@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Google OAuth Configuration Test</title>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+    <h1>Google OAuth Configuration Test</h1>
+    <p>Testing with Client ID: ${process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID}</p>
+    
+    <div id="g_id_onload"
+         data-client_id="${process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID}"
+         data-callback="handleCredentialResponse"
+         data-auto_prompt="false">
+    </div>
+    
+    <div class="g_id_signin" 
+         data-type="standard" 
+         data-size="large" 
+         data-theme="outline" 
+         data-text="sign_in_with" 
+         data-shape="rectangular" 
+         data-logo_alignment="left">
+    </div>
+
+    <div id="result"></div>
+
+    <script>
+        function handleCredentialResponse(response) {
+            console.log("Encoded JWT ID token: " + response.credential);
+            
+            try {
+                // Decode the JWT token
+                const payload = JSON.parse(atob(response.credential.split('.')[1]));
+                console.log("Decoded payload:", payload);
+                
+                document.getElementById('result').innerHTML = `
+                    <h2>Success!</h2>
+                    <p><strong>Name:</strong> ${payload.name}</p>
+                    <p><strong>Email:</strong> ${payload.email}</p>
+                    <p><strong>Picture:</strong> <img src="${payload.picture}" width="50" height="50" style="border-radius: 50%;"></p>
+                `;
+            } catch (error) {
+                console.error("Error decoding token:", error);
+                document.getElementById('result').innerHTML = `<p style="color: red;">Error: ${error.message}</p>`;
+            }
+        }
+
+        // Test if the script loaded correctly
+        window.onload = function() {
+            if (window.google && window.google.accounts) {
+                console.log("Google Identity Services loaded successfully");
+            } else {
+                console.error("Google Identity Services failed to load");
+            }
+        };
+    </script>
+</body>
+</html>

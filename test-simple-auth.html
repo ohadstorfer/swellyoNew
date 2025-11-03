@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Simple Google OAuth Test</title>
+</head>
+<body>
+    <h1>Simple Google OAuth Test</h1>
+    <p>This tests a simplified Google OAuth implementation for Expo web.</p>
+    
+    <div style="background-color: #f0f0f0; padding: 15px; margin: 10px 0; border-radius: 5px;">
+        <h3>Current Configuration:</h3>
+        <ul>
+            <li><strong>Client ID:</strong> ${process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID}</li>
+            <li><strong>Redirect URI:</strong> http://localhost:8081 (current page origin)</li>
+            <li><strong>Scopes:</strong> openid, email, profile</li>
+        </ul>
+    </div>
+    
+    <div style="background-color: #e8f4fd; padding: 15px; margin: 10px 0; border-radius: 5px;">
+        <h3>Google Cloud Console Setup:</h3>
+        <p>Make sure your OAuth client has these settings:</p>
+        <ul>
+            <li><strong>Authorized JavaScript origins:</strong> http://localhost:8081</li>
+            <li><strong>Authorized redirect URIs:</strong> http://localhost:8081</li>
+        </ul>
+    </div>
+    
+    <button onclick="testGoogleAuth()" style="padding: 10px 20px; font-size: 16px; background-color: #4285f4; color: white; border: none; border-radius: 5px; cursor: pointer;">
+        Test Google OAuth
+    </button>
+    
+    <div id="result" style="margin-top: 20px; padding: 15px; border-radius: 5px;"></div>
+
+    <script>
+        function testGoogleAuth() {
+            const resultDiv = document.getElementById('result');
+            resultDiv.innerHTML = '<p>Opening Google OAuth...</p>';
+            
+            const clientId = '${process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID}';
+            const redirectUri = encodeURIComponent(window.location.origin);
+            const scope = encodeURIComponent('openid email profile');
+            
+            const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
+                `client_id=${clientId}&` +
+                `redirect_uri=${redirectUri}&` +
+                `scope=${scope}&` +
+                `response_type=code&` +
+                `access_type=offline&` +
+                `prompt=select_account`;
+
+            console.log('Auth URL:', authUrl);
+            
+            // Open in same window for testing
+            window.location.href = authUrl;
+        }
+        
+        // Check if we're returning from OAuth
+        window.onload = function() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const code = urlParams.get('code');
+            const error = urlParams.get('error');
+            
+            if (code) {
+                document.getElementById('result').innerHTML = `
+                    <div style="background-color: #d4edda; color: #155724; padding: 15px; border-radius: 5px;">
+                        <h3>Success!</h3>
+                        <p>Authorization code received: <code>${code}</code></p>
+                        <p>This means your Google OAuth configuration is working correctly!</p>
+                    </div>
+                `;
+            } else if (error) {
+                document.getElementById('result').innerHTML = `
+                    <div style="background-color: #f8d7da; color: #721c24; padding: 15px; border-radius: 5px;">
+                        <h3>Error!</h3>
+                        <p>OAuth error: <code>${error}</code></p>
+                        <p>Check your Google Cloud Console configuration.</p>
+                    </div>
+                `;
+            }
+        };
+    </script>
+</body>
+</html>

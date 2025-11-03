@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Google OAuth Debug</title>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+    <h1>Google OAuth Debug</h1>
+    <div id="debug-info"></div>
+    
+    <button onclick="testGoogleSignIn()">Test Google Sign-In</button>
+    <div id="result"></div>
+
+    <script>
+        function updateDebugInfo(message) {
+            const debugDiv = document.getElementById('debug-info');
+            debugDiv.innerHTML += '<p>' + new Date().toLocaleTimeString() + ': ' + message + '</p>';
+            console.log(message);
+        }
+
+        function testGoogleSignIn() {
+            updateDebugInfo('Starting Google Sign-In test...');
+            
+            if (!window.google || !window.google.accounts) {
+                updateDebugInfo('ERROR: Google Identity Services not loaded');
+                return;
+            }
+            
+            updateDebugInfo('Google Identity Services loaded successfully');
+            
+            try {
+                window.google.accounts.id.initialize({
+                    client_id: '${process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID}',
+                    callback: handleCredentialResponse,
+                    auto_select: false,
+                    cancel_on_tap_outside: true
+                });
+                
+                updateDebugInfo('Google Identity Services initialized');
+                
+                window.google.accounts.id.prompt((notification) => {
+                    updateDebugInfo('Prompt notification: ' + JSON.stringify(notification));
+                    
+                    if (notification.isNotDisplayed()) {
+                        updateDebugInfo('ERROR: Popup not displayed - ' + notification.getNotDisplayedReason());
+                    }
+                    if (notification.isSkippedMoment()) {
+                        updateDebugInfo('WARNING: Popup skipped - ' + notification.getSkippedReason());
+                    }
+                });
+                
+            } catch (error) {
+                updateDebugInfo('ERROR: ' + error.message);
+            }
+        }
+
+        function handleCredentialResponse(response) {
+            updateDebugInfo('SUCCESS: Received credential response');
+            console.log("Encoded JWT ID token: " + response.credential);
+            
+            try {
+                const payload = JSON.parse(atob(response.credential.split('.')[1]));
+                updateDebugInfo('SUCCESS: Token decoded successfully');
+                
+                document.getElementById('result').innerHTML = `
+                    <h2>Success!</h2>
+                    <p><strong>Name:</strong> ${payload.name}</p>
+                    <p><strong>Email:</strong> ${payload.email}</p>
+                    <p><strong>Subject:</strong> ${payload.sub}</p>
+                `;
+            } catch (error) {
+                updateDebugInfo('ERROR decoding token: ' + error.message);
+            }
+        }
+
+        // Check when page loads
+        window.onload = function() {
+            updateDebugInfo('Page loaded');
+            
+            setTimeout(() => {
+                if (window.google && window.google.accounts) {
+                    updateDebugInfo('Google Identity Services loaded');
+                } else {
+                    updateDebugInfo('ERROR: Google Identity Services failed to load');
+                }
+            }, 2000);
+        };
+    </script>
+</body>
+</html>

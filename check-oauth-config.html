@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Check OAuth Configuration</title>
+</head>
+<body>
+    <h1>Google OAuth Configuration Check</h1>
+    
+    <h2>Current Configuration:</h2>
+    <ul>
+        
+        <li><strong>Redirect URI (Next-auth):</strong> http://localhost:8081/api/auth/callback/google</li>
+        <li><strong>JavaScript Origins:</strong> http://localhost:8081</li>
+    </ul>
+    
+    <h2>Required Google Cloud Console Settings:</h2>
+    <div style="background-color: #f0f0f0; padding: 15px; margin: 10px 0; border-radius: 5px;">
+        <h3>Authorized JavaScript origins:</h3>
+        <ul>
+            <li>http://localhost:8081</li>
+            <li>http://127.0.0.1:8081</li>
+        </ul>
+        
+        <h3>Authorized redirect URIs:</h3>
+        <ul>
+            <li>http://localhost:8081/api/auth/callback/google</li>
+            <li>http://127.0.0.1:8081/api/auth/callback/google</li>
+        </ul>
+    </div>
+    
+    <h2>Test Links:</h2>
+    <ul>
+        <li><a href="http://localhost:8081/test-auth">Test Next-auth</a></li>
+        <li><a href="http://localhost:8081/api/auth/signin">Direct Sign-in</a></li>
+    </ul>
+    
+    <h2>Common Issues:</h2>
+    <ol>
+        <li><strong>Redirect URI mismatch:</strong> Make sure the redirect URI in Google Console matches exactly</li>
+        <li><strong>OAuth consent screen:</strong> Ensure it's configured and your email is in test users</li>
+        <li><strong>Client ID/Secret:</strong> Verify they're correct and active</li>
+    </ol>
+</body>
+</html>

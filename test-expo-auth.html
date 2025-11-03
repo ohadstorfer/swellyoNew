@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Expo Auth Test</title>
+</head>
+<body>
+    <h1>Expo Auth Session Test</h1>
+    <p>This will test the Expo Auth Session implementation for Google OAuth.</p>
+    
+    <div style="background-color: #f0f0f0; padding: 15px; margin: 10px 0; border-radius: 5px;">
+        <h3>Expected Redirect URI:</h3>
+        <p>The Expo Auth Session will generate a redirect URI like:</p>
+        <code>exp://127.0.0.1:8081/--/expo-auth-session</code>
+        <p>or</p>
+        <code>https://auth.expo.io/@your-username/your-app-slug</code>
+    </div>
+    
+    <div style="background-color: #e8f4fd; padding: 15px; margin: 10px 0; border-radius: 5px;">
+        <h3>Google Cloud Console Configuration:</h3>
+        <p>You need to add the generated redirect URI to your Google OAuth client:</p>
+        <ol>
+            <li>Go to Google Cloud Console → APIs & Services → Credentials</li>
+            <li>Edit your OAuth 2.0 Client ID</li>
+            <li>Add the redirect URI that Expo generates</li>
+        </ol>
+    </div>
+    
+    <h2>Test Links:</h2>
+    <ul>
+        <li><a href="http://localhost:8081">Main App</a></li>
+    </ul>
+    
+    <h2>How to Test:</h2>
+    <ol>
+        <li>Open the main app</li>
+        <li>Click "Get Started with Google"</li>
+        <li>Check the browser console for the redirect URI</li>
+        <li>Add that redirect URI to Google Cloud Console</li>
+        <li>Try again</li>
+    </ol>
+</body>
+</html>

@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Simple Google OAuth Test</title>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+    <h1>Simple Google OAuth Test</h1>
+    <p>Testing with a minimal configuration...</p>
+    
+    <div id="g_id_onload"
+         data-client_id="${process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID}"
+         data-callback="handleCredentialResponse"
+         data-auto_prompt="false">
+    </div>
+    
+    <div class="g_id_signin" 
+         data-type="standard" 
+         data-size="large" 
+         data-theme="outline" 
+         data-text="sign_in_with" 
+         data-shape="rectangular" 
+         data-logo_alignment="left">
+    </div>
+
+    <div id="result"></div>
+
+    <script>
+        function handleCredentialResponse(response) {
+            console.log("SUCCESS: " + response.credential);
+            document.getElementById('result').innerHTML = '<h2 style="color: green;">SUCCESS! OAuth is working!</h2>';
+        }
+
+        // Check for errors
+        window.onload = function() {
+            setTimeout(() => {
+                if (!window.google || !window.google.accounts) {
+                    document.getElementById('result').innerHTML = '<h2 style="color: red;">ERROR: Google Identity Services failed to load</h2>';
+                }
+            }, 3000);
+        };
+    </script>
+</body>
+</html>

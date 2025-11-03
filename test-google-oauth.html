@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Google OAuth Test</title>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+    <h1>Google OAuth Test</h1>
+    <div id="g_id_onload"
+         data-client_id="${process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID}"
+         data-callback="handleCredentialResponse">
+    </div>
+    <div class="g_id_signin" data-type="standard"></div>
+
+    <script>
+        function handleCredentialResponse(response) {
+            console.log("Encoded JWT ID token: " + response.credential);
+            
+            // Decode the JWT token
+            const payload = JSON.parse(atob(response.credential.split('.')[1]));
+            console.log("Decoded payload:", payload);
+            
+            alert(`Welcome ${payload.name}! Email: ${payload.email}`);
+        }
+    </script>
+</body>
+</html>
