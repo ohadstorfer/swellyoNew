@@ -7,6 +7,7 @@ import {
   Platform,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../components/Text';
 import { BoardCarousel } from '../components/BoardCarousel';
 import { colors, spacing, typography } from '../styles/theme';
@@ -101,15 +102,7 @@ export const OnboardingStep1Screen: React.FC<OnboardingStep1ScreenProps> = ({
         {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity onPress={onBack} style={styles.backButton}>
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-              <path 
-                d="M19 12H5M5 12L12 19M5 12L12 5" 
-                stroke="#222B30" 
-                strokeWidth="2" 
-                strokeLinecap="round" 
-                strokeLinejoin="round"
-              />
-            </svg>
+            <Ionicons name="arrow-back" size={24} color="#222B30" />
           </TouchableOpacity>
 
           <Text style={styles.stepText}>Step 1/4</Text>
