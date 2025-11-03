@@ -3,19 +3,13 @@ import {
   View,
   StyleSheet,
   SafeAreaView,
-  ScrollView,
   TouchableOpacity,
   Platform,
-  KeyboardAvoidingView,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
-import { ProgressBar } from '../components/ProgressBar';
-import { Input } from '../components/Input';
-import { BoardTypeSelector } from '../components/BoardTypeSelector';
-import { Button } from '../components/Button';
 import { Text } from '../components/Text';
-import { colors, spacing } from '../styles/theme';
+import { BoardCarousel } from '../components/BoardCarousel';
+import { colors, spacing, typography } from '../styles/theme';
 
 interface OnboardingStep1ScreenProps {
   onNext: (data: OnboardingData) => void;
@@ -31,7 +25,9 @@ export interface SurfLevel {
 
 export interface BoardType {
   id: number;
-  description: string;
+  name: string;
+  imageUrl: string;
+  description?: string;
 }
 
 export interface OnboardingData {
@@ -39,27 +35,31 @@ export interface OnboardingData {
   userEmail: string;
   location: string;
   age: number;
-  boardType: number; // Board type selection
-  surfLevel: number; // Surf level selection
-  travelExperience: number; // Travel experience (0 to infinity)
+  boardType: number;
+  surfLevel: number;
+  travelExperience: number;
 }
 
 const BOARD_TYPES: BoardType[] = [
   {
     id: 0,
-    description: 'Shortboard',
+    name: 'Short Board',
+    imageUrl: 'https://api.builder.io/api/v1/image/assets/TEMP/9761796f6e2272f3cacf14c4fc9342525bb54ff8?width=371',
   },
   {
     id: 1,
-    description: 'Mid-length',
+    name: 'Mid Length',
+    imageUrl: 'https://api.builder.io/api/v1/image/assets/TEMP/377f67727b21485479e873ed3d93c57611722f74?width=371',
   },
   {
     id: 2,
-    description: 'Longboard',
+    name: 'Long Board',
+    imageUrl: 'https://api.builder.io/api/v1/image/assets/TEMP/4692a28e8ac444a82eec1f691f5f008c8a9bbc8e?width=371',
   },
   {
     id: 3,
-    description: 'Soft Top',
+    name: 'Soft Top',
+    imageUrl: 'https://api.builder.io/api/v1/image/assets/TEMP/1d104557a7a5ea05c3b36931c1ee56fd01a6d426?width=371',
   },
 ];
 
@@ -69,175 +69,105 @@ export const OnboardingStep1Screen: React.FC<OnboardingStep1ScreenProps> = ({
   initialData = {},
   updateFormData,
 }) => {
-  const [formData, setFormData] = useState<OnboardingData>({
-    nickname: initialData.nickname || '',
-    userEmail: initialData.userEmail || '',
-    location: initialData.location || '',
-    age: initialData.age || 0,
-    boardType: initialData.boardType ?? -1, // Use -1 to indicate no selection
-    surfLevel: initialData.surfLevel ?? -1, // Use -1 to indicate no selection
-    travelExperience: initialData.travelExperience ?? 0, // Default to 0
-  });
+  const [selectedBoardId, setSelectedBoardId] = useState<number>(
+    initialData.boardType ?? 0
+  );
 
-  const [errors, setErrors] = useState<Partial<Record<keyof OnboardingData, string>>>({});
-
-  const validateForm = (): boolean => {
-    const newErrors: Partial<Record<keyof OnboardingData, string>> = {};
-
-    if (!formData.nickname.trim()) {
-      newErrors.nickname = 'Nickname is required';
-    }
-
-    // Email validation not needed since it comes from Google and is not editable
-
-    if (!formData.location.trim()) {
-      newErrors.location = 'Location is required';
-    }
-
-    if (!formData.age || formData.age < 13 || formData.age > 120) {
-      newErrors.age = 'Please enter a valid age (13-120)';
-    }
-
-    if (formData.boardType === -1) {
-      newErrors.boardType = 'Please select your board type';
-    }
-
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
+  const handleBoardSelect = (board: BoardType) => {
+    setSelectedBoardId(board.id);
+    updateFormData({ boardType: board.id });
   };
 
   const handleNext = () => {
-    if (validateForm()) {
-      onNext(formData);
-    }
+    const formData: OnboardingData = {
+      nickname: initialData.nickname || '',
+      userEmail: initialData.userEmail || '',
+      location: initialData.location || '',
+      age: initialData.age || 0,
+      boardType: selectedBoardId,
+      surfLevel: initialData.surfLevel ?? -1,
+      travelExperience: initialData.travelExperience ?? 0,
+    };
+    onNext(formData);
   };
 
-  const updateField = (field: keyof OnboardingData, value: string | number) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
-    // Also update the context immediately
-    updateFormData({ [field]: value });
-    // Clear error when user starts typing
-    if (errors[field]) {
-      setErrors(prev => ({ ...prev, [field]: undefined }));
-    }
-  };
-
-  const handleAgeChange = (text: string) => {
-    const ageNum = parseInt(text) || 0;
-    updateField('age', ageNum);
-  };
-
-  const handleBoardTypeChange = (type: BoardType) => {
-    updateField('boardType', type.id); // Only save the ID
-  };
-
-  // Helper function to get the selected BoardType object from ID
-  const getSelectedBoardType = (): BoardType | undefined => {
-    if (formData.boardType >= 0) {
-      return BOARD_TYPES.find(type => type.id === formData.boardType);
-    }
-    return undefined;
+  const handleSkip = () => {
+    handleNext();
   };
 
   return (
     <SafeAreaView style={styles.container}>
-      <LinearGradient
-        colors={[colors.backgroundLight, colors.backgroundMedium]}
-        style={styles.gradient}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 0, y: 1 }}
-      >
-        <KeyboardAvoidingView
-          style={styles.keyboardView}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        >
-          <ScrollView
-            style={styles.scrollView}
-            contentContainerStyle={styles.scrollContent}
-            showsVerticalScrollIndicator={false}
+      <View style={styles.content}>
+        {/* Header */}
+        <View style={styles.header}>
+          <TouchableOpacity onPress={onBack} style={styles.backButton}>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+              <path 
+                d="M19 12H5M5 12L12 19M5 12L12 5" 
+                stroke="#222B30" 
+                strokeWidth="2" 
+                strokeLinecap="round" 
+                strokeLinejoin="round"
+              />
+            </svg>
+          </TouchableOpacity>
+
+          <Text style={styles.stepText}>Step 1/4</Text>
+
+          <TouchableOpacity onPress={handleSkip} style={styles.skipButton}>
+            <Text style={styles.skipText}>Skip</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Progress Bar */}
+        <View style={styles.progressContainer}>
+          <View style={styles.progressBar}>
+            <View style={[styles.progressFill, { width: '25%' }]} />
+          </View>
+        </View>
+
+        {/* Title */}
+        <View style={styles.titleContainer}>
+          <Text style={styles.title}>
+            Nice to meet you,{'\n'}
+            {initialData.nickname || 'Jake'}!
+          </Text>
+        </View>
+
+        {/* Subtitle */}
+        <View style={styles.subtitleContainer}>
+          <Text style={styles.subtitle}>What is your choice style?</Text>
+          <Text style={styles.description}>
+            Select one... you can add more later!
+          </Text>
+        </View>
+
+        {/* Board Carousel */}
+        <View style={styles.carouselContainer}>
+          <BoardCarousel
+            boards={BOARD_TYPES}
+            selectedBoardId={selectedBoardId}
+            onBoardSelect={handleBoardSelect}
+          />
+        </View>
+
+        {/* Next Button */}
+        <View style={styles.buttonContainer}>
+          <TouchableOpacity 
+            onPress={handleNext}
+            activeOpacity={0.8}
           >
-            {/* Header */}
-            <View style={styles.header}>
-              <TouchableOpacity onPress={onBack} style={styles.backButton}>
-                <Ionicons name="arrow-back" size={24} color={colors.textDark} />
-              </TouchableOpacity>
-              
-              <View style={styles.headerCenter}>
-                <ProgressBar currentStep={1} totalSteps={4} />
-              </View>
-            </View>
-
-            {/* Form Content */}
-            <View style={styles.content}>
-              <Text variant="title" style={styles.screenTitle}>
-                Tell us about yourself
-              </Text>
-
-              {/* Input Fields */}
-              <View style={styles.inputSection}>
-                <Input
-                  label="Nickname"
-                  placeholder="Enter your nickname"
-                  value={formData.nickname}
-                  onChangeText={(text) => updateField('nickname', text)}
-                  error={errors.nickname}
-                  required
-                />
-
-                <Input
-                  label="Email"
-                  placeholder="Your email from Google"
-                  value={formData.userEmail}
-                  onChangeText={(text) => updateField('userEmail', text)}
-                  error={errors.userEmail}
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  editable={false}
-                />
-
-                <View style={styles.row}>
-                  <Input
-                    label="Where are you from?"
-                    placeholder="City, Country"
-                    value={formData.location}
-                    onChangeText={(text) => updateField('location', text)}
-                    error={errors.location}
-                    required
-                    width="half"
-                  />
-                  
-                  <Input
-                    label="Age"
-                    placeholder="Age"
-                    value={formData.age > 0 ? formData.age.toString() : ''}
-                    onChangeText={handleAgeChange}
-                    error={errors.age}
-                    required
-                    width="half"
-                    keyboardType="numeric"
-                  />
-                </View>
-              </View>
-
-              {/* Board Type Selection */}
-              <BoardTypeSelector
-                selectedType={getSelectedBoardType()}
-                onSelectType={handleBoardTypeChange}
-                error={errors.boardType}
-              />
-            </View>
-
-            {/* Next Button */}
-            <View style={styles.buttonContainer}>
-              <Button
-                title="Next"
-                onPress={handleNext}
-                style={styles.nextButton}
-              />
-            </View>
-          </ScrollView>
-        </KeyboardAvoidingView>
-      </LinearGradient>
+            <LinearGradient
+              colors={['#00A2B6', '#0788B0']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.gradientButton}
+            >
+              <Text style={styles.buttonText}>Next</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+        </View>
+      </View>
     </SafeAreaView>
   );
 };
@@ -245,55 +175,112 @@ export const OnboardingStep1Screen: React.FC<OnboardingStep1ScreenProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-  },
-  gradient: {
-    flex: 1,
-  },
-  keyboardView: {
-    flex: 1,
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    flexGrow: 1,
-    paddingBottom: spacing.xxl,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: spacing.lg,
-    paddingTop: Platform.OS === 'web' ? spacing.xxl : spacing.lg,
-    paddingBottom: spacing.md,
-  },
-  backButton: {
-    padding: spacing.sm,
-    marginRight: spacing.md,
-  },
-  headerCenter: {
-    flex: 1,
+    backgroundColor: colors.backgroundGray,
   },
   content: {
     flex: 1,
-    paddingHorizontal: spacing.lg,
   },
-  screenTitle: {
-    fontSize: 28,
-    marginBottom: spacing.xl,
-    textAlign: 'center',
-  },
-  inputSection: {
-    marginBottom: spacing.xl,
-  },
-  row: {
+  header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: spacing.md,
+    paddingTop: Platform.OS === 'web' ? spacing.md : spacing.sm,
+    height: 44,
   },
-  buttonContainer: {
+  backButton: {
+    width: 60,
+    alignItems: 'flex-start',
+  },
+  stepText: {
+    fontSize: 12,
+    fontWeight: '400',
+    color: colors.textPrimary,
+    textAlign: 'center',
+    lineHeight: 15,
+  },
+  skipButton: {
+    width: 60,
+    alignItems: 'flex-end',
+    paddingHorizontal: 10,
+  },
+  skipText: {
+    fontSize: 12,
+    fontWeight: '400',
+    color: colors.textSecondary,
+    textAlign: 'right',
+    lineHeight: 15,
+  },
+  progressContainer: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+  },
+  progressBar: {
+    width: 237,
+    height: 4,
+    backgroundColor: colors.progressBackground,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: colors.progressFill,
+    borderRadius: 8,
+  },
+  titleContainer: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.lg,
+    alignItems: 'center',
   },
-  nextButton: {
-    width: '100%',
+  title: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: colors.brandTeal,
+    textAlign: 'center',
+    lineHeight: 28.8,
   },
-}); 
+  subtitleContainer: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.lg,
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  subtitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#000',
+    textAlign: 'center',
+    lineHeight: 24,
+  },
+  description: {
+    fontSize: 12,
+    fontWeight: '400',
+    color: '#000',
+    textAlign: 'center',
+    lineHeight: 15,
+  },
+  carouselContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    marginTop: -spacing.xl,
+  },
+  buttonContainer: {
+    paddingHorizontal: spacing.xl,
+    paddingBottom: spacing.xl,
+  },
+  gradientButton: {
+    height: 56,
+    borderRadius: 999,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: spacing.lg,
+  },
+  buttonText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.white,
+    textAlign: 'center',
+    lineHeight: 24,
+  },
+});
