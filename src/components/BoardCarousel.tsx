@@ -13,10 +13,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { Text } from './Text';
 import { colors, spacing } from '../styles/theme';
 
-// Get screen width - update on resize for web
+// Helpers for sizing
 const getScreenWidth = () => Dimensions.get('window').width;
-
-// On web, use a constrained width for better UX; on mobile, use full screen width
 const getCarouselItemWidth = () => {
   const screenWidth = getScreenWidth();
   return Platform.OS === 'web' ? Math.min(screenWidth, 600) : screenWidth;
@@ -38,19 +36,17 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
   boards,
   selectedBoardId,
   onBoardSelect,
-}: BoardCarouselProps) => {
+}) => {
   const flatListRef = useRef<FlatList<BoardType>>(null);
   const [carouselItemWidth, setCarouselItemWidth] = useState(getCarouselItemWidth());
   const [activeIndex, setActiveIndex] = useState(
     boards.findIndex((b: BoardType) => b.id === selectedBoardId) || 0
   );
 
-  // Update carousel width on window resize (web)
+  // Update width on resize (web)
   React.useEffect(() => {
     if (Platform.OS === 'web') {
-      const updateWidth = () => {
-        setCarouselItemWidth(getCarouselItemWidth());
-      };
+      const updateWidth = () => setCarouselItemWidth(getCarouselItemWidth());
       if (typeof window !== 'undefined') {
         window.addEventListener('resize', updateWidth);
         return () => window.removeEventListener('resize', updateWidth);
@@ -66,18 +62,15 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
     }
   }).current;
 
-  const viewabilityConfig = useRef({
-    itemVisiblePercentThreshold: 50,
-  }).current;
+  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50 }).current;
 
   const renderBoard = ({ item }: { item: BoardType }) => {
-    const itemWidth = carouselItemWidth;
-    const imageWidth = Platform.OS === 'web' 
-      ? Math.min(itemWidth * 0.6, 400) 
+    const imageWidth = Platform.OS === 'web'
+      ? Math.min(carouselItemWidth * 0.6, 400)
       : getScreenWidth() * 0.5;
-    
+
     return (
-      <View style={[styles.carouselItem, { width: itemWidth }]}> 
+      <View style={[styles.carouselItem, { width: carouselItemWidth }]}> 
         <Image
           source={{ uri: item.imageUrl }}
           style={[styles.boardImage, { width: imageWidth }]}
@@ -92,41 +85,30 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
       {boards.map((_board: BoardType, index: number) => (
         <View
           key={index}
-          style={[
-            styles.dot,
-            index === activeIndex ? styles.dotActive : styles.dotInactive,
-          ]}
+          style={[styles.dot, index === activeIndex ? styles.dotActive : styles.dotInactive]}
         />
       ))}
     </View>
   );
 
-  // Scroll to initial index on mount (especially important for web)
+  // Ensure initial index is centered
   React.useEffect(() => {
     if (flatListRef.current && activeIndex >= 0) {
       const timeout = Platform.OS === 'web' ? 300 : 100;
       setTimeout(() => {
-        flatListRef.current?.scrollToIndex({
-          index: activeIndex,
-          animated: false,
-          viewPosition: 0.5,
-        });
+        flatListRef.current?.scrollToIndex({ index: activeIndex, animated: false, viewPosition: 0.5 });
       }, timeout);
     }
   }, []);
 
-  // Update active index when selectedBoardId changes
+  // Keep scroll in sync with external selection
   React.useEffect(() => {
     const newIndex = boards.findIndex((b: BoardType) => b.id === selectedBoardId);
     if (newIndex >= 0 && newIndex !== activeIndex && flatListRef.current) {
       setActiveIndex(newIndex);
       const timeout = Platform.OS === 'web' ? 300 : 100;
       setTimeout(() => {
-        flatListRef.current?.scrollToIndex({
-          index: newIndex,
-          animated: Platform.OS !== 'web',
-          viewPosition: 0.5,
-        });
+        flatListRef.current?.scrollToIndex({ index: newIndex, animated: Platform.OS !== 'web', viewPosition: 0.5 });
       }, timeout);
     }
   }, [selectedBoardId, boards, activeIndex]);
@@ -153,11 +135,7 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
     <View style={styles.container}>
       <View style={styles.carouselWrapper}>
         {Platform.OS === 'web' && activeIndex > 0 && (
-          <TouchableOpacity
-            style={styles.arrowButton}
-            onPress={scrollToPrevious}
-            activeOpacity={0.7}
-          >
+          <TouchableOpacity style={styles.arrowButton} onPress={scrollToPrevious} activeOpacity={0.7}>
             <Ionicons name="chevron-back" size={24} color={colors.textDark} />
           </TouchableOpacity>
         )}
@@ -173,11 +151,7 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
           onViewableItemsChanged={onViewableItemsChanged}
           viewabilityConfig={viewabilityConfig}
           initialScrollIndex={activeIndex >= 0 ? activeIndex : 0}
-          getItemLayout={(data, index) => ({
-            length: carouselItemWidth,
-            offset: carouselItemWidth * index,
-            index,
-          })}
+          getItemLayout={(_, index) => ({ length: carouselItemWidth, offset: carouselItemWidth * index, index })}
           snapToAlignment="center"
           snapToInterval={carouselItemWidth}
           decelerationRate="fast"
@@ -185,29 +159,19 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
           onScrollToIndexFailed={(info) => {
             const wait = new Promise(resolve => setTimeout(resolve, 500));
             wait.then(() => {
-              flatListRef.current?.scrollToOffset({ 
-                offset: info.index * carouselItemWidth, 
-                animated: false 
-              });
+              flatListRef.current?.scrollToOffset({ offset: info.index * carouselItemWidth, animated: false });
             });
           }}
-          {...(Platform.OS === 'web' && {
-            // @ts-ignore - web-specific style prop
-            style: { overflowX: 'hidden' as any },
-          } as any)}
+          {...(Platform.OS === 'web' && { style: { overflowX: 'hidden' as any } as any })}
         />
 
         {Platform.OS === 'web' && activeIndex < boards.length - 1 && (
-          <TouchableOpacity
-            style={[styles.arrowButton, styles.arrowButtonRight]}
-            onPress={scrollToNext}
-            activeOpacity={0.7}
-          >
+          <TouchableOpacity style={[styles.arrowButton, styles.arrowButtonRight]} onPress={scrollToNext} activeOpacity={0.7}>
             <Ionicons name="chevron-forward" size={24} color={colors.textDark} />
           </TouchableOpacity>
         )}
       </View>
-      
+
       <View style={styles.labelContainer}>
         {renderDots()}
         <Text style={styles.boardName}>{boards[activeIndex]?.name || ''}</Text>
@@ -222,10 +186,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     width: '100%',
-    ...(Platform.OS === 'web' && {
-      maxWidth: 600,
-      alignSelf: 'center',
-    }),
+    ...(Platform.OS === 'web' && { maxWidth: 600, alignSelf: 'center' }),
   },
   carouselWrapper: {
     width: '100%',
@@ -234,7 +195,7 @@ const styles = StyleSheet.create({
     ...(Platform.OS === 'web' && {
       maxWidth: 600,
       alignSelf: 'center',
-      // @ts-ignore - web-specific CSS
+      // @ts-ignore
       WebkitOverflowScrolling: 'touch',
       // @ts-ignore
       scrollBehavior: 'smooth',
@@ -275,9 +236,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingVertical: spacing.xl,
-    ...(Platform.OS === 'web' && {
-      paddingHorizontal: 0,
-    }),
+    ...(Platform.OS === 'web' && { paddingHorizontal: 0 }),
   },
   boardImage: {
     height: 350,
