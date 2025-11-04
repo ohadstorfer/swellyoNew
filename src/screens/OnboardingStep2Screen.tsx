@@ -5,6 +5,8 @@ import {
   SafeAreaView,
   TouchableOpacity,
   Platform,
+  Image,
+  Dimensions,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -12,6 +14,8 @@ import { Text } from '../components/Text';
 import { VideoCarousel, VideoLevel } from '../components/VideoCarousel';
 import { colors, spacing } from '../styles/theme';
 import { OnboardingData } from './OnboardingStep1Screen';
+
+const getScreenWidth = () => Dimensions.get('window').width;
 
 interface OnboardingStep2ScreenProps {
   onNext: (data: OnboardingData) => void;
@@ -81,8 +85,19 @@ export const OnboardingStep2Screen: React.FC<OnboardingStep2ScreenProps> = ({
     handleNext();
   };
 
+  const selectedVideo = SURF_LEVEL_VIDEOS.find(v => v.id === selectedVideoId) || SURF_LEVEL_VIDEOS[0];
+
   return (
     <SafeAreaView style={styles.container}>
+      {/* Background Video/Image with 20% opacity */}
+      <View style={styles.backgroundVideoContainer}>
+        <Image
+          source={{ uri: selectedVideo.thumbnailUrl }}
+          style={styles.backgroundVideo}
+          resizeMode="cover"
+        />
+      </View>
+
       <View style={styles.content}>
         {/* Header */}
         <View style={styles.header}>
@@ -92,15 +107,15 @@ export const OnboardingStep2Screen: React.FC<OnboardingStep2ScreenProps> = ({
 
           <Text style={styles.stepText}>Step 2/4</Text>
 
-          <TouchableOpacity onPress={handleSkip} style={styles.skipButton}>
-            <Text style={styles.skipText}>Skip</Text>
-          </TouchableOpacity>
+          <View style={styles.skipButton}>
+            {/* Skip button is hidden/opacity 0 in Figma */}
+          </View>
         </View>
 
         {/* Progress Bar */}
         <View style={styles.progressContainer}>
           <View style={styles.progressBar}>
-            <View style={[styles.progressFill, { width: '50%' }]} />
+            <View style={[styles.progressFill, { width: 116 }]} />
           </View>
         </View>
 
@@ -145,9 +160,30 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.backgroundGray || '#FAFAFA',
+    width: '100%',
+    overflow: 'hidden',
+  },
+  backgroundVideoContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 579,
+    overflow: 'hidden',
+    borderBottomLeftRadius: 48,
+    borderBottomRightRadius: 48,
+  },
+  backgroundVideo: {
+    width: '100%',
+    height: '100%',
+    opacity: 0.2,
   },
   content: {
     flex: 1,
+    zIndex: 1,
+    width: '100%',
+    maxWidth: '100%',
+    overflow: 'hidden',
   },
   header: {
     flexDirection: 'row',
@@ -155,16 +191,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: spacing.md,
     paddingTop: Platform.OS === 'web' ? spacing.md : spacing.sm,
-    height: 44,
+    paddingBottom: spacing.md,
+    minHeight: 44,
   },
   backButton: {
     width: 60,
     alignItems: 'flex-start',
+    padding: 10,
   },
   stepText: {
     fontSize: 12,
     fontWeight: '400',
-    color: colors.textPrimary || '#333',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'System',
+    color: colors.textPrimary || '#333333',
     textAlign: 'center',
     lineHeight: 15,
   },
@@ -172,6 +211,7 @@ const styles = StyleSheet.create({
     width: 60,
     alignItems: 'flex-end',
     paddingHorizontal: 10,
+    opacity: 0, // Hidden in Figma design
   },
   skipText: {
     fontSize: 12,
@@ -182,30 +222,33 @@ const styles = StyleSheet.create({
   },
   progressContainer: {
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
+    paddingBottom: spacing.md,
     alignItems: 'center',
   },
   progressBar: {
     width: 237,
     height: 4,
-    backgroundColor: colors.progressBackground || '#BDBDBD',
+    backgroundColor: '#BDBDBD',
     borderRadius: 8,
     overflow: 'hidden',
   },
   progressFill: {
     height: '100%',
-    backgroundColor: colors.progressFill || '#333',
+    backgroundColor: '#333333',
     borderRadius: 8,
   },
   titleContainer: {
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
+    paddingHorizontal: Platform.OS === 'web' ? 32 : 16,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.sm,
     alignItems: 'center',
+    maxWidth: '100%',
   },
   title: {
     fontSize: 16,
     fontWeight: '700',
-    color: colors.textPrimary || '#333',
+    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'System',
+    color: colors.textPrimary || '#333333',
     textAlign: 'center',
     lineHeight: 24,
   },
@@ -213,13 +256,24 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     paddingVertical: spacing.lg,
+    width: '100%',
+    maxWidth: '100%',
+    overflow: 'hidden',
   },
   buttonContainer: {
-    paddingHorizontal: spacing.xl,
-    paddingBottom: spacing.xl,
+    paddingHorizontal: Platform.OS === 'web' ? 32 : 16,
+    paddingTop: spacing.xl,
+    paddingBottom: 40,
+    alignItems: 'center',
+    width: '100%',
+    maxWidth: '100%',
   },
   gradientButton: {
     height: 56,
+    width: Platform.OS === 'web' 
+      ? Math.min(330, getScreenWidth() - 64) 
+      : Math.min(330, getScreenWidth() - 64),
+    maxWidth: 330,
     borderRadius: 999,
     justifyContent: 'center',
     alignItems: 'center',
@@ -228,6 +282,7 @@ const styles = StyleSheet.create({
   buttonText: {
     fontSize: 16,
     fontWeight: '700',
+    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'System',
     color: colors.white || '#FFF',
     textAlign: 'center',
     lineHeight: 24,
