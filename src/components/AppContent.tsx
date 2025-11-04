@@ -14,7 +14,7 @@ export const AppContent: React.FC = () => {
   };
 
   const handleDemoChat = () => {
-    setCurrentStep(4); // Go directly to chat screen
+    setCurrentStep(1); // Go directly to chat screen
   };
 
   const handleStep1Next = (data: OnboardingData) => {
