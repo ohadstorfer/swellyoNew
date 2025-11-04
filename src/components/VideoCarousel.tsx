@@ -34,9 +34,11 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
   onVideoSelect,
 }) => {
   const flatListRef = useRef<FlatList<VideoLevel>>(null);
-  const [activeIndex, setActiveIndex] = useState(
-    videos.findIndex((v: VideoLevel) => v.id === selectedVideoId) || 0
-  );
+  const initialIndex = (() => {
+    const idx = videos.findIndex((v: VideoLevel) => v.id === selectedVideoId);
+    return idx >= 0 ? idx : 0;
+  })();
+  const [activeIndex, setActiveIndex] = useState(initialIndex);
 
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
     if (viewableItems.length > 0 && viewableItems[0].index !== null) {
@@ -99,7 +101,11 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
     </View>
   );
 
-  const selectedVideo = videos[activeIndex];
+  if (!videos || videos.length === 0) {
+    return <View style={{ alignItems: 'center', padding: spacing.lg }}><Text>No videos available</Text></View>;
+  }
+  const safeIndex = Math.min(Math.max(activeIndex, 0), videos.length - 1);
+  const selectedVideo = videos[safeIndex] || videos[0];
 
   return (
     <View style={styles.container}>
