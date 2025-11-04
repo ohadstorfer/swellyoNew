@@ -88,14 +88,18 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
           isActive && styles.thumbnailActive,
         ]}
       >
-        <Image
-          source={{ uri: item.thumbnailUrl }}
-          style={[
-            styles.thumbnailImage,
-            !isActive && styles.thumbnailImageInactive,
-          ]}
-          resizeMode="cover"
-        />
+        {item?.thumbnailUrl ? (
+          <Image
+            source={{ uri: item.thumbnailUrl }}
+            style={[
+              styles.thumbnailImage,
+              !isActive && styles.thumbnailImageInactive,
+            ]}
+            resizeMode="cover"
+          />
+        ) : (
+          <View style={[styles.thumbnailImage, { backgroundColor: '#EEE' }]} />
+        )}
         {isActive && <View style={styles.activeBorder} />}
       </TouchableOpacity>
     );
