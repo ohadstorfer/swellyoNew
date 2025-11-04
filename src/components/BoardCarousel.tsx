@@ -13,8 +13,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { Text } from './Text';
 import { colors, spacing } from '../styles/theme';
 
-const SCREEN_WIDTH = Dimensions.get('window').width;
-const CAROUSEL_ITEM_WIDTH = Platform.OS === 'web' ? Math.min(SCREEN_WIDTH, 600) : SCREEN_WIDTH;
+// Helpers for sizing
+const getScreenWidth = () => Dimensions.get('window').width;
+const getCarouselItemWidth = () => {
+  const screenWidth = getScreenWidth();
+  return Platform.OS === 'web' ? Math.min(screenWidth, 600) : screenWidth;
+};
 
 export interface BoardType {
   id: number;
@@ -33,27 +37,40 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
   selectedBoardId,
   onBoardSelect,
 }) => {
-  const flatListRef = useRef<FlatList>(null);
+  const flatListRef = useRef<FlatList<BoardType>>(null);
+  const [carouselItemWidth, setCarouselItemWidth] = useState(getCarouselItemWidth());
   const [activeIndex, setActiveIndex] = useState(
     boards.findIndex((b: BoardType) => b.id === selectedBoardId) || 0
   );
 
+  // Update width on resize (web)
+  React.useEffect(() => {
+    if (Platform.OS === 'web') {
+      const updateWidth = () => setCarouselItemWidth(getCarouselItemWidth());
+      if (typeof window !== 'undefined') {
+        window.addEventListener('resize', updateWidth);
+        return () => window.removeEventListener('resize', updateWidth);
+      }
+    }
+  }, []);
+
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
     if (viewableItems.length > 0 && viewableItems[0].index !== null) {
-      const index = viewableItems[0].index;
+      const index = viewableItems[0].index as number;
       setActiveIndex(index);
       onBoardSelect(boards[index]);
     }
   }).current;
 
-  const viewabilityConfig = useRef({
-    itemVisiblePercentThreshold: 50,
-  }).current;
+  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50 }).current;
 
   const renderBoard = ({ item }: { item: BoardType }) => {
-    const imageWidth = Platform.OS === 'web' ? Math.min(CAROUSEL_ITEM_WIDTH * 0.6, 400) : SCREEN_WIDTH * 0.5;
+    const imageWidth = Platform.OS === 'web'
+      ? Math.min(carouselItemWidth * 0.6, 400)
+      : getScreenWidth() * 0.5;
+
     return (
-      <View style={[styles.carouselItem, { width: CAROUSEL_ITEM_WIDTH }]}>
+      <View style={[styles.carouselItem, { width: carouselItemWidth }]}> 
         <Image
           source={{ uri: item.imageUrl }}
           style={[styles.boardImage, { width: imageWidth }]}
@@ -65,21 +82,42 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
 
   const renderDots = () => (
     <View style={styles.dotsContainer}>
-      {boards.map((_, index: number) => (
+      {boards.map((_board: BoardType, index: number) => (
         <View
           key={index}
-          style={[
-            styles.dot,
-            index === activeIndex ? styles.dotActive : styles.dotInactive,
-          ]}
+          style={[styles.dot, index === activeIndex ? styles.dotActive : styles.dotInactive]}
         />
       ))}
     </View>
   );
 
+  // Ensure initial index is centered
+  React.useEffect(() => {
+    if (flatListRef.current && activeIndex >= 0) {
+      const timeout = Platform.OS === 'web' ? 300 : 100;
+      setTimeout(() => {
+        flatListRef.current?.scrollToIndex({ index: activeIndex, animated: false, viewPosition: 0.5 });
+      }, timeout);
+    }
+  }, []);
+
+  // Keep scroll in sync with external selection
+  React.useEffect(() => {
+    const newIndex = boards.findIndex((b: BoardType) => b.id === selectedBoardId);
+    if (newIndex >= 0 && newIndex !== activeIndex && flatListRef.current) {
+      setActiveIndex(newIndex);
+      const timeout = Platform.OS === 'web' ? 300 : 100;
+      setTimeout(() => {
+        flatListRef.current?.scrollToIndex({ index: newIndex, animated: Platform.OS !== 'web', viewPosition: 0.5 });
+      }, timeout);
+    }
+  }, [selectedBoardId, boards, activeIndex]);
+
   const scrollToPrevious = () => {
     if (activeIndex > 0 && flatListRef.current) {
       const newIndex = activeIndex - 1;
+      setActiveIndex(newIndex);
+      onBoardSelect(boards[newIndex]);
       flatListRef.current.scrollToIndex({ index: newIndex, animated: true, viewPosition: 0.5 });
     }
   };
@@ -87,17 +125,11 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
   const scrollToNext = () => {
     if (activeIndex < boards.length - 1 && flatListRef.current) {
       const newIndex = activeIndex + 1;
+      setActiveIndex(newIndex);
+      onBoardSelect(boards[newIndex]);
       flatListRef.current.scrollToIndex({ index: newIndex, animated: true, viewPosition: 0.5 });
     }
   };
-
-  React.useEffect(() => {
-    if (flatListRef.current && activeIndex >= 0) {
-      setTimeout(() => {
-        flatListRef.current?.scrollToIndex({ index: activeIndex, animated: false, viewPosition: 0.5 });
-      }, Platform.OS === 'web' ? 300 : 100);
-    }
-  }, []);
 
   return (
     <View style={styles.container}>
@@ -107,6 +139,7 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
             <Ionicons name="chevron-back" size={24} color={colors.textDark} />
           </TouchableOpacity>
         )}
+
         <FlatList
           ref={flatListRef}
           data={boards}
@@ -118,27 +151,27 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
           onViewableItemsChanged={onViewableItemsChanged}
           viewabilityConfig={viewabilityConfig}
           initialScrollIndex={activeIndex >= 0 ? activeIndex : 0}
-          getItemLayout={(_, index) => ({
-            length: CAROUSEL_ITEM_WIDTH,
-            offset: CAROUSEL_ITEM_WIDTH * index,
-            index,
-          })}
+          getItemLayout={(_, index) => ({ length: carouselItemWidth, offset: carouselItemWidth * index, index })}
           snapToAlignment="center"
-          snapToInterval={CAROUSEL_ITEM_WIDTH}
+          snapToInterval={carouselItemWidth}
           decelerationRate="fast"
           contentContainerStyle={styles.carouselContent}
           onScrollToIndexFailed={(info) => {
-            setTimeout(() => {
-              flatListRef.current?.scrollToOffset({ offset: info.index * CAROUSEL_ITEM_WIDTH, animated: false });
-            }, 500);
+            const wait = new Promise(resolve => setTimeout(resolve, 500));
+            wait.then(() => {
+              flatListRef.current?.scrollToOffset({ offset: info.index * carouselItemWidth, animated: false });
+            });
           }}
+          {...(Platform.OS === 'web' && { style: { overflowX: 'hidden' as any } as any })}
         />
+
         {Platform.OS === 'web' && activeIndex < boards.length - 1 && (
           <TouchableOpacity style={[styles.arrowButton, styles.arrowButtonRight]} onPress={scrollToNext} activeOpacity={0.7}>
             <Ionicons name="chevron-forward" size={24} color={colors.textDark} />
           </TouchableOpacity>
         )}
       </View>
+
       <View style={styles.labelContainer}>
         {renderDots()}
         <Text style={styles.boardName}>{boards[activeIndex]?.name || ''}</Text>
@@ -159,54 +192,18 @@ const styles = StyleSheet.create({
     width: '100%',
     overflow: 'hidden',
     position: 'relative',
-    ...(Platform.OS === 'web' && { maxWidth: 600, alignSelf: 'center' }),
-  },
-  carouselContent: {
-    alignItems: 'center',
-    paddingVertical: Platform.OS === 'web' ? spacing.lg : 0,
-  },
-  carouselItem: {
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: spacing.xl,
-  },
-  boardImage: {
-    height: 350,
-    maxWidth: Platform.OS === 'web' ? 400 : undefined,
-  },
-  labelContainer: {
-    alignItems: 'center',
-    marginTop: spacing.md,
-    gap: spacing.sm,
-  },
-  dotsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: spacing.sm,
-  },
-  dot: {
-    height: 8,
-    borderRadius: 4,
-  },
-  dotActive: {
-    width: 24,
-    backgroundColor: '#0788B0',
-  },
-  dotInactive: {
-    width: 8,
-    backgroundColor: '#CFCFCF',
-  },
-  boardName: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#000',
-    textAlign: 'center',
+    ...(Platform.OS === 'web' && {
+      maxWidth: 600,
+      alignSelf: 'center',
+      // @ts-ignore
+      WebkitOverflowScrolling: 'touch',
+      // @ts-ignore
+      scrollBehavior: 'smooth',
+    }),
   },
   arrowButton: {
     position: 'absolute',
-    left: 10,
+    left: Platform.OS === 'web' ? 10 : 0,
     top: '50%',
     marginTop: -20,
     zIndex: 10,
@@ -225,7 +222,59 @@ const styles = StyleSheet.create({
   },
   arrowButtonRight: {
     left: 'auto',
-    right: 10,
+    right: Platform.OS === 'web' ? 10 : 0,
+  },
+  carouselContent: {
+    alignItems: 'center',
+    paddingVertical: Platform.OS === 'web' ? spacing.lg : 0,
+    ...(Platform.OS === 'web' && {
+      paddingLeft: 0,
+      paddingRight: 0,
+    }),
+  },
+  carouselItem: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: spacing.xl,
+    ...(Platform.OS === 'web' && { paddingHorizontal: 0 }),
+  },
+  boardImage: {
+    height: 350,
+    maxWidth: Platform.OS === 'web' ? 400 : undefined,
+    ...(Platform.OS === 'web' && {
+      // @ts-ignore
+      objectFit: 'contain' as any,
+      width: 400,
+    }),
+  },
+  labelContainer: {
+    alignItems: 'center',
+    marginTop: spacing.md,
+    gap: spacing.sm as any,
+  },
+  dotsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 6 as any,
+    marginBottom: spacing.sm,
+  },
+  dot: {
+    height: 8,
+    borderRadius: 4,
+  },
+  dotActive: {
+    width: 24,
+    backgroundColor: colors.dotActive || '#0788B0',
+  },
+  dotInactive: {
+    width: 8,
+    backgroundColor: colors.dotInactive || '#CFCFCF',
+  },
+  boardName: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#000',
+    textAlign: 'center',
   },
 });
-

@@ -3,19 +3,15 @@ import {
   View,
   StyleSheet,
   SafeAreaView,
-  ScrollView,
   TouchableOpacity,
   Platform,
-  KeyboardAvoidingView,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { ProgressBar } from '../components/ProgressBar';
-import { SurfLevelSelector } from '../components/SurfLevelSelector';
-import { Button } from '../components/Button';
 import { Text } from '../components/Text';
+import { VideoCarousel, VideoLevel } from '../components/VideoCarousel';
 import { colors, spacing } from '../styles/theme';
-import { OnboardingData, SurfLevel } from './OnboardingStep1Screen';
+import { OnboardingData } from './OnboardingStep1Screen';
 
 interface OnboardingStep2ScreenProps {
   onNext: (data: OnboardingData) => void;
@@ -24,22 +20,32 @@ interface OnboardingStep2ScreenProps {
   updateFormData: (data: Partial<OnboardingData>) => void;
 }
 
-const SURF_LEVELS: SurfLevel[] = [
+// Video levels representing different surf skills
+const SURF_LEVEL_VIDEOS: VideoLevel[] = [
   {
     id: 0,
-    description: 'Dipping My Toes',
+    name: 'Dipping My Toes',
+    thumbnailUrl: 'https://images.unsplash.com/photo-1502680390469-be75c86b636f?w=400&h=300&fit=crop',
   },
   {
     id: 1,
-    description: 'Cruising Around',
+    name: 'Cruising Around',
+    thumbnailUrl: 'https://images.unsplash.com/photo-1537519646099-335112f03225?w=400&h=300&fit=crop',
   },
   {
     id: 2,
-    description: 'Snapping',
+    name: 'Cross Stepping',
+    thumbnailUrl: 'https://images.unsplash.com/photo-1621951753023-1f9a988a7c8a?w=400&h=300&fit=crop',
   },
   {
     id: 3,
-    description: 'Charging',
+    name: 'Hanging Toes',
+    thumbnailUrl: 'https://images.unsplash.com/photo-1541516160071-4bb0c5af65ba?w=400&h=300&fit=crop',
+  },
+  {
+    id: 4,
+    name: 'Charging',
+    thumbnailUrl: 'https://images.unsplash.com/photo-1502680390469-be75c86b636f?w=400&h=300&fit=crop',
   },
 ];
 
@@ -49,114 +55,88 @@ export const OnboardingStep2Screen: React.FC<OnboardingStep2ScreenProps> = ({
   initialData = {},
   updateFormData,
 }) => {
-  const [formData, setFormData] = useState<OnboardingData>({
-    nickname: initialData.nickname || '',
-    userEmail: initialData.userEmail || '',
-    location: initialData.location || '',
-    age: initialData.age || 0,
-    boardType: initialData.boardType ?? -1,
-    surfLevel: initialData.surfLevel ?? -1, // Use -1 to indicate no selection
-    travelExperience: initialData.travelExperience ?? 0, // Default to 0
-  });
+  const [selectedVideoId, setSelectedVideoId] = useState<number>(
+    typeof initialData.surfLevel === 'number' && initialData.surfLevel >= 0 ? initialData.surfLevel : 0
+  );
 
-  const [errors, setErrors] = useState<Partial<Record<keyof OnboardingData, string>>>({});
-
-  const validateForm = (): boolean => {
-    const newErrors: Partial<Record<keyof OnboardingData, string>> = {};
-
-    if (formData.surfLevel === -1) {
-      newErrors.surfLevel = 'Please select your surf level';
-    }
-
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
+  const handleVideoSelect = (video: VideoLevel) => {
+    setSelectedVideoId(video.id);
+    updateFormData({ surfLevel: video.id });
   };
 
   const handleNext = () => {
-    if (validateForm()) {
-      onNext(formData);
-    }
+    const formData: OnboardingData = {
+      nickname: initialData.nickname || '',
+      userEmail: initialData.userEmail || '',
+      location: initialData.location || '',
+      age: initialData.age || 0,
+      boardType: initialData.boardType ?? -1,
+      surfLevel: selectedVideoId,
+      travelExperience: initialData.travelExperience ?? 0,
+    };
+    onNext(formData);
   };
 
-  const updateField = (field: keyof OnboardingData, value: string | number) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
-    // Also update the context immediately
-    updateFormData({ [field]: value });
-    // Clear error when user starts typing
-    if (errors[field]) {
-      setErrors(prev => ({ ...prev, [field]: undefined }));
-    }
-  };
-
-  const handleSurfLevelChange = (level: SurfLevel) => {
-    updateField('surfLevel', level.id); // Only save the ID
-  };
-
-  // Helper function to get the selected SurfLevel object from ID
-  const getSelectedSurfLevel = (): SurfLevel | undefined => {
-    if (formData.surfLevel >= 0) {
-      return SURF_LEVELS.find(level => level.id === formData.surfLevel);
-    }
-    return undefined;
+  const handleSkip = () => {
+    handleNext();
   };
 
   return (
     <SafeAreaView style={styles.container}>
-      <LinearGradient
-        colors={[colors.backgroundLight, colors.backgroundMedium]}
-        style={styles.gradient}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 0, y: 1 }}
-      >
-        <KeyboardAvoidingView
-          style={styles.keyboardView}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        >
-          <ScrollView
-            style={styles.scrollView}
-            contentContainerStyle={styles.scrollContent}
-            showsVerticalScrollIndicator={false}
+      <View style={styles.content}>
+        {/* Header */}
+        <View style={styles.header}>
+          <TouchableOpacity onPress={onBack} style={styles.backButton}>
+            <Ionicons name="arrow-back" size={24} color="#222B30" />
+          </TouchableOpacity>
+
+          <Text style={styles.stepText}>Step 2/4</Text>
+
+          <TouchableOpacity onPress={handleSkip} style={styles.skipButton}>
+            <Text style={styles.skipText}>Skip</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Progress Bar */}
+        <View style={styles.progressContainer}>
+          <View style={styles.progressBar}>
+            <View style={[styles.progressFill, { width: '50%' }]} />
+          </View>
+        </View>
+
+        {/* Title */}
+        <View style={styles.titleContainer}>
+          <Text style={styles.title}>
+            Select the video that best represents{'\n'}how you surf.
+          </Text>
+        </View>
+
+        {/* Video Carousel */}
+        <View style={styles.carouselContainer}>
+          <VideoCarousel
+            videos={SURF_LEVEL_VIDEOS}
+            selectedVideoId={selectedVideoId}
+            onVideoSelect={handleVideoSelect}
+          />
+        </View>
+
+        {/* Next Button */}
+        <View style={styles.buttonContainer}>
+          <TouchableOpacity 
+            onPress={handleNext}
+            activeOpacity={0.8}
           >
-            {/* Header */}
-            <View style={styles.header}>
-              <TouchableOpacity onPress={onBack} style={styles.backButton}>
-                <Ionicons name="arrow-back" size={24} color={colors.textDark} />
-              </TouchableOpacity>
-              
-              <View style={styles.headerCenter}>
-                <ProgressBar currentStep={2} totalSteps={4} />
-              </View>
-            </View>
-
-            {/* Form Content */}
-            <View style={styles.content}>
-              <Text variant="title" style={styles.screenTitle}>
-                What's your surf level?
-              </Text>
-
-              <Text variant="body" style={styles.subtitle}>
-                This helps us recommend the best spots and conditions for you
-              </Text>
-
-              {/* Surf Level Selection */}
-              <SurfLevelSelector
-                selectedLevel={getSelectedSurfLevel()}
-                onSelectLevel={handleSurfLevelChange}
-                error={errors.surfLevel}
-              />
-            </View>
-
-            {/* Next Button */}
-            <View style={styles.buttonContainer}>
-              <Button
-                title="Next"
-                onPress={handleNext}
-                style={styles.nextButton}
-              />
-            </View>
-          </ScrollView>
-        </KeyboardAvoidingView>
-      </LinearGradient>
+            <LinearGradient
+              colors={['#00A2B6', '#0788B0']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.gradientButton}
+            >
+              <Text style={styles.buttonText}>Next</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+        </View>
+      </View>
     </SafeAreaView>
   );
 };
@@ -164,55 +144,92 @@ export const OnboardingStep2Screen: React.FC<OnboardingStep2ScreenProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-  },
-  gradient: {
-    flex: 1,
-  },
-  keyboardView: {
-    flex: 1,
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    flexGrow: 1,
-    paddingBottom: spacing.xxl,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: spacing.lg,
-    paddingTop: Platform.OS === 'web' ? spacing.xxl : spacing.lg,
-    paddingBottom: spacing.md,
-  },
-  backButton: {
-    padding: spacing.sm,
-    marginRight: spacing.md,
-  },
-  headerCenter: {
-    flex: 1,
+    backgroundColor: colors.backgroundGray || '#FAFAFA',
   },
   content: {
     flex: 1,
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: spacing.md,
+    paddingTop: Platform.OS === 'web' ? spacing.md : spacing.sm,
+    height: 44,
+  },
+  backButton: {
+    width: 60,
+    alignItems: 'flex-start',
+  },
+  stepText: {
+    fontSize: 12,
+    fontWeight: '400',
+    color: colors.textPrimary || '#333',
+    textAlign: 'center',
+    lineHeight: 15,
+  },
+  skipButton: {
+    width: 60,
+    alignItems: 'flex-end',
+    paddingHorizontal: 10,
+  },
+  skipText: {
+    fontSize: 12,
+    fontWeight: '400',
+    color: colors.textSecondary || '#7B7B7B',
+    textAlign: 'right',
+    lineHeight: 15,
+  },
+  progressContainer: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+  },
+  progressBar: {
+    width: 237,
+    height: 4,
+    backgroundColor: colors.progressBackground || '#BDBDBD',
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: colors.progressFill || '#333',
+    borderRadius: 8,
+  },
+  titleContainer: {
     paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
   },
-  screenTitle: {
-    fontSize: 28,
-    marginBottom: spacing.md,
-    textAlign: 'center',
-  },
-  subtitle: {
+  title: {
     fontSize: 16,
-    color: colors.textMedium,
+    fontWeight: '700',
+    color: colors.textPrimary || '#333',
     textAlign: 'center',
-    marginBottom: spacing.xl,
-    lineHeight: 22,
+    lineHeight: 24,
+  },
+  carouselContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    paddingVertical: spacing.lg,
   },
   buttonContainer: {
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.lg,
+    paddingHorizontal: spacing.xl,
+    paddingBottom: spacing.xl,
   },
-  nextButton: {
-    width: '100%',
+  gradientButton: {
+    height: 56,
+    borderRadius: 999,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: spacing.lg,
+  },
+  buttonText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.white || '#FFF',
+    textAlign: 'center',
+    lineHeight: 24,
   },
 });
