@@ -56,7 +56,7 @@ export const OnboardingStep2Screen: React.FC<OnboardingStep2ScreenProps> = ({
   updateFormData,
 }) => {
   const [selectedVideoId, setSelectedVideoId] = useState<number>(
-    initialData.surfLevel ?? 0
+    typeof initialData.surfLevel === 'number' && initialData.surfLevel >= 0 ? initialData.surfLevel : 0
   );
 
   const handleVideoSelect = (video: VideoLevel) => {
