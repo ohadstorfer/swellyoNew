@@ -43,8 +43,9 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
     if (viewableItems.length > 0 && viewableItems[0].index !== null) {
       const index = viewableItems[0].index as number;
-      setActiveIndex(index);
-      onVideoSelect(videos[index]);
+      const clamped = Math.min(Math.max(index, 0), Math.max(videos.length - 1, 0));
+      setActiveIndex(clamped);
+      if (videos[clamped]) onVideoSelect(videos[clamped]);
     }
   }).current;
 
