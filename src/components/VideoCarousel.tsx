@@ -56,13 +56,23 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
     if (flatListRef.current && activeIndex >= 0) {
       const timeout = Platform.OS === 'web' ? 300 : 100;
       setTimeout(() => {
-        flatListRef.current?.scrollToIndex({ 
-          index: activeIndex, 
-          animated: false 
+        flatListRef.current?.scrollToIndex({
+          index: Math.min(Math.max(activeIndex, 0), Math.max(videos.length - 1, 0)),
+          animated: false
         });
       }, timeout);
     }
-  }, []);
+  }, [videos?.length]);
+
+  // Keep in sync if parent selection changes
+  React.useEffect(() => {
+    const idx = videos.findIndex(v => v.id === selectedVideoId);
+    const newIndex = idx >= 0 ? idx : 0;
+    if (newIndex !== activeIndex) {
+      setActiveIndex(newIndex);
+      flatListRef.current?.scrollToIndex({ index: newIndex, animated: Platform.OS !== 'web' });
+    }
+  }, [selectedVideoId, videos]);
 
   const renderThumbnail = ({ item, index }: { item: VideoLevel; index: number }) => {
     const isActive = index === activeIndex;
