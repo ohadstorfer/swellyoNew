@@ -1,6 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
-import { GoogleSigninButton } from '@react-native-google-signin/google-signin';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 
 export const GoogleSignInTest: React.FC = () => {
   const handlePress = () => {
@@ -10,12 +9,12 @@ export const GoogleSignInTest: React.FC = () => {
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Google Sign-In Test</Text>
-      <GoogleSigninButton
+      <TouchableOpacity
         style={styles.button}
-        size={GoogleSigninButton.Size.Wide}
-        color={GoogleSigninButton.Color.Dark}
         onPress={handlePress}
-      />
+      >
+        <Text style={styles.buttonText}>Continue with Google</Text>
+      </TouchableOpacity>
     </View>
   );
 };
@@ -34,5 +33,16 @@ const styles = StyleSheet.create({
   button: {
     width: 300,
     height: 50,
+    backgroundColor: '#fff',
+    borderRadius: 4,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#d8dadc',
+  },
+  buttonText: {
+    color: '#000',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });

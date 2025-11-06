@@ -8,6 +8,7 @@ import {
   Image,
   Dimensions,
 } from 'react-native';
+import { Video, ResizeMode } from 'expo-av';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../components/Text';
@@ -24,32 +25,57 @@ interface OnboardingStep2ScreenProps {
   updateFormData: (data: Partial<OnboardingData>) => void;
 }
 
+// Helper function to get video URL based on name
+const getVideoUrl = (name: string): string => {
+  // Map video names to file paths
+  const videoMap: { [key: string]: string } = {
+    'Dipping My Toes': '/surf level/Dipping My Toes.mp4',
+    'Cruising Around': '/surf level/Cruising Around.mp4',
+    'Cross Stepping': '/surf level/CrossStepping.mp4',
+    'Hanging Toes': '/surf level/Hanging Toes.mp4',
+    'Charging': '/surf level/Charging.mp4',
+  };
+  
+  return videoMap[name] || '';
+};
+
+// Helper function to get thumbnail URL - use video URL as thumbnail (will show first frame)
+const getThumbnailUrl = (name: string): string => {
+  // Use the video URL as thumbnail - browsers/native will show the first frame
+  return getVideoUrl(name);
+};
+
 // Video levels representing different surf skills
 const SURF_LEVEL_VIDEOS: VideoLevel[] = [
   {
     id: 0,
     name: 'Dipping My Toes',
-    thumbnailUrl: 'https://images.unsplash.com/photo-1502680390469-be75c86b636f?w=400&h=300&fit=crop',
+    thumbnailUrl: getThumbnailUrl('Dipping My Toes'),
+    videoUrl: getVideoUrl('Dipping My Toes'),
   },
   {
     id: 1,
     name: 'Cruising Around',
-    thumbnailUrl: 'https://images.unsplash.com/photo-1537519646099-335112f03225?w=400&h=300&fit=crop',
+    thumbnailUrl: getThumbnailUrl('Cruising Around'),
+    videoUrl: getVideoUrl('Cruising Around'),
   },
   {
     id: 2,
     name: 'Cross Stepping',
-    thumbnailUrl: 'https://images.unsplash.com/photo-1621951753023-1f9a988a7c8a?w=400&h=300&fit=crop',
+    thumbnailUrl: getThumbnailUrl('Cross Stepping'),
+    videoUrl: getVideoUrl('Cross Stepping'),
   },
   {
     id: 3,
     name: 'Hanging Toes',
-    thumbnailUrl: 'https://images.unsplash.com/photo-1541516160071-4bb0c5af65ba?w=400&h=300&fit=crop',
+    thumbnailUrl: getThumbnailUrl('Hanging Toes'),
+    videoUrl: getVideoUrl('Hanging Toes'),
   },
   {
     id: 4,
     name: 'Charging',
-    thumbnailUrl: 'https://images.unsplash.com/photo-1502680390469-be75c86b636f?w=400&h=300&fit=crop',
+    thumbnailUrl: getThumbnailUrl('Charging'),
+    videoUrl: getVideoUrl('Charging'),
   },
 ];
 
@@ -91,11 +117,25 @@ export const OnboardingStep2Screen: React.FC<OnboardingStep2ScreenProps> = ({
     <SafeAreaView style={styles.container}>
       {/* Background Video/Image with 20% opacity */}
       <View style={styles.backgroundVideoContainer}>
-        <Image
-          source={{ uri: selectedVideo.thumbnailUrl }}
-          style={styles.backgroundVideo}
-          resizeMode="cover"
-        />
+        <View style={styles.backgroundVideoWrapper}>
+          {selectedVideo.videoUrl ? (
+            <Video
+              source={{ uri: Platform.OS === 'web' ? selectedVideo.videoUrl : selectedVideo.videoUrl }}
+              style={styles.backgroundVideo}
+              resizeMode={ResizeMode.COVER}
+              shouldPlay={true}
+              isLooping={true}
+              isMuted={true}
+              useNativeControls={false}
+            />
+          ) : (
+            <Image
+              source={{ uri: selectedVideo.thumbnailUrl }}
+              style={styles.backgroundVideo}
+              resizeMode="cover"
+            />
+          )}
+        </View>
       </View>
 
       <View style={styles.content}>
@@ -168,15 +208,23 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    height: 579,
+    height: 640,
     overflow: 'hidden',
     borderBottomLeftRadius: 48,
     borderBottomRightRadius: 48,
   },
-  backgroundVideo: {
+  backgroundVideoWrapper: {
     width: '100%',
     height: '100%',
     opacity: 0.2,
+  },
+  backgroundVideo: {
+    width: '100%',
+    height: '100%',
+    ...(Platform.OS === 'web' && {
+      objectFit: 'cover' as any,
+      objectPosition: 'center center' as any,
+    }),
   },
   content: {
     flex: 1,

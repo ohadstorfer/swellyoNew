@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import {
   View,
   FlatList,
@@ -7,7 +7,9 @@ import {
   StyleSheet,
   Platform,
   TouchableOpacity,
+  Animated,
 } from 'react-native';
+import { Video, ResizeMode } from 'expo-av';
 import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { Text } from './Text';
@@ -21,6 +23,79 @@ export interface VideoLevel {
   thumbnailUrl: string;
   videoUrl?: string;
 }
+
+// Animated Thumbnail Component
+interface AnimatedThumbnailProps {
+  item: VideoLevel;
+  isActive: boolean;
+  selectedVideoId: number;
+  onPress: () => void;
+  baseStyle: any;
+  activeStyle: any;
+  imageStyle: any;
+  borderStyle: any;
+}
+
+const AnimatedThumbnail: React.FC<AnimatedThumbnailProps> = ({ 
+  item, 
+  isActive, 
+  selectedVideoId,
+  onPress, 
+  baseStyle,
+  activeStyle,
+  imageStyle,
+  borderStyle,
+}) => {
+  const thumbnailAnim = useRef(new Animated.Value(isActive ? 1 : 0.5)).current;
+  
+  // Fade animation when selectedVideoId changes (same as main video)
+  useEffect(() => {
+    // Fade out first, then fade in to new opacity
+    thumbnailAnim.setValue(0);
+    Animated.timing(thumbnailAnim, {
+      toValue: isActive ? 1 : 0.5,
+      duration: 400,
+      useNativeDriver: true,
+    }).start();
+  }, [selectedVideoId, isActive, thumbnailAnim]);
+  
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.8}
+    >
+      <Animated.View
+        style={[
+          baseStyle,
+          isActive && activeStyle,
+          {
+            opacity: thumbnailAnim,
+          },
+        ]}
+      >
+        {item.videoUrl ? (
+          <Video
+            source={{ uri: Platform.OS === 'web' ? item.videoUrl : item.videoUrl }}
+            style={imageStyle}
+            resizeMode={ResizeMode.COVER}
+            shouldPlay={false}
+            isLooping={false}
+            isMuted={true}
+            useNativeControls={false}
+            positionMillis={500}
+          />
+        ) : (
+          <Image
+            source={{ uri: item.thumbnailUrl }}
+            style={imageStyle}
+            resizeMode="cover"
+          />
+        )}
+        {isActive && <View style={borderStyle} />}
+      </Animated.View>
+    </TouchableOpacity>
+  );
+};
 
 interface VideoCarouselProps {
   videos: VideoLevel[];
@@ -36,6 +111,8 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
   type ReorderedVideoItem = { item: VideoLevel; originalIndex: number };
   const flatListRef = useRef<FlatList<ReorderedVideoItem>>(null);
   const [containerWidth, setContainerWidth] = useState(0);
+  const fadeAnim = useRef(new Animated.Value(1)).current;
+  const videoRef = useRef<Video>(null);
 
   // Reorder videos array so selected item is in the middle
   const getReorderedVideos = React.useMemo((): ReorderedVideoItem[] => {
@@ -79,29 +156,76 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
     return videos.find(v => v.id === selectedVideoId) || videos[0];
   }, [videos, selectedVideoId]);
 
+  // Fade animation for main video change and restart video
+  useEffect(() => {
+    // Fade out
+    fadeAnim.setValue(0);
+    
+    // Restart video when selection changes
+    if (videoRef.current && selectedVideo.videoUrl) {
+      videoRef.current.setPositionAsync(0);
+      videoRef.current.playAsync();
+    }
+    
+    Animated.timing(fadeAnim, {
+      toValue: 1,
+      duration: 900,
+      useNativeDriver: true,
+    }).start();
+  }, [selectedVideoId, selectedVideo.videoUrl]);
+
   // Scroll to middle index when videos are reordered
   React.useEffect(() => {
-    if (flatListRef.current && getReorderedVideos.length > 0) {
-      const timeout = Platform.OS === 'web' ? 300 : 100;
-      setTimeout(() => {
+    if (flatListRef.current && getReorderedVideos.length > 0 && containerWidth > 0) {
+      const scrollToCenter = () => {
         const middleIdx = Math.floor(getReorderedVideos.length / 2);
+        const baseWidth = 98;
+        const activeWidth = 119;
+        const gap = 12;
+        
+        // Calculate offset to center the middle item (which is the selected one)
+        // The middle item is at index middleIdx in the reordered array
+        // We need to calculate its position and center it
+        let offset = 0;
+        
+        // Calculate offset for items before the middle one
+        for (let i = 0; i < middleIdx; i++) {
+          offset += baseWidth + gap;
+        }
+        
+        // Add half of the middle item's width (it's active, so use activeWidth)
+        // Then subtract half of container width to center it
+        const itemCenter = offset + (activeWidth / 2);
+        const containerCenter = containerWidth / 2;
+        const scrollOffset = itemCenter - containerCenter;
+        
         try {
           flatListRef.current?.scrollToIndex({
             index: middleIdx,
-            animated: false,
+            animated: true,
             viewPosition: 0.5,
           });
         } catch (error) {
-          // Fallback if scrollToIndex fails
-          const baseWidth = 98;
-          const gap = 12;
-          const offset = middleIdx * (baseWidth + gap);
+          // Fallback: use scrollToOffset with calculated position
           flatListRef.current?.scrollToOffset({
-            offset,
-            animated: false,
+            offset: Math.max(0, scrollOffset),
+            animated: true,
           });
         }
-      }, timeout);
+      };
+      
+      // Use requestAnimationFrame for web to ensure smooth scrolling
+      if (Platform.OS === 'web') {
+        if (typeof window !== 'undefined' && window.requestAnimationFrame) {
+          window.requestAnimationFrame(() => {
+            setTimeout(scrollToCenter, 50);
+          });
+        } else {
+          setTimeout(scrollToCenter, 50);
+        }
+      } else {
+        setTimeout(scrollToCenter, 50);
+      }
     }
   }, [selectedVideoId, videos, containerWidth, getReorderedVideos]);
 
@@ -110,24 +234,19 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
     const isActive = item.item.id === selectedVideoId;
     
     return (
-      <TouchableOpacity
+      <AnimatedThumbnail
+        item={item.item}
+        isActive={isActive}
+        selectedVideoId={selectedVideoId}
         onPress={() => {
           // Update selection - this will trigger reordering via getReorderedVideos
           onVideoSelect(item.item);
         }}
-        style={[
-          styles.thumbnail,
-          isActive && styles.thumbnailActive,
-        ]}
-        activeOpacity={0.8}
-      >
-        <Image
-          source={{ uri: item.item.thumbnailUrl }}
-          style={styles.thumbnailImage}
-          resizeMode="cover"
-        />
-        {isActive && <View style={styles.activeBorder} />}
-      </TouchableOpacity>
+        baseStyle={styles.thumbnail}
+        activeStyle={styles.thumbnailActive}
+        imageStyle={styles.thumbnailImage}
+        borderStyle={styles.activeBorder}
+      />
     );
   };
 
@@ -154,11 +273,34 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
       {/* Main Video Display */}
       <View style={styles.mainVideoContainer}>
         <View style={styles.videoWrapper}>
-          <Image
-            source={{ uri: selectedVideo.thumbnailUrl }}
-            style={styles.mainVideo}
-            resizeMode="cover"
-          />
+          <Animated.View
+            style={[
+              styles.mainVideo,
+              {
+                opacity: fadeAnim,
+              },
+            ]}
+          >
+            {selectedVideo.videoUrl ? (
+              <Video
+                ref={videoRef}
+                source={{ uri: Platform.OS === 'web' ? selectedVideo.videoUrl : selectedVideo.videoUrl }}
+                style={styles.videoPlayer}
+                resizeMode={ResizeMode.COVER}
+                shouldPlay={true}
+                isLooping={true}
+                isMuted={true}
+                useNativeControls={false}
+                positionMillis={0}
+              />
+            ) : (
+              <Image
+                source={{ uri: selectedVideo.thumbnailUrl }}
+                style={styles.videoPlayer}
+                resizeMode="cover"
+              />
+            )}
+          </Animated.View>
           
           {/* Gradient Overlay */}
           <LinearGradient
@@ -237,17 +379,30 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
                   : Math.max((containerWidth - 119) / 2, spacing.md),
               },
             ]}
-            onScrollToIndexFailed={(info) => {
-              const wait = new Promise(resolve => setTimeout(resolve, 500));
-              wait.then(() => {
-                const baseWidth = 98;
-                const gap = 12;
-                flatListRef.current?.scrollToOffset({
-                  offset: info.index * (baseWidth + gap),
-                  animated: false,
-                });
-              });
-            }}
+             onScrollToIndexFailed={(info) => {
+               const wait = new Promise(resolve => setTimeout(resolve, 100));
+               wait.then(() => {
+                 const baseWidth = 98;
+                 const activeWidth = 119;
+                 const gap = 12;
+                 const middleIdx = Math.floor(getReorderedVideos.length / 2);
+                 
+                 // Calculate offset to center the middle item
+                 let offset = 0;
+                 for (let i = 0; i < middleIdx; i++) {
+                   offset += baseWidth + gap;
+                 }
+                 
+                 const itemCenter = offset + (activeWidth / 2);
+                 const containerCenter = containerWidth > 0 ? containerWidth / 2 : 0;
+                 const scrollOffset = itemCenter - containerCenter;
+                 
+                 flatListRef.current?.scrollToOffset({
+                   offset: Math.max(0, scrollOffset),
+                   animated: true,
+                 });
+               });
+             }}
             bounces={false}
             alwaysBounceHorizontal={false}
             {...(Platform.OS === 'web' && { style: { overflow: 'hidden' } as any })}
@@ -271,8 +426,8 @@ const styles = StyleSheet.create({
   mainVideoContainer: {
     width: '100%',
     alignItems: 'center',
+    justifyContent: 'center',
     paddingHorizontal: Platform.OS === 'web' ? 26 : 16,
-    maxWidth: '100%',
   },
   videoWrapper: {
     width: Platform.OS === 'web' 
@@ -283,10 +438,20 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     overflow: 'hidden',
     position: 'relative',
+    backgroundColor: '#000',
   },
   mainVideo: {
     width: '100%',
     height: '100%',
+    overflow: 'hidden',
+  },
+  videoPlayer: {
+    width: '100%',
+    height: '100%',
+    ...(Platform.OS === 'web' && {
+      objectFit: 'cover' as any,
+      objectPosition: 'center center' as any,
+    }),
   },
   gradientOverlay: {
     position: 'absolute',
@@ -331,6 +496,7 @@ const styles = StyleSheet.create({
     gap: 32,
     paddingHorizontal: 0,
     overflow: 'hidden',
+    marginTop: Platform.OS === 'web' ? 90 : 70,
   },
   thumbnailsWrapper: {
     width: '100%',
@@ -351,12 +517,10 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     overflow: 'hidden',
     position: 'relative',
-    opacity: 0.5,
   },
   thumbnailActive: {
     width: 119,
     height: 80,
-    opacity: 1,
   },
   thumbnailImage: {
     width: '100%',
@@ -394,3 +558,4 @@ const styles = StyleSheet.create({
     backgroundColor: '#CFCFCF',
   },
 });
+

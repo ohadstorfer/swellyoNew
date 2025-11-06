@@ -9,7 +9,6 @@ import {
   Text as RNText,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { GoogleSigninButton } from '@react-native-google-signin/google-signin';
 import { Logo } from '../components/Logo';
 import { Button } from '../components/Button';
 import { Text } from '../components/Text';
@@ -29,7 +28,6 @@ const GOOGLE_LOGO_URL = 'https://www.figma.com/api/mcp/asset/d749a4e2-08f7-4b0f-
 
 export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDemoChat }) => {
   const [isLoading, setIsLoading] = useState(false);
-  const [showGoogleButton, setShowGoogleButton] = useState(false);
   const { setUser, updateFormData } = useOnboarding();
   
   // Detect if we're on mobile (native or web on mobile device)
@@ -83,18 +81,14 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
         }
       }
 
-      // Initialize Google Sign-In and show button after a short delay
+      // Initialize Google Sign-In (no-op for expo-auth-session, but kept for compatibility)
       const initGoogleSignIn = async () => {
         try {
           console.log('Initializing Google Sign-In...');
           await authService.configure();
-          setShowGoogleButton(true);
-          console.log('Google Sign-In configured successfully, showing button');
+          console.log('Google Sign-In configured successfully');
         } catch (error) {
           console.error('Failed to configure Google Sign-In:', error);
-          // Still show the button even if configuration fails
-          setShowGoogleButton(true);
-          console.log('Showing fallback button due to configuration error');
         }
       };
 
@@ -155,7 +149,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
   };
 
 
-  console.log('WelcomeScreen rendering - showGoogleButton:', showGoogleButton, 'Platform:', Platform.OS);
+  console.log('WelcomeScreen rendering - Platform:', Platform.OS);
   
   return (
     <View style={styles.container}>
@@ -188,51 +182,23 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
           <View style={styles.bottomContent}>
             {/* Call to Action */}
             <View style={styles.buttonContainer}>
-            {Platform.OS === 'web' ? (
-              <TouchableOpacity
-                onPress={handleGoogleSignIn}
-                disabled={isLoading}
-                style={[styles.getStartedButton, isLoading && styles.buttonDisabled]}
-                activeOpacity={0.8}
-              >
-                <View style={styles.buttonContent}>
-                  <Image
-                    source={{ uri: GOOGLE_LOGO_URL }}
-                    style={styles.googleIcon}
-                    resizeMode="contain"
-                  />
-                  <RNText style={styles.getStartedButtonText} numberOfLines={1}>
-                    {isLoading ? "Signing in..." : "Continue with Google"}
-                  </RNText>
-                </View>
-              </TouchableOpacity>
-            ) : showGoogleButton ? (
-              <GoogleSigninButton
-                style={styles.googleSignInButton}
-                size={GoogleSigninButton.Size.Wide}
-                color={GoogleSigninButton.Color.Dark}
-                onPress={handleGoogleSignIn}
-                disabled={isLoading}
-              />
-            ) : (
-              <TouchableOpacity
-                onPress={handleGoogleSignIn}
-                disabled={isLoading}
-                style={[styles.getStartedButton, isLoading && styles.buttonDisabled]}
-                activeOpacity={0.8}
-              >
-                <View style={styles.buttonContent}>
-                  <Image
-                    source={{ uri: GOOGLE_LOGO_URL }}
-                    style={styles.googleIcon}
-                    resizeMode="contain"
-                  />
-                  <RNText style={styles.getStartedButtonText} numberOfLines={1}>
-                    Continue with Google
-                  </RNText>
-                </View>
-              </TouchableOpacity>
-            )}
+            <TouchableOpacity
+              onPress={handleGoogleSignIn}
+              disabled={isLoading}
+              style={[styles.getStartedButton, isLoading && styles.buttonDisabled]}
+              activeOpacity={0.8}
+            >
+              <View style={styles.buttonContent}>
+                <Image
+                  source={{ uri: GOOGLE_LOGO_URL }}
+                  style={styles.googleIcon}
+                  resizeMode="contain"
+                />
+                <RNText style={styles.getStartedButtonText} numberOfLines={1}>
+                  {isLoading ? "Signing in..." : "Continue with Google"}
+                </RNText>
+              </View>
+            </TouchableOpacity>
             
             {/* Demo Chat Button */}
             {onDemoChat && (
