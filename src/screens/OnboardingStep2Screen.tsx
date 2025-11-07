@@ -8,13 +8,14 @@ import {
   Image,
   Dimensions,
 } from 'react-native';
-import { Video, ResizeMode } from 'expo-av';
+import { useVideoPlayer, VideoView } from 'expo-video';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../components/Text';
 import { VideoCarousel, VideoLevel } from '../components/VideoCarousel';
 import { colors, spacing } from '../styles/theme';
 import { OnboardingData } from './OnboardingStep1Screen';
+import { getVideoUrl as getVideoUrlUtil } from '../utils/videoUtils';
 
 const getScreenWidth = () => Dimensions.get('window').width;
 
@@ -36,7 +37,9 @@ const getVideoUrl = (name: string): string => {
     'Charging': '/surf level/Charging.mp4',
   };
   
-  return videoMap[name] || '';
+  const path = videoMap[name] || '';
+  // Use the utility to get platform-specific URL
+  return path ? getVideoUrlUtil(path) : '';
 };
 
 // Helper function to get thumbnail URL - use video URL as thumbnail (will show first frame)
@@ -113,20 +116,42 @@ export const OnboardingStep2Screen: React.FC<OnboardingStep2ScreenProps> = ({
 
   const selectedVideo = SURF_LEVEL_VIDEOS.find(v => v.id === selectedVideoId) || SURF_LEVEL_VIDEOS[0];
 
+  // Create video player for background video
+  const backgroundPlayer = useVideoPlayer(
+    selectedVideo.videoUrl || '',
+    (player: any) => {
+      if (player) {
+        player.loop = true;
+        player.muted = true;
+        player.play();
+      }
+    }
+  );
+
+  // Update player source when video changes
+  React.useEffect(() => {
+    if (selectedVideo.videoUrl && backgroundPlayer) {
+      backgroundPlayer.replaceAsync(selectedVideo.videoUrl).then(() => {
+        backgroundPlayer.loop = true;
+        backgroundPlayer.muted = true;
+        backgroundPlayer.play();
+      }).catch((error: any) => {
+        console.error('Error replacing video:', error);
+      });
+    }
+  }, [selectedVideo.videoUrl, backgroundPlayer]);
+
   return (
     <SafeAreaView style={styles.container}>
       {/* Background Video/Image with 20% opacity */}
       <View style={styles.backgroundVideoContainer}>
         <View style={styles.backgroundVideoWrapper}>
           {selectedVideo.videoUrl ? (
-            <Video
-              source={{ uri: Platform.OS === 'web' ? selectedVideo.videoUrl : selectedVideo.videoUrl }}
+            <VideoView
+              player={backgroundPlayer}
               style={styles.backgroundVideo}
-              resizeMode={ResizeMode.COVER}
-              shouldPlay={true}
-              isLooping={true}
-              isMuted={true}
-              useNativeControls={false}
+              contentFit="cover"
+              nativeControls={false}
             />
           ) : (
             <Image
@@ -145,7 +170,7 @@ export const OnboardingStep2Screen: React.FC<OnboardingStep2ScreenProps> = ({
             <Ionicons name="arrow-back" size={24} color="#222B30" />
           </TouchableOpacity>
 
-          <Text style={styles.stepText}>Step 2/4</Text>
+          <Text style={styles.stepText}>Step 2/5</Text>
 
           <View style={styles.skipButton}>
             {/* Skip button is hidden/opacity 0 in Figma */}
@@ -155,7 +180,7 @@ export const OnboardingStep2Screen: React.FC<OnboardingStep2ScreenProps> = ({
         {/* Progress Bar */}
         <View style={styles.progressContainer}>
           <View style={styles.progressBar}>
-            <View style={[styles.progressFill, { width: 116 }]} />
+            <View style={[styles.progressFill, { width: '40%' }]} />
           </View>
         </View>
 

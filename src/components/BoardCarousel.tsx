@@ -8,6 +8,7 @@ import {
   ViewToken,
   Platform,
   TouchableOpacity,
+  Animated,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from './Text';
@@ -17,7 +18,8 @@ import { colors, spacing } from '../styles/theme';
 const getScreenWidth = () => Dimensions.get('window').width;
 const getCarouselItemWidth = () => {
   const screenWidth = getScreenWidth();
-  return Platform.OS === 'web' ? Math.min(screenWidth, 600) : screenWidth;
+  // Each item takes 1/3 of the screen width to show 3 items at once
+  return screenWidth / 3;
 };
 
 export interface BoardType {
@@ -64,18 +66,43 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
 
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50 }).current;
 
-  const renderBoard = ({ item }: { item: BoardType }) => {
-    const imageWidth = Platform.OS === 'web'
-      ? Math.min(carouselItemWidth * 0.6, 400)
-      : getScreenWidth() * 0.5;
+  const renderBoard = ({ item, index }: { item: BoardType; index: number }) => {
+    const isActive = index === activeIndex;
+    const isLeft = index === activeIndex - 1;
+    const isRight = index === activeIndex + 1;
+    const isVisible = isActive || isLeft || isRight;
+    
+    // Don't render if not visible (optimization)
+    if (!isVisible && Math.abs(index - activeIndex) > 1) {
+      return <View style={[styles.carouselItem, { width: carouselItemWidth }]} />;
+    }
+
+    // Size and opacity based on position
+    const scale = isActive ? 1 : 0.8; // Side boards are 70% size
+    const opacity = isActive ? 1 : 0.7; // Side boards are 50% opacity
+    
+    // Image width - center is larger
+    const imageWidth = isActive 
+      ? carouselItemWidth * 1.2 // Center board is 120% of item width
+      : carouselItemWidth * 1; // Side boards are 84% of item width (0.7 * 1.2)
 
     return (
-      <View style={[styles.carouselItem, { width: carouselItemWidth }]}> 
-        <Image
-          source={{ uri: item.imageUrl }}
-          style={[styles.boardImage, { width: imageWidth }]}
-          resizeMode="contain"
-        />
+      <View style={[styles.carouselItem, { width: carouselItemWidth }]}>
+        <Animated.View
+          style={[
+            styles.boardWrapper,
+            {
+              transform: [{ scale }],
+              opacity,
+            },
+          ]}
+        >
+          <Image
+            source={{ uri: item.imageUrl }}
+            style={[styles.boardImage, { width: imageWidth }]}
+            resizeMode="contain"
+          />
+        </Animated.View>
       </View>
     );
   };
@@ -96,7 +123,9 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
     if (flatListRef.current && activeIndex >= 0) {
       const timeout = Platform.OS === 'web' ? 300 : 100;
       setTimeout(() => {
-        flatListRef.current?.scrollToIndex({ index: activeIndex, animated: false, viewPosition: 0.5 });
+        // Calculate offset to center the item (accounting for padding)
+        const offset = activeIndex * carouselItemWidth;
+        flatListRef.current?.scrollToOffset({ offset, animated: false });
       }, timeout);
     }
   }, []);
@@ -108,17 +137,19 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
       setActiveIndex(newIndex);
       const timeout = Platform.OS === 'web' ? 300 : 100;
       setTimeout(() => {
-        flatListRef.current?.scrollToIndex({ index: newIndex, animated: Platform.OS !== 'web', viewPosition: 0.5 });
+        const offset = newIndex * carouselItemWidth;
+        flatListRef.current?.scrollToOffset({ offset, animated: true });
       }, timeout);
     }
-  }, [selectedBoardId, boards, activeIndex]);
+  }, [selectedBoardId, boards, activeIndex, carouselItemWidth]);
 
   const scrollToPrevious = () => {
     if (activeIndex > 0 && flatListRef.current) {
       const newIndex = activeIndex - 1;
       setActiveIndex(newIndex);
       onBoardSelect(boards[newIndex]);
-      flatListRef.current.scrollToIndex({ index: newIndex, animated: true, viewPosition: 0.5 });
+      const offset = newIndex * carouselItemWidth;
+      flatListRef.current.scrollToOffset({ offset, animated: true });
     }
   };
 
@@ -127,14 +158,15 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
       const newIndex = activeIndex + 1;
       setActiveIndex(newIndex);
       onBoardSelect(boards[newIndex]);
-      flatListRef.current.scrollToIndex({ index: newIndex, animated: true, viewPosition: 0.5 });
+      const offset = newIndex * carouselItemWidth;
+      flatListRef.current.scrollToOffset({ offset, animated: true });
     }
   };
 
   return (
     <View style={styles.container}>
       <View style={styles.carouselWrapper}>
-        {Platform.OS === 'web' && activeIndex > 0 && (
+        {activeIndex > 0 && (
           <TouchableOpacity style={styles.arrowButton} onPress={scrollToPrevious} activeOpacity={0.7}>
             <Ionicons name="chevron-back" size={24} color={colors.textDark} />
           </TouchableOpacity>
@@ -143,10 +175,10 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
         <FlatList
           ref={flatListRef}
           data={boards}
-          renderItem={renderBoard}
+          renderItem={({ item, index }) => renderBoard({ item, index })}
           keyExtractor={(item) => item.id.toString()}
           horizontal
-          pagingEnabled={Platform.OS !== 'web'}
+          pagingEnabled={false}
           showsHorizontalScrollIndicator={false}
           onViewableItemsChanged={onViewableItemsChanged}
           viewabilityConfig={viewabilityConfig}
@@ -156,6 +188,8 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
           snapToInterval={carouselItemWidth}
           decelerationRate="fast"
           contentContainerStyle={styles.carouselContent}
+          // Add padding to center the first and last items
+          contentInsetAdjustmentBehavior="never"
           onScrollToIndexFailed={(info) => {
             const wait = new Promise(resolve => setTimeout(resolve, 500));
             wait.then(() => {
@@ -165,7 +199,7 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
           {...(Platform.OS === 'web' && { style: { overflowX: 'hidden' as any } as any })}
         />
 
-        {Platform.OS === 'web' && activeIndex < boards.length - 1 && (
+        {activeIndex < boards.length - 1 && (
           <TouchableOpacity style={[styles.arrowButton, styles.arrowButtonRight]} onPress={scrollToNext} activeOpacity={0.7}>
             <Ionicons name="chevron-forward" size={24} color={colors.textDark} />
           </TouchableOpacity>
@@ -203,7 +237,7 @@ const styles = StyleSheet.create({
   },
   arrowButton: {
     position: 'absolute',
-    left: Platform.OS === 'web' ? 10 : 0,
+    left: 10,
     top: '50%',
     marginTop: -20,
     zIndex: 10,
@@ -222,15 +256,14 @@ const styles = StyleSheet.create({
   },
   arrowButtonRight: {
     left: 'auto',
-    right: Platform.OS === 'web' ? 10 : 0,
+    right: 10,
   },
   carouselContent: {
     alignItems: 'center',
     paddingVertical: Platform.OS === 'web' ? spacing.lg : 0,
-    ...(Platform.OS === 'web' && {
-      paddingLeft: 0,
-      paddingRight: 0,
-    }),
+    // Add horizontal padding to center items properly (one item width on each side)
+    paddingLeft: getCarouselItemWidth(),
+    paddingRight: getCarouselItemWidth(),
   },
   carouselItem: {
     justifyContent: 'center',
@@ -238,13 +271,15 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.xl,
     ...(Platform.OS === 'web' && { paddingHorizontal: 0 }),
   },
+  boardWrapper: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   boardImage: {
     height: 350,
-    maxWidth: Platform.OS === 'web' ? 400 : undefined,
     ...(Platform.OS === 'web' && {
       // @ts-ignore
       objectFit: 'contain' as any,
-      width: 400,
     }),
   },
   labelContainer: {

@@ -25,6 +25,11 @@ class SimpleAuthService {
   }
 
   private async signInWithGoogleWeb(): Promise<User> {
+    // Skip on mobile - web only
+    if (Platform.OS !== 'web' || typeof window === 'undefined' || !window.location) {
+      throw new Error('Google OAuth is only available on web');
+    }
+
     // Check if we're returning from OAuth with a code
     const urlParams = new URLSearchParams(window.location.search);
     const code = urlParams.get('code');
@@ -37,7 +42,9 @@ class SimpleAuthService {
     if (code) {
       console.log('Found OAuth code in URL, processing...');
       // Clean up the URL
-      window.history.replaceState({}, document.title, window.location.pathname);
+      if (window.history && window.location) {
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
       
       return new Promise((resolve, reject) => {
         this.exchangeCodeForUser(code, resolve, reject);
@@ -49,7 +56,7 @@ class SimpleAuthService {
     if (!clientId) {
       throw new Error('EXPO_PUBLIC_GOOGLE_CLIENT_ID environment variable is not set');
     }
-    const redirectUri = encodeURIComponent(window.location.origin);
+    const redirectUri = encodeURIComponent(window.location?.origin || '');
     const scope = encodeURIComponent('openid email profile');
     
     const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
@@ -61,14 +68,18 @@ class SimpleAuthService {
       `prompt=select_account`;
 
     console.log('=== OAuth Debug Info ===');
-    console.log('Current URL:', window.location.href);
-    console.log('Current Origin:', window.location.origin);
+    if (window.location) {
+      console.log('Current URL:', window.location.href);
+      console.log('Current Origin:', window.location.origin);
+    }
     console.log('Redirect URI:', redirectUri);
     console.log('Full Auth URL:', authUrl);
     console.log('========================');
     
     // Redirect to Google OAuth
-    window.location.href = authUrl;
+    if (window.location) {
+      window.location.href = authUrl;
+    }
     
     // This will never resolve because we're redirecting
     return new Promise(() => {});
@@ -78,8 +89,10 @@ class SimpleAuthService {
     try {
       console.log('=== Token Exchange Debug ===');
       console.log('Exchanging code for user info...', code);
-      console.log('Using redirect URI:', window.location.origin);
-      console.log('Current URL:', window.location.href);
+      if (window.location) {
+        console.log('Using redirect URI:', window.location.origin);
+        console.log('Current URL:', window.location.href);
+      }
       console.log('============================');
       
       // Exchange code for access token
@@ -99,7 +112,7 @@ class SimpleAuthService {
           client_secret: clientSecret,
           code: code,
           grant_type: 'authorization_code',
-          redirect_uri: window.location.origin,
+          redirect_uri: window.location?.origin || '',
         }),
       });
 

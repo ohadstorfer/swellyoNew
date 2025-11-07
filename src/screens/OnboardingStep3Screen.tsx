@@ -91,7 +91,7 @@ export const OnboardingStep3Screen: React.FC<OnboardingStep3ScreenProps> = ({
                 </TouchableOpacity>
                 
                 <View style={styles.stepTextContainer}>
-                  <Text style={styles.stepText}>Step 3/4</Text>
+                  <Text style={styles.stepText}>Step 3/5</Text>
                 </View>
                 
                 <TouchableOpacity onPress={handleNext} style={styles.skipButton}>
@@ -102,7 +102,7 @@ export const OnboardingStep3Screen: React.FC<OnboardingStep3ScreenProps> = ({
               {/* Progress Bar */}
               <View style={styles.progressContainer}>
                 <View style={styles.progressBar}>
-                  <View style={[styles.progressFill, { width: '75%' }]} />
+                  <View style={[styles.progressFill, { width: '60%' }]} />
                 </View>
               </View>
             </View>

@@ -22,11 +22,11 @@ const STORAGE_KEY = '@swellyo_onboarding';
 export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   // Check if we're on the swelly_chat route
   const getInitialStep = () => {
-    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      const path = window.location.pathname;
-      const hash = window.location.hash;
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location) {
+      const path = window.location.pathname || '';
+      const hash = window.location.hash || '';
       if (path.includes('swelly_chat') || hash.includes('swelly_chat')) {
-        return 4; // Go directly to chat screen
+        return 5; // Go directly to chat screen
       }
     }
     return 0; // Default to welcome screen
@@ -68,8 +68,8 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         console.log('Parsed data:', parsed);
         
         // Only override the current step if we're not on the swelly_chat route
-        const isOnSwellyChatRoute = Platform.OS === 'web' && typeof window !== 'undefined' && 
-          (window.location.pathname.includes('swelly_chat') || window.location.hash.includes('swelly_chat'));
+        const isOnSwellyChatRoute = Platform.OS === 'web' && typeof window !== 'undefined' && window.location &&
+          ((window.location.pathname || '').includes('swelly_chat') || (window.location.hash || '').includes('swelly_chat'));
         
         if (!isOnSwellyChatRoute) {
           setCurrentStep(parsed.currentStep || 0);

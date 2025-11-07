@@ -2,6 +2,8 @@
 // Resolve a sensible default BASE_URL across web, simulator, and device
 const isBrowser = typeof window !== 'undefined';
 const isLocalhost = isBrowser &&
+  window.location &&
+  window.location.host &&
   (/localhost/.test(window.location.host) || /127\.0\.0\.1/.test(window.location.host));
 
 // Prefer localhost when developing on web/simulator. Allow override via env.

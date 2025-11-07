@@ -224,8 +224,8 @@ export const ChatScreen: React.FC = () => {
         <TouchableOpacity 
           style={styles.backButton}
           onPress={() => {
-            setCurrentStep(3); // Go back to onboarding step 3
-            if (Platform.OS === 'web') {
+            setCurrentStep(4); // Go back to onboarding step 4
+            if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location) {
               window.location.href = '/'; // Navigate to main app
             }
           }}

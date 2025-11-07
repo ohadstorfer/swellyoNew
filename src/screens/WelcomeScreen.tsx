@@ -48,7 +48,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
 
     // Check if we're returning from OAuth
     const checkOAuthReturn = async () => {
-      if (Platform.OS === 'web') {
+      if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location) {
         const urlParams = new URLSearchParams(window.location.search);
         const code = urlParams.get('code');
         

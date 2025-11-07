@@ -1,13 +1,16 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { WelcomeScreen } from '../screens/WelcomeScreen';
 import { OnboardingStep1Screen, OnboardingData } from '../screens/OnboardingStep1Screen';
 import { OnboardingStep2Screen } from '../screens/OnboardingStep2Screen';
 import { OnboardingStep3Screen } from '../screens/OnboardingStep3Screen';
+import { OnboardingStep4Screen } from '../screens/OnboardingStep4Screen';
+import { LoadingScreen } from '../screens/LoadingScreen';
 import { ChatScreen } from '../screens/ChatScreen';
 import { useOnboarding } from '../context/OnboardingContext';
 
 export const AppContent: React.FC = () => {
   const { currentStep, formData, setCurrentStep, updateFormData } = useOnboarding();
+  const [showLoading, setShowLoading] = useState(false);
 
   const handleGetStarted = () => {
     setCurrentStep(1);
@@ -32,7 +35,23 @@ export const AppContent: React.FC = () => {
   const handleStep3Next = (data: OnboardingData) => {
     console.log('Step 3 next called with data:', data);
     updateFormData(data);
-    setCurrentStep(4); // Go to step 4 (chat screen)
+    setCurrentStep(4); // Go to step 4 (profile details)
+  };
+
+  const handleStep4Next = (data: OnboardingData) => {
+    console.log('Step 4 next called with data:', data);
+    updateFormData(data);
+    setShowLoading(true); // Show loading screen
+  };
+
+  const handleLoadingComplete = () => {
+    setShowLoading(false);
+    setCurrentStep(5); // Go to step 5 (chat screen)
+  };
+
+  const handleLoadingBack = () => {
+    setShowLoading(false);
+    setCurrentStep(4); // Go back to step 4
   };
 
   const handleStep1Back = () => {
@@ -45,6 +64,10 @@ export const AppContent: React.FC = () => {
 
   const handleStep3Back = () => {
     setCurrentStep(2); // Go back to step 2
+  };
+
+  const handleStep4Back = () => {
+    setCurrentStep(3); // Go back to step 3
   };
 
   // Show onboarding step 1 if we're on step 1
@@ -86,8 +109,31 @@ export const AppContent: React.FC = () => {
     );
   }
 
-  // Show chat screen if we're on step 4
+  // Show loading screen if triggered
+  if (showLoading) {
+    return (
+      <LoadingScreen
+        onComplete={handleLoadingComplete}
+        onBack={handleLoadingBack}
+      />
+    );
+  }
+
+  // Show onboarding step 4 if we're on step 4
   if (currentStep === 4) {
+    console.log('Rendering OnboardingStep4Screen with initialData:', formData);
+    return (
+      <OnboardingStep4Screen
+        onNext={handleStep4Next}
+        onBack={handleStep4Back}
+        initialData={formData}
+        updateFormData={updateFormData}
+      />
+    );
+  }
+
+  // Show chat screen if we're on step 5
+  if (currentStep === 5) {
     return <ChatScreen />;
   }
 

@@ -9,7 +9,7 @@ import {
   TouchableOpacity,
   Animated,
 } from 'react-native';
-import { Video, ResizeMode } from 'expo-av';
+import { useVideoPlayer, VideoView } from 'expo-video';
 import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { Text } from './Text';
@@ -73,24 +73,12 @@ const AnimatedThumbnail: React.FC<AnimatedThumbnailProps> = ({
           },
         ]}
       >
-        {item.videoUrl ? (
-          <Video
-            source={{ uri: Platform.OS === 'web' ? item.videoUrl : item.videoUrl }}
-            style={imageStyle}
-            resizeMode={ResizeMode.COVER}
-            shouldPlay={false}
-            isLooping={false}
-            isMuted={true}
-            useNativeControls={false}
-            positionMillis={500}
-          />
-        ) : (
-          <Image
-            source={{ uri: item.thumbnailUrl }}
-            style={imageStyle}
-            resizeMode="cover"
-          />
-        )}
+        {/* Use image for thumbnails for better performance */}
+        <Image
+          source={{ uri: item.thumbnailUrl }}
+          style={imageStyle}
+          resizeMode="cover"
+        />
         {isActive && <View style={borderStyle} />}
       </Animated.View>
     </TouchableOpacity>
@@ -112,7 +100,6 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
   const flatListRef = useRef<FlatList<ReorderedVideoItem>>(null);
   const [containerWidth, setContainerWidth] = useState(0);
   const fadeAnim = useRef(new Animated.Value(1)).current;
-  const videoRef = useRef<Video>(null);
 
   // Reorder videos array so selected item is in the middle
   const getReorderedVideos = React.useMemo((): ReorderedVideoItem[] => {
@@ -156,16 +143,35 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
     return videos.find(v => v.id === selectedVideoId) || videos[0];
   }, [videos, selectedVideoId]);
 
-  // Fade animation for main video change and restart video
+  // Create video player for main video
+  const mainVideoPlayer = useVideoPlayer(
+    selectedVideo.videoUrl || '',
+    (player: any) => {
+      if (player) {
+        player.loop = true;
+        player.muted = true;
+        player.play();
+      }
+    }
+  );
+
+  // Update player source when video changes
+  useEffect(() => {
+    if (selectedVideo.videoUrl && mainVideoPlayer) {
+      mainVideoPlayer.replaceAsync(selectedVideo.videoUrl).then(() => {
+        mainVideoPlayer.loop = true;
+        mainVideoPlayer.muted = true;
+        mainVideoPlayer.play();
+      }).catch((error: any) => {
+        console.error('Error replacing video:', error);
+      });
+    }
+  }, [selectedVideo.videoUrl, mainVideoPlayer]);
+
+  // Fade animation for main video change
   useEffect(() => {
     // Fade out
     fadeAnim.setValue(0);
-    
-    // Restart video when selection changes
-    if (videoRef.current && selectedVideo.videoUrl) {
-      videoRef.current.setPositionAsync(0);
-      videoRef.current.playAsync();
-    }
     
     Animated.timing(fadeAnim, {
       toValue: 1,
@@ -282,16 +288,11 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
             ]}
           >
             {selectedVideo.videoUrl ? (
-              <Video
-                ref={videoRef}
-                source={{ uri: Platform.OS === 'web' ? selectedVideo.videoUrl : selectedVideo.videoUrl }}
+              <VideoView
+                player={mainVideoPlayer}
                 style={styles.videoPlayer}
-                resizeMode={ResizeMode.COVER}
-                shouldPlay={true}
-                isLooping={true}
-                isMuted={true}
-                useNativeControls={false}
-                positionMillis={0}
+                contentFit="cover"
+                nativeControls={false}
               />
             ) : (
               <Image
@@ -303,13 +304,13 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
           </Animated.View>
           
           {/* Gradient Overlay */}
-          <LinearGradient
+          {/* <LinearGradient
             colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.8)']}
             locations={[0.80097, 0.25243]}
             start={{ x: 0, y: 0.80097 }}
             end={{ x: 0, y: 0.25243 }}
             style={styles.gradientOverlay}
-          />
+          /> */}
           
           {/* Frame Border SVG */}
           <Svg style={styles.frameBorder} width="100%" height="100%" viewBox="0 0 344 328" fill="none" preserveAspectRatio="none">
@@ -461,6 +462,7 @@ const styles = StyleSheet.create({
     top: 0,
     borderBottomLeftRadius: 24,
     borderBottomRightRadius: 24,
+    opacity: 0.2,
   },
   frameBorder: {
     position: 'absolute',

@@ -39,6 +39,8 @@ export interface OnboardingData {
   boardType: number;
   surfLevel: number;
   travelExperience: number;
+  profilePicture?: string;
+  pronouns?: string;
 }
 
 const BOARD_TYPES: BoardType[] = [
@@ -105,7 +107,7 @@ export const OnboardingStep1Screen: React.FC<OnboardingStep1ScreenProps> = ({
             <Ionicons name="arrow-back" size={24} color="#222B30" />
           </TouchableOpacity>
 
-          <Text style={styles.stepText}>Step 1/4</Text>
+          <Text style={styles.stepText}>Step 1/5</Text>
 
           <TouchableOpacity onPress={handleSkip} style={styles.skipButton}>
             <Text style={styles.skipText}>Skip</Text>
@@ -115,7 +117,7 @@ export const OnboardingStep1Screen: React.FC<OnboardingStep1ScreenProps> = ({
         {/* Progress Bar */}
         <View style={styles.progressContainer}>
           <View style={styles.progressBar}>
-            <View style={[styles.progressFill, { width: '25%' }]} />
+            <View style={[styles.progressFill, { width: '20%' }]} />
           </View>
         </View>
 
