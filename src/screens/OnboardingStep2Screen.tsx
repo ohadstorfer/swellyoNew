@@ -19,6 +19,13 @@ import { getVideoUrl as getVideoUrlUtil } from '../utils/videoUtils';
 
 const getScreenWidth = () => Dimensions.get('window').width;
 
+// Helper to detect if we're on desktop web (not mobile web)
+const isDesktopWeb = () => {
+  if (Platform.OS !== 'web') return false;
+  if (typeof window === 'undefined') return false;
+  return window.innerWidth > 768; // Desktop breakpoint
+};
+
 interface OnboardingStep2ScreenProps {
   onNext: (data: OnboardingData) => void;
   onBack: () => void;
@@ -42,10 +49,29 @@ const getVideoUrl = (name: string): string => {
   return path ? getVideoUrlUtil(path) : '';
 };
 
-// Helper function to get thumbnail URL - use video URL as thumbnail (will show first frame)
+// Helper function to get thumbnail URL
+// Uses actual thumbnail image files from public/surf level/
 const getThumbnailUrl = (name: string): string => {
-  // Use the video URL as thumbnail - browsers/native will show the first frame
-  return getVideoUrl(name);
+  // Map video names to thumbnail image file paths
+  // Files are named: "{name} thumbnail.PNG"
+  const thumbnailMap: { [key: string]: string } = {
+    'Dipping My Toes': '/surf level/Dipping My Toes thumbnail.PNG',
+    'Cruising Around': '/surf level/Cruising Around thumbnail.PNG',
+    'Cross Stepping': '/surf level/CrossStepping thumbnail.PNG',
+    'Hanging Toes': '/surf level/Hanging Toes thumbnail.PNG',
+    'Charging': '/surf level/Charging thumbnail.PNG',
+  };
+  
+  const thumbnailPath = thumbnailMap[name];
+  if (!thumbnailPath) {
+    // Fallback to video URL if thumbnail not found
+    return getVideoUrl(name);
+  }
+  
+  // Use the utility to get platform-specific URL for thumbnails
+  return Platform.OS === 'web' 
+    ? thumbnailPath 
+    : getVideoUrlUtil(thumbnailPath);
 };
 
 // Video levels representing different surf skills
@@ -120,10 +146,14 @@ export const OnboardingStep2Screen: React.FC<OnboardingStep2ScreenProps> = ({
   const backgroundPlayer = useVideoPlayer(
     selectedVideo.videoUrl || '',
     (player: any) => {
-      if (player) {
-        player.loop = true;
-        player.muted = true;
-        player.play();
+      if (player && selectedVideo.videoUrl) {
+        try {
+          player.loop = true;
+          player.muted = true;
+          player.play();
+        } catch (error) {
+          console.error('Error initializing background video player:', error);
+        }
       }
     }
   );
@@ -131,15 +161,27 @@ export const OnboardingStep2Screen: React.FC<OnboardingStep2ScreenProps> = ({
   // Update player source when video changes
   React.useEffect(() => {
     if (selectedVideo.videoUrl && backgroundPlayer) {
-      backgroundPlayer.replaceAsync(selectedVideo.videoUrl).then(() => {
-        backgroundPlayer.loop = true;
-        backgroundPlayer.muted = true;
-        backgroundPlayer.play();
+      const videoUrl = selectedVideo.videoUrl;
+      if (!videoUrl) {
+        console.warn('No video URL provided for background video:', selectedVideo.name);
+        return;
+      }
+      
+      backgroundPlayer.replaceAsync(videoUrl).then(() => {
+        if (backgroundPlayer) {
+          backgroundPlayer.loop = true;
+          backgroundPlayer.muted = true;
+          try {
+            backgroundPlayer.play();
+          } catch (playError: any) {
+            console.error('Error playing background video:', playError);
+          }
+        }
       }).catch((error: any) => {
-        console.error('Error replacing video:', error);
+        console.error('Error replacing background video:', error, 'URL:', videoUrl);
       });
     }
-  }, [selectedVideo.videoUrl, backgroundPlayer]);
+  }, [selectedVideo.videoUrl, selectedVideo.name, backgroundPlayer]);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -152,6 +194,8 @@ export const OnboardingStep2Screen: React.FC<OnboardingStep2ScreenProps> = ({
               style={styles.backgroundVideo}
               contentFit="cover"
               nativeControls={false}
+              allowsFullscreen={false}
+              allowsPictureInPicture={false}
             />
           ) : (
             <Image
@@ -256,16 +300,25 @@ const styles = StyleSheet.create({
     zIndex: 1,
     width: '100%',
     maxWidth: '100%',
-    overflow: 'hidden',
+    overflow: 'hidden', // Mobile: keep original
+    ...(isDesktopWeb() && {
+      overflow: 'visible',
+      alignItems: 'center',
+      minHeight: 0, // Allow flex to shrink if needed
+    }),
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: spacing.md,
-    paddingTop: Platform.OS === 'web' ? spacing.md : spacing.sm,
-    paddingBottom: spacing.md,
+    paddingTop: spacing.sm, // Mobile: keep original
+    paddingBottom: spacing.md, // Mobile: keep original
     minHeight: 44,
+    ...(isDesktopWeb() && {
+      paddingTop: spacing.sm, // Desktop: minimal top padding
+      paddingBottom: spacing.sm, // Desktop: reduced bottom padding
+    }),
   },
   backButton: {
     width: 60,
@@ -295,8 +348,15 @@ const styles = StyleSheet.create({
   },
   progressContainer: {
     paddingHorizontal: spacing.md,
-    paddingBottom: spacing.md,
+    paddingBottom: spacing.md, // Mobile native: keep original
     alignItems: 'center',
+    ...(Platform.OS === 'web' && !isDesktopWeb() && {
+      // Mobile web: reduce spacing to match image
+      paddingBottom: spacing.sm,
+    }),
+    ...(isDesktopWeb() && {
+      paddingBottom: spacing.sm, // Desktop: reduced bottom padding
+    }),
   },
   progressBar: {
     width: 237,
@@ -311,11 +371,22 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   titleContainer: {
-    paddingHorizontal: Platform.OS === 'web' ? 32 : 16,
-    paddingTop: spacing.lg,
-    paddingBottom: spacing.sm,
+    paddingHorizontal: 16, // Mobile native: keep original
+    paddingTop: spacing.lg, // Mobile native: keep original
+    paddingBottom: spacing.sm, // Mobile native: keep original
     alignItems: 'center',
     maxWidth: '100%',
+    ...(isDesktopWeb() && {
+      // Desktop web ONLY - keep desktop styles unchanged
+      paddingHorizontal: 32,
+      paddingTop: spacing.md, // Desktop: reduced top padding
+      paddingBottom: spacing.xs || 4, // Desktop: minimal bottom padding
+    }),
+    ...(Platform.OS === 'web' && !isDesktopWeb() && {
+      // Mobile web ONLY: move title down
+      paddingTop: spacing.xl,
+      paddingBottom: spacing.md,
+    }),
   },
   title: {
     fontSize: 16,
@@ -324,22 +395,51 @@ const styles = StyleSheet.create({
     color: colors.textPrimary || '#333333',
     textAlign: 'center',
     lineHeight: 24,
+    ...(Platform.OS === 'web' && !isDesktopWeb() && {
+      // Mobile web ONLY: make title bigger
+      fontSize: 20,
+      lineHeight: 28,
+    }),
   },
   carouselContainer: {
     flex: 1,
     justifyContent: 'center',
-    paddingVertical: spacing.lg,
+    paddingVertical: spacing.lg, // Mobile native: keep original
     width: '100%',
     maxWidth: '100%',
-    overflow: 'hidden',
+    overflow: 'hidden', // Mobile: keep original
+    ...(Platform.OS === 'web' && !isDesktopWeb() && {
+      // Mobile web: tighter padding to match example
+      paddingVertical: spacing.sm,
+    }),
+    ...(isDesktopWeb() && {
+      maxWidth: 600,
+      alignSelf: 'center',
+      minHeight: 0,
+      overflow: 'visible',
+      paddingTop: 8, // Desktop: minimal top padding
+      paddingBottom: 8, // Desktop: minimal bottom padding
+      paddingVertical: 0, // Desktop: override vertical padding
+    }),
   },
   buttonContainer: {
-    paddingHorizontal: Platform.OS === 'web' ? 32 : 16,
-    paddingTop: spacing.xl,
-    paddingBottom: 40,
+    paddingHorizontal: 16, // Mobile native: keep original
+    paddingTop: spacing.xl, // Mobile native: keep original
+    paddingBottom: 40, // Mobile native: keep original
     alignItems: 'center',
     width: '100%',
     maxWidth: '100%',
+    ...(Platform.OS === 'web' && !isDesktopWeb() && {
+      // Mobile web: tighter spacing to match example
+      paddingTop: spacing.md,
+      paddingBottom: 24,
+    }),
+    ...(isDesktopWeb() && {
+      paddingHorizontal: 32,
+      flexShrink: 0,
+      paddingTop: spacing.md, // Desktop: reduced top padding
+      paddingBottom: 24, // Desktop: reduced bottom padding
+    }),
   },
   gradientButton: {
     height: 56,

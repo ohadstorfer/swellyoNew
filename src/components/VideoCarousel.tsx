@@ -17,6 +17,13 @@ import { colors, spacing } from '../styles/theme';
 
 const getScreenWidth = () => Dimensions.get('window').width;
 
+// Helper to detect if we're on desktop web (not mobile web)
+const isDesktopWeb = () => {
+  if (Platform.OS !== 'web') return false;
+  if (typeof window === 'undefined') return false;
+  return window.innerWidth > 768; // Desktop breakpoint
+};
+
 export interface VideoLevel {
   id: number;
   name: string;
@@ -55,7 +62,7 @@ const AnimatedThumbnail: React.FC<AnimatedThumbnailProps> = ({
     Animated.timing(thumbnailAnim, {
       toValue: isActive ? 1 : 0.5,
       duration: 400,
-      useNativeDriver: true,
+      useNativeDriver: false,
     }).start();
   }, [selectedVideoId, isActive, thumbnailAnim]);
   
@@ -73,7 +80,7 @@ const AnimatedThumbnail: React.FC<AnimatedThumbnailProps> = ({
           },
         ]}
       >
-        {/* Use image for thumbnails for better performance */}
+        {/* Use image for thumbnails - thumbnailUrl should point to actual image files */}
         <Image
           source={{ uri: item.thumbnailUrl }}
           style={imageStyle}
@@ -147,10 +154,14 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
   const mainVideoPlayer = useVideoPlayer(
     selectedVideo.videoUrl || '',
     (player: any) => {
-      if (player) {
-        player.loop = true;
-        player.muted = true;
-        player.play();
+      if (player && selectedVideo.videoUrl) {
+        try {
+          player.loop = true;
+          player.muted = true;
+          player.play();
+        } catch (error) {
+          console.error('Error initializing video player:', error);
+        }
       }
     }
   );
@@ -158,15 +169,27 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
   // Update player source when video changes
   useEffect(() => {
     if (selectedVideo.videoUrl && mainVideoPlayer) {
-      mainVideoPlayer.replaceAsync(selectedVideo.videoUrl).then(() => {
-        mainVideoPlayer.loop = true;
-        mainVideoPlayer.muted = true;
-        mainVideoPlayer.play();
+      const videoUrl = selectedVideo.videoUrl;
+      if (!videoUrl) {
+        console.warn('No video URL provided for:', selectedVideo.name);
+        return;
+      }
+      
+      mainVideoPlayer.replaceAsync(videoUrl).then(() => {
+        if (mainVideoPlayer) {
+          mainVideoPlayer.loop = true;
+          mainVideoPlayer.muted = true;
+          try {
+            mainVideoPlayer.play();
+          } catch (playError: any) {
+            console.error('Error playing video:', playError);
+          }
+        }
       }).catch((error: any) => {
-        console.error('Error replacing video:', error);
+        console.error('Error replacing video:', error, 'URL:', videoUrl);
       });
     }
-  }, [selectedVideo.videoUrl, mainVideoPlayer]);
+  }, [selectedVideo.videoUrl, selectedVideo.name, mainVideoPlayer]);
 
   // Fade animation for main video change
   useEffect(() => {
@@ -205,6 +228,12 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
         const containerCenter = containerWidth / 2;
         const scrollOffset = itemCenter - containerCenter;
         
+        // Account for padding
+        const paddingLeft = isDesktopWeb()
+          ? Math.max((containerWidth - activeWidth) / 2, spacing.lg)
+          : Math.max((containerWidth - activeWidth) / 2, spacing.md);
+        const finalOffset = scrollOffset + paddingLeft;
+        
         try {
           flatListRef.current?.scrollToIndex({
             index: middleIdx,
@@ -214,7 +243,7 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
         } catch (error) {
           // Fallback: use scrollToOffset with calculated position
           flatListRef.current?.scrollToOffset({
-            offset: Math.max(0, scrollOffset),
+            offset: Math.max(0, finalOffset),
             animated: true,
           });
         }
@@ -293,6 +322,8 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
                 style={styles.videoPlayer}
                 contentFit="cover"
                 nativeControls={false}
+                allowsFullscreen={false}
+                allowsPictureInPicture={false}
               />
             ) : (
               <Image
@@ -358,25 +389,38 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
             getItemLayout={(_, index) => {
               const baseWidth = 98;
               const gap = 12;
+              const activeWidth = 119;
+              // Calculate offset: sum of all previous items
+              let offset = 0;
+              for (let i = 0; i < index; i++) {
+                // Check if this is the active item (middle index)
+                const isActive = i === Math.floor(getReorderedVideos.length / 2);
+                offset += (isActive ? activeWidth : baseWidth) + gap;
+              }
+              // Current item width
+              const isActive = index === Math.floor(getReorderedVideos.length / 2);
+              const currentWidth = isActive ? activeWidth : baseWidth;
               return {
-                length: baseWidth + gap,
-                offset: index * (baseWidth + gap),
+                length: currentWidth + gap,
+                offset: offset,
                 index,
               };
             }}
             snapToAlignment="center"
             snapToInterval={Platform.OS === 'web' ? undefined : 110}
             decelerationRate="fast"
+            pagingEnabled={false}
+            scrollEnabled={true}
             contentContainerStyle={[
               styles.thumbnailsList,
               containerWidth > 0 && {
                 // Add padding to allow items to scroll to center
                 // Padding should be (containerWidth - activeItemWidth) / 2
-                paddingLeft: Platform.OS === 'web' 
-                  ? spacing.lg 
+                paddingLeft: isDesktopWeb()
+                  ? Math.max((containerWidth - 119) / 2, spacing.lg)
                   : Math.max((containerWidth - 119) / 2, spacing.md),
-                paddingRight: Platform.OS === 'web' 
-                  ? spacing.lg 
+                paddingRight: isDesktopWeb()
+                  ? Math.max((containerWidth - 119) / 2, spacing.lg)
                   : Math.max((containerWidth - 119) / 2, spacing.md),
               },
             ]}
@@ -406,7 +450,14 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
              }}
             bounces={false}
             alwaysBounceHorizontal={false}
-            {...(Platform.OS === 'web' && { style: { overflow: 'hidden' } as any })}
+            {...(Platform.OS === 'web' && { 
+              style: { 
+                overflow: 'hidden',
+                WebkitOverflowScrolling: 'touch' as any,
+              } as any,
+              // Enable smooth scrolling on web
+              scrollEventThrottle: 16,
+            })}
           />
         </View>
         
@@ -420,26 +471,46 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
 const styles = StyleSheet.create({
   container: {
     alignItems: 'center',
-    gap: 32,
     width: '100%',
     maxWidth: '100%',
+    ...(isDesktopWeb() && {
+      maxWidth: 600,
+      alignSelf: 'center',
+      overflow: 'visible',
+    }),
   },
   mainVideoContainer: {
     width: '100%',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: Platform.OS === 'web' ? 26 : 16,
+    paddingHorizontal: 16, // Mobile: keep original
+    marginBottom: 32, // Mobile native: keep original 32
+    ...(Platform.OS === 'web' && !isDesktopWeb() && {
+      // Mobile web: tighter spacing to match example
+      marginBottom: 16,
+    }),
+    ...(isDesktopWeb() && {
+      paddingHorizontal: 26,
+      overflow: 'visible',
+      marginBottom: 8, // Desktop: reduced spacing
+      paddingTop: 8, // Desktop: minimal top padding
+    }),
   },
   videoWrapper: {
-    width: Platform.OS === 'web' 
-      ? Math.min(340, getScreenWidth() - 52) 
-      : Math.min(340, getScreenWidth() - 32),
-    aspectRatio: 340 / 324,
-    maxWidth: 340,
+    width: Math.min(340, getScreenWidth() - 32), // Mobile: full width
+    aspectRatio: 340 / 324, // Mobile: original aspect ratio
+    maxWidth: 340, // Mobile: original max width
+    minWidth: 280,
     borderRadius: 24,
     overflow: 'hidden',
     position: 'relative',
     backgroundColor: '#000',
+    alignSelf: 'center',
+    ...(isDesktopWeb() && {
+      width: Math.min(300, getScreenWidth() - 52), // Desktop: smaller
+      aspectRatio: 300 / 286, // Desktop: slightly smaller
+      maxWidth: 300, // Desktop: smaller max width
+    }),
   },
   mainVideo: {
     width: '100%',
@@ -450,6 +521,7 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
     ...(Platform.OS === 'web' && {
+      // Apply to all web (desktop and mobile web)
       objectFit: 'cover' as any,
       objectPosition: 'center center' as any,
     }),
@@ -495,22 +567,35 @@ const styles = StyleSheet.create({
   thumbnailsSection: {
     width: '100%',
     alignItems: 'center',
-    gap: 32,
     paddingHorizontal: 0,
     overflow: 'hidden',
-    marginTop: Platform.OS === 'web' ? 90 : 70,
+    marginTop: 70, // Mobile native: keep original 70
+    ...(isDesktopWeb() && {
+      // Desktop web only
+      overflow: 'visible',
+      marginTop: 16, // Desktop: reduced spacing
+      marginBottom: 8, // Desktop: minimal bottom margin
+    }),
+    ...(Platform.OS === 'web' && !isDesktopWeb() && {
+      // Mobile web ONLY: move thumbnails down
+      marginTop: 100,
+    }),
   },
   thumbnailsWrapper: {
     width: '100%',
     height: 80,
     justifyContent: 'center',
     alignItems: 'center',
-    overflow: 'hidden',
+    overflow: 'hidden', // Mobile: keep original
+    ...(isDesktopWeb() && {
+      overflow: 'visible',
+      minHeight: 80, // Ensure full height is visible
+    }),
   },
   thumbnailsList: {
-    gap: 12,
     alignItems: 'center',
     justifyContent: 'flex-start',
+    // Gap is handled by marginRight on thumbnails
     // Padding will be set dynamically in contentContainerStyle based on containerWidth
   },
   thumbnail: {
@@ -519,6 +604,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     overflow: 'hidden',
     position: 'relative',
+    marginRight: 12,
   },
   thumbnailActive: {
     width: 119,
@@ -545,11 +631,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    gap: 6,
+    marginTop: 32, // Mobile native: keep original
+    ...(Platform.OS === 'web' && !isDesktopWeb() && {
+      // Mobile web: tighter spacing to match example
+      marginTop: 16,
+    }),
+    ...(isDesktopWeb() && {
+      marginTop: 16, // Desktop: reduced spacing
+      marginBottom: 8, // Desktop: minimal bottom margin
+    }),
   },
   dot: {
     height: 8,
     borderRadius: 4,
+    marginHorizontal: 3,
   },
   dotActive: {
     width: 24,

@@ -23,25 +23,25 @@ const TRAVEL_LEVELS: TravelExperienceLevel[] = [
     id: 0,
     title: 'New Nomad',
     subtitle: '0-3 surf trips',
-    imageUrl: '/Travel levels/Travel 1.png',
+    imageUrl: '/Travel levels/Travel 111.png',
   },
   {
     id: 1,
     title: 'Rising Voyager',
     subtitle: '4-9 surf trips',
-    imageUrl: '/Travel levels/Travel 2.png',
+    imageUrl: '/Travel levels/Travel 222.png',
   },
   {
     id: 2,
     title: 'Wave Hunter',
     subtitle: '10-19 surf trips',
-    imageUrl: '/Travel levels/Travel 3.png',
+    imageUrl: '/Travel levels/Travel 333.png',
   },
   {
     id: 3,
     title: 'Chicken Joe',
     subtitle: '20+ surf trips',
-    imageUrl: '/Travel levels/Travel 4.png',
+    imageUrl: '/Travel levels/Travel 444.png',
   },
 ];
 
@@ -60,28 +60,36 @@ export const TravelExperienceSlider: React.FC<TravelExperienceSliderProps> = ({
   onValueChange,
   error,
 }) => {
-  const [currentLevel, setCurrentLevel] = useState<number>(
-    Math.max(0, Math.min(3, Math.round(value)))
-  );
+  // Ensure initial value is valid (not NaN)
+  const safeInitialValue = isNaN(value) || value < 0 || value > 3 ? 0 : value;
+  const initialLevel = Math.max(0, Math.min(3, Math.round(safeInitialValue)));
+  
+  const [currentLevel, setCurrentLevel] = useState<number>(initialLevel);
   
   const knobPosition = useRef(
-    new Animated.Value((Math.max(0, Math.min(3, Math.round(value))) / 3) * BAR_WIDTH)
+    new Animated.Value((initialLevel / 3) * BAR_WIDTH)
   ).current;
 
   const imageOpacity = useRef(
     TRAVEL_LEVELS.map((_, index) => 
-      new Animated.Value(index === Math.max(0, Math.min(3, Math.round(value))) ? 1 : 0)
+      new Animated.Value(index === initialLevel ? 1 : 0)
     )
   ).current;
 
   const updateLevel = React.useCallback((newLevel: number, shouldNotify: boolean = true) => {
-    if (newLevel < 0 || newLevel > 3) return;
+    // Validate that newLevel is a valid number
+    if (isNaN(newLevel) || newLevel < 0 || newLevel > 3) {
+      console.warn('Invalid level in updateLevel:', newLevel);
+      return;
+    }
     
-    const clampedLevel = Math.max(0, Math.min(3, newLevel));
+    const clampedLevel = Math.max(0, Math.min(3, Math.round(newLevel)));
     setCurrentLevel(clampedLevel);
     
     if (shouldNotify) {
-      onValueChange(clampedLevel);
+      // Ensure we're passing a valid number to onValueChange
+      const validLevel = isNaN(clampedLevel) ? 0 : clampedLevel;
+      onValueChange(validLevel);
     }
 
     // Animate knob position
@@ -93,17 +101,25 @@ export const TravelExperienceSlider: React.FC<TravelExperienceSliderProps> = ({
     }).start();
 
     // Animate image transitions
+    // Note: useNativeDriver: false for opacity to avoid warnings in some Expo environments
+    // Opacity animations are still performant without native driver
     TRAVEL_LEVELS.forEach((_, index) => {
       Animated.timing(imageOpacity[index], {
         toValue: index === clampedLevel ? 1 : 0,
         duration: 300,
-        useNativeDriver: true,
+        useNativeDriver: false,
       }).start();
     });
   }, [knobPosition, imageOpacity, onValueChange]);
 
   // Sync with external value changes
   React.useEffect(() => {
+    // Validate value before using it
+    if (isNaN(value) || value < 0 || value > 3) {
+      console.warn('Invalid value prop in TravelExperienceSlider:', value);
+      return;
+    }
+    
     const newLevel = Math.max(0, Math.min(3, Math.round(value)));
     if (newLevel !== currentLevel) {
       updateLevel(newLevel, false);
@@ -111,12 +127,55 @@ export const TravelExperienceSlider: React.FC<TravelExperienceSliderProps> = ({
   }, [value, currentLevel, updateLevel]);
 
   const handleBarPress = (event: any) => {
-    const { locationX } = event.nativeEvent;
-    const newLevel = Math.round((locationX / BAR_WIDTH) * 3);
-    updateLevel(newLevel);
+    let locationX: number | undefined;
+    const nativeEvent = event.nativeEvent || {};
+    
+    // Handle different event structures for web vs native
+    if (Platform.OS === 'web') {
+      // On web, try to get locationX first, then fallback to clientX calculation
+      if (typeof nativeEvent.locationX === 'number') {
+        locationX = nativeEvent.locationX;
+      } else if (nativeEvent.target) {
+        // Calculate position relative to the element
+        try {
+          const rect = (nativeEvent.target as HTMLElement).getBoundingClientRect();
+          if (nativeEvent.clientX !== undefined) {
+            locationX = nativeEvent.clientX - rect.left;
+          }
+        } catch (e) {
+          // If getBoundingClientRect fails, just return
+          return;
+        }
+      }
+    } else {
+      // On native, use locationX from nativeEvent
+      locationX = nativeEvent.locationX;
+    }
+    
+    // Validate locationX and ensure it's a valid number
+    if (locationX === undefined || locationX === null || isNaN(locationX)) {
+      // Silently return if we can't determine the position
+      return;
+    }
+    
+    // Clamp locationX to valid range [0, BAR_WIDTH]
+    const clampedX = Math.max(0, Math.min(BAR_WIDTH, locationX));
+    
+    // Calculate level (0-3) based on position
+    const calculatedLevel = Math.round((clampedX / BAR_WIDTH) * 3);
+    
+    // Clamp level to valid range [0, 3]
+    const newLevel = Math.max(0, Math.min(3, calculatedLevel));
+    
+    // Only update if the level is valid
+    if (!isNaN(newLevel) && newLevel >= 0 && newLevel <= 3) {
+      updateLevel(newLevel);
+    }
   };
 
-  const currentLevelData = TRAVEL_LEVELS[currentLevel];
+  // Ensure currentLevel is within bounds and get the level data
+  const safeCurrentLevel = Math.max(0, Math.min(3, currentLevel));
+  const currentLevelData = TRAVEL_LEVELS[safeCurrentLevel] || TRAVEL_LEVELS[0];
 
   return (
     <View style={styles.container}>
@@ -131,7 +190,7 @@ export const TravelExperienceSlider: React.FC<TravelExperienceSliderProps> = ({
               styles.imageWrapper,
               {
                 opacity: imageOpacity[index],
-                zIndex: index === currentLevel ? 10 : 1,
+                zIndex: index === safeCurrentLevel ? 10 : 1,
               },
             ]}
           >
@@ -273,6 +332,7 @@ const styles = StyleSheet.create({
     width: BAR_WIDTH,
     height: KNOB_SIZE,
     justifyContent: 'center',
+    alignItems: 'center',
     position: 'relative',
   },
   barBackground: {
@@ -281,6 +341,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#E1E1E1',
     borderRadius: 8,
     overflow: 'hidden',
+    position: 'absolute',
+    top: (KNOB_SIZE - BAR_HEIGHT) / 2,
+    left: 0,
+    alignSelf: 'center',
   },
   barFill: {
     height: BAR_HEIGHT,
@@ -293,7 +357,8 @@ const styles = StyleSheet.create({
     height: KNOB_SIZE,
     justifyContent: 'center',
     alignItems: 'center',
-    top: (KNOB_SIZE - BAR_HEIGHT) / 2,
+    top: 0,
+    left: 0,
   },
   knobInner: {
     width: KNOB_SIZE,
