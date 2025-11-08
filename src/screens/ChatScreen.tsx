@@ -9,11 +9,14 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  Image,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../components/Text';
 import { colors, spacing, typography, borderRadius } from '../styles/theme';
 import { ChatService, ChatResponse } from '../utils/chatService';
 import { useOnboarding } from '../context/OnboardingContext';
+import { getImageUrl } from '../utils/imageUtils';
 
 interface Message {
   id: string;
@@ -209,10 +212,19 @@ export const ChatScreen: React.FC = () => {
           message.isUser ? styles.userMessageBubble : styles.botMessageBubble,
         ]}
       >
-        <Text style={message.isUser ? styles.userMessageText : styles.botMessageText}>
-          {message.text}
-        </Text>
-        <Text style={styles.timestamp}>{message.timestamp}</Text>
+        <View style={styles.messageTextContainer}>
+          <Text style={message.isUser ? styles.userMessageText : styles.botMessageText}>
+            {message.text}
+          </Text>
+        </View>
+        <View style={styles.timestampContainer}>
+          <Text style={[
+            styles.timestamp,
+            message.isUser ? styles.userTimestamp : styles.botTimestamp,
+          ]}>
+            {message.timestamp}
+          </Text>
+        </View>
       </View>
     </View>
   );
@@ -220,35 +232,45 @@ export const ChatScreen: React.FC = () => {
   return (
     <SafeAreaView style={styles.container}>
       {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity 
-          style={styles.backButton}
-          onPress={() => {
-            setCurrentStep(4); // Go back to onboarding step 4
-            if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location) {
-              window.location.href = '/'; // Navigate to main app
-            }
-          }}
-        >
-          <Text style={styles.backIcon}>←</Text>
-        </TouchableOpacity>
-        
-        <View style={styles.profileSection}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>S</Text>
-          </View>
-          <View style={styles.profileInfo}>
-            <Text style={styles.profileName}>Swelly</Text>
-            <Text style={styles.profileTagline}>Ride the waves, we handle the rest</Text>
-            <View style={styles.progressBar}>
-              <View style={styles.progressFill} />
+      <View style={styles.headerContainer}>
+        <View style={styles.header}>
+          <View style={styles.headerLeft}>
+            <TouchableOpacity 
+              style={styles.backButton}
+              onPress={() => {
+                setCurrentStep(4); // Go back to onboarding step 4
+                if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location) {
+                  window.location.href = '/'; // Navigate to main app
+                }
+              }}
+            >
+              <Ionicons name="chevron-back" size={24} color="#222B30" />
+            </TouchableOpacity>
+            
+            <View style={styles.avatar}>
+              <View style={styles.avatarImageContainer}>
+                <Image
+                  source={{ uri: getImageUrl('/Swelly avatar.png') }}
+                  style={styles.avatarImage}
+                  resizeMode="cover"
+                />
+              </View>
             </View>
           </View>
+          
+          <View style={styles.profileInfo}>
+            <Text style={styles.profileName}>Swelly</Text>
+            <Text style={styles.profileTagline}>Join the global surf travel community!</Text>
+          </View>
+          
+          <TouchableOpacity style={styles.menuButton}>
+            <Ionicons name="ellipsis-vertical" size={24} color="#222B30" />
+          </TouchableOpacity>
         </View>
         
-        <TouchableOpacity style={styles.menuButton}>
-          <Text style={styles.menuIcon}>⋮</Text>
-        </TouchableOpacity>
+        <View style={styles.progressBar}>
+          <View style={styles.progressFill} />
+        </View>
       </View>
 
       {/* Chat Messages */}
@@ -275,37 +297,43 @@ export const ChatScreen: React.FC = () => {
         </ScrollView>
 
         {/* Input Area */}
-        <View style={styles.inputContainer}>
-          <TouchableOpacity style={styles.attachButton}>
-            <Text style={styles.attachIcon}>+</Text>
-          </TouchableOpacity>
+        <View style={styles.inputWrapper}>
+          <View style={styles.attachButtonWrapper}>
+            <TouchableOpacity style={styles.attachButton}>
+              <Ionicons name="add" size={28} color="#222B30" />
+            </TouchableOpacity>
+          </View>
           
-          <TextInput
-            style={styles.textInput}
-            placeholder="Type your message.."
-            placeholderTextColor="#999"
-            value={inputText}
-            onChangeText={setInputText}
-            multiline
-            maxLength={500}
-            onSubmitEditing={sendMessage}
-            returnKeyType="send"
-            blurOnSubmit={false}
-            onKeyPress={(e) => {
-              if (Platform.OS === 'web' && e.nativeEvent.key === 'Enter' && !(e.nativeEvent as any).shiftKey) {
-                e.preventDefault();
-                sendMessage();
-              }
-            }}
-          />
-          
-          <TouchableOpacity 
-            style={styles.sendButton}
-            onPress={sendMessage}
-            disabled={!inputText.trim() || isLoading}
-          >
-            <Text style={styles.sendIcon}>➤</Text>
-          </TouchableOpacity>
+          <View style={styles.inputContainer}>
+            <View style={styles.inputInnerContainer}>
+              <TextInput
+                style={styles.textInput}
+                placeholder="Type your message.."
+                placeholderTextColor="#7B7B7B"
+                value={inputText}
+                onChangeText={setInputText}
+                multiline
+                maxLength={500}
+                onSubmitEditing={sendMessage}
+                returnKeyType="send"
+                blurOnSubmit={false}
+                onKeyPress={(e) => {
+                  if (Platform.OS === 'web' && e.nativeEvent.key === 'Enter' && !(e.nativeEvent as any).shiftKey) {
+                    e.preventDefault();
+                    sendMessage();
+                  }
+                }}
+              />
+            </View>
+            
+            <TouchableOpacity 
+              style={[styles.sendButton, (!inputText.trim() || isLoading) && styles.sendButtonDisabled]}
+              onPress={sendMessage}
+              disabled={!inputText.trim() || isLoading}
+            >
+              <Ionicons name="mic" size={24} color="#FFFFFF" />
+            </TouchableOpacity>
+          </View>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -317,77 +345,102 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#F5F5F5',
   },
-  header: {
+  headerContainer: {
     backgroundColor: colors.white,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderBottomLeftRadius: borderRadius.medium,
-    borderBottomRightRadius: borderRadius.medium,
+    paddingTop: 48,
+    paddingBottom: spacing.md,
+    paddingHorizontal: 0,
+    alignItems: 'center',
+  },
+  header: {
     flexDirection: 'row',
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    width: '100%',
+    paddingHorizontal: spacing.md,
+    marginBottom: spacing.md,
+  },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: spacing.sm,
   },
   backButton: {
-    marginRight: spacing.sm,
-  },
-  backIcon: {
-    fontSize: 20,
-    color: colors.black,
-  },
-  profileSection: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#8B5CF6',
+    width: 24,
+    height: 24,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: spacing.sm,
+    marginRight: 5,
   },
-  avatarText: {
-    color: colors.white,
-    fontSize: 18,
-    fontWeight: 'bold',
+  avatar: {
+    width: 48,
+    height: 52,
+    aspectRatio: 12 / 13,
+    borderRadius: 24,
+    overflow: 'hidden',
+    // backgroundColor: '#D3D3D3', // lightgray fallback
+    position: 'relative',
+  },
+  avatarImageContainer: {
+    position: 'absolute',
+    width: 48 * 1.52147, // 152.147% of 48px
+    height: 52 * 1.08344, // 108.344% of 52px
+    left: -10.983,
+    top: 0,
+    overflow: 'hidden',
+  },
+  avatarImage: {
+    width: '100%',
+    height: '100%',
+    ...(Platform.OS === 'web' && {
+      objectFit: 'cover' as any,
+      objectPosition: '0px 0px' as any,
+      backgroundRepeat: 'no-repeat' as any,
+    }),
   },
   profileInfo: {
     flex: 1,
+    width: 246,
+    marginRight: spacing.sm,
   },
   profileName: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#8B5CF6',
-    marginBottom: 2,
+    fontSize: 20,
+    fontWeight: '700',
+    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : undefined,
+    lineHeight: 32,
+    color: '#333333',
+    marginBottom: 4,
   },
   profileTagline: {
-    fontSize: 12,
-    color: '#999',
-    marginBottom: spacing.xs,
+    fontSize: 14,
+    fontWeight: '400',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    lineHeight: 20,
+    color: '#868686',
+  },
+  menuButton: {
+    width: 24,
+    height: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   progressBar: {
     height: 4,
-    backgroundColor: '#E5E5E5',
-    borderRadius: 2,
+    width: 237,
+    backgroundColor: '#BDBDBD',
+    borderRadius: 8,
     overflow: 'hidden',
   },
   progressFill: {
     height: '100%',
-    width: '30%',
-    backgroundColor: '#8B5CF6',
+    width: 47,
+    backgroundColor: '#B72DF2',
+    borderRadius: 8,
   },
   menuButton: {
-    marginLeft: spacing.sm,
-  },
-  menuIcon: {
-    fontSize: 18,
-    color: colors.black,
+    width: 24,
+    height: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   chatContainer: {
     flex: 1,
@@ -400,83 +453,138 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.lg,
   },
   messageContainer: {
-    marginBottom: spacing.md,
+    marginBottom: 16,
   },
   userMessageContainer: {
     alignItems: 'flex-end',
+    paddingLeft: 16,
+    paddingRight: 48,
   },
   botMessageContainer: {
     alignItems: 'flex-start',
+    paddingLeft: 16,
+    paddingRight: 48,
   },
   messageBubble: {
-    maxWidth: '80%',
-    padding: spacing.md,
-    borderRadius: borderRadius.medium,
-    position: 'relative',
+    maxWidth: 268,
+    paddingTop: 16,
+    paddingBottom: 8,
+    paddingHorizontal: 16,
+    flexDirection: 'column',
   },
   userMessageBubble: {
-    backgroundColor: '#8B5CF6',
-    borderBottomRightRadius: 4,
+    backgroundColor: '#B72DF2',
+    borderTopLeftRadius: 4,
+    borderTopRightRadius: 16,
+    borderBottomLeftRadius: 16,
+    borderBottomRightRadius: 16,
   },
   botMessageBubble: {
     backgroundColor: colors.white,
-    borderWidth: 1,
-    borderColor: '#8B5CF6',
-    borderBottomLeftRadius: 4,
+    borderTopLeftRadius: 2,
+    borderTopRightRadius: 16,
+    borderBottomLeftRadius: 16,
+    borderBottomRightRadius: 16,
+    ...(Platform.OS === 'web' && {
+      boxShadow: '0px 0px 20px rgba(0, 0, 0, 0.08)',
+    }),
+  },
+  messageTextContainer: {
+    marginBottom: 10,
   },
   userMessageText: {
-    color: colors.white,
+    color: '#FFFFFF',
     fontSize: 16,
-    lineHeight: 22,
+    fontWeight: '500',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    lineHeight: 16,
   },
   botMessageText: {
-    color: colors.textDark,
+    color: '#333333',
     fontSize: 16,
-    lineHeight: 22,
+    fontWeight: '500',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    lineHeight: 16,
+  },
+  timestampContainer: {
+    alignItems: 'flex-start',
   },
   timestamp: {
-    fontSize: 12,
-    color: '#999',
-    marginTop: spacing.xs,
-    textAlign: 'right',
+    fontSize: 14,
+    fontWeight: '400',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    lineHeight: 20,
   },
-  inputContainer: {
+  userTimestamp: {
+    color: 'rgba(255, 255, 255, 0.5)',
+  },
+  botTimestamp: {
+    color: 'rgba(123, 123, 123, 0.5)',
+  },
+  inputWrapper: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    padding: spacing.md,
-    backgroundColor: colors.white,
-    borderTopWidth: 1,
-    borderTopColor: '#E5E5E5',
+    paddingHorizontal: 8,
+    paddingBottom: 35,
+    paddingTop: 0,
+  },
+  attachButtonWrapper: {
+    paddingBottom: 15,
+    marginRight: 8,
   },
   attachButton: {
-    marginRight: spacing.sm,
-    padding: spacing.sm,
-  },
-  attachIcon: {
-    fontSize: 20,
-    color: colors.black,
-  },
-  textInput: {
-    flex: 1,
-    backgroundColor: '#F8F8F8',
-    borderRadius: borderRadius.large,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    fontSize: 16,
-    maxHeight: 100,
-    marginRight: spacing.sm,
-  },
-  sendButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#8B5CF6',
+    width: 28,
+    height: 28,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  sendIcon: {
+  inputContainer: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.white,
+    paddingLeft: 10,
+    paddingRight: 8,
+    paddingVertical: 7,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 32,
+    borderBottomLeftRadius: 20,
+    borderBottomRightRadius: 32,
+    ...(Platform.OS === 'web' && {
+      boxShadow: '0px 0px 20px rgba(0, 0, 0, 0.08)',
+    }),
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.08,
+    shadowRadius: 20,
+    elevation: 5,
+  },
+  inputInnerContainer: {
+    flex: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 0,
+  },
+  textInput: {
+    flex: 1,
     fontSize: 18,
-    color: colors.white,
+    fontWeight: '400',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    lineHeight: 22,
+    color: '#333333',
+    maxHeight: 100,
+    padding: 0,
+  },
+  sendButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 48,
+    backgroundColor: '#B72DF2',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 10,
+  },
+  sendButtonDisabled: {
+    opacity: 0.5,
   },
   profileBubble: {
     backgroundColor: '#F0F8FF',

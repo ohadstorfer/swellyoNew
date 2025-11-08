@@ -2,11 +2,11 @@ import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 
 /**
- * Get the proper video URL for the current platform
+ * Get the proper image URL for the current platform
  * On web: uses public folder paths
- * On mobile: uses full dev server URL or asset paths
+ * On mobile: uses full dev server URL with proper encoding
  */
-export const getVideoUrl = (path: string): string => {
+export const getImageUrl = (path: string): string => {
   // Ensure path starts with /
   const normalizedPath = path.startsWith('/') ? path : `/${path}`;
   
@@ -16,7 +16,7 @@ export const getVideoUrl = (path: string): string => {
   }
   
   // On mobile (iOS/Android), we need to use the dev server URL
-  // For Expo Go, videos in public folder need to be accessed via the Metro dev server
+  // For Expo Go, images in public folder need to be accessed via the Metro dev server
   if (__DEV__) {
     try {
       // Try multiple methods to get the dev server URL
@@ -98,19 +98,19 @@ export const getVideoUrl = (path: string): string => {
         const fullUrl = `${devServerUrl}${encodedPath}`;
         
         if (__DEV__) {
-          console.log(`[getVideoUrl] Resolved: ${normalizedPath} -> ${fullUrl}`);
+          console.log(`[getImageUrl] Resolved: ${normalizedPath} -> ${fullUrl}`);
         }
         
         return fullUrl;
       }
     } catch (error) {
-      console.warn('Error getting dev server URL for video:', error);
+      console.warn('Error getting dev server URL for image:', error);
     }
     
     // Fallback: return path as-is (will show warning)
-    // Note: This may not work in Expo Go - videos should be in assets folder or served from a URL
+    // Note: This may not work in Expo Go - images should be in assets folder or served from a URL
     if (__DEV__) {
-      console.warn(`Video path ${normalizedPath} may not work on mobile. Constants.debuggerHost not available.`);
+      console.warn(`Image path ${normalizedPath} may not work on mobile. Constants.debuggerHost not available.`);
       console.log('Available Constants:', {
         debuggerHost: Constants.debuggerHost,
         hasExpoConfig: !!Constants.expoConfig,
@@ -146,19 +146,8 @@ export const getVideoUrl = (path: string): string => {
     return normalizedPath;
   }
   
-  // Production: videos should be bundled as assets or served from CDN
+  // Production: images should be bundled as assets or served from CDN
   // For now, return the path as-is (will need to be updated for production)
   return normalizedPath;
-};
-
-/**
- * Get background video source
- */
-export const getBackgroundVideoSource = (): string => {
-  if (Platform.OS === 'web') {
-    return '/swellyo welcome video.mp4';
-  }
-  // On mobile, use the shorter filename
-  return getVideoUrl('/swellyo169welcome.mp4');
 };
 

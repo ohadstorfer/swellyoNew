@@ -10,6 +10,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { colors, spacing, typography } from '../styles/theme';
 import { Text } from './Text';
+import { getImageUrl } from '../utils/imageUtils';
 
 interface TravelExperienceLevel {
   id: number;
@@ -18,30 +19,35 @@ interface TravelExperienceLevel {
   imageUrl: string;
 }
 
+// Helper to get travel level image URL with proper platform handling
+const getTravelLevelImageUrl = (path: string): string => {
+  return getImageUrl(path);
+};
+
 const TRAVEL_LEVELS: TravelExperienceLevel[] = [
   {
     id: 0,
     title: 'New Nomad',
     subtitle: '0-3 surf trips',
-    imageUrl: '/Travel levels/Travel 111.png',
+    imageUrl: getTravelLevelImageUrl('/Travel levels/Travel 111.png'),
   },
   {
     id: 1,
     title: 'Rising Voyager',
     subtitle: '4-9 surf trips',
-    imageUrl: '/Travel levels/Travel 222.png',
+    imageUrl: getTravelLevelImageUrl('/Travel levels/Travel 222.png'),
   },
   {
     id: 2,
     title: 'Wave Hunter',
     subtitle: '10-19 surf trips',
-    imageUrl: '/Travel levels/Travel 333.png',
+    imageUrl: getTravelLevelImageUrl('/Travel levels/Travel 333.png'),
   },
   {
     id: 3,
     title: 'Chicken Joe',
     subtitle: '20+ surf trips',
-    imageUrl: '/Travel levels/Travel 444.png',
+    imageUrl: getTravelLevelImageUrl('/Travel levels/Travel 444.png'),
   },
 ];
 

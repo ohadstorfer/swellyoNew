@@ -16,8 +16,21 @@ import { colors, spacing } from '../styles/theme';
 
 // Helpers for sizing
 const getScreenWidth = () => Dimensions.get('window').width;
+
+// Helper to detect if we're on desktop web (not mobile web)
+const isDesktopWeb = () => {
+  if (Platform.OS !== 'web') return false;
+  if (typeof window === 'undefined') return false;
+  return window.innerWidth > 768; // Desktop breakpoint
+};
+
 const getCarouselItemWidth = () => {
   const screenWidth = getScreenWidth();
+  if (isDesktopWeb()) {
+    // On desktop, use a fixed max width and calculate from that
+    const maxCarouselWidth = 700;
+    return maxCarouselWidth / 3;
+  }
   // Each item takes 1/3 of the screen width to show 3 items at once
   return screenWidth / 3;
 };
@@ -220,13 +233,30 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     width: '100%',
-    ...(Platform.OS === 'web' && { maxWidth: 600, alignSelf: 'center' }),
+    ...(isDesktopWeb() && {
+      maxWidth: 700,
+      alignSelf: 'center',
+    }),
+    ...(Platform.OS === 'web' && !isDesktopWeb() && {
+      // Mobile web: keep original behavior
+      maxWidth: 600,
+      alignSelf: 'center',
+    }),
   },
   carouselWrapper: {
     width: '100%',
     overflow: 'hidden',
     position: 'relative',
-    ...(Platform.OS === 'web' && {
+    ...(isDesktopWeb() && {
+      maxWidth: 700,
+      alignSelf: 'center',
+      // @ts-ignore
+      WebkitOverflowScrolling: 'touch',
+      // @ts-ignore
+      scrollBehavior: 'smooth',
+    }),
+    ...(Platform.OS === 'web' && !isDesktopWeb() && {
+      // Mobile web: keep original behavior
       maxWidth: 600,
       alignSelf: 'center',
       // @ts-ignore
@@ -277,7 +307,13 @@ const styles = StyleSheet.create({
   },
   boardImage: {
     height: 350,
-    ...(Platform.OS === 'web' && {
+    ...(isDesktopWeb() && {
+      height: 400, // Slightly larger on desktop
+      // @ts-ignore
+      objectFit: 'contain' as any,
+    }),
+    ...(Platform.OS === 'web' && !isDesktopWeb() && {
+      // Mobile web: keep original
       // @ts-ignore
       objectFit: 'contain' as any,
     }),

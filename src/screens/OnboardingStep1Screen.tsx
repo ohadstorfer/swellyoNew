@@ -12,6 +12,13 @@ import { Text } from '../components/Text';
 import { BoardCarousel } from '../components/BoardCarousel';
 import { colors, spacing, typography } from '../styles/theme';
 
+// Helper to detect if we're on desktop web (not mobile web)
+const isDesktopWeb = () => {
+  if (Platform.OS !== 'web') return false;
+  if (typeof window === 'undefined') return false;
+  return window.innerWidth > 768; // Desktop breakpoint
+};
+
 interface OnboardingStep1ScreenProps {
   onNext: (data: OnboardingData) => void;
   onBack: () => void;
@@ -174,6 +181,11 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+    ...(isDesktopWeb() && {
+      maxWidth: 800,
+      alignSelf: 'center',
+      width: '100%',
+    }),
   },
   header: {
     flexDirection: 'row',
@@ -182,6 +194,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingTop: Platform.OS === 'web' ? spacing.md : spacing.sm,
     height: 44,
+    ...(isDesktopWeb() && {
+      paddingHorizontal: spacing.xl,
+      paddingTop: spacing.lg,
+    }),
   },
   backButton: {
     width: 60,
@@ -210,6 +226,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.md,
     alignItems: 'center',
+    ...(isDesktopWeb() && {
+      paddingVertical: spacing.sm,
+    }),
   },
   progressBar: {
     width: 237,
@@ -217,6 +236,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.progressBackground,
     borderRadius: 8,
     overflow: 'hidden',
+    ...(isDesktopWeb() && {
+      width: 300,
+    }),
   },
   progressFill: {
     height: '100%',
@@ -227,6 +249,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.lg,
     alignItems: 'center',
+    ...(isDesktopWeb() && {
+      paddingTop: spacing.xl,
+      paddingBottom: spacing.sm,
+    }),
   },
   title: {
     fontSize: 24,
@@ -234,12 +260,20 @@ const styles = StyleSheet.create({
     color: colors.brandTeal,
     textAlign: 'center',
     lineHeight: 28.8,
+    ...(isDesktopWeb() && {
+      fontSize: 28,
+      lineHeight: 34,
+    }),
   },
   subtitleContainer: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.lg,
     alignItems: 'center',
     gap: spacing.sm,
+    ...(isDesktopWeb() && {
+      paddingTop: spacing.md,
+      paddingBottom: spacing.sm,
+    }),
   },
   subtitle: {
     fontSize: 16,
@@ -259,10 +293,20 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     marginTop: -spacing.xl,
+    ...(isDesktopWeb() && {
+      marginTop: -spacing.lg,
+      paddingHorizontal: spacing.lg,
+    }),
   },
   buttonContainer: {
     paddingHorizontal: spacing.xl,
     paddingBottom: spacing.xl,
+    ...(isDesktopWeb() && {
+      paddingHorizontal: spacing.xxl,
+      paddingBottom: spacing.xxl,
+      maxWidth: 400,
+      alignSelf: 'center',
+    }),
   },
   gradientButton: {
     height: 56,

@@ -8,6 +8,7 @@ import {
   Platform,
   TouchableOpacity,
   Animated,
+  Easing,
 } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -36,6 +37,7 @@ interface AnimatedThumbnailProps {
   item: VideoLevel;
   isActive: boolean;
   selectedVideoId: number;
+  videos: VideoLevel[];
   onPress: () => void;
   baseStyle: any;
   activeStyle: any;
@@ -47,24 +49,85 @@ const AnimatedThumbnail: React.FC<AnimatedThumbnailProps> = ({
   item, 
   isActive, 
   selectedVideoId,
+  videos,
   onPress, 
   baseStyle,
   activeStyle,
   imageStyle,
   borderStyle,
 }) => {
-  const thumbnailAnim = useRef(new Animated.Value(isActive ? 1 : 0.5)).current;
+  const opacity = useRef(new Animated.Value(isActive ? 1 : 0.5)).current;
+  const translateX = useRef(new Animated.Value(0)).current;
+  const prevSelectedId = useRef(selectedVideoId);
+  const isInitialMount = useRef(true);
   
-  // Fade animation when selectedVideoId changes (same as main video)
+  // Slide animation when selectedVideoId changes (Figma Smart Animate style)
   useEffect(() => {
-    // Fade out first, then fade in to new opacity
-    thumbnailAnim.setValue(0);
-    Animated.timing(thumbnailAnim, {
-      toValue: isActive ? 1 : 0.5,
-      duration: 400,
-      useNativeDriver: false,
-    }).start();
-  }, [selectedVideoId, isActive, thumbnailAnim]);
+    // Skip animation on initial mount
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      prevSelectedId.current = selectedVideoId;
+      return;
+    }
+    
+    // Only animate if selectedVideoId actually changed
+    if (prevSelectedId.current === selectedVideoId) {
+      return;
+    }
+    
+    const currentIndex = videos.findIndex(v => v.id === selectedVideoId);
+    const prevIndex = videos.findIndex(v => v.id === prevSelectedId.current);
+    const itemIndex = videos.findIndex(v => v.id === item.id);
+    
+    // Determine slide direction based on movement
+    let slideDirection = 0;
+    if (currentIndex !== prevIndex && currentIndex !== -1 && prevIndex !== -1) {
+      // Moving forward (right) - new active slides in from right, old active slides out to left
+      if (currentIndex > prevIndex) {
+        if (itemIndex === currentIndex) {
+          // New active item - slide in from right
+          slideDirection = 60;
+        } else if (itemIndex === prevIndex) {
+          // Old active item - slide out to left
+          slideDirection = -60;
+        }
+      } 
+      // Moving backward (left) - new active slides in from left, old active slides out to right
+      else if (currentIndex < prevIndex) {
+        if (itemIndex === currentIndex) {
+          // New active item - slide in from left
+          slideDirection = -60;
+        } else if (itemIndex === prevIndex) {
+          // Old active item - slide out to right
+          slideDirection = 60;
+        }
+      }
+    }
+    
+    // Set initial values before animation
+    if (slideDirection !== 0) {
+      translateX.setValue(slideDirection);
+    }
+    opacity.setValue(isActive ? 0.4 : 0.3);
+    
+    // Animate with ease-in curve, 350ms duration (matching Figma Smart Animate)
+    Animated.parallel([
+      Animated.timing(opacity, {
+        toValue: isActive ? 1 : 0.5,
+        duration: 350,
+        easing: Easing.in(Easing.ease),
+        useNativeDriver: false,
+      }),
+      Animated.timing(translateX, {
+        toValue: 0,
+        duration: 350,
+        easing: Easing.in(Easing.ease),
+        useNativeDriver: false,
+      }),
+    ]).start();
+    
+    prevSelectedId.current = selectedVideoId;
+  }, [selectedVideoId, isActive, item.id, videos]);
   
   return (
     <TouchableOpacity
@@ -75,8 +138,10 @@ const AnimatedThumbnail: React.FC<AnimatedThumbnailProps> = ({
         style={[
           baseStyle,
           isActive && activeStyle,
+          isActive && borderStyle, // Apply border directly to thumbnail container
           {
-            opacity: thumbnailAnim,
+            opacity,
+            transform: [{ translateX }],
           },
         ]}
       >
@@ -86,7 +151,6 @@ const AnimatedThumbnail: React.FC<AnimatedThumbnailProps> = ({
           style={imageStyle}
           resizeMode="cover"
         />
-        {isActive && <View style={borderStyle} />}
       </Animated.View>
     </TouchableOpacity>
   );
@@ -193,13 +257,13 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
 
   // Fade animation for main video change
   useEffect(() => {
-    // Fade out
+    // Fade out then in
     fadeAnim.setValue(0);
-    
     Animated.timing(fadeAnim, {
       toValue: 1,
       duration: 900,
-      useNativeDriver: true,
+      easing: Easing.ease,
+      useNativeDriver: false,
     }).start();
   }, [selectedVideoId, selectedVideo.videoUrl]);
 
@@ -273,6 +337,7 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
         item={item.item}
         isActive={isActive}
         selectedVideoId={selectedVideoId}
+        videos={videos}
         onPress={() => {
           // Update selection - this will trigger reordering via getReorderedVideos
           onVideoSelect(item.item);
@@ -483,12 +548,8 @@ const styles = StyleSheet.create({
     width: '100%',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 16, // Mobile: keep original
-    marginBottom: 32, // Mobile native: keep original 32
-    ...(Platform.OS === 'web' && !isDesktopWeb() && {
-      // Mobile web: tighter spacing to match example
-      marginBottom: 16,
-    }),
+    paddingHorizontal: 16,
+    marginBottom: 16, // Native mobile and mobile web: same as mobile web
     ...(isDesktopWeb() && {
       paddingHorizontal: 26,
       overflow: 'visible',
@@ -569,16 +630,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 0,
     overflow: 'hidden',
-    marginTop: 70, // Mobile native: keep original 70
+    marginTop: 100, // Native mobile and mobile web: same as mobile web
     ...(isDesktopWeb() && {
       // Desktop web only
       overflow: 'visible',
       marginTop: 16, // Desktop: reduced spacing
       marginBottom: 8, // Desktop: minimal bottom margin
-    }),
-    ...(Platform.OS === 'web' && !isDesktopWeb() && {
-      // Mobile web ONLY: move thumbnails down
-      marginTop: 100,
     }),
   },
   thumbnailsWrapper: {
@@ -609,33 +666,28 @@ const styles = StyleSheet.create({
   thumbnailActive: {
     width: 119,
     height: 80,
+    overflow: 'visible', // Allow border to be visible
   },
   thumbnailImage: {
     width: '100%',
     height: '100%',
+    borderRadius: 8, // Match the thumbnail border radius
   },
   thumbnailImageInactive: {
     opacity: 1,
   },
   activeBorder: {
-    position: 'absolute',
-    top: -4,
-    left: -4,
-    right: -4,
-    bottom: -4,
-    borderRadius: 8,
     borderWidth: 4,
     borderColor: '#05BCD3',
+    borderRadius: 16, // More rounded border
+    // Border is drawn on the element itself, so it will be visible
+    // even with overflow: hidden on the container
   },
   dotsContainer: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 32, // Mobile native: keep original
-    ...(Platform.OS === 'web' && !isDesktopWeb() && {
-      // Mobile web: tighter spacing to match example
-      marginTop: 16,
-    }),
+    marginTop: 16, // Native mobile and mobile web: same as mobile web
     ...(isDesktopWeb() && {
       marginTop: 16, // Desktop: reduced spacing
       marginBottom: 8, // Desktop: minimal bottom margin

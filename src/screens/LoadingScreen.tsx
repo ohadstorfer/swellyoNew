@@ -195,11 +195,9 @@ const styles = StyleSheet.create({
   videoContainer: {
     width: 295,
     height: 294,
-    borderRadius: 12,
+    borderRadius: 0,
     overflow: 'hidden',
-    backgroundColor: '#000000',
-    borderWidth: 1,
-    borderColor: '#CFCFCF',
+    backgroundColor: '#FAFAFA',
     position: 'relative',
   },
   video: {
@@ -214,6 +212,8 @@ const styles = StyleSheet.create({
       display: 'block' as any,
       visibility: 'visible' as any,
       opacity: 1,
+      mixBlendMode: 'darken' as any, 
+      backgroundColor: '#FAFAFA',
     } as any),
   },
   videoPlaceholder: {

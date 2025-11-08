@@ -16,6 +16,7 @@ import { VideoCarousel, VideoLevel } from '../components/VideoCarousel';
 import { colors, spacing } from '../styles/theme';
 import { OnboardingData } from './OnboardingStep1Screen';
 import { getVideoUrl as getVideoUrlUtil } from '../utils/videoUtils';
+import { getImageUrl } from '../utils/imageUtils';
 
 const getScreenWidth = () => Dimensions.get('window').width;
 
@@ -68,45 +69,54 @@ const getThumbnailUrl = (name: string): string => {
     return getVideoUrl(name);
   }
   
-  // Use the utility to get platform-specific URL for thumbnails
-  return Platform.OS === 'web' 
-    ? thumbnailPath 
-    : getVideoUrlUtil(thumbnailPath);
+  // Use the image utility to get platform-specific URL for thumbnails
+  return getImageUrl(thumbnailPath);
 };
 
-// Video levels representing different surf skills
-const SURF_LEVEL_VIDEOS: VideoLevel[] = [
+// Video level definitions with paths (not resolved URLs)
+// URLs will be resolved dynamically when component mounts
+const SURF_LEVEL_DEFINITIONS = [
   {
     id: 0,
     name: 'Dipping My Toes',
-    thumbnailUrl: getThumbnailUrl('Dipping My Toes'),
-    videoUrl: getVideoUrl('Dipping My Toes'),
+    videoPath: '/surf level/Dipping My Toes.mp4',
+    thumbnailPath: '/surf level/Dipping My Toes thumbnail.PNG',
   },
   {
     id: 1,
     name: 'Cruising Around',
-    thumbnailUrl: getThumbnailUrl('Cruising Around'),
-    videoUrl: getVideoUrl('Cruising Around'),
+    videoPath: '/surf level/Cruising Around.mp4',
+    thumbnailPath: '/surf level/Cruising Around thumbnail.PNG',
   },
   {
     id: 2,
     name: 'Cross Stepping',
-    thumbnailUrl: getThumbnailUrl('Cross Stepping'),
-    videoUrl: getVideoUrl('Cross Stepping'),
+    videoPath: '/surf level/CrossStepping.mp4',
+    thumbnailPath: '/surf level/CrossStepping thumbnail.PNG',
   },
   {
     id: 3,
     name: 'Hanging Toes',
-    thumbnailUrl: getThumbnailUrl('Hanging Toes'),
-    videoUrl: getVideoUrl('Hanging Toes'),
+    videoPath: '/surf level/Hanging Toes.mp4',
+    thumbnailPath: '/surf level/Hanging Toes thumbnail.PNG',
   },
   {
     id: 4,
     name: 'Charging',
-    thumbnailUrl: getThumbnailUrl('Charging'),
-    videoUrl: getVideoUrl('Charging'),
+    videoPath: '/surf level/Charging.mp4',
+    thumbnailPath: '/surf level/Charging thumbnail.PNG',
   },
 ];
+
+// Function to get videos with resolved URLs (called when component mounts)
+const getSurfLevelVideos = (): VideoLevel[] => {
+  return SURF_LEVEL_DEFINITIONS.map(def => ({
+    id: def.id,
+    name: def.name,
+    thumbnailUrl: getImageUrl(def.thumbnailPath),
+    videoUrl: getVideoUrlUtil(def.videoPath),
+  }));
+};
 
 export const OnboardingStep2Screen: React.FC<OnboardingStep2ScreenProps> = ({
   onNext,
@@ -117,6 +127,9 @@ export const OnboardingStep2Screen: React.FC<OnboardingStep2ScreenProps> = ({
   const [selectedVideoId, setSelectedVideoId] = useState<number>(
     typeof initialData.surfLevel === 'number' && initialData.surfLevel >= 0 ? initialData.surfLevel : 0
   );
+
+  // Get videos with resolved URLs (called when component mounts, when Constants should be available)
+  const surfLevelVideos = React.useMemo(() => getSurfLevelVideos(), []);
 
   const handleVideoSelect = (video: VideoLevel) => {
     setSelectedVideoId(video.id);
@@ -140,7 +153,7 @@ export const OnboardingStep2Screen: React.FC<OnboardingStep2ScreenProps> = ({
     handleNext();
   };
 
-  const selectedVideo = SURF_LEVEL_VIDEOS.find(v => v.id === selectedVideoId) || SURF_LEVEL_VIDEOS[0];
+  const selectedVideo = surfLevelVideos.find((v: VideoLevel) => v.id === selectedVideoId) || surfLevelVideos[0];
 
   // Create video player for background video
   const backgroundPlayer = useVideoPlayer(
@@ -238,7 +251,7 @@ export const OnboardingStep2Screen: React.FC<OnboardingStep2ScreenProps> = ({
         {/* Video Carousel */}
         <View style={styles.carouselContainer}>
           <VideoCarousel
-            videos={SURF_LEVEL_VIDEOS}
+            videos={surfLevelVideos}
             selectedVideoId={selectedVideoId}
             onVideoSelect={handleVideoSelect}
           />
@@ -371,46 +384,41 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   titleContainer: {
-    paddingHorizontal: 16, // Mobile native: keep original
-    paddingTop: spacing.lg, // Mobile native: keep original
-    paddingBottom: spacing.sm, // Mobile native: keep original
+    paddingHorizontal: 16,
+    paddingTop: spacing.xl, // Mobile web: same as mobile web
+    paddingBottom: spacing.md, // Mobile web: same as mobile web
     alignItems: 'center',
     maxWidth: '100%',
+    ...(Platform.OS !== 'web' && {
+      // Native mobile (Expo Go) ONLY: add more space below title to prevent covering video
+      paddingBottom: spacing.lg, // Increased bottom padding for native mobile
+    }),
     ...(isDesktopWeb() && {
       // Desktop web ONLY - keep desktop styles unchanged
       paddingHorizontal: 32,
       paddingTop: spacing.md, // Desktop: reduced top padding
       paddingBottom: spacing.xs || 4, // Desktop: minimal bottom padding
     }),
-    ...(Platform.OS === 'web' && !isDesktopWeb() && {
-      // Mobile web ONLY: move title down
-      paddingTop: spacing.xl,
-      paddingBottom: spacing.md,
-    }),
   },
   title: {
-    fontSize: 16,
+    fontSize: 20, // Native mobile and mobile web: same as mobile web
     fontWeight: '700',
     fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'System',
     color: colors.textPrimary || '#333333',
     textAlign: 'center',
-    lineHeight: 24,
-    ...(Platform.OS === 'web' && !isDesktopWeb() && {
-      // Mobile web ONLY: make title bigger
-      fontSize: 20,
-      lineHeight: 28,
-    }),
+    lineHeight: 28, // Native mobile and mobile web: same as mobile web
   },
   carouselContainer: {
     flex: 1,
     justifyContent: 'center',
-    paddingVertical: spacing.lg, // Mobile native: keep original
+    paddingVertical: spacing.sm, // Mobile web: keep current (8px)
     width: '100%',
     maxWidth: '100%',
-    overflow: 'hidden', // Mobile: keep original
-    ...(Platform.OS === 'web' && !isDesktopWeb() && {
-      // Mobile web: tighter padding to match example
-      paddingVertical: spacing.sm,
+    overflow: 'hidden',
+    ...(Platform.OS !== 'web' && {
+      // Native mobile (Expo Go) ONLY: add more space above video to prevent title overlap
+      paddingTop: 80, // 80px top padding for native mobile
+      paddingBottom: spacing.sm, // Keep bottom padding same as web mobile
     }),
     ...(isDesktopWeb() && {
       maxWidth: 600,
@@ -423,17 +431,12 @@ const styles = StyleSheet.create({
     }),
   },
   buttonContainer: {
-    paddingHorizontal: 16, // Mobile native: keep original
-    paddingTop: spacing.xl, // Mobile native: keep original
-    paddingBottom: 40, // Mobile native: keep original
+    paddingHorizontal: 16,
+    paddingTop: spacing.md, // Native mobile and mobile web: same as mobile web
+    paddingBottom: 24, // Native mobile and mobile web: same as mobile web
     alignItems: 'center',
     width: '100%',
     maxWidth: '100%',
-    ...(Platform.OS === 'web' && !isDesktopWeb() && {
-      // Mobile web: tighter spacing to match example
-      paddingTop: spacing.md,
-      paddingBottom: 24,
-    }),
     ...(isDesktopWeb() && {
       paddingHorizontal: 32,
       flexShrink: 0,
