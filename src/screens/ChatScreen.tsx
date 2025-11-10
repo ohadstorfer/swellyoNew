@@ -622,3 +622,4 @@ const styles = StyleSheet.create({
     borderTopColor: '#E5E5E5',
   },
 });
+
