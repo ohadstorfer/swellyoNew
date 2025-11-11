@@ -1,33 +1,57 @@
 import React from 'react';
-import { View, StyleSheet, Image } from 'react-native';
+import { View, StyleSheet, Image, Platform, Text } from 'react-native';
+import { getImageUrl } from '../utils/imageUtils';
 
-// Figma logo asset URLs - updated with latest asset URLs
-const LOGO_IMAGE_URL = 'https://www.figma.com/api/mcp/asset/c1e731af-c573-4cf4-9cb9-f7cde4affd1e';
-const SWELLYO_TEXT_URL = 'https://www.figma.com/api/mcp/asset/dceda2ab-08ae-4224-9c9f-1e96cfc80256';
+// Local logo assets from public/welcome page folder
+const LOGO_IMAGE_PATH = '/welcome page/Logo Swellyo.svg';
+const VECTOR_IMAGE_PATH = '/welcome page/Vector.svg';
 
 interface LogoProps {
   size?: number;
 }
 
 export const Logo: React.FC<LogoProps> = ({ size = 112 }) => {
+  const [logoError, setLogoError] = React.useState(false);
+  const [vectorError, setVectorError] = React.useState(false);
+
+  // Get the logo and vector URLs using the image utility for proper platform handling
+  const logoUrl = React.useMemo(() => getImageUrl(LOGO_IMAGE_PATH), []);
+  const vectorUrl = React.useMemo(() => getImageUrl(VECTOR_IMAGE_PATH), []);
+
   return (
     <View style={styles.container}>
-      {/* Main logo image - no ellipse background */}
+      {/* Logo image - contains both logo and text */}
       <View style={[styles.logoContainer, { width: size, height: size }]}>
-        <Image
-          source={{ uri: LOGO_IMAGE_URL }}
-          style={styles.logoImage}
-          resizeMode="contain"
-        />
+        {!logoError ? (
+          <Image
+            source={{ uri: logoUrl }}
+            style={styles.logoImage}
+            resizeMode="contain"
+            onError={(error) => {
+              console.warn('Failed to load logo image, using fallback:', error);
+              setLogoError(true);
+            }}
+          />
+        ) : (
+          <View style={[styles.fallbackLogo, { width: size, height: size, borderRadius: size / 2 }]}>
+            <Text style={styles.fallbackLogoText}>S</Text>
+          </View>
+        )}
       </View>
       
-      {/* SWELLYO text */}
-      <View style={styles.textContainer}>
-        <Image
-          source={{ uri: SWELLYO_TEXT_URL }}
-          style={styles.swellyoText}
-          resizeMode="contain"
-        />
+      {/* Vector image below the logo */}
+      <View style={styles.vectorContainer}>
+        {!vectorError ? (
+          <Image
+            source={{ uri: vectorUrl }}
+            style={styles.vectorImage}
+            resizeMode="contain"
+            onError={(error) => {
+              console.warn('Failed to load vector image:', error);
+              setVectorError(true);
+            }}
+          />
+        ) : null}
       </View>
     </View>
   );
@@ -41,18 +65,49 @@ const styles = StyleSheet.create({
   logoContainer: {
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 24,
+    marginBottom: 0,
   },
   logoImage: {
     width: '100%',
     height: '100%',
+    ...(Platform.OS === 'web' && {
+      objectFit: 'contain' as any,
+      display: 'block' as any,
+    }),
   },
-  textContainer: {
-    height: 37,
+  vectorContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 24, // 24px gap from logo as per Figma
     width: 245,
+    height: 37,
   },
-  swellyoText: {
-    width: '100%',
-    height: '100%',
+  vectorImage: {
+    width: 245,
+    height: 37,
+    tintColor: '#FFFFFF', // White fill as per Figma (--Text-inverse, #FFF)
+    ...(Platform.OS === 'web' && {
+      objectFit: 'contain' as any,
+      display: 'block' as any,
+      filter: 'brightness(0) invert(1)' as any, // Ensure white color on web for SVG
+    }),
+  },
+  fallbackLogo: {
+    backgroundColor: '#8B5CF6',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fallbackLogoText: {
+    color: '#FFFFFF',
+    fontSize: 48,
+    fontWeight: '700',
+    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : undefined,
+  },
+  fallbackText: {
+    color: '#FFFFFF',
+    fontSize: 24,
+    fontWeight: '700',
+    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : undefined,
+    textAlign: 'center',
   },
 }); 

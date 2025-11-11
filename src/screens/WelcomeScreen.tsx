@@ -17,14 +17,44 @@ import { colors, spacing } from '../styles/theme';
 import { authService } from '../utils/authService';
 import { simpleAuthService } from '../utils/simpleAuthService';
 import { useOnboarding } from '../context/OnboardingContext';
+import { getImageUrl } from '../utils/imageUtils';
 
 interface WelcomeScreenProps {
   onGetStarted: () => void;
   onDemoChat?: () => void;
 }
 
-// Figma design asset URLs
-const GOOGLE_LOGO_URL = 'https://www.figma.com/api/mcp/asset/d749a4e2-08f7-4b0f-9874-88fbb9b88f33';
+// Google logo path from public/welcome page folder
+const GOOGLE_LOGO_PATH = '/welcome page/Google logo.svg';
+
+// Google Icon Component with fallback
+const GoogleIcon: React.FC = () => {
+  const [imageError, setImageError] = React.useState(false);
+  
+  // Get the Google logo URL using the image utility for proper platform handling
+  const googleLogoUrl = React.useMemo(() => getImageUrl(GOOGLE_LOGO_PATH), []);
+
+  if (imageError) {
+    // Fallback: Simple "G" text
+    return (
+      <View style={styles.googleIconFallback}>
+        <RNText style={styles.googleIconText}>G</RNText>
+      </View>
+    );
+  }
+
+  return (
+    <Image
+      source={{ uri: googleLogoUrl }}
+      style={styles.googleIcon}
+      resizeMode="contain"
+      onError={(error) => {
+        console.warn('Failed to load Google icon, using fallback:', error);
+        setImageError(true);
+      }}
+    />
+  );
+};
 
 export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDemoChat }) => {
   const [isLoading, setIsLoading] = useState(false);
@@ -189,11 +219,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
               activeOpacity={0.8}
             >
               <View style={styles.buttonContent}>
-                <Image
-                  source={{ uri: GOOGLE_LOGO_URL }}
-                  style={styles.googleIcon}
-                  resizeMode="contain"
-                />
+                <GoogleIcon />
                 <RNText style={styles.getStartedButtonText} numberOfLines={1}>
                   {isLoading ? "Signing in..." : "Continue with Google"}
                 </RNText>
@@ -309,6 +335,25 @@ const styles = StyleSheet.create({
     height: 19,
     marginRight: 10,
     flexShrink: 0,
+    ...(Platform.OS === 'web' && {
+      objectFit: 'contain' as any,
+      display: 'block' as any,
+    }),
+  },
+  googleIconFallback: {
+    width: 18.174,
+    height: 19,
+    marginRight: 10,
+    flexShrink: 0,
+    backgroundColor: '#4285F4',
+    borderRadius: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  googleIconText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: 'bold',
   },
   getStartedButtonText: {
     color: '#000',

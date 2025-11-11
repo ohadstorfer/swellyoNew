@@ -2,6 +2,8 @@ import { databaseService, User } from './databaseService';
 import { Platform } from 'react-native';
 import * as AuthSession from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
+import { supabaseAuthService } from './supabaseAuthService';
+import { isSupabaseConfigured } from '../config/supabase';
 
 // Complete the web browser authentication session
 WebBrowser.maybeCompleteAuthSession();
@@ -28,6 +30,22 @@ class AuthService {
   }
 
   async signInWithGoogle(): Promise<User> {
+    // Use Supabase if configured, otherwise fall back to old method
+    if (isSupabaseConfigured()) {
+      console.log('Using Supabase for Google OAuth');
+      const supabaseUser = await supabaseAuthService.signInWithGoogle();
+      // Convert Supabase user format to legacy User format for compatibility
+      return {
+        id: parseInt(supabaseUser.id.replace(/-/g, '').substring(0, 15)) || Date.now(),
+        email: supabaseUser.email,
+        nickname: supabaseUser.nickname,
+        googleId: supabaseUser.googleId || supabaseUser.id,
+        createdAt: supabaseUser.createdAt,
+        updatedAt: supabaseUser.updatedAt,
+      };
+    }
+    
+    console.log('Supabase not configured, using legacy OAuth method');
     if (Platform.OS === 'web') {
       return this.signInWithGoogleWeb();
     } else {
@@ -250,9 +268,13 @@ class AuthService {
 
   async signOut(): Promise<void> {
     try {
-      // For expo-auth-session, we just clear any stored tokens
-      // In a production app, you might want to revoke the token with Google
-      console.log('User signed out successfully');
+      if (isSupabaseConfigured()) {
+        await supabaseAuthService.signOut();
+      } else {
+        // For expo-auth-session, we just clear any stored tokens
+        // In a production app, you might want to revoke the token with Google
+        console.log('User signed out successfully (legacy method)');
+      }
     } catch (error) {
       console.error('Error signing out:', error);
       throw error;

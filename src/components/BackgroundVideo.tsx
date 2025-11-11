@@ -60,10 +60,10 @@ export const BackgroundVideo: React.FC<BackgroundVideoProps> = ({
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, webContainerStyle as any]}>
       <VideoView
         player={player}
-        style={styles.video}
+        style={[styles.video, webVideoStyle as any]}
         contentFit="cover"
         nativeControls={false}
         allowsFullscreen={false}
@@ -80,9 +80,30 @@ const styles = StyleSheet.create({
   },
   video: {
     ...StyleSheet.absoluteFillObject,
-    ...(Platform.OS === 'web' && {
-      objectFit: 'cover' as any,
-      display: 'block' as any,
-    } as any),
   },
 });
+
+// Web-specific styles applied separately
+const webContainerStyle = Platform.OS === 'web' ? {
+  position: 'fixed' as any,
+  top: 0,
+  left: 0,
+  right: 0,
+  bottom: 0,
+  width: '100vw' as any,
+  height: '100vh' as any,
+  zIndex: 0,
+} : {};
+
+const webVideoStyle = Platform.OS === 'web' ? {
+  objectFit: 'cover' as any,
+  display: 'block' as any,
+  position: 'absolute' as any,
+  top: 0,
+  left: 0,
+  width: '100%',
+  height: '100%',
+  minWidth: '100%',
+  minHeight: '100%',
+  zIndex: 0,
+} : {};

@@ -1,5 +1,7 @@
 import { Platform } from 'react-native';
 import { databaseService, User } from './databaseService';
+import { supabaseAuthService } from './supabaseAuthService';
+import { isSupabaseConfigured } from '../config/supabase';
 
 export interface GoogleUser {
   id: string;
@@ -13,6 +15,22 @@ class SimpleAuthService {
     try {
       console.log('Starting simple Google OAuth...');
       
+      // Use Supabase if configured, otherwise fall back to old method
+      if (isSupabaseConfigured()) {
+        console.log('Using Supabase for Google OAuth');
+        const supabaseUser = await supabaseAuthService.signInWithGoogle();
+        // Convert Supabase user format to legacy User format for compatibility
+        return {
+          id: parseInt(supabaseUser.id.replace(/-/g, '').substring(0, 15)) || Date.now(),
+          email: supabaseUser.email,
+          nickname: supabaseUser.nickname,
+          googleId: supabaseUser.googleId || supabaseUser.id,
+          createdAt: supabaseUser.createdAt,
+          updatedAt: supabaseUser.updatedAt,
+        };
+      }
+      
+      console.log('Supabase not configured, using legacy OAuth method');
       if (Platform.OS === 'web') {
         return this.signInWithGoogleWeb();
       } else {
@@ -174,7 +192,11 @@ class SimpleAuthService {
 
   async signOut(): Promise<void> {
     try {
-      console.log('User signed out successfully');
+      if (isSupabaseConfigured()) {
+        await supabaseAuthService.signOut();
+      } else {
+        console.log('User signed out successfully (legacy method)');
+      }
     } catch (error) {
       console.error('Error signing out:', error);
       throw error;
