@@ -16,6 +16,8 @@ import { BackgroundVideo } from '../components/BackgroundVideo';
 import { colors, spacing } from '../styles/theme';
 import { authService } from '../utils/authService';
 import { simpleAuthService } from '../utils/simpleAuthService';
+import { supabaseAuthService } from '../utils/supabaseAuthService';
+import { isSupabaseConfigured } from '../config/supabase';
 import { useOnboarding } from '../context/OnboardingContext';
 import { getImageUrl } from '../utils/imageUtils';
 
@@ -76,18 +78,90 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
       }
     }
 
-    // Check if we're returning from OAuth
-    const checkOAuthReturn = async () => {
+    // Check for existing session and OAuth return
+    const checkAuthState = async () => {
+      // First, check if we have an existing Supabase session
+      if (isSupabaseConfigured()) {
+        try {
+          const supabaseUser = await supabaseAuthService.getCurrentUser();
+          if (supabaseUser) {
+            console.log('Found existing Supabase session, user:', supabaseUser);
+            // Convert Supabase user (id: string) to legacy format (id: number)
+            const legacyUser = {
+              id: parseInt(supabaseUser.id.replace(/-/g, '').substring(0, 15), 16) || Date.now(),
+              email: supabaseUser.email,
+              nickname: supabaseUser.nickname,
+              googleId: supabaseUser.googleId || supabaseUser.id,
+              createdAt: supabaseUser.createdAt,
+              updatedAt: supabaseUser.updatedAt,
+            };
+            setUser(legacyUser);
+            updateFormData({
+              nickname: supabaseUser.nickname,
+              userEmail: supabaseUser.email,
+            });
+            onGetStarted();
+            return; // Don't proceed with OAuth flow if we already have a session
+          }
+        } catch (error) {
+          console.log('No existing Supabase session:', error);
+        }
+      }
+
+      // Check if we're returning from OAuth (for Supabase web flow)
       if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location) {
+        // Check for Supabase OAuth return (access_token in hash)
+        const hashParams = new URLSearchParams(window.location.hash.substring(1));
+        const accessToken = hashParams.get('access_token');
+        
+        if (accessToken && isSupabaseConfigured()) {
+          console.log('Detected Supabase OAuth return, processing session...');
+          try {
+            setIsLoading(true);
+            // The session should already be set by Supabase, just get the user
+            const supabaseUser = await supabaseAuthService.getCurrentUser();
+            if (supabaseUser) {
+              console.log('Supabase OAuth return successful, setting user:', supabaseUser);
+              // Convert Supabase user (id: string) to legacy format (id: number)
+              const legacyUser = {
+                id: parseInt(supabaseUser.id.replace(/-/g, '').substring(0, 15), 16) || Date.now(),
+                email: supabaseUser.email,
+                nickname: supabaseUser.nickname,
+                googleId: supabaseUser.googleId || supabaseUser.id,
+                createdAt: supabaseUser.createdAt,
+                updatedAt: supabaseUser.updatedAt,
+              };
+              setUser(legacyUser);
+              updateFormData({
+                nickname: supabaseUser.nickname,
+                userEmail: supabaseUser.email,
+              });
+              
+              // Clean up the URL hash
+              window.history.replaceState({}, document.title, window.location.pathname);
+              
+              onGetStarted();
+              return;
+            }
+          } catch (error: any) {
+            console.error('Supabase OAuth return error:', error);
+            // Clean up the URL even on error
+            window.history.replaceState({}, document.title, window.location.pathname);
+          } finally {
+            setIsLoading(false);
+          }
+        }
+
+        // Check for legacy OAuth return (code in query params)
         const urlParams = new URLSearchParams(window.location.search);
         const code = urlParams.get('code');
         
-        if (code) {
-          console.log('Detected OAuth return with code, processing...');
+        if (code && !isSupabaseConfigured()) {
+          console.log('Detected legacy OAuth return with code, processing...');
           try {
             setIsLoading(true);
             const user = await simpleAuthService.signInWithGoogle();
-            console.log('OAuth return successful, setting user:', user);
+            console.log('Legacy OAuth return successful, setting user:', user);
             setUser(user);
             
             // Set default nickname and email in form data
@@ -98,7 +172,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
             
             onGetStarted();
           } catch (error: any) {
-            console.error('OAuth return error:', error);
+            console.error('Legacy OAuth return error:', error);
             Alert.alert(
               'Sign In Failed',
               error.message || 'An error occurred during sign in. Please try again.',
@@ -125,8 +199,8 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
       initGoogleSignIn();
     };
 
-    checkOAuthReturn();
-  }, [setUser, onGetStarted]);
+    checkAuthState();
+  }, [setUser, onGetStarted, updateFormData]);
 
   const handleGoogleSignIn = async () => {
     console.log('Google Sign-In button pressed');

@@ -48,6 +48,14 @@ class SupabaseAuthService {
     try {
       console.log('Starting Supabase Google OAuth for web...');
       
+      // First, check if we already have a valid session
+      const { data: existingSession, error: sessionCheckError } = await supabase.auth.getSession();
+      
+      if (!sessionCheckError && existingSession?.session?.user) {
+        console.log('Found existing Supabase session, using it');
+        return this.convertSupabaseUserToAppUser(existingSession.session.user);
+      }
+      
       // Check if we're returning from OAuth redirect
       const hashParams = new URLSearchParams(window.location.hash.substring(1));
       const accessToken = hashParams.get('access_token');
@@ -62,11 +70,9 @@ class SupabaseAuthService {
         // We're returning from OAuth, get the session
         console.log('Detected OAuth redirect, processing session...');
         
-        // Clean up the URL
-        if (window.history && window.location) {
-          window.history.replaceState({}, document.title, window.location.pathname);
-        }
-
+        // Wait a bit for Supabase to process the session
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
         const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
         
         if (sessionError) {
@@ -74,12 +80,16 @@ class SupabaseAuthService {
         }
 
         if (sessionData.session && sessionData.session.user) {
+          // Clean up the URL after successful auth
+          if (window.history && window.location) {
+            window.history.replaceState({}, document.title, window.location.pathname);
+          }
           return this.convertSupabaseUserToAppUser(sessionData.session.user);
         }
       }
 
-      // No access token found, initiate OAuth flow
-      console.log('Initiating Google OAuth flow...');
+      // No access token found and no existing session, initiate OAuth flow
+      console.log('No existing session found, initiating Google OAuth flow...');
       
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
@@ -213,68 +223,31 @@ class SupabaseAuthService {
   }
 
   /**
-   * Get or create user profile in Supabase
+   * Get or create user profile in Supabase users table
    */
   private async getOrCreateUserProfile(supabaseUser: any): Promise<any> {
     try {
-      // Check if profile exists
-      const { data: existingProfile, error: fetchError } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', supabaseUser.id)
-        .single();
+      // Import the database service
+      const { supabaseDatabaseService } = await import('./supabaseDatabaseService');
+      
+      // Save user to users table
+      const savedUser = await supabaseDatabaseService.saveUser({
+        email: supabaseUser.email || '',
+        nickname: supabaseUser.user_metadata?.full_name || supabaseUser.user_metadata?.name,
+        profilePicture: supabaseUser.user_metadata?.avatar_url || supabaseUser.user_metadata?.picture,
+        googleId: supabaseUser.app_metadata?.provider_id || supabaseUser.id,
+      });
 
-      if (existingProfile && !fetchError) {
-        // Profile exists, update it
-        const { data: updatedProfile, error: updateError } = await supabase
-          .from('profiles')
-          .update({
-            email: supabaseUser.email,
-            nickname: supabaseUser.user_metadata?.full_name || supabaseUser.user_metadata?.name || existingProfile.nickname,
-            photo: supabaseUser.user_metadata?.avatar_url || supabaseUser.user_metadata?.picture || existingProfile.photo,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', supabaseUser.id)
-          .select()
-          .single();
-
-        if (updateError) {
-          console.warn('Error updating profile:', updateError);
-          return existingProfile;
-        }
-
-        return updatedProfile;
-      }
-
-      // Profile doesn't exist, create it
-      const { data: newProfile, error: createError } = await supabase
-        .from('profiles')
-        .insert({
-          id: supabaseUser.id,
-          email: supabaseUser.email,
-          nickname: supabaseUser.user_metadata?.full_name || supabaseUser.user_metadata?.name || 'User',
-          photo: supabaseUser.user_metadata?.avatar_url || supabaseUser.user_metadata?.picture,
-          google_id: supabaseUser.app_metadata?.provider_id || supabaseUser.id,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .select()
-        .single();
-
-      if (createError) {
-        console.warn('Error creating profile (table might not exist yet):', createError);
-        // Return a default profile object
-        return {
-          nickname: supabaseUser.user_metadata?.full_name || supabaseUser.user_metadata?.name || 'User',
-        };
-      }
-
-      return newProfile;
+      return {
+        nickname: savedUser.nickname || supabaseUser.user_metadata?.full_name || supabaseUser.user_metadata?.name || 'User',
+        email: savedUser.email,
+      };
     } catch (error) {
       console.warn('Error in getOrCreateUserProfile:', error);
       // Return a default profile object
       return {
         nickname: supabaseUser.user_metadata?.full_name || supabaseUser.user_metadata?.name || 'User',
+        email: supabaseUser.email || '',
       };
     }
   }

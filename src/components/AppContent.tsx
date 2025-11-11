@@ -7,6 +7,7 @@ import { OnboardingStep4Screen } from '../screens/OnboardingStep4Screen';
 import { LoadingScreen } from '../screens/LoadingScreen';
 import { ChatScreen } from '../screens/ChatScreen';
 import { useOnboarding } from '../context/OnboardingContext';
+import { isSupabaseConfigured } from '../config/supabase';
 
 export const AppContent: React.FC = () => {
   const { currentStep, formData, setCurrentStep, updateFormData } = useOnboarding();
@@ -38,9 +39,32 @@ export const AppContent: React.FC = () => {
     setCurrentStep(4); // Go to step 4 (profile details)
   };
 
-  const handleStep4Next = (data: OnboardingData) => {
+  const handleStep4Next = async (data: OnboardingData) => {
     console.log('Step 4 next called with data:', data);
     updateFormData(data);
+    
+    // Save complete onboarding data to Supabase if configured
+    if (isSupabaseConfigured()) {
+      try {
+        const { supabaseDatabaseService } = await import('../utils/supabaseDatabaseService');
+        await supabaseDatabaseService.saveOnboardingData({
+          nickname: data.nickname,
+          userEmail: data.userEmail,
+          location: data.location,
+          age: data.age,
+          profilePicture: data.profilePicture,
+          pronouns: data.pronouns,
+          boardType: data.boardType,
+          surfLevel: data.surfLevel,
+          travelExperience: data.travelExperience,
+        });
+        console.log('Complete onboarding data saved to Supabase');
+      } catch (error) {
+        console.error('Error saving onboarding data to Supabase:', error);
+        // Continue with loading screen even if Supabase save fails
+      }
+    }
+    
     setShowLoading(true); // Show loading screen
   };
 

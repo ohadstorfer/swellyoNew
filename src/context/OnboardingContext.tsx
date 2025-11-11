@@ -2,6 +2,8 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { OnboardingData } from '../screens/OnboardingStep1Screen';
 import { User, databaseService } from '../utils/databaseService';
+import { supabaseDatabaseService } from '../utils/supabaseDatabaseService';
+import { isSupabaseConfigured } from '../config/supabase';
 import { Platform } from 'react-native';
 
 interface OnboardingContextType {
@@ -117,14 +119,36 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   const saveOnboardingData = async () => {
     try {
+      // Save to local storage for step tracking
       const dataToSave = {
         currentStep,
         formData,
         user,
         timestamp: Date.now(),
       };
-      console.log('Saving data:', dataToSave);
+      console.log('Saving data to local storage:', dataToSave);
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave));
+
+      // If Supabase is configured and we have complete data, save to Supabase
+      if (isSupabaseConfigured() && formData && Object.keys(formData).length > 0) {
+        try {
+          await supabaseDatabaseService.saveOnboardingData({
+            nickname: formData.nickname,
+            userEmail: formData.userEmail,
+            location: formData.location,
+            age: formData.age,
+            profilePicture: formData.profilePicture,
+            pronouns: formData.pronouns,
+            boardType: formData.boardType,
+            surfLevel: formData.surfLevel,
+            travelExperience: formData.travelExperience,
+          });
+          console.log('Onboarding data saved to Supabase successfully');
+        } catch (supabaseError) {
+          console.warn('Failed to save to Supabase (will use local storage):', supabaseError);
+          // Continue with local storage if Supabase fails
+        }
+      }
     } catch (error) {
       console.log('Error saving onboarding data:', error);
     }
