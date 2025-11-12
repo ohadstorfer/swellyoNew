@@ -20,6 +20,7 @@ interface OnboardingStep3ScreenProps {
   onBack: () => void;
   initialData?: Partial<OnboardingData>;
   updateFormData: (data: Partial<OnboardingData>) => void;
+  isLoading?: boolean;
 }
 
 export const OnboardingStep3Screen: React.FC<OnboardingStep3ScreenProps> = ({
@@ -27,6 +28,7 @@ export const OnboardingStep3Screen: React.FC<OnboardingStep3ScreenProps> = ({
   onBack,
   initialData = {},
   updateFormData,
+  isLoading = false,
 }) => {
   const [formData, setFormData] = useState<OnboardingData>({
     nickname: initialData.nickname || '',
@@ -43,7 +45,7 @@ export const OnboardingStep3Screen: React.FC<OnboardingStep3ScreenProps> = ({
   const validateForm = (): boolean => {
     const newErrors: Partial<Record<keyof OnboardingData, string>> = {};
 
-    if (formData.travelExperience < 0) {
+    if (formData.travelExperience < 0 || isNaN(formData.travelExperience)) {
       newErrors.travelExperience = 'Please select your travel experience';
     }
 
@@ -95,7 +97,7 @@ export const OnboardingStep3Screen: React.FC<OnboardingStep3ScreenProps> = ({
                 </View>
                 
                 <TouchableOpacity onPress={handleNext} style={styles.skipButton}>
-                  <Text style={styles.skipText}>Skip</Text>
+                  {/* <Text style={styles.skipText}>Skip</Text> */}
                 </TouchableOpacity>
               </View>
               
@@ -115,31 +117,15 @@ export const OnboardingStep3Screen: React.FC<OnboardingStep3ScreenProps> = ({
                 error={errors.travelExperience}
               />
               
-              {/* Clickable areas for level navigation */}
-              <TouchableOpacity
-                style={styles.leftClickArea}
-                onPress={() => {
-                  const newValue = Math.max(0, formData.travelExperience - 1);
-                  handleTravelExperienceChange(newValue);
-                }}
-                activeOpacity={0.3}
-              />
-              <TouchableOpacity
-                style={styles.rightClickArea}
-                onPress={() => {
-                  const newValue = Math.min(3, formData.travelExperience + 1);
-                  handleTravelExperienceChange(newValue);
-                }}
-                activeOpacity={0.3}
-              />
             </View>
 
             {/* Next Button */}
             <View style={styles.buttonContainer}>
               <TouchableOpacity
-                style={styles.nextButton}
+                style={[styles.nextButton, isLoading && styles.buttonDisabled]}
                 onPress={handleNext}
                 activeOpacity={0.8}
+                disabled={isLoading}
               >
                 <LinearGradient
                   colors={['#00A2B6', '#0788B0']}
@@ -147,7 +133,9 @@ export const OnboardingStep3Screen: React.FC<OnboardingStep3ScreenProps> = ({
                   end={{ x: 1, y: 0 }}
                   style={styles.buttonGradient}
                 >
-                  <Text style={styles.buttonText}>Next</Text>
+                  <Text style={styles.buttonText}>
+                    {isLoading ? 'Loading...' : 'Next'}
+                  </Text>
                 </LinearGradient>
               </TouchableOpacity>
             </View>
@@ -243,24 +231,6 @@ const styles = StyleSheet.create({
     paddingTop: spacing.xl,
     position: 'relative',
   },
-  leftClickArea: {
-    position: 'absolute',
-    left: 0,
-    width: 142,
-    top: 0,
-    bottom: 0,
-    backgroundColor: 'transparent',
-    zIndex: 1,
-  },
-  rightClickArea: {
-    position: 'absolute',
-    right: 0,
-    width: 142,
-    top: 0,
-    bottom: 0,
-    backgroundColor: 'transparent',
-    zIndex: 1,
-  },
   buttonContainer: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.xl,
@@ -288,5 +258,8 @@ const styles = StyleSheet.create({
     lineHeight: 32,
     color: '#FFFFFF',
     textAlign: 'center',
+  },
+  buttonDisabled: {
+    opacity: 0.6,
   },
 });

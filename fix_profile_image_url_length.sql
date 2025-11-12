@@ -19,3 +19,4 @@ WHERE table_schema = 'public'
 AND table_name = 'surfers'
 AND column_name = 'profile_image_url';
 
+

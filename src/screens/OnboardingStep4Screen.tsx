@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import Svg, { Circle, Rect, Defs, Filter, FeFlood, FeColorMatrix, FeOffset, FeGaussianBlur, FeComposite, FeBlend } from 'react-native-svg';
 // Image picker will be conditionally imported
 import { Text } from '../components/Text';
 import { colors, spacing, typography } from '../styles/theme';
@@ -21,6 +22,7 @@ interface OnboardingStep4ScreenProps {
   onBack: () => void;
   initialData?: Partial<OnboardingData>;
   updateFormData: (data: Partial<OnboardingData>) => void;
+  isLoading?: boolean;
 }
 
 interface FieldProps {
@@ -53,11 +55,37 @@ const Field: React.FC<FieldProps> = ({
   );
 };
 
+// Plus Icon SVG Component
+const PlusIcon: React.FC<{ size?: number }> = ({ size = 40 }) => {
+  const scale = size / 40;
+  return (
+    <Svg width={size} height={size} viewBox="0 0 40 40" fill="none">
+      <Defs>
+        <Filter id={`filter0_d_3645_6670_${size}`} x="0" y="0" width="40" height="40" filterUnits="userSpaceOnUse">
+          <FeFlood floodOpacity="0" result="BackgroundImageFix"/>
+          <FeColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+          <FeOffset/>
+          <FeGaussianBlur stdDeviation="2"/>
+          <FeComposite in2="hardAlpha" operator="out"/>
+          <FeColorMatrix type="matrix" values="0 0 0 0 0.376471 0 0 0 0 0.396078 0 0 0 0 0.435294 0 0 0 0.45 0"/>
+          <FeBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow_3645_6670"/>
+          <FeBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow_3645_6670" result="shape"/>
+        </Filter>
+      </Defs>
+      <Circle cx="20" cy="20" r="16" fill="white" filter={`url(#filter0_d_3645_6670_${size})`}/>
+      <Circle cx="20" cy="20" r="13" fill="#00A2B6"/>
+      <Rect x="19" y="11" width="2" height="18" rx="1" fill="white"/>
+      <Rect x="29" y="19" width="2" height="18" rx="1" transform="rotate(90 29 19)" fill="white"/>
+    </Svg>
+  );
+};
+
 export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
   onNext,
   onBack,
   initialData = {},
   updateFormData,
+  isLoading = false,
 }) => {
   const [profilePicture, setProfilePicture] = useState<string | null>(
     initialData.profilePicture || null
@@ -178,9 +206,7 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
                 </View>
               )}
               <View style={styles.editIconContainer}>
-                <View style={styles.editIcon}>
-                  <Ionicons name="pencil" size={16} color="#333333" />
-                </View>
+                <PlusIcon size={40} />
               </View>
             </TouchableOpacity>
           </View>
@@ -194,7 +220,7 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
                 setName(text);
                 updateFormData({ nickname: text });
               }}
-              placeholder="Jake Glaser"
+              placeholder="Nickname*"
               width={354}
             />
 
@@ -206,7 +232,7 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
                   setLocation(text);
                   updateFormData({ location: text });
                 }}
-                placeholder="Los Angeles, CA"
+                placeholder="Where are you from?*"
                 width={212}
               />
               <Field
@@ -217,7 +243,7 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
                   const ageNum = parseInt(text) || 0;
                   updateFormData({ age: ageNum });
                 }}
-                placeholder="40"
+                placeholder="Age*"
                 width={115}
                 style={styles.ageField}
               />
@@ -231,7 +257,7 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
                   setPronouns(text);
                   updateFormData({ pronouns: text });
                 }}
-                placeholder="He/Him"
+                placeholder="Pronouns*"
                 width={212}
               />
             </View>
@@ -240,14 +266,21 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
 
         {/* Next Button */}
         <View style={styles.buttonContainer}>
-          <TouchableOpacity onPress={handleNext} activeOpacity={0.8}>
+          <TouchableOpacity 
+            onPress={handleNext} 
+            activeOpacity={0.8}
+            disabled={isLoading}
+            style={isLoading && styles.buttonDisabled}
+          >
             <LinearGradient
               colors={['#00A2B6', '#0788B0']}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 0 }}
               style={styles.gradientButton}
             >
-              <Text style={styles.buttonText}>Next</Text>
+              <Text style={styles.buttonText}>
+                {isLoading ? 'Loading...' : 'Next'}
+              </Text>
             </LinearGradient>
           </TouchableOpacity>
         </View>
@@ -324,12 +357,13 @@ const styles = StyleSheet.create({
     height: 162,
     borderRadius: 81,
     position: 'relative',
-    overflow: 'hidden',
+    overflow: 'visible',
   },
   profilePicture: {
     width: 162,
     height: 162,
     borderRadius: 81,
+    overflow: 'hidden',
   },
   profilePicturePlaceholder: {
     width: 162,
@@ -343,22 +377,17 @@ const styles = StyleSheet.create({
   },
   editIconContainer: {
     position: 'absolute',
-    bottom: 0,
-    right: 0,
+    bottom: -2,
+    right: -2,
     width: 40,
     height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.white,
-    borderWidth: 1,
-    borderColor: '#CFCFCF',
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  editIcon: {
-    width: 24,
-    height: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
+    zIndex: 10,
+    ...(Platform.OS === 'web' && {
+      // @ts-ignore
+      pointerEvents: 'none' as any,
+    }),
   },
   form: {
     gap: 24,
@@ -410,6 +439,9 @@ const styles = StyleSheet.create({
     color: colors.white,
     textAlign: 'center',
     lineHeight: 32,
+  },
+  buttonDisabled: {
+    opacity: 0.6,
   },
 });
 

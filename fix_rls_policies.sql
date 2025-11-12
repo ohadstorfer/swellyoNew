@@ -84,3 +84,4 @@ WHERE schemaname = 'public'
 AND tablename IN ('users', 'surfers')
 ORDER BY tablename, policyname;
 
+

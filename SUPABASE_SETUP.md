@@ -154,3 +154,4 @@ const subscription = supabase
 
 For more information, visit the [Supabase Documentation](https://supabase.com/docs).
 
+

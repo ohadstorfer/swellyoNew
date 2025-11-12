@@ -147,3 +147,4 @@ After updating the policies:
 
 If you need to bypass RLS temporarily for testing, you can use the service role key, but **NEVER expose this in your frontend code**. Only use it in server-side code or for admin operations.
 
+

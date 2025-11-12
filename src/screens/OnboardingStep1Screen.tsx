@@ -24,6 +24,7 @@ interface OnboardingStep1ScreenProps {
   onBack: () => void;
   initialData?: Partial<OnboardingData>;
   updateFormData: (data: Partial<OnboardingData>) => void;
+  isLoading?: boolean;
 }
 
 export interface SurfLevel {
@@ -78,6 +79,7 @@ export const OnboardingStep1Screen: React.FC<OnboardingStep1ScreenProps> = ({
   onBack,
   initialData = {},
   updateFormData,
+  isLoading = false,
 }) => {
   const [selectedBoardId, setSelectedBoardId] = useState<number>(
     initialData.boardType ?? 0
@@ -117,7 +119,7 @@ export const OnboardingStep1Screen: React.FC<OnboardingStep1ScreenProps> = ({
           <Text style={styles.stepText}>Step 1/5</Text>
 
           <TouchableOpacity onPress={handleSkip} style={styles.skipButton}>
-            <Text style={styles.skipText}>Skip</Text>
+            {/* <Text style={styles.skipText}>Skip</Text> */}
           </TouchableOpacity>
         </View>
 
@@ -158,6 +160,8 @@ export const OnboardingStep1Screen: React.FC<OnboardingStep1ScreenProps> = ({
           <TouchableOpacity 
             onPress={handleNext}
             activeOpacity={0.8}
+            disabled={isLoading}
+            style={isLoading && styles.buttonDisabled}
           >
             <LinearGradient
               colors={['#00A2B6', '#0788B0']}
@@ -165,7 +169,9 @@ export const OnboardingStep1Screen: React.FC<OnboardingStep1ScreenProps> = ({
               end={{ x: 1, y: 0 }}
               style={styles.gradientButton}
             >
-              <Text style={styles.buttonText}>Next</Text>
+              <Text style={styles.buttonText}>
+                {isLoading ? 'Loading...' : 'Next'}
+              </Text>
             </LinearGradient>
           </TouchableOpacity>
         </View>
@@ -321,5 +327,8 @@ const styles = StyleSheet.create({
     color: colors.white,
     textAlign: 'center',
     lineHeight: 24,
+  },
+  buttonDisabled: {
+    opacity: 0.6,
   },
 });

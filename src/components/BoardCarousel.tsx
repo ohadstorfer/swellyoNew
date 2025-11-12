@@ -54,9 +54,33 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
 }) => {
   const flatListRef = useRef<FlatList<BoardType>>(null);
   const [carouselItemWidth, setCarouselItemWidth] = useState(getCarouselItemWidth());
-  const [activeIndex, setActiveIndex] = useState(
-    boards.findIndex((b: BoardType) => b.id === selectedBoardId) || 0
-  );
+  const initialRealIndex = boards.findIndex((b: BoardType) => b.id === selectedBoardId) || 0;
+  
+  // Create infinite data array: [last, ...boards, first]
+  // This allows seamless looping
+  const infiniteData = React.useMemo(() => {
+    if (boards.length === 0) return [];
+    const lastBoard = boards[boards.length - 1];
+    const firstBoard = boards[0];
+    return [lastBoard, ...boards, firstBoard];
+  }, [boards]);
+
+  // Map virtual index (in infiniteData) to real index (in boards)
+  const getRealIndex = (virtualIndex: number): number => {
+    if (virtualIndex === 0) return boards.length - 1; // First item is last board
+    if (virtualIndex === infiniteData.length - 1) return 0; // Last item is first board
+    return virtualIndex - 1; // Middle items map directly
+  };
+
+  // Map real index to virtual index
+  const getVirtualIndex = (realIndex: number): number => {
+    return realIndex + 1; // +1 because first item is the duplicate last board
+  };
+
+  // Initial virtual index (accounting for the duplicate at the start)
+  const initialVirtualIndex = getVirtualIndex(initialRealIndex);
+  const [activeVirtualIndex, setActiveVirtualIndex] = useState(initialVirtualIndex);
+  const [isScrolling, setIsScrolling] = useState(false);
 
   // Update width on resize (web)
   React.useEffect(() => {
@@ -70,23 +94,52 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
   }, []);
 
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
-    if (viewableItems.length > 0 && viewableItems[0].index !== null) {
-      const index = viewableItems[0].index as number;
-      setActiveIndex(index);
-      onBoardSelect(boards[index]);
+    if (viewableItems.length > 0 && viewableItems[0].index !== null && !isScrolling) {
+      const virtualIndex = viewableItems[0].index as number;
+      setActiveVirtualIndex(virtualIndex);
+      
+      // Handle infinite loop: jump to real item when at edges
+      if (virtualIndex === 0) {
+        // At duplicate last board, jump to real last board
+        setTimeout(() => {
+          const realLastIndex = boards.length - 1;
+          const realLastVirtualIndex = getVirtualIndex(realLastIndex);
+          flatListRef.current?.scrollToIndex({ index: realLastVirtualIndex, animated: false });
+          setActiveVirtualIndex(realLastVirtualIndex);
+          onBoardSelect(boards[realLastIndex]);
+        }, 50);
+      } else if (virtualIndex === infiniteData.length - 1) {
+        // At duplicate first board, jump to real first board
+        setTimeout(() => {
+          const realFirstVirtualIndex = getVirtualIndex(0);
+          flatListRef.current?.scrollToIndex({ index: realFirstVirtualIndex, animated: false });
+          setActiveVirtualIndex(realFirstVirtualIndex);
+          onBoardSelect(boards[0]);
+        }, 50);
+      } else {
+        // Normal case: map virtual index to real index
+        const realIndex = getRealIndex(virtualIndex);
+        onBoardSelect(boards[realIndex]);
+      }
     }
   }).current;
 
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50 }).current;
 
   const renderBoard = ({ item, index }: { item: BoardType; index: number }) => {
-    const isActive = index === activeIndex;
-    const isLeft = index === activeIndex - 1;
-    const isRight = index === activeIndex + 1;
+    const isActive = index === activeVirtualIndex;
+    const isLeft = index === activeVirtualIndex - 1 || (activeVirtualIndex === 0 && index === infiniteData.length - 1);
+    const isRight = index === activeVirtualIndex + 1 || (activeVirtualIndex === infiniteData.length - 1 && index === 0);
     const isVisible = isActive || isLeft || isRight;
     
     // Don't render if not visible (optimization)
-    if (!isVisible && Math.abs(index - activeIndex) > 1) {
+    // Account for wrapping in infinite loop
+    const distance = Math.min(
+      Math.abs(index - activeVirtualIndex),
+      Math.abs(index - activeVirtualIndex + infiniteData.length),
+      Math.abs(index - activeVirtualIndex - infiniteData.length)
+    );
+    if (!isVisible && distance > 1) {
       return <View style={[styles.carouselItem, { width: carouselItemWidth }]} />;
     }
 
@@ -120,108 +173,127 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
     );
   };
 
-  const renderDots = () => (
-    <View style={styles.dotsContainer}>
-      {boards.map((_board: BoardType, index: number) => (
-        <View
-          key={index}
-          style={[styles.dot, index === activeIndex ? styles.dotActive : styles.dotInactive]}
-        />
-      ))}
-    </View>
-  );
+  const renderDots = () => {
+    const currentRealIndex = getRealIndex(activeVirtualIndex);
+    return (
+      <View style={styles.dotsContainer}>
+        {boards.map((_board: BoardType, index: number) => (
+          <View
+            key={index}
+            style={[styles.dot, index === currentRealIndex ? styles.dotActive : styles.dotInactive]}
+          />
+        ))}
+      </View>
+    );
+  };
 
   // Ensure initial index is centered
   React.useEffect(() => {
-    if (flatListRef.current && activeIndex >= 0) {
+    if (flatListRef.current && initialVirtualIndex >= 0) {
       const timeout = Platform.OS === 'web' ? 300 : 100;
       setTimeout(() => {
-        // Calculate offset to center the item (accounting for padding)
-        const offset = activeIndex * carouselItemWidth;
-        flatListRef.current?.scrollToOffset({ offset, animated: false });
+        flatListRef.current?.scrollToIndex({ index: initialVirtualIndex, animated: false });
       }, timeout);
     }
   }, []);
 
   // Keep scroll in sync with external selection
   React.useEffect(() => {
-    const newIndex = boards.findIndex((b: BoardType) => b.id === selectedBoardId);
-    if (newIndex >= 0 && newIndex !== activeIndex && flatListRef.current) {
-      setActiveIndex(newIndex);
-      const timeout = Platform.OS === 'web' ? 300 : 100;
-      setTimeout(() => {
-        const offset = newIndex * carouselItemWidth;
-        flatListRef.current?.scrollToOffset({ offset, animated: true });
-      }, timeout);
+    const newRealIndex = boards.findIndex((b: BoardType) => b.id === selectedBoardId);
+    if (newRealIndex >= 0 && flatListRef.current) {
+      const currentRealIndex = getRealIndex(activeVirtualIndex);
+      if (newRealIndex !== currentRealIndex) {
+        setIsScrolling(true);
+        const newVirtualIndex = getVirtualIndex(newRealIndex);
+        setActiveVirtualIndex(newVirtualIndex);
+        const timeout = Platform.OS === 'web' ? 300 : 100;
+        setTimeout(() => {
+          flatListRef.current?.scrollToIndex({ index: newVirtualIndex, animated: true });
+          setTimeout(() => setIsScrolling(false), 500);
+        }, timeout);
+      }
     }
-  }, [selectedBoardId, boards, activeIndex, carouselItemWidth]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedBoardId, boards, activeVirtualIndex, carouselItemWidth, infiniteData.length]);
 
   const scrollToPrevious = () => {
-    if (activeIndex > 0 && flatListRef.current) {
-      const newIndex = activeIndex - 1;
-      setActiveIndex(newIndex);
-      onBoardSelect(boards[newIndex]);
-      const offset = newIndex * carouselItemWidth;
-      flatListRef.current.scrollToOffset({ offset, animated: true });
+    if (flatListRef.current) {
+      setIsScrolling(true);
+      let newVirtualIndex = activeVirtualIndex - 1;
+      
+      // If at the first item (duplicate last), wrap to real last
+      if (newVirtualIndex < 0) {
+        newVirtualIndex = infiniteData.length - 2; // Real last board
+      }
+      
+      setActiveVirtualIndex(newVirtualIndex);
+      const realIndex = getRealIndex(newVirtualIndex);
+      onBoardSelect(boards[realIndex]);
+      flatListRef.current.scrollToIndex({ index: newVirtualIndex, animated: true });
+      setTimeout(() => setIsScrolling(false), 500);
     }
   };
 
   const scrollToNext = () => {
-    if (activeIndex < boards.length - 1 && flatListRef.current) {
-      const newIndex = activeIndex + 1;
-      setActiveIndex(newIndex);
-      onBoardSelect(boards[newIndex]);
-      const offset = newIndex * carouselItemWidth;
-      flatListRef.current.scrollToOffset({ offset, animated: true });
+    if (flatListRef.current) {
+      setIsScrolling(true);
+      let newVirtualIndex = activeVirtualIndex + 1;
+      
+      // If at the last item (duplicate first), wrap to real first
+      if (newVirtualIndex >= infiniteData.length) {
+        newVirtualIndex = 1; // Real first board
+      }
+      
+      setActiveVirtualIndex(newVirtualIndex);
+      const realIndex = getRealIndex(newVirtualIndex);
+      onBoardSelect(boards[realIndex]);
+      flatListRef.current.scrollToIndex({ index: newVirtualIndex, animated: true });
+      setTimeout(() => setIsScrolling(false), 500);
     }
   };
 
   return (
     <View style={styles.container}>
       <View style={styles.carouselWrapper}>
-        {activeIndex > 0 && (
-          <TouchableOpacity style={styles.arrowButton} onPress={scrollToPrevious} activeOpacity={0.7}>
-            <Ionicons name="chevron-back" size={24} color={colors.textDark} />
-          </TouchableOpacity>
-        )}
+        {/* Always show arrows since it's infinite */}
+        <TouchableOpacity style={styles.arrowButton} onPress={scrollToPrevious} activeOpacity={0.7}>
+          <Ionicons name="chevron-back" size={24} color={colors.textDark} />
+        </TouchableOpacity>
 
         <FlatList
           ref={flatListRef}
-          data={boards}
+          data={infiniteData}
           renderItem={({ item, index }) => renderBoard({ item, index })}
-          keyExtractor={(item) => item.id.toString()}
+          keyExtractor={(item, index) => `board-${item.id}-${index}`}
           horizontal
           pagingEnabled={false}
           showsHorizontalScrollIndicator={false}
           onViewableItemsChanged={onViewableItemsChanged}
           viewabilityConfig={viewabilityConfig}
-          initialScrollIndex={activeIndex >= 0 ? activeIndex : 0}
+          initialScrollIndex={initialVirtualIndex >= 0 ? initialVirtualIndex : 1}
           getItemLayout={(_, index) => ({ length: carouselItemWidth, offset: carouselItemWidth * index, index })}
           snapToAlignment="center"
           snapToInterval={carouselItemWidth}
           decelerationRate="fast"
           contentContainerStyle={styles.carouselContent}
-          // Add padding to center the first and last items
           contentInsetAdjustmentBehavior="never"
           onScrollToIndexFailed={(info) => {
             const wait = new Promise(resolve => setTimeout(resolve, 500));
             wait.then(() => {
-              flatListRef.current?.scrollToOffset({ offset: info.index * carouselItemWidth, animated: false });
+              flatListRef.current?.scrollToIndex({ index: info.index, animated: false });
             });
           }}
           {...(Platform.OS === 'web' && { style: { overflowX: 'hidden' as any } as any })}
         />
 
-        {activeIndex < boards.length - 1 && (
-          <TouchableOpacity style={[styles.arrowButton, styles.arrowButtonRight]} onPress={scrollToNext} activeOpacity={0.7}>
-            <Ionicons name="chevron-forward" size={24} color={colors.textDark} />
-          </TouchableOpacity>
-        )}
+        <TouchableOpacity style={[styles.arrowButton, styles.arrowButtonRight]} onPress={scrollToNext} activeOpacity={0.7}>
+          <Ionicons name="chevron-forward" size={24} color={colors.textDark} />
+        </TouchableOpacity>
       </View>
 
       <View style={styles.labelContainer}>
         {renderDots()}
-        <Text style={styles.boardName}>{boards[activeIndex]?.name || ''}</Text>
+        <Text style={styles.boardName}>{boards[getRealIndex(activeVirtualIndex)]?.name || ''}</Text>
       </View>
     </View>
   );

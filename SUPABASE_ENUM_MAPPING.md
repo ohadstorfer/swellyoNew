@@ -70,3 +70,4 @@ ORDER BY t.typname, e.enumsortorder;
 
 Once you provide the enum values, I'll update `src/utils/supabaseDatabaseService.ts` with the correct mappings.
 
+

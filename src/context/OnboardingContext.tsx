@@ -15,6 +15,7 @@ interface OnboardingContextType {
   setUser: (user: User | null) => void;
   resetOnboarding: () => void;
   isComplete: boolean;
+  saveStepToSupabase: (stepData: Partial<OnboardingData>) => Promise<void>;
 }
 
 const OnboardingContext = createContext<OnboardingContextType | undefined>(undefined);
@@ -45,10 +46,11 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     initializeDatabase();
   }, []);
 
-  // Save data whenever it changes
+  // Save to local storage whenever step or formData changes (for step tracking and recovery)
+  // Note: Supabase saving happens only when user presses "Next" button
   useEffect(() => {
     if (isLoaded) {
-      saveOnboardingData();
+      saveToLocalStorage();
     }
   }, [currentStep, formData, isLoaded]);
 
@@ -117,9 +119,10 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }
   };
 
-  const saveOnboardingData = async () => {
+  // Save to local storage only (for step tracking and recovery)
+  // Supabase saving is handled explicitly when user presses "Next" button
+  const saveToLocalStorage = async () => {
     try {
-      // Save to local storage for step tracking
       const dataToSave = {
         currentStep,
         formData,
@@ -128,29 +131,38 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       };
       console.log('Saving data to local storage:', dataToSave);
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave));
-
-      // If Supabase is configured and we have complete data, save to Supabase
-      if (isSupabaseConfigured() && formData && Object.keys(formData).length > 0) {
-        try {
-          await supabaseDatabaseService.saveOnboardingData({
-            nickname: formData.nickname,
-            userEmail: formData.userEmail,
-            location: formData.location,
-            age: formData.age,
-            profilePicture: formData.profilePicture,
-            pronouns: formData.pronouns,
-            boardType: formData.boardType,
-            surfLevel: formData.surfLevel,
-            travelExperience: formData.travelExperience,
-          });
-          console.log('Onboarding data saved to Supabase successfully');
-        } catch (supabaseError) {
-          console.warn('Failed to save to Supabase (will use local storage):', supabaseError);
-          // Continue with local storage if Supabase fails
-        }
-      }
     } catch (error) {
-      console.log('Error saving onboarding data:', error);
+      console.log('Error saving onboarding data to local storage:', error);
+    }
+  };
+
+  // Method to save current step data to Supabase (called explicitly on "Next" button)
+  const saveStepToSupabase = async (stepData: Partial<OnboardingData>) => {
+    if (!isSupabaseConfigured()) {
+      console.log('Supabase not configured, skipping save');
+      return;
+    }
+
+    try {
+      // Merge step data with existing formData
+      const dataToSave = { ...formData, ...stepData };
+      
+      // Save to Supabase - this will update/create user and surfer records
+      await supabaseDatabaseService.saveOnboardingData({
+        nickname: dataToSave.nickname,
+        userEmail: dataToSave.userEmail,
+        location: dataToSave.location,
+        age: dataToSave.age,
+        profilePicture: dataToSave.profilePicture,
+        pronouns: dataToSave.pronouns,
+        boardType: dataToSave.boardType,
+        surfLevel: dataToSave.surfLevel,
+        travelExperience: dataToSave.travelExperience,
+      });
+      console.log('Step data saved to Supabase successfully');
+    } catch (supabaseError) {
+      console.warn('Failed to save step data to Supabase:', supabaseError);
+      // Don't throw - allow user to continue even if Supabase save fails
     }
   };
 
@@ -186,6 +198,7 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     setUser,
     resetOnboarding,
     isComplete,
+    saveStepToSupabase,
   };
 
   return (

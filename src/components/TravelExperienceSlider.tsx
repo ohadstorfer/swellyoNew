@@ -6,6 +6,7 @@ import {
   Animated,
   Image,
   Platform,
+  PanResponder,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { colors, spacing, typography } from '../styles/theme';
@@ -51,6 +52,22 @@ const TRAVEL_LEVELS: TravelExperienceLevel[] = [
   },
 ];
 
+// Helper function to map number of trips to category level (0-3)
+const getCategoryFromTrips = (trips: number): number => {
+  if (trips <= 3) return 0; // New Nomad
+  if (trips <= 9) return 1; // Rising Voyager
+  if (trips <= 19) return 2; // Wave Hunter
+  return 3; // Chicken Joe (20+)
+};
+
+// Helper function to format trips display
+const formatTrips = (trips: number): string => {
+  if (trips === 0) return '0 trips';
+  if (trips === 1) return '1 trip';
+  if (trips >= 20) return '20+ trips';
+  return `${trips} trips`;
+};
+
 interface TravelExperienceSliderProps {
   value: number;
   onValueChange: (value: number) => void;
@@ -61,78 +78,146 @@ const BAR_WIDTH = 330;
 const BAR_HEIGHT = 4;
 const KNOB_SIZE = 28;
 
+const MAX_TRIPS = 20; // Maximum value for the slider (20+)
+
 export const TravelExperienceSlider: React.FC<TravelExperienceSliderProps> = ({
   value,
   onValueChange,
   error,
 }) => {
-  // Ensure initial value is valid (not NaN)
-  const safeInitialValue = isNaN(value) || value < 0 || value > 3 ? 0 : value;
-  const initialLevel = Math.max(0, Math.min(3, Math.round(safeInitialValue)));
+  // Ensure initial value is valid (number of trips, 0-20+)
+  const safeInitialValue = isNaN(value) || value < 0 ? 0 : Math.min(value, MAX_TRIPS);
+  const initialTrips = Math.max(0, Math.round(safeInitialValue));
+  const initialCategory = getCategoryFromTrips(initialTrips);
   
-  const [currentLevel, setCurrentLevel] = useState<number>(initialLevel);
+  const [currentTrips, setCurrentTrips] = useState<number>(initialTrips);
   
   const knobPosition = useRef(
-    new Animated.Value((initialLevel / 3) * BAR_WIDTH)
+    new Animated.Value((initialTrips / MAX_TRIPS) * BAR_WIDTH)
   ).current;
 
   const imageOpacity = useRef(
     TRAVEL_LEVELS.map((_, index) => 
-      new Animated.Value(index === initialLevel ? 1 : 0)
+      new Animated.Value(index === initialCategory ? 1 : 0)
     )
   ).current;
 
-  const updateLevel = React.useCallback((newLevel: number, shouldNotify: boolean = true) => {
-    // Validate that newLevel is a valid number
-    if (isNaN(newLevel) || newLevel < 0 || newLevel > 3) {
-      console.warn('Invalid level in updateLevel:', newLevel);
+  // Track the initial position when dragging starts
+  const dragStartPosition = useRef<number>((initialTrips / MAX_TRIPS) * BAR_WIDTH);
+  const barContainerRef = useRef<View>(null);
+  // Track the last trips value during drag to ensure we use the correct value on release
+  const lastDragTrips = useRef<number>(initialTrips);
+  // Track if any actual movement occurred during the pan gesture
+  const didPanMove = useRef(false);
+
+  const updateTrips = React.useCallback((newTrips: number, shouldNotify: boolean = true, skipAnimation: boolean = false) => {
+    // Validate that newTrips is a valid number
+    if (isNaN(newTrips) || newTrips < 0) {
+      console.warn('Invalid trips in updateTrips:', newTrips);
       return;
     }
     
-    const clampedLevel = Math.max(0, Math.min(3, Math.round(newLevel)));
-    setCurrentLevel(clampedLevel);
+    const clampedTrips = Math.max(0, Math.min(MAX_TRIPS, Math.round(newTrips)));
+    setCurrentTrips(clampedTrips);
+    
+    // Track the value we're setting internally
+    lastInternalValue.current = clampedTrips;
+    
+    // Get the category for this number of trips
+    const category = getCategoryFromTrips(clampedTrips);
     
     if (shouldNotify) {
-      // Ensure we're passing a valid number to onValueChange
-      const validLevel = isNaN(clampedLevel) ? 0 : clampedLevel;
-      onValueChange(validLevel);
+      // Pass the actual number of trips to onValueChange
+      const validTrips = isNaN(clampedTrips) ? 0 : clampedTrips;
+      onValueChange(validTrips);
     }
 
-    // Animate knob position
-    Animated.spring(knobPosition, {
-      toValue: (clampedLevel / 3) * BAR_WIDTH,
-      useNativeDriver: false,
-      tension: 50,
-      friction: 7,
-    }).start();
+    const targetPosition = (clampedTrips / MAX_TRIPS) * BAR_WIDTH;
 
-    // Animate image transitions
-    // Note: useNativeDriver: false for opacity to avoid warnings in some Expo environments
-    // Opacity animations are still performant without native driver
+    if (skipAnimation) {
+      // For dragging, update position immediately without animation
+      knobPosition.setValue(targetPosition);
+    } else {
+      // Animate knob position
+      Animated.spring(knobPosition, {
+        toValue: targetPosition,
+        useNativeDriver: false,
+        tension: 50,
+        friction: 7,
+      }).start();
+    }
+
+    // Animate image transitions based on category
     TRAVEL_LEVELS.forEach((_, index) => {
       Animated.timing(imageOpacity[index], {
-        toValue: index === clampedLevel ? 1 : 0,
+        toValue: index === category ? 1 : 0,
         duration: 300,
         useNativeDriver: false,
       }).start();
     });
   }, [knobPosition, imageOpacity, onValueChange]);
 
-  // Sync with external value changes
+  // Track if we're currently dragging to prevent sync conflicts
+  // Using both ref (for PanResponder) and state (for UI updates)
+  const isDraggingRef = useRef(false);
+  const [isDragging, setIsDragging] = useState(false);
+  // Track the last value we set internally to prevent sync conflicts
+  const lastInternalValue = useRef<number>(initialTrips);
+  // Track if we just finished dragging (to prevent immediate sync and press events)
+  // Using both ref (for PanResponder) and state (for TouchableOpacity disabled prop)
+  const justFinishedDraggingRef = useRef(false);
+  const [justFinishedDragging, setJustFinishedDragging] = useState(false);
+  
+  // Sync refs with state so PanResponder can access them
   React.useEffect(() => {
-    // Validate value before using it
-    if (isNaN(value) || value < 0 || value > 3) {
+    isDraggingRef.current = isDragging;
+  }, [isDragging]);
+  
+  React.useEffect(() => {
+    justFinishedDraggingRef.current = justFinishedDragging;
+  }, [justFinishedDragging]);
+
+  // Sync with external value changes (but not while dragging or immediately after)
+  React.useEffect(() => {
+    if (isDraggingRef.current) {
+      return; // Don't sync while user is dragging
+    }
+    
+    // If we just finished dragging, check if the external value matches what we set
+    if (justFinishedDragging) {
+      const roundedValue = Math.max(0, Math.min(MAX_TRIPS, Math.round(value)));
+      // If the external value matches what we just set, ignore it (it's from our own update)
+      if (roundedValue === lastInternalValue.current) {
+        setJustFinishedDragging(false); // Reset flag
+        return;
+      }
+      // Otherwise, wait a bit before syncing to avoid race conditions
+      const timeoutId = setTimeout(() => {
+        setJustFinishedDragging(false);
+      }, 100);
+      return () => clearTimeout(timeoutId);
+    }
+    
+    // Validate value before using it (value is now number of trips, 0-20+)
+    if (isNaN(value) || value < 0) {
       console.warn('Invalid value prop in TravelExperienceSlider:', value);
       return;
     }
     
-    const newLevel = Math.max(0, Math.min(3, Math.round(value)));
-    if (newLevel !== currentLevel) {
-      updateLevel(newLevel, false);
+    const newTrips = Math.max(0, Math.min(MAX_TRIPS, Math.round(value)));
+    // Only sync if the value is actually different and not from our own update
+    if (newTrips !== currentTrips && newTrips !== lastInternalValue.current) {
+      updateTrips(newTrips, false);
     }
-  }, [value, currentLevel, updateLevel]);
+  }, [value, currentTrips, updateTrips]);
 
   const handleBarPress = (event: any) => {
+    // Prevent bar press from firing immediately after drag release
+    // This happens when user releases mouse/pointer while still over the slider
+    if (justFinishedDraggingRef.current || isDraggingRef.current) {
+      return;
+    }
+    
     let locationX: number | undefined;
     const nativeEvent = event.nativeEvent || {};
     
@@ -167,21 +252,115 @@ export const TravelExperienceSlider: React.FC<TravelExperienceSliderProps> = ({
     // Clamp locationX to valid range [0, BAR_WIDTH]
     const clampedX = Math.max(0, Math.min(BAR_WIDTH, locationX));
     
-    // Calculate level (0-3) based on position
-    const calculatedLevel = Math.round((clampedX / BAR_WIDTH) * 3);
+    // Calculate number of trips (0-100) based on position
+    const calculatedTrips = Math.round((clampedX / BAR_WIDTH) * MAX_TRIPS);
     
-    // Clamp level to valid range [0, 3]
-    const newLevel = Math.max(0, Math.min(3, calculatedLevel));
+    // Clamp trips to valid range [0, MAX_TRIPS]
+    const newTrips = Math.max(0, Math.min(MAX_TRIPS, calculatedTrips));
     
-    // Only update if the level is valid
-    if (!isNaN(newLevel) && newLevel >= 0 && newLevel <= 3) {
-      updateLevel(newLevel);
+    // Only update if the trips value is valid
+    if (!isNaN(newTrips) && newTrips >= 0 && newTrips <= MAX_TRIPS) {
+      updateTrips(newTrips);
     }
   };
 
-  // Ensure currentLevel is within bounds and get the level data
-  const safeCurrentLevel = Math.max(0, Math.min(3, currentLevel));
-  const currentLevelData = TRAVEL_LEVELS[safeCurrentLevel] || TRAVEL_LEVELS[0];
+  // PanResponder for drag functionality
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onStartShouldSetPanResponderCapture: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponderCapture: () => true,
+      onPanResponderGrant: (evt) => {
+        // Mark that we're dragging
+        isDraggingRef.current = true;
+        setIsDragging(true);
+        // Reset movement tracking
+        didPanMove.current = false;
+        // Store the current position when drag starts
+        knobPosition.stopAnimation((value) => {
+          dragStartPosition.current = value;
+        });
+        // Initialize the tracked trips value to current value
+        lastDragTrips.current = currentTrips;
+      },
+      onPanResponderMove: (evt, gestureState) => {
+        // Mark that actual movement occurred
+        if (Math.abs(gestureState.dx) > 2 || Math.abs(gestureState.dy) > 2) {
+          didPanMove.current = true;
+        }
+        
+        // Calculate new position based on drag
+        let newPosition: number;
+        
+        if (Platform.OS === 'web') {
+          // On web, calculate position relative to the bar container
+          if (barContainerRef.current) {
+            try {
+              const node = barContainerRef.current as any;
+              if (node && node.getBoundingClientRect) {
+                const rect = node.getBoundingClientRect();
+                const nativeEvent = evt.nativeEvent as any;
+                const clientX = nativeEvent.clientX || nativeEvent.touches?.[0]?.clientX;
+                if (clientX !== undefined) {
+                  newPosition = clientX - rect.left;
+                } else {
+                  newPosition = dragStartPosition.current + gestureState.dx;
+                }
+              } else {
+                newPosition = dragStartPosition.current + gestureState.dx;
+              }
+            } catch (e) {
+              newPosition = dragStartPosition.current + gestureState.dx;
+            }
+          } else {
+            newPosition = dragStartPosition.current + gestureState.dx;
+          }
+        } else {
+          // On native, use dx directly
+          newPosition = dragStartPosition.current + gestureState.dx;
+        }
+        
+        // Clamp position to valid range [0, BAR_WIDTH]
+        const clampedPosition = Math.max(0, Math.min(BAR_WIDTH, newPosition));
+        
+        // Calculate trips from position
+        const calculatedTrips = Math.round((clampedPosition / BAR_WIDTH) * MAX_TRIPS);
+        const newTrips = Math.max(0, Math.min(MAX_TRIPS, calculatedTrips));
+        
+        // Update immediately during drag (skip animation)
+        lastDragTrips.current = newTrips; // Track the value during drag
+        updateTrips(newTrips, true, true);
+      },
+      onPanResponderRelease: () => {
+        // Use the last tracked trips value from the drag
+        // This ensures we use the exact value where the user released
+        const finalTrips = lastDragTrips.current;
+        
+        // Mark that dragging has ended
+        isDraggingRef.current = false;
+        setIsDragging(false);
+        
+        // If actual movement occurred, prevent press events
+        if (didPanMove.current) {
+          justFinishedDraggingRef.current = true;
+          setJustFinishedDragging(true);
+          // Reset the flag after a delay to allow normal taps again
+          setTimeout(() => {
+            justFinishedDraggingRef.current = false;
+            setJustFinishedDragging(false);
+          }, 300); // Longer delay if actual drag occurred
+        }
+        
+        // Update to final position
+        updateTrips(finalTrips, true, false); // Animate to final position
+      },
+    })
+  ).current;
+
+  // Get the category based on current number of trips
+  const currentCategory = getCategoryFromTrips(currentTrips);
+  const currentLevelData = TRAVEL_LEVELS[currentCategory] || TRAVEL_LEVELS[0];
 
   return (
     <View style={styles.container}>
@@ -196,7 +375,7 @@ export const TravelExperienceSlider: React.FC<TravelExperienceSliderProps> = ({
               styles.imageWrapper,
               {
                 opacity: imageOpacity[index],
-                zIndex: index === safeCurrentLevel ? 10 : 1,
+                zIndex: index === currentCategory ? 10 : 1,
               },
             ]}
           >
@@ -212,35 +391,41 @@ export const TravelExperienceSlider: React.FC<TravelExperienceSliderProps> = ({
       {/* Level Info */}
       <View style={styles.levelInfo}>
         <Text style={styles.levelTitle}>{currentLevelData.title}</Text>
-        <Text style={styles.levelSubtitle}>{currentLevelData.subtitle}</Text>
+        <Text style={styles.levelSubtitle}>{formatTrips(currentTrips)}</Text>
       </View>
 
       {/* Level Bar */}
-      <View style={styles.barContainer}>
-        <TouchableOpacity
-          style={styles.barTouchable}
-          onPress={handleBarPress}
-          activeOpacity={1}
-        >
-          <View style={styles.barBackground}>
-            <Animated.View
-              style={[
-                styles.barFill,
-                {
-                  width: knobPosition,
-                },
-              ]}
-            >
-              <LinearGradient
-                colors={['#00A2B6', '#0788B0']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                style={StyleSheet.absoluteFill}
-              />
-            </Animated.View>
-          </View>
+      <View 
+        ref={barContainerRef}
+        style={styles.barContainer}
+      >
+        <View style={styles.barTouchable}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            onPress={handleBarPress}
+            activeOpacity={1}
+            disabled={isDragging || justFinishedDragging}
+          >
+            <View style={styles.barBackground}>
+              <Animated.View
+                style={[
+                  styles.barFill,
+                  {
+                    width: knobPosition,
+                  },
+                ]}
+              >
+                <LinearGradient
+                  colors={['#00A2B6', '#0788B0']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={StyleSheet.absoluteFill}
+                />
+              </Animated.View>
+            </View>
+          </TouchableOpacity>
 
-          {/* Knob */}
+          {/* Knob - Draggable (outside TouchableOpacity, always receives events) */}
           <Animated.View
             style={[
               styles.knob,
@@ -251,10 +436,11 @@ export const TravelExperienceSlider: React.FC<TravelExperienceSliderProps> = ({
                 }),
               },
             ]}
+            {...panResponder.panHandlers}
           >
             <View style={styles.knobInner} />
           </Animated.View>
-        </TouchableOpacity>
+        </View>
       </View>
 
       {error && <Text style={styles.errorText}>{error}</Text>}

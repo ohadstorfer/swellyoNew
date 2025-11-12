@@ -178,3 +178,4 @@ To fully migrate:
 - [Supabase Google OAuth Guide](https://supabase.com/docs/guides/auth/social-login/auth-google)
 - [Expo AuthSession Documentation](https://docs.expo.dev/guides/authentication/#google)
 
+

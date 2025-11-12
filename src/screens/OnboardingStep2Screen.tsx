@@ -32,6 +32,7 @@ interface OnboardingStep2ScreenProps {
   onBack: () => void;
   initialData?: Partial<OnboardingData>;
   updateFormData: (data: Partial<OnboardingData>) => void;
+  isLoading?: boolean;
 }
 
 // Helper function to get video URL based on name
@@ -123,6 +124,7 @@ export const OnboardingStep2Screen: React.FC<OnboardingStep2ScreenProps> = ({
   onBack,
   initialData = {},
   updateFormData,
+  isLoading = false,
 }) => {
   const [selectedVideoId, setSelectedVideoId] = useState<number>(
     typeof initialData.surfLevel === 'number' && initialData.surfLevel >= 0 ? initialData.surfLevel : 0
@@ -262,6 +264,8 @@ export const OnboardingStep2Screen: React.FC<OnboardingStep2ScreenProps> = ({
           <TouchableOpacity 
             onPress={handleNext}
             activeOpacity={0.8}
+            disabled={isLoading}
+            style={isLoading && styles.buttonDisabled}
           >
             <LinearGradient
               colors={['#00A2B6', '#0788B0']}
@@ -269,7 +273,9 @@ export const OnboardingStep2Screen: React.FC<OnboardingStep2ScreenProps> = ({
               end={{ x: 1, y: 0 }}
               style={styles.gradientButton}
             >
-              <Text style={styles.buttonText}>Next</Text>
+              <Text style={styles.buttonText}>
+                {isLoading ? 'Loading...' : 'Next'}
+              </Text>
             </LinearGradient>
           </TouchableOpacity>
         </View>
@@ -462,6 +468,9 @@ const styles = StyleSheet.create({
     color: colors.white || '#FFF',
     textAlign: 'center',
     lineHeight: 24,
+  },
+  buttonDisabled: {
+    opacity: 0.6,
   },
 });
 

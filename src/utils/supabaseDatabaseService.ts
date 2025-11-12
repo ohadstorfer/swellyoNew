@@ -306,19 +306,24 @@ class SupabaseDatabaseService {
         location: onboardingData.location, // Will be used for surfer.country_from
       });
 
-      // Convert travelExperience number to enum string if needed
-      // NOTE: You may need to adjust these enum values to match your Supabase enum definition
-      // App travel experience levels: 0=New Nomad, 1=Rising Voyager, 2=Wave Hunter, 3=Chicken Joe
+      // Convert travelExperience (number of trips) to enum string
+      // Map number of trips to category:
+      // 0-3 trips: new_nomad
+      // 4-9 trips: rising_voyager
+      // 10-19 trips: wave_hunter
+      // 20+ trips: chicken_joe
       let travelExperienceEnum: string | undefined;
       if (onboardingData.travelExperience !== undefined) {
-        // Adjust these mappings to match your actual Supabase travel_experience enum values
-        const travelExpMap: { [key: number]: string } = {
-          0: 'new_nomad',       // New Nomad
-          1: 'rising_voyager',  // Rising Voyager
-          2: 'wave_hunter',     // Wave Hunter
-          3: 'chicken_joe',     // Chicken Joe
-        };
-        travelExperienceEnum = travelExpMap[onboardingData.travelExperience];
+        const trips = onboardingData.travelExperience;
+        if (trips <= 3) {
+          travelExperienceEnum = 'new_nomad';
+        } else if (trips <= 9) {
+          travelExperienceEnum = 'rising_voyager';
+        } else if (trips <= 19) {
+          travelExperienceEnum = 'wave_hunter';
+        } else {
+          travelExperienceEnum = 'chicken_joe'; // 20+
+        }
       }
 
       // Save surfer data (all profile and preference data goes here)

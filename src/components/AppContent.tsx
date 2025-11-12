@@ -7,11 +7,14 @@ import { OnboardingStep4Screen } from '../screens/OnboardingStep4Screen';
 import { LoadingScreen } from '../screens/LoadingScreen';
 import { ChatScreen } from '../screens/ChatScreen';
 import { useOnboarding } from '../context/OnboardingContext';
-import { isSupabaseConfigured } from '../config/supabase';
 
 export const AppContent: React.FC = () => {
-  const { currentStep, formData, setCurrentStep, updateFormData } = useOnboarding();
+  const { currentStep, formData, setCurrentStep, updateFormData, saveStepToSupabase } = useOnboarding();
   const [showLoading, setShowLoading] = useState(false);
+  const [isSavingStep1, setIsSavingStep1] = useState(false);
+  const [isSavingStep2, setIsSavingStep2] = useState(false);
+  const [isSavingStep3, setIsSavingStep3] = useState(false);
+  const [isSavingStep4, setIsSavingStep4] = useState(false);
 
   const handleGetStarted = () => {
     setCurrentStep(1);
@@ -21,51 +24,111 @@ export const AppContent: React.FC = () => {
     setCurrentStep(1); // Go directly to chat screen
   };
 
-  const handleStep1Next = (data: OnboardingData) => {
+  const handleStep1Next = async (data: OnboardingData) => {
+    if (isSavingStep1) return; // Prevent multiple clicks
+    
     console.log('Step 1 next called with data:', data);
-    updateFormData(data);
-    setCurrentStep(2); // Go to step 2 (surf level selection)
+    setIsSavingStep1(true);
+    
+    try {
+      updateFormData(data);
+      
+      // Save Step 1 data to Supabase (board type)
+      await saveStepToSupabase({
+        boardType: data.boardType,
+      });
+      
+      setCurrentStep(2); // Go to step 2 (surf level selection)
+    } catch (error) {
+      console.error('Error in Step 1 Next:', error);
+      // Still allow navigation even if save fails
+      setCurrentStep(2);
+    } finally {
+      setIsSavingStep1(false);
+    }
   };
 
-  const handleStep2Next = (data: OnboardingData) => {
+  const handleStep2Next = async (data: OnboardingData) => {
+    if (isSavingStep2) return; // Prevent multiple clicks
+    
     console.log('Step 2 next called with data:', data);
-    updateFormData(data);
-    setCurrentStep(3); // Go to step 3 (travel experience)
+    setIsSavingStep2(true);
+    
+    try {
+      updateFormData(data);
+      
+      // Save Step 2 data to Supabase (surf level)
+      await saveStepToSupabase({
+        boardType: data.boardType,
+        surfLevel: data.surfLevel,
+      });
+      
+      setCurrentStep(3); // Go to step 3 (travel experience)
+    } catch (error) {
+      console.error('Error in Step 2 Next:', error);
+      // Still allow navigation even if save fails
+      setCurrentStep(3);
+    } finally {
+      setIsSavingStep2(false);
+    }
   };
 
-  const handleStep3Next = (data: OnboardingData) => {
+  const handleStep3Next = async (data: OnboardingData) => {
+    if (isSavingStep3) return; // Prevent multiple clicks
+    
     console.log('Step 3 next called with data:', data);
-    updateFormData(data);
-    setCurrentStep(4); // Go to step 4 (profile details)
+    setIsSavingStep3(true);
+    
+    try {
+      updateFormData(data);
+      
+      // Save Step 3 data to Supabase (travel experience)
+      await saveStepToSupabase({
+        boardType: data.boardType,
+        surfLevel: data.surfLevel,
+        travelExperience: data.travelExperience,
+      });
+      
+      setCurrentStep(4); // Go to step 4 (profile details)
+    } catch (error) {
+      console.error('Error in Step 3 Next:', error);
+      // Still allow navigation even if save fails
+      setCurrentStep(4);
+    } finally {
+      setIsSavingStep3(false);
+    }
   };
 
   const handleStep4Next = async (data: OnboardingData) => {
+    if (isSavingStep4) return; // Prevent multiple clicks
+    
     console.log('Step 4 next called with data:', data);
-    updateFormData(data);
+    setIsSavingStep4(true);
     
-    // Save complete onboarding data to Supabase if configured
-    if (isSupabaseConfigured()) {
-      try {
-        const { supabaseDatabaseService } = await import('../utils/supabaseDatabaseService');
-        await supabaseDatabaseService.saveOnboardingData({
-          nickname: data.nickname,
-          userEmail: data.userEmail,
-          location: data.location,
-          age: data.age,
-          profilePicture: data.profilePicture,
-          pronouns: data.pronouns,
-          boardType: data.boardType,
-          surfLevel: data.surfLevel,
-          travelExperience: data.travelExperience,
-        });
-        console.log('Complete onboarding data saved to Supabase');
-      } catch (error) {
-        console.error('Error saving onboarding data to Supabase:', error);
-        // Continue with loading screen even if Supabase save fails
-      }
+    try {
+      updateFormData(data);
+      
+      // Save complete onboarding data to Supabase (all profile details)
+      await saveStepToSupabase({
+        nickname: data.nickname,
+        userEmail: data.userEmail,
+        location: data.location,
+        age: data.age,
+        profilePicture: data.profilePicture,
+        pronouns: data.pronouns,
+        boardType: data.boardType,
+        surfLevel: data.surfLevel,
+        travelExperience: data.travelExperience,
+      });
+      
+      setShowLoading(true); // Show loading screen
+    } catch (error) {
+      console.error('Error in Step 4 Next:', error);
+      // Still allow navigation even if save fails
+      setShowLoading(true);
+    } finally {
+      setIsSavingStep4(false);
     }
-    
-    setShowLoading(true); // Show loading screen
   };
 
   const handleLoadingComplete = () => {
@@ -103,6 +166,7 @@ export const AppContent: React.FC = () => {
         onBack={handleStep1Back}
         initialData={formData}
         updateFormData={updateFormData}
+        isLoading={isSavingStep1}
       />
     );
   }
@@ -116,6 +180,7 @@ export const AppContent: React.FC = () => {
         onBack={handleStep2Back}
         initialData={formData}
         updateFormData={updateFormData}
+        isLoading={isSavingStep2}
       />
     );
   }
@@ -129,6 +194,7 @@ export const AppContent: React.FC = () => {
         onBack={handleStep3Back}
         initialData={formData}
         updateFormData={updateFormData}
+        isLoading={isSavingStep3}
       />
     );
   }
@@ -152,6 +218,7 @@ export const AppContent: React.FC = () => {
         onBack={handleStep4Back}
         initialData={formData}
         updateFormData={updateFormData}
+        isLoading={isSavingStep4}
       />
     );
   }
