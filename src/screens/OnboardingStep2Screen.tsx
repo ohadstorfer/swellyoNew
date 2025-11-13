@@ -35,88 +35,71 @@ interface OnboardingStep2ScreenProps {
   isLoading?: boolean;
 }
 
-// Helper function to get video URL based on name
-const getVideoUrl = (name: string): string => {
-  // Map video names to file paths
-  const videoMap: { [key: string]: string } = {
-    'Dipping My Toes': '/surf level/Dipping My Toes.mp4',
-    'Cruising Around': '/surf level/Cruising Around.mp4',
-    'Cross Stepping': '/surf level/CrossStepping.mp4',
-    'Hanging Toes': '/surf level/Hanging Toes.mp4',
-    'Charging': '/surf level/Charging.mp4',
-  };
-  
-  const path = videoMap[name] || '';
-  // Use the utility to get platform-specific URL
-  return path ? getVideoUrlUtil(path) : '';
+// Board-specific video definitions
+// Each board type has its own set of videos in the specified order
+const BOARD_VIDEO_DEFINITIONS: { [boardType: number]: Array<{ name: string; videoFileName: string; thumbnailFileName: string }> } = {
+  // Shortboard (id: 0): Dipping My Toes, Cruising Around, Snapping, Charging
+  0: [
+    { name: 'Dipping My Toes', videoFileName: 'Dipping My Toes.mp4', thumbnailFileName: 'Dipping My Toes thumbnail.PNG' },
+    { name: 'Cruising Around', videoFileName: 'Cruising Around.mp4', thumbnailFileName: 'Cruising Around thumbnail.PNG' },
+    { name: 'Snapping', videoFileName: 'Snapping.mp4', thumbnailFileName: 'Snapping thumbnail.PNG' },
+    { name: 'Charging', videoFileName: 'Charging.mp4', thumbnailFileName: 'Charging thumbnail.PNG' },
+  ],
+  // Midlength (id: 1): Dipping My Toes, Cruising Around, Trimming Lines, Carving Turns
+  1: [
+    { name: 'Dipping My Toes', videoFileName: 'Dipping My Toes.mp4', thumbnailFileName: 'Dipping My Toes thumbnail.PNG' },
+    { name: 'Cruising Around', videoFileName: 'Cruising Around.mp4', thumbnailFileName: 'Cruising Around thumbnail.PNG' },
+    { name: 'Trimming Lines', videoFileName: 'Trimming Lines.mp4', thumbnailFileName: 'Trimming Lines thumbnail.PNG' },
+    { name: 'Carving Turns', videoFileName: 'Carving Turns.mp4', thumbnailFileName: 'Carving Turns thumbnail.PNG' },
+  ],
+  // Longboard (id: 2): Dipping My Toes, Cruising Around, Cross Stepping, Hanging Toes
+  2: [
+    { name: 'Dipping My Toes', videoFileName: 'Dipping My Toes.mp4', thumbnailFileName: 'Dipping My Toes thumbnail.PNG' },
+    { name: 'Cruising Around', videoFileName: 'Cruising Around.mp4', thumbnailFileName: 'Cruising Around thumbnail.PNG' },
+    { name: 'Cross Stepping', videoFileName: 'CrossStepping.mp4', thumbnailFileName: 'CrossStepping thumbnail.PNG' },
+    { name: 'Hanging Toes', videoFileName: 'Hanging Toes.mp4', thumbnailFileName: 'Hanging Toes thumbnail.PNG' },
+  ],
+  // Softtop (id: 3): Skip step 2 - no videos
 };
 
-// Helper function to get thumbnail URL
-// Uses actual thumbnail image files from public/surf level/
-const getThumbnailUrl = (name: string): string => {
-  // Map video names to thumbnail image file paths
-  // Files are named: "{name} thumbnail.PNG"
-  const thumbnailMap: { [key: string]: string } = {
-    'Dipping My Toes': '/surf level/Dipping My Toes thumbnail.PNG',
-    'Cruising Around': '/surf level/Cruising Around thumbnail.PNG',
-    'Cross Stepping': '/surf level/CrossStepping thumbnail.PNG',
-    'Hanging Toes': '/surf level/Hanging Toes thumbnail.PNG',
-    'Charging': '/surf level/Charging thumbnail.PNG',
+// Helper function to get board folder name from board type
+const getBoardFolder = (boardType: number): string => {
+  const folderMap: { [key: number]: string } = {
+    0: 'shortboard',
+    1: 'midlength',
+    2: 'longboard',
+    3: 'softtop', // Not used, but for completeness
   };
-  
-  const thumbnailPath = thumbnailMap[name];
-  if (!thumbnailPath) {
-    // Fallback to video URL if thumbnail not found
-    return getVideoUrl(name);
+  return folderMap[boardType] || 'shortboard';
+};
+
+// Function to get videos with resolved URLs for a specific board type
+const getSurfLevelVideos = (boardType: number): VideoLevel[] => {
+  const boardVideos = BOARD_VIDEO_DEFINITIONS[boardType];
+  if (!boardVideos) {
+    console.warn(`No videos defined for board type ${boardType}, using shortboard as fallback`);
+    return getSurfLevelVideos(0); // Fallback to shortboard
   }
+
+  const boardFolder = getBoardFolder(boardType);
   
-  // Use the image utility to get platform-specific URL for thumbnails
-  return getImageUrl(thumbnailPath);
-};
-
-// Video level definitions with paths (not resolved URLs)
-// URLs will be resolved dynamically when component mounts
-const SURF_LEVEL_DEFINITIONS = [
-  {
-    id: 0,
-    name: 'Dipping My Toes',
-    videoPath: '/surf level/Dipping My Toes.mp4',
-    thumbnailPath: '/surf level/Dipping My Toes thumbnail.PNG',
-  },
-  {
-    id: 1,
-    name: 'Cruising Around',
-    videoPath: '/surf level/Cruising Around.mp4',
-    thumbnailPath: '/surf level/Cruising Around thumbnail.PNG',
-  },
-  {
-    id: 2,
-    name: 'Cross Stepping',
-    videoPath: '/surf level/CrossStepping.mp4',
-    thumbnailPath: '/surf level/CrossStepping thumbnail.PNG',
-  },
-  {
-    id: 3,
-    name: 'Hanging Toes',
-    videoPath: '/surf level/Hanging Toes.mp4',
-    thumbnailPath: '/surf level/Hanging Toes thumbnail.PNG',
-  },
-  {
-    id: 4,
-    name: 'Charging',
-    videoPath: '/surf level/Charging.mp4',
-    thumbnailPath: '/surf level/Charging thumbnail.PNG',
-  },
-];
-
-// Function to get videos with resolved URLs (called when component mounts)
-const getSurfLevelVideos = (): VideoLevel[] => {
-  return SURF_LEVEL_DEFINITIONS.map(def => ({
-    id: def.id,
-    name: def.name,
-    thumbnailUrl: getImageUrl(def.thumbnailPath),
-    videoUrl: getVideoUrlUtil(def.videoPath),
-  }));
+  return boardVideos
+    .filter(video => {
+      // Filter out videos that don't exist (e.g., Snapping if file doesn't exist)
+      // We'll include all videos and let the component handle missing files gracefully
+      return true;
+    })
+    .map((video, index) => {
+      const videoPath = `/surf level/${boardFolder}/${video.videoFileName}`;
+      const thumbnailPath = `/surf level/${boardFolder}/${video.thumbnailFileName}`;
+      
+      return {
+        id: index, // Use index as ID to maintain order
+        name: video.name,
+        thumbnailUrl: getImageUrl(thumbnailPath),
+        videoUrl: getVideoUrlUtil(videoPath),
+      };
+    });
 };
 
 export const OnboardingStep2Screen: React.FC<OnboardingStep2ScreenProps> = ({
@@ -126,12 +109,39 @@ export const OnboardingStep2Screen: React.FC<OnboardingStep2ScreenProps> = ({
   updateFormData,
   isLoading = false,
 }) => {
-  const [selectedVideoId, setSelectedVideoId] = useState<number>(
-    typeof initialData.surfLevel === 'number' && initialData.surfLevel >= 0 ? initialData.surfLevel : 0
-  );
+  // Get board type from initial data (default to 0 if not set)
+  const boardType = initialData.boardType ?? 0;
 
-  // Get videos with resolved URLs (called when component mounts, when Constants should be available)
-  const surfLevelVideos = React.useMemo(() => getSurfLevelVideos(), []);
+  // Get videos with resolved URLs for the selected board type
+  const surfLevelVideos = React.useMemo(() => getSurfLevelVideos(boardType), [boardType]);
+
+  // Initialize selectedVideoId, and reset it when board type changes to ensure it's valid
+  const [selectedVideoId, setSelectedVideoId] = useState<number>(() => {
+    const initialSurfLevel = typeof initialData.surfLevel === 'number' && initialData.surfLevel >= 0 
+      ? initialData.surfLevel 
+      : 0;
+    // Ensure the initial value is valid for the current board's videos
+    const videos = getSurfLevelVideos(boardType);
+    if (videos.length > 0 && videos.some(v => v.id === initialSurfLevel)) {
+      return initialSurfLevel;
+    }
+    return 0; // Default to first video if invalid
+  });
+
+  // Reset selectedVideoId when board type changes to ensure it's valid for the new board's videos
+  React.useEffect(() => {
+    if (surfLevelVideos.length > 0) {
+      // Check if current selectedVideoId is valid for the new board's videos
+      const isValid = surfLevelVideos.some(v => v.id === selectedVideoId);
+      if (!isValid) {
+        // Reset to first video (id: 0) if current selection is invalid
+        const newSelectedId = 0;
+        setSelectedVideoId(newSelectedId);
+        updateFormData({ surfLevel: newSelectedId });
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [boardType]); // Only run when board type changes - surfLevelVideos is derived from boardType
 
   const handleVideoSelect = (video: VideoLevel) => {
     setSelectedVideoId(video.id);

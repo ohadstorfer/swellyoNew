@@ -167,52 +167,69 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
   selectedVideoId,
   onVideoSelect,
 }) => {
-  type ReorderedVideoItem = { item: VideoLevel; originalIndex: number };
-  const flatListRef = useRef<FlatList<ReorderedVideoItem>>(null);
+  const flatListRef = useRef<FlatList<VideoLevel>>(null);
   const [containerWidth, setContainerWidth] = useState(0);
   const fadeAnim = useRef(new Animated.Value(1)).current;
-
-  // Reorder videos array so selected item is in the middle
-  const getReorderedVideos = React.useMemo((): ReorderedVideoItem[] => {
-    const selectedIndex = videos.findIndex(v => v.id === selectedVideoId);
-    if (selectedIndex < 0) {
-      // If not found, return original order
-      return videos.map((item, idx) => ({ item, originalIndex: idx }));
-    }
-    
-    // Create array with selected item in the middle
-    const middleIndex = Math.floor(videos.length / 2);
-    const reordered: ReorderedVideoItem[] = [];
-    
-    // We want: reordered[middleIndex] = videos[selectedIndex]
-    // Calculate how many positions to shift: we need selectedIndex to end up at middleIndex
-    // If selectedIndex is 0 and middleIndex is 2, we need to shift right by 2
-    // So: reordered[i] = videos[(i - (middleIndex - selectedIndex) + videos.length) % videos.length]
-    const shift = middleIndex - selectedIndex;
-    
-    for (let i = 0; i < videos.length; i++) {
-      // Calculate which original index should be at position i in reordered array
-      const originalIdx = (i - shift + videos.length) % videos.length;
-      reordered.push({
-        item: videos[originalIdx],
-        originalIndex: originalIdx,
-      });
-    }
-    
-    // Verify: reordered[middleIndex] should be videos[selectedIndex]
-    // reordered[middleIndex] = videos[(middleIndex - shift + videos.length) % videos.length]
-    // = videos[(middleIndex - (middleIndex - selectedIndex) + videos.length) % videos.length]
-    // = videos[(selectedIndex + videos.length) % videos.length] = videos[selectedIndex] ✓
-    
-    return reordered;
-  }, [videos, selectedVideoId]);
-
-  const middleIndex = Math.floor(videos.length / 2);
+  const thumbnailFadeAnim = useRef(new Animated.Value(1)).current;
   
   // Get the selected video directly from selectedVideoId
   const selectedVideo = React.useMemo(() => {
     return videos.find(v => v.id === selectedVideoId) || videos[0];
   }, [videos, selectedVideoId]);
+
+  // Reorder videos array so selected item is in the middle
+  // On desktop: [2ndPrev, prev, selected, next, 2ndNext] (5 items)
+  // On mobile: [prev, selected, next] (3 items - hide 2nd prev/next)
+  const reorderedVideos = React.useMemo(() => {
+    if (videos.length === 0) return [];
+    
+    const selectedIndex = videos.findIndex(v => v.id === selectedVideoId);
+    if (selectedIndex < 0) return videos;
+    
+    const reordered: VideoLevel[] = [];
+    
+    // Helper function to get index with wrapping
+    const getWrappedIndex = (index: number, length: number): number => {
+      if (index < 0) return length + index;
+      if (index >= length) return index - length;
+      return index;
+    };
+    
+    // On mobile, only show 3 items (prev, selected, next)
+    // On desktop, show 5 items (2ndPrev, prev, selected, next, 2ndNext)
+    const showOuterItems = true;
+    
+    if (showOuterItems) {
+      // Desktop: Show 5 items
+      // Get 2nd previous item (wrapping around if needed)
+      const secondPrevIndex = getWrappedIndex(selectedIndex - 2, videos.length);
+      reordered.push(videos[secondPrevIndex]);
+    }
+    
+    // Get previous item (or last if selected is first)
+    const prevIndex = getWrappedIndex(selectedIndex - 1, videos.length);
+    reordered.push(videos[prevIndex]);
+    
+    // Add selected item in the middle
+    reordered.push(videos[selectedIndex]);
+    
+    // Get next item (or first if selected is last)
+    const nextIndex = getWrappedIndex(selectedIndex + 1, videos.length);
+    reordered.push(videos[nextIndex]);
+    
+    if (showOuterItems) {
+      // Desktop: Show 2nd next item
+      // Get 2nd next item (wrapping around if needed)
+      const secondNextIndex = getWrappedIndex(selectedIndex + 2, videos.length);
+      reordered.push(videos[secondNextIndex]);
+    }
+    
+    return reordered;
+  }, [videos, selectedVideoId]);
+
+  // The selected item is always at index 2 in the reordered array (middle of 5 items)
+  // Array structure: [0: 2ndPrev, 1: Prev, 2: Selected, 3: Next, 4: 2ndNext]
+  const centerIndex = 2;
 
   // Create video player for main video
   const mainVideoPlayer = useVideoPlayer(
@@ -267,86 +284,104 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
     }).start();
   }, [selectedVideoId, selectedVideo.videoUrl]);
 
-  // Scroll to middle index when videos are reordered
-  React.useEffect(() => {
-    if (flatListRef.current && getReorderedVideos.length > 0 && containerWidth > 0) {
-      const scrollToCenter = () => {
-        const middleIdx = Math.floor(getReorderedVideos.length / 2);
-        const baseWidth = 98;
-        const activeWidth = 119;
-        const gap = 12;
-        
-        // Calculate offset to center the middle item (which is the selected one)
-        // The middle item is at index middleIdx in the reordered array
-        // We need to calculate its position and center it
-        let offset = 0;
-        
-        // Calculate offset for items before the middle one
-        for (let i = 0; i < middleIdx; i++) {
-          offset += baseWidth + gap;
-        }
-        
-        // Add half of the middle item's width (it's active, so use activeWidth)
-        // Then subtract half of container width to center it
-        const itemCenter = offset + (activeWidth / 2);
-        const containerCenter = containerWidth / 2;
-        const scrollOffset = itemCenter - containerCenter;
-        
-        // Account for padding
-        const paddingLeft = isDesktopWeb()
-          ? Math.max((containerWidth - activeWidth) / 2, spacing.lg)
-          : Math.max((containerWidth - activeWidth) / 2, spacing.md);
-        const finalOffset = scrollOffset + paddingLeft;
-        
-        try {
-          flatListRef.current?.scrollToIndex({
-            index: middleIdx,
-            animated: true,
-            viewPosition: 0.5,
-          });
-        } catch (error) {
-          // Fallback: use scrollToOffset with calculated position
-          flatListRef.current?.scrollToOffset({
-            offset: Math.max(0, finalOffset),
-            animated: true,
-          });
-        }
-      };
-      
-      // Use requestAnimationFrame for web to ensure smooth scrolling
-      if (Platform.OS === 'web') {
-        if (typeof window !== 'undefined' && window.requestAnimationFrame) {
-          window.requestAnimationFrame(() => {
-            setTimeout(scrollToCenter, 50);
-          });
-        } else {
-          setTimeout(scrollToCenter, 50);
-        }
-      } else {
-        setTimeout(scrollToCenter, 50);
-      }
-    }
-  }, [selectedVideoId, videos, containerWidth, getReorderedVideos]);
+  // Fade animation for thumbnails when selection changes
+  useEffect(() => {
+    // Fade out then in (same as main video)
+    thumbnailFadeAnim.setValue(0);
+    Animated.timing(thumbnailFadeAnim, {
+      toValue: 1,
+      duration: 900,
+      easing: Easing.ease,
+      useNativeDriver: false,
+    }).start();
+  }, [selectedVideoId]);
 
-  const renderThumbnail = ({ item, index }: { item: ReorderedVideoItem; index: number }) => {
-    // The middle item should be the selected one - verify by checking if it matches selectedVideoId
-    const isActive = item.item.id === selectedVideoId;
+  // Scroll to center whenever selection changes
+  React.useEffect(() => {
+    if (!flatListRef.current || reorderedVideos.length === 0 || containerWidth === 0) return;
+
+    const scrollToCenter = () => {
+      try {
+        // Scroll to centerIndex (2 on desktop, 1 on mobile)
+        flatListRef.current?.scrollToIndex({
+          index: centerIndex,
+          animated: true,
+          viewPosition: 0.5, // Center the item
+        });
+      } catch (error) {
+        // Retry after a delay if it fails
+        setTimeout(() => {
+          try {
+            flatListRef.current?.scrollToIndex({
+              index: centerIndex,
+              animated: true,
+              viewPosition: 0.5,
+            });
+          } catch (e) {
+            // Final fallback: manual offset calculation
+            const itemWidth = isDesktopWeb() ? 119 + 12 : 119 + 4; // Desktop: 131px, Mobile: 123px
+            const padding = Math.max((containerWidth - 119) / 2, spacing.md);
+            const itemCenter = (centerIndex * itemWidth) + (itemWidth / 2);
+            const containerCenter = containerWidth / 2;
+            const scrollOffset = itemCenter - containerCenter;
+            
+            try {
+              flatListRef.current?.scrollToOffset({
+                offset: Math.max(0, scrollOffset + padding),
+                animated: true,
+              });
+            } catch (finalError) {
+              console.warn('Failed to scroll to center:', finalError);
+            }
+          }
+        }, 100);
+      }
+    };
+
+    // Wait for layout to be ready
+    if (Platform.OS === 'web') {
+      if (typeof window !== 'undefined' && window.requestAnimationFrame) {
+        window.requestAnimationFrame(() => {
+          setTimeout(scrollToCenter, 50);
+        });
+      } else {
+        setTimeout(scrollToCenter, 100);
+      }
+    } else {
+      setTimeout(scrollToCenter, 100);
+    }
+  }, [selectedVideoId, reorderedVideos, containerWidth, centerIndex]);
+
+  const renderThumbnail = ({ item, index }: { item: VideoLevel; index: number }) => {
+    const isActive = index === centerIndex;
+    // On desktop, index 0 and 4 are outer items (2nd prev and 2nd next)
+    // On mobile, these don't exist (only 3 items shown)
+    const isOuter = isDesktopWeb() && (index === 0 || index === 4);
     
     return (
-      <AnimatedThumbnail
-        item={item.item}
-        isActive={isActive}
-        selectedVideoId={selectedVideoId}
-        videos={videos}
-        onPress={() => {
-          // Update selection - this will trigger reordering via getReorderedVideos
-          onVideoSelect(item.item);
-        }}
-        baseStyle={styles.thumbnail}
-        activeStyle={styles.thumbnailActive}
-        imageStyle={styles.thumbnailImage}
-        borderStyle={styles.activeBorder}
-      />
+      <Animated.View
+        style={[
+          styles.thumbnailCarouselItem,
+          isOuter && styles.thumbnailCarouselItemOuter,
+          {
+            opacity: thumbnailFadeAnim,
+          },
+        ]}
+      >
+        <AnimatedThumbnail
+          item={item}
+          isActive={isActive}
+          selectedVideoId={selectedVideoId}
+          videos={videos}
+          onPress={() => {
+            onVideoSelect(item);
+          }}
+          baseStyle={styles.thumbnail}
+          activeStyle={styles.thumbnailActive}
+          imageStyle={styles.thumbnailImage}
+          borderStyle={styles.activeBorder}
+        />
+      </Animated.View>
     );
   };
 
@@ -445,82 +480,54 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
         >
           <FlatList
             ref={flatListRef}
-            data={getReorderedVideos}
+            data={reorderedVideos}
             renderItem={renderThumbnail}
-            keyExtractor={(item, index) => `video-${item.originalIndex}-${index}`}
+            keyExtractor={(item, index) => `video-${item.id}-${index}`}
             horizontal
             showsHorizontalScrollIndicator={false}
-            initialScrollIndex={Math.floor(getReorderedVideos.length / 2)}
-            getItemLayout={(_, index) => {
-              const baseWidth = 98;
-              const gap = 12;
-              const activeWidth = 119;
-              // Calculate offset: sum of all previous items
-              let offset = 0;
-              for (let i = 0; i < index; i++) {
-                // Check if this is the active item (middle index)
-                const isActive = i === Math.floor(getReorderedVideos.length / 2);
-                offset += (isActive ? activeWidth : baseWidth) + gap;
-              }
-              // Current item width
-              const isActive = index === Math.floor(getReorderedVideos.length / 2);
-              const currentWidth = isActive ? activeWidth : baseWidth;
-              return {
-                length: currentWidth + gap,
-                offset: offset,
-                index,
-              };
-            }}
             snapToAlignment="center"
-            snapToInterval={Platform.OS === 'web' ? undefined : 110}
+            snapToInterval={isDesktopWeb() ? 119 + 12 : 119 + 4} // Active width + gap for snapping (12px desktop, 4px mobile)
             decelerationRate="fast"
             pagingEnabled={false}
             scrollEnabled={true}
+            initialScrollIndex={centerIndex}
+            getItemLayout={(_, index) => {
+              // Use consistent item width for layout calculations
+              // Desktop: 119px + 12px gap = 131px, Mobile: 119px + 4px gap = 123px
+              const itemWidth = isDesktopWeb() ? 119 + 12 : 119 + 4;
+              return {
+                length: itemWidth,
+                offset: itemWidth * index,
+                index,
+              };
+            }}
             contentContainerStyle={[
               styles.thumbnailsList,
               containerWidth > 0 && {
-                // Add padding to allow items to scroll to center
-                // Padding should be (containerWidth - activeItemWidth) / 2
-                paddingLeft: isDesktopWeb()
-                  ? Math.max((containerWidth - 119) / 2, spacing.lg)
-                  : Math.max((containerWidth - 119) / 2, spacing.md),
-                paddingRight: isDesktopWeb()
-                  ? Math.max((containerWidth - 119) / 2, spacing.lg)
-                  : Math.max((containerWidth - 119) / 2, spacing.md),
+                // Add padding to center the widest thumbnail (119px active)
+                // This ensures the selected thumbnail (at index 1) is centered
+                paddingHorizontal: Math.max((containerWidth - 119) / 2, spacing.md),
               },
             ]}
-             onScrollToIndexFailed={(info) => {
-               const wait = new Promise(resolve => setTimeout(resolve, 100));
-               wait.then(() => {
-                 const baseWidth = 98;
-                 const activeWidth = 119;
-                 const gap = 12;
-                 const middleIdx = Math.floor(getReorderedVideos.length / 2);
-                 
-                 // Calculate offset to center the middle item
-                 let offset = 0;
-                 for (let i = 0; i < middleIdx; i++) {
-                   offset += baseWidth + gap;
-                 }
-                 
-                 const itemCenter = offset + (activeWidth / 2);
-                 const containerCenter = containerWidth > 0 ? containerWidth / 2 : 0;
-                 const scrollOffset = itemCenter - containerCenter;
-                 
-                 flatListRef.current?.scrollToOffset({
-                   offset: Math.max(0, scrollOffset),
-                   animated: true,
-                 });
-               });
-             }}
-            bounces={false}
-            alwaysBounceHorizontal={false}
+            onScrollToIndexFailed={(info) => {
+              // Retry after layout is ready
+              setTimeout(() => {
+                try {
+                  flatListRef.current?.scrollToIndex({
+                    index: centerIndex,
+                    animated: true,
+                    viewPosition: 0.5,
+                  });
+                } catch (e) {
+                  console.warn('Failed to scroll to center after retry:', e);
+                }
+              }, 100);
+            }}
             {...(Platform.OS === 'web' && { 
               style: { 
                 overflow: 'hidden',
                 WebkitOverflowScrolling: 'touch' as any,
               } as any,
-              // Enable smooth scrolling on web
               scrollEventThrottle: 16,
             })}
           />
@@ -649,6 +656,25 @@ const styles = StyleSheet.create({
       minHeight: 80, // Ensure full height is visible
     }),
   },
+  thumbnailCarouselItem: {
+    // Mobile: smaller gap (4px), Desktop: larger gap (12px)
+    width: isDesktopWeb() ? 119 + 12 : 119 , // Active thumbnail width + gap
+    height: 80,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingRight: 0, // No extra padding, gap is handled by container width
+  },
+  thumbnailCarouselItemOuter: {
+    // Outer items (2nd prev and 2nd next) should be slightly visible
+    // Only on desktop web
+    opacity: 0.3, // Make them semi-transparent
+    transform: [{ scale: 0.85 }], // Slightly smaller
+    ...(isDesktopWeb() && {
+      // On desktop, reduce the gap between outer items and adjacent items
+      // This makes the gap between 2nd prev/next and prev/next equal to the gap between prev/next and center
+      marginHorizontal: -20,// Negative margin to reduce gap (half of the 12px gap)
+    }),
+  },
   thumbnailsList: {
     alignItems: 'center',
     justifyContent: 'flex-start',
@@ -661,12 +687,14 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     overflow: 'hidden',
     position: 'relative',
-    marginRight: 12,
+    marginRight: 0, // Gap is handled by container width
+    alignSelf: 'center', // Center within the 131px container
   },
   thumbnailActive: {
     width: 119,
     height: 80,
     overflow: 'visible', // Allow border to be visible
+    alignSelf: 'center', // Center within the 131px container
   },
   thumbnailImage: {
     width: '100%',

@@ -38,11 +38,23 @@ export const AppContent: React.FC = () => {
         boardType: data.boardType,
       });
       
-      setCurrentStep(2); // Go to step 2 (surf level selection)
+      // Soft Top (id: 3) skips step 2 and goes directly to step 3
+      if (data.boardType === 3) {
+        // Set a default surf level for Soft Top (level 3 as specified)
+        updateFormData({ surfLevel: 3 });
+        setCurrentStep(3); // Go directly to step 3 (travel experience)
+      } else {
+        setCurrentStep(2); // Go to step 2 (surf level selection)
+      }
     } catch (error) {
       console.error('Error in Step 1 Next:', error);
       // Still allow navigation even if save fails
-      setCurrentStep(2);
+      if (data.boardType === 3) {
+        updateFormData({ surfLevel: 3 });
+        setCurrentStep(3);
+      } else {
+        setCurrentStep(2);
+      }
     } finally {
       setIsSavingStep1(false);
     }
@@ -150,7 +162,12 @@ export const AppContent: React.FC = () => {
   };
 
   const handleStep3Back = () => {
-    setCurrentStep(2); // Go back to step 2
+    // If Soft Top (id: 3) was selected, go back to step 1 (since step 2 was skipped)
+    if (formData.boardType === 3) {
+      setCurrentStep(1); // Go back to step 1
+    } else {
+      setCurrentStep(2); // Go back to step 2
+    }
   };
 
   const handleStep4Back = () => {

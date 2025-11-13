@@ -46,10 +46,10 @@ let supabaseClient: SupabaseClient | null = null;
 if (SUPABASE_URL && SUPABASE_ANON_KEY && validateUrl(SUPABASE_URL)) {
   try {
     supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      auth: {
-        storage: AsyncStorage,
-        autoRefreshToken: true,
-        persistSession: true,
+  auth: {
+    storage: AsyncStorage,
+    autoRefreshToken: true,
+    persistSession: true,
         detectSessionInUrl: Platform.OS === 'web',
         flowType: 'pkce', // Recommended for mobile apps
       },
@@ -72,9 +72,9 @@ if (SUPABASE_URL && SUPABASE_ANON_KEY && validateUrl(SUPABASE_URL)) {
         storage: AsyncStorage,
         autoRefreshToken: false,
         persistSession: false,
-        detectSessionInUrl: false,
-      },
-    });
+    detectSessionInUrl: false,
+  },
+});
   } catch {
     // If even the placeholder fails, we'll handle it in the code
   }
