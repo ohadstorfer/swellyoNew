@@ -1,0 +1,267 @@
+import React, { useState } from 'react';
+import {
+  View,
+  Modal,
+  StyleSheet,
+  TextInput,
+  TouchableOpacity,
+  FlatList,
+  Image,
+  ActivityIndicator,
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { Text } from './Text';
+import { colors, spacing, typography, borderRadius } from '../styles/theme';
+import { supabase } from '../config/supabase';
+
+interface User {
+  user_id: string;
+  name: string;
+  profile_image_url: string | null;
+  email: string;
+}
+
+interface UserSearchModalProps {
+  visible: boolean;
+  onClose: () => void;
+  onUserSelect: (userId: string) => void;
+}
+
+export const UserSearchModal: React.FC<UserSearchModalProps> = ({
+  visible,
+  onClose,
+  onUserSelect,
+}) => {
+  const [searchQuery, setSearchQuery] = useState('');
+  const [users, setUsers] = useState<User[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const searchUsers = async (query: string) => {
+    if (!query.trim()) {
+      setUsers([]);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const { data: currentUser } = await supabase.auth.getUser();
+      
+      const { data, error } = await supabase
+        .from('surfers')
+        .select('user_id, name, profile_image_url')
+        .ilike('name', `%${query}%`)
+        .neq('user_id', currentUser?.user?.id || '')
+        .limit(20);
+
+      if (error) throw error;
+
+      // Get emails for these users
+      const userIds = (data || []).map(u => u.user_id);
+      const { data: usersData } = await supabase
+        .from('users')
+        .select('id, email')
+        .in('id', userIds);
+
+      const usersWithEmail = (data || []).map(surfer => ({
+        ...surfer,
+        email: usersData?.find(u => u.id === surfer.user_id)?.email || '',
+      }));
+
+      setUsers(usersWithEmail);
+    } catch (error) {
+      console.error('Error searching users:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSearch = (text: string) => {
+    setSearchQuery(text);
+    searchUsers(text);
+  };
+
+  const handleUserPress = (userId: string) => {
+    onUserSelect(userId);
+    setSearchQuery('');
+    setUsers([]);
+    onClose();
+  };
+
+  return (
+    <Modal
+      visible={visible}
+      animationType="slide"
+      transparent={true}
+      onRequestClose={onClose}
+    >
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContent}>
+          {/* Header */}
+          <View style={styles.header}>
+            <Text style={styles.headerTitle}>Search Users</Text>
+            <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+              <Ionicons name="close" size={24} color={colors.textDark} />
+            </TouchableOpacity>
+          </View>
+
+          {/* Search Input */}
+          <View style={styles.searchContainer}>
+            <Ionicons name="search" size={20} color={colors.textSecondary} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search by name..."
+              value={searchQuery}
+              onChangeText={handleSearch}
+              autoFocus
+              placeholderTextColor={colors.textSecondary}
+            />
+          </View>
+
+          {/* Results */}
+          {loading ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color={colors.brandTeal} />
+            </View>
+          ) : (
+            <FlatList
+              data={users}
+              keyExtractor={(item) => item.user_id}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={styles.userItem}
+                  onPress={() => handleUserPress(item.user_id)}
+                >
+                  {item.profile_image_url ? (
+                    <Image
+                      source={{ uri: item.profile_image_url }}
+                      style={styles.avatar}
+                    />
+                  ) : (
+                    <View style={[styles.avatar, styles.avatarPlaceholder]}>
+                      <Text style={styles.avatarPlaceholderText}>
+                        {item.name.charAt(0).toUpperCase()}
+                      </Text>
+                    </View>
+                  )}
+                  <View style={styles.userInfo}>
+                    <Text style={styles.userName}>{item.name}</Text>
+                    <Text style={styles.userEmail}>{item.email}</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
+                </TouchableOpacity>
+              )}
+              ListEmptyComponent={
+                searchQuery.trim() ? (
+                  <View style={styles.emptyContainer}>
+                    <Text style={styles.emptyText}>No users found</Text>
+                  </View>
+                ) : (
+                  <View style={styles.emptyContainer}>
+                    <Text style={styles.emptyText}>Start typing to search users</Text>
+                  </View>
+                )
+              }
+            />
+          )}
+        </View>
+      </View>
+    </Modal>
+  );
+};
+
+const styles = StyleSheet.create({
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: colors.white,
+    borderTopLeftRadius: borderRadius.large,
+    borderTopRightRadius: borderRadius.large,
+    height: '80%',
+    paddingTop: spacing.md,
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: spacing.md,
+    marginBottom: spacing.md,
+  },
+  headerTitle: {
+    ...typography.titleLarge,
+    color: colors.textDark,
+  },
+  closeButton: {
+    padding: spacing.xs,
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.backgroundGray,
+    borderRadius: borderRadius.medium,
+    paddingHorizontal: spacing.md,
+    marginHorizontal: spacing.md,
+    marginBottom: spacing.md,
+    height: 48,
+  },
+  searchInput: {
+    flex: 1,
+    marginLeft: spacing.sm,
+    ...typography.body,
+    color: colors.textDark,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  userItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.backgroundGray,
+  },
+  avatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    marginRight: spacing.md,
+  },
+  avatarPlaceholder: {
+    backgroundColor: colors.brandTeal,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  avatarPlaceholderText: {
+    color: colors.white,
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  userInfo: {
+    flex: 1,
+  },
+  userName: {
+    ...typography.body,
+    fontWeight: '600',
+    color: colors.textDark,
+    marginBottom: 2,
+  },
+  userEmail: {
+    ...typography.bodySmall,
+    color: colors.textSecondary,
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingTop: spacing.xxl,
+  },
+  emptyText: {
+    ...typography.body,
+    color: colors.textSecondary,
+  },
+});

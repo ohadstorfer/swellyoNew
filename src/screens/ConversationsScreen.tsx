@@ -17,6 +17,8 @@ import { supabaseAuthService } from '../services/auth/supabaseAuthService';
 import { authService } from '../services/auth/authService';
 import { useOnboarding } from '../context/OnboardingContext';
 import { getImageUrl } from '../services/media/imageService';
+import { UserSearchModal } from '../components/UserSearchModal';
+import { DirectMessageScreen } from './DirectMessageScreen';
 
 interface ConversationsScreenProps {
   onConversationPress?: (conversationId: string) => void;
@@ -36,6 +38,12 @@ export default function ConversationsScreen({
   const [userName, setUserName] = useState('User');
   const [userAvatar, setUserAvatar] = useState<string | null>(null);
   const [showMenu, setShowMenu] = useState(false);
+  const [showSearchModal, setShowSearchModal] = useState(false);
+  const [selectedConversation, setSelectedConversation] = useState<{
+    id: string;
+    otherUserName: string;
+    otherUserAvatar: string | null;
+  } | null>(null);
 
   useEffect(() => {
     loadConversations();
@@ -105,6 +113,33 @@ export default function ConversationsScreen({
 
   const getConversationType = (conv: Conversation): 'advisor' | 'seeker' | 'both' | null => {
     return conv.metadata?.type || null;
+  };
+
+  const handleUserSelect = async (userId: string) => {
+    try {
+      // Create or get existing conversation with this user
+      const conversation = await messagingService.createDirectConversation(userId);
+      
+      // Load the conversation details
+      const conversations = await messagingService.getConversations();
+      const foundConv = conversations.find(c => c.id === conversation.id);
+      
+      if (foundConv && foundConv.other_user) {
+        setSelectedConversation({
+          id: conversation.id,
+          otherUserName: foundConv.other_user.name || 'User',
+          otherUserAvatar: foundConv.other_user.profile_image_url || null,
+        });
+      }
+    } catch (error) {
+      console.error('Error creating conversation:', error);
+      Alert.alert('Error', 'Failed to start conversation');
+    }
+  };
+
+  const handleBackFromChat = () => {
+    setSelectedConversation(null);
+    loadConversations();
   };
 
   const handleLogout = async () => {
@@ -318,6 +353,17 @@ export default function ConversationsScreen({
 
   const filteredConversations = getFilteredConversations();
 
+  if (selectedConversation) {
+    return (
+      <DirectMessageScreen
+        conversationId={selectedConversation.id}
+        otherUserName={selectedConversation.otherUserName}
+        otherUserAvatar={selectedConversation.otherUserAvatar}
+        onBack={handleBackFromChat}
+      />
+    );
+  }
+
   return (
     <View style={styles.container}>
       {/* Header */}
@@ -336,7 +382,10 @@ export default function ConversationsScreen({
         </View>
 
         <View style={styles.headerRight}>
-          <TouchableOpacity style={styles.headerButton}>
+          <TouchableOpacity 
+            style={styles.headerButton}
+            onPress={() => setShowSearchModal(true)}
+          >
             <Ionicons name="search" size={24} color="#EEEEEE" />
           </TouchableOpacity>
           <TouchableOpacity 
@@ -424,6 +473,13 @@ export default function ConversationsScreen({
           </TouchableOpacity>
         </Modal>
       )}
+
+      {/* User Search Modal */}
+      <UserSearchModal
+        visible={showSearchModal}
+        onClose={() => setShowSearchModal(false)}
+        onUserSelect={handleUserSelect}
+      />
     </View>
   );
 }
