@@ -227,6 +227,7 @@ export const AppContent: React.FC = () => {
     );
   }
 
+  
   // Show onboarding step 3 if we're on step 3
   if (currentStep === 3) {
     console.log('Rendering OnboardingStep3Screen with initialData:', formData);
