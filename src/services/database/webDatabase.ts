@@ -1,4 +1,4 @@
-import { User } from '../services/database/databaseService';
+import { User } from './databaseService';
 
 class WebDatabaseService {
   private readonly STORAGE_KEY = 'swellyo_users';

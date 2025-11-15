@@ -1,9 +1,9 @@
-import { databaseService, User } from './databaseService';
+import { databaseService, User } from '../database/databaseService';
 import { Platform } from 'react-native';
 import * as AuthSession from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
 import { supabaseAuthService } from './supabaseAuthService';
-import { isSupabaseConfigured } from '../config/supabase';
+import { isSupabaseConfigured } from '../../config/supabase';
 
 // Complete the web browser authentication session
 WebBrowser.maybeCompleteAuthSession();
@@ -307,3 +307,4 @@ class AuthService {
 }
 
 export const authService = new AuthService();
+

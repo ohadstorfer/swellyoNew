@@ -1,7 +1,7 @@
 import { Platform } from 'react-native';
-import { databaseService, User } from './databaseService';
+import { databaseService, User } from '../database/databaseService';
 import { supabaseAuthService } from './supabaseAuthService';
-import { isSupabaseConfigured } from '../config/supabase';
+import { isSupabaseConfigured } from '../../config/supabase';
 
 export interface GoogleUser {
   id: string;
@@ -205,3 +205,4 @@ class SimpleAuthService {
 }
 
 export const simpleAuthService = new SimpleAuthService();
+

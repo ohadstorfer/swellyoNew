@@ -14,12 +14,12 @@ import { Button } from '../components/Button';
 import { Text } from '../components/Text';
 import { BackgroundVideo } from '../components/BackgroundVideo';
 import { colors, spacing } from '../styles/theme';
-import { authService } from '../utils/authService';
-import { simpleAuthService } from '../utils/simpleAuthService';
-import { supabaseAuthService } from '../utils/supabaseAuthService';
+import { authService } from '../services/auth/authService';
+import { simpleAuthService } from '../services/auth/simpleAuthService';
+import { supabaseAuthService } from '../services/auth/supabaseAuthService';
 import { isSupabaseConfigured } from '../config/supabase';
 import { useOnboarding } from '../context/OnboardingContext';
-import { getImageUrl } from '../utils/imageUtils';
+import { getImageUrl } from '../services/media/imageService';
 
 interface WelcomeScreenProps {
   onGetStarted: () => void;
@@ -237,11 +237,44 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
       }
     } catch (error: any) {
       console.error('Google Sign-In Error:', error);
-      Alert.alert(
-        'Sign In Failed',
-        error.message || 'An error occurred during sign in. Please try again.',
-        [{ text: 'OK' }]
-      );
+      const errorMessage = error?.message || 'An error occurred during sign in. Please try again.';
+      
+      // Check if it's a database error and provide specific guidance
+      if (errorMessage.includes('Database error') || errorMessage.includes('Database Error')) {
+        Alert.alert(
+          'Database Error During Sign-In',
+          'There was an error creating your user account in the database.\n\n' +
+          'This usually happens when:\n' +
+          '• A database trigger is failing\n' +
+          '• Required fields are missing\n' +
+          '• Row Level Security policies are blocking the operation\n\n' +
+          'Please contact support or check your Supabase database configuration.',
+          [{ text: 'OK' }]
+        );
+      } else if (errorMessage.includes('server_error')) {
+        Alert.alert(
+          'Sign In Configuration Error',
+          'There seems to be a configuration issue with Google sign-in.\n\n' +
+          'Please check:\n' +
+          '• Supabase redirect URLs are configured correctly\n' +
+          '• Google OAuth is properly set up in Supabase\n' +
+          '• The redirect URL matches your current domain\n\n' +
+          'If you\'re a developer, check the Supabase dashboard settings.',
+          [{ text: 'OK' }]
+        );
+      } else if (errorMessage.includes('access_denied')) {
+        Alert.alert(
+          'Sign In Cancelled',
+          'You cancelled the sign-in process. Please try again when ready.',
+          [{ text: 'OK' }]
+        );
+      } else {
+        Alert.alert(
+          'Sign In Failed',
+          errorMessage,
+          [{ text: 'OK' }]
+        );
+      }
     } finally {
       setIsLoading(false);
     }

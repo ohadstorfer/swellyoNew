@@ -12,7 +12,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../components/Text';
 import { colors, spacing } from '../styles/theme';
 import { useOnboarding } from '../context/OnboardingContext';
-import { getVideoUrl } from '../utils/videoUtils';
+import { getVideoUrl } from '../services/media/videoService';
 
 interface LoadingScreenProps {
   onComplete: () => void;

@@ -1,5 +1,5 @@
 import { Platform } from 'react-native';
-import { supabase, isSupabaseConfigured } from '../config/supabase';
+import { supabase, isSupabaseConfigured } from '../../config/supabase';
 import * as AuthSession from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
 
@@ -61,9 +61,46 @@ class SupabaseAuthService {
       const accessToken = hashParams.get('access_token');
       const refreshToken = hashParams.get('refresh_token');
       const errorParam = hashParams.get('error');
+      const errorDescription = hashParams.get('error_description');
 
       if (errorParam) {
-        throw new Error(`OAuth error: ${errorParam}`);
+        // Clean up the error from URL
+        if (window.history && window.location) {
+          window.history.replaceState({}, document.title, window.location.pathname);
+        }
+        
+        // Provide more helpful error messages
+        let errorMessage = `OAuth error: ${errorParam}`;
+        if (errorDescription) {
+          errorMessage += ` - ${errorDescription}`;
+        }
+        
+        // Add specific guidance for common errors
+        if (errorParam === 'server_error') {
+          if (errorDescription && errorDescription.includes('Database error')) {
+            errorMessage = 'Database Error: ' + errorDescription;
+            errorMessage += '\n\nThis error occurs when Supabase tries to automatically create a user record in your database.\n' +
+              'Common causes:\n' +
+              '1. Database trigger or function is failing when creating user records\n' +
+              '2. Missing required columns in the users table\n' +
+              '3. Row Level Security (RLS) policies preventing user creation\n' +
+              '4. Database constraints or foreign key violations\n\n' +
+              'To fix:\n' +
+              '1. Check your Supabase database for triggers/functions on auth.users\n' +
+              '2. Verify the users table schema matches what the trigger expects\n' +
+              '3. Check RLS policies on the users table\n' +
+              '4. Review Supabase logs for detailed error information';
+          } else {
+            errorMessage += '\n\nThis usually indicates a configuration issue. Please check:\n' +
+              '1. Supabase redirect URLs are correctly configured\n' +
+              '2. Google OAuth credentials are properly set up in Supabase\n' +
+              '3. The redirect URL matches your current domain';
+          }
+        } else if (errorParam === 'access_denied') {
+          errorMessage += '\n\nYou cancelled the sign-in process.';
+        }
+        
+        throw new Error(errorMessage);
       }
 
       if (accessToken) {
@@ -91,10 +128,14 @@ class SupabaseAuthService {
       // No access token found and no existing session, initiate OAuth flow
       console.log('No existing session found, initiating Google OAuth flow...');
       
+      // Get the current URL without hash/query params for redirect
+      const redirectUrl = window.location.origin + window.location.pathname;
+      console.log('OAuth redirect URL:', redirectUrl);
+      
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: window.location.origin + window.location.pathname,
+          redirectTo: redirectUrl,
           queryParams: {
             access_type: 'offline',
             prompt: 'consent',
@@ -103,11 +144,17 @@ class SupabaseAuthService {
       });
 
       if (error) {
-        throw error;
+        console.error('Error initiating OAuth:', error);
+        throw new Error(`Failed to initiate Google sign-in: ${error.message}`);
+      }
+
+      if (!data?.url) {
+        throw new Error('OAuth URL not returned from Supabase. Please check your Supabase configuration.');
       }
 
       // Supabase will redirect, so this promise never resolves
       // The function will be called again when the user returns from OAuth
+      console.log('Redirecting to Google OAuth...');
       return new Promise(() => {}); // Never resolves, redirect happens
     } catch (error: any) {
       console.error('Error in web Google OAuth:', error);
@@ -228,7 +275,7 @@ class SupabaseAuthService {
   private async getOrCreateUserProfile(supabaseUser: any): Promise<any> {
     try {
       // Import the database service
-      const { supabaseDatabaseService } = await import('./supabaseDatabaseService');
+      const { supabaseDatabaseService } = await import('../database');
       
       // Save user to users table
       const savedUser = await supabaseDatabaseService.saveUser({

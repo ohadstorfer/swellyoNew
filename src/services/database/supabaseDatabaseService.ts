@@ -1,4 +1,4 @@
-import { supabase, isSupabaseConfigured } from '../config/supabase';
+import { supabase, isSupabaseConfigured } from '../../config/supabase';
 import { Platform } from 'react-native';
 
 /**

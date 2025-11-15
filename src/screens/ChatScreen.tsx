@@ -14,9 +14,9 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../components/Text';
 import { colors, spacing, typography, borderRadius } from '../styles/theme';
-import { ChatService, ChatResponse } from '../utils/chatService';
+import { ChatService, ChatResponse } from '../services/chat/chatService';
 import { useOnboarding } from '../context/OnboardingContext';
-import { getImageUrl } from '../utils/imageUtils';
+import { getImageUrl } from '../services/media/imageService';
 
 interface Message {
   id: string;
@@ -33,7 +33,11 @@ interface UserProfile {
 }
 
 
-export const ChatScreen: React.FC = () => {
+interface ChatScreenProps {
+  onChatComplete?: () => void;
+}
+
+export const ChatScreen: React.FC<ChatScreenProps> = ({ onChatComplete }) => {
   const { setCurrentStep } = useOnboarding();
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
@@ -147,7 +151,13 @@ export const ChatScreen: React.FC = () => {
           Alert.alert(
             'Chat Complete!',
             'Thanks for sharing your info! Swelly has everything he needs to help you plan your next surf trip.',
-            [{ text: 'Awesome!', style: 'default' }]
+            [
+              {
+                text: 'Go to Conversations',
+                style: 'default',
+                onPress: () => onChatComplete?.(),
+              },
+            ]
           );
         }, 1000);
       }
@@ -238,9 +248,14 @@ export const ChatScreen: React.FC = () => {
             <TouchableOpacity 
               style={styles.backButton}
               onPress={() => {
-                setCurrentStep(4); // Go back to onboarding step 4
-                if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location) {
-                  window.location.href = '/'; // Navigate to main app
+                // If onChatComplete is provided, it means we're in post-onboarding mode
+                if (onChatComplete) {
+                  onChatComplete(); // Go to conversations list
+                } else {
+                  setCurrentStep(4); // Go back to onboarding step 4
+                  if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location) {
+                    window.location.href = '/'; // Navigate to main app
+                  }
                 }
               }}
             >
@@ -436,12 +451,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#B72DF2',
     borderRadius: 8,
   },
-  menuButton: {
-    width: 24,
-    height: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
   chatContainer: {
     flex: 1,
   },
@@ -598,6 +607,9 @@ const styles = StyleSheet.create({
     color: '#8B5CF6',
     marginBottom: spacing.md,
     textAlign: 'center',
+  },
+  profileSection: {
+    marginBottom: spacing.sm,
   },
   profileLabel: {
     fontSize: 14,

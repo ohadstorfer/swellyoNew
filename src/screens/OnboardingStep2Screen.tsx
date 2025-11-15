@@ -15,8 +15,8 @@ import { Text } from '../components/Text';
 import { VideoCarousel, VideoLevel } from '../components/VideoCarousel';
 import { colors, spacing } from '../styles/theme';
 import { OnboardingData } from './OnboardingStep1Screen';
-import { getVideoUrl as getVideoUrlUtil } from '../utils/videoUtils';
-import { getImageUrl } from '../utils/imageUtils';
+import { getVideoUrl as getVideoUrlUtil } from '../services/media/videoService';
+import { getImageUrl } from '../services/media/imageService';
 
 const getScreenWidth = () => Dimensions.get('window').width;
 

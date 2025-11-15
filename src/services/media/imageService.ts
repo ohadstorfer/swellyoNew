@@ -2,6 +2,14 @@ import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 
 /**
+ * Image Service
+ * 
+ * Provides utilities for handling images across platforms.
+ * On web: uses public folder paths
+ * On mobile: uses full dev server URL with proper encoding
+ */
+
+/**
  * Get the proper image URL for the current platform
  * On web: uses public folder paths
  * On mobile: uses full dev server URL with proper encoding

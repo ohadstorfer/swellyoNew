@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, Image, Platform } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video';
-import { getBackgroundVideoSource, getVideoUrl } from '../utils/videoUtils';
+import { getBackgroundVideoSource, getVideoUrl } from '../services/media/videoService';
 
 interface BackgroundVideoProps {
   videoSource?: string;

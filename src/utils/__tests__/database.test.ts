@@ -1,4 +1,4 @@
-import { databaseService, User } from '../databaseService';
+import { databaseService, User } from '../../services/database/databaseService';
 
 // Mock expo-sqlite
 jest.mock('expo-sqlite', () => ({

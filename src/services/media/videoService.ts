@@ -2,6 +2,14 @@ import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 
 /**
+ * Video Service
+ * 
+ * Provides utilities for handling videos across platforms.
+ * On web: uses public folder paths
+ * On mobile: uses full dev server URL or asset paths
+ */
+
+/**
  * Get the proper video URL for the current platform
  * On web: uses public folder paths
  * On mobile: uses full dev server URL or asset paths

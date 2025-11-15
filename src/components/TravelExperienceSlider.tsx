@@ -11,7 +11,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { colors, spacing, typography } from '../styles/theme';
 import { Text } from './Text';
-import { getImageUrl } from '../utils/imageUtils';
+import { getImageUrl } from '../services/media/imageService';
 
 interface TravelExperienceLevel {
   id: number;

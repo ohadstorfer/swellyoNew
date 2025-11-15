@@ -6,10 +6,11 @@ import { OnboardingStep3Screen } from '../screens/OnboardingStep3Screen';
 import { OnboardingStep4Screen } from '../screens/OnboardingStep4Screen';
 import { LoadingScreen } from '../screens/LoadingScreen';
 import { ChatScreen } from '../screens/ChatScreen';
+import ConversationsScreen from '../screens/ConversationsScreen';
 import { useOnboarding } from '../context/OnboardingContext';
 
 export const AppContent: React.FC = () => {
-  const { currentStep, formData, setCurrentStep, updateFormData, saveStepToSupabase } = useOnboarding();
+  const { currentStep, formData, setCurrentStep, updateFormData, saveStepToSupabase, isComplete, markOnboardingComplete } = useOnboarding();
   const [showLoading, setShowLoading] = useState(false);
   const [isSavingStep1, setIsSavingStep1] = useState(false);
   const [isSavingStep2, setIsSavingStep2] = useState(false);
@@ -33,10 +34,9 @@ export const AppContent: React.FC = () => {
     try {
       updateFormData(data);
       
-      // Save Step 1 data to Supabase (board type)
-      await saveStepToSupabase({
-        boardType: data.boardType,
-      });
+      // Save Step 1 data to Supabase (board type) using onboarding service
+      const { onboardingService } = await import('../services/onboarding/onboardingService');
+      await onboardingService.saveStep1(data.boardType);
       
       // Soft Top (id: 3) skips step 2 and goes directly to step 3
       if (data.boardType === 3) {
@@ -69,11 +69,9 @@ export const AppContent: React.FC = () => {
     try {
       updateFormData(data);
       
-      // Save Step 2 data to Supabase (surf level)
-      await saveStepToSupabase({
-        boardType: data.boardType,
-        surfLevel: data.surfLevel,
-      });
+      // Save Step 2 data to Supabase (surf level) using onboarding service
+      const { onboardingService } = await import('../services/onboarding/onboardingService');
+      await onboardingService.saveStep2(data.boardType!, data.surfLevel!);
       
       setCurrentStep(3); // Go to step 3 (travel experience)
     } catch (error) {
@@ -94,12 +92,9 @@ export const AppContent: React.FC = () => {
     try {
       updateFormData(data);
       
-      // Save Step 3 data to Supabase (travel experience)
-      await saveStepToSupabase({
-        boardType: data.boardType,
-        surfLevel: data.surfLevel,
-        travelExperience: data.travelExperience,
-      });
+      // Save Step 3 data to Supabase (travel experience) using onboarding service
+      const { onboardingService } = await import('../services/onboarding/onboardingService');
+      await onboardingService.saveStep3(data.boardType!, data.surfLevel!, data.travelExperience!);
       
       setCurrentStep(4); // Go to step 4 (profile details)
     } catch (error) {
@@ -120,8 +115,9 @@ export const AppContent: React.FC = () => {
     try {
       updateFormData(data);
       
-      // Save complete onboarding data to Supabase (all profile details)
-      await saveStepToSupabase({
+      // Save complete onboarding data to Supabase (all profile details) using onboarding service
+      const { onboardingService } = await import('../services/onboarding/onboardingService');
+      await onboardingService.saveStep4({
         nickname: data.nickname,
         userEmail: data.userEmail,
         location: data.location,
@@ -145,7 +141,25 @@ export const AppContent: React.FC = () => {
 
   const handleLoadingComplete = () => {
     setShowLoading(false);
-    setCurrentStep(5); // Go to step 5 (chat screen)
+    setCurrentStep(5); // Go to step 5 (Swelly chat screen)
+  };
+
+  const handleChatComplete = () => {
+    // Mark onboarding as complete and show conversations as home page
+    markOnboardingComplete();
+    setCurrentStep(0); // Reset step to 0, but isComplete will show home
+  };
+
+  const handleConversationPress = (conversationId: string) => {
+    // Navigate to ChatScreen with specific conversation
+    // For now, we'll just log it
+    console.log('Navigate to conversation:', conversationId);
+    // TODO: Implement conversation-specific chat view
+  };
+
+  const handleSwellyPress = () => {
+    // Navigate to Swelly chat from conversations page
+    setCurrentStep(5); // Show Swelly chat
   };
 
   const handleLoadingBack = () => {
@@ -173,6 +187,17 @@ export const AppContent: React.FC = () => {
   const handleStep4Back = () => {
     setCurrentStep(3); // Go back to step 3
   };
+
+  // If onboarding is complete, show conversations screen as home page (regardless of currentStep)
+  // This check must come FIRST before any step checks
+  if (isComplete) {
+    return (
+      <ConversationsScreen
+        onConversationPress={handleConversationPress}
+        onSwellyPress={handleSwellyPress}
+      />
+    );
+  }
 
   // Show onboarding step 1 if we're on step 1
   if (currentStep === 1) {
@@ -240,11 +265,11 @@ export const AppContent: React.FC = () => {
     );
   }
 
-  // Show chat screen if we're on step 5
+  // Show chat screen if we're on step 5 (Swelly chat)
   if (currentStep === 5) {
-    return <ChatScreen />;
+    return <ChatScreen onChatComplete={handleChatComplete} />;
   }
 
-  // Show welcome screen by default (step 0)
+  // Show welcome screen by default (step 0, before onboarding)
   return <WelcomeScreen onGetStarted={handleGetStarted} onDemoChat={handleDemoChat} />;
 };

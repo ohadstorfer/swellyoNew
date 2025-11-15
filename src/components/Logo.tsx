@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, StyleSheet, Image, Platform, Text } from 'react-native';
-import { getImageUrl } from '../utils/imageUtils';
+import { getImageUrl } from '../services/media/imageService';
 
 // Local logo assets from public/welcome page folder
 const LOGO_IMAGE_PATH = '/welcome page/Logo Swellyo.svg';

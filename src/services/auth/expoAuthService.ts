@@ -1,7 +1,7 @@
 import * as AuthSession from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
 import { Platform } from 'react-native';
-import { databaseService, User } from './databaseService';
+import { databaseService, User } from '../database/databaseService';
 
 // Configure WebBrowser for better UX
 WebBrowser.maybeCompleteAuthSession();
@@ -118,3 +118,4 @@ class ExpoAuthService {
 }
 
 export const expoAuthService = new ExpoAuthService();
+

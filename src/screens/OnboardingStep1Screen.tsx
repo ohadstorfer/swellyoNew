@@ -11,6 +11,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../components/Text';
 import { BoardCarousel } from '../components/BoardCarousel';
 import { colors, spacing, typography } from '../styles/theme';
+import { useOnboarding } from '../context/OnboardingContext';
 
 // Helper to detect if we're on desktop web (not mobile web)
 const isDesktopWeb = () => {
@@ -81,6 +82,7 @@ export const OnboardingStep1Screen: React.FC<OnboardingStep1ScreenProps> = ({
   updateFormData,
   isLoading = false,
 }) => {
+  const { markOnboardingComplete } = useOnboarding();
   const [selectedBoardId, setSelectedBoardId] = useState<number>(
     initialData.boardType ?? 0
   );
@@ -107,6 +109,11 @@ export const OnboardingStep1Screen: React.FC<OnboardingStep1ScreenProps> = ({
     handleNext();
   };
 
+  const handleHomepage = () => {
+    // Mark onboarding as complete to show conversations screen (homepage)
+    markOnboardingComplete();
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.content}>
@@ -118,8 +125,8 @@ export const OnboardingStep1Screen: React.FC<OnboardingStep1ScreenProps> = ({
 
           <Text style={styles.stepText}>Step 1/5</Text>
 
-          <TouchableOpacity onPress={handleSkip} style={styles.skipButton}>
-            {/* <Text style={styles.skipText}>Skip</Text> */}
+          <TouchableOpacity onPress={handleHomepage} style={styles.homepageButton}>
+            <Ionicons name="home" size={24} color="#222B30" />
           </TouchableOpacity>
         </View>
 
@@ -227,6 +234,12 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     textAlign: 'right',
     lineHeight: 15,
+  },
+  homepageButton: {
+    width: 60,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    paddingHorizontal: 10,
   },
   progressContainer: {
     paddingHorizontal: spacing.md,

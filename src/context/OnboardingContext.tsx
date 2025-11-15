@@ -1,9 +1,8 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { OnboardingData } from '../screens/OnboardingStep1Screen';
-import { User, databaseService } from '../utils/databaseService';
-import { supabaseDatabaseService } from '../utils/supabaseDatabaseService';
-import { isSupabaseConfigured } from '../config/supabase';
+import { User, databaseService } from '../services/database/databaseService';
+import { onboardingService } from '../services/onboarding/onboardingService';
 import { Platform } from 'react-native';
 
 interface OnboardingContextType {
@@ -16,6 +15,7 @@ interface OnboardingContextType {
   resetOnboarding: () => void;
   isComplete: boolean;
   saveStepToSupabase: (stepData: Partial<OnboardingData>) => Promise<void>;
+  markOnboardingComplete: () => void;
 }
 
 const OnboardingContext = createContext<OnboardingContextType | undefined>(undefined);
@@ -39,6 +39,7 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const [formData, setFormData] = useState<Partial<OnboardingData>>({});
   const [user, setUser] = useState<User | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
+  const [isComplete, setIsComplete] = useState(false);
 
   // Load saved data on mount
   useEffect(() => {
@@ -46,13 +47,13 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     initializeDatabase();
   }, []);
 
-  // Save to local storage whenever step or formData changes (for step tracking and recovery)
+  // Save to local storage whenever step, formData, or isComplete changes (for step tracking and recovery)
   // Note: Supabase saving happens only when user presses "Next" button
   useEffect(() => {
     if (isLoaded) {
       saveToLocalStorage();
     }
-  }, [currentStep, formData, isLoaded]);
+  }, [currentStep, formData, isLoaded, isComplete]);
 
   const initializeDatabase = async () => {
     try {
@@ -82,6 +83,11 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         // Load user data if available
         if (parsed.user) {
           setUser(parsed.user);
+        }
+        
+        // Load onboarding completion status
+        if (parsed.isComplete !== undefined) {
+          setIsComplete(parsed.isComplete);
         }
         
         // Ensure form data has the correct structure
@@ -127,6 +133,7 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         currentStep,
         formData,
         user,
+        isComplete,
         timestamp: Date.now(),
       };
       console.log('Saving data to local storage:', dataToSave);
@@ -138,17 +145,12 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   // Method to save current step data to Supabase (called explicitly on "Next" button)
   const saveStepToSupabase = async (stepData: Partial<OnboardingData>) => {
-    if (!isSupabaseConfigured()) {
-      console.log('Supabase not configured, skipping save');
-      return;
-    }
-
     try {
       // Merge step data with existing formData
       const dataToSave = { ...formData, ...stepData };
       
-      // Save to Supabase - this will update/create user and surfer records
-      await supabaseDatabaseService.saveOnboardingData({
+      // Use onboarding service to save data
+      await onboardingService.saveOnboardingData({
         nickname: dataToSave.nickname,
         userEmail: dataToSave.userEmail,
         location: dataToSave.location,
@@ -177,9 +179,10 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
 
   const resetOnboarding = async () => {
-    setCurrentStep(1);
+    setCurrentStep(0); // Go back to welcome screen
     setFormData({});
     setUser(null);
+    setIsComplete(false);
     try {
       await AsyncStorage.removeItem(STORAGE_KEY);
     } catch (error) {
@@ -187,7 +190,10 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }
   };
 
-  const isComplete = currentStep > 4;
+  const markOnboardingComplete = () => {
+    console.log('Marking onboarding as complete');
+    setIsComplete(true);
+  };
 
   const value: OnboardingContextType = {
     currentStep,
@@ -199,6 +205,7 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     resetOnboarding,
     isComplete,
     saveStepToSupabase,
+    markOnboardingComplete,
   };
 
   return (
