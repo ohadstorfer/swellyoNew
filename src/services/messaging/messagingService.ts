@@ -72,8 +72,17 @@ class MessagingService {
     }
 
     try {
+      // Ensure we have a valid session
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError || !session) {
+        console.error('Session error in getConversations:', sessionError);
+        throw new Error('Not authenticated. Please sign in again.');
+      }
+
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
+      
+      console.log('Getting conversations for user:', user.id);
 
       // Get all conversations where user is a member
       const { data: membershipData, error: membershipError } = await supabase
@@ -130,33 +139,44 @@ class MessagingService {
             unreadCount = count || 0;
           }
 
-          // Get all members
+          // Get all members (without joins to avoid RLS issues)
           const { data: membersData } = await supabase
             .from('conversation_members')
-            .select(`
-              *,
-              users:user_id (
-                id,
-                email
-              ),
-              surfers:user_id (
-                name,
-                profile_image_url
-              )
-            `)
+            .select('*')
             .eq('conversation_id', conv.id);
+
+          // Fetch user and surfer data separately for each member to avoid RLS join issues
+          const enrichedMembers = await Promise.all(
+            (membersData || []).map(async (member) => {
+              // Fetch user data (email)
+              const { data: userData } = await supabase
+                .from('users')
+                .select('id, email')
+                .eq('id', member.user_id)
+                .maybeSingle();
+
+              // Fetch surfer data (name, profile_image_url)
+              const { data: surferData } = await supabase
+                .from('surfers')
+                .select('name, profile_image_url')
+                .eq('user_id', member.user_id)
+                .maybeSingle();
+
+              return {
+                ...member,
+                name: surferData?.name || userData?.email?.split('@')[0] || 'Unknown',
+                profile_image_url: surferData?.profile_image_url,
+                email: userData?.email,
+              };
+            })
+          );
 
           // For direct conversations, find the other user
           let otherUser: ConversationMember | undefined;
-          if (conv.is_direct && membersData) {
-            const otherMember = membersData.find(m => m.user_id !== user.id);
+          if (conv.is_direct && enrichedMembers.length > 0) {
+            const otherMember = enrichedMembers.find(m => m.user_id !== user.id);
             if (otherMember) {
-              otherUser = {
-                ...otherMember,
-                name: (otherMember as any).surfers?.name || (otherMember as any).users?.email,
-                profile_image_url: (otherMember as any).surfers?.profile_image_url,
-                email: (otherMember as any).users?.email,
-              };
+              otherUser = otherMember;
             }
           }
 
@@ -165,12 +185,7 @@ class MessagingService {
             last_message: lastMessageData || undefined,
             unread_count: unreadCount,
             other_user: otherUser,
-            members: membersData?.map(m => ({
-              ...m,
-              name: (m as any).surfers?.name || (m as any).users?.email,
-              profile_image_url: (m as any).surfers?.profile_image_url,
-              email: (m as any).users?.email,
-            })),
+            members: enrichedMembers,
           };
         })
       );
@@ -191,15 +206,10 @@ class MessagingService {
     }
 
     try {
-      const { data, error } = await supabase
+      // Fetch messages without joins to avoid RLS issues
+      const { data: messages, error } = await supabase
         .from('messages')
-        .select(`
-          *,
-          surfers:sender_id (
-            name,
-            profile_image_url
-          )
-        `)
+        .select('*')
         .eq('conversation_id', conversationId)
         .eq('deleted', false)
         .order('created_at', { ascending: true })
@@ -207,10 +217,25 @@ class MessagingService {
 
       if (error) throw error;
 
-      return (data || []).map(msg => ({
+      // Fetch sender info separately for each unique sender
+      const senderIds = [...new Set((messages || []).map(msg => msg.sender_id))];
+      
+      // Fetch surfer data for all senders
+      const { data: surfersData } = await supabase
+        .from('surfers')
+        .select('user_id, name, profile_image_url')
+        .in('user_id', senderIds);
+
+      // Create a map for quick lookup
+      const surferMap = new Map(
+        (surfersData || []).map(s => [s.user_id, s])
+      );
+
+      // Enrich messages with sender info
+      return (messages || []).map(msg => ({
         ...msg,
-        sender_name: (msg as any).surfers?.name,
-        sender_avatar: (msg as any).surfers?.profile_image_url,
+        sender_name: surferMap.get(msg.sender_id)?.name,
+        sender_avatar: surferMap.get(msg.sender_id)?.profile_image_url,
       }));
     } catch (error) {
       console.error('Error fetching messages:', error);
@@ -265,33 +290,64 @@ class MessagingService {
     }
 
     try {
+      // Ensure we have a valid session with auth token
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError) {
+        console.error('Session error:', sessionError);
+        throw new Error('Failed to get authentication session');
+      }
+      if (!session) {
+        throw new Error('Not authenticated. Please sign in again.');
+      }
+
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
+      
+      console.log('Creating conversation with user:', otherUserId, 'Current user:', user.id);
+      console.log('Session exists:', !!session, 'Access token present:', !!session.access_token);
 
       // Check if a direct conversation already exists
-      const { data: existingConversations } = await supabase
+      // Use maybeSingle() to handle cases where no conversations exist
+      const { data: existingConversations, error: existingError } = await supabase
         .from('conversation_members')
         .select('conversation_id')
         .eq('user_id', user.id);
 
-      if (existingConversations) {
+      if (existingError) {
+        console.error('Error checking existing conversations:', existingError);
+        // Continue to create new conversation even if check fails
+      } else if (existingConversations && existingConversations.length > 0) {
         for (const { conversation_id } of existingConversations) {
-          const { data: members } = await supabase
+          const { data: members, error: membersError } = await supabase
             .from('conversation_members')
             .select('user_id')
             .eq('conversation_id', conversation_id);
+
+          if (membersError) {
+            console.error('Error fetching members for conversation:', conversation_id, membersError);
+            continue;
+          }
 
           if (members && members.length === 2) {
             const userIds = members.map(m => m.user_id).sort();
             const targetUserIds = [user.id, otherUserId].sort();
             if (JSON.stringify(userIds) === JSON.stringify(targetUserIds)) {
               // Found existing conversation
-              const { data: conv } = await supabase
+              const { data: conv, error: convError } = await supabase
                 .from('conversations')
                 .select('*')
                 .eq('id', conversation_id)
-                .single();
-              return conv;
+                .maybeSingle();
+              
+              if (convError) {
+                console.error('Error fetching existing conversation:', convError);
+                break;
+              }
+              
+              if (conv) {
+                console.log('Found existing conversation:', conv.id);
+                return conv;
+              }
             }
           }
         }
@@ -382,10 +438,11 @@ class MessagingService {
    */
   subscribeToMessages(conversationId: string, callback: (message: Message) => void) {
     if (!isSupabaseConfigured()) {
-      throw new Error('Supabase is not configured');
+      console.warn('Supabase is not configured, subscription will not work');
+      return () => {}; // Return no-op unsubscribe function
     }
 
-    const subscription = supabase
+    const channel = supabase
       .channel(`messages:${conversationId}`)
       .on(
         'postgres_changes',
@@ -395,14 +452,40 @@ class MessagingService {
           table: 'messages',
           filter: `conversation_id=eq.${conversationId}`,
         },
-        (payload) => {
-          callback(payload.new as Message);
+        async (payload) => {
+          const newMessage = payload.new as Message;
+          
+          // Enrich message with sender info if needed
+          if (!newMessage.sender_name || !newMessage.sender_avatar) {
+            try {
+              const { data: surferData } = await supabase
+                .from('surfers')
+                .select('name, profile_image_url')
+                .eq('user_id', newMessage.sender_id)
+                .maybeSingle();
+              
+              if (surferData) {
+                newMessage.sender_name = surferData.name;
+                newMessage.sender_avatar = surferData.profile_image_url;
+              }
+            } catch (error) {
+              console.error('Error enriching message with sender info:', error);
+            }
+          }
+          
+          callback(newMessage);
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          console.log(`Subscribed to messages for conversation ${conversationId}`);
+        } else if (status === 'CHANNEL_ERROR') {
+          console.error(`Error subscribing to messages for conversation ${conversationId}`);
+        }
+      });
 
     return () => {
-      subscription.unsubscribe();
+      supabase.removeChannel(channel);
     };
   }
 

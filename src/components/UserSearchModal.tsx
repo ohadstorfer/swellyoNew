@@ -45,31 +45,99 @@ export const UserSearchModal: React.FC<UserSearchModalProps> = ({
     setLoading(true);
     try {
       const { data: currentUser } = await supabase.auth.getUser();
+      const currentUserId = currentUser?.user?.id;
       
-      const { data, error } = await supabase
+      if (!currentUserId) {
+        console.error('No current user found');
+        setUsers([]);
+        return;
+      }
+
+      console.log('Searching for:', query);
+      
+      // Search in users table by email
+      const { data: usersByEmail, error: usersError } = await supabase
+        .from('users')
+        .select('id, email')
+        .ilike('email', `%${query}%`)
+        .neq('id', currentUserId)
+        .limit(20);
+
+      if (usersError) {
+        console.error('Error searching users by email:', usersError);
+      } else {
+        console.log('Found users by email:', usersByEmail?.length || 0);
+      }
+
+      // Search in surfers table by name
+      const { data: surfersByName, error: surfersError } = await supabase
         .from('surfers')
         .select('user_id, name, profile_image_url')
         .ilike('name', `%${query}%`)
-        .neq('user_id', currentUser?.user?.id || '')
+        .neq('user_id', currentUserId)
         .limit(20);
 
-      if (error) throw error;
+      if (surfersError) {
+        console.error('Error searching surfers by name:', surfersError);
+      } else {
+        console.log('Found surfers by name:', surfersByName?.length || 0);
+      }
 
-      // Get emails for these users
-      const userIds = (data || []).map(u => u.user_id);
-      const { data: usersData } = await supabase
+      // Combine results: get all unique user IDs
+      const userIdsFromSurfers = (surfersByName || []).map(s => s.user_id);
+      const userIdsFromUsers = (usersByEmail || []).map(u => u.id);
+      const allUserIds = [...new Set([...userIdsFromSurfers, ...userIdsFromUsers])];
+
+      if (allUserIds.length === 0) {
+        setUsers([]);
+        return;
+      }
+
+      // Get all user emails
+      const { data: allUsersData, error: allUsersError } = await supabase
         .from('users')
         .select('id, email')
-        .in('id', userIds);
+        .in('id', allUserIds);
 
-      const usersWithEmail = (data || []).map(surfer => ({
-        ...surfer,
-        email: usersData?.find(u => u.id === surfer.user_id)?.email || '',
-      }));
+      if (allUsersError) {
+        console.error('Error fetching user emails:', allUsersError);
+      }
 
-      setUsers(usersWithEmail);
+      // Get all surfer profiles
+      const { data: allSurfersData, error: allSurfersError } = await supabase
+        .from('surfers')
+        .select('user_id, name, profile_image_url')
+        .in('user_id', allUserIds);
+
+      if (allSurfersError) {
+        console.error('Error fetching surfer profiles:', allSurfersError);
+      }
+
+      // Combine results: prefer surfer data if available, otherwise use email as name
+      const combinedUsers: User[] = allUserIds.map(userId => {
+        const surferData = (allSurfersData || []).find(s => s.user_id === userId);
+        const userData = (allUsersData || []).find(u => u.id === userId);
+
+        return {
+          user_id: userId,
+          name: surferData?.name || userData?.email?.split('@')[0] || 'User',
+          profile_image_url: surferData?.profile_image_url || null,
+          email: userData?.email || '',
+        };
+      });
+
+      // Filter to only include users that match the search query (name or email)
+      const queryLower = query.toLowerCase();
+      const filteredUsers = combinedUsers.filter(user => 
+        user.name.toLowerCase().includes(queryLower) ||
+        user.email.toLowerCase().includes(queryLower)
+      );
+
+      console.log('Total combined users found:', filteredUsers.length);
+      setUsers(filteredUsers);
     } catch (error) {
       console.error('Error searching users:', error);
+      setUsers([]);
     } finally {
       setLoading(false);
     }

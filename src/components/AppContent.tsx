@@ -151,10 +151,9 @@ export const AppContent: React.FC = () => {
   };
 
   const handleConversationPress = (conversationId: string) => {
-    // Navigate to ChatScreen with specific conversation
-    // For now, we'll just log it
-    console.log('Navigate to conversation:', conversationId);
-    // TODO: Implement conversation-specific chat view
+    // ConversationsScreen handles navigation internally via selectedConversation state
+    // This callback is kept for potential future use (e.g., analytics)
+    console.log('Conversation pressed:', conversationId);
   };
 
   const handleSwellyPress = () => {

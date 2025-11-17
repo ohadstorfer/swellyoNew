@@ -15,6 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../components/Text';
 import { colors, spacing, typography, borderRadius } from '../styles/theme';
 import { messagingService, Message } from '../services/messaging/messagingService';
+import { supabaseAuthService } from '../services/auth/supabaseAuthService';
 
 interface DirectMessageScreenProps {
   conversationId: string;
@@ -29,24 +30,54 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   otherUserAvatar,
   onBack,
 }) => {
+  // Debug: Log avatar URL
+  useEffect(() => {
+    console.log('DirectMessageScreen - otherUserAvatar:', otherUserAvatar);
+    console.log('DirectMessageScreen - otherUserName:', otherUserName);
+  }, [otherUserAvatar, otherUserName]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isFetchingMessages, setIsFetchingMessages] = useState(true);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const scrollViewRef = useRef<ScrollView>(null);
 
   useEffect(() => {
+    // Get current user ID
+    const getCurrentUser = async () => {
+      try {
+        const user = await supabaseAuthService.getCurrentUser();
+        if (user) {
+          setCurrentUserId(user.id);
+        }
+      } catch (error) {
+        console.error('Error getting current user:', error);
+      }
+    };
+    getCurrentUser();
+
     loadMessages();
 
     // Mark conversation as read
-    messagingService.markAsRead(conversationId);
+    messagingService.markAsRead(conversationId).catch(err => {
+      console.error('Error marking as read:', err);
+    });
 
     // Subscribe to new messages
     const unsubscribe = messagingService.subscribeToMessages(
       conversationId,
       (newMessage) => {
-        setMessages((prev) => [...prev, newMessage]);
-        messagingService.markAsRead(conversationId, newMessage.id);
+        // Check if message already exists (avoid duplicates)
+        setMessages((prev) => {
+          const exists = prev.some(msg => msg.id === newMessage.id);
+          if (exists) {
+            return prev;
+          }
+          return [...prev, newMessage];
+        });
+        messagingService.markAsRead(conversationId, newMessage.id).catch(err => {
+          console.error('Error marking message as read:', err);
+        });
         setTimeout(() => scrollToBottom(), 100);
       }
     );
@@ -61,7 +92,8 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       setIsFetchingMessages(true);
       const msgs = await messagingService.getMessages(conversationId);
       setMessages(msgs);
-      setTimeout(() => scrollToBottom(), 100);
+      // Scroll to bottom after messages load
+      setTimeout(() => scrollToBottom(), 200);
     } catch (error) {
       console.error('Error loading messages:', error);
     } finally {
@@ -70,26 +102,72 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   };
 
   const sendMessage = async () => {
-    if (!inputText.trim() || isLoading) return;
+    if (!inputText.trim() || isLoading || !currentUserId) return;
 
     const messageText = inputText.trim();
+    const tempId = `temp-${Date.now()}`;
+    
+    // Optimistic update: Add message immediately to UI
+    const optimisticMessage: Message = {
+      id: tempId,
+      conversation_id: conversationId,
+      sender_id: currentUserId,
+      body: messageText,
+      rendered_body: null,
+      attachments: [],
+      is_system: false,
+      edited: false,
+      deleted: false,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    setMessages((prev) => [...prev, optimisticMessage]);
     setInputText('');
     setIsLoading(true);
+    
+    // Scroll to bottom immediately
+    setTimeout(() => scrollToBottom(), 50);
 
     try {
-      await messagingService.sendMessage(conversationId, messageText);
+      // Send message to server
+      const sentMessage = await messagingService.sendMessage(conversationId, messageText);
+      
+      // Replace optimistic message with real message from server
+      setMessages((prev) => {
+        const filtered = prev.filter(msg => msg.id !== tempId);
+        // Check if message already exists (from subscription)
+        const exists = filtered.some(msg => msg.id === sentMessage.id);
+        if (exists) {
+          return filtered;
+        }
+        return [...filtered, sentMessage];
+      });
+      
       setTimeout(() => scrollToBottom(), 100);
     } catch (error) {
       console.error('Error sending message:', error);
-      setInputText(messageText);
+      // Remove optimistic message on error
+      setMessages((prev) => prev.filter(msg => msg.id !== tempId));
+      setInputText(messageText); // Restore input text
     } finally {
       setIsLoading(false);
     }
   };
 
   const scrollToBottom = () => {
-    scrollViewRef.current?.scrollToEnd({ animated: true });
+    // Use requestAnimationFrame for better timing
+    requestAnimationFrame(() => {
+      scrollViewRef.current?.scrollToEnd({ animated: true });
+    });
   };
+
+  // Scroll to bottom when messages change
+  useEffect(() => {
+    if (messages.length > 0 && !isFetchingMessages) {
+      setTimeout(() => scrollToBottom(), 100);
+    }
+  }, [messages.length, isFetchingMessages]);
 
   const formatTime = (timestamp: string) => {
     const date = new Date(timestamp);
@@ -98,41 +176,118 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     return `${hours}:${minutes}`;
   };
 
-  return (
-    <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView
-        style={styles.container}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+  const renderMessage = (message: Message) => {
+    const isOwnMessage = currentUserId && message.sender_id === currentUserId;
+    
+    return (
+      <View
+        key={message.id}
+        style={[
+          styles.messageContainer,
+          isOwnMessage ? styles.userMessageContainer : styles.botMessageContainer,
+        ]}
       >
-        {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity onPress={onBack} style={styles.backButton}>
-            <Ionicons name="arrow-back" size={24} color={colors.textDark} />
-          </TouchableOpacity>
-
-          <View style={styles.headerCenter}>
+        {/* Show other user's avatar for received messages */}
+        {!isOwnMessage && (
+          <View style={styles.messageAvatarContainer}>
             {otherUserAvatar ? (
-              <Image source={{ uri: otherUserAvatar }} style={styles.headerAvatar} />
+              <Image
+                source={{ uri: otherUserAvatar }}
+                style={styles.messageAvatar}
+                resizeMode="cover"
+              />
             ) : (
-              <View style={[styles.headerAvatar, styles.avatarPlaceholder]}>
-                <Text style={styles.avatarPlaceholderText}>
+              <View style={[styles.messageAvatar, styles.messageAvatarPlaceholder]}>
+                <Text style={styles.messageAvatarPlaceholderText}>
                   {otherUserName.charAt(0).toUpperCase()}
                 </Text>
               </View>
             )}
-            <Text style={styles.headerName}>{otherUserName}</Text>
           </View>
-
-          <View style={styles.headerRight} />
+        )}
+        
+        <View
+          style={[
+            styles.messageBubble,
+            isOwnMessage ? styles.userMessageBubble : styles.botMessageBubble,
+          ]}
+        >
+          <View style={styles.messageTextContainer}>
+            <Text style={isOwnMessage ? styles.userMessageText : styles.botMessageText}>
+              {message.body || ''}
+            </Text>
+          </View>
+          <View style={styles.timestampContainer}>
+            <Text style={[
+              styles.timestamp,
+              isOwnMessage ? styles.userTimestamp : styles.botTimestamp,
+            ]}>
+              {formatTime(message.created_at)}
+            </Text>
+          </View>
         </View>
+      </View>
+    );
+  };
 
-        {/* Messages */}
+  return (
+    <SafeAreaView style={styles.container}>
+      {/* Header */}
+      <View style={styles.headerContainer}>
+        <View style={styles.header}>
+          <View style={styles.headerLeft}>
+            <TouchableOpacity 
+              style={styles.backButton}
+              onPress={onBack}
+            >
+              <Ionicons name="chevron-back" size={24} color="#222B30" />
+            </TouchableOpacity>
+            
+            <View style={styles.avatar}>
+              {otherUserAvatar && otherUserAvatar.trim() !== '' ? (
+                <Image
+                  source={{ uri: otherUserAvatar }}
+                  style={styles.avatarImage}
+                  resizeMode="cover"
+                  onError={(error) => {
+                    console.error('Error loading avatar image:', error, 'URL:', otherUserAvatar);
+                  }}
+                  onLoad={() => {
+                    console.log('Avatar image loaded successfully:', otherUserAvatar);
+                  }}
+                />
+              ) : (
+                <View style={styles.avatarPlaceholder}>
+                  <Text style={styles.avatarPlaceholderText}>
+                    {otherUserName.charAt(0).toUpperCase()}
+                  </Text>
+                </View>
+              )}
+            </View>
+          </View>
+          
+          <View style={styles.profileInfo}>
+            <Text style={styles.profileName}>{otherUserName}</Text>
+            <Text style={styles.profileTagline}>Online</Text>
+          </View>
+          
+          <TouchableOpacity style={styles.menuButton}>
+            <Ionicons name="ellipsis-vertical" size={24} color="#222B30" />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Chat Messages */}
+      <KeyboardAvoidingView 
+        style={styles.chatContainer}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+      >
         <ScrollView
           ref={scrollViewRef}
-          style={styles.messagesContainer}
+          style={styles.messagesList}
           contentContainerStyle={styles.messagesContent}
-          onContentSizeChange={scrollToBottom}
+          showsVerticalScrollIndicator={false}
         >
           {isFetchingMessages ? (
             <View style={styles.loadingContainer}>
@@ -143,78 +298,53 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
               <Text style={styles.emptyText}>No messages yet. Say hi! 👋</Text>
             </View>
           ) : (
-            messages.map((message) => {
-              const isOwnMessage = message.sender_id !== conversationId;
-              return (
-                <View
-                  key={message.id}
-                  style={[
-                    styles.messageWrapper,
-                    isOwnMessage ? styles.ownMessageWrapper : styles.otherMessageWrapper,
-                  ]}
-                >
-                  {!isOwnMessage && otherUserAvatar && (
-                    <Image source={{ uri: otherUserAvatar }} style={styles.messageAvatar} />
-                  )}
-                  {!isOwnMessage && !otherUserAvatar && (
-                    <View style={[styles.messageAvatar, styles.avatarPlaceholder]}>
-                      <Text style={styles.avatarPlaceholderTextSmall}>
-                        {otherUserName.charAt(0).toUpperCase()}
-                      </Text>
-                    </View>
-                  )}
-
-                  <View
-                    style={[
-                      styles.messageBubble,
-                      isOwnMessage ? styles.ownMessage : styles.otherMessage,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.messageText,
-                        isOwnMessage ? styles.ownMessageText : styles.otherMessageText,
-                      ]}
-                    >
-                      {message.body}
-                    </Text>
-                    <Text
-                      style={[
-                        styles.timeText,
-                        isOwnMessage ? styles.ownTimeText : styles.otherTimeText,
-                      ]}
-                    >
-                      {formatTime(message.created_at)}
-                    </Text>
-                  </View>
-                </View>
-              );
-            })
+            messages.map(renderMessage)
+          )}
+          {isLoading && (
+            <View style={[styles.messageContainer, styles.botMessageContainer]}>
+              <View style={[styles.messageBubble, styles.botMessageBubble]}>
+                <Text style={styles.botMessageText}>Sending...</Text>
+              </View>
+            </View>
           )}
         </ScrollView>
 
-        {/* Input */}
-        <View style={styles.inputContainer}>
-          <View style={styles.inputWrapper}>
-            <TextInput
-              style={styles.input}
-              placeholder="Type a message..."
-              value={inputText}
-              onChangeText={setInputText}
-              multiline
-              maxLength={1000}
-              placeholderTextColor={colors.textSecondary}
-            />
-            <TouchableOpacity
+        {/* Input Area */}
+        <View style={styles.inputWrapper}>
+          <View style={styles.attachButtonWrapper}>
+            <TouchableOpacity style={styles.attachButton}>
+              <Ionicons name="add" size={28} color="#222B30" />
+            </TouchableOpacity>
+          </View>
+          
+          <View style={styles.inputContainer}>
+            <View style={styles.inputInnerContainer}>
+              <TextInput
+                style={styles.textInput}
+                placeholder="Type your message.."
+                placeholderTextColor="#7B7B7B"
+                value={inputText}
+                onChangeText={setInputText}
+                multiline
+                maxLength={500}
+                onSubmitEditing={sendMessage}
+                returnKeyType="send"
+                blurOnSubmit={false}
+                onKeyPress={(e) => {
+                  if (Platform.OS === 'web' && e.nativeEvent.key === 'Enter' && !(e.nativeEvent as any).shiftKey) {
+                    e.preventDefault();
+                    sendMessage();
+                  }
+                }}
+              />
+            </View>
+            
+            <TouchableOpacity 
+              style={[styles.sendButton, (!inputText.trim() || isLoading) && styles.sendButtonDisabled]}
               onPress={sendMessage}
               disabled={!inputText.trim() || isLoading}
-              style={[styles.sendButton, (!inputText.trim() || isLoading) && styles.sendButtonDisabled]}
             >
-              {isLoading ? (
-                <ActivityIndicator size="small" color={colors.white} />
-              ) : (
-                <Ionicons name="send" size={20} color={colors.white} />
-              )}
+              <Ionicons name="mic" size={24} color="#FFFFFF" />
             </TouchableOpacity>
           </View>
         </View>
@@ -226,47 +356,98 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#F5F5F5',
+  },
+  headerContainer: {
     backgroundColor: colors.white,
+    paddingTop: 48,
+    paddingBottom: spacing.md,
+    paddingHorizontal: 0,
+    alignItems: 'center',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
+    width: '100%',
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.backgroundGray,
+    marginBottom: spacing.md,
   },
-  backButton: {
-    padding: spacing.xs,
-  },
-  headerCenter: {
-    flex: 1,
+  headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginLeft: spacing.md,
-  },
-  headerAvatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
     marginRight: spacing.sm,
   },
-  headerName: {
-    ...typography.body,
-    fontWeight: '600',
-    color: colors.textDark,
+  backButton: {
+    width: 24,
+    height: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 5,
   },
-  headerRight: {
-    width: 40,
+  avatar: {
+    width: 48,
+    height: 52,
+    aspectRatio: 12 / 13,
+    borderRadius: 24,
+    overflow: 'hidden',
+    backgroundColor: '#D3D3D3', // Fallback background
   },
-  messagesContainer: {
+  avatarImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 24,
+    ...(Platform.OS === 'web' && {
+      objectFit: 'cover' as any,
+    }),
+  },
+  avatarPlaceholder: {
+    backgroundColor: '#D3D3D3',
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: 48,
+    height: 52,
+    borderRadius: 24,
+  },
+  avatarPlaceholderText: {
+    color: colors.white,
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  profileInfo: {
     flex: 1,
-    backgroundColor: colors.backgroundLight,
+    width: 246,
+    marginRight: spacing.sm,
+  },
+  profileName: {
+    fontSize: 20,
+    fontWeight: '700',
+    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : undefined,
+    lineHeight: 32,
+    color: '#333333',
+    marginBottom: 4,
+  },
+  profileTagline: {
+    fontSize: 14,
+    fontWeight: '400',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    lineHeight: 20,
+    color: '#868686',
+  },
+  menuButton: {
+    width: 24,
+    height: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  chatContainer: {
+    flex: 1,
+  },
+  messagesList: {
+    flex: 1,
   },
   messagesContent: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
-    flexGrow: 1,
+    padding: spacing.md,
+    paddingBottom: spacing.lg,
   },
   loadingContainer: {
     flex: 1,
@@ -282,102 +463,166 @@ const styles = StyleSheet.create({
     ...typography.body,
     color: colors.textSecondary,
   },
-  messageWrapper: {
+  messageContainer: {
+    // marginBottom handled by userMessageContainer and botMessageContainer
+  },
+  userMessageContainer: {
     flexDirection: 'row',
-    marginBottom: spacing.md,
-    alignItems: 'flex-end',
-  },
-  ownMessageWrapper: {
     justifyContent: 'flex-end',
+    alignItems: 'flex-end',
+    paddingLeft: 60,
+    paddingRight: 0,
+    marginBottom: 16,
   },
-  otherMessageWrapper: {
+  botMessageContainer: {
+    flexDirection: 'row',
     justifyContent: 'flex-start',
+    alignItems: 'flex-end',
+    paddingLeft: 16,
+    paddingRight: 48,
+    marginBottom: 16,
+  },
+  messageAvatarContainer: {
+    marginRight: 8,
+    marginBottom: 0,
   },
   messageAvatar: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    marginRight: spacing.sm,
   },
-  avatarPlaceholder: {
-    backgroundColor: colors.brandTeal,
+  messageAvatarPlaceholder: {
+    backgroundColor: '#D3D3D3',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  avatarPlaceholderText: {
+  messageAvatarPlaceholderText: {
     color: colors.white,
     fontSize: 14,
     fontWeight: 'bold',
   },
-  avatarPlaceholderTextSmall: {
-    color: colors.white,
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
   messageBubble: {
-    maxWidth: '75%',
-    borderRadius: borderRadius.medium,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+    maxWidth: 268,
+    flexDirection: 'column',
   },
-  ownMessage: {
-    backgroundColor: colors.brandTeal,
-    borderBottomRightRadius: 4,
+  userMessageBubble: {
+    maxWidth: 268,
+    paddingTop: 16,
+    paddingRight: 16,
+    paddingBottom: 8,
+    paddingLeft: 16,
+    flexDirection: 'column',
+    justifyContent: 'flex-end',
+    alignItems: 'flex-end',
+    backgroundColor: '#B72DF2',
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 2,
+    borderBottomLeftRadius: 16,
+    borderBottomRightRadius: 16,
   },
-  otherMessage: {
-    backgroundColor: colors.backgroundMedium,
-    borderBottomLeftRadius: 4,
-  },
-  messageText: {
-    ...typography.body,
-    marginBottom: 2,
-  },
-  ownMessageText: {
-    color: colors.white,
-  },
-  otherMessageText: {
-    color: colors.textDark,
-  },
-  timeText: {
-    fontSize: 10,
-    marginTop: 2,
-  },
-  ownTimeText: {
-    color: 'rgba(255, 255, 255, 0.8)',
-    textAlign: 'right',
-  },
-  otherTimeText: {
-    color: colors.textSecondary,
-  },
-  inputContainer: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+  botMessageBubble: {
     backgroundColor: colors.white,
-    borderTopWidth: 1,
-    borderTopColor: colors.backgroundGray,
+    borderTopLeftRadius: 2,
+    borderTopRightRadius: 16,
+    borderBottomLeftRadius: 16,
+    borderBottomRightRadius: 16,
+    ...(Platform.OS === 'web' && {
+      boxShadow: '0px 0px 20px rgba(0, 0, 0, 0.08)',
+    }),
+  },
+  messageTextContainer: {
+    marginBottom: 10,
+  },
+  userMessageText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '500',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    lineHeight: 16,
+  },
+  botMessageText: {
+    color: '#333333',
+    fontSize: 16,
+    fontWeight: '500',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    lineHeight: 16,
+  },
+  timestampContainer: {
+    alignItems: 'flex-start',
+  },
+  timestamp: {
+    fontSize: 14,
+    fontWeight: '400',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    lineHeight: 20,
+  },
+  userTimestamp: {
+    color: 'rgba(255, 255, 255, 0.5)',
+  },
+  botTimestamp: {
+    color: 'rgba(123, 123, 123, 0.5)',
   },
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    backgroundColor: colors.backgroundGray,
-    borderRadius: borderRadius.large,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+    paddingHorizontal: 8,
+    paddingBottom: 35,
+    paddingTop: 0,
   },
-  input: {
-    flex: 1,
-    ...typography.body,
-    color: colors.textDark,
-    maxHeight: 100,
+  attachButtonWrapper: {
+    paddingBottom: 15,
+    marginRight: 8,
   },
-  sendButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: colors.brandTeal,
+  attachButton: {
+    width: 28,
+    height: 28,
     justifyContent: 'center',
     alignItems: 'center',
-    marginLeft: spacing.sm,
+  },
+  inputContainer: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.white,
+    paddingLeft: 10,
+    paddingRight: 8,
+    paddingVertical: 7,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 32,
+    borderBottomLeftRadius: 20,
+    borderBottomRightRadius: 32,
+    ...(Platform.OS === 'web' && {
+      boxShadow: '0px 0px 20px rgba(0, 0, 0, 0.08)',
+    }),
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.08,
+    shadowRadius: 20,
+    elevation: 5,
+  },
+  inputInnerContainer: {
+    flex: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 0,
+  },
+  textInput: {
+    flex: 1,
+    fontSize: 18,
+    fontWeight: '400',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    lineHeight: 22,
+    color: '#333333',
+    maxHeight: 100,
+    padding: 0,
+  },
+  sendButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 48,
+    backgroundColor: '#B72DF2',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 10,
   },
   sendButtonDisabled: {
     opacity: 0.5,

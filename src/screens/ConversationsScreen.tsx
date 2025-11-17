@@ -206,7 +206,8 @@ export default function ConversationsScreen({
     label: string,
     count?: number,
     iconName?: string,
-    iconColor?: string
+    iconColor?: string,
+    badgeDotColor?: string
   ) => {
     const isActive = filter === type;
 
@@ -219,7 +220,12 @@ export default function ConversationsScreen({
         onPress={() => setFilter(type)}
       >
         {iconName && (
-          <Ionicons name={iconName as any} size={16} color={iconColor || '#05BCD3'} />
+          <Ionicons 
+            name={iconName as any} 
+            size={24} 
+            color={iconColor || '#05BCD3'} 
+            style={iconName === 'send' && type === 'seeker' ? { transform: [{ rotate: '180deg' }] } : undefined}
+          />
         )}
         <Text style={styles.filterButtonText}>{label}</Text>
         {count !== undefined && count > 0 && (
@@ -228,13 +234,25 @@ export default function ConversationsScreen({
             <View
               style={[
                 styles.filterBadgeDot,
-                { backgroundColor: iconColor || '#05BCD3' },
+                { backgroundColor: badgeDotColor || iconColor || '#05BCD3' },
               ]}
             />
           </View>
         )}
       </TouchableOpacity>
     );
+  };
+
+  const handleConversationPress = (conv: Conversation) => {
+    if (conv.is_direct && conv.other_user) {
+      setSelectedConversation({
+        id: conv.id,
+        otherUserName: conv.other_user.name || 'User',
+        otherUserAvatar: conv.other_user.profile_image_url || null,
+      });
+    }
+    // Also call the callback if provided
+    onConversationPress?.(conv.id);
   };
 
   const renderConversationItem = (conv: Conversation) => {
@@ -251,7 +269,7 @@ export default function ConversationsScreen({
       <TouchableOpacity
         key={conv.id}
         style={styles.conversationItem}
-        onPress={() => onConversationPress?.(conv.id)}
+        onPress={() => handleConversationPress(conv)}
       >
         <View style={styles.conversationContent}>
           {/* Avatar with type badges */}
@@ -302,14 +320,14 @@ export default function ConversationsScreen({
 
         {/* Time and unread badge */}
         <View style={styles.timeContainer}>
-          {lastMessageTime && (
+          {lastMessageTime ? (
             <Text style={styles.timeText}>{lastMessageTime}</Text>
-          )}
-          {unreadCount > 0 && (
+          ) : null}
+          {unreadCount > 0 ? (
             <View style={styles.unreadBadge}>
               <Text style={styles.unreadBadgeText}>{unreadCount}</Text>
             </View>
-          )}
+          ) : null}
         </View>
       </TouchableOpacity>
     );
@@ -323,25 +341,25 @@ export default function ConversationsScreen({
       >
         <View style={styles.conversationContent}>
           {/* Swelly avatar */}
-          <View style={styles.avatarContainer}>
+          <View style={styles.swellyAvatarContainer}>
             <Image
               source={{ uri: getImageUrl('/swelly/Swelly_PopOut_DarkBackground.png') }}
               style={styles.swellyAvatar}
-              resizeMode="contain"
+              resizeMode="cover"
             />
           </View>
 
           {/* Text content */}
-          <View style={styles.textContainer}>
+          <View style={styles.swellyTextContainer}>
             <Text style={styles.swellyName}>Swelly</Text>
-            <Text style={styles.lastMessage} numberOfLines={1}>
+            <Text style={styles.swellyLastMessage} numberOfLines={1}>
               Did you see the new exhibit at the MAM?
             </Text>
           </View>
         </View>
 
         {/* Time and unread badge */}
-        <View style={styles.timeContainer}>
+        <View style={styles.swellyTimeContainer}>
           <Text style={styles.swellyTimeText}>15:20</Text>
           <View style={styles.swellyUnreadBadge}>
             <Text style={styles.unreadBadgeText}>2</Text>
@@ -364,9 +382,23 @@ export default function ConversationsScreen({
     );
   }
 
+  // Set body and html background color on web to ensure dark background is visible
+  useEffect(() => {
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      const originalBodyBg = document.body.style.backgroundColor;
+      const originalHtmlBg = document.documentElement.style.backgroundColor;
+      document.body.style.backgroundColor = '#212121';
+      document.documentElement.style.backgroundColor = '#212121';
+      return () => {
+        document.body.style.backgroundColor = originalBodyBg;
+        document.documentElement.style.backgroundColor = originalHtmlBg;
+      };
+    }
+  }, []);
+
   return (
     <View style={styles.container}>
-      {/* Header */}
+      {/* Header - Dark background */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           {userAvatar ? (
@@ -400,35 +432,41 @@ export default function ConversationsScreen({
         </View>
       </View>
 
-      {/* Phone status bar spacer */}
-      <View style={styles.statusBarSpacer} />
-
-      {/* Filter buttons */}
-      <View style={styles.filterContainer}>
-        {renderFilterButton('all', 'All')}
-        {renderFilterButton('advisor', 'Advisor', getAdvisorCount(), 'send', '#05BCD3')}
-        {renderFilterButton('seeker', 'Seeker', getSeekerCount(), 'send', '#FF5367')}
-      </View>
-
-      {/* Conversations list */}
-      <ScrollView
-        style={styles.conversationsList}
-        contentContainerStyle={styles.conversationsListContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {loading ? (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#05BCD3" />
+      {/* Content area with light background and rounded corners - dark background visible around it */}
+      <View style={styles.contentAreaWrapper}>
+        <View style={styles.contentArea}>
+        <View style={styles.contentInner}>
+          {/* Swelly conversation (positioned at top, before filters) */}
+          <View style={styles.swellyWrapper}>
+            {renderSwellyConversation()}
           </View>
-        ) : (
-          <>
-            {filteredConversations.map(renderConversationItem)}
-          </>
-        )}
-      </ScrollView>
 
-      {/* Swelly conversation (always visible at bottom) */}
-      {renderSwellyConversation()}
+          {/* Filter buttons */}
+          <View style={styles.filterContainer}>
+            {renderFilterButton('all', 'All')}
+            {renderFilterButton('advisor', 'Advisor', getAdvisorCount(), 'send', '#05BCD3', '#0788B0')}
+            {renderFilterButton('seeker', 'Seeker', getSeekerCount(), 'send', '#FF5367', '#FF5367')}
+          </View>
+
+          {/* Conversations list */}
+          <ScrollView
+            style={styles.conversationsList}
+            contentContainerStyle={styles.conversationsListContent}
+            showsVerticalScrollIndicator={false}
+          >
+            {loading ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color="#05BCD3" />
+              </View>
+            ) : (
+              <>
+                {filteredConversations.map(renderConversationItem)}
+              </>
+            )}
+          </ScrollView>
+        </View>
+      </View>
+      </View>
 
       {/* Menu Modal */}
       {showMenu && (
@@ -487,7 +525,32 @@ export default function ConversationsScreen({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#212121',
+    width: '100%',
+    height: '100%',
+    ...(Platform.OS === 'web' && {
+      position: 'fixed' as any,
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+    }),
+  },
+  contentAreaWrapper: {
+    flex: 1,
+    backgroundColor: '#212121', // Dark background visible around content area
+  },
+  contentArea: {
+    flex: 1,
     backgroundColor: '#FAFAFA',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    overflow: 'hidden',
+  },
+  contentInner: {
+    flex: 1,
+    paddingTop: 16,
+    paddingBottom: 32,
   },
   header: {
     backgroundColor: '#212121',
@@ -529,14 +592,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  statusBarSpacer: {
-    height: 38,
-    backgroundColor: '#212121',
-  },
   filterContainer: {
     flexDirection: 'row',
-    paddingHorizontal: 32,
-    paddingVertical: 24,
+    paddingHorizontal: 16,
+    paddingTop: 24,
+    paddingBottom: 16,
     gap: 8,
   },
   filterButton: {
@@ -549,6 +609,7 @@ const styles = StyleSheet.create({
     height: 36,
     borderWidth: 1,
     gap: 10,
+    minWidth: 60,
   },
   filterButtonActive: {
     backgroundColor: '#EEEEEE',
@@ -571,6 +632,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 2,
     paddingVertical: 2,
     minWidth: 20,
+    height: 20,
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
@@ -588,13 +650,15 @@ const styles = StyleSheet.create({
     borderRadius: 2.5,
     position: 'absolute',
     top: -2,
-    right: -2,
+    left: 8,
   },
   conversationsList: {
     flex: 1,
   },
   conversationsListContent: {
     paddingHorizontal: 16,
+    paddingTop: 16,
+    gap: 0,
   },
   loadingContainer: {
     flex: 1,
@@ -610,6 +674,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     borderBottomWidth: 1,
     borderBottomColor: '#EEEEEE',
+    minHeight: 80,
   },
   conversationContent: {
     flexDirection: 'row',
@@ -649,6 +714,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     bottom: 0,
     left: 38,
+    padding: 2,
   },
   typeBadgeAdvisor: {
     backgroundColor: '#05BCD3',
@@ -658,6 +724,7 @@ const styles = StyleSheet.create({
   },
   textContainer: {
     flex: 1,
+    maxWidth: 246,
     gap: 8,
   },
   conversationName: {
@@ -678,6 +745,8 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     gap: 10,
     width: 37,
+    height: 42,
+    justifyContent: 'flex-start',
   },
   timeText: {
     fontFamily: 'Inter',
@@ -702,21 +771,37 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     color: '#FFFFFF',
   },
+  swellyWrapper: {
+    paddingHorizontal: 16,
+    paddingTop: 0,
+    paddingBottom: 0,
+  },
   swellyContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: 16,
-    marginHorizontal: 16,
-    marginBottom: 16,
+    paddingVertical: 16,
+    paddingHorizontal: 8,
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
     borderWidth: 1,
     borderColor: '#B72DF2',
+    minHeight: 97,
+  },
+  swellyAvatarContainer: {
+    width: 50,
+    height: 55.255,
+    marginRight: 4,
   },
   swellyAvatar: {
     width: 50,
     height: 55.255,
+    borderRadius: 0,
+  },
+  swellyTextContainer: {
+    flex: 1,
+    maxWidth: 246,
+    gap: 8,
   },
   swellyName: {
     fontFamily: 'Montserrat-Bold',
@@ -724,6 +809,20 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     lineHeight: 22,
     color: '#B72DF2',
+  },
+  swellyLastMessage: {
+    fontFamily: 'Inter',
+    fontSize: 10,
+    fontWeight: '400',
+    lineHeight: 20,
+    color: '#868686',
+  },
+  swellyTimeContainer: {
+    alignItems: 'flex-end',
+    gap: 10,
+    width: 37,
+    height: 42,
+    justifyContent: 'flex-start',
   },
   swellyTimeText: {
     fontFamily: 'Inter',
