@@ -140,8 +140,7 @@ export const OnboardingStep1Screen: React.FC<OnboardingStep1ScreenProps> = ({
         {/* Title */}
         <View style={styles.titleContainer}>
           <Text style={styles.title}>
-            Nice to meet you,{'\n'}
-            {initialData.nickname || 'Jake'}!
+            Nice to meet you, {initialData.nickname || 'Jake'}!
           </Text>
         </View>
 
@@ -268,45 +267,58 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.lg,
     alignItems: 'center',
+    paddingBottom: 36, // gap-[36px] from Figma
     ...(isDesktopWeb() && {
       paddingTop: spacing.xl,
-      paddingBottom: spacing.sm,
+      paddingBottom: 36,
     }),
   },
   title: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: colors.brandTeal,
+    fontSize: 24, // var(--Size-2-xl, 24px)
+    fontWeight: '700', // Montserrat Bold
+    fontFamily: Platform.select({
+      web: 'Montserrat, sans-serif',
+      default: 'Montserrat',
+    }),
+    color: '#0788B0', // var(--Text-brand, #0788B0)
     textAlign: 'center',
-    lineHeight: 28.8,
+    lineHeight: 28.8, // 120% of 24px
     ...(isDesktopWeb() && {
-      fontSize: 28,
-      lineHeight: 34,
+      fontSize: 24,
+      lineHeight: 28.8,
     }),
   },
   subtitleContainer: {
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.lg,
     alignItems: 'center',
-    gap: spacing.sm,
+    gap: 8, // gap-[8px] from Figma
+    marginTop: -8, // Adjust to account for titleContainer paddingBottom
     ...(isDesktopWeb() && {
-      paddingTop: spacing.md,
+      paddingTop: 0,
       paddingBottom: spacing.sm,
     }),
   },
   subtitle: {
-    fontSize: 16,
-    fontWeight: '700',
+    fontSize: 18, // var(--Size-lg, 18px)
+    fontWeight: '700', // Montserrat Bold
+    fontFamily: Platform.select({
+      web: 'Montserrat, sans-serif',
+      default: 'Montserrat',
+    }),
     color: '#000',
     textAlign: 'center',
-    lineHeight: 24,
+    lineHeight: 24, // var(--Size-2-xl, 24px) - 133.333% of 18px
   },
   description: {
-    fontSize: 12,
-    fontWeight: '400',
+    fontSize: 16, // var(--Size-md, 16px)
+    fontWeight: '400', // Inter Regular
+    fontFamily: Platform.select({
+      web: 'Inter, sans-serif',
+      default: 'Inter',
+    }),
     color: '#000',
     textAlign: 'center',
-    lineHeight: 15,
+    lineHeight: 22, // var(--Size-xl, 22px) - 137.5% of 16px
   },
   carouselContainer: {
     flex: 1,

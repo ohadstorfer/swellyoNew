@@ -275,25 +275,57 @@ class SupabaseAuthService {
   private async getOrCreateUserProfile(supabaseUser: any): Promise<any> {
     try {
       // Import the database service
-      const { supabaseDatabaseService } = await import('../database');
+      const { supabaseDatabaseService } = await import('../database/supabaseDatabaseService');
+      
+      // Get Google name from metadata
+      const googleName = supabaseUser.user_metadata?.full_name || 
+                        supabaseUser.user_metadata?.name || 
+                        supabaseUser.email?.split('@')[0] || 
+                        'User';
       
       // Save user to users table
       const savedUser = await supabaseDatabaseService.saveUser({
         email: supabaseUser.email || '',
-        nickname: supabaseUser.user_metadata?.full_name || supabaseUser.user_metadata?.name,
+        nickname: googleName,
         profilePicture: supabaseUser.user_metadata?.avatar_url || supabaseUser.user_metadata?.picture,
         googleId: supabaseUser.app_metadata?.provider_id || supabaseUser.id,
       });
 
+      // Also create/update surfer record with Google name if it doesn't exist or has default "User" name
+      try {
+        const { data: existingSurfer } = await supabase
+          .from('surfers')
+          .select('name')
+          .eq('user_id', supabaseUser.id)
+          .maybeSingle();
+
+        // If no surfer exists, or if surfer exists with "User" name, update it with Google name
+        if (!existingSurfer || existingSurfer.name === 'User' || !existingSurfer.name || existingSurfer.name.trim() === '') {
+          const { supabaseDatabaseService } = await import('../database/supabaseDatabaseService');
+          await supabaseDatabaseService.saveSurfer({
+            name: googleName,
+            profileImageUrl: supabaseUser.user_metadata?.avatar_url || supabaseUser.user_metadata?.picture,
+          });
+          console.log(`Created/updated surfer record with Google name: ${googleName}`);
+        }
+      } catch (surferError) {
+        // Log but don't fail - surfer creation is not critical for auth
+        console.warn('Error creating/updating surfer record during signup:', surferError);
+      }
+
       return {
-        nickname: savedUser.nickname || supabaseUser.user_metadata?.full_name || supabaseUser.user_metadata?.name || 'User',
+        nickname: savedUser.nickname || googleName,
         email: savedUser.email,
       };
     } catch (error) {
       console.warn('Error in getOrCreateUserProfile:', error);
       // Return a default profile object
+      const googleName = supabaseUser.user_metadata?.full_name || 
+                        supabaseUser.user_metadata?.name || 
+                        supabaseUser.email?.split('@')[0] || 
+                        'User';
       return {
-        nickname: supabaseUser.user_metadata?.full_name || supabaseUser.user_metadata?.name || 'User',
+        nickname: googleName,
         email: supabaseUser.email || '',
       };
     }

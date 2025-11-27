@@ -56,31 +56,37 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
   const [carouselItemWidth, setCarouselItemWidth] = useState(getCarouselItemWidth());
   const initialRealIndex = boards.findIndex((b: BoardType) => b.id === selectedBoardId) || 0;
   
-  // Create infinite data array: [last, ...boards, first]
-  // This allows seamless looping
+  // Animated value for smooth scrolling
+  const scrollX = useRef(new Animated.Value(0)).current;
+  
+  // Simple function to create a very long repeating array (infinite carousel)
+  const INFINITE_SIZE = 1000; // Large enough to feel infinite
+  const START_INDEX = Math.floor(INFINITE_SIZE / 2); // Start in the middle
+  
   const infiniteData = React.useMemo(() => {
     if (boards.length === 0) return [];
-    const lastBoard = boards[boards.length - 1];
-    const firstBoard = boards[0];
-    return [lastBoard, ...boards, firstBoard];
+    // Create a long array by repeating the boards
+    return Array.from({ length: INFINITE_SIZE }, (_, i) => boards[i % boards.length]);
   }, [boards]);
 
-  // Map virtual index (in infiniteData) to real index (in boards)
+  // Simple mapping: any index maps to a board using modulo
   const getRealIndex = (virtualIndex: number): number => {
-    if (virtualIndex === 0) return boards.length - 1; // First item is last board
-    if (virtualIndex === infiniteData.length - 1) return 0; // Last item is first board
-    return virtualIndex - 1; // Middle items map directly
+    if (boards.length === 0) return 0;
+    return virtualIndex % boards.length;
   };
 
-  // Map real index to virtual index
+  // Get virtual index for a real index (start in middle + offset)
   const getVirtualIndex = (realIndex: number): number => {
-    return realIndex + 1; // +1 because first item is the duplicate last board
+    return START_INDEX + realIndex;
   };
 
-  // Initial virtual index (accounting for the duplicate at the start)
-  const initialVirtualIndex = getVirtualIndex(initialRealIndex);
+  // Initial virtual index (start in middle + initial real index)
+  const initialVirtualIndex = START_INDEX + initialRealIndex;
   const [activeVirtualIndex, setActiveVirtualIndex] = useState(initialVirtualIndex);
   const [isScrolling, setIsScrolling] = useState(false);
+  
+  // Edge threshold - jump back to middle when we get too close to edges
+  const EDGE_THRESHOLD = 100;
 
   // Update width on resize (web)
   React.useEffect(() => {
@@ -98,77 +104,148 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
       const virtualIndex = viewableItems[0].index as number;
       setActiveVirtualIndex(virtualIndex);
       
-      // Handle infinite loop: jump to real item when at edges
-      if (virtualIndex === 0) {
-        // At duplicate last board, jump to real last board
+      // Check if we're near edges and need to jump back to middle
+      if (virtualIndex < EDGE_THRESHOLD) {
+        // Near the start, jump to middle with same real board
+        const realIndex = getRealIndex(virtualIndex);
+        const newVirtualIndex = START_INDEX + realIndex;
         setTimeout(() => {
-          const realLastIndex = boards.length - 1;
-          const realLastVirtualIndex = getVirtualIndex(realLastIndex);
-          flatListRef.current?.scrollToIndex({ index: realLastVirtualIndex, animated: false });
-          setActiveVirtualIndex(realLastVirtualIndex);
-          onBoardSelect(boards[realLastIndex]);
+          flatListRef.current?.scrollToIndex({ index: newVirtualIndex, animated: false });
+          setActiveVirtualIndex(newVirtualIndex);
+          scrollX.setValue(newVirtualIndex * carouselItemWidth);
         }, 50);
-      } else if (virtualIndex === infiniteData.length - 1) {
-        // At duplicate first board, jump to real first board
+      } else if (virtualIndex > INFINITE_SIZE - EDGE_THRESHOLD) {
+        // Near the end, jump to middle with same real board
+        const realIndex = getRealIndex(virtualIndex);
+        const newVirtualIndex = START_INDEX + realIndex;
         setTimeout(() => {
-          const realFirstVirtualIndex = getVirtualIndex(0);
-          flatListRef.current?.scrollToIndex({ index: realFirstVirtualIndex, animated: false });
-          setActiveVirtualIndex(realFirstVirtualIndex);
-          onBoardSelect(boards[0]);
+          flatListRef.current?.scrollToIndex({ index: newVirtualIndex, animated: false });
+          setActiveVirtualIndex(newVirtualIndex);
+          scrollX.setValue(newVirtualIndex * carouselItemWidth);
         }, 50);
-      } else {
-        // Normal case: map virtual index to real index
+      }
+      
+      // Always update the selected board
         const realIndex = getRealIndex(virtualIndex);
         onBoardSelect(boards[realIndex]);
-      }
     }
   }).current;
 
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50 }).current;
 
+  const handleBoardPress = (index: number) => {
+    if (index === activeVirtualIndex || isScrolling) return; // Don't do anything if already active or scrolling
+    
+    setIsScrolling(true);
+    
+    // If near edges, jump to middle first, then calculate target
+    let targetIndex = index;
+    if (index < EDGE_THRESHOLD || index > INFINITE_SIZE - EDGE_THRESHOLD) {
+      // Near edge, use middle position with same real board
+      const realIndex = getRealIndex(index);
+      targetIndex = START_INDEX + realIndex;
+    }
+    
+    setActiveVirtualIndex(targetIndex);
+    const realIndex = getRealIndex(targetIndex);
+    onBoardSelect(boards[realIndex]);
+    
+    // Animate scroll to the selected board - this creates the sliding effect
+    if (flatListRef.current) {
+      flatListRef.current.scrollToIndex({ index: targetIndex, animated: true });
+      // Manually update scrollX to ensure interpolation works correctly
+      Animated.timing(scrollX, {
+        toValue: targetIndex * carouselItemWidth,
+        duration: 300,
+        useNativeDriver: false,
+      }).start();
+      setTimeout(() => setIsScrolling(false), 500);
+    }
+  };
+
   const renderBoard = ({ item, index }: { item: BoardType; index: number }) => {
     const isActive = index === activeVirtualIndex;
-    const isLeft = index === activeVirtualIndex - 1 || (activeVirtualIndex === 0 && index === infiniteData.length - 1);
-    const isRight = index === activeVirtualIndex + 1 || (activeVirtualIndex === infiniteData.length - 1 && index === 0);
+    const isLeft = index === activeVirtualIndex - 1;
+    const isRight = index === activeVirtualIndex + 1;
     const isVisible = isActive || isLeft || isRight;
     
     // Don't render if not visible (optimization)
-    // Account for wrapping in infinite loop
-    const distance = Math.min(
-      Math.abs(index - activeVirtualIndex),
-      Math.abs(index - activeVirtualIndex + infiniteData.length),
-      Math.abs(index - activeVirtualIndex - infiniteData.length)
-    );
+    const distance = Math.abs(index - activeVirtualIndex);
     if (!isVisible && distance > 1) {
       return <View style={[styles.carouselItem, { width: carouselItemWidth }]} />;
     }
 
-    // Size and opacity based on position
-    const scale = isActive ? 1 : 0.8; // Side boards are 70% size
-    const opacity = isActive ? 1 : 0.7; // Side boards are 50% opacity
+    // Animated values based on scroll position for smooth transitions
+    // scrollX from onScroll is contentOffset.x, which is the scroll position within the content
+    // When index N is centered, scrollX = N * carouselItemWidth
+    const inputRange = [
+      (index - 1) * carouselItemWidth,
+      index * carouselItemWidth,
+      (index + 1) * carouselItemWidth,
+    ];
+
+    // Interpolate scale: center board is 1.0, side boards are 0.89 (matching Figma)
+    const animatedScale = scrollX.interpolate({
+      inputRange,
+      outputRange: [0.89, 1, 0.89],
+      extrapolate: 'clamp',
+    });
+
+    // Interpolate opacity: center board is 1.0, side boards are 0.3 (matching Figma)
+    const animatedOpacity = scrollX.interpolate({
+      inputRange,
+      outputRange: [0.3, 1, 0.3],
+      extrapolate: 'clamp',
+    });
+
+    // Interpolate vertical position: side boards slide down
+    const baseImageHeight = isDesktopWeb() ? 500 : 450;
+    const centerBoardHeight = baseImageHeight;
+    const sideBoardHeight = baseImageHeight * 0.89;
+    const verticalOffsetValue = (centerBoardHeight - sideBoardHeight) + (baseImageHeight * 0.15);
     
-    // Image width - center is larger
+    const animatedTranslateY = scrollX.interpolate({
+      inputRange,
+      outputRange: [verticalOffsetValue, 0, verticalOffsetValue],
+      extrapolate: 'clamp',
+    });
+
+    // Image width - center is larger, matching Figma proportions
+    // Use animated scale to determine width dynamically
+    const centerImageWidth = carouselItemWidth * 1.7; // Center board is 170% of item width (increased from 1.5)
+    // For image width, we'll use a static calculation based on current active state
+    // since we need the actual width value, not an animated one
     const imageWidth = isActive 
-      ? carouselItemWidth * 1.2 // Center board is 120% of item width
-      : carouselItemWidth * 1; // Side boards are 84% of item width (0.7 * 1.2)
+      ? centerImageWidth // Center board
+      : centerImageWidth * 0.89; // Side boards are 89% of center board size
 
     return (
-      <View style={[styles.carouselItem, { width: carouselItemWidth }]}>
-        <Animated.View
-          style={[
-            styles.boardWrapper,
-            {
-              transform: [{ scale }],
-              opacity,
-            },
-          ]}
+      <View style={[styles.carouselItem, { width: carouselItemWidth }]}> 
+        <TouchableOpacity
+          activeOpacity={0.9}
+          onPress={() => handleBoardPress(index)}
+          disabled={isScrolling}
+          style={styles.boardTouchable}
         >
-          <Image
-            source={{ uri: item.imageUrl }}
-            style={[styles.boardImage, { width: imageWidth }]}
-            resizeMode="contain"
-          />
-        </Animated.View>
+            <Animated.View
+              style={[
+                styles.boardWrapper,
+              {
+                transform: [
+                  { scale: animatedScale },
+                  { translateY: animatedTranslateY },
+                ],
+                opacity: animatedOpacity,
+              },
+              ]}
+            >
+        <Image
+          source={{ uri: item.imageUrl }}
+          style={[styles.boardImage, { width: imageWidth }]}
+          resizeMode="contain"
+        />
+            </Animated.View>
+        </TouchableOpacity>
       </View>
     );
   };
@@ -176,23 +253,31 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
   const renderDots = () => {
     const currentRealIndex = getRealIndex(activeVirtualIndex);
     return (
-      <View style={styles.dotsContainer}>
-        {boards.map((_board: BoardType, index: number) => (
-          <View
-            key={index}
+    <View style={styles.dotsContainer}>
+      {boards.map((_board: BoardType, index: number) => (
+        <View
+          key={index}
             style={[styles.dot, index === currentRealIndex ? styles.dotActive : styles.dotInactive]}
-          />
-        ))}
-      </View>
-    );
+        />
+      ))}
+    </View>
+  );
   };
 
-  // Ensure initial index is centered
+  // Ensure initial index is centered and initialize scrollX
   React.useEffect(() => {
     if (flatListRef.current && initialVirtualIndex >= 0) {
+      // Initialize scrollX to match the initial scroll position
+      // When index N is centered, scrollX = N * carouselItemWidth
+      const initialScrollX = initialVirtualIndex * carouselItemWidth;
+      scrollX.setValue(initialScrollX);
       const timeout = Platform.OS === 'web' ? 300 : 100;
       setTimeout(() => {
         flatListRef.current?.scrollToIndex({ index: initialVirtualIndex, animated: false });
+        // Update scrollX after scroll completes to ensure sync
+        setTimeout(() => {
+          scrollX.setValue(initialVirtualIndex * carouselItemWidth);
+        }, 100);
       }, timeout);
     }
   }, []);
@@ -206,12 +291,12 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
         setIsScrolling(true);
         const newVirtualIndex = getVirtualIndex(newRealIndex);
         setActiveVirtualIndex(newVirtualIndex);
-        const timeout = Platform.OS === 'web' ? 300 : 100;
-        setTimeout(() => {
+      const timeout = Platform.OS === 'web' ? 300 : 100;
+      setTimeout(() => {
           flatListRef.current?.scrollToIndex({ index: newVirtualIndex, animated: true });
           setTimeout(() => setIsScrolling(false), 500);
-        }, timeout);
-      }
+      }, timeout);
+    }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedBoardId, boards, activeVirtualIndex, carouselItemWidth, infiniteData.length]);
@@ -221,15 +306,22 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
       setIsScrolling(true);
       let newVirtualIndex = activeVirtualIndex - 1;
       
-      // If at the first item (duplicate last), wrap to real last
-      if (newVirtualIndex < 0) {
-        newVirtualIndex = infiniteData.length - 2; // Real last board
+      // If near edge, jump to middle with previous real board
+      if (newVirtualIndex < EDGE_THRESHOLD) {
+        const realIndex = getRealIndex(newVirtualIndex);
+        newVirtualIndex = START_INDEX + realIndex;
       }
       
       setActiveVirtualIndex(newVirtualIndex);
       const realIndex = getRealIndex(newVirtualIndex);
       onBoardSelect(boards[realIndex]);
       flatListRef.current.scrollToIndex({ index: newVirtualIndex, animated: true });
+      // Manually update scrollX to ensure interpolation works correctly
+      Animated.timing(scrollX, {
+        toValue: newVirtualIndex * carouselItemWidth,
+          duration: 300,
+        useNativeDriver: false,
+      }).start();
       setTimeout(() => setIsScrolling(false), 500);
     }
   };
@@ -239,15 +331,22 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
       setIsScrolling(true);
       let newVirtualIndex = activeVirtualIndex + 1;
       
-      // If at the last item (duplicate first), wrap to real first
-      if (newVirtualIndex >= infiniteData.length) {
-        newVirtualIndex = 1; // Real first board
+      // If near edge, jump to middle with next real board
+      if (newVirtualIndex > INFINITE_SIZE - EDGE_THRESHOLD) {
+        const realIndex = getRealIndex(newVirtualIndex);
+        newVirtualIndex = START_INDEX + realIndex;
       }
       
       setActiveVirtualIndex(newVirtualIndex);
       const realIndex = getRealIndex(newVirtualIndex);
       onBoardSelect(boards[realIndex]);
       flatListRef.current.scrollToIndex({ index: newVirtualIndex, animated: true });
+      // Manually update scrollX to ensure interpolation works correctly
+      Animated.timing(scrollX, {
+        toValue: newVirtualIndex * carouselItemWidth,
+          duration: 300,
+        useNativeDriver: false,
+      }).start();
       setTimeout(() => setIsScrolling(false), 500);
     }
   };
@@ -255,10 +354,12 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
   return (
     <View style={styles.container}>
       <View style={styles.carouselWrapper}>
-        {/* Always show arrows since it's infinite */}
-        <TouchableOpacity style={styles.arrowButton} onPress={scrollToPrevious} activeOpacity={0.7}>
-          <Ionicons name="chevron-back" size={24} color={colors.textDark} />
-        </TouchableOpacity>
+        {/* Show arrows only on desktop web */}
+        {isDesktopWeb() && (
+          <TouchableOpacity style={styles.arrowButton} onPress={scrollToPrevious} activeOpacity={0.7}>
+            <Ionicons name="chevron-back" size={24} color={colors.textDark} />
+          </TouchableOpacity>
+        )}
 
         <FlatList
           ref={flatListRef}
@@ -270,13 +371,18 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
           showsHorizontalScrollIndicator={false}
           onViewableItemsChanged={onViewableItemsChanged}
           viewabilityConfig={viewabilityConfig}
-          initialScrollIndex={initialVirtualIndex >= 0 ? initialVirtualIndex : 1}
+          initialScrollIndex={initialVirtualIndex >= 0 ? initialVirtualIndex : START_INDEX}
           getItemLayout={(_, index) => ({ length: carouselItemWidth, offset: carouselItemWidth * index, index })}
           snapToAlignment="center"
           snapToInterval={carouselItemWidth}
           decelerationRate="fast"
           contentContainerStyle={styles.carouselContent}
           contentInsetAdjustmentBehavior="never"
+          onScroll={Animated.event(
+            [{ nativeEvent: { contentOffset: { x: scrollX } } }],
+            { useNativeDriver: false }
+          )}
+          scrollEventThrottle={16}
           onScrollToIndexFailed={(info) => {
             const wait = new Promise(resolve => setTimeout(resolve, 500));
             wait.then(() => {
@@ -286,9 +392,12 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
           {...(Platform.OS === 'web' && { style: { overflowX: 'hidden' as any } as any })}
         />
 
-        <TouchableOpacity style={[styles.arrowButton, styles.arrowButtonRight]} onPress={scrollToNext} activeOpacity={0.7}>
-          <Ionicons name="chevron-forward" size={24} color={colors.textDark} />
-        </TouchableOpacity>
+        {/* Show arrows only on desktop web */}
+        {isDesktopWeb() && (
+          <TouchableOpacity style={[styles.arrowButton, styles.arrowButtonRight]} onPress={scrollToNext} activeOpacity={0.7}>
+            <Ionicons name="chevron-forward" size={24} color={colors.textDark} />
+          </TouchableOpacity>
+        )}
       </View>
 
       <View style={styles.labelContainer}>
@@ -368,19 +477,31 @@ const styles = StyleSheet.create({
     paddingRight: getCarouselItemWidth(),
   },
   carouselItem: {
-    justifyContent: 'center',
+    justifyContent: 'flex-start', // Align to top so center board is higher
     alignItems: 'center',
-    paddingVertical: spacing.xl,
+    paddingTop: spacing.md, // Top padding for center board
+    paddingBottom: spacing.xxl, // More bottom padding for side boards to sit lower
+    minHeight: 500, // Bigger height to accommodate larger boards
+    ...(isDesktopWeb() && {
+      minHeight: 550,
+      paddingTop: spacing.lg,
+    }),
     ...(Platform.OS === 'web' && { paddingHorizontal: 0 }),
   },
-  boardWrapper: {
+  boardTouchable: {
+    width: '100%',
+    height: '100%',
     justifyContent: 'center',
+    alignItems: 'center',
+  },
+  boardWrapper: {
+    justifyContent: 'flex-start', // Align boards to top
     alignItems: 'center',
   },
   boardImage: {
-    height: 350,
+    height: 450, // Increased from 400 - bigger boards
     ...(isDesktopWeb() && {
-      height: 400, // Slightly larger on desktop
+      height: 500, // Increased from 450 - even larger on desktop
       // @ts-ignore
       objectFit: 'contain' as any,
     }),

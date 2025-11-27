@@ -1,4 +1,4 @@
-import { API_CONFIG, ENDPOINTS } from '../../config/api';
+import { supabase, isSupabaseConfigured } from '../../config/supabase';
 
 /**
  * Swelly Service
@@ -9,9 +9,9 @@ import { API_CONFIG, ENDPOINTS } from '../../config/api';
  * - Continuing existing conversations
  * - Retrieving chat history
  * - Health checks
+ * 
+ * Uses Supabase Edge Functions instead of external backend.
  */
-
-const API_BASE_URL = API_CONFIG.BASE_URL;
 
 export interface SwellyChatRequest {
   message: string;
@@ -36,22 +36,67 @@ export interface SwellyContinueChatResponse {
 
 class SwellyService {
   /**
+   * Get the Supabase Edge Function URL for Swelly chat
+   */
+  private getFunctionUrl(endpoint: string): string {
+    if (!isSupabaseConfigured()) {
+      throw new Error('Supabase is not configured');
+    }
+    
+    const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
+    if (!supabaseUrl) {
+      throw new Error('EXPO_PUBLIC_SUPABASE_URL is not set');
+    }
+    
+    return `${supabaseUrl}/functions/v1/swelly-chat${endpoint}`;
+  }
+
+  /**
+   * Get authentication headers for Supabase Edge Function calls
+   */
+  private async getAuthHeaders(): Promise<HeadersInit> {
+    const { data: { session }, error } = await supabase.auth.getSession();
+    
+    if (error || !session) {
+      throw new Error('Not authenticated. Please sign in again.');
+    }
+
+    const anonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+    if (!anonKey) {
+      throw new Error('EXPO_PUBLIC_SUPABASE_ANON_KEY is not set');
+    }
+
+    return {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${session.access_token}`,
+      'apikey': anonKey,
+    };
+  }
+
+  /**
    * Start a new conversation with Swelly
    * @param request - Initial message or context for the conversation
+   * @param conversationId - Optional Supabase conversation ID to link chat history
    * @returns Swelly's response and chat ID
    */
-  async startNewConversation(request: SwellyChatRequest): Promise<SwellyChatResponse> {
+  async startNewConversation(
+    request: SwellyChatRequest, 
+    conversationId?: string
+  ): Promise<SwellyChatResponse> {
     try {
-      const url = `${API_BASE_URL}${ENDPOINTS.NEW_CHAT}`;
+      const url = this.getFunctionUrl('/new_chat');
+      const headers = await this.getAuthHeaders();
+      
       console.log('[SwellyService] Starting new conversation:', url);
       console.log('[SwellyService] Request body:', JSON.stringify(request));
       
       const response = await fetch(url, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(request),
+        headers,
+        body: JSON.stringify({
+          ...request,
+          conversation_id: conversationId,
+        }),
       });
 
       console.log('[SwellyService] Response status:', response.status);
@@ -76,19 +121,27 @@ class SwellyService {
    * Continue an existing conversation with Swelly
    * @param chatId - The chat ID from the previous conversation
    * @param request - The user's message
+   * @param conversationId - Optional Supabase conversation ID to link chat history
    * @returns Swelly's response
    */
-  async continueConversation(chatId: string, request: SwellyContinueChatRequest): Promise<SwellyContinueChatResponse> {
+  async continueConversation(
+    chatId: string, 
+    request: SwellyContinueChatRequest,
+    conversationId?: string
+  ): Promise<SwellyContinueChatResponse> {
     try {
-      const url = `${API_BASE_URL}${ENDPOINTS.CONTINUE_CHAT(chatId)}`;
+      const url = this.getFunctionUrl(`/continue/${chatId}`);
+      const headers = await this.getAuthHeaders();
+      
       console.log('[SwellyService] Continuing conversation:', url);
       
       const response = await fetch(url, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(request),
+        headers,
+        body: JSON.stringify({
+          ...request,
+          conversation_id: conversationId,
+        }),
       });
 
       if (!response.ok) {
@@ -113,14 +166,14 @@ class SwellyService {
    */
   async getChatHistory(chatId: string): Promise<any> {
     try {
-      const url = `${API_BASE_URL}${ENDPOINTS.GET_CHAT(chatId)}`;
+      const url = this.getFunctionUrl(`/${chatId}`);
+      const headers = await this.getAuthHeaders();
+      
       console.log('[SwellyService] Getting chat history:', url);
       
       const response = await fetch(url, {
         method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers,
       });
 
       if (!response.ok) {
@@ -144,11 +197,14 @@ class SwellyService {
    */
   async healthCheck(): Promise<any> {
     try {
-      const url = `${API_BASE_URL}${ENDPOINTS.HEALTH}`;
+      const url = this.getFunctionUrl('/health');
+      const headers = await this.getAuthHeaders();
+      
       console.log('[SwellyService] Checking API health:', url);
       
       const response = await fetch(url, {
         method: 'GET',
+        headers,
       });
 
       if (!response.ok) {

@@ -32,6 +32,13 @@ export interface SupabaseSurfer {
   travel_experience?: string; // travel_experience enum, nullable
   bio?: string; // text, nullable
   profile_image_url?: string; // varchar(2048), nullable
+  // Swelly conversation results
+  onboarding_summary_text?: string; // text, nullable
+  destinations_array?: Array<{ destination_name: string; time_in_days: number }>; // jsonb, nullable
+  travel_type?: 'budget' | 'mid' | 'high'; // text, nullable
+  travel_buddies?: 'solo' | '2' | 'crew'; // text, nullable
+  lifestyle_keywords?: string[]; // text[], nullable
+  wave_type_keywords?: string[]; // text[], nullable
   created_at: string; // timestamptz
   updated_at: string; // timestamptz
 }
@@ -153,6 +160,13 @@ class SupabaseDatabaseService {
     bio?: string;
     profileImageUrl?: string;
     boardType?: number; // Legacy support - will be converted to surfboardType enum
+    // Swelly conversation results
+    onboardingSummaryText?: string;
+    destinationsArray?: Array<{ destination_name: string; time_in_days: number }>;
+    travelType?: 'budget' | 'mid' | 'high';
+    travelBuddies?: 'solo' | '2' | 'crew';
+    lifestyleKeywords?: string[];
+    waveTypeKeywords?: string[];
   }): Promise<SupabaseSurfer> {
     if (!isSupabaseConfigured()) {
       throw new Error('Supabase is not configured. Please set up your Supabase credentials.');
@@ -177,6 +191,17 @@ class SupabaseDatabaseService {
       // Log fetch error but don't throw - it's okay if the record doesn't exist yet
       if (fetchError && fetchError.code !== 'PGRST116') {
         console.warn('Error checking for existing surfer (non-critical):', fetchError);
+      }
+
+      // Get Google name from user metadata as fallback if name is not provided
+      let googleName: string | undefined;
+      if (!surferData.name && !existingSurfer?.name) {
+        const { data: { user: authUserWithMetadata } } = await supabase.auth.getUser();
+        if (authUserWithMetadata) {
+          googleName = authUserWithMetadata.user_metadata?.full_name || 
+                      authUserWithMetadata.user_metadata?.name || 
+                      authUserWithMetadata.email?.split('@')[0];
+        }
       }
 
       // Convert boardType number to enum if needed
@@ -214,7 +239,7 @@ class SupabaseDatabaseService {
 
       const surferDataToSave: Partial<SupabaseSurfer> = {
         user_id: authUser.id,
-        name: surferData.name || existingSurfer?.name || 'User', // Required field
+        name: surferData.name || existingSurfer?.name || googleName || 'User', // Required field - prefer provided name, then existing, then Google name, then 'User'
         age: surferData.age,
         pronoun: surferData.pronoun,
         country_from: surferData.countryFrom,
@@ -223,6 +248,13 @@ class SupabaseDatabaseService {
         travel_experience: surferData.travelExperience,
         bio: surferData.bio,
         profile_image_url: profileImageUrl,
+        // Swelly conversation results
+        onboarding_summary_text: surferData.onboardingSummaryText,
+        destinations_array: surferData.destinationsArray,
+        travel_type: surferData.travelType,
+        travel_buddies: surferData.travelBuddies,
+        lifestyle_keywords: surferData.lifestyleKeywords,
+        wave_type_keywords: surferData.waveTypeKeywords,
       };
 
       let savedSurfer: SupabaseSurfer;
@@ -250,7 +282,7 @@ class SupabaseDatabaseService {
         // Create new surfer
         const insertData = {
           ...surferDataToSave,
-          name: surferDataToSave.name || 'User', // Ensure name is provided
+          name: surferDataToSave.name || googleName || 'User', // Ensure name is provided - prefer Google name over 'User'
         };
         
         const { data, error } = await supabase
@@ -294,7 +326,7 @@ class SupabaseDatabaseService {
     boardType?: number;
     surfLevel?: number;
     travelExperience?: number;
-  }): Promise<{ user: SupabaseUser; surfer: SupabaseSurfer }> {
+  }): Promise<{ user: User; surfer: SupabaseSurfer }> {
     try {
       // Save user data (only email goes to users table)
       const user = await this.saveUser({
@@ -505,6 +537,63 @@ class SupabaseDatabaseService {
     } catch (error: any) {
       console.error('Error getting user by Google ID from Supabase:', error);
       return null;
+    }
+  }
+
+  /**
+   * Save a surf trip plan to the surf_trip_plans table
+   */
+  async saveSurfTripPlan(tripPlanData: {
+    destinations?: string[];
+    timeInDays?: number;
+    travelType?: 'budget' | 'mid' | 'high';
+    travelBuddies?: 'solo' | '2' | 'crew';
+    lifestyleKeywords?: string[];
+    waveTypeKeywords?: string[];
+    summaryText?: string;
+  }): Promise<any> {
+    if (!isSupabaseConfigured()) {
+      throw new Error('Supabase is not configured. Please set up your Supabase credentials.');
+    }
+
+    try {
+      // Get the current authenticated user
+      const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
+      
+      if (authError || !authUser) {
+        throw new Error('User not authenticated. Please sign in first.');
+      }
+
+      const tripPlanToSave: any = {
+        created_by: authUser.id,
+        destinations: tripPlanData.destinations || null,
+        time_in_days: tripPlanData.timeInDays || null,
+        travel_type: tripPlanData.travelType || null,
+        travel_buddies: tripPlanData.travelBuddies || null,
+        lifestyle_keywords: tripPlanData.lifestyleKeywords || null,
+        wave_type_keywords: tripPlanData.waveTypeKeywords || null,
+        summary_text: tripPlanData.summaryText || null,
+      };
+
+      const { data, error } = await supabase
+        .from('surf_trip_plans')
+        .insert(tripPlanToSave)
+        .select()
+        .single();
+
+      if (error) {
+        throw error;
+      }
+
+      if (!data) {
+        throw new Error('Insert succeeded but no data returned');
+      }
+
+      console.log('Surf trip plan saved to Supabase:', data);
+      return data;
+    } catch (error: any) {
+      console.error('Error saving surf trip plan to Supabase:', error);
+      throw new Error(`Failed to save surf trip plan: ${error.message || String(error)}`);
     }
   }
 }

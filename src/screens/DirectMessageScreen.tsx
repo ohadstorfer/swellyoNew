@@ -21,6 +21,7 @@ interface DirectMessageScreenProps {
   conversationId: string;
   otherUserName: string;
   otherUserAvatar: string | null;
+  isDirect?: boolean; // true for direct messages (2 users), false for group chats
   onBack?: () => void;
 }
 
@@ -28,6 +29,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   conversationId,
   otherUserName,
   otherUserAvatar,
+  isDirect = true, // Default to direct message (2 users)
   onBack,
 }) => {
   // Debug: Log avatar URL
@@ -179,27 +181,36 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const renderMessage = (message: Message) => {
     const isOwnMessage = currentUserId && message.sender_id === currentUserId;
     
+    // For group chats, show avatar for received messages
+    // For direct messages (2 users), don't show avatar since it's always the same person
+    const showAvatar = !isOwnMessage && !isDirect && (message.sender_name || message.sender_avatar);
+    const senderName = message.sender_name || message.sender?.name || otherUserName;
+    const senderAvatar = message.sender_avatar || message.sender?.avatar || otherUserAvatar;
+    
     return (
       <View
         key={message.id}
         style={[
           styles.messageContainer,
-          isOwnMessage ? styles.userMessageContainer : styles.botMessageContainer,
+          isOwnMessage ? styles.userMessageContainer : [
+            styles.botMessageContainer,
+            isDirect && styles.botMessageContainerDirect, // Less padding for direct messages (no avatar)
+          ],
         ]}
       >
-        {/* Show other user's avatar for received messages */}
-        {!isOwnMessage && (
+        {/* Show avatar only for group chats (not direct messages) */}
+        {showAvatar && (
           <View style={styles.messageAvatarContainer}>
-            {otherUserAvatar ? (
+            {senderAvatar ? (
               <Image
-                source={{ uri: otherUserAvatar }}
+                source={{ uri: senderAvatar }}
                 style={styles.messageAvatar}
                 resizeMode="cover"
               />
             ) : (
               <View style={[styles.messageAvatar, styles.messageAvatarPlaceholder]}>
                 <Text style={styles.messageAvatarPlaceholderText}>
-                  {otherUserName.charAt(0).toUpperCase()}
+                  {senderName.charAt(0).toUpperCase()}
                 </Text>
               </View>
             )}
@@ -212,12 +223,18 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             isOwnMessage ? styles.userMessageBubble : styles.botMessageBubble,
           ]}
         >
+          {/* Message text container with gap */}
           <View style={styles.messageTextContainer}>
             <Text style={isOwnMessage ? styles.userMessageText : styles.botMessageText}>
               {message.body || ''}
             </Text>
           </View>
-          <View style={styles.timestampContainer}>
+          
+          {/* Timestamp container with rounded corners (Figma design) */}
+          <View style={[
+            styles.timestampContainer,
+            !isOwnMessage && styles.botTimestampContainer,
+          ]}>
             <Text style={[
               styles.timestamp,
               isOwnMessage ? styles.userTimestamp : styles.botTimestamp,
@@ -478,9 +495,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'flex-start',
     alignItems: 'flex-end',
-    paddingLeft: 16,
+    paddingLeft: 16, // Default padding for group chats (with avatar)
     paddingRight: 48,
     marginBottom: 16,
+  },
+  botMessageContainerDirect: {
+    // For direct messages (no avatar), reduce left padding
+    paddingLeft: 16, // Keep same padding since we removed avatar
   },
   messageAvatarContainer: {
     marginRight: 8,
@@ -522,16 +543,23 @@ const styles = StyleSheet.create({
   },
   botMessageBubble: {
     backgroundColor: colors.white,
-    borderTopLeftRadius: 2,
-    borderTopRightRadius: 16,
-    borderBottomLeftRadius: 16,
-    borderBottomRightRadius: 16,
+    paddingTop: 16,
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+    flexDirection: 'column',
+    justifyContent: 'flex-end',
+    alignItems: 'flex-start',
+    borderTopLeftRadius: 4, // Figma: rounded-tl-[4px]
+    borderTopRightRadius: 16, // Figma: rounded-tr-[16px]
+    borderBottomLeftRadius: 16, // Figma: rounded-bl-[16px]
+    borderBottomRightRadius: 16, // Figma: rounded-br-[16px]
     ...(Platform.OS === 'web' && {
       boxShadow: '0px 0px 20px rgba(0, 0, 0, 0.08)',
     }),
   },
   messageTextContainer: {
-    marginBottom: 10,
+    marginBottom: 10, // Gap between text and timestamp (Figma: gap-[10px])
+    width: '100%',
   },
   userMessageText: {
     color: '#FFFFFF',
@@ -541,26 +569,32 @@ const styles = StyleSheet.create({
     lineHeight: 16,
   },
   botMessageText: {
-    color: '#333333',
-    fontSize: 16,
-    fontWeight: '500',
+    color: '#333333', // Figma: text-[color:var(--text\/primary,#333333)]
+    fontSize: 16, // Figma: text-[length:var(--size\/xs,16px)]
+    fontWeight: '500', // Figma: font-medium
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
-    lineHeight: 16,
+    lineHeight: 16, // Figma: leading-[normal]
   },
   timestampContainer: {
     alignItems: 'flex-start',
+    width: '100%',
+  },
+  botTimestampContainer: {
+    // Figma: rounded-bl-[16px] rounded-br-[16px] rounded-tl-[4px] rounded-tr-[16px]
+    // The timestamp container itself doesn't need rounded corners since it's inside the bubble
+    // But we ensure proper alignment
   },
   timestamp: {
-    fontSize: 14,
-    fontWeight: '400',
+    fontSize: 14, // Figma: text-[length:var(--size\/xxs,14px)]
+    fontWeight: '400', // Figma: font-normal
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
-    lineHeight: 20,
+    lineHeight: 20, // Figma: leading-[20px]
   },
   userTimestamp: {
     color: 'rgba(255, 255, 255, 0.5)',
   },
   botTimestamp: {
-    color: 'rgba(123, 123, 123, 0.5)',
+    color: 'rgba(123, 123, 123, 0.5)', // Figma: text-[color:var(--text\/secondary,#7b7b7b)] opacity-50
   },
   inputWrapper: {
     flexDirection: 'row',

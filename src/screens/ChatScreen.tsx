@@ -14,9 +14,10 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../components/Text';
 import { colors, spacing, typography, borderRadius } from '../styles/theme';
-import { ChatService, ChatResponse } from '../services/chat/chatService';
+import { swellyService, SwellyChatResponse } from '../services/swelly/swellyService';
 import { useOnboarding } from '../context/OnboardingContext';
 import { getImageUrl } from '../services/media/imageService';
+import { supabaseDatabaseService } from '../services/database/supabaseDatabaseService';
 
 interface Message {
   id: string;
@@ -38,7 +39,7 @@ interface ChatScreenProps {
 }
 
 export const ChatScreen: React.FC<ChatScreenProps> = ({ onChatComplete }) => {
-  const { setCurrentStep } = useOnboarding();
+  const { setCurrentStep, formData } = useOnboarding();
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -52,13 +53,21 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ onChatComplete }) => {
     const initializeChat = async () => {
       try {
         console.log('Testing API connection...');
-        const health = await ChatService.healthCheck();
+        const health = await swellyService.healthCheck();
         console.log('API health check successful:', health);
         
-        // Send initial context message (hidden from UI)
-        console.log('Initializing chat with context...');
-        const response = await ChatService.startNewChat({
-          message: "Context: Matan Rabi, age 26, shortboarder, intermediate level surfer, 13 surf trips"
+        // Send initial context message using actual onboarding data
+        console.log('Initializing chat with user profile data...');
+        console.log('Form data:', formData);
+        
+        // Use initializeWithProfile to build context from onboarding data
+        // This will use the actual data collected during onboarding steps 1-4
+        const response = await swellyService.initializeWithProfile({
+          nickname: formData.nickname,
+          age: formData.age,
+          boardType: formData.boardType,
+          surfLevel: formData.surfLevel,
+          travelExperience: formData.travelExperience,
         });
         
         console.log('Chat initialized with response:', response);
@@ -91,7 +100,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ onChatComplete }) => {
     };
     
     initializeChat();
-  }, []);
+  }, [formData]); // Re-run if formData changes
 
   const sendMessage = async () => {
     if (!inputText.trim() || isLoading) return;
@@ -113,18 +122,18 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ onChatComplete }) => {
     setIsLoading(true);
 
     try {
-      let response: ChatResponse;
+      let response: SwellyChatResponse;
       
       if (chatId) {
         // Continue existing chat
         console.log('Continuing chat with ID:', chatId);
-        response = await ChatService.continueChat(chatId, {
+        response = await swellyService.continueConversation(chatId, {
           message: userMessage.text,
         });
       } else {
         // This shouldn't happen since we initialize chat on mount, but fallback just in case
         console.log('Starting new chat (fallback)');
-        response = await ChatService.startNewChat({
+        response = await swellyService.startNewConversation({
           message: userMessage.text,
         });
         console.log('New chat response:', response);
@@ -144,9 +153,47 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ onChatComplete }) => {
 
       setMessages(prev => [...prev, botMessage]);
 
-      // If chat is finished, save user profile and show completion message
+      // If chat is finished, save user profile and Swelly conversation results to database
       if (response.is_finished && response.data) {
         setUserProfile(response.data);
+        
+        // Save Swelly conversation results to surfers table
+        try {
+          console.log('Saving Swelly conversation results to database:', response.data);
+          await supabaseDatabaseService.saveSurfer({
+            onboardingSummaryText: response.data.onboarding_summary_text,
+            destinationsArray: response.data.destinations_array,
+            travelType: response.data.travel_type,
+            travelBuddies: response.data.travel_buddies,
+            lifestyleKeywords: response.data.lifestyle_keywords,
+            waveTypeKeywords: response.data.wave_type_keywords,
+          });
+          console.log('Swelly conversation results saved successfully');
+        } catch (error) {
+          console.error('Error saving Swelly conversation results:', error);
+          // Don't block the UI if saving fails, but log the error
+        }
+
+        // Save surf trip plan to surf_trip_plans table if provided
+        if (response.data.surf_trip_plan) {
+          try {
+            console.log('Saving surf trip plan to database:', response.data.surf_trip_plan);
+            await supabaseDatabaseService.saveSurfTripPlan({
+              destinations: response.data.surf_trip_plan.destinations,
+              timeInDays: response.data.surf_trip_plan.time_in_days,
+              travelType: response.data.travel_type,
+              travelBuddies: response.data.travel_buddies,
+              lifestyleKeywords: response.data.lifestyle_keywords,
+              waveTypeKeywords: response.data.wave_type_keywords,
+              summaryText: response.data.surf_trip_plan.summary_text,
+            });
+            console.log('Surf trip plan saved successfully');
+          } catch (error) {
+            console.error('Error saving surf trip plan:', error);
+            // Don't block the UI if saving fails, but log the error
+          }
+        }
+        
         setTimeout(() => {
           Alert.alert(
             'Chat Complete!',

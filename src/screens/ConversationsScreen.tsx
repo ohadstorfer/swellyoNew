@@ -43,6 +43,7 @@ export default function ConversationsScreen({
     id: string;
     otherUserName: string;
     otherUserAvatar: string | null;
+    isDirect?: boolean;
   } | null>(null);
 
   useEffect(() => {
@@ -244,11 +245,22 @@ export default function ConversationsScreen({
   };
 
   const handleConversationPress = (conv: Conversation) => {
+    // Handle both direct messages and group chats
     if (conv.is_direct && conv.other_user) {
+      // Direct message (2 users)
       setSelectedConversation({
         id: conv.id,
         otherUserName: conv.other_user.name || 'User',
         otherUserAvatar: conv.other_user.profile_image_url || null,
+        isDirect: true,
+      });
+    } else if (!conv.is_direct) {
+      // Group chat - use title or fallback
+      setSelectedConversation({
+        id: conv.id,
+        otherUserName: conv.title || 'Group Chat',
+        otherUserAvatar: null, // Group chats don't have a single avatar
+        isDirect: false,
       });
     }
     // Also call the callback if provided
@@ -371,18 +383,8 @@ export default function ConversationsScreen({
 
   const filteredConversations = getFilteredConversations();
 
-  if (selectedConversation) {
-    return (
-      <DirectMessageScreen
-        conversationId={selectedConversation.id}
-        otherUserName={selectedConversation.otherUserName}
-        otherUserAvatar={selectedConversation.otherUserAvatar}
-        onBack={handleBackFromChat}
-      />
-    );
-  }
-
   // Set body and html background color on web to ensure dark background is visible
+  // This hook MUST be called before any early returns to follow Rules of Hooks
   useEffect(() => {
     if (Platform.OS === 'web' && typeof document !== 'undefined') {
       const originalBodyBg = document.body.style.backgroundColor;
@@ -395,6 +397,19 @@ export default function ConversationsScreen({
       };
     }
   }, []);
+
+  // Early return for DirectMessageScreen - must come AFTER all hooks
+  if (selectedConversation) {
+    return (
+      <DirectMessageScreen
+        conversationId={selectedConversation.id}
+        otherUserName={selectedConversation.otherUserName}
+        otherUserAvatar={selectedConversation.otherUserAvatar}
+        isDirect={selectedConversation.isDirect ?? true}
+        onBack={handleBackFromChat}
+      />
+    );
+  }
 
   return (
     <View style={styles.container}>

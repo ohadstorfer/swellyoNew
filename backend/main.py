@@ -86,7 +86,7 @@ Now gimme a bit more juice on each: how much time you’ve actually clocked in S
     "is_finished": false,
     "data": null
 }
-
+ש
 User said:
 SD - 3 weeks once, then 7 months. known a lot of locals. was this year. sri lanka - twice for a month each- winter 2023 and 2024, knows a bunch of locals. maldives 1 month
 

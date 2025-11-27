@@ -52,6 +52,10 @@ export interface Message {
   // Enriched from users/surfers
   sender_name?: string;
   sender_avatar?: string;
+  sender?: {
+    name?: string;
+    avatar?: string;
+  };
 }
 
 // Message reaction interface
@@ -140,31 +144,60 @@ class MessagingService {
           }
 
           // Get all members (without joins to avoid RLS issues)
-          const { data: membersData } = await supabase
+          const { data: membersData, error: membersError } = await supabase
             .from('conversation_members')
             .select('*')
             .eq('conversation_id', conv.id);
 
+          if (membersError) {
+            console.error(`Error fetching members for conversation ${conv.id}:`, membersError);
+          }
+          
+          console.log(`Conversation ${conv.id} - Found ${membersData?.length || 0} members:`, membersData?.map(m => m.user_id));
+
           // Fetch user and surfer data separately for each member to avoid RLS join issues
           const enrichedMembers = await Promise.all(
             (membersData || []).map(async (member) => {
+              console.log(`Fetching data for member: ${member.user_id}, current user: ${user.id}`);
+              
               // Fetch user data (email)
-              const { data: userData } = await supabase
+              const { data: userData, error: userError } = await supabase
                 .from('users')
                 .select('id, email')
                 .eq('id', member.user_id)
                 .maybeSingle();
 
+              if (userError) {
+                console.error(`Error fetching user data for ${member.user_id}:`, userError);
+              }
+
               // Fetch surfer data (name, profile_image_url)
-              const { data: surferData } = await supabase
+              const { data: surferData, error: surferError } = await supabase
                 .from('surfers')
                 .select('name, profile_image_url')
                 .eq('user_id', member.user_id)
                 .maybeSingle();
 
+              if (surferError) {
+                console.error(`Error fetching surfer data for ${member.user_id}:`, surferError);
+              }
+
+              // Log the actual data received
+              console.log(`Member ${member.user_id} - surferData:`, surferData, 'userData:', userData);
+
+              // Determine name: prefer surfer name, fallback to email prefix, then 'Unknown'
+              let name = 'Unknown';
+              if (surferData?.name && surferData.name.trim() !== '') {
+                name = surferData.name;
+              } else if (userData?.email) {
+                name = userData.email.split('@')[0];
+              }
+              
+              console.log(`Member ${member.user_id} - final name: ${name}, has surfer: ${!!surferData}, surfer name: ${surferData?.name}, has user: ${!!userData}, user email: ${userData?.email}`);
+
               return {
                 ...member,
-                name: surferData?.name || userData?.email?.split('@')[0] || 'Unknown',
+                name: name,
                 profile_image_url: surferData?.profile_image_url,
                 email: userData?.email,
               };
@@ -174,9 +207,13 @@ class MessagingService {
           // For direct conversations, find the other user
           let otherUser: ConversationMember | undefined;
           if (conv.is_direct && enrichedMembers.length > 0) {
+            console.log(`Direct conversation ${conv.id} - members:`, enrichedMembers.map(m => ({ id: m.user_id, name: m.name })));
             const otherMember = enrichedMembers.find(m => m.user_id !== user.id);
             if (otherMember) {
+              console.log(`Found other user: ${otherMember.user_id}, name: ${otherMember.name}`);
               otherUser = otherMember;
+            } else {
+              console.warn(`No other user found for direct conversation ${conv.id}. Members:`, enrichedMembers.map(m => m.user_id));
             }
           }
 
