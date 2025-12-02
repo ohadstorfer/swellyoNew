@@ -10,12 +10,14 @@ import {
   Platform,
   Image,
   ActivityIndicator,
+  ImageBackground,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../components/Text';
 import { colors, spacing, typography, borderRadius } from '../styles/theme';
 import { messagingService, Message } from '../services/messaging/messagingService';
 import { supabaseAuthService } from '../services/auth/supabaseAuthService';
+import { getImageUrl } from '../services/media/imageService';
 
 interface DirectMessageScreenProps {
   conversationId: string;
@@ -42,7 +44,9 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [isFetchingMessages, setIsFetchingMessages] = useState(true);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [inputHeight, setInputHeight] = useState(34); // Initial height for one line
   const scrollViewRef = useRef<ScrollView>(null);
+  const textInputRef = useRef<TextInput>(null);
 
   useEffect(() => {
     // Get current user ID
@@ -163,6 +167,13 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       scrollViewRef.current?.scrollToEnd({ animated: true });
     });
   };
+
+  // Reset input height when text is cleared
+  useEffect(() => {
+    if (!inputText.trim()) {
+      setInputHeight(34);
+    }
+  }, [inputText]);
 
   // Scroll to bottom when messages change
   useEffect(() => {
@@ -300,12 +311,17 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
       >
-        <ScrollView
-          ref={scrollViewRef}
-          style={styles.messagesList}
-          contentContainerStyle={styles.messagesContent}
-          showsVerticalScrollIndicator={false}
+        <ImageBackground
+          source={{ uri: getImageUrl('/chat background.png') }}
+          style={styles.backgroundImage}
+          resizeMode="cover"
         >
+          <ScrollView
+            ref={scrollViewRef}
+            style={styles.messagesList}
+            contentContainerStyle={styles.messagesContent}
+            showsVerticalScrollIndicator={false}
+          >
           {isFetchingMessages ? (
             <View style={styles.loadingContainer}>
               <ActivityIndicator size="large" color={colors.brandTeal} />
@@ -324,7 +340,8 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
               </View>
             </View>
           )}
-        </ScrollView>
+          </ScrollView>
+        </ImageBackground>
 
         {/* Input Area */}
         <View style={styles.inputWrapper}>
@@ -336,9 +353,18 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
           
           <View style={styles.inputContainer}>
             <View style={styles.inputInnerContainer}>
+              {!inputText && (
+                <Text style={[
+                  styles.placeholderText,
+                  inputHeight <= 34 ? styles.placeholderCentered : styles.placeholderTop
+                ]}>
+                  Type your message..
+                </Text>
+              )}
               <TextInput
-                style={styles.textInput}
-                placeholder="Type your message.."
+                ref={textInputRef}
+                style={[styles.textInput, { height: Math.max(34, Math.min(inputHeight, 120)) }]}
+                placeholder=""
                 placeholderTextColor="#7B7B7B"
                 value={inputText}
                 onChangeText={setInputText}
@@ -347,12 +373,19 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                 onSubmitEditing={sendMessage}
                 returnKeyType="send"
                 blurOnSubmit={false}
+                onContentSizeChange={(event) => {
+                  const { height } = event.nativeEvent.contentSize;
+                  // Set height, but cap at max (120px for ~6 lines)
+                  setInputHeight(Math.min(height, 120));
+                }}
                 onKeyPress={(e) => {
                   if (Platform.OS === 'web' && e.nativeEvent.key === 'Enter' && !(e.nativeEvent as any).shiftKey) {
                     e.preventDefault();
                     sendMessage();
                   }
                 }}
+                scrollEnabled={inputHeight >= 120}
+                textAlignVertical="top"
               />
             </View>
             
@@ -361,7 +394,11 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
               onPress={sendMessage}
               disabled={!inputText.trim() || isLoading}
             >
-              <Ionicons name="mic" size={24} color="#FFFFFF" />
+              <Ionicons 
+                name={inputText.trim() ? "arrow-up" : "mic"} 
+                size={24} 
+                color="#FFFFFF" 
+              />
             </TouchableOpacity>
           </View>
         </View>
@@ -459,8 +496,14 @@ const styles = StyleSheet.create({
   chatContainer: {
     flex: 1,
   },
+  backgroundImage: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
+  },
   messagesList: {
     flex: 1,
+    backgroundColor: 'transparent',
   },
   messagesContent: {
     padding: spacing.md,
@@ -616,11 +659,12 @@ const styles = StyleSheet.create({
   inputContainer: {
     flex: 1,
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-end',
     backgroundColor: colors.white,
     paddingLeft: 10,
     paddingRight: 8,
-    paddingVertical: 7,
+    paddingVertical: 8,
+    minHeight: 48, // Ensure consistent height
     borderTopLeftRadius: 20,
     borderTopRightRadius: 32,
     borderBottomLeftRadius: 20,
@@ -638,16 +682,43 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: 8,
     paddingVertical: 0,
+    justifyContent: 'flex-start',
+    minHeight: 34, // Ensure minimum height for proper centering
+    position: 'relative',
   },
-  textInput: {
-    flex: 1,
-    fontSize: 18,
+  placeholderText: {
+    position: 'absolute',
+    left: 8,
+    fontSize: 14,
     fontWeight: '400',
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
     lineHeight: 22,
+    color: '#7B7B7B',
+    pointerEvents: 'none',
+    zIndex: 1,
+  },
+  placeholderCentered: {
+    top: '50%',
+    transform: [{ translateY: -11 }], // Half of lineHeight (22/2)
+  },
+  placeholderTop: {
+    top: 8,
+  },
+  textInput: {
+    fontSize: 18,
+    fontWeight: '400',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    lineHeight: 22, // Slightly larger for better readability
     color: '#333333',
-    maxHeight: 100,
     padding: 0,
+    margin: 0,
+    textAlignVertical: 'top',
+    includeFontPadding: false,
+    ...(Platform.OS === 'web' && {
+      // @ts-ignore - web-specific CSS properties
+      overflow: 'auto' as any,
+      resize: 'none' as any,
+    }),
   },
   sendButton: {
     width: 48,

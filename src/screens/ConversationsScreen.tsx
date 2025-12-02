@@ -23,6 +23,7 @@ import { DirectMessageScreen } from './DirectMessageScreen';
 interface ConversationsScreenProps {
   onConversationPress?: (conversationId: string) => void;
   onSwellyPress?: () => void;
+  onProfilePress?: () => void;
 }
 
 type FilterType = 'all' | 'advisor' | 'seeker';
@@ -30,6 +31,7 @@ type FilterType = 'all' | 'advisor' | 'seeker';
 export default function ConversationsScreen({
   onConversationPress,
   onSwellyPress,
+  onProfilePress,
 }: ConversationsScreenProps) {
   const { resetOnboarding } = useOnboarding();
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -415,7 +417,11 @@ export default function ConversationsScreen({
     <View style={styles.container}>
       {/* Header - Dark background */}
       <View style={styles.header}>
-        <View style={styles.headerLeft}>
+        <TouchableOpacity 
+          style={styles.headerLeft}
+          onPress={onProfilePress}
+          activeOpacity={0.7}
+        >
           {userAvatar ? (
             <Image source={{ uri: userAvatar }} style={styles.headerAvatar} />
           ) : (
@@ -426,7 +432,7 @@ export default function ConversationsScreen({
             </View>
           )}
           <Text style={styles.headerTitle}>Hello {userName}</Text>
-        </View>
+        </TouchableOpacity>
 
         <View style={styles.headerRight}>
           <TouchableOpacity 

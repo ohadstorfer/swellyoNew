@@ -7,6 +7,7 @@ import { OnboardingStep4Screen } from '../screens/OnboardingStep4Screen';
 import { LoadingScreen } from '../screens/LoadingScreen';
 import { ChatScreen } from '../screens/ChatScreen';
 import ConversationsScreen from '../screens/ConversationsScreen';
+import { ProfileScreen } from '../screens/ProfileScreen';
 import { useOnboarding } from '../context/OnboardingContext';
 
 export const AppContent: React.FC = () => {
@@ -144,10 +145,17 @@ export const AppContent: React.FC = () => {
     setCurrentStep(5); // Go to step 5 (Swelly chat screen)
   };
 
+  const [showProfile, setShowProfile] = useState(false);
+
   const handleChatComplete = () => {
-    // Mark onboarding as complete and show conversations as home page
+    // Mark onboarding as complete and navigate to profile
     markOnboardingComplete();
-    setCurrentStep(0); // Reset step to 0, but isComplete will show home
+    setShowProfile(true);
+  };
+
+  const handleProfileBack = () => {
+    // Navigate back to conversations
+    setShowProfile(false);
   };
 
   const handleConversationPress = (conversationId: string) => {
@@ -159,6 +167,11 @@ export const AppContent: React.FC = () => {
   const handleSwellyPress = () => {
     // Navigate to Swelly chat from conversations page
     setCurrentStep(5); // Show Swelly chat
+  };
+
+  const handleProfilePress = () => {
+    // Navigate to profile page from conversations page
+    setShowProfile(true);
   };
 
   const handleLoadingBack = () => {
@@ -190,10 +203,18 @@ export const AppContent: React.FC = () => {
   // If onboarding is complete, show conversations screen as home page (regardless of currentStep)
   // This check must come FIRST before any step checks
   if (isComplete) {
+    // Show profile screen if requested
+    if (showProfile) {
+      return (
+        <ProfileScreen onBack={handleProfileBack} />
+      );
+    }
+    
     return (
       <ConversationsScreen
         onConversationPress={handleConversationPress}
         onSwellyPress={handleSwellyPress}
+        onProfilePress={handleProfilePress}
       />
     );
   }

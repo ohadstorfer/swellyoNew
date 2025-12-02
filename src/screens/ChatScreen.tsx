@@ -10,6 +10,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Image,
+  ImageBackground,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../components/Text';
@@ -26,12 +27,6 @@ interface Message {
   timestamp: string;
 }
 
-interface UserProfile {
-  destinations: string;
-  travel_style: string;
-  surf_pref: string;
-  extras: string;
-}
 
 
 interface ChatScreenProps {
@@ -45,8 +40,31 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ onChatComplete }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
   const [chatId, setChatId] = useState<string | null>(null);
-  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  // Removed userProfile state - no longer rendering profile in chat
+  const [isFinished, setIsFinished] = useState(false);
+  const [inputHeight, setInputHeight] = useState(34); // Initial height for one line
   const scrollViewRef = useRef<ScrollView>(null);
+  const textInputRef = useRef<TextInput>(null);
+
+  // Calculate progress based on conversation length
+  // Estimate: typical conversation is 6-10 message pairs (12-20 messages total)
+  // Progress increases with each message exchange
+  const calculateProgress = () => {
+    if (isFinished) return 100; // Full progress when chat is complete
+    
+    const totalMessages = messages.length;
+    // Estimate max messages for a typical conversation (can be adjusted)
+    const estimatedMaxMessages = 20;
+    
+    // Progress starts at 5% (initial message) and increases with each message
+    const baseProgress = 5;
+    const progressPerMessage = (95 / estimatedMaxMessages); // Remaining 95% distributed
+    
+    const progress = Math.min(100, baseProgress + (totalMessages * progressPerMessage));
+    return progress;
+  };
+
+  const progressPercentage = calculateProgress();
 
   // Test API connection and initialize chat context on component mount
   useEffect(() => {
@@ -155,7 +173,20 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ onChatComplete }) => {
 
       // If chat is finished, save user profile and Swelly conversation results to database
       if (response.is_finished && response.data) {
-        setUserProfile(response.data);
+        setIsFinished(true);
+        
+        // Show "creating profile..." message
+        const creatingProfileMessage: Message = {
+          id: (Date.now() + 2).toString(),
+          text: 'Creating your profile...',
+          isUser: false,
+          timestamp: new Date().toLocaleTimeString('en-US', { 
+            hour: '2-digit', 
+            minute: '2-digit',
+            hour12: false 
+          }),
+        };
+        setMessages(prev => [...prev, creatingProfileMessage]);
         
         // Save Swelly conversation results to surfers table
         try {
@@ -194,19 +225,11 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ onChatComplete }) => {
           }
         }
         
+        // Navigate to profile screen after a short delay
         setTimeout(() => {
-          Alert.alert(
-            'Chat Complete!',
-            'Thanks for sharing your info! Swelly has everything he needs to help you plan your next surf trip.',
-            [
-              {
-                text: 'Go to Conversations',
-                style: 'default',
-                onPress: () => onChatComplete?.(),
-              },
-            ]
-          );
-        }, 1000);
+          // Mark onboarding as complete and navigate to profile
+          onChatComplete?.();
+        }, 1500);
       }
 
     } catch (error) {
@@ -225,35 +248,15 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ onChatComplete }) => {
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages, userProfile, isInitializing, isLoading]);
+  }, [messages, isInitializing, isLoading]);
 
-  const renderUserProfile = (profile: UserProfile) => (
-    <View key="user-profile" style={[styles.messageContainer, styles.botMessageContainer]}>
-      <View style={[styles.messageBubble, styles.botMessageBubble, styles.profileBubble]}>
-        <Text style={styles.profileTitle}>🏄‍♂️ Your Surf Profile</Text>
-        <View style={styles.profileSection}>
-          <Text style={styles.profileLabel}>📍 Destinations:</Text>
-          <Text style={styles.profileValue}>{profile.destinations}</Text>
-        </View>
-        <View style={styles.profileSection}>
-          <Text style={styles.profileLabel}>✈️ Travel Style:</Text>
-          <Text style={styles.profileValue}>{profile.travel_style}</Text>
-        </View>
-        <View style={styles.profileSection}>
-          <Text style={styles.profileLabel}>🌊 Surf Preferences:</Text>
-          <Text style={styles.profileValue}>{profile.surf_pref}</Text>
-        </View>
-        <View style={styles.profileSection}>
-          <Text style={styles.profileLabel}>🎯 Extras:</Text>
-          <Text style={styles.profileValue}>{profile.extras}</Text>
-        </View>
-        <Text style={styles.profileFooter}>
-          {/* Perfect! Now I can help you find the best surf spots and plan your next adventure! 🤙 */}
-          Perfect! Now let's get you connected with other surfers to help you plan your next adventure! 🤙
-        </Text>
-      </View>
-    </View>
-  );
+  // Reset input height when text is cleared
+  useEffect(() => {
+    if (!inputText.trim()) {
+      setInputHeight(34);
+    }
+  }, [inputText]);
+
 
   const renderMessage = (message: Message) => (
     <View
@@ -331,7 +334,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ onChatComplete }) => {
         </View>
         
         <View style={styles.progressBar}>
-          <View style={styles.progressFill} />
+          <View style={[styles.progressFill, { width: `${progressPercentage}%` }]} />
         </View>
       </View>
 
@@ -341,14 +344,18 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ onChatComplete }) => {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
       >
-        <ScrollView
-          ref={scrollViewRef}
-          style={styles.messagesList}
-          contentContainerStyle={styles.messagesContent}
-          showsVerticalScrollIndicator={false}
+        <ImageBackground
+          source={{ uri: getImageUrl('/chat background.png') }}
+          style={styles.backgroundImage}
+          resizeMode="cover"
         >
+          <ScrollView
+            ref={scrollViewRef}
+            style={styles.messagesList}
+            contentContainerStyle={styles.messagesContent}
+            showsVerticalScrollIndicator={false}
+          >
           {messages.map(renderMessage)}
-          {userProfile && renderUserProfile(userProfile)}
           {(isLoading || isInitializing) && (
             <View style={[styles.messageContainer, styles.botMessageContainer]}>
               <View style={[styles.messageBubble, styles.botMessageBubble]}>
@@ -356,7 +363,8 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ onChatComplete }) => {
               </View>
             </View>
           )}
-        </ScrollView>
+          </ScrollView>
+        </ImageBackground>
 
         {/* Input Area */}
         <View style={styles.inputWrapper}>
@@ -368,10 +376,18 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ onChatComplete }) => {
           
           <View style={styles.inputContainer}>
             <View style={styles.inputInnerContainer}>
+              {!inputText && (
+                <Text style={[
+                  styles.placeholderText,
+                  inputHeight <= 34 ? styles.placeholderCentered : styles.placeholderTop
+                ]}>
+                  Type your message..
+                </Text>
+              )}
               <TextInput
-                style={styles.textInput}
-                placeholder="Type your message.."
-                placeholderTextColor="#7B7B7B"
+                ref={textInputRef}
+                style={[styles.textInput, { height: Math.max(34, Math.min(inputHeight, 120)) }]}
+                placeholder=""
                 value={inputText}
                 onChangeText={setInputText}
                 multiline
@@ -379,12 +395,19 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ onChatComplete }) => {
                 onSubmitEditing={sendMessage}
                 returnKeyType="send"
                 blurOnSubmit={false}
+                onContentSizeChange={(event) => {
+                  const { height } = event.nativeEvent.contentSize;
+                  // Set height, but cap at max (120px for ~6 lines)
+                  setInputHeight(Math.min(height, 120));
+                }}
                 onKeyPress={(e) => {
                   if (Platform.OS === 'web' && e.nativeEvent.key === 'Enter' && !(e.nativeEvent as any).shiftKey) {
                     e.preventDefault();
                     sendMessage();
                   }
                 }}
+                scrollEnabled={inputHeight >= 120}
+                textAlignVertical="top"
               />
             </View>
             
@@ -393,7 +416,11 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ onChatComplete }) => {
               onPress={sendMessage}
               disabled={!inputText.trim() || isLoading}
             >
-              <Ionicons name="mic" size={24} color="#FFFFFF" />
+              <Ionicons 
+                name={inputText.trim() ? "arrow-up" : "mic"} 
+                size={24} 
+                color="#FFFFFF" 
+              />
             </TouchableOpacity>
           </View>
         </View>
@@ -409,8 +436,8 @@ const styles = StyleSheet.create({
   },
   headerContainer: {
     backgroundColor: colors.white,
-    paddingTop: 48,
-    paddingBottom: spacing.md,
+    paddingTop: 40,
+    paddingBottom: 16,
     paddingHorizontal: 0,
     alignItems: 'center',
   },
@@ -419,7 +446,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     width: '100%',
     paddingHorizontal: spacing.md,
-    marginBottom: spacing.md,
+    marginBottom: 12,
   },
   headerLeft: {
     flexDirection: 'row',
@@ -434,18 +461,18 @@ const styles = StyleSheet.create({
     marginRight: 5,
   },
   avatar: {
-    width: 48,
-    height: 52,
-    aspectRatio: 12 / 13,
-    borderRadius: 24,
+    width: 62,
+    height: 68,
+    aspectRatio: 62 / 68,
+    borderRadius: 31,
     overflow: 'hidden',
     // backgroundColor: '#D3D3D3', // lightgray fallback
     position: 'relative',
   },
   avatarImageContainer: {
     position: 'absolute',
-    width: 48 * 1.52147, // 152.147% of 48px
-    height: 52 * 1.08344, // 108.344% of 52px
+    width: 62 * 1.52147, // 152.147% of 62px
+    height: 68 * 1.08344, // 108.344% of 68px
     left: -10.983,
     top: 0,
     overflow: 'hidden',
@@ -465,18 +492,18 @@ const styles = StyleSheet.create({
     marginRight: spacing.sm,
   },
   profileName: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '700',
     fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : undefined,
-    lineHeight: 32,
+    lineHeight: 24,
     color: '#333333',
-    marginBottom: 4,
+    marginBottom: 2,
   },
   profileTagline: {
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: '400',
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
-    lineHeight: 20,
+    lineHeight: 15,
     color: '#868686',
   },
   menuButton: {
@@ -494,27 +521,37 @@ const styles = StyleSheet.create({
   },
   progressFill: {
     height: '100%',
-    width: 47,
     backgroundColor: '#B72DF2',
     borderRadius: 8,
+    ...(Platform.OS === 'web' && {
+      // @ts-ignore - web-specific CSS property
+      transition: 'width 0.3s ease',
+    }),
   },
   chatContainer: {
     flex: 1,
   },
+  backgroundImage: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
+  },
   messagesList: {
     flex: 1,
+    backgroundColor: 'transparent',
   },
   messagesContent: {
     padding: spacing.md,
     paddingBottom: spacing.lg,
+    gap: 16,
   },
   messageContainer: {
-    marginBottom: 16,
+    marginBottom: 4,
   },
   userMessageContainer: {
     alignItems: 'flex-end',
-    paddingLeft: 16,
-    paddingRight: 48,
+    paddingLeft: 48,
+    paddingRight: 16,
   },
   botMessageContainer: {
     alignItems: 'flex-start',
@@ -530,8 +567,8 @@ const styles = StyleSheet.create({
   },
   userMessageBubble: {
     backgroundColor: '#B72DF2',
-    borderTopLeftRadius: 4,
-    borderTopRightRadius: 16,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 2, // Pointy edge on the right
     borderBottomLeftRadius: 16,
     borderBottomRightRadius: 16,
   },
@@ -547,20 +584,21 @@ const styles = StyleSheet.create({
   },
   messageTextContainer: {
     marginBottom: 10,
+    gap: 10,
   },
   userMessageText: {
     color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '500',
+    fontSize: 18,
+    fontWeight: '400',
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
-    lineHeight: 16,
+    lineHeight: 18,
   },
   botMessageText: {
     color: '#333333',
-    fontSize: 16,
-    fontWeight: '500',
+    fontSize: 18,
+    fontWeight: '400',
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
-    lineHeight: 16,
+    lineHeight: 18,
   },
   timestampContainer: {
     alignItems: 'flex-start',
@@ -597,11 +635,12 @@ const styles = StyleSheet.create({
   inputContainer: {
     flex: 1,
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-end',
     backgroundColor: colors.white,
     paddingLeft: 10,
     paddingRight: 8,
-    paddingVertical: 7,
+    paddingVertical: 8,
+    minHeight: 48, // Ensure consistent height
     borderTopLeftRadius: 20,
     borderTopRightRadius: 32,
     borderBottomLeftRadius: 20,
@@ -619,16 +658,43 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: 8,
     paddingVertical: 0,
+    justifyContent: 'flex-start',
+    minHeight: 34, // Ensure minimum height for proper centering
+    position: 'relative',
   },
-  textInput: {
-    flex: 1,
-    fontSize: 18,
+  placeholderText: {
+    position: 'absolute',
+    left: 8,
+    fontSize: 14,
     fontWeight: '400',
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
     lineHeight: 22,
+    color: '#7B7B7B',
+    pointerEvents: 'none',
+    zIndex: 1,
+  },
+  placeholderCentered: {
+    top: '50%',
+    transform: [{ translateY: -11 }], // Half of lineHeight (22/2)
+  },
+  placeholderTop: {
+    top: 8,
+  },
+  textInput: {
+    fontSize: 18,
+    fontWeight: '400',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    lineHeight: 22, // Slightly larger for better readability
     color: '#333333',
-    maxHeight: 100,
     padding: 0,
+    margin: 0,
+    textAlignVertical: 'top',
+    includeFontPadding: false,
+    ...(Platform.OS === 'web' && {
+      // @ts-ignore - web-specific CSS properties
+      overflow: 'auto' as any,
+      resize: 'none' as any,
+    }),
   },
   sendButton: {
     width: 48,
@@ -641,44 +707,6 @@ const styles = StyleSheet.create({
   },
   sendButtonDisabled: {
     opacity: 0.5,
-  },
-  profileBubble: {
-    backgroundColor: '#F0F8FF',
-    borderColor: '#8B5CF6',
-    borderWidth: 2,
-    maxWidth: '90%',
-  },
-  profileTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#8B5CF6',
-    marginBottom: spacing.md,
-    textAlign: 'center',
-  },
-  profileSection: {
-    marginBottom: spacing.sm,
-  },
-  profileLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#8B5CF6',
-    marginBottom: 2,
-  },
-  profileValue: {
-    fontSize: 14,
-    color: colors.textDark,
-    lineHeight: 20,
-    paddingLeft: spacing.sm,
-  },
-  profileFooter: {
-    fontSize: 14,
-    color: '#8B5CF6',
-    fontStyle: 'italic',
-    textAlign: 'center',
-    marginTop: spacing.md,
-    paddingTop: spacing.sm,
-    borderTopWidth: 1,
-    borderTopColor: '#E5E5E5',
   },
 });
 
