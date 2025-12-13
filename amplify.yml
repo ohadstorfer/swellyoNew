@@ -6,6 +6,16 @@ frontend:
         - echo "Installing dependencies..."
         - npm install --quiet --global expo-cli
         - npm install
+        - echo "Preventing Next.js detection by renaming Next.js files..."
+        - |
+          if [ -f "next.config.js" ]; then
+            mv next.config.js next.config.js.bak
+            echo "Renamed next.config.js to next.config.js.bak"
+          fi
+          if [ -d "pages" ]; then
+            mv pages pages.bak
+            echo "Renamed pages/ to pages.bak/"
+          fi
     build:
       commands:
         - echo "Building Expo web app..."
@@ -25,10 +35,15 @@ frontend:
           {"version": 1, "routes": []}
           EOF
         - echo "Verifying build output:"
-        - ls -la web-build/ | head -10
+        - ls -la web-build/ | head -20
+        - echo "Checking for required files:"
+        - ls -la web-build/*.json || echo "No JSON files found"
         - test -f web-build/index.html && echo "✓ index.html exists" || echo "✗ index.html missing"
         - test -f web-build/required-server-files.json && echo "✓ required-server-files.json exists" || echo "✗ required-server-files.json missing"
         - test -f web-build/server-trace.json && echo "✓ server-trace.json exists" || echo "✗ server-trace.json missing"
+        - echo "Final file check - all files in web-build:"
+        - find web-build -name "*.json" -type f
+        - echo "Build artifacts ready for deployment"
   artifacts:
     baseDirectory: web-build
     files:
