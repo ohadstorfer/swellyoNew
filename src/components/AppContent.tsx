@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Alert } from 'react-native';
 import { WelcomeScreen } from '../screens/WelcomeScreen';
 import { OnboardingStep1Screen, OnboardingData } from '../screens/OnboardingStep1Screen';
 import { OnboardingStep2Screen } from '../screens/OnboardingStep2Screen';
@@ -8,6 +9,8 @@ import { LoadingScreen } from '../screens/LoadingScreen';
 import { ChatScreen } from '../screens/ChatScreen';
 import ConversationsScreen from '../screens/ConversationsScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
+import { DirectMessageScreen } from '../screens/DirectMessageScreen';
+import { messagingService } from '../services/messaging/messagingService';
 import { useOnboarding } from '../context/OnboardingContext';
 
 export const AppContent: React.FC = () => {
@@ -146,6 +149,14 @@ export const AppContent: React.FC = () => {
   };
 
   const [showProfile, setShowProfile] = useState(false);
+  const [showTripPlanningChat, setShowTripPlanningChat] = useState(false);
+  const [viewingUserId, setViewingUserId] = useState<string | null>(null);
+  const [selectedConversation, setSelectedConversation] = useState<{
+    id?: string; // Optional: undefined for pending conversations
+    otherUserId: string; // Required: the user ID we're messaging
+    otherUserName: string;
+    otherUserAvatar: string | null;
+  } | null>(null);
 
   const handleChatComplete = () => {
     // Mark onboarding as complete and navigate to profile
@@ -154,8 +165,11 @@ export const AppContent: React.FC = () => {
   };
 
   const handleProfileBack = () => {
-    // Navigate back to conversations
+    // Navigate back - restore trip planning chat if it was open
     setShowProfile(false);
+    setViewingUserId(null);
+    // If we were in trip planning chat before viewing profile, restore it
+    // This is handled by the user navigating back to conversations and clicking Swelly again
   };
 
   const handleConversationPress = (conversationId: string) => {
@@ -165,13 +179,77 @@ export const AppContent: React.FC = () => {
   };
 
   const handleSwellyPress = () => {
-    // Navigate to Swelly chat from conversations page
-    setCurrentStep(5); // Show Swelly chat
+    // Navigate to Swelly trip planning chat from conversations page
+    setShowTripPlanningChat(true);
+  };
+
+  const handleTripPlanningChatBack = () => {
+    // Navigate back to conversations from trip planning chat
+    setShowTripPlanningChat(false);
   };
 
   const handleProfilePress = () => {
     // Navigate to profile page from conversations page
     setShowProfile(true);
+    setViewingUserId(null); // View own profile
+  };
+
+  const handleViewUserProfile = (userId: string) => {
+    console.log('[AppContent] handleViewUserProfile called with userId:', userId);
+    // Navigate to another user's profile
+    // Close trip planning chat if open
+    setShowTripPlanningChat(false);
+    // Close conversation to show profile screen
+    console.log('[AppContent] Closing conversation, setting selectedConversation to null');
+    setSelectedConversation(null);
+    console.log('[AppContent] Setting viewingUserId to:', userId);
+    setViewingUserId(userId);
+    console.log('[AppContent] Setting showProfile to true');
+    setShowProfile(true);
+    console.log('[AppContent] handleViewUserProfile completed');
+  };
+
+  const handleStartConversation = async (userId: string) => {
+    try {
+      // Check if conversation already exists
+      const conversations = await messagingService.getConversations();
+      const existingConv = conversations.find(conv => {
+        if (conv.other_user && conv.other_user.user_id === userId) {
+          return true;
+        }
+        return false;
+      });
+      
+      if (existingConv && existingConv.other_user) {
+        // Conversation exists, use it
+        setSelectedConversation({
+          id: existingConv.id,
+          otherUserId: userId,
+          otherUserName: existingConv.other_user.name || 'User',
+          otherUserAvatar: existingConv.other_user.profile_image_url || null,
+        });
+      } else {
+        // No conversation exists yet - create pending conversation
+        // Get user details for display
+        const { supabaseDatabaseService } = await import('../services/database/supabaseDatabaseService');
+        const surferData = await supabaseDatabaseService.getSurferByUserId(userId);
+        
+        setSelectedConversation({
+          // No id - this is a pending conversation
+          otherUserId: userId,
+          otherUserName: surferData?.name || 'User',
+          otherUserAvatar: surferData?.profile_image_url || null,
+        });
+      }
+      setShowTripPlanningChat(false); // Close chat to show conversation
+    } catch (error) {
+      console.error('Error starting conversation:', error);
+      Alert.alert('Error', 'Failed to start conversation');
+    }
+  };
+
+  const handleBackFromChat = () => {
+    setSelectedConversation(null);
   };
 
   const handleLoadingBack = () => {
@@ -203,10 +281,57 @@ export const AppContent: React.FC = () => {
   // If onboarding is complete, show conversations screen as home page (regardless of currentStep)
   // This check must come FIRST before any step checks
   if (isComplete) {
-    // Show profile screen if requested
+    console.log('[AppContent] Rendering check - showProfile:', showProfile, 'viewingUserId:', viewingUserId);
+    console.log('[AppContent] Rendering check - selectedConversation:', selectedConversation ? 'exists' : 'null');
+    console.log('[AppContent] Rendering check - showTripPlanningChat:', showTripPlanningChat);
+    
+    // Show profile screen if requested (check before conversation)
     if (showProfile) {
+      console.log('[AppContent] Rendering ProfileScreen for userId:', viewingUserId);
       return (
-        <ProfileScreen onBack={handleProfileBack} />
+        <ProfileScreen 
+          onBack={handleProfileBack}
+          userId={viewingUserId ?? undefined}
+          onMessage={handleStartConversation}
+        />
+      );
+    }
+    
+    // Show direct message screen if conversation is selected
+    if (selectedConversation) {
+      console.log('[AppContent] Rendering DirectMessageScreen');
+      console.log('[AppContent] handleViewUserProfile function exists:', !!handleViewUserProfile);
+      console.log('[AppContent] handleViewUserProfile type:', typeof handleViewUserProfile);
+      console.log('[AppContent] Passing onViewProfile prop:', handleViewUserProfile);
+      return (
+        <DirectMessageScreen
+          conversationId={selectedConversation.id} // May be undefined for pending conversations
+          otherUserId={selectedConversation.otherUserId}
+          otherUserName={selectedConversation.otherUserName}
+          otherUserAvatar={selectedConversation.otherUserAvatar}
+          isDirect={true}
+          onBack={handleBackFromChat}
+          onViewProfile={handleViewUserProfile}
+          onConversationCreated={(conversationId) => {
+            // Update selectedConversation with the created conversation ID
+            setSelectedConversation({
+              ...selectedConversation,
+              id: conversationId,
+            });
+          }}
+        />
+      );
+    }
+    
+    // Show trip planning chat if requested
+    if (showTripPlanningChat) {
+      return (
+        <ChatScreen 
+          onChatComplete={handleTripPlanningChatBack} 
+          conversationType="trip-planning"
+          onViewUserProfile={handleViewUserProfile}
+          onStartConversation={handleStartConversation}
+        />
       );
     }
     
@@ -215,6 +340,7 @@ export const AppContent: React.FC = () => {
         onConversationPress={handleConversationPress}
         onSwellyPress={handleSwellyPress}
         onProfilePress={handleProfilePress}
+        onViewUserProfile={handleViewUserProfile}
       />
     );
   }
@@ -287,8 +413,17 @@ export const AppContent: React.FC = () => {
   }
 
   // Show chat screen if we're on step 5 (Swelly chat)
+  // Determine conversation type: if onboarding is complete, it's trip planning
   if (currentStep === 5) {
-    return <ChatScreen onChatComplete={handleChatComplete} />;
+    const conversationType = isComplete ? 'trip-planning' : 'onboarding';
+    return (
+      <ChatScreen 
+        onChatComplete={handleChatComplete} 
+        conversationType={conversationType}
+        onViewUserProfile={handleViewUserProfile}
+        onStartConversation={handleStartConversation}
+      />
+    );
   }
 
   // Show welcome screen by default (step 0, before onboarding)

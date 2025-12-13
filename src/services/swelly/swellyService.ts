@@ -38,7 +38,7 @@ class SwellyService {
   /**
    * Get the Supabase Edge Function URL for Swelly chat
    */
-  private getFunctionUrl(endpoint: string): string {
+  private getFunctionUrl(endpoint: string, conversationType: 'onboarding' | 'trip-planning' = 'onboarding'): string {
     if (!isSupabaseConfigured()) {
       throw new Error('Supabase is not configured');
     }
@@ -48,7 +48,8 @@ class SwellyService {
       throw new Error('EXPO_PUBLIC_SUPABASE_URL is not set');
     }
     
-    return `${supabaseUrl}/functions/v1/swelly-chat${endpoint}`;
+    const functionName = conversationType === 'trip-planning' ? 'swelly-trip-planning' : 'swelly-chat';
+    return `${supabaseUrl}/functions/v1/${functionName}${endpoint}`;
   }
 
   /**
@@ -261,6 +262,92 @@ class SwellyService {
     return this.startNewConversation({
       message: contextMessage,
     });
+  }
+
+  /**
+   * Start a new trip planning conversation with Swelly
+   * @param request - Initial message for the trip planning conversation
+   * @param conversationId - Optional Supabase conversation ID to link chat history
+   * @returns Swelly's response and chat ID
+   */
+  async startTripPlanningConversation(
+    request: SwellyChatRequest, 
+    conversationId?: string
+  ): Promise<SwellyChatResponse> {
+    try {
+      const url = this.getFunctionUrl('/new_chat', 'trip-planning');
+      const headers = await this.getAuthHeaders();
+      
+      console.log('[SwellyService] Starting trip planning conversation:', url);
+      console.log('[SwellyService] Request body:', JSON.stringify(request));
+      
+      const response = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          ...request,
+          conversation_id: conversationId,
+        }),
+      });
+
+      console.log('[SwellyService] Response status:', response.status);
+      console.log('[SwellyService] Response ok:', response.ok);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[SwellyService] Error response:', errorText);
+        throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+      }
+
+      const result = await response.json();
+      console.log('[SwellyService] Response data:', result);
+      return result;
+    } catch (error) {
+      console.error('[SwellyService] Error starting trip planning conversation:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Continue an existing trip planning conversation with Swelly
+   * @param chatId - The chat ID from the previous conversation
+   * @param request - The user's message
+   * @param conversationId - Optional Supabase conversation ID to link chat history
+   * @returns Swelly's response
+   */
+  async continueTripPlanningConversation(
+    chatId: string, 
+    request: SwellyContinueChatRequest,
+    conversationId?: string
+  ): Promise<SwellyContinueChatResponse> {
+    try {
+      const url = this.getFunctionUrl(`/continue/${chatId}`, 'trip-planning');
+      const headers = await this.getAuthHeaders();
+      
+      console.log('[SwellyService] Continuing trip planning conversation:', url);
+      
+      const response = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          ...request,
+          conversation_id: conversationId,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[SwellyService] Error response:', errorText);
+        throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+      }
+
+      const result = await response.json();
+      console.log('[SwellyService] Response data:', result);
+      return result;
+    } catch (error) {
+      console.error('[SwellyService] Error continuing trip planning conversation:', error);
+      throw error;
+    }
   }
 }
 

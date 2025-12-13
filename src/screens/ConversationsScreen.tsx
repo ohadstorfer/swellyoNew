@@ -24,6 +24,7 @@ interface ConversationsScreenProps {
   onConversationPress?: (conversationId: string) => void;
   onSwellyPress?: () => void;
   onProfilePress?: () => void;
+  onViewUserProfile?: (userId: string) => void;
 }
 
 type FilterType = 'all' | 'advisor' | 'seeker';
@@ -32,6 +33,7 @@ export default function ConversationsScreen({
   onConversationPress,
   onSwellyPress,
   onProfilePress,
+  onViewUserProfile,
 }: ConversationsScreenProps) {
   const { resetOnboarding } = useOnboarding();
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -42,7 +44,8 @@ export default function ConversationsScreen({
   const [showMenu, setShowMenu] = useState(false);
   const [showSearchModal, setShowSearchModal] = useState(false);
   const [selectedConversation, setSelectedConversation] = useState<{
-    id: string;
+    id?: string; // Optional: undefined for pending conversations
+    otherUserId: string; // Required: the user ID we're messaging
     otherUserName: string;
     otherUserAvatar: string | null;
     isDirect?: boolean;
@@ -120,22 +123,38 @@ export default function ConversationsScreen({
 
   const handleUserSelect = async (userId: string) => {
     try {
-      // Create or get existing conversation with this user
-      const conversation = await messagingService.createDirectConversation(userId);
-      
-      // Load the conversation details
+      // Check if conversation already exists
       const conversations = await messagingService.getConversations();
-      const foundConv = conversations.find(c => c.id === conversation.id);
+      const existingConv = conversations.find(conv => {
+        if (conv.other_user && conv.other_user.user_id === userId) {
+          return true;
+        }
+        return false;
+      });
       
-      if (foundConv && foundConv.other_user) {
+      if (existingConv && existingConv.other_user) {
+        // Conversation exists, use it
         setSelectedConversation({
-          id: conversation.id,
-          otherUserName: foundConv.other_user.name || 'User',
-          otherUserAvatar: foundConv.other_user.profile_image_url || null,
+          id: existingConv.id,
+          otherUserId: userId,
+          otherUserName: existingConv.other_user.name || 'User',
+          otherUserAvatar: existingConv.other_user.profile_image_url || null,
+        });
+      } else {
+        // No conversation exists yet - create pending conversation
+        // Get user details for display
+        const { supabaseDatabaseService } = await import('../services/database/supabaseDatabaseService');
+        const surferData = await supabaseDatabaseService.getSurferByUserId(userId);
+        
+        setSelectedConversation({
+          // No id - this is a pending conversation
+          otherUserId: userId,
+          otherUserName: surferData?.name || 'User',
+          otherUserAvatar: surferData?.profile_image_url || null,
         });
       }
     } catch (error) {
-      console.error('Error creating conversation:', error);
+      console.error('Error starting conversation:', error);
       Alert.alert('Error', 'Failed to start conversation');
     }
   };
@@ -404,11 +423,20 @@ export default function ConversationsScreen({
   if (selectedConversation) {
     return (
       <DirectMessageScreen
-        conversationId={selectedConversation.id}
+        conversationId={selectedConversation.id} // May be undefined for pending conversations
+        otherUserId={selectedConversation.otherUserId}
         otherUserName={selectedConversation.otherUserName}
         otherUserAvatar={selectedConversation.otherUserAvatar}
         isDirect={selectedConversation.isDirect ?? true}
         onBack={handleBackFromChat}
+        onViewProfile={onViewUserProfile}
+        onConversationCreated={(conversationId) => {
+          // Update selectedConversation with the created conversation ID
+          setSelectedConversation({
+            ...selectedConversation,
+            id: conversationId,
+          });
+        }}
       />
     );
   }

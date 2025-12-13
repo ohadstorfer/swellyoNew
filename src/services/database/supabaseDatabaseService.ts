@@ -39,6 +39,7 @@ export interface SupabaseSurfer {
   travel_buddies?: 'solo' | '2' | 'crew'; // text, nullable
   lifestyle_keywords?: string[]; // text[], nullable
   wave_type_keywords?: string[]; // text[], nullable
+  is_demo_user?: boolean; // boolean, default false
   created_at: string; // timestamptz
   updated_at: string; // timestamptz
 }

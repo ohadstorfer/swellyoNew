@@ -13,6 +13,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../components/Text';
+import { Text as RNText } from 'react-native';
 import { colors, spacing, typography } from '../styles/theme';
 import { supabaseDatabaseService, SupabaseSurfer } from '../services/database/supabaseDatabaseService';
 import { supabase } from '../config/supabase';
@@ -20,6 +21,8 @@ import { getImageUrl } from '../services/media/imageService';
 
 interface ProfileScreenProps {
   onBack?: () => void;
+  userId?: string; // Optional: if provided, view this user's profile instead of current user's
+  onMessage?: (userId: string) => void; // Callback when message button is clicked
 }
 
 // Board type mapping
@@ -72,27 +75,41 @@ const LIFESTYLE_ICON_MAP: { [key: string]: string } = {
   'mobility': 'barbell-outline',
 };
 
-export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack }) => {
+export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, onMessage }) => {
   const [profileData, setProfileData] = useState<SupabaseSurfer | null>(null);
   const [loading, setLoading] = useState(true);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  
+  // Determine if we're viewing our own profile or another user's
+  const isViewingOwnProfile = !userId;
 
   useEffect(() => {
     loadProfileData();
-  }, []);
+  }, [userId]);
 
   const loadProfileData = async () => {
     try {
-      // Get current authenticated user
-      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      let targetUserId: string;
       
-      if (authError || !user) {
-        console.error('Error getting user:', authError);
-        setLoading(false);
-        return;
+      if (userId) {
+        // View specific user's profile
+        targetUserId = userId;
+      } else {
+        // Get current authenticated user
+        const { data: { user }, error: authError } = await supabase.auth.getUser();
+        
+        if (authError || !user) {
+          console.error('Error getting user:', authError);
+          setLoading(false);
+          return;
+        }
+        
+        targetUserId = user.id;
+        setCurrentUserId(user.id);
       }
 
       // Fetch surfer data
-      const surferData = await supabaseDatabaseService.getSurferByUserId(user.id);
+      const surferData = await supabaseDatabaseService.getSurferByUserId(targetUserId);
       setProfileData(surferData);
     } catch (error) {
       console.error('Error loading profile data:', error);
@@ -219,12 +236,28 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack }) => {
           </View>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.saveButton}>
-          <View style={styles.saveButtonContainer}>
-            <Ionicons name="cloud-upload-outline" size={18} color="#222B30" />
-            <Text style={styles.saveButtonText}>Save</Text>
-          </View>
-        </TouchableOpacity>
+        {isViewingOwnProfile ? (
+          <TouchableOpacity style={styles.saveButton}>
+            <View style={styles.saveButtonContainer}>
+              <Ionicons name="cloud-upload-outline" size={18} color="#222B30" />
+              <Text style={styles.saveButtonText}>Save</Text>
+            </View>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity 
+            style={styles.messageButton}
+            onPress={() => {
+              if (userId && onMessage) {
+                onMessage(userId);
+              }
+            }}
+          >
+            <View style={styles.messageButtonContainer}>
+              <Ionicons name="chatbubble-outline" size={18} color="#222B30" />
+              <Text style={styles.messageButtonText}>Message</Text>
+            </View>
+          </TouchableOpacity>
+        )}
 
         {/* Profile Picture - Centered */}
         <View style={styles.profilePictureContainer}>
@@ -260,7 +293,14 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack }) => {
             {/* Name and Details - Right side, bottom aligned */}
             <View style={styles.nameContainer}>
               <View style={styles.fullNameContainer}>
-                <Text style={styles.fullName}>{profileData.name || 'User'}</Text>
+                <RNText 
+                  style={styles.fullName}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit={true}
+                  minimumFontScale={0.4}
+                >
+                  {profileData.name || 'User'}
+                </RNText>
               </View>
               <View style={styles.profileDetailsContainer}>
                 <Text style={styles.profileDetails}>
@@ -497,6 +537,33 @@ const styles = StyleSheet.create({
     lineHeight: 15,
     color: colors.textPrimary,
   },
+  messageButton: {
+    position: 'absolute',
+    left: 307,
+    top: 54,
+    zIndex: 10,
+  },
+  messageButtonContainer: {
+    height: 40,
+    minWidth: 70,
+    borderRadius: 48,
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: '#EEEEEE',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingLeft: 8,
+    paddingRight: 12,
+    paddingVertical: 10,
+  },
+  messageButtonText: {
+    fontSize: 12,
+    fontWeight: '400',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    lineHeight: 15,
+    color: colors.textPrimary,
+  },
   profilePictureContainer: {
     position: 'absolute',
     top: 78,
@@ -543,6 +610,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 0,
     alignItems: 'center',
     width: 361,
+    alignSelf: 'center',
   },
   contentContainer: {
     marginTop: 16,
@@ -564,22 +632,24 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   boardImage: {
-    width: 79,
-    height: 130,
+    width: 85, // Increased from 79 (slightly bigger)
+    height: 140, // Increased from 130 (slightly bigger)
     ...(Platform.OS === 'web' && {
       objectFit: 'contain' as any,
     }),
   },
   nameContainer: {
-    width: 200,
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'flex-end',
     paddingBottom: 8,
     gap: 8,
+    minWidth: 200,
   },
   fullNameContainer: {
     width: '100%',
     alignItems: 'center',
+    flexShrink: 1,
   },
   profileDetailsContainer: {
     width: 194,
@@ -591,6 +661,8 @@ const styles = StyleSheet.create({
     fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : undefined,
     lineHeight: 28.8, // 1.2 * 24
     color: colors.textPrimary,
+    textAlign: 'center',
+    width: '100%',
   },
   profileDetails: {
     fontSize: 14,

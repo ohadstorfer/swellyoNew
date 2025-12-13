@@ -11,6 +11,7 @@ import {
   Image,
   ActivityIndicator,
   ImageBackground,
+  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../components/Text';
@@ -20,25 +21,43 @@ import { supabaseAuthService } from '../services/auth/supabaseAuthService';
 import { getImageUrl } from '../services/media/imageService';
 
 interface DirectMessageScreenProps {
-  conversationId: string;
+  conversationId?: string; // Optional: undefined for pending conversations (will be created on first message)
+  otherUserId: string; // Required: the user ID we're messaging
   otherUserName: string;
   otherUserAvatar: string | null;
   isDirect?: boolean; // true for direct messages (2 users), false for group chats
   onBack?: () => void;
+  onConversationCreated?: (conversationId: string) => void; // Callback when conversation is created
+  onViewProfile?: (userId: string) => void; // Callback when avatar or name is clicked
 }
 
 export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   conversationId,
+  otherUserId,
   otherUserName,
   otherUserAvatar,
   isDirect = true, // Default to direct message (2 users)
   onBack,
+  onConversationCreated,
+  onViewProfile,
 }) => {
-  // Debug: Log avatar URL
+  // Debug: Log props immediately on every render (synchronous)
+  console.log('[DirectMessageScreen] === COMPONENT RENDER ===');
+  console.log('[DirectMessageScreen] onViewProfile exists:', !!onViewProfile);
+  console.log('[DirectMessageScreen] onViewProfile type:', typeof onViewProfile);
+  console.log('[DirectMessageScreen] onViewProfile:', onViewProfile);
+  console.log('[DirectMessageScreen] onBack exists:', !!onBack);
+  console.log('[DirectMessageScreen] otherUserId:', otherUserId);
+  
+  const [currentConversationId, setCurrentConversationId] = useState<string | undefined>(conversationId);
+  
+  // Debug: Log props on mount and when they change
   useEffect(() => {
-    console.log('DirectMessageScreen - otherUserAvatar:', otherUserAvatar);
-    console.log('DirectMessageScreen - otherUserName:', otherUserName);
-  }, [otherUserAvatar, otherUserName]);
+    console.log('[DirectMessageScreen] useEffect - Component mounted/updated with props:');
+    console.log('[DirectMessageScreen] useEffect - onViewProfile exists:', !!onViewProfile);
+    console.log('[DirectMessageScreen] useEffect - onViewProfile type:', typeof onViewProfile);
+    console.log('[DirectMessageScreen] useEffect - onViewProfile value:', onViewProfile);
+  }, [otherUserId, otherUserName, otherUserAvatar, onViewProfile, onBack]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -62,41 +81,53 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     };
     getCurrentUser();
 
-    loadMessages();
+    // Only load messages and subscribe if conversation exists
+    if (currentConversationId) {
+      loadMessages();
 
-    // Mark conversation as read
-    messagingService.markAsRead(conversationId).catch(err => {
-      console.error('Error marking as read:', err);
-    });
+      // Mark conversation as read
+      messagingService.markAsRead(currentConversationId).catch(err => {
+        console.error('Error marking as read:', err);
+      });
 
-    // Subscribe to new messages
-    const unsubscribe = messagingService.subscribeToMessages(
-      conversationId,
-      (newMessage) => {
-        // Check if message already exists (avoid duplicates)
-        setMessages((prev) => {
-          const exists = prev.some(msg => msg.id === newMessage.id);
-          if (exists) {
-            return prev;
-          }
-          return [...prev, newMessage];
-        });
-        messagingService.markAsRead(conversationId, newMessage.id).catch(err => {
-          console.error('Error marking message as read:', err);
-        });
-        setTimeout(() => scrollToBottom(), 100);
-      }
-    );
+      // Subscribe to new messages
+      const unsubscribe = messagingService.subscribeToMessages(
+        currentConversationId,
+        (newMessage) => {
+          // Check if message already exists (avoid duplicates)
+          setMessages((prev) => {
+            const exists = prev.some(msg => msg.id === newMessage.id);
+            if (exists) {
+              return prev;
+            }
+            return [...prev, newMessage];
+          });
+          messagingService.markAsRead(currentConversationId, newMessage.id).catch(err => {
+            console.error('Error marking message as read:', err);
+          });
+          setTimeout(() => scrollToBottom(), 100);
+        }
+      );
 
-    return () => {
-      unsubscribe();
-    };
-  }, [conversationId]);
+      return () => {
+        unsubscribe();
+      };
+    } else {
+      // No conversation yet - clear messages
+      setMessages([]);
+    }
+  }, [currentConversationId]);
 
   const loadMessages = async () => {
+    if (!currentConversationId) {
+      setMessages([]);
+      setIsFetchingMessages(false);
+      return;
+    }
+    
     try {
       setIsFetchingMessages(true);
-      const msgs = await messagingService.getMessages(conversationId);
+      const msgs = await messagingService.getMessages(currentConversationId);
       setMessages(msgs);
       // Scroll to bottom after messages load
       setTimeout(() => scrollToBottom(), 200);
@@ -113,10 +144,56 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     const messageText = inputText.trim();
     const tempId = `temp-${Date.now()}`;
     
+    // Determine conversation ID - create if it doesn't exist
+    let targetConversationId = currentConversationId;
+    
+    if (!targetConversationId) {
+      // Create conversation on first message (WhatsApp-like behavior)
+      try {
+        setIsLoading(true);
+        const conversation = await messagingService.createDirectConversation(otherUserId);
+        targetConversationId = conversation.id;
+        setCurrentConversationId(targetConversationId);
+        
+        // Notify parent component that conversation was created
+        if (onConversationCreated) {
+          onConversationCreated(targetConversationId);
+        }
+        
+        // Subscribe to messages for the new conversation
+        const unsubscribe = messagingService.subscribeToMessages(
+          targetConversationId,
+          (newMessage) => {
+            setMessages((prev) => {
+              const exists = prev.some(msg => msg.id === newMessage.id);
+              if (exists) {
+                return prev;
+              }
+              return [...prev, newMessage];
+            });
+            if (targetConversationId) {
+              messagingService.markAsRead(targetConversationId, newMessage.id).catch(err => {
+                console.error('Error marking message as read:', err);
+              });
+            }
+            setTimeout(() => scrollToBottom(), 100);
+          }
+        );
+        
+        // Store unsubscribe function (we'll need to clean it up on unmount)
+        // For now, we'll let it run - the component will handle cleanup
+      } catch (error) {
+        console.error('Error creating conversation:', error);
+        Alert.alert('Error', 'Failed to create conversation');
+        setIsLoading(false);
+        return;
+      }
+    }
+    
     // Optimistic update: Add message immediately to UI
     const optimisticMessage: Message = {
       id: tempId,
-      conversation_id: conversationId,
+      conversation_id: targetConversationId,
       sender_id: currentUserId,
       body: messageText,
       rendered_body: null,
@@ -136,8 +213,13 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     setTimeout(() => scrollToBottom(), 50);
 
     try {
+      // At this point, targetConversationId should always be defined
+      if (!targetConversationId) {
+        throw new Error('Conversation ID is required to send message');
+      }
+      
       // Send message to server
-      const sentMessage = await messagingService.sendMessage(conversationId, messageText);
+      const sentMessage = await messagingService.sendMessage(targetConversationId, messageText);
       
       // Replace optimistic message with real message from server
       setMessages((prev) => {
@@ -271,7 +353,20 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
               <Ionicons name="chevron-back" size={24} color="#222B30" />
             </TouchableOpacity>
             
-            <View style={styles.avatar}>
+            <TouchableOpacity 
+              style={styles.avatar}
+              onPress={() => {
+                console.log('[DirectMessageScreen] Avatar pressed, otherUserId:', otherUserId);
+                console.log('[DirectMessageScreen] onViewProfile exists:', !!onViewProfile);
+                if (onViewProfile) {
+                  console.log('[DirectMessageScreen] Calling onViewProfile with userId:', otherUserId);
+                  onViewProfile(otherUserId);
+                } else {
+                  console.warn('[DirectMessageScreen] onViewProfile is not provided!');
+                }
+              }}
+              activeOpacity={0.7}
+            >
               {otherUserAvatar && otherUserAvatar.trim() !== '' ? (
                 <Image
                   source={{ uri: otherUserAvatar }}
@@ -291,13 +386,26 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                   </Text>
                 </View>
               )}
-            </View>
+            </TouchableOpacity>
           </View>
           
-          <View style={styles.profileInfo}>
+          <TouchableOpacity 
+            style={styles.profileInfo}
+            onPress={() => {
+              console.log('[DirectMessageScreen] Profile info (name) pressed, otherUserId:', otherUserId);
+              console.log('[DirectMessageScreen] onViewProfile exists:', !!onViewProfile);
+              if (onViewProfile) {
+                console.log('[DirectMessageScreen] Calling onViewProfile with userId:', otherUserId);
+                onViewProfile(otherUserId);
+              } else {
+                console.warn('[DirectMessageScreen] onViewProfile is not provided!');
+              }
+            }}
+            activeOpacity={0.7}
+          >
             <Text style={styles.profileName}>{otherUserName}</Text>
             <Text style={styles.profileTagline}>Online</Text>
-          </View>
+          </TouchableOpacity>
           
           <TouchableOpacity style={styles.menuButton}>
             <Ionicons name="ellipsis-vertical" size={24} color="#222B30" />
