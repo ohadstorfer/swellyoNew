@@ -18,7 +18,7 @@ frontend:
           fi
         - echo '{}' > dist/required-server-files.json
         - echo "Created required-server-files.json"
-        - echo '{"version": 1, "routes": []}' > dist/server-trace.json
+        - printf '{"version": 1, "routes": []}\n' > dist/server-trace.json
         - echo "Created server-trace.json (empty for static site)"
         - echo "Verifying build output..."
         - ls -la dist/ | head -10
