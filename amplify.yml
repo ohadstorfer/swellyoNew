@@ -1,47 +1,30 @@
-version: 1
+version: 1.0
 frontend:
   phases:
     preBuild:
       commands:
-        - echo "Preventing Next.js detection..."
-        - |
-          if [ -f "next.config.js" ]; then
-            mv next.config.js next.config.js.bak
-            echo "Renamed next.config.js to prevent Next.js detection"
-          fi
-        - |
-          if [ -d "pages" ]; then
-            mv pages pages.bak
-            echo "Renamed pages directory to prevent Next.js detection"
-          fi
         - echo "Installing dependencies..."
+        - npm install --quiet --global expo-cli
         - npm install
     build:
       commands:
-        - echo "Building web app with Expo..."
-        - npm run build
+        - echo "Building Expo web app..."
+        - expo build:web || (npx expo export --platform web && mv dist web-build)
         - echo "Build completed"
-        - echo "Restoring Next.js files..."
+        - echo "Creating index.html if needed..."
         - |
-          if [ -f "next.config.js.bak" ]; then
-            mv next.config.js.bak next.config.js
-          fi
-        - |
-          if [ -d "pages.bak" ]; then
-            mv pages.bak pages
-          fi
-        - echo "Creating required files for Amplify..."
-        - |
-          if [ -f "dist/swelly_chat.html" ]; then
-            cp dist/swelly_chat.html dist/index.html
+          if [ -f "web-build/swelly_chat.html" ] && [ ! -f "web-build/index.html" ]; then
+            cp web-build/swelly_chat.html web-build/index.html
             echo "Created index.html from swelly_chat.html"
           fi
-        - echo '{}' > dist/required-server-files.json
-        - echo "Created required-server-files.json"
+        - echo "Verifying build output:"
+        - ls -la web-build/ | head -10
+        - test -f web-build/index.html && echo "✓ index.html exists" || echo "✗ index.html missing"
   artifacts:
-    baseDirectory: dist
+    baseDirectory: web-build
     files:
       - '**/*'
   cache:
     paths:
       - node_modules/**/*
+      - $(npm root --global)/**/*
