@@ -10,6 +10,18 @@ frontend:
         - echo "Building web app with Expo..."
         - npm run build
         - echo "Build completed"
+        - echo "Creating required files for Amplify..."
+        - |
+          if [ -f "dist/swelly_chat.html" ]; then
+            cp dist/swelly_chat.html dist/index.html
+            echo "Created index.html from swelly_chat.html"
+          fi
+        - echo '{}' > dist/required-server-files.json
+        - echo "Created required-server-files.json"
+        - echo "Verifying build output..."
+        - ls -la dist/ | head -10
+        - test -f dist/index.html && echo "✓ index.html exists" || echo "✗ index.html missing"
+        - test -f dist/required-server-files.json && echo "✓ required-server-files.json exists" || echo "✗ required-server-files.json missing"
   artifacts:
     baseDirectory: dist
     files:
