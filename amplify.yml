@@ -18,10 +18,13 @@ frontend:
           fi
         - echo '{}' > dist/required-server-files.json
         - echo "Created required-server-files.json"
+        - echo '{"version": 1, "routes": []}' > dist/server-trace.json
+        - echo "Created server-trace.json (empty for static site)"
         - echo "Verifying build output..."
         - ls -la dist/ | head -10
         - test -f dist/index.html && echo "✓ index.html exists" || echo "✗ index.html missing"
         - test -f dist/required-server-files.json && echo "✓ required-server-files.json exists" || echo "✗ required-server-files.json missing"
+        - test -f dist/server-trace.json && echo "✓ server-trace.json exists" || echo "✗ server-trace.json missing"
   artifacts:
     baseDirectory: dist
     files:
