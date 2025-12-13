@@ -17,9 +17,12 @@ frontend:
             cp web-build/swelly_chat.html web-build/index.html
             echo "Created index.html from swelly_chat.html"
           fi
+        - echo "Creating required-server-files.json for Amplify..."
+        - echo '{}' > web-build/required-server-files.json
         - echo "Verifying build output:"
         - ls -la web-build/ | head -10
         - test -f web-build/index.html && echo "✓ index.html exists" || echo "✗ index.html missing"
+        - test -f web-build/required-server-files.json && echo "✓ required-server-files.json exists" || echo "✗ required-server-files.json missing"
   artifacts:
     baseDirectory: web-build
     files:
