@@ -5,19 +5,11 @@ frontend:
       commands:
         - echo "Installing dependencies..."
         - npm ci
-        - echo "Environment variables check..."
-        - echo "EXPO_PUBLIC_SUPABASE_URL is set: $([ -n \"$EXPO_PUBLIC_SUPABASE_URL\" ] && echo 'yes' || echo 'no')"
     build:
       commands:
         - echo "Building web app with Expo..."
         - npm run build
-        - echo "Build completed. Checking dist directory..."
-        - ls -la dist/ || echo "dist directory not found"
-        - echo "Copying redirects file if needed..."
-        - |
-          if [ -f "public/_redirects" ]; then
-            cp public/_redirects dist/_redirects || true
-          fi
+        - echo "Build completed"
   artifacts:
     baseDirectory: dist
     files:
