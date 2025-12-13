@@ -3,6 +3,17 @@ frontend:
   phases:
     preBuild:
       commands:
+        - echo "Preventing Next.js detection..."
+        - |
+          if [ -f "next.config.js" ]; then
+            mv next.config.js next.config.js.bak
+            echo "Renamed next.config.js to prevent Next.js detection"
+          fi
+        - |
+          if [ -d "pages" ]; then
+            mv pages pages.bak
+            echo "Renamed pages directory to prevent Next.js detection"
+          fi
         - echo "Installing dependencies..."
         - npm install
     build:
@@ -10,6 +21,15 @@ frontend:
         - echo "Building web app with Expo..."
         - npm run build
         - echo "Build completed"
+        - echo "Restoring Next.js files..."
+        - |
+          if [ -f "next.config.js.bak" ]; then
+            mv next.config.js.bak next.config.js
+          fi
+        - |
+          if [ -d "pages.bak" ]; then
+            mv pages.bak pages
+          fi
         - echo "Creating required files for Amplify..."
         - |
           if [ -f "dist/swelly_chat.html" ]; then
@@ -18,16 +38,6 @@ frontend:
           fi
         - echo '{}' > dist/required-server-files.json
         - echo "Created required-server-files.json"
-        - |
-          cat > dist/server-trace.json << 'EOF'
-          {"version": 1, "routes": []}
-          EOF
-        - echo "Created server-trace.json (empty for static site)"
-        - echo "Verifying build output..."
-        - ls -la dist/ | head -10
-        - test -f dist/index.html && echo "✓ index.html exists" || echo "✗ index.html missing"
-        - test -f dist/required-server-files.json && echo "✓ required-server-files.json exists" || echo "✗ required-server-files.json missing"
-        - test -f dist/server-trace.json && echo "✓ server-trace.json exists" || echo "✗ server-trace.json missing"
   artifacts:
     baseDirectory: dist
     files:
