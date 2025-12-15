@@ -678,6 +678,7 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     lineHeight: 24,
   },
+
   
   headerButton: {
     width: 44,
