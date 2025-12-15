@@ -1,6 +1,6 @@
 [build]
   publish = "dist"
-  command = "npm run build"
+  command = "npm run build:netlify"
 
 [build.environment]
   NODE_VERSION = "18"
@@ -11,7 +11,7 @@
   to = "/#swelly_chat"
   status = 200
 
-# Fallback for SPA routing
+# Fallback for SPA routing - must be last
 [[redirects]]
   from = "/*"
   to = "/index.html"
@@ -22,4 +22,5 @@
   [headers.values]
     X-Frame-Options = "DENY"
     X-XSS-Protection = "1; mode=block"
-    X-Content-Type-Options = "nosniff" 
+    X-Content-Type-Options = "nosniff"
+    Cache-Control = "public, max-age=0, must-revalidate" 

@@ -7,7 +7,8 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "build": "expo export --platform web && cp public/swelly_chat.html dist/ && node update-bundle.js && node create-amplify-files.js"
+    "build": "expo export --platform web && cp public/swelly_chat.html dist/ && node update-bundle.js && node create-amplify-files.js",
+    "build:netlify": "expo export --platform web && cp public/swelly_chat.html dist/index.html && cp public/_redirects dist/_redirects"
   },
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",
