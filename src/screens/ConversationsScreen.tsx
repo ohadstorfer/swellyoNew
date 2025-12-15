@@ -11,6 +11,7 @@ import {
   Modal,
   Alert,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { messagingService, Conversation } from '../services/messaging/messagingService';
 import { supabaseAuthService } from '../services/auth/supabaseAuthService';
@@ -229,7 +230,7 @@ export default function ConversationsScreen({
     count?: number,
     iconName?: string,
     iconColor?: string,
-    badgeDotColor?: string
+    badgeColor?: string
   ) => {
     const isActive = filter === type;
 
@@ -241,22 +242,22 @@ export default function ConversationsScreen({
         ]}
         onPress={() => setFilter(type)}
       >
-        {iconName && (
+        {iconName && type !== 'all' && (
           <Ionicons 
             name={iconName as any} 
             size={24} 
-            color={iconColor || '#05BCD3'} 
+            color={iconColor || '#333'} 
             style={iconName === 'send' && type === 'seeker' ? { transform: [{ rotate: '180deg' }] } : undefined}
           />
         )}
         <Text style={styles.filterButtonText}>{label}</Text>
         {count !== undefined && count > 0 && (
-          <View style={styles.filterBadge}>
+          <View style={[styles.filterBadge, { backgroundColor: badgeColor || '#BCAC99' }]}>
             <Text style={styles.filterBadgeText}>{count}</Text>
             <View
               style={[
                 styles.filterBadgeDot,
-                { backgroundColor: badgeDotColor || iconColor || '#05BCD3' },
+                { backgroundColor: '#FF5367' },
               ]}
             />
           </View>
@@ -271,6 +272,7 @@ export default function ConversationsScreen({
       // Direct message (2 users)
       setSelectedConversation({
         id: conv.id,
+        otherUserId: conv.other_user.user_id || '',
         otherUserName: conv.other_user.name || 'User',
         otherUserAvatar: conv.other_user.profile_image_url || null,
         isDirect: true,
@@ -279,6 +281,7 @@ export default function ConversationsScreen({
       // Group chat - use title or fallback
       setSelectedConversation({
         id: conv.id,
+        otherUserId: '', // Group chats don't have a single user ID
         otherUserName: conv.title || 'Group Chat',
         otherUserAvatar: null, // Group chats don't have a single avatar
         isDirect: false,
@@ -320,21 +323,21 @@ export default function ConversationsScreen({
             {/* Type badges */}
             {conversationType === 'advisor' && (
               <View style={[styles.typeBadge, styles.typeBadgeAdvisor]}>
-                <Ionicons name="send" size={8} color="#FFFFFF" />
+                <Ionicons name="send" size={10} color="#FFFFFF" />
               </View>
             )}
             {conversationType === 'seeker' && (
               <View style={[styles.typeBadge, styles.typeBadgeSeeker]}>
-                <Ionicons name="send" size={8} color="#FFFFFF" style={{ transform: [{ rotate: '180deg' }] }} />
+                <Ionicons name="send" size={10} color="#FFFFFF" style={{ transform: [{ rotate: '180deg' }] }} />
               </View>
             )}
             {conversationType === 'both' && (
               <>
                 <View style={[styles.typeBadge, styles.typeBadgeAdvisor]}>
-                  <Ionicons name="send" size={8} color="#FFFFFF" />
+                  <Ionicons name="send" size={10} color="#FFFFFF" />
                 </View>
-                <View style={[styles.typeBadge, styles.typeBadgeSeeker, { left: 38 }]}>
-                  <Ionicons name="send" size={8} color="#FFFFFF" style={{ transform: [{ rotate: '180deg' }] }} />
+                <View style={[styles.typeBadge, styles.typeBadgeSeeker, { left: 36 }]}>
+                  <Ionicons name="send" size={10} color="#FFFFFF" style={{ transform: [{ rotate: '180deg' }] }} />
                 </View>
               </>
             )}
@@ -357,7 +360,12 @@ export default function ConversationsScreen({
             <Text style={styles.timeText}>{lastMessageTime}</Text>
           ) : null}
           {unreadCount > 0 ? (
-            <View style={styles.unreadBadge}>
+            <View style={[
+              styles.unreadBadge,
+              conversationType === 'advisor' ? styles.unreadBadgeAdvisor :
+              conversationType === 'seeker' ? styles.unreadBadgeSeeker :
+              styles.unreadBadgeDefault
+            ]}>
               <Text style={styles.unreadBadgeText}>{unreadCount}</Text>
             </View>
           ) : null}
@@ -373,13 +381,15 @@ export default function ConversationsScreen({
         onPress={onSwellyPress}
       >
         <View style={styles.conversationContent}>
-          {/* Swelly avatar */}
+          {/* Swelly avatar with border */}
           <View style={styles.swellyAvatarContainer}>
-            <Image
-              source={{ uri: getImageUrl('/swelly/Swelly_PopOut_DarkBackground.png') }}
-              style={styles.swellyAvatar}
-              resizeMode="cover"
-            />
+            <View style={styles.swellyAvatarBorder}>
+              <Image
+                source={{ uri: getImageUrl('/Swelly avatar.png') }}
+                style={styles.swellyAvatar}
+                resizeMode="cover"
+              />
+            </View>
           </View>
 
           {/* Text content */}
@@ -462,39 +472,43 @@ export default function ConversationsScreen({
           <Text style={styles.headerTitle}>Hello {userName}</Text>
         </TouchableOpacity>
 
-        <View style={styles.headerRight}>
-          <TouchableOpacity 
-            style={styles.headerButton}
-            onPress={() => setShowSearchModal(true)}
-          >
-            <Ionicons name="search" size={24} color="#EEEEEE" />
-          </TouchableOpacity>
-          <TouchableOpacity 
-            style={styles.headerButton}
-            onPress={() => {
-              console.log('Menu button pressed, showing menu');
-              setShowMenu(true);
-            }}
-          >
-            <Ionicons name="ellipsis-vertical" size={24} color="#EEEEEE" />
-          </TouchableOpacity>
-        </View>
+        <TouchableOpacity 
+          style={styles.headerButton}
+          onPress={() => {
+            console.log('Menu button pressed, showing menu');
+            setShowMenu(true);
+          }}
+        >
+          <Ionicons name="ellipsis-vertical" size={24} color="#7B7B7B" />
+        </TouchableOpacity>
+        
+        {/* Gradient border at bottom */}
+        <LinearGradient
+          colors={['#05BCD3', '#DBCDBC']}
+          locations={[0, 0.7]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={styles.headerGradientBorder}
+        />
       </View>
 
       {/* Content area with light background and rounded corners - dark background visible around it */}
       <View style={styles.contentAreaWrapper}>
         <View style={styles.contentArea}>
         <View style={styles.contentInner}>
-          {/* Swelly conversation (positioned at top, before filters) */}
-          <View style={styles.swellyWrapper}>
-            {renderSwellyConversation()}
+          {/* Search Bar */}
+          <View style={styles.searchBarContainer}>
+            <View style={styles.searchBar}>
+              <Ionicons name="search" size={24} color="#7B7B7B" style={styles.searchIcon} />
+              <Text style={styles.searchPlaceholder}>Search</Text>
+            </View>
           </View>
 
           {/* Filter buttons */}
           <View style={styles.filterContainer}>
             {renderFilterButton('all', 'All')}
-            {renderFilterButton('advisor', 'Advisor', getAdvisorCount(), 'send', '#05BCD3', '#0788B0')}
-            {renderFilterButton('seeker', 'Seeker', getSeekerCount(), 'send', '#FF5367', '#FF5367')}
+            {renderFilterButton('advisor', 'Get Adv', getAdvisorCount(), 'send', '#333', '#BCAC99')}
+            {renderFilterButton('seeker', 'Give Adv', getSeekerCount(), 'send', '#333', '#05BCD3')}
           </View>
 
           {/* Conversations list */}
@@ -515,6 +529,11 @@ export default function ConversationsScreen({
           </ScrollView>
         </View>
       </View>
+      </View>
+
+      {/* Swelly conversation card - positioned at bottom */}
+      <View style={styles.swellyCardWrapper}>
+        {renderSwellyConversation()}
       </View>
 
       {/* Menu Modal */}
@@ -592,50 +611,76 @@ const styles = StyleSheet.create({
   contentArea: {
     flex: 1,
     backgroundColor: '#FAFAFA',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
     overflow: 'hidden',
   },
   contentInner: {
     flex: 1,
-    paddingTop: 16,
+    paddingTop: 24,
     paddingBottom: 32,
+  },
+  searchBarContainer: {
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+  },
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#D5D7DA',
+    borderRadius: 32,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 6,
+  },
+  searchIcon: {
+    marginRight: 0,
+  },
+  searchPlaceholder: {
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    fontSize: 14,
+    fontWeight: '400',
+    lineHeight: 18,
+    color: '#A7B8C2',
   },
   header: {
     backgroundColor: '#212121',
-    paddingTop: Platform.OS === 'web' ? 48 : 48,
-    paddingBottom: 16,
+    paddingTop: Platform.OS === 'web' ? 62 : 62,
+    paddingBottom: 24,
     paddingHorizontal: 16,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    position: 'relative',
+  },
+  headerGradientBorder: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 4,
   },
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 10,
   },
   headerAvatar: {
     width: 40,
     height: 40,
-    borderRadius: 80,
-    borderWidth: 2,
-    borderColor: '#FFFFFF',
-    marginRight: 8,
+    borderRadius: 20,
+    marginRight: 0,
   },
   headerTitle: {
-    fontFamily: 'Inter-Bold',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter-Bold',
     fontSize: 20,
     fontWeight: 'bold',
     color: '#FFFFFF',
     lineHeight: 24,
   },
-  headerRight: {
-    flexDirection: 'row',
-    gap: 8,
-  },
   headerButton: {
-    width: 45,
-    height: 45,
+    width: 44,
+    height: 44,
     borderRadius: 48,
     backgroundColor: '#333333',
     alignItems: 'center',
@@ -707,6 +752,7 @@ const styles = StyleSheet.create({
   conversationsListContent: {
     paddingHorizontal: 16,
     paddingTop: 16,
+    paddingBottom: 120, // Space for Swelly card at bottom
     gap: 0,
   },
   loadingContainer: {
@@ -723,22 +769,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     borderBottomWidth: 1,
     borderBottomColor: '#EEEEEE',
-    minHeight: 80,
   },
   conversationContent: {
     flexDirection: 'row',
     alignItems: 'center',
     flex: 1,
-    gap: 8,
+    gap: 16,
   },
   avatarContainer: {
     position: 'relative',
-    width: 48,
-    height: 48,
+    width: 52,
+    height: 52,
   },
   avatar: {
-    width: 48,
-    height: 48,
+    width: 52,
+    height: 52,
     borderRadius: 40,
   },
   avatarPlaceholder: {
@@ -754,22 +799,22 @@ const styles = StyleSheet.create({
   },
   typeBadge: {
     position: 'absolute',
-    width: 14,
-    height: 14,
+    width: 16,
+    height: 16,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
-    bottom: 0,
-    left: 38,
+    top: 35,
+    left: 36,
     padding: 2,
   },
   typeBadgeAdvisor: {
     backgroundColor: '#05BCD3',
   },
   typeBadgeSeeker: {
-    backgroundColor: '#FFB443',
+    backgroundColor: '#BCAC99',
   },
   textContainer: {
     flex: 1,
@@ -777,104 +822,132 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   conversationName: {
-    fontFamily: 'Inter-SemiBold',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter-SemiBold',
     fontSize: 14,
     fontWeight: '600',
     lineHeight: 18,
-    color: '#000000',
+    color: '#333333',
   },
   lastMessage: {
-    fontFamily: 'Inter',
-    fontSize: 10,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    fontSize: 13,
     fontWeight: '400',
-    lineHeight: 20,
-    color: '#868686',
+    lineHeight: 15,
+    color: '#A0A0A0',
   },
   timeContainer: {
     alignItems: 'flex-end',
-    gap: 10,
+    gap: 4,
     width: 37,
-    height: 42,
+    height: 39,
     justifyContent: 'flex-start',
   },
   timeText: {
-    fontFamily: 'Inter',
-    fontSize: 10,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    fontSize: 12,
     fontWeight: '400',
-    lineHeight: 20,
-    color: '#05BCD3',
+    lineHeight: 15,
+    color: '#212121',
     textAlign: 'right',
   },
   unreadBadge: {
-    backgroundColor: '#05BCD3',
     borderRadius: 16,
     width: 20,
     height: 20,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  unreadBadgeDefault: {
+    backgroundColor: '#05BCD3',
+  },
+  unreadBadgeAdvisor: {
+    backgroundColor: '#05BCD3',
+  },
+  unreadBadgeSeeker: {
+    backgroundColor: '#BCAC99',
+  },
   unreadBadgeText: {
-    fontFamily: 'Inter',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     fontSize: 10,
     fontWeight: '400',
     lineHeight: 20,
     color: '#FFFFFF',
   },
-  swellyWrapper: {
-    paddingHorizontal: 16,
-    paddingTop: 0,
-    paddingBottom: 0,
+  swellyCardWrapper: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    paddingBottom: 16,
+    zIndex: 10,
   },
   swellyContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingVertical: 16,
-    paddingHorizontal: 8,
+    paddingHorizontal: 16,
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
     borderWidth: 1,
     borderColor: '#B72DF2',
-    minHeight: 97,
+    minHeight: 104,
+    width: 361,
+    shadowColor: '#B72DF2',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.24,
+    shadowRadius: 14,
+    elevation: 5,
   },
   swellyAvatarContainer: {
-    width: 50,
-    height: 55.255,
-    marginRight: 4,
+    width: 62,
+    height: 68,
+    marginRight: 8,
+    position: 'relative',
+  },
+  swellyAvatarBorder: {
+    width: 62,
+    height: 62,
+    borderRadius: 31,
+    borderWidth: 2,
+    borderColor: '#B72DF2',
+    overflow: 'hidden',
+    backgroundColor: '#D9D9D9',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   swellyAvatar: {
-    width: 50,
-    height: 55.255,
-    borderRadius: 0,
+    width: '100%',
+    height: '100%',
   },
   swellyTextContainer: {
     flex: 1,
-    maxWidth: 246,
-    gap: 8,
+    gap: 0,
   },
   swellyName: {
-    fontFamily: 'Montserrat-Bold',
+    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat-Bold',
     fontSize: 14,
     fontWeight: 'bold',
     lineHeight: 22,
-    color: '#B72DF2',
+    color: '#333333',
+    marginBottom: 0,
   },
   swellyLastMessage: {
-    fontFamily: 'Inter',
-    fontSize: 10,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    fontSize: 12,
     fontWeight: '400',
-    lineHeight: 20,
-    color: '#868686',
+    lineHeight: 15,
+    color: '#333333',
   },
   swellyTimeContainer: {
     alignItems: 'flex-end',
     gap: 10,
     width: 37,
-    height: 42,
     justifyContent: 'flex-start',
   },
   swellyTimeText: {
-    fontFamily: 'Inter',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     fontSize: 10,
     fontWeight: '400',
     lineHeight: 20,

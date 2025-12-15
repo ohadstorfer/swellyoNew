@@ -18,6 +18,7 @@ import { colors, spacing, typography } from '../styles/theme';
 import { supabaseDatabaseService, SupabaseSurfer } from '../services/database/supabaseDatabaseService';
 import { supabase } from '../config/supabase';
 import { getImageUrl } from '../services/media/imageService';
+import { getCountryFlag } from '../utils/countryFlags';
 
 interface ProfileScreenProps {
   onBack?: () => void;
@@ -214,7 +215,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
         <View style={styles.coverContainer}>
           <ImageBackground
             source={{ 
-              uri: 'https://images.unsplash.com/photo-1502680390469-be75c86b636f?w=800&q=80' // Default surfboard cover image
+              uri: getImageUrl('/COVER IMAGE.jpg') // Default cover image from public folder
             }}
             style={styles.coverImage}
             resizeMode="cover"
@@ -290,7 +291,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
               />
             </View>
 
-            {/* Name and Details - Right side, bottom aligned */}
+            {/* Name and Details - Centered below profile image, vertically aligned with board */}
             <View style={styles.nameContainer}>
               <View style={styles.fullNameContainer}>
                 <RNText 
@@ -371,15 +372,28 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
               </View>
               {topDestinations.map((destination, index) => {
                 const progressWidth = getDestinationProgressWidth(destination.time_in_days);
+                // Extract country name from destination (format: "Area, Country" or just "Country")
+                const destinationParts = destination.destination_name.split(',').map(part => part.trim());
+                const countryName = destinationParts.length > 1 ? destinationParts[destinationParts.length - 1] : destinationParts[0];
+                const countryFlagUrl = getCountryFlag(countryName);
+                
                 return (
                   <View key={index} style={styles.destinationCard}>
-                    <Image
-                      source={{ 
-                        uri: `https://source.unsplash.com/86x74/?${encodeURIComponent(destination.destination_name.split(',')[0])},beach,surf`
-                      }}
-                      style={styles.destinationImage}
-                      resizeMode="cover"
-                    />
+                    {countryFlagUrl ? (
+                      <Image
+                        source={{ uri: countryFlagUrl }}
+                        style={styles.destinationImage}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <Image
+                        source={{ 
+                          uri: `https://source.unsplash.com/86x74/?${encodeURIComponent(destination.destination_name.split(',')[0])},beach,surf`
+                        }}
+                        style={styles.destinationImage}
+                        resizeMode="cover"
+                      />
+                    )}
                     <View style={styles.destinationContent}>
                       <View style={styles.destinationTitleRow}>
                         <Text style={styles.destinationName}>{destination.destination_name}:</Text>
@@ -389,10 +403,6 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
                         </View>
                       </View>
                       <View style={styles.destinationProgressContainer}>
-                        <View style={styles.destinationProgressLabels}>
-                          <Text style={styles.destinationProgressLabel}>Short visit</Text>
-                          <Text style={styles.destinationProgressLabel}>Local</Text>
-                        </View>
                         <View style={styles.destinationProgressBar}>
                           <LinearGradient
                             colors={['#05BCD3', '#00A2B6']}
@@ -401,6 +411,10 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
                             style={[styles.destinationProgressFill, { width: progressWidth }]}
                           />
                           <View style={[styles.destinationProgressEmpty, { flex: 1 }]} />
+                        </View>
+                        <View style={styles.destinationProgressLabels}>
+                          <Text style={styles.destinationProgressLabel}>Short visit</Text>
+                          <Text style={styles.destinationProgressLabel}>Local</Text>
                         </View>
                       </View>
                     </View>
@@ -620,9 +634,9 @@ const styles = StyleSheet.create({
   },
   profileInfoRow: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: 13,
     width: '100%',
+    alignItems: 'flex-end',
+    position: 'relative',
   },
   boardImageContainer: {
     width: 75,
@@ -639,12 +653,14 @@ const styles = StyleSheet.create({
     }),
   },
   nameContainer: {
-    flex: 1,
+    position: 'absolute',
+    left: '50%',
+    marginLeft: -100, // Center it (half of typical width ~200px)
     alignItems: 'center',
     justifyContent: 'flex-end',
     paddingBottom: 8,
     gap: 8,
-    minWidth: 200,
+    width: 200,
   },
   fullNameContainer: {
     width: '100%',
@@ -814,13 +830,13 @@ const styles = StyleSheet.create({
   },
   destinationProgressContainer: {
     width: '100%',
-    gap: 0,
+    gap: 4,
   },
   destinationProgressLabels: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     paddingHorizontal: 2,
-    marginBottom: 0,
+    marginTop: 0,
   },
   destinationProgressLabel: {
     fontSize: 10,
