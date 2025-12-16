@@ -13,18 +13,10 @@
   to = "/#swelly_chat"
   status = 200
 
-# Fallback for SPA routing
-# This redirect only applies to routes that don't match existing files
-# Static files (JS, CSS, images, etc.) are served automatically by Netlify
-# The force = false ensures existing files are not redirected
-[[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200
-  force = false
-
-# Explicitly disable Next.js plugin (Netlify auto-detects it)
-# This prevents Netlify from treating this as a Next.js project
+# Note: The _redirects file in dist/ takes precedence over netlify.toml redirects
+# The _redirects file uses a simple catch-all that Netlify processes correctly:
+# - Existing files (like _expo/*) are served automatically
+# - Non-existent routes are redirected to index.html for SPA routing
 
 [[headers]]
   for = "/*"
