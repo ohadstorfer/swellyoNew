@@ -161,10 +161,15 @@ export const getVideoUrl = (path: string): string => {
 
 /**
  * Get background video source
+ * Returns WebM for web (better compression) with MP4 fallback
  */
-export const getBackgroundVideoSource = (): string => {
+export const getBackgroundVideoSource = (): string | { webm?: string; mp4: string } => {
   if (Platform.OS === 'web') {
-    return '/swellyo welcome video.mp4';
+    // Return object with both formats for <video> element with source fallback
+    return {
+      webm: '/swellyo welcome video.webm', // WebM for modern browsers (better compression)
+      mp4: '/swellyo welcome video.mp4',   // MP4 fallback for older browsers
+    };
   }
   // On mobile, use the shorter filename
   return getVideoUrl('/swellyo169welcome.mp4');
