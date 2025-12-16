@@ -34,70 +34,115 @@ export const BackgroundVideo: React.FC<BackgroundVideoProps> = ({
   
   const mobileWebVideoUrl = mp4FallbackUrl;
 
-  console.log('[BackgroundVideo] Video URL:', videoUrl);
-  console.log('[BackgroundVideo] Mobile Web URL:', mobileWebVideoUrl);
-  console.log('[BackgroundVideo] Platform:', Platform.OS);
-  console.log('[BackgroundVideo] Is Mobile Web:', isMobileWeb());
+  if (__DEV__) {
+    console.log('[BackgroundVideo] Video URL:', videoUrl);
+    console.log('[BackgroundVideo] Mobile Web URL:', mobileWebVideoUrl);
+    console.log('[BackgroundVideo] Platform:', Platform.OS);
+    console.log('[BackgroundVideo] Is Mobile Web:', isMobileWeb());
+  }
 
-  // Web-specific: Use native HTML5 video for better webm support
+  // Web-specific: Optimized for fast loading and immediate autoplay
   if (Platform.OS === 'web') {
     useEffect(() => {
       const videoElement = videoRef.current;
-      if (videoElement) {
-        videoElement.loop = true;
-        videoElement.muted = true;
-        videoElement.playsInline = true;
-        videoElement.preload = 'auto';
+      if (!videoElement) return;
+
+      // Set all attributes immediately for fastest loading
+      videoElement.setAttribute('playsinline', 'true');
+      videoElement.setAttribute('webkit-playsinline', 'true');
+      videoElement.loop = true;
+      videoElement.muted = true;
+      videoElement.preload = 'auto'; // Always auto for fastest loading
+      videoElement.playsInline = true;
+      
+      let hasPlayed = false;
+
+      // Aggressive play function - tries multiple times immediately
+      const attemptPlay = async () => {
+        if (hasPlayed) return;
         
-        const handleCanPlay = () => {
-          console.log('[BackgroundVideo] Video can play, attempting to play');
-          videoElement.play().catch((error) => {
-            console.error('[BackgroundVideo] Error playing HTML5 video:', error);
-            setVideoError(String(error));
-            setUseImageFallback(true);
-          });
-        };
-
-        const handleLoadedData = () => {
-          console.log('[BackgroundVideo] Video data loaded');
-          videoElement.play().catch((error) => {
-            console.warn('[BackgroundVideo] Play failed on loadeddata:', error);
-          });
-        };
-
-        const handleError = (e: any) => {
-          console.error('[BackgroundVideo] HTML5 video error:', e);
-          const error = videoElement.error;
-          if (error) {
-            console.error('[BackgroundVideo] Video error code:', error.code);
-            console.error('[BackgroundVideo] Video error message:', error.message);
-            
-            // If WebM fails on mobile, try MP4 fallback
-            if (error.code === 4 && !isMobileWeb() && videoUrl.includes('.webm')) {
-              console.log('[BackgroundVideo] WebM failed, trying MP4 fallback');
-              videoElement.src = mobileWebVideoUrl;
-              return;
+        try {
+          const playPromise = videoElement.play();
+          if (playPromise !== undefined) {
+            await playPromise;
+            hasPlayed = true;
+            if (__DEV__) {
+              console.log('[BackgroundVideo] Video playing successfully');
             }
           }
-          setVideoError('Video failed to load');
-          setUseImageFallback(true);
-        };
+        } catch (error: any) {
+          // Silently handle autoplay restrictions - will retry on next event
+          if (__DEV__ && error.name !== 'NotAllowedError') {
+            console.warn('[BackgroundVideo] Play attempt:', error.message);
+          }
+        }
+      };
 
-        videoElement.addEventListener('canplay', handleCanPlay);
-        videoElement.addEventListener('loadeddata', handleLoadedData);
-        videoElement.addEventListener('error', handleError);
+      // Try to play on multiple events for fastest possible start
+      const handleCanPlay = () => {
+        attemptPlay();
+      };
 
-        // Try to play immediately
-        videoElement.play().catch((error) => {
-          console.warn('[BackgroundVideo] Initial play failed, waiting for canplay:', error);
-        });
+      const handleCanPlayThrough = () => {
+        attemptPlay();
+      };
 
-        return () => {
-          videoElement.removeEventListener('canplay', handleCanPlay);
-          videoElement.removeEventListener('loadeddata', handleLoadedData);
-          videoElement.removeEventListener('error', handleError);
-        };
-      }
+      const handleLoadedMetadata = () => {
+        attemptPlay();
+      };
+
+      const handleLoadedData = () => {
+        attemptPlay();
+      };
+
+      const handleLoadedStart = () => {
+        attemptPlay();
+      };
+
+      const handleError = (e: any) => {
+        const error = videoElement.error;
+        if (error) {
+          if (__DEV__) {
+            console.error('[BackgroundVideo] Video error:', {
+              code: error.code,
+              message: error.message,
+            });
+          }
+          
+          // Error code 4 = MEDIA_ERR_SRC_NOT_SUPPORTED - browser will try next source
+          if (error.code === 4) {
+            return;
+          }
+        }
+        setVideoError('Video failed to load');
+        setUseImageFallback(true);
+      };
+
+      // Add all event listeners for fastest possible playback
+      videoElement.addEventListener('loadstart', handleLoadedStart);
+      videoElement.addEventListener('loadedmetadata', handleLoadedMetadata);
+      videoElement.addEventListener('loadeddata', handleLoadedData);
+      videoElement.addEventListener('canplay', handleCanPlay);
+      videoElement.addEventListener('canplaythrough', handleCanPlayThrough);
+      videoElement.addEventListener('error', handleError);
+
+      // Immediate play attempt
+      attemptPlay();
+
+      // Also try after a tiny delay (catches cases where element isn't ready)
+      const timeoutId = setTimeout(() => {
+        attemptPlay();
+      }, 100);
+
+      return () => {
+        clearTimeout(timeoutId);
+        videoElement.removeEventListener('loadstart', handleLoadedStart);
+        videoElement.removeEventListener('loadedmetadata', handleLoadedMetadata);
+        videoElement.removeEventListener('loadeddata', handleLoadedData);
+        videoElement.removeEventListener('canplay', handleCanPlay);
+        videoElement.removeEventListener('canplaythrough', handleCanPlayThrough);
+        videoElement.removeEventListener('error', handleError);
+      };
     }, [videoUrl, mobileWebVideoUrl]);
 
     return (
@@ -112,6 +157,7 @@ export const BackgroundVideo: React.FC<BackgroundVideoProps> = ({
             loop
             muted
             playsInline
+            {...(isMobileWeb() && { 'webkit-playsinline': true } as any)}
             preload="auto"
             style={{
               position: 'absolute',
@@ -121,29 +167,34 @@ export const BackgroundVideo: React.FC<BackgroundVideoProps> = ({
               height: '100%',
               objectFit: 'cover',
               zIndex: 0,
+              pointerEvents: 'none',
             } as any}
             onError={(e: any) => {
-              console.error('[BackgroundVideo] HTML5 video onError:', e);
+              if (__DEV__) {
+                console.error('[BackgroundVideo] HTML5 video onError:', e);
+              }
               setVideoError('Video failed to load');
               setUseImageFallback(true);
             }}
           >
-            {/* Provide multiple source formats for better compatibility */}
+            {/* Optimized source order for fastest loading */}
+            {/* Mobile web: MP4 first (fastest iOS loading), then WebM */}
             {isMobileWeb() ? (
-              // Mobile web: prefer MP4, fallback to WebM
               <>
                 <source src={mobileWebVideoUrl} type="video/mp4" />
-                {videoUrl.includes('.webm') && (
+                {videoUrl.includes('.webm') && videoUrl !== mobileWebVideoUrl && (
                   <source src={videoUrl} type="video/webm" />
                 )}
               </>
             ) : (
-              // Desktop: prefer WebM, fallback to MP4
+              // Desktop: WebM first (smaller), then MP4
               <>
                 {videoUrl.includes('.webm') && (
                   <source src={videoUrl} type="video/webm" />
                 )}
-                <source src={mobileWebVideoUrl} type="video/mp4" />
+                {mobileWebVideoUrl !== videoUrl && (
+                  <source src={mobileWebVideoUrl} type="video/mp4" />
+                )}
               </>
             )}
           </video>
