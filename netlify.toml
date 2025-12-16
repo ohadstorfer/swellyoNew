@@ -13,9 +13,10 @@
   to = "/#swelly_chat"
   status = 200
 
-# Fallback for SPA routing - must be last
-# force = false means: only redirect if the file doesn't exist
-# This allows static files (JS, CSS, images, etc.) to be served normally
+# Fallback for SPA routing
+# This redirect only applies to routes that don't match existing files
+# Static files (JS, CSS, images, etc.) are served automatically by Netlify
+# The force = false ensures existing files are not redirected
 [[redirects]]
   from = "/*"
   to = "/index.html"
