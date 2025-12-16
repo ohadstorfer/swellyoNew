@@ -8,7 +8,9 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "build": "expo export --platform web && cp public/swelly_chat.html dist/ && node update-bundle.js && node create-amplify-files.js",
-    "build:netlify": "expo export --platform web && cp public/swelly_chat.html dist/index.html && cp public/_redirects dist/_redirects"
+    "build:netlify": "npm run build:netlify:pre && expo export --platform web && npm run build:netlify:post",
+    "build:netlify:pre": "([ -f next.config.js ] && mv next.config.js next.config.js.bak || true) && ([ -d pages ] && mv pages pages.bak || true)",
+    "build:netlify:post": "cp public/swelly_chat.html dist/index.html && cp public/_redirects dist/_redirects"
   },
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",

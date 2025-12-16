@@ -4,6 +4,8 @@
 
 [build.environment]
   NODE_VERSION = "18"
+  # Disable Next.js detection
+  NETLIFY_NEXT_PLUGIN_SKIP = "true"
 
 # Handle swelly_chat route - redirect to main app with hash
 [[redirects]]
@@ -16,6 +18,9 @@
   from = "/*"
   to = "/index.html"
   status = 200
+
+# Explicitly disable Next.js plugin (Netlify auto-detects it)
+# This prevents Netlify from treating this as a Next.js project
 
 [[headers]]
   for = "/*"

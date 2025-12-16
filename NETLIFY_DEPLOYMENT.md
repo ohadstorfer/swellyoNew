@@ -24,6 +24,18 @@ Netlify will auto-detect the build settings from `netlify.toml`, but you can ver
 - **Publish directory**: `dist`
 - **Node version**: 18 (configured in netlify.toml)
 
+### 2a. Disable Next.js Plugin (IMPORTANT)
+
+**CRITICAL**: Netlify may auto-detect this as a Next.js project. You MUST disable the Next.js plugin:
+
+1. Go to **Site settings** → **Build & deploy** → **Plugins**
+2. If you see `@netlify/plugin-nextjs` in the list, click on it
+3. Click **Disable** or **Remove** to disable it
+4. Alternatively, go to **Site settings** → **Build & deploy** → **Build settings** → **Environment variables**
+5. Add: `NETLIFY_NEXT_PLUGIN_SKIP` = `true`
+
+**Why?** This is an Expo web app, not a Next.js app. The Next.js plugin will cause build failures.
+
 ### 3. Set Environment Variables
 
 In the Netlify dashboard, go to:
@@ -83,10 +95,16 @@ Netlify automatically deploys when you push to your main branch. You can:
 
 ### Build Fails
 
-1. Check the build logs in Netlify dashboard
-2. Verify Node version (should be 18)
-3. Ensure all dependencies are in `package.json`
-4. Check for missing environment variables
+1. **Next.js Plugin Error**: If you see "Your publish directory does not contain expected Next.js build output":
+   - Go to **Site settings** → **Build & deploy** → **Plugins**
+   - Disable or remove `@netlify/plugin-nextjs`
+   - Add environment variable: `NETLIFY_NEXT_PLUGIN_SKIP` = `true`
+   - Redeploy
+
+2. Check the build logs in Netlify dashboard
+3. Verify Node version (should be 18)
+4. Ensure all dependencies are in `package.json`
+5. Check for missing environment variables
 
 ### Routing Issues
 
