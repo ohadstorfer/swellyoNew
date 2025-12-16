@@ -60,7 +60,7 @@ const GoogleIcon: React.FC = () => {
 
 export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDemoChat }) => {
   const [isLoading, setIsLoading] = useState(false);
-  const { setUser, updateFormData } = useOnboarding();
+  const { setUser, updateFormData, checkOnboardingStatus, isComplete } = useOnboarding();
   
   // Detect if we're on mobile (native or web on mobile device)
   const isMobile = Platform.OS === 'ios' || Platform.OS === 'android' || 
@@ -100,7 +100,13 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
               nickname: supabaseUser.nickname,
               userEmail: supabaseUser.email,
             });
-            onGetStarted();
+            
+            // Check if user has finished onboarding before navigating
+            const hasFinishedOnboarding = await checkOnboardingStatus();
+            if (!hasFinishedOnboarding) {
+              onGetStarted();
+            }
+            // If hasFinishedOnboarding is true, isComplete will be set and AppContent will show homepage
             return; // Don't proceed with OAuth flow if we already have a session
           }
         } catch (error) {
@@ -140,7 +146,12 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
               // Clean up the URL hash
               window.history.replaceState({}, document.title, window.location.pathname);
               
-              onGetStarted();
+              // Check if user has finished onboarding before navigating
+              const hasFinishedOnboarding = await checkOnboardingStatus();
+              if (!hasFinishedOnboarding) {
+                onGetStarted();
+              }
+              // If hasFinishedOnboarding is true, isComplete will be set and AppContent will show homepage
               return;
             }
           } catch (error: any) {
@@ -334,13 +345,13 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
             </TouchableOpacity>
             
             {/* Demo Chat Button */}
-            {onDemoChat && (
+            {/* {onDemoChat && (
               <Button
                 title="Demo Chat"
                 onPress={onDemoChat}
                 style={[styles.getStartedButton, styles.demoButton]}
               />
-            )}
+            )} */}
             </View>
 
             {/* Login Prompt */}

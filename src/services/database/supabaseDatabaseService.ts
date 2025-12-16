@@ -40,6 +40,7 @@ export interface SupabaseSurfer {
   lifestyle_keywords?: string[]; // text[], nullable
   wave_type_keywords?: string[]; // text[], nullable
   is_demo_user?: boolean; // boolean, default false
+  finished_onboarding?: boolean; // boolean, default false
   created_at: string; // timestamptz
   updated_at: string; // timestamptz
 }
@@ -251,6 +252,7 @@ class SupabaseDatabaseService {
         profile_image_url: profileImageUrl,
         // Swelly conversation results
         onboarding_summary_text: surferData.onboardingSummaryText,
+        finished_onboarding: surferData.finishedOnboarding,
         destinations_array: surferData.destinationsArray,
         travel_type: surferData.travelType,
         travel_buddies: surferData.travelBuddies,
@@ -462,6 +464,38 @@ class SupabaseDatabaseService {
     } catch (error: any) {
       console.error('Error getting current user data:', error);
       return { user: null, surfer: null };
+    }
+  }
+
+  /**
+   * Mark onboarding as complete for the current user
+   */
+  async markOnboardingComplete(): Promise<void> {
+    if (!isSupabaseConfigured()) {
+      console.log('Supabase not configured, skipping markOnboardingComplete');
+      return;
+    }
+
+    try {
+      const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
+      
+      if (authError || !authUser) {
+        throw new Error('User not authenticated. Please sign in first.');
+      }
+
+      const { error } = await supabase
+        .from('surfers')
+        .update({ finished_onboarding: true })
+        .eq('user_id', authUser.id);
+
+      if (error) {
+        throw error;
+      }
+
+      console.log('Marked onboarding as complete in database');
+    } catch (error: any) {
+      console.error('Error marking onboarding as complete:', error);
+      throw new Error(`Failed to mark onboarding as complete: ${error.message || String(error)}`);
     }
   }
 

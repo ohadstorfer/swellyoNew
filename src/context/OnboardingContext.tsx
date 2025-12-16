@@ -3,6 +3,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { OnboardingData } from '../screens/OnboardingStep1Screen';
 import { User, databaseService } from '../services/database/databaseService';
 import { onboardingService } from '../services/onboarding/onboardingService';
+import { supabaseDatabaseService } from '../services/database/supabaseDatabaseService';
+import { isSupabaseConfigured } from '../config/supabase';
 import { Platform } from 'react-native';
 
 interface OnboardingContextType {
@@ -16,6 +18,7 @@ interface OnboardingContextType {
   isComplete: boolean;
   saveStepToSupabase: (stepData: Partial<OnboardingData>) => Promise<void>;
   markOnboardingComplete: () => void;
+  checkOnboardingStatus: () => Promise<boolean>;
 }
 
 const OnboardingContext = createContext<OnboardingContextType | undefined>(undefined);
@@ -66,6 +69,21 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   const loadOnboardingData = async () => {
     try {
+      // First, check database for finished_onboarding status if user is authenticated
+      let dbOnboardingComplete = false;
+      if (isSupabaseConfigured()) {
+        try {
+          const { surfer } = await supabaseDatabaseService.getCurrentUserData();
+          if (surfer?.finished_onboarding) {
+            dbOnboardingComplete = true;
+            console.log('User has finished onboarding (from database)');
+          }
+        } catch (error) {
+          console.log('Error checking database for onboarding status:', error);
+          // Continue with local storage check if database check fails
+        }
+      }
+
       const savedData = await AsyncStorage.getItem(STORAGE_KEY);
       console.log('Loading saved data:', savedData);
       if (savedData) {
@@ -85,8 +103,10 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           setUser(parsed.user);
         }
         
-        // Load onboarding completion status
-        if (parsed.isComplete !== undefined) {
+        // Load onboarding completion status - prioritize database value over local storage
+        if (dbOnboardingComplete) {
+          setIsComplete(true);
+        } else if (parsed.isComplete !== undefined) {
           setIsComplete(parsed.isComplete);
         }
         
@@ -190,9 +210,42 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }
   };
 
-  const markOnboardingComplete = () => {
+  const markOnboardingComplete = async () => {
     console.log('Marking onboarding as complete');
     setIsComplete(true);
+    
+    // Also save to database
+    if (isSupabaseConfigured()) {
+      try {
+        await supabaseDatabaseService.markOnboardingComplete();
+      } catch (error) {
+        console.error('Error marking onboarding as complete in database:', error);
+        // Don't throw - local state is already updated
+      }
+    }
+  };
+
+  /**
+   * Check if the current user has finished onboarding in the database
+   * Returns true if finished, false otherwise
+   */
+  const checkOnboardingStatus = async (): Promise<boolean> => {
+    if (!isSupabaseConfigured()) {
+      return false;
+    }
+
+    try {
+      const { surfer } = await supabaseDatabaseService.getCurrentUserData();
+      if (surfer?.finished_onboarding) {
+        console.log('User has finished onboarding (from database check)');
+        setIsComplete(true);
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.log('Error checking onboarding status:', error);
+      return false;
+    }
   };
 
   const value: OnboardingContextType = {
@@ -206,6 +259,7 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     isComplete,
     saveStepToSupabase,
     markOnboardingComplete,
+    checkOnboardingStatus,
   };
 
   return (

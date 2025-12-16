@@ -158,9 +158,9 @@ export const AppContent: React.FC = () => {
     otherUserAvatar: string | null;
   } | null>(null);
 
-  const handleChatComplete = () => {
+  const handleChatComplete = async () => {
     // Mark onboarding as complete and navigate to profile
-    markOnboardingComplete();
+    await markOnboardingComplete();
     setShowProfile(true);
   };
 
