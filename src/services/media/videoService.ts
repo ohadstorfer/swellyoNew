@@ -170,3 +170,14 @@ export const getBackgroundVideoSource = (): string => {
   return getVideoUrl('/swellyo169welcome.mp4');
 };
 
+/**
+ * Get background video source MP4 fallback (for mobile web compatibility)
+ */
+export const getBackgroundVideoSourceMP4 = (): string => {
+  if (Platform.OS === 'web') {
+    // Use the matching MP4 file (swellyo169welcome.mp4)
+    return '/swellyo169welcome.mp4';
+  }
+  return getVideoUrl('/swellyo169welcome.mp4');
+};
+

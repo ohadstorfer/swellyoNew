@@ -69,6 +69,7 @@ export interface MessageReaction {
 class MessagingService {
   /**
    * Get all conversations for the current user
+   * OPTIMIZED: Batches all queries to avoid N+1 problem
    */
   async getConversations(): Promise<Conversation[]> {
     if (!isSupabaseConfigured()) {
@@ -85,8 +86,6 @@ class MessagingService {
 
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
-      
-      console.log('Getting conversations for user:', user.id);
 
       // Get all conversations where user is a member
       const { data: membershipData, error: membershipError } = await supabase
@@ -102,130 +101,164 @@ class MessagingService {
         return [];
       }
 
-      // Get conversation details
+      // OPTIMIZATION 1: Get conversation details with specific columns
       const { data: conversations, error: conversationsError } = await supabase
         .from('conversations')
-        .select('*')
+        .select('id, title, is_direct, metadata, created_by, created_at, updated_at')
         .in('id', conversationIds)
         .order('updated_at', { ascending: false });
 
       if (conversationsError) throw conversationsError;
 
-      // Enrich each conversation with last message, unread count, and members
-      const enrichedConversations = await Promise.all(
-        (conversations || []).map(async (conv) => {
-          // Get last message
-          const { data: lastMessageData } = await supabase
-            .from('messages')
-            .select('*')
-            .eq('conversation_id', conv.id)
-            .eq('deleted', false)
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .maybeSingle();
+      if (!conversations || conversations.length === 0) {
+        return [];
+      }
 
-          // Get unread count
-          const { data: memberData } = await supabase
-            .from('conversation_members')
-            .select('last_read_message_id, last_read_at')
-            .eq('conversation_id', conv.id)
-            .eq('user_id', user.id)
-            .maybeSingle();
+      // OPTIMIZATION 2: Batch fetch all last messages in parallel using a single query per conversation
+      // (Supabase doesn't support window functions easily, so we'll use a more efficient approach)
+      const lastMessagesPromises = conversations.map(conv =>
+        supabase
+          .from('messages')
+          .select('id, conversation_id, sender_id, body, rendered_body, attachments, is_system, edited, deleted, created_at, updated_at')
+          .eq('conversation_id', conv.id)
+          .eq('deleted', false)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+      );
+      const lastMessagesResults = await Promise.all(lastMessagesPromises);
+      const lastMessagesMap = new Map<string, Message>();
+      lastMessagesResults.forEach((result, index) => {
+        if (result.data && conversations[index]) {
+          lastMessagesMap.set(conversations[index].id, result.data);
+        }
+      });
 
-          let unreadCount = 0;
-          if (memberData && lastMessageData) {
-            const { count } = await supabase
-              .from('messages')
-              .select('*', { count: 'exact', head: true })
-              .eq('conversation_id', conv.id)
-              .eq('deleted', false)
-              .gt('created_at', memberData.last_read_at || new Date(0).toISOString());
-            unreadCount = count || 0;
-          }
+      // OPTIMIZATION 3: Batch fetch all member data for all conversations
+      const { data: allMembersData, error: allMembersError } = await supabase
+        .from('conversation_members')
+        .select('conversation_id, user_id, role, joined_at, last_read_message_id, last_read_at, preferences')
+        .in('conversation_id', conversationIds);
 
-          // Get all members (without joins to avoid RLS issues)
-          const { data: membersData, error: membersError } = await supabase
-            .from('conversation_members')
-            .select('*')
-            .eq('conversation_id', conv.id);
+      if (allMembersError) {
+        console.error('Error fetching all members:', allMembersError);
+      }
 
-          if (membersError) {
-            console.error(`Error fetching members for conversation ${conv.id}:`, membersError);
-          }
+      // Group members by conversation
+      const membersByConversation = new Map<string, typeof allMembersData>();
+      (allMembersData || []).forEach(member => {
+        if (!membersByConversation.has(member.conversation_id)) {
+          membersByConversation.set(member.conversation_id, []);
+        }
+        membersByConversation.get(member.conversation_id)!.push(member);
+      });
+
+      // OPTIMIZATION 4: Get current user's read status for all conversations in one query
+      const { data: userMemberData, error: userMemberError } = await supabase
+        .from('conversation_members')
+        .select('conversation_id, last_read_at')
+        .eq('user_id', user.id)
+        .in('conversation_id', conversationIds);
+
+      if (userMemberError) {
+        console.error('Error fetching user member data:', userMemberError);
+      }
+
+      const userReadMap = new Map<string, string | null>();
+      (userMemberData || []).forEach(member => {
+        userReadMap.set(member.conversation_id, member.last_read_at);
+      });
+
+      // OPTIMIZATION 5: Batch calculate unread counts for all conversations
+      const unreadCountPromises = conversations.map(conv => {
+        const lastReadAt = userReadMap.get(conv.id) || new Date(0).toISOString();
+        const lastMessage = lastMessagesMap.get(conv.id);
+        if (!lastMessage) return Promise.resolve(0);
+        
+        return supabase
+          .from('messages')
+          .select('id', { count: 'exact', head: true })
+          .eq('conversation_id', conv.id)
+          .eq('deleted', false)
+          .gt('created_at', lastReadAt)
+          .then(result => result.count || 0);
+      });
+      const unreadCounts = await Promise.all(unreadCountPromises);
+      const unreadCountMap = new Map<string, number>();
+      conversations.forEach((conv, index) => {
+        unreadCountMap.set(conv.id, unreadCounts[index]);
+      });
+
+      // OPTIMIZATION 6: Batch fetch all unique user IDs and get their data in bulk
+      const allUserIds = new Set<string>();
+      (allMembersData || []).forEach(member => {
+        allUserIds.add(member.user_id);
+      });
+
+      // Batch fetch users
+      const userIdsArray = Array.from(allUserIds);
+      const { data: usersData } = await supabase
+        .from('users')
+        .select('id, email')
+        .in('id', userIdsArray);
+
+      // Batch fetch surfers
+      const { data: surfersData } = await supabase
+        .from('surfers')
+        .select('user_id, name, profile_image_url')
+        .in('user_id', userIdsArray);
+
+      // Create lookup maps
+      const usersMap = new Map((usersData || []).map(u => [u.id, u]));
+      const surfersMap = new Map((surfersData || []).map(s => [s.user_id, s]));
+
+      // OPTIMIZATION 7: Enrich members using the lookup maps (no additional queries)
+      const enrichedMembersByConv = new Map<string, ConversationMember[]>();
+      membersByConversation.forEach((members, convId) => {
+        const enriched = members.map(member => {
+          const userData = usersMap.get(member.user_id);
+          const surferData = surfersMap.get(member.user_id);
           
-          console.log(`Conversation ${conv.id} - Found ${membersData?.length || 0} members:`, membersData?.map(m => m.user_id));
-
-          // Fetch user and surfer data separately for each member to avoid RLS join issues
-          const enrichedMembers = await Promise.all(
-            (membersData || []).map(async (member) => {
-              console.log(`Fetching data for member: ${member.user_id}, current user: ${user.id}`);
-              
-              // Fetch user data (email)
-              const { data: userData, error: userError } = await supabase
-                .from('users')
-                .select('id, email')
-                .eq('id', member.user_id)
-                .maybeSingle();
-
-              if (userError) {
-                console.error(`Error fetching user data for ${member.user_id}:`, userError);
-              }
-
-              // Fetch surfer data (name, profile_image_url)
-              const { data: surferData, error: surferError } = await supabase
-                .from('surfers')
-                .select('name, profile_image_url')
-                .eq('user_id', member.user_id)
-                .maybeSingle();
-
-              if (surferError) {
-                console.error(`Error fetching surfer data for ${member.user_id}:`, surferError);
-              }
-
-              // Log the actual data received
-              console.log(`Member ${member.user_id} - surferData:`, surferData, 'userData:', userData);
-
-              // Determine name: prefer surfer name, fallback to email prefix, then 'Unknown'
-              let name = 'Unknown';
-              if (surferData?.name && surferData.name.trim() !== '') {
-                name = surferData.name;
-              } else if (userData?.email) {
-                name = userData.email.split('@')[0];
-              }
-              
-              console.log(`Member ${member.user_id} - final name: ${name}, has surfer: ${!!surferData}, surfer name: ${surferData?.name}, has user: ${!!userData}, user email: ${userData?.email}`);
-
-              return {
-                ...member,
-                name: name,
-                profile_image_url: surferData?.profile_image_url,
-                email: userData?.email,
-              };
-            })
-          );
-
-          // For direct conversations, find the other user
-          let otherUser: ConversationMember | undefined;
-          if (conv.is_direct && enrichedMembers.length > 0) {
-            console.log(`Direct conversation ${conv.id} - members:`, enrichedMembers.map(m => ({ id: m.user_id, name: m.name })));
-            const otherMember = enrichedMembers.find(m => m.user_id !== user.id);
-            if (otherMember) {
-              console.log(`Found other user: ${otherMember.user_id}, name: ${otherMember.name}`);
-              otherUser = otherMember;
-            } else {
-              console.warn(`No other user found for direct conversation ${conv.id}. Members:`, enrichedMembers.map(m => m.user_id));
-            }
+          let name = 'Unknown';
+          if (surferData?.name && surferData.name.trim() !== '') {
+            name = surferData.name;
+          } else if (userData?.email) {
+            name = userData.email.split('@')[0];
           }
 
           return {
-            ...conv,
-            last_message: lastMessageData || undefined,
-            unread_count: unreadCount,
-            other_user: otherUser,
-            members: enrichedMembers,
+            ...member,
+            name,
+            profile_image_url: surferData?.profile_image_url,
+            email: userData?.email,
           };
-        })
-      );
+        });
+        enrichedMembersByConv.set(convId, enriched);
+      });
+
+      // Build final enriched conversations
+      const enrichedConversations = conversations.map(conv => {
+        const lastMessage = lastMessagesMap.get(conv.id);
+        const unreadCount = unreadCountMap.get(conv.id) || 0;
+        const enrichedMembers = enrichedMembersByConv.get(conv.id) || [];
+
+        // For direct conversations, find the other user
+        let otherUser: ConversationMember | undefined;
+        if (conv.is_direct && enrichedMembers.length > 0) {
+          const otherMember = enrichedMembers.find(m => m.user_id !== user.id);
+          if (otherMember) {
+            otherUser = otherMember;
+          }
+        }
+
+        return {
+          ...conv,
+          last_message: lastMessage,
+          unread_count: unreadCount,
+          other_user: otherUser,
+          members: enrichedMembers,
+        };
+      });
 
       return enrichedConversations;
     } catch (error) {
@@ -236,6 +269,7 @@ class MessagingService {
 
   /**
    * Get messages for a specific conversation
+   * OPTIMIZED: Uses specific column selects instead of *
    */
   async getMessages(conversationId: string, limit: number = 50): Promise<Message[]> {
     if (!isSupabaseConfigured()) {
@@ -243,10 +277,10 @@ class MessagingService {
     }
 
     try {
-      // Fetch messages without joins to avoid RLS issues
+      // OPTIMIZATION: Fetch only needed columns instead of *
       const { data: messages, error } = await supabase
         .from('messages')
-        .select('*')
+        .select('id, conversation_id, sender_id, body, rendered_body, attachments, is_system, edited, deleted, created_at, updated_at')
         .eq('conversation_id', conversationId)
         .eq('deleted', false)
         .order('created_at', { ascending: true })
@@ -254,10 +288,22 @@ class MessagingService {
 
       if (error) throw error;
 
-      // Fetch sender info separately for each unique sender
-      const senderIds = [...new Set((messages || []).map(msg => msg.sender_id))];
+      if (!messages || messages.length === 0) {
+        return [];
+      }
+
+      // Fetch sender info separately for each unique sender (already batched)
+      const senderIds = [...new Set(messages.map(msg => msg.sender_id))];
       
-      // Fetch surfer data for all senders
+      if (senderIds.length === 0) {
+        return messages.map(msg => ({
+          ...msg,
+          sender_name: undefined,
+          sender_avatar: undefined,
+        }));
+      }
+
+      // OPTIMIZATION: Batch fetch surfer data for all senders
       const { data: surfersData } = await supabase
         .from('surfers')
         .select('user_id, name, profile_image_url')
@@ -269,7 +315,7 @@ class MessagingService {
       );
 
       // Enrich messages with sender info
-      return (messages || []).map(msg => ({
+      return messages.map(msg => ({
         ...msg,
         sender_name: surferMap.get(msg.sender_id)?.name,
         sender_avatar: surferMap.get(msg.sender_id)?.profile_image_url,

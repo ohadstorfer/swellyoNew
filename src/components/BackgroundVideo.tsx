@@ -1,11 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, StyleSheet, Image, Platform } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video';
-import { getBackgroundVideoSource, getVideoUrl } from '../services/media/videoService';
+import { getBackgroundVideoSource, getBackgroundVideoSourceMP4, getVideoUrl } from '../services/media/videoService';
 
 interface BackgroundVideoProps {
   videoSource?: string;
 }
+
+// Detect if we're on mobile web
+const isMobileWeb = () => {
+  if (Platform.OS !== 'web') return false;
+  if (typeof window === 'undefined') return false;
+  return window.innerWidth <= 768 || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+};
 
 export const BackgroundVideo: React.FC<BackgroundVideoProps> = ({ 
   videoSource 
@@ -19,8 +26,18 @@ export const BackgroundVideo: React.FC<BackgroundVideoProps> = ({
     ? getVideoUrl(videoSource) 
     : getBackgroundVideoSource();
 
+  // For mobile web, use MP4 instead of WebM for better compatibility
+  // Get MP4 version - if using default background video, use matching MP4 filename (swellyo169welcome.mp4)
+  const mp4FallbackUrl = videoSource 
+    ? (videoSource.includes('.webm') ? videoSource.replace('.webm', '.mp4') : videoSource)
+    : getBackgroundVideoSourceMP4();
+  
+  const mobileWebVideoUrl = mp4FallbackUrl;
+
   console.log('[BackgroundVideo] Video URL:', videoUrl);
+  console.log('[BackgroundVideo] Mobile Web URL:', mobileWebVideoUrl);
   console.log('[BackgroundVideo] Platform:', Platform.OS);
+  console.log('[BackgroundVideo] Is Mobile Web:', isMobileWeb());
 
   // Web-specific: Use native HTML5 video for better webm support
   if (Platform.OS === 'web') {
@@ -30,6 +47,7 @@ export const BackgroundVideo: React.FC<BackgroundVideoProps> = ({
         videoElement.loop = true;
         videoElement.muted = true;
         videoElement.playsInline = true;
+        videoElement.preload = 'auto';
         
         const handleCanPlay = () => {
           console.log('[BackgroundVideo] Video can play, attempting to play');
@@ -40,13 +58,33 @@ export const BackgroundVideo: React.FC<BackgroundVideoProps> = ({
           });
         };
 
+        const handleLoadedData = () => {
+          console.log('[BackgroundVideo] Video data loaded');
+          videoElement.play().catch((error) => {
+            console.warn('[BackgroundVideo] Play failed on loadeddata:', error);
+          });
+        };
+
         const handleError = (e: any) => {
           console.error('[BackgroundVideo] HTML5 video error:', e);
+          const error = videoElement.error;
+          if (error) {
+            console.error('[BackgroundVideo] Video error code:', error.code);
+            console.error('[BackgroundVideo] Video error message:', error.message);
+            
+            // If WebM fails on mobile, try MP4 fallback
+            if (error.code === 4 && !isMobileWeb() && videoUrl.includes('.webm')) {
+              console.log('[BackgroundVideo] WebM failed, trying MP4 fallback');
+              videoElement.src = mobileWebVideoUrl;
+              return;
+            }
+          }
           setVideoError('Video failed to load');
           setUseImageFallback(true);
         };
 
         videoElement.addEventListener('canplay', handleCanPlay);
+        videoElement.addEventListener('loadeddata', handleLoadedData);
         videoElement.addEventListener('error', handleError);
 
         // Try to play immediately
@@ -56,10 +94,11 @@ export const BackgroundVideo: React.FC<BackgroundVideoProps> = ({
 
         return () => {
           videoElement.removeEventListener('canplay', handleCanPlay);
+          videoElement.removeEventListener('loadeddata', handleLoadedData);
           videoElement.removeEventListener('error', handleError);
         };
       }
-    }, [videoUrl]);
+    }, [videoUrl, mobileWebVideoUrl]);
 
     return (
       <View style={[styles.container, webContainerStyle as any]}>
@@ -69,11 +108,11 @@ export const BackgroundVideo: React.FC<BackgroundVideoProps> = ({
           // @ts-ignore - HTML5 video element for web
           <video
             ref={videoRef}
-            src={videoUrl}
             autoPlay
             loop
             muted
             playsInline
+            preload="auto"
             style={{
               position: 'absolute',
               top: 0,
@@ -88,7 +127,26 @@ export const BackgroundVideo: React.FC<BackgroundVideoProps> = ({
               setVideoError('Video failed to load');
               setUseImageFallback(true);
             }}
-          />
+          >
+            {/* Provide multiple source formats for better compatibility */}
+            {isMobileWeb() ? (
+              // Mobile web: prefer MP4, fallback to WebM
+              <>
+                <source src={mobileWebVideoUrl} type="video/mp4" />
+                {videoUrl.includes('.webm') && (
+                  <source src={videoUrl} type="video/webm" />
+                )}
+              </>
+            ) : (
+              // Desktop: prefer WebM, fallback to MP4
+              <>
+                {videoUrl.includes('.webm') && (
+                  <source src={videoUrl} type="video/webm" />
+                )}
+                <source src={mobileWebVideoUrl} type="video/mp4" />
+              </>
+            )}
+          </video>
         )}
       </View>
     );

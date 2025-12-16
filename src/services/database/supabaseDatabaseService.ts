@@ -412,6 +412,7 @@ class SupabaseDatabaseService {
 
   /**
    * Get surfer data by user ID
+   * OPTIMIZED: Uses specific column selects for better performance
    */
   async getSurferByUserId(userId: string): Promise<SupabaseSurfer | null> {
     if (!isSupabaseConfigured()) {
@@ -419,9 +420,12 @@ class SupabaseDatabaseService {
     }
 
     try {
+      // OPTIMIZATION: Select only needed columns instead of *
+      // Note: If you need all columns, you can change this back to '*'
+      // but specifying columns is generally faster and uses less bandwidth
       const { data, error } = await supabase
         .from('surfers')
-        .select('*')
+        .select('user_id, name, age, pronoun, country_from, surfboard_type, surf_level, travel_experience, bio, profile_image_url, destinations_map, destinations_array, lifestyle_keywords, wave_type_keywords, travel_buddies, created_at, updated_at, finished_onboarding')
         .eq('user_id', userId)
         .single();
 
