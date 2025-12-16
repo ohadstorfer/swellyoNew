@@ -13,67 +13,9 @@
   to = "/#swelly_chat"
   status = 200
 
-# Exclude static assets from SPA redirect
-# These patterns must come before the catch-all redirect
-# Allow _expo directory and static files to be served directly
-[[redirects]]
-  from = "/_expo/*"
-  status = 200
-
-[[redirects]]
-  from = "/*.js"
-  status = 200
-
-[[redirects]]
-  from = "/*.css"
-  status = 200
-
-[[redirects]]
-  from = "/*.json"
-  status = 200
-
-[[redirects]]
-  from = "/*.png"
-  status = 200
-
-[[redirects]]
-  from = "/*.jpg"
-  status = 200
-
-[[redirects]]
-  from = "/*.jpeg"
-  status = 200
-
-[[redirects]]
-  from = "/*.gif"
-  status = 200
-
-[[redirects]]
-  from = "/*.svg"
-  status = 200
-
-[[redirects]]
-  from = "/*.woff"
-  status = 200
-
-[[redirects]]
-  from = "/*.woff2"
-  status = 200
-
-[[redirects]]
-  from = "/*.ttf"
-  status = 200
-
-[[redirects]]
-  from = "/*.eot"
-  status = 200
-
-[[redirects]]
-  from = "/*.ico"
-  status = 200
-
 # Fallback for SPA routing - must be last
-# Only redirect if file doesn't exist (force = false means don't override existing files)
+# force = false means: only redirect if the file doesn't exist
+# This allows static files (JS, CSS, images, etc.) to be served normally
 [[redirects]]
   from = "/*"
   to = "/index.html"

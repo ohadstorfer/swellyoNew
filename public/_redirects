@@ -1,5 +1,4 @@
 # Netlify SPA redirects
-# Allow static assets in _expo directory to be served directly
-/_expo/*    200
-# Redirect all other routes to index.html for client-side routing
-/*    /index.html   200
+# Note: Static files are handled automatically by Netlify
+# Only redirect non-existent routes to index.html for SPA routing
+# The catch-all is handled in netlify.toml with force=false
