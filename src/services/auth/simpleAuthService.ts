@@ -72,8 +72,15 @@ class SimpleAuthService {
     // No code found, redirect to Google OAuth
     const clientId = process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID;
     if (!clientId) {
-      throw new Error('EXPO_PUBLIC_GOOGLE_CLIENT_ID environment variable is not set');
+      console.error('❌ EXPO_PUBLIC_GOOGLE_CLIENT_ID is not set. This variable must be set in Netlify and a new deployment must be triggered.');
+      console.error('📝 Steps to fix:');
+      console.error('   1. Go to Netlify Dashboard → Site settings → Environment variables');
+      console.error('   2. Add EXPO_PUBLIC_GOOGLE_CLIENT_ID with your Google OAuth Client ID');
+      console.error('   3. Go to Deploys → Trigger deploy → Deploy site');
+      console.error('   4. Wait for the build to complete');
+      throw new Error('EXPO_PUBLIC_GOOGLE_CLIENT_ID environment variable is not set. Please set it in Netlify and trigger a new deployment.');
     }
+    console.log('✅ EXPO_PUBLIC_GOOGLE_CLIENT_ID is set:', clientId.substring(0, 20) + '...');
     const redirectUri = encodeURIComponent(window.location?.origin || '');
     const scope = encodeURIComponent('openid email profile');
     

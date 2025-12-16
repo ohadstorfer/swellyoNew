@@ -36,20 +36,44 @@ Netlify will auto-detect the build settings from `netlify.toml`, but you can ver
 
 **Why?** This is an Expo web app, not a Next.js app. The Next.js plugin will cause build failures.
 
-### 3. Set Environment Variables
+### 3. Set Environment Variables (REQUIRED)
+
+**IMPORTANT**: You MUST set these environment variables for the app to work properly.
 
 In the Netlify dashboard, go to:
-**Site settings** → **Environment variables** → **Add variable**
+**Site settings** → **Build & deploy** → **Environment variables** → **Add variable**
 
-Add the following environment variables (if needed):
+Add the following environment variables:
 
-```
-EXPO_PUBLIC_SUPABASE_URL=your_supabase_url
-EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
-EXPO_PUBLIC_GOOGLE_CLIENT_ID=your_google_client_id
-```
+#### Required Environment Variables:
 
-**Note**: If your environment variables are prefixed with `EXPO_PUBLIC_`, they will be available in the browser. Make sure these are safe to expose publicly.
+1. **EXPO_PUBLIC_SUPABASE_URL**
+   - Value: Your Supabase project URL
+   - Example: `https://xxxxx.supabase.co`
+   - Get it from: Supabase Dashboard → Settings → API → Project URL
+
+2. **EXPO_PUBLIC_SUPABASE_ANON_KEY**
+   - Value: Your Supabase anonymous/public key
+   - Example: `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...`
+   - Get it from: Supabase Dashboard → Settings → API → anon/public key
+
+3. **EXPO_PUBLIC_GOOGLE_CLIENT_ID** ⚠️ **REQUIRED FOR GOOGLE AUTH**
+   - Value: Your Google OAuth Client ID
+   - Example: `123456789-abcdefghijklmnop.apps.googleusercontent.com`
+   - Get it from: [Google Cloud Console](https://console.cloud.google.com/) → APIs & Services → Credentials
+   - **Important**: This must be a Web Client ID (not iOS/Android)
+   - **Authorized JavaScript origins**: Add your Netlify domain (e.g., `https://your-site.netlify.app`)
+   - **Authorized redirect URIs**: Add your Netlify domain (e.g., `https://your-site.netlify.app`)
+
+#### Optional Environment Variables:
+
+- `EXPO_PUBLIC_OPENAI_API_KEY` - Only if using OpenAI features
+- `EXPO_PUBLIC_API_BASE_URL` - If you have a custom API base URL
+
+**Note**: 
+- Variables prefixed with `EXPO_PUBLIC_` are embedded at build time and available in the browser
+- These are safe to expose publicly (they're meant for client-side use)
+- **After adding/changing environment variables, you MUST trigger a new deployment** for changes to take effect
 
 ### 4. Deploy
 
@@ -115,9 +139,26 @@ If routes don't work:
 
 ### Environment Variables Not Working
 
-1. Ensure variables are prefixed with `EXPO_PUBLIC_` if needed in the browser
-2. Redeploy after adding new environment variables
-3. Check that variables are set in the correct deploy context
+1. **"EXPO_PUBLIC_GOOGLE_CLIENT_ID environment variable is not set"**
+   - Go to **Site settings** → **Build & deploy** → **Environment variables**
+   - Add `EXPO_PUBLIC_GOOGLE_CLIENT_ID` with your Google OAuth Client ID
+   - **Trigger a new deployment** (go to **Deploys** → **Trigger deploy** → **Deploy site**)
+   - Environment variables are embedded at build time, so a new build is required
+
+2. **Variables not appearing in the app**
+   - Ensure variables are prefixed with `EXPO_PUBLIC_` if needed in the browser
+   - **Redeploy after adding/changing environment variables** (they're embedded at build time)
+   - Check that variables are set in the correct deploy context (Production, Branch, Deploy Preview)
+   - Verify there are no typos in variable names
+   - Check for trailing spaces in variable values
+
+3. **Google Sign-In not working**
+   - Verify `EXPO_PUBLIC_GOOGLE_CLIENT_ID` is set correctly
+   - Check Google Cloud Console that your Netlify domain is added to:
+     - **Authorized JavaScript origins**: `https://your-site.netlify.app`
+     - **Authorized redirect URIs**: `https://your-site.netlify.app`
+   - Ensure you're using a **Web Client ID** (not iOS/Android client ID)
+   - Redeploy after making changes
 
 ## Differences from AWS Amplify
 
