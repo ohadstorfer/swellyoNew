@@ -149,7 +149,7 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
     setActiveVirtualIndex(targetIndex);
     const realIndex = getRealIndex(targetIndex);
     onBoardSelect(boards[realIndex]);
-    
+
     // Animate scroll to the selected board - this creates the sliding effect
     if (flatListRef.current) {
       flatListRef.current.scrollToIndex({ index: targetIndex, animated: true });
@@ -160,7 +160,7 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
         useNativeDriver: false,
       }).start();
       setTimeout(() => setIsScrolling(false), 500);
-    }
+        }
   };
 
   const renderBoard = ({ item, index }: { item: BoardType; index: number }) => {
@@ -168,7 +168,7 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
     const isLeft = index === activeVirtualIndex - 1;
     const isRight = index === activeVirtualIndex + 1;
     const isVisible = isActive || isLeft || isRight;
-    
+      
     // Don't render if not visible (optimization)
     const distance = Math.abs(index - activeVirtualIndex);
     if (!isVisible && distance > 1) {

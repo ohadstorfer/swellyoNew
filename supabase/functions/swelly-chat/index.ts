@@ -396,11 +396,11 @@ async function callOpenAI(messages: any[]): Promise<string> {
     // Use a model that supports JSON mode
     // gpt-4 (base) doesn't support response_format: json_object
     // Options: gpt-4o, gpt-4-turbo, gpt-4-0125-preview, gpt-3.5-turbo-1106
-    model: 'gpt-4o',
+    model: 'gpt-5.2',
     messages: messages,
-    max_tokens: 500,
     temperature: 0.7,
-    response_format: { type: 'json_object' }
+    max_completion_tokens: 1000,
+    response_format: { type: 'json_object' },
   }
 
   console.log('Sending request to OpenAI:', JSON.stringify(requestBody, null, 2))

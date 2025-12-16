@@ -97,16 +97,16 @@ const Field: React.FC<FieldProps> = ({
       
       {/* Input Container - Always show TextInput for editing */}
       <View style={styles.inputContainer}>
-        <TextInput
+      <TextInput
           ref={inputRef}
           style={[
             inputStyle,
             Platform.OS === 'web' && styles.fieldInputWeb,
           ]}
-          value={value}
-          onChangeText={onChangeText}
-          placeholder={placeholder || label}
-          placeholderTextColor={colors.textSecondary}
+        value={value}
+        onChangeText={onChangeText}
+        placeholder={placeholder || label}
+        placeholderTextColor={colors.textSecondary}
           onFocus={() => setIsFocused(true)}
           onBlur={() => setIsFocused(false)}
           editable={true}
@@ -116,8 +116,8 @@ const Field: React.FC<FieldProps> = ({
           autoCorrect={false}
           returnKeyType="next"
           blurOnSubmit={true}
-        />
-      </View>
+      />
+    </View>
 
       {/* Check Icon on Right when field has value and not focused */}
       {showCheck && (
@@ -250,21 +250,21 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
               style={styles.headerGradient}
             />
             
-            <View style={styles.header}>
-              <TouchableOpacity onPress={onBack} style={styles.backButton}>
-                <Ionicons name="arrow-back" size={24} color="#222B30" />
-              </TouchableOpacity>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={onBack} style={styles.backButton}>
+            <Ionicons name="arrow-back" size={24} color="#222B30" />
+          </TouchableOpacity>
 
               <Text style={styles.stepText}>Step 4/4</Text>
 
-              <View style={styles.skipButton}>
-                {/* Skip button is hidden in this step */}
-              </View>
-            </View>
-            
-            {/* Progress Bar */}
-            <View style={styles.progressContainer}>
-              <View style={styles.progressBar}>
+          <View style={styles.skipButton}>
+            {/* Skip button is hidden in this step */}
+          </View>
+        </View>
+
+        {/* Progress Bar */}
+        <View style={styles.progressContainer}>
+          <View style={styles.progressBar}>
                 <View style={[styles.progressFill, { width: '100%' }]} />
               </View>
             </View>
@@ -283,99 +283,99 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
             keyboardShouldPersistTaps="handled"
           >
 
-            {/* Main Container */}
+        {/* Main Container */}
             <View style={styles.mainContainerWrapper}>
-              <View style={styles.mainContainer}>
-              {/* Profile Picture Container */}
-              <View style={styles.profilePictureContainer}>
-                <TouchableOpacity
-                  onPress={pickImage}
-                  style={styles.profilePictureWrapper}
-                >
-                  {profilePicture ? (
-                    <Image
-                      source={{ uri: profilePicture }}
+        <View style={styles.mainContainer}>
+          {/* Profile Picture Container */}
+          <View style={styles.profilePictureContainer}>
+            <TouchableOpacity
+              onPress={pickImage}
+              style={styles.profilePictureWrapper}
+            >
+              {profilePicture ? (
+                <Image
+                  source={{ uri: profilePicture }}
                       style={styles.profilePicture as any}
-                    />
-                  ) : (
-                    <View style={styles.profilePicturePlaceholder}>
-                      <Ionicons name="camera" size={40} color={colors.textSecondary} />
-                    </View>
-                  )}
-                  <View style={styles.editIconContainer}>
-                    <PlusIcon size={40} />
-                  </View>
-                </TouchableOpacity>
+                />
+              ) : (
+                <View style={styles.profilePicturePlaceholder}>
+                  <Ionicons name="camera" size={40} color={colors.textSecondary} />
+                </View>
+              )}
+              <View style={styles.editIconContainer}>
+                <PlusIcon size={40} />
+              </View>
+            </TouchableOpacity>
                 
                 {/* Text Container - Missing from design */}
                 <View style={styles.textContainer}>
                   <Text style={styles.headingText}>Add a Picture</Text>
                   <Text style={styles.subheadingText}>Let's get to know each other better!</Text>
                 </View>
-              </View>
+          </View>
 
-              {/* Form */}
-              <View style={styles.form}>
-                <Field
-                  label="Name"
-                  value={name}
-                  onChangeText={(text) => {
-                    setName(text);
-                    updateFormData({ nickname: text });
-                  }}
-                  placeholder="Nickname*"
+          {/* Form */}
+          <View style={styles.form}>
+            <Field
+              label="Name"
+              value={name}
+              onChangeText={(text) => {
+                setName(text);
+                updateFormData({ nickname: text });
+              }}
+              placeholder="Nickname*"
                   width={357}
-                />
+            />
 
-                <View style={styles.rowContainer}>
-                  <Field
-                    label="Location"
-                    value={location}
-                    onChangeText={(text) => {
-                      setLocation(text);
-                      updateFormData({ location: text });
-                    }}
-                    placeholder="Where are you from?*"
-                    width={212}
-                  />
-                  <Field
-                    label="Age"
-                    value={age}
-                    onChangeText={(text) => {
-                      setAge(text);
-                      const ageNum = parseInt(text) || 0;
-                      updateFormData({ age: ageNum });
-                    }}
-                    placeholder="Age*"
+            <View style={styles.rowContainer}>
+              <Field
+                label="Location"
+                value={location}
+                onChangeText={(text) => {
+                  setLocation(text);
+                  updateFormData({ location: text });
+                }}
+                placeholder="Where are you from?*"
+                width={212}
+              />
+              <Field
+                label="Age"
+                value={age}
+                onChangeText={(text) => {
+                  setAge(text);
+                  const ageNum = parseInt(text) || 0;
+                  updateFormData({ age: ageNum });
+                }}
+                placeholder="Age*"
                     width={118}
-                    style={styles.ageField}
-                  />
-                </View>
-              </View>
-              </View>
+                style={styles.ageField}
+              />
             </View>
+            </View>
+          </View>
+        </View>
           </KeyboardAwareScrollView>
 
           {/* Next Button - Fixed at bottom, moves up with keyboard */}
-          <View style={styles.buttonContainer}>
-            <TouchableOpacity 
-              onPress={handleNext} 
-              activeOpacity={0.8}
-              disabled={isLoading}
-              style={isLoading && styles.buttonDisabled}
+        <View style={styles.buttonContainer}>
+          <TouchableOpacity 
+            onPress={handleNext} 
+            activeOpacity={0.8}
+            disabled={isLoading}
+            style={isLoading && styles.buttonDisabled}
+          >
+            <LinearGradient
+              colors={['#00A2B6', '#0788B0']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.gradientButton}
             >
-              <LinearGradient
-                colors={['#00A2B6', '#0788B0']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                style={styles.gradientButton}
-              >
-                <Text style={styles.buttonText}>
-                  {isLoading ? 'Loading...' : 'Next'}
-                </Text>
-              </LinearGradient>
-            </TouchableOpacity>
-          </View>
+              <Text style={styles.buttonText}>
+                {isLoading ? 'Loading...' : 'Next'}
+              </Text>
+            </LinearGradient>
+          </TouchableOpacity>
+        </View>
         </View>
     </SafeAreaView>
   );

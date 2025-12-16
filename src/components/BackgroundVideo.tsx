@@ -3,12 +3,6 @@ import { View, StyleSheet, Image, Platform } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { getBackgroundVideoSource, getVideoUrl } from '../services/media/videoService';
 
-// For web video element
-let VideoElement: any = null;
-if (Platform.OS === 'web' && typeof document !== 'undefined') {
-  VideoElement = 'video';
-}
-
 interface BackgroundVideoProps {
   videoSource?: string;
 }
@@ -17,181 +11,189 @@ export const BackgroundVideo: React.FC<BackgroundVideoProps> = ({
   videoSource 
 }) => {
   const [useImageFallback, setUseImageFallback] = useState(false);
-  const [isVideoReady, setIsVideoReady] = useState(false);
-  const [shouldLoadVideo, setShouldLoadVideo] = useState(false);
-  const videoLoadedRef = useRef(false);
+  const [videoError, setVideoError] = useState<string | null>(null);
+  const videoRef = useRef<any>(null);
   
-  // Get the video source URL(s)
-  const videoSourceData = videoSource 
+  // Get the video source URL
+  const videoUrl = videoSource 
     ? getVideoUrl(videoSource) 
     : getBackgroundVideoSource();
-  
-  // Handle both string (legacy) and object (with WebM/MP4) formats
-  const videoUrl = typeof videoSourceData === 'string' 
-    ? videoSourceData 
-    : videoSourceData.mp4;
-  const webmUrl = typeof videoSourceData === 'object' && videoSourceData.webm
-    ? videoSourceData.webm
-    : null;
 
-  // Get poster/thumbnail image URL (first frame of video or a static image)
-  const posterImageUrl = Platform.OS === 'web' 
-    ? '/welcome page/Vector.svg' // Use existing vector as placeholder
-    : undefined;
+  console.log('[BackgroundVideo] Video URL:', videoUrl);
+  console.log('[BackgroundVideo] Platform:', Platform.OS);
 
-  // Lazy load video - only start loading after component mounts
-  useEffect(() => {
-    // Start loading immediately - video is preloaded in HTML and cached
-    // The delay was causing unnecessary wait time
-    setShouldLoadVideo(true);
-  }, []);
+  // Web-specific: Use native HTML5 video for better webm support
+  if (Platform.OS === 'web') {
+    useEffect(() => {
+      const videoElement = videoRef.current;
+      if (videoElement) {
+        videoElement.loop = true;
+        videoElement.muted = true;
+        videoElement.playsInline = true;
+        
+        const handleCanPlay = () => {
+          console.log('[BackgroundVideo] Video can play, attempting to play');
+          videoElement.play().catch((error) => {
+            console.error('[BackgroundVideo] Error playing HTML5 video:', error);
+            setVideoError(String(error));
+            setUseImageFallback(true);
+          });
+        };
 
-  // Create video player only when we should load the video (for mobile/non-web)
-  // On web, we'll use HTML5 video element directly for better format support
-  const player = useVideoPlayer(
-    shouldLoadVideo && Platform.OS !== 'web' ? videoUrl : '', 
-    (player: any) => {
-      if (player && shouldLoadVideo && !videoLoadedRef.current) {
-        try {
-          player.loop = true;
-          player.muted = true;
-          // Set preload to metadata for faster initial load
-          if (Platform.OS === 'web' && (player as any).preload !== undefined) {
-            (player as any).preload = 'metadata';
-          }
-          videoLoadedRef.current = true;
-        } catch (error) {
-          console.error('Error initializing video player:', error);
-        }
+        const handleError = (e: any) => {
+          console.error('[BackgroundVideo] HTML5 video error:', e);
+          setVideoError('Video failed to load');
+          setUseImageFallback(true);
+        };
+
+        videoElement.addEventListener('canplay', handleCanPlay);
+        videoElement.addEventListener('error', handleError);
+
+        // Try to play immediately
+        videoElement.play().catch((error) => {
+          console.warn('[BackgroundVideo] Initial play failed, waiting for canplay:', error);
+        });
+
+        return () => {
+          videoElement.removeEventListener('canplay', handleCanPlay);
+          videoElement.removeEventListener('error', handleError);
+        };
       }
-    }
-  );
+    }, [videoUrl]);
 
-  // Handle video loading and playback
+    return (
+      <View style={[styles.container, webContainerStyle as any]}>
+        {useImageFallback ? (
+          <View style={styles.fallbackContainer} />
+        ) : (
+          // @ts-ignore - HTML5 video element for web
+          <video
+            ref={videoRef}
+            src={videoUrl}
+            autoPlay
+            loop
+            muted
+            playsInline
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              height: '100%',
+              objectFit: 'cover',
+              zIndex: 0,
+            } as any}
+            onError={(e: any) => {
+              console.error('[BackgroundVideo] HTML5 video onError:', e);
+              setVideoError('Video failed to load');
+              setUseImageFallback(true);
+            }}
+          />
+        )}
+      </View>
+    );
+  }
+
+  // Create video player
+  const player = useVideoPlayer(videoUrl, (player: any) => {
+    if (player) {
+      console.log('[BackgroundVideo] Player created:', player);
+      player.loop = true;
+      player.muted = true;
+      try {
+        player.play();
+      } catch (error) {
+        console.error('[BackgroundVideo] Error in player callback:', error);
+        setVideoError(String(error));
+      }
+    } else {
+      console.warn('[BackgroundVideo] Player is null');
+    }
+  });
+
+  // Ensure video plays after mount and handle errors
   useEffect(() => {
-    if (player && shouldLoadVideo && !isVideoReady) {
-      // Set properties
+    if (player) {
+      console.log('[BackgroundVideo] Setting up player properties');
+      // Set properties again to ensure they're applied
       player.loop = true;
       player.muted = true;
       
-      // Listen for when video is ready to play
-      const handleCanPlay = () => {
-        setIsVideoReady(true);
-      };
-
-      // Play the video when ready
+      // Play the video
       const playVideo = async () => {
         try {
-          // Wait a bit for video to buffer
-          await new Promise(resolve => setTimeout(resolve, 200));
+          console.log('[BackgroundVideo] Attempting to play video');
           await player.play();
-          setIsVideoReady(true);
+          console.log('[BackgroundVideo] Video play() called successfully');
         } catch (error) {
-          console.error('Error playing background video:', error);
+          console.error('[BackgroundVideo] Error playing background video:', error);
+          setVideoError(String(error));
           setUseImageFallback(true);
         }
       };
       
-      // Try to play immediately, but don't block on errors
-      playVideo().catch(() => {
-        // If immediate play fails, video will play when ready
-        setUseImageFallback(true);
-      });
+      playVideo();
+    } else {
+      console.warn('[BackgroundVideo] Player is null in useEffect');
     }
-  }, [player, shouldLoadVideo, isVideoReady]);
+  }, [player, videoUrl]);
 
-  // Note: Video preload is handled in swelly_chat.html for better performance
+  // Handle video errors
+  useEffect(() => {
+    if (player) {
+      const handleError = (error: any) => {
+        console.error('[BackgroundVideo] Video player error:', error);
+        setVideoError(String(error));
+        setUseImageFallback(true);
+      };
 
-  // Show poster image while video is loading
-  if (!isVideoReady && !useImageFallback && posterImageUrl) {
-    return (
-      <View style={[styles.container, webContainerStyle as any]}>
-        <Image
-          source={{ uri: posterImageUrl }}
-          style={[StyleSheet.absoluteFillObject, styles.posterImage]}
-          resizeMode="cover"
-        />
-      </View>
-    );
-  }
+      // Listen for video errors
+      if (player.addEventListener) {
+        player.addEventListener('error', handleError);
+        return () => {
+          if (player.removeEventListener) {
+            player.removeEventListener('error', handleError);
+          }
+        };
+      }
+    }
+  }, [player]);
 
-  if (useImageFallback) {
+  if (useImageFallback || videoError) {
+    console.log('[BackgroundVideo] Using image fallback. Error:', videoError);
+    // Try to use a fallback image if video fails
+    // For now, just show black background or a placeholder
     return (
       <View style={styles.container}>
-        <Image
-          source={{ uri: posterImageUrl || videoUrl }}
-          style={StyleSheet.absoluteFillObject}
-          resizeMode="cover"
-        />
+        <View style={styles.fallbackContainer}>
+          {/* You can add a fallback image here if needed */}
+        </View>
       </View>
     );
   }
 
-  if (!shouldLoadVideo) {
-    // Show placeholder while waiting to load
+  if (!player) {
+    console.warn('[BackgroundVideo] No player available, showing fallback');
     return (
-      <View style={[styles.container, webContainerStyle as any]}>
-        {posterImageUrl && (
-          <Image
-            source={{ uri: posterImageUrl }}
-            style={[StyleSheet.absoluteFillObject, styles.posterImage]}
-            resizeMode="cover"
-          />
-        )}
+      <View style={styles.container}>
+        <View style={styles.fallbackContainer} />
       </View>
     );
   }
 
-  // For web, use HTML5 video element with source fallback for better format support
-  if (Platform.OS === 'web' && webmUrl && VideoElement) {
-    return (
-      <View style={[styles.container, webContainerStyle as any]}>
-        {/* Show poster image behind video while loading */}
-        {!isVideoReady && posterImageUrl && (
-          <Image
-            source={{ uri: posterImageUrl }}
-            style={[StyleSheet.absoluteFillObject, styles.posterImage]}
-            resizeMode="cover"
-          />
-        )}
-        {/* Use HTML5 video element for better format support on web */}
-        {React.createElement(
-          VideoElement,
-          {
-            autoPlay: true,
-            loop: true,
-            muted: true,
-            playsInline: true,
-            style: webVideoStyle,
-            onCanPlay: () => setIsVideoReady(true),
-            onError: () => setUseImageFallback(true),
-            children: [
-              React.createElement('source', { key: 'webm', src: webmUrl, type: 'video/webm' }),
-              React.createElement('source', { key: 'mp4', src: videoUrl, type: 'video/mp4' }),
-            ],
-          }
-        )}
-      </View>
-    );
-  }
-
-  // For mobile or when WebM is not available, use VideoView
   return (
     <View style={[styles.container, webContainerStyle as any]}>
-      {/* Show poster image behind video while loading */}
-      {!isVideoReady && posterImageUrl && (
-        <Image
-          source={{ uri: posterImageUrl }}
-          style={[StyleSheet.absoluteFillObject, styles.posterImage]}
-          resizeMode="cover"
-        />
-      )}
       <VideoView
         player={player}
         style={[styles.video, webVideoStyle as any]}
         contentFit="cover"
         nativeControls={false}
         allowsFullscreen={false}
+        onError={(error: any) => {
+          console.error('[BackgroundVideo] VideoView error:', error);
+          setVideoError(String(error));
+          setUseImageFallback(true);
+        }}
       />
     </View>
   );
@@ -206,8 +208,9 @@ const styles = StyleSheet.create({
   video: {
     ...StyleSheet.absoluteFillObject,
   },
-  posterImage: {
-    opacity: 1,
+  fallbackContainer: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#000',
   },
 });
 

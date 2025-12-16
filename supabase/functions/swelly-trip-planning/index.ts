@@ -462,11 +462,11 @@ async function callOpenAI(messages: Array<{ role: string; content: string }>): P
       'Authorization': `Bearer ${OPENAI_API_KEY}`,
     },
     body: JSON.stringify({
-      model: 'gpt-4o-mini',
+      model: 'gpt-5.2',
       messages: messages,
       temperature: 0.7,
-      max_tokens: 1000, // Increased to allow for full JSON responses
-      response_format: { type: 'json_object' }, // Force JSON output
+      max_completion_tokens: 1000, 
+      response_format: { type: 'json_object' },
     }),
   })
 

@@ -18,58 +18,10 @@
 # - Existing files (like _expo/*) are served automatically
 # - Non-existent routes are redirected to index.html for SPA routing
 
-# Security headers for all files
 [[headers]]
   for = "/*"
   [headers.values]
     X-Frame-Options = "DENY"
     X-XSS-Protection = "1; mode=block"
     X-Content-Type-Options = "nosniff"
-
-# Cache HTML and JS files (short cache for app updates)
-[[headers]]
-  for = "/*.html"
-  [headers.values]
     Cache-Control = "public, max-age=0, must-revalidate"
-
-[[headers]]
-  for = "/_expo/static/js/**"
-  [headers.values]
-    Cache-Control = "public, max-age=31536000, immutable"
-
-# Long cache for static assets (images, videos, fonts)
-[[headers]]
-  for = "/*.mp4"
-  [headers.values]
-    Cache-Control = "public, max-age=31536000, immutable"
-    Accept-Ranges = "bytes"
-
-[[headers]]
-  for = "/*.jpg"
-  [headers.values]
-    Cache-Control = "public, max-age=31536000, immutable"
-
-[[headers]]
-  for = "/*.png"
-  [headers.values]
-    Cache-Control = "public, max-age=31536000, immutable"
-
-[[headers]]
-  for = "/*.svg"
-  [headers.values]
-    Cache-Control = "public, max-age=31536000, immutable"
-
-[[headers]]
-  for = "/*.woff2"
-  [headers.values]
-    Cache-Control = "public, max-age=31536000, immutable"
-
-[[headers]]
-  for = "/*.woff"
-  [headers.values]
-    Cache-Control = "public, max-age=31536000, immutable"
-
-[[headers]]
-  for = "/*.ttf"
-  [headers.values]
-    Cache-Control = "public, max-age=31536000, immutable"

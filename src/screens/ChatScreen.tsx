@@ -126,17 +126,17 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
         } else {
           // Onboarding: Send initial context message using actual onboarding data
           console.log('Initializing onboarding chat with user profile data...');
-          console.log('Form data:', formData);
-          
-          // Use initializeWithProfile to build context from onboarding data
-          // This will use the actual data collected during onboarding steps 1-4
+        console.log('Form data:', formData);
+        
+        // Use initializeWithProfile to build context from onboarding data
+        // This will use the actual data collected during onboarding steps 1-4
           response = await swellyService.initializeWithProfile({
-            nickname: formData.nickname,
-            age: formData.age,
-            boardType: formData.boardType,
-            surfLevel: formData.surfLevel,
-            travelExperience: formData.travelExperience,
-          });
+          nickname: formData.nickname,
+          age: formData.age,
+          boardType: formData.boardType,
+          surfLevel: formData.surfLevel,
+          travelExperience: formData.travelExperience,
+        });
         }
         
         console.log('Chat initialized with response:', response);
@@ -201,9 +201,9 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
             message: userMessage.text,
           });
         } else {
-          response = await swellyService.continueConversation(chatId, {
-            message: userMessage.text,
-          });
+        response = await swellyService.continueConversation(chatId, {
+          message: userMessage.text,
+        });
         }
       } else {
         // This shouldn't happen since we initialize chat on mount, but fallback just in case
@@ -213,9 +213,9 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
             message: userMessage.text,
           });
         } else {
-          response = await swellyService.startNewConversation({
-            message: userMessage.text,
-          });
+        response = await swellyService.startNewConversation({
+          message: userMessage.text,
+        });
         }
         console.log('New chat response:', response);
         setChatId(response.chat_id || null);
@@ -353,46 +353,46 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
             }),
           };
           setMessages(prev => [...prev, creatingProfileMessage]);
-          
-          // Save Swelly conversation results to surfers table
+        
+        // Save Swelly conversation results to surfers table
+        try {
+          console.log('Saving Swelly conversation results to database:', response.data);
+          await supabaseDatabaseService.saveSurfer({
+            onboardingSummaryText: response.data.onboarding_summary_text,
+            destinationsArray: response.data.destinations_array,
+            travelType: response.data.travel_type,
+            travelBuddies: response.data.travel_buddies,
+            lifestyleKeywords: response.data.lifestyle_keywords,
+            waveTypeKeywords: response.data.wave_type_keywords,
+          });
+          console.log('Swelly conversation results saved successfully');
+        } catch (error) {
+          console.error('Error saving Swelly conversation results:', error);
+          // Don't block the UI if saving fails, but log the error
+        }
+
+        // Save surf trip plan to surf_trip_plans table if provided
+        if (response.data.surf_trip_plan) {
           try {
-            console.log('Saving Swelly conversation results to database:', response.data);
-            await supabaseDatabaseService.saveSurfer({
-              onboardingSummaryText: response.data.onboarding_summary_text,
-              destinationsArray: response.data.destinations_array,
+            console.log('Saving surf trip plan to database:', response.data.surf_trip_plan);
+            await supabaseDatabaseService.saveSurfTripPlan({
+              destinations: response.data.surf_trip_plan.destinations,
+              timeInDays: response.data.surf_trip_plan.time_in_days,
               travelType: response.data.travel_type,
               travelBuddies: response.data.travel_buddies,
               lifestyleKeywords: response.data.lifestyle_keywords,
               waveTypeKeywords: response.data.wave_type_keywords,
+              summaryText: response.data.surf_trip_plan.summary_text,
             });
-            console.log('Swelly conversation results saved successfully');
+            console.log('Surf trip plan saved successfully');
           } catch (error) {
-            console.error('Error saving Swelly conversation results:', error);
+            console.error('Error saving surf trip plan:', error);
             // Don't block the UI if saving fails, but log the error
           }
-
-          // Save surf trip plan to surf_trip_plans table if provided
-          if (response.data.surf_trip_plan) {
-            try {
-              console.log('Saving surf trip plan to database:', response.data.surf_trip_plan);
-              await supabaseDatabaseService.saveSurfTripPlan({
-                destinations: response.data.surf_trip_plan.destinations,
-                timeInDays: response.data.surf_trip_plan.time_in_days,
-                travelType: response.data.travel_type,
-                travelBuddies: response.data.travel_buddies,
-                lifestyleKeywords: response.data.lifestyle_keywords,
-                waveTypeKeywords: response.data.wave_type_keywords,
-                summaryText: response.data.surf_trip_plan.summary_text,
-              });
-              console.log('Surf trip plan saved successfully');
-            } catch (error) {
-              console.error('Error saving surf trip plan:', error);
-              // Don't block the UI if saving fails, but log the error
-            }
-          }
-          
+        }
+        
           // Navigate to profile screen after a short delay (onboarding only)
-          setTimeout(() => {
+        setTimeout(() => {
             // Mark onboarding as complete and navigate to profile
             onChatComplete?.();
           }, 1500);
@@ -456,11 +456,11 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
                   <Text style={styles.botMessageText}>
                     {message.text}
                   </Text>
-                </View>
+        </View>
                 <View style={styles.timestampContainer}>
                   <Text style={styles.botTimestamp}>
                     {message.timestamp}
-                  </Text>
+        </Text>
                 </View>
               </View>
             </View>
@@ -477,42 +477,42 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
                 onViewProfile={handleViewProfile}
               />
             ))}
-          </View>
-        </View>
-      );
+      </View>
+    </View>
+  );
     }
 
     // Regular message rendering
     return (
+    <View
+      key={message.id}
+      style={[
+        styles.messageContainer,
+        message.isUser ? styles.userMessageContainer : styles.botMessageContainer,
+      ]}
+    >
       <View
-        key={message.id}
         style={[
-          styles.messageContainer,
-          message.isUser ? styles.userMessageContainer : styles.botMessageContainer,
+          styles.messageBubble,
+          message.isUser ? styles.userMessageBubble : styles.botMessageBubble,
         ]}
       >
-        <View
-          style={[
-            styles.messageBubble,
-            message.isUser ? styles.userMessageBubble : styles.botMessageBubble,
-          ]}
-        >
-          <View style={styles.messageTextContainer}>
-            <Text style={message.isUser ? styles.userMessageText : styles.botMessageText}>
-              {message.text}
-            </Text>
-          </View>
-          <View style={styles.timestampContainer}>
-            <Text style={[
-              styles.timestamp,
-              message.isUser ? styles.userTimestamp : styles.botTimestamp,
-            ]}>
-              {message.timestamp}
-            </Text>
-          </View>
+        <View style={styles.messageTextContainer}>
+          <Text style={message.isUser ? styles.userMessageText : styles.botMessageText}>
+            {message.text}
+          </Text>
+        </View>
+        <View style={styles.timestampContainer}>
+          <Text style={[
+            styles.timestamp,
+            message.isUser ? styles.userTimestamp : styles.botTimestamp,
+          ]}>
+            {message.timestamp}
+          </Text>
         </View>
       </View>
-    );
+    </View>
+  );
   };
 
   return (
@@ -574,13 +574,13 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
           source={{ uri: getImageUrl('/chat background.png') }}
           style={styles.backgroundImage}
           resizeMode="cover"
+      >
+        <ScrollView
+          ref={scrollViewRef}
+          style={styles.messagesList}
+          contentContainerStyle={styles.messagesContent}
+          showsVerticalScrollIndicator={false}
         >
-          <ScrollView
-            ref={scrollViewRef}
-            style={styles.messagesList}
-            contentContainerStyle={styles.messagesContent}
-            showsVerticalScrollIndicator={false}
-          >
           {messages.map(renderMessage)}
           {(isLoading || isInitializing) && (
             <View style={[styles.messageContainer, styles.botMessageContainer]}>
@@ -589,7 +589,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
               </View>
             </View>
           )}
-          </ScrollView>
+        </ScrollView>
         </ImageBackground>
 
         {/* Input Area */}
