@@ -863,7 +863,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#E4E4E4',
   },
   lifestyleSectionWrapper: {
-    marginTop: 32,
+    marginTop: 0,
     marginLeft: 0,
     width: '100%',
     gap: 7.5,

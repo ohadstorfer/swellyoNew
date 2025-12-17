@@ -228,6 +228,7 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   /**
    * Check if the current user has finished onboarding in the database
    * Returns true if finished, false otherwise
+   * Uses lightweight query for better performance and reliability
    */
   const checkOnboardingStatus = async (): Promise<boolean> => {
     if (!isSupabaseConfigured()) {
@@ -235,12 +236,29 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }
 
     try {
-      const { surfer } = await supabaseDatabaseService.getCurrentUserData();
-      if (surfer?.finished_onboarding) {
-        console.log('User has finished onboarding (from database check)');
+      // First try the lightweight method (only checks finished_onboarding)
+      // This avoids querying columns that might not exist
+      const finished = await supabaseDatabaseService.checkFinishedOnboarding();
+      if (finished) {
+        console.log('User has finished onboarding (from lightweight check)');
         setIsComplete(true);
         return true;
       }
+
+      // Fallback: Try full data fetch if lightweight method fails
+      // This handles edge cases where the lightweight query might fail
+      try {
+        const { surfer } = await supabaseDatabaseService.getCurrentUserData();
+        if (surfer?.finished_onboarding) {
+          console.log('User has finished onboarding (from full data check)');
+          setIsComplete(true);
+          return true;
+        }
+      } catch (fallbackError) {
+        // If full data fetch also fails, just return false
+        console.log('Fallback check also failed:', fallbackError);
+      }
+
       return false;
     } catch (error) {
       console.log('Error checking onboarding status:', error);

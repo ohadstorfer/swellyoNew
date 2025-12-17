@@ -413,6 +413,7 @@ class SupabaseDatabaseService {
   /**
    * Get surfer data by user ID
    * OPTIMIZED: Uses specific column selects for better performance
+   * Note: Only selects columns that actually exist in the database
    */
   async getSurferByUserId(userId: string): Promise<SupabaseSurfer | null> {
     if (!isSupabaseConfigured()) {
@@ -420,12 +421,11 @@ class SupabaseDatabaseService {
     }
 
     try {
-      // OPTIMIZATION: Select only needed columns instead of *
-      // Note: If you need all columns, you can change this back to '*'
-      // but specifying columns is generally faster and uses less bandwidth
+      // OPTIMIZATION: Select only columns that exist in the database
+      // destinations_map does NOT exist - only destinations_array exists
       const { data, error } = await supabase
         .from('surfers')
-        .select('user_id, name, age, pronoun, country_from, surfboard_type, surf_level, travel_experience, bio, profile_image_url, destinations_map, destinations_array, lifestyle_keywords, wave_type_keywords, travel_buddies, created_at, updated_at, finished_onboarding')
+        .select('user_id, name, age, pronoun, country_from, surfboard_type, surf_level, travel_experience, bio, profile_image_url, destinations_array, lifestyle_keywords, wave_type_keywords, travel_buddies, created_at, updated_at, finished_onboarding')
         .eq('user_id', userId)
         .single();
 
@@ -434,6 +434,26 @@ class SupabaseDatabaseService {
           // No rows returned
           return null;
         }
+        
+        // If specific columns fail, try with * as fallback
+        if (error.code === '42703' || error.message?.includes('does not exist')) {
+          console.warn('Specific column select failed, trying with *:', error.message);
+          const { data: fallbackData, error: fallbackError } = await supabase
+            .from('surfers')
+            .select('*')
+            .eq('user_id', userId)
+            .single();
+          
+          if (fallbackError) {
+            if (fallbackError.code === 'PGRST116') {
+              return null;
+            }
+            throw fallbackError;
+          }
+          
+          return fallbackData;
+        }
+        
         throw error;
       }
 
@@ -468,6 +488,44 @@ class SupabaseDatabaseService {
     } catch (error: any) {
       console.error('Error getting current user data:', error);
       return { user: null, surfer: null };
+    }
+  }
+
+  /**
+   * Check if current user has finished onboarding (lightweight query)
+   * This is a simpler method that only checks finished_onboarding without fetching all data
+   */
+  async checkFinishedOnboarding(): Promise<boolean> {
+    if (!isSupabaseConfigured()) {
+      return false;
+    }
+
+    try {
+      const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
+      
+      if (authError || !authUser) {
+        return false;
+      }
+
+      const { data, error } = await supabase
+        .from('surfers')
+        .select('finished_onboarding')
+        .eq('user_id', authUser.id)
+        .maybeSingle();
+
+      if (error) {
+        if (error.code === 'PGRST116') {
+          // No rows returned - user hasn't completed onboarding
+          return false;
+        }
+        console.error('Error checking finished_onboarding:', error);
+        return false;
+      }
+
+      return data?.finished_onboarding === true;
+    } catch (error: any) {
+      console.error('Error checking finished_onboarding:', error);
+      return false;
     }
   }
 

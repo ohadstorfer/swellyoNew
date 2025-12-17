@@ -228,32 +228,46 @@ export default function ConversationsScreen({
     type: FilterType,
     label: string,
     count?: number,
-    iconName?: string,
+    iconPath?: string,
     iconColor?: string,
     badgeColor?: string
   ) => {
     const isActive = filter === type;
 
+    // Get icon path based on filter type
+    let iconUrl: string | null = null;
+    if (type === 'advisor') {
+      iconUrl = getImageUrl('/Get adv icon.svg');
+    } else if (type === 'seeker') {
+      iconUrl = getImageUrl('/Give adv icon.svg');
+    }
+
     return (
       <TouchableOpacity
         style={[
           styles.filterButton,
+          type === 'all' && styles.filterButtonAll,
           isActive ? styles.filterButtonActive : styles.filterButtonInactive,
         ]}
         onPress={() => setFilter(type)}
       >
-        {iconName && type !== 'all' && (
-          <Ionicons 
-            name={iconName as any} 
-            size={24} 
-            color={iconColor || '#333'} 
-            style={iconName === 'send' && type === 'seeker' ? { transform: [{ rotate: '180deg' }] } : undefined}
+        {iconUrl && type !== 'all' && (
+          <Image
+            source={{ uri: iconUrl }}
+            style={styles.filterIcon}
+            resizeMode="contain"
           />
         )}
-        <Text style={styles.filterButtonText}>{label}</Text>
+        <Text style={[
+          styles.filterButtonText,
+          Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
+        ]}>{label}</Text>
         {count !== undefined && count > 0 && (
           <View style={[styles.filterBadge, { backgroundColor: badgeColor || '#BCAC99' }]}>
-            <Text style={styles.filterBadgeText}>{count}</Text>
+            <Text style={[
+              styles.filterBadgeText,
+              Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
+            ]}>{count}</Text>
             <View
               style={[
                 styles.filterBadgeDot,
@@ -345,10 +359,16 @@ export default function ConversationsScreen({
 
           {/* Text content */}
           <View style={styles.textContainer}>
-            <Text style={styles.conversationName} numberOfLines={1}>
+            <Text style={[
+              styles.conversationName,
+              Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
+            ]} numberOfLines={1}>
               {displayName}
             </Text>
-            <Text style={styles.lastMessage} numberOfLines={1}>
+            <Text style={[
+              styles.lastMessage,
+              Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
+            ]} numberOfLines={1}>
               {lastMessageText}
             </Text>
           </View>
@@ -357,7 +377,10 @@ export default function ConversationsScreen({
         {/* Time and unread badge */}
         <View style={styles.timeContainer}>
           {lastMessageTime ? (
-            <Text style={styles.timeText}>{lastMessageTime}</Text>
+            <Text style={[
+              styles.timeText,
+              Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
+            ]}>{lastMessageTime}</Text>
           ) : null}
           {unreadCount > 0 ? (
             <View style={[
@@ -366,7 +389,10 @@ export default function ConversationsScreen({
               conversationType === 'seeker' ? styles.unreadBadgeSeeker :
               styles.unreadBadgeDefault
             ]}>
-              <Text style={styles.unreadBadgeText}>{unreadCount}</Text>
+              <Text style={[
+                styles.unreadBadgeText,
+                Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
+              ]}>{unreadCount}</Text>
             </View>
           ) : null}
         </View>
@@ -395,7 +421,10 @@ export default function ConversationsScreen({
           {/* Text content */}
           <View style={styles.swellyTextContainer}>
             <Text style={styles.swellyName}>Swelly</Text>
-            <Text style={styles.swellyLastMessage} numberOfLines={1}>
+            <Text style={[
+              styles.swellyLastMessage,
+              Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
+            ]} numberOfLines={1}>
               Did you see the new exhibit at the MAM?
             </Text>
           </View>
@@ -403,9 +432,15 @@ export default function ConversationsScreen({
 
         {/* Time and unread badge */}
         <View style={styles.swellyTimeContainer}>
-          <Text style={styles.swellyTimeText}>15:20</Text>
+          <Text style={[
+            styles.swellyTimeText,
+            Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
+          ]}>15:20</Text>
           <View style={styles.swellyUnreadBadge}>
-            <Text style={styles.unreadBadgeText}>2</Text>
+            <Text style={[
+              styles.unreadBadgeText,
+              Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
+            ]}>2</Text>
           </View>
         </View>
       </TouchableOpacity>
@@ -507,8 +542,8 @@ export default function ConversationsScreen({
           {/* Filter buttons */}
           <View style={styles.filterContainer}>
             {renderFilterButton('all', 'All')}
-            {renderFilterButton('advisor', 'Get Adv', getAdvisorCount(), 'send', '#333', '#BCAC99')}
-            {renderFilterButton('seeker', 'Give Adv', getSeekerCount(), 'send', '#333', '#05BCD3')}
+            {renderFilterButton('advisor', 'Get Adv', getAdvisorCount(), undefined, '#333', '#BCAC99')}
+            {renderFilterButton('seeker', 'Give Adv', getSeekerCount(), undefined, '#333', '#05BCD3')}
           </View>
 
           {/* Conversations list */}
@@ -620,7 +655,6 @@ const styles = StyleSheet.create({
   },
   searchBarContainer: {
     paddingHorizontal: 16,
-    paddingBottom: 8,
   },
   searchBar: {
     flexDirection: 'row',
@@ -645,7 +679,7 @@ const styles = StyleSheet.create({
   },
   header: {
     backgroundColor: '#212121',
-    paddingTop: Platform.OS === 'web' ? 62 : 62,
+    paddingTop: Platform.OS === 'web' ? 35 : 35,
     paddingBottom: 24,
     paddingHorizontal: 16,
     flexDirection: 'row',
@@ -676,7 +710,7 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: 'bold',
     color: '#FFFFFF',
-    lineHeight: 24,
+    lineHeight: 28,
   },
   headerButton: {
     width: 44,
@@ -700,25 +734,41 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 6,
     borderRadius: 32,
-    height: 36,
+    height: 46,
     borderWidth: 1,
     gap: 10,
-    minWidth: 60,
+  },
+  filterButtonAll: {
+    width: 60,
   },
   filterButtonActive: {
-    backgroundColor: '#EEEEEE',
-    borderColor: '#E4E4E4',
+    ...(Platform.OS === 'web' ? {
+      backgroundColor: 'var(--Colors-Neutral-300, #EEE)',
+      borderColor: 'var(--Colors-Neutral-400, #E4E4E4)',
+    } : {
+      backgroundColor: '#EEE',
+      borderColor: '#E4E4E4',
+    }),
   },
   filterButtonInactive: {
-    backgroundColor: '#FFFFFF',
-    borderColor: '#E4E4E4',
+    ...(Platform.OS === 'web' ? {
+      backgroundColor: 'var(--Surface-white, #FFF)',
+      borderColor: 'var(--Colors-Neutral-400, #E4E4E4)',
+    } : {
+      backgroundColor: '#FFFFFF',
+      borderColor: '#E4E4E4',
+    }),
   },
   filterButtonText: {
-    fontFamily: 'Inter',
+    fontFamily: Platform.OS === 'web' ? 'var(--Family-Body, Inter), sans-serif' : 'Inter',
     fontSize: 12,
     fontWeight: '400',
     lineHeight: 15,
     color: '#000000',
+  },
+  filterIcon: {
+    width: 24,
+    height: 24,
   },
   filterBadge: {
     backgroundColor: '#E4E4E4',
@@ -732,7 +782,7 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   filterBadgeText: {
-    fontFamily: 'Inter',
+    fontFamily: Platform.OS === 'web' ? 'var(--Family-Body, Inter), sans-serif' : 'Inter',
     fontSize: 10,
     fontWeight: '400',
     lineHeight: 9,
@@ -849,6 +899,7 @@ const styles = StyleSheet.create({
     lineHeight: 15,
     color: '#212121',
     textAlign: 'right',
+    // CSS variable applied via inline style on web
   },
   unreadBadge: {
     borderRadius: 16,
@@ -872,6 +923,7 @@ const styles = StyleSheet.create({
     fontWeight: '400',
     lineHeight: 20,
     color: '#FFFFFF',
+    // CSS variable applied via inline style on web
   },
   swellyCardWrapper: {
     position: 'absolute',
@@ -939,6 +991,7 @@ const styles = StyleSheet.create({
     fontWeight: '400',
     lineHeight: 15,
     color: '#333333',
+    // CSS variable applied via inline style on web
   },
   swellyTimeContainer: {
     alignItems: 'flex-end',
@@ -953,6 +1006,7 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     color: '#B72DF2',
     textAlign: 'right',
+    // CSS variable applied via inline style on web
   },
   swellyUnreadBadge: {
     backgroundColor: '#B72DF2',
