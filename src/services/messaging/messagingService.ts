@@ -26,6 +26,7 @@ export interface ConversationMember {
   conversation_id: string;
   user_id: string;
   role: 'owner' | 'admin' | 'member';
+  adv_role?: 'adv_giver' | 'adv_seeker' | null; // Role in trip planning context
   joined_at: string;
   last_read_message_id?: string;
   last_read_at?: string;
@@ -366,8 +367,13 @@ class MessagingService {
 
   /**
    * Create a new direct conversation with another user
+   * @param otherUserId - The user ID to create a conversation with
+   * @param fromTripPlanning - If true, sets adv_role: current user = adv_seeker, other user = adv_giver
    */
-  async createDirectConversation(otherUserId: string): Promise<Conversation> {
+  async createDirectConversation(
+    otherUserId: string, 
+    fromTripPlanning: boolean = false
+  ): Promise<Conversation> {
     if (!isSupabaseConfigured()) {
       throw new Error('Supabase is not configured');
     }
@@ -449,6 +455,7 @@ class MessagingService {
       if (convError) throw convError;
 
       // Add both users as members
+      // If from trip planning: current user is adv_seeker, other user is adv_giver
       const { error: membersError } = await supabase
         .from('conversation_members')
         .insert([
@@ -456,11 +463,13 @@ class MessagingService {
             conversation_id: conversation.id,
             user_id: user.id,
             role: 'owner',
+            adv_role: fromTripPlanning ? 'adv_seeker' : null,
           },
           {
             conversation_id: conversation.id,
             user_id: otherUserId,
             role: 'member',
+            adv_role: fromTripPlanning ? 'adv_giver' : null,
           },
         ]);
 

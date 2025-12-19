@@ -56,3 +56,4 @@ The build creates a `dist/` directory with:
 - Check Supabase project is active
 - Ensure RLS policies allow necessary access
 
+

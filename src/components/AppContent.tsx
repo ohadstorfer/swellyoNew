@@ -156,6 +156,7 @@ export const AppContent: React.FC = () => {
     otherUserId: string; // Required: the user ID we're messaging
     otherUserName: string;
     otherUserAvatar: string | null;
+    fromTripPlanning?: boolean; // If true, conversation was created from trip planning recommendations
   } | null>(null);
 
   const handleChatComplete = async () => {
@@ -239,6 +240,7 @@ export const AppContent: React.FC = () => {
           otherUserId: userId,
           otherUserName: surferData?.name || 'User',
           otherUserAvatar: surferData?.profile_image_url || null,
+          fromTripPlanning: true, // This conversation is from trip planning recommendations
         });
       }
       setShowTripPlanningChat(false); // Close chat to show conversation
@@ -310,6 +312,7 @@ export const AppContent: React.FC = () => {
           otherUserName={selectedConversation.otherUserName}
           otherUserAvatar={selectedConversation.otherUserAvatar}
           isDirect={true}
+          fromTripPlanning={selectedConversation.fromTripPlanning || false}
           onBack={handleBackFromChat}
           onViewProfile={handleViewUserProfile}
           onConversationCreated={(conversationId) => {

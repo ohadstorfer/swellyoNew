@@ -103,3 +103,4 @@ Potential further improvements:
 3. **Real-time Optimization:** Optimize real-time subscriptions to only fetch deltas
 4. **Materialized Views:** Consider materialized views for complex aggregations (unread counts, etc.)
 
+

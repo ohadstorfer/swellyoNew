@@ -37,6 +37,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   otherUserName,
   otherUserAvatar,
   isDirect = true, // Default to direct message (2 users)
+  fromTripPlanning = false, // Default to false (not from trip planning)
   onBack,
   onConversationCreated,
   onViewProfile,
@@ -61,6 +62,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState<string>('');
   const [isFetchingMessages, setIsFetchingMessages] = useState(true);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [inputHeight, setInputHeight] = useState(34); // Initial height for one line
@@ -113,8 +115,9 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         unsubscribe();
       };
     } else {
-      // No conversation yet - clear messages
+      // No conversation yet - clear messages and stop loading
       setMessages([]);
+      setIsFetchingMessages(false);
     }
   }, [currentConversationId]);
 
@@ -151,41 +154,69 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       // Create conversation on first message (WhatsApp-like behavior)
       try {
         setIsLoading(true);
-        const conversation = await messagingService.createDirectConversation(otherUserId);
-        targetConversationId = conversation.id;
-        setCurrentConversationId(targetConversationId);
+        setLoadingMessage('');
         
-        // Notify parent component that conversation was created
-        if (onConversationCreated) {
-          onConversationCreated(targetConversationId);
-        }
+        // Progressive feedback: Show messages at different intervals
+        const feedbackTimeout = setTimeout(() => {
+          setLoadingMessage('This is taking longer than usual...');
+        }, 5000);
         
-        // Subscribe to messages for the new conversation
-        const unsubscribe = messagingService.subscribeToMessages(
-          targetConversationId,
-          (newMessage) => {
-            setMessages((prev) => {
-              const exists = prev.some(msg => msg.id === newMessage.id);
-              if (exists) {
-                return prev;
-              }
-              return [...prev, newMessage];
-            });
-            if (targetConversationId) {
-              messagingService.markAsRead(targetConversationId, newMessage.id).catch(err => {
-                console.error('Error marking message as read:', err);
-              });
-            }
-            setTimeout(() => scrollToBottom(), 100);
+        // Final timeout after 30 seconds (generous for DB operations)
+        const finalTimeout = setTimeout(() => {
+          clearTimeout(feedbackTimeout);
+          throw new Error('Connection timeout. Please check your internet connection and try again.');
+        }, 30000);
+        
+        try {
+          const conversation = await messagingService.createDirectConversation(otherUserId, fromTripPlanning);
+          
+          // Clear timeouts if successful
+          clearTimeout(feedbackTimeout);
+          clearTimeout(finalTimeout);
+          setLoadingMessage('');
+          
+          targetConversationId = conversation.id;
+          setCurrentConversationId(targetConversationId);
+          
+          // Notify parent component that conversation was created
+          if (onConversationCreated) {
+            onConversationCreated(targetConversationId);
           }
-        );
-        
-        // Store unsubscribe function (we'll need to clean it up on unmount)
-        // For now, we'll let it run - the component will handle cleanup
-      } catch (error) {
+          
+          // Subscribe to messages for the new conversation
+          const unsubscribe = messagingService.subscribeToMessages(
+            targetConversationId,
+            (newMessage) => {
+              setMessages((prev) => {
+                const exists = prev.some(msg => msg.id === newMessage.id);
+                if (exists) {
+                  return prev;
+                }
+                return [...prev, newMessage];
+              });
+              if (targetConversationId) {
+                messagingService.markAsRead(targetConversationId, newMessage.id).catch(err => {
+                  console.error('Error marking message as read:', err);
+                });
+              }
+              setTimeout(() => scrollToBottom(), 100);
+            }
+          );
+          
+          // Store unsubscribe function (we'll need to clean it up on unmount)
+          // For now, we'll let it run - the component will handle cleanup
+        } catch (error) {
+          // Clear timeouts on error
+          clearTimeout(feedbackTimeout);
+          clearTimeout(finalTimeout);
+          throw error;
+        }
+      } catch (error: any) {
         console.error('Error creating conversation:', error);
-        Alert.alert('Error', 'Failed to create conversation');
+        const errorMessage = error?.message || 'Failed to create conversation. Please try again.';
+        Alert.alert('Error', errorMessage);
         setIsLoading(false);
+        setLoadingMessage('');
         return;
       }
     }
@@ -430,13 +461,18 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             contentContainerStyle={styles.messagesContent}
             showsVerticalScrollIndicator={false}
           >
-          {isFetchingMessages ? (
+          {isFetchingMessages && currentConversationId ? (
             <View style={styles.loadingContainer}>
               <ActivityIndicator size="large" color={colors.brandTeal} />
+              <Text style={styles.loadingText}>Loading messages...</Text>
             </View>
           ) : messages.length === 0 ? (
             <View style={styles.emptyContainer}>
-              <Text style={styles.emptyText}>No messages yet. Say hi! 👋</Text>
+              <Text style={styles.emptyText}>
+                {currentConversationId 
+                  ? 'No messages yet. Say hi! 👋' 
+                  : 'Start the conversation by sending a message!'}
+              </Text>
             </View>
           ) : (
             messages.map(renderMessage)
@@ -444,7 +480,9 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
           {isLoading && (
             <View style={[styles.messageContainer, styles.botMessageContainer]}>
               <View style={[styles.messageBubble, styles.botMessageBubble]}>
-                <Text style={styles.botMessageText}>Sending...</Text>
+                <Text style={styles.botMessageText}>
+                  {loadingMessage || (currentConversationId ? 'Sending...' : 'Creating conversation...')}
+                </Text>
               </View>
             </View>
           )}
@@ -621,6 +659,12 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    gap: 12,
+  },
+  loadingText: {
+    fontSize: 14,
+    color: '#7B7B7B',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
   },
   emptyContainer: {
     flex: 1,

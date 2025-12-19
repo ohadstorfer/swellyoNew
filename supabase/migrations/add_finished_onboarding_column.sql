@@ -10,3 +10,4 @@ CREATE INDEX IF NOT EXISTS idx_surfers_finished_onboarding
 ON public.surfers(finished_onboarding) 
 WHERE finished_onboarding = true;
 
+
