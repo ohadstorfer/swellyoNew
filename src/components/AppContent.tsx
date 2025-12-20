@@ -151,6 +151,12 @@ export const AppContent: React.FC = () => {
   const [showProfile, setShowProfile] = useState(false);
   const [showTripPlanningChat, setShowTripPlanningChat] = useState(false);
   const [viewingUserId, setViewingUserId] = useState<string | null>(null);
+  
+  // Trip planning chat state - persisted between navigations
+  const [tripPlanningChatId, setTripPlanningChatId] = useState<string | null>(null);
+  const [tripPlanningMatchedUsers, setTripPlanningMatchedUsers] = useState<any[]>([]);
+  const [tripPlanningDestination, setTripPlanningDestination] = useState<string>('');
+  
   const [selectedConversation, setSelectedConversation] = useState<{
     id?: string; // Optional: undefined for pending conversations
     otherUserId: string; // Required: the user ID we're messaging
@@ -343,6 +349,14 @@ export const AppContent: React.FC = () => {
           conversationType="trip-planning"
           onViewUserProfile={handleViewUserProfile}
           onStartConversation={handleStartConversation}
+          persistedChatId={tripPlanningChatId}
+          persistedMatchedUsers={tripPlanningMatchedUsers}
+          persistedDestination={tripPlanningDestination}
+          onChatStateChange={(chatId: string | null, matchedUsers: any[], destination: string) => {
+            setTripPlanningChatId(chatId);
+            setTripPlanningMatchedUsers(matchedUsers);
+            setTripPlanningDestination(destination);
+          }}
         />
       );
     }

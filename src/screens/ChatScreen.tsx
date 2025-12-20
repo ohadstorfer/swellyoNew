@@ -39,6 +39,11 @@ interface ChatScreenProps {
   conversationType?: 'onboarding' | 'trip-planning';
   onViewUserProfile?: (userId: string) => void;
   onStartConversation?: (userId: string) => void;
+  // Props for persisting trip planning state
+  persistedChatId?: string | null;
+  persistedMatchedUsers?: any[];
+  persistedDestination?: string;
+  onChatStateChange?: (chatId: string | null, matchedUsers: any[], destination: string) => void;
 }
 
 export const ChatScreen: React.FC<ChatScreenProps> = ({ 
@@ -46,18 +51,21 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
   conversationType = 'onboarding',
   onViewUserProfile,
   onStartConversation,
+  persistedChatId,
+  persistedMatchedUsers,
+  persistedDestination,
+  onChatStateChange,
 }) => {
   const { setCurrentStep, formData } = useOnboarding();
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
-  const [chatId, setChatId] = useState<string | null>(null);
-  // Removed userProfile state - no longer rendering profile in chat
+  const [chatId, setChatId] = useState<string | null>(persistedChatId || null);
   const [isFinished, setIsFinished] = useState(false);
   const [inputHeight, setInputHeight] = useState(34); // Initial height for one line
-  const [matchedUsers, setMatchedUsers] = useState<any[]>([]); // Store matched users for rendering cards
-  const [destinationCountry, setDestinationCountry] = useState<string>(''); // Store destination for cards
+  const [matchedUsers, setMatchedUsers] = useState<any[]>(persistedMatchedUsers || []); // Store matched users for rendering cards
+  const [destinationCountry, setDestinationCountry] = useState<string>(persistedDestination || ''); // Store destination for cards
   const scrollViewRef = useRef<ScrollView>(null);
   const textInputRef = useRef<TextInput>(null);
 
@@ -88,6 +96,71 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
         console.log('Testing API connection...');
         const health = await swellyService.healthCheck();
         console.log('API health check successful:', health);
+        
+        // If we have a persisted chatId for trip planning, restore the conversation
+        if (conversationType === 'trip-planning' && persistedChatId) {
+          console.log('Restoring trip planning conversation from chatId:', persistedChatId);
+          try {
+            const history = await swellyService.getTripPlanningHistory(persistedChatId);
+            console.log('Restored history:', history);
+            
+            if (history && history.messages && history.messages.length > 0) {
+              // Convert backend messages to UI format
+              const restoredMessages: Message[] = [];
+              let messageId = 1;
+              
+              for (const msg of history.messages) {
+                // Skip system messages
+                if (msg.role === 'system') continue;
+                
+                // Parse assistant messages that might be JSON
+                let messageText = msg.content;
+                if (msg.role === 'assistant') {
+                  try {
+                    const parsed = JSON.parse(msg.content);
+                    messageText = parsed.return_message || msg.content;
+                  } catch {
+                    // Not JSON, use as-is
+                  }
+                }
+                
+                restoredMessages.push({
+                  id: String(messageId++),
+                  text: messageText,
+                  isUser: msg.role === 'user',
+                  timestamp: new Date().toLocaleTimeString('en-US', { 
+                    hour: '2-digit', 
+                    minute: '2-digit',
+                    hour12: false 
+                  }),
+                });
+              }
+              
+              // If we have persisted matched users, add the matched users message
+              if (persistedMatchedUsers && persistedMatchedUsers.length > 0) {
+                restoredMessages.push({
+                  id: String(messageId++),
+                  text: `Found ${persistedMatchedUsers.length} awesome match${persistedMatchedUsers.length > 1 ? 'es' : ''} for you!`,
+                  isUser: false,
+                  timestamp: new Date().toLocaleTimeString('en-US', { 
+                    hour: '2-digit', 
+                    minute: '2-digit',
+                    hour12: false 
+                  }),
+                  isMatchedUsers: true,
+                });
+                setIsFinished(true);
+              }
+              
+              setMessages(restoredMessages);
+              setIsInitializing(false);
+              return; // Exit early, we've restored the conversation
+            }
+          } catch (restoreError) {
+            console.error('Failed to restore trip planning conversation:', restoreError);
+            // Fall through to start a new conversation
+          }
+        }
         
         let response: SwellyChatResponse;
         
@@ -140,7 +213,13 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
         }
         
         console.log('Chat initialized with response:', response);
-        setChatId(response.chat_id || null);
+        const newChatId = response.chat_id || null;
+        setChatId(newChatId);
+        
+        // Notify parent of new chatId
+        if (conversationType === 'trip-planning' && onChatStateChange) {
+          onChatStateChange(newChatId, [], '');
+        }
         
         // Set the first message from Swelly's response
         setMessages([
@@ -308,6 +387,11 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
               // Store matched users and destination for rendering cards
               setMatchedUsers(matchedUsers);
               setDestinationCountry(response.data.destination_country);
+              
+              // Notify parent to persist state for when user returns
+              if (onChatStateChange) {
+                onChatStateChange(chatId, matchedUsers, response.data.destination_country);
+              }
             } else {
               // Different message based on whether filters came from non-negotiable step
               const noMatchesMessage: Message = {
