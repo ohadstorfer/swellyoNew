@@ -420,6 +420,7 @@ class SupabaseDatabaseService {
       return null;
     }
 
+    
     try {
       // OPTIMIZATION: Select only columns that exist in the database
       // destinations_map does NOT exist - only destinations_array exists
