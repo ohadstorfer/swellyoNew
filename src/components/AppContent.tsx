@@ -228,6 +228,7 @@ export const AppContent: React.FC = () => {
           otherUserId: userId,
           otherUserName: existingConv.other_user.name || 'User',
           otherUserAvatar: existingConv.other_user.profile_image_url || null,
+          fromTripPlanning: true, // This conversation is from trip planning recommendations
         });
       } else {
         // No conversation exists yet - create pending conversation
@@ -323,9 +324,11 @@ export const AppContent: React.FC = () => {
           onViewProfile={handleViewUserProfile}
           onConversationCreated={(conversationId) => {
             // Update selectedConversation with the created conversation ID
+            // Preserve fromTripPlanning flag
             setSelectedConversation({
               ...selectedConversation,
               id: conversationId,
+              fromTripPlanning: selectedConversation?.fromTripPlanning || false,
             });
           }}
         />

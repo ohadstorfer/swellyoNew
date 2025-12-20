@@ -732,11 +732,11 @@ export async function findMatchingUsers(
       }
       
       // Filter by age range
-      if (request.queryFilters.age_min !== undefined) {
+      if (request.queryFilters.age_min !== undefined && request.queryFilters.age_min !== null && typeof request.queryFilters.age_min === 'number') {
         query = query.gte('age', request.queryFilters.age_min);
         console.log(`  - Filtering by age_min: ${request.queryFilters.age_min}`);
       }
-      if (request.queryFilters.age_max !== undefined) {
+      if (request.queryFilters.age_max !== undefined && request.queryFilters.age_max !== null && typeof request.queryFilters.age_max === 'number') {
         query = query.lte('age', request.queryFilters.age_max);
         console.log(`  - Filtering by age_max: ${request.queryFilters.age_max}`);
       }
@@ -748,11 +748,11 @@ export async function findMatchingUsers(
       }
       
       // Filter by surf_level
-      if (request.queryFilters.surf_level_min !== undefined) {
+      if (request.queryFilters.surf_level_min !== undefined && request.queryFilters.surf_level_min !== null && typeof request.queryFilters.surf_level_min === 'number') {
         query = query.gte('surf_level', request.queryFilters.surf_level_min);
         console.log(`  - Filtering by surf_level_min: ${request.queryFilters.surf_level_min}`);
       }
-      if (request.queryFilters.surf_level_max !== undefined) {
+      if (request.queryFilters.surf_level_max !== undefined && request.queryFilters.surf_level_max !== null && typeof request.queryFilters.surf_level_max === 'number') {
         query = query.lte('surf_level', request.queryFilters.surf_level_max);
         console.log(`  - Filtering by surf_level_max: ${request.queryFilters.surf_level_max}`);
       }
