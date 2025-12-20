@@ -26,6 +26,7 @@ interface DirectMessageScreenProps {
   otherUserName: string;
   otherUserAvatar: string | null;
   isDirect?: boolean; // true for direct messages (2 users), false for group chats
+  fromTripPlanning?: boolean; // true if conversation was created from trip planning recommendations
   onBack?: () => void;
   onConversationCreated?: (conversationId: string) => void; // Callback when conversation is created
   onViewProfile?: (userId: string) => void; // Callback when avatar or name is clicked

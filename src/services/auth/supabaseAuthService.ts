@@ -170,9 +170,7 @@ class SupabaseAuthService {
       console.log('Starting Supabase Google OAuth for mobile...');
 
       // Get the redirect URI
-      const redirectUri = AuthSession.makeRedirectUri({
-        useProxy: true,
-      });
+      const redirectUri = AuthSession.makeRedirectUri({});
 
       console.log('Redirect URI:', redirectUri);
 

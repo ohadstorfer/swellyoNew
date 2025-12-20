@@ -22,9 +22,7 @@ class ExpoAuthService {
     return clientId;
   }
   
-  private redirectUri = AuthSession.makeRedirectUri({
-    useProxy: true,
-  });
+  private redirectUri = AuthSession.makeRedirectUri({});
 
   async signInWithGoogle(): Promise<User> {
     try {
@@ -38,7 +36,6 @@ class ExpoAuthService {
         redirectUri: this.redirectUri,
         responseType: AuthSession.ResponseType.Code,
         extraParams: {},
-        additionalParameters: {},
         prompt: AuthSession.Prompt.SelectAccount,
       });
 
@@ -59,7 +56,7 @@ class ExpoAuthService {
             code: result.params.code,
             redirectUri: this.redirectUri,
             extraParams: {
-              code_verifier: request.codeVerifier,
+              code_verifier: request.codeVerifier || '',
             },
           },
           {

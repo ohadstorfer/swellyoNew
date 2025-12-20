@@ -251,7 +251,13 @@ export const AppContent: React.FC = () => {
   };
 
   const handleBackFromChat = () => {
-    setSelectedConversation(null);
+    // If user came from trip planning, return there
+    if (selectedConversation?.fromTripPlanning) {
+      setSelectedConversation(null);
+      setShowTripPlanningChat(true);
+    } else {
+      setSelectedConversation(null);
+    }
   };
 
   const handleLoadingBack = () => {
