@@ -193,6 +193,38 @@ class SwellyService {
   }
 
   /**
+   * Get trip planning chat history for a specific conversation
+   * @param chatId - The chat ID
+   * @returns Chat history with messages
+   */
+  async getTripPlanningHistory(chatId: string): Promise<{ chat_id: string; messages: Array<{ role: string; content: string }> }> {
+    try {
+      const url = this.getFunctionUrl(`/${chatId}`, 'trip-planning');
+      const headers = await this.getAuthHeaders();
+      
+      console.log('[SwellyService] Getting trip planning history:', url);
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        headers,
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[SwellyService] Error response:', errorText);
+        throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+      }
+
+      const result = await response.json();
+      console.log('[SwellyService] Trip planning history:', result);
+      return result;
+    } catch (error) {
+      console.error('[SwellyService] Error getting trip planning history:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Check if the Swelly API is healthy and available
    * @returns Health check response
    */
