@@ -145,14 +145,12 @@ class MessagingService {
         console.error('Error fetching all members:', allMembersError);
       }
 
-      // Group members by conversation
-      const membersByConversation = new Map<string, typeof allMembersData>();
+      // OPTIMIZATION 3.5: Extract user IDs early and fetch user data in parallel with other queries
+      const allUserIds = new Set<string>();
       (allMembersData || []).forEach(member => {
-        if (!membersByConversation.has(member.conversation_id)) {
-          membersByConversation.set(member.conversation_id, []);
-        }
-        membersByConversation.get(member.conversation_id)!.push(member);
+        allUserIds.add(member.user_id);
       });
+      const userIdsArray = Array.from(allUserIds);
 
       // OPTIMIZATION 4: Get current user's read status for all conversations in one query
       const { data: userMemberData, error: userMemberError } = await supabase
@@ -170,7 +168,27 @@ class MessagingService {
         userReadMap.set(member.conversation_id, member.last_read_at);
       });
 
-      // OPTIMIZATION 5: Batch calculate unread counts for all conversations
+      // OPTIMIZATION 5: Fetch user names EARLY and in parallel with unread counts
+      // This allows names to be available immediately
+      const [usersResult, surfersResult] = await Promise.all([
+        supabase
+          .from('users')
+          .select('id, email')
+          .in('id', userIdsArray),
+        supabase
+          .from('surfers')
+          .select('user_id, name, profile_image_url')
+          .in('user_id', userIdsArray)
+      ]);
+
+      const usersData = usersResult.data || [];
+      const surfersData = surfersResult.data || [];
+
+      // Create lookup maps early (before unread counts calculation)
+      const usersMap = new Map(usersData.map(u => [u.id, u]));
+      const surfersMap = new Map(surfersData.map(s => [s.user_id, s]));
+
+      // OPTIMIZATION 6: Batch calculate unread counts for all conversations (in parallel with name fetching above)
       const unreadCountPromises = conversations.map(conv => {
         const lastReadAt = userReadMap.get(conv.id) || new Date(0).toISOString();
         const lastMessage = lastMessagesMap.get(conv.id);
@@ -190,30 +208,17 @@ class MessagingService {
         unreadCountMap.set(conv.id, unreadCounts[index]);
       });
 
-      // OPTIMIZATION 6: Batch fetch all unique user IDs and get their data in bulk
-      const allUserIds = new Set<string>();
+      // Group members by conversation (after we have all data)
+      const membersByConversation = new Map<string, typeof allMembersData>();
       (allMembersData || []).forEach(member => {
-        allUserIds.add(member.user_id);
+        if (!membersByConversation.has(member.conversation_id)) {
+          membersByConversation.set(member.conversation_id, []);
+        }
+        membersByConversation.get(member.conversation_id)!.push(member);
       });
 
-      // Batch fetch users
-      const userIdsArray = Array.from(allUserIds);
-      const { data: usersData } = await supabase
-        .from('users')
-        .select('id, email')
-        .in('id', userIdsArray);
-
-      // Batch fetch surfers
-      const { data: surfersData } = await supabase
-        .from('surfers')
-        .select('user_id, name, profile_image_url')
-        .in('user_id', userIdsArray);
-
-      // Create lookup maps
-      const usersMap = new Map((usersData || []).map(u => [u.id, u]));
-      const surfersMap = new Map((surfersData || []).map(s => [s.user_id, s]));
-
       // OPTIMIZATION 7: Enrich members using the lookup maps (no additional queries)
+      // Names are already fetched, so this is just mapping
       const enrichedMembersByConv = new Map<string, ConversationMember[]>();
       membersByConversation.forEach((members, convId: string) => {
         const enriched = (members || []).map(member => {

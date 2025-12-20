@@ -38,7 +38,7 @@ export default function ConversationsScreen({
 }: ConversationsScreenProps) {
   const { resetOnboarding } = useOnboarding();
   const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false); // Start as false to show conversations immediately
   const [filter, setFilter] = useState<FilterType>('all');
   const [userName, setUserName] = useState('User');
   const [userAvatar, setUserAvatar] = useState<string | null>(null);
@@ -82,12 +82,13 @@ export default function ConversationsScreen({
 
   const loadConversations = async () => {
     try {
-      setLoading(true);
+      // Don't set loading to true immediately - show cached conversations first
+      // This allows names to appear immediately if we have cached data
       const convos = await messagingService.getConversations();
       setConversations(convos);
+      setLoading(false);
     } catch (error) {
       console.error('Error loading conversations:', error);
-    } finally {
       setLoading(false);
     }
   };
@@ -940,7 +941,9 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingVertical: 16,
     paddingHorizontal: 16,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Platform.OS === 'web' 
+      ? 'rgba(255, 255, 255, 0.08)' 
+      : 'rgba(255, 255, 255, 0.06)',
     borderRadius: 16,
     borderWidth: 1,
     borderColor: '#B72DF2',
@@ -951,6 +954,10 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.24,
     shadowRadius: 14,
     elevation: 5,
+    ...(Platform.OS === 'web' && {
+      backdropFilter: 'blur(20px) saturate(195%)',
+      WebkitBackdropFilter: 'blur(20px) saturate(195%)',
+    } as any),
   },
   swellyAvatarContainer: {
     width: 62,
