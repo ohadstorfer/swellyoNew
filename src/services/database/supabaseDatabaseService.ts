@@ -164,6 +164,7 @@ class SupabaseDatabaseService {
     boardType?: number; // Legacy support - will be converted to surfboardType enum
     // Swelly conversation results
     onboardingSummaryText?: string;
+    finishedOnboarding?: boolean; // Whether user has completed onboarding
     destinationsArray?: Array<{ destination_name: string; time_in_days: number }>;
     travelType?: 'budget' | 'mid' | 'high';
     travelBuddies?: 'solo' | '2' | 'crew';

@@ -160,10 +160,8 @@ class AuthService {
         throw new Error('EXPO_PUBLIC_GOOGLE_CLIENT_ID environment variable is not set');
       }
 
-      // Use expo-auth-session for OAuth flow with proxy for better compatibility
-      const redirectUri = AuthSession.makeRedirectUri({
-        useProxy: true,
-      });
+      // Use expo-auth-session for OAuth flow
+      const redirectUri = AuthSession.makeRedirectUri({});
 
       const discovery = {
         authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',

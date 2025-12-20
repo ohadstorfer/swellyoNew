@@ -126,7 +126,7 @@ class NativeDatabaseService {
         users.push(user);
       }
 
-      await AsyncStorage.setItem(this.STORAGE_KEY, JSON.stringify(users));
+      await AsyncStorage.default.setItem(this.STORAGE_KEY, JSON.stringify(users));
       console.log('User saved to AsyncStorage:', user);
       return user;
     } catch (error) {
@@ -174,7 +174,7 @@ class NativeDatabaseService {
       const AsyncStorage = await import('@react-native-async-storage/async-storage');
       const users = await this.getAllUsersFromStorage(AsyncStorage);
       const filteredUsers = users.filter(user => user.googleId !== googleId);
-      await AsyncStorage.setItem(this.STORAGE_KEY, JSON.stringify(filteredUsers));
+      await AsyncStorage.default.setItem(this.STORAGE_KEY, JSON.stringify(filteredUsers));
     } catch (error) {
       console.error('Error deleting user from AsyncStorage:', error);
       throw error;

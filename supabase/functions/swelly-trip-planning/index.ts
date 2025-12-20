@@ -735,7 +735,7 @@ async function getChatHistory(chatId: string, supabaseAdmin: any): Promise<Array
   return data?.messages || []
 }
 
-serve(async (req) => {
+serve(async (req: Request) => {
   // Handle CORS
   if (req.method === 'OPTIONS') {
     return new Response(null, {
@@ -1891,10 +1891,11 @@ When asking QUESTION 3 (travel distance), use their country_from to provide rele
       }
     )
 
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Error:', error)
+    const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred'
     return new Response(
-      JSON.stringify({ error: error.message }),
+      JSON.stringify({ error: errorMessage }),
       {
         status: 500,
         headers: {

@@ -215,8 +215,8 @@ class MessagingService {
 
       // OPTIMIZATION 7: Enrich members using the lookup maps (no additional queries)
       const enrichedMembersByConv = new Map<string, ConversationMember[]>();
-      membersByConversation.forEach((members, convId) => {
-        const enriched = members.map(member => {
+      membersByConversation.forEach((members, convId: string) => {
+        const enriched = (members || []).map(member => {
           const userData = usersMap.get(member.user_id);
           const surferData = surfersMap.get(member.user_id);
           

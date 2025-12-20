@@ -429,7 +429,7 @@ async function callOpenAI(messages: any[]): Promise<string> {
   return assistantMessage
 }
 
-serve(async (req) => {
+serve(async (req: Request) => {
   // Handle CORS
   if (req.method === 'OPTIONS') {
     return new Response(null, {
@@ -709,10 +709,11 @@ serve(async (req) => {
       }
     )
 
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Error:', error)
+    const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred'
     return new Response(
-      JSON.stringify({ error: error.message }),
+      JSON.stringify({ error: errorMessage }),
       {
         status: 500,
         headers: {

@@ -256,14 +256,21 @@ export const BackgroundVideo: React.FC<BackgroundVideoProps> = ({
         setUseImageFallback(true);
       };
 
-      // Listen for video errors
-      if (player.addEventListener) {
-        player.addEventListener('error', handleError);
+      // Listen for video errors using addListener (expo-video API)
+      try {
+        const subscription = player.addListener('statusChange', (event: any) => {
+          if (event.error) {
+            handleError(event.error);
+          }
+        });
         return () => {
-          if (player.removeEventListener) {
-            player.removeEventListener('error', handleError);
+          if (subscription && typeof subscription.remove === 'function') {
+            subscription.remove();
           }
         };
+      } catch (e) {
+        // Player doesn't support listeners, will rely on onError in VideoView
+        console.log('[BackgroundVideo] Player listeners not available');
       }
     }
   }, [player]);
@@ -298,11 +305,6 @@ export const BackgroundVideo: React.FC<BackgroundVideoProps> = ({
         contentFit="cover"
         nativeControls={false}
         allowsFullscreen={false}
-        onError={(error: any) => {
-          console.error('[BackgroundVideo] VideoView error:', error);
-          setVideoError(String(error));
-          setUseImageFallback(true);
-        }}
       />
     </View>
   );
