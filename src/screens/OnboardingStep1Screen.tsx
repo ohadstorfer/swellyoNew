@@ -12,7 +12,7 @@ import { Text } from '../components/Text';
 import { BoardCarousel } from '../components/BoardCarousel';
 import { colors, spacing, typography } from '../styles/theme';
 import { useOnboarding } from '../context/OnboardingContext';
-import { useIsDesktopWeb } from '../utils/responsive';
+import { useIsDesktopWeb, useScreenDimensions } from '../utils/responsive';
 
 interface OnboardingStep1ScreenProps {
   onNext: (data: OnboardingData) => void;
@@ -78,6 +78,7 @@ export const OnboardingStep1Screen: React.FC<OnboardingStep1ScreenProps> = ({
 }) => {
   const { markOnboardingComplete } = useOnboarding();
   const isDesktop = useIsDesktopWeb();
+  const { height: screenHeight } = useScreenDimensions();
   const [selectedBoardId, setSelectedBoardId] = useState<number>(
     initialData.boardType ?? 0
   );
@@ -88,6 +89,64 @@ export const OnboardingStep1Screen: React.FC<OnboardingStep1ScreenProps> = ({
   // Calculate responsive dimensions
   const progressBarWidth = isDesktop ? 300 : 237;
   const buttonContainerMaxWidth = isDesktop ? 400 : undefined;
+  
+  // Calculate available space between subtitle text and dots/board name
+  // This will be used as the board height to fill the space dynamically
+  const calculateAvailableBoardHeight = () => {
+    // Calculate space from bottom of subtitle to top of label container
+    
+    // Subtitle ends at: 
+    // - subtitle lineHeight (24px) + description lineHeight (22px) + gap (8px)
+    // - Plus any paddingBottom from subtitleContainer
+    const subtitleBottom = 24 + 22 + 8 + (isDesktop ? spacing.sm : 0);
+    
+    // Label container starts at: 
+    // - It's positioned above the button, so we need to account for:
+    // - Label container paddingBottom (spacing.md)
+    // - The gap between label and button area
+    // Since carouselContainer has flex: 1 and justifyContent: 'center',
+    // and labelContainer is after it, we need to calculate the space differently
+    
+    // The carousel container uses flex: 1, so it takes available space
+    // We need to calculate: screenHeight - (everything above subtitle) - (subtitle) - (label + button)
+    
+    // Everything above subtitle:
+    const headerHeight = 44 + (isDesktop ? spacing.lg : (Platform.OS === 'web' ? spacing.md : spacing.sm));
+    const progressHeight = 4 + (isDesktop ? spacing.sm * 2 : spacing.md * 2);
+    const titleHeight = 28.8 + (isDesktop ? spacing.xl : spacing.lg) + 36; // lineHeight + paddingTop + paddingBottom
+    
+    // Subtitle height (already calculated above)
+    const subtitleTotalHeight = subtitleBottom;
+    
+    // Label + Button area:
+    const labelHeight = 24 + 24 + spacing.sm + spacing.md; // dots + board name + gap + padding
+    const buttonHeight = 56 + spacing.xl; // button + padding
+    
+    // Carousel marginTop (negative, adds space)
+    const carouselMarginTop = isDesktop ? spacing.lg : spacing.xl;
+    
+    // Calculate available space for board
+    // Total used space = everything above subtitle + subtitle + label + button
+    const totalUsedSpace = headerHeight + progressHeight + titleHeight + subtitleTotalHeight + labelHeight + buttonHeight;
+    
+    // Available space = screen height - used space + carousel margin (negative margin adds space)
+    // Subtract a small buffer (8px) for visual spacing
+    const availableSpace = screenHeight - totalUsedSpace + carouselMarginTop - 8;
+    
+    // Ensure minimum height (at least 200px) and maximum reasonable height
+    if (availableSpace < 200) {
+      return 200;
+    }
+    
+    // Cap at reasonable maximum to prevent boards from being too large on very tall screens
+    if (availableSpace > 600) {
+      return 600;
+    }
+    
+    return availableSpace;
+  };
+  
+  const availableBoardHeight = calculateAvailableBoardHeight();
 
   const handleBoardSelect = (board: BoardType) => {
     setSelectedBoardId(board.id);
@@ -161,6 +220,7 @@ export const OnboardingStep1Screen: React.FC<OnboardingStep1ScreenProps> = ({
             selectedBoardId={selectedBoardId}
             onBoardSelect={handleBoardSelect}
             onActiveIndexChange={setActiveBoardIndex}
+            availableBoardHeight={availableBoardHeight}
           />
         </View>
 

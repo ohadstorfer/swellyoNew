@@ -44,6 +44,7 @@ interface BoardCarouselProps {
   selectedBoardId: number;
   onBoardSelect: (board: BoardType) => void;
   onActiveIndexChange?: (realIndex: number) => void; // Callback to notify parent of active index change
+  availableBoardHeight?: number; // Available space between header text and dots - board will fill this space
 }
 
 export const BoardCarousel: React.FC<BoardCarouselProps> = ({
@@ -51,6 +52,7 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
   selectedBoardId,
   onBoardSelect,
   onActiveIndexChange,
+  availableBoardHeight,
 }) => {
   const flatListRef = useRef<FlatList<BoardType>>(null);
   const isDesktop = useIsDesktopWeb();
@@ -58,24 +60,33 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
   const [carouselItemWidth, setCarouselItemWidth] = useState(getCarouselItemWidth());
   const initialRealIndex = boards.findIndex((b: BoardType) => b.id === selectedBoardId) || 0;
   
-  // Calculate responsive board dimensions based on screen width
-  // Scale down on smaller screens to prevent overlap
+  // Calculate responsive board dimensions
+  // If availableBoardHeight is provided, use it to fill the space between header and dots
+  // Otherwise, use default responsive sizing based on screen width
   const getResponsiveImageHeight = () => {
-    if (isDesktop) return 500;
+    // If available height is provided, use it (this fills the space dynamically)
+    if (availableBoardHeight && availableBoardHeight > 0) {
+      return availableBoardHeight;
+    }
     
-    // Scale based on screen width
-    // iPhone SE (320px): ~280px height
-    // iPhone 12/13/14 (390px): ~350px height  
-    // iPhone 14 Pro Max (430px): ~400px height
-    // Default (450px+): 450px height
-    if (screenWidth <= BREAKPOINTS.xs) {
-      return 280; // iPhone SE and smaller
-    } else if (screenWidth <= BREAKPOINTS.sm) {
-      return 320; // iPhone 8, iPhone SE 2nd gen
-    } else if (screenWidth <= BREAKPOINTS.md) {
-      return 380; // iPhone 12/13/14 standard
+    // Fallback to default responsive sizing based on screen width
+    if (isDesktop) {
+      return 500;
     } else {
-      return 450; // iPhone 14 Pro Max and larger
+      // Scale based on screen width
+      // iPhone SE (320px): ~280px height
+      // iPhone 12/13/14 (390px): ~350px height  
+      // iPhone 14 Pro Max (430px): ~400px height
+      // Default (450px+): 450px height
+      if (screenWidth <= BREAKPOINTS.xs) {
+        return 280; // iPhone SE and smaller
+      } else if (screenWidth <= BREAKPOINTS.sm) {
+        return 320; // iPhone 8, iPhone SE 2nd gen
+      } else if (screenWidth <= BREAKPOINTS.md) {
+        return 380; // iPhone 12/13/14 standard
+      } else {
+        return 450; // iPhone 14 Pro Max and larger
+      }
     }
   };
   
