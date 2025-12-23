@@ -345,13 +345,13 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
             </TouchableOpacity>
             
             {/* Demo Chat Button */}
-            {/* {onDemoChat && (
+            {onDemoChat && (
               <Button
                 title="Demo Chat"
                 onPress={onDemoChat}
                 style={[styles.getStartedButton, styles.demoButton]}
               />
-            )} */}
+            )}
             </View>
 
             {/* Login Prompt */}
