@@ -81,6 +81,9 @@ export const OnboardingStep1Screen: React.FC<OnboardingStep1ScreenProps> = ({
   const [selectedBoardId, setSelectedBoardId] = useState<number>(
     initialData.boardType ?? 0
   );
+  const [activeBoardIndex, setActiveBoardIndex] = useState<number>(
+    BOARD_TYPES.findIndex(b => b.id === selectedBoardId) || 0
+  );
   
   // Calculate responsive dimensions
   const progressBarWidth = isDesktop ? 300 : 237;
@@ -157,7 +160,21 @@ export const OnboardingStep1Screen: React.FC<OnboardingStep1ScreenProps> = ({
             boards={BOARD_TYPES}
             selectedBoardId={selectedBoardId}
             onBoardSelect={handleBoardSelect}
+            onActiveIndexChange={setActiveBoardIndex}
           />
+        </View>
+
+        {/* Dots and Board Name - positioned above Next button */}
+        <View style={[styles.labelContainer, isDesktop && styles.labelContainerDesktop, buttonContainerMaxWidth && { maxWidth: buttonContainerMaxWidth }]}>
+          <View style={styles.dotsContainer}>
+            {BOARD_TYPES.map((_board, index) => (
+              <View
+                key={index}
+                style={[styles.dot, index === activeBoardIndex ? styles.dotActive : styles.dotInactive]}
+              />
+            ))}
+          </View>
+          <Text style={styles.boardName}>{BOARD_TYPES[activeBoardIndex]?.name || ''}</Text>
         </View>
 
         {/* Next Button */}
@@ -346,5 +363,40 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: {
     opacity: 0.6,
+  },
+  labelContainer: {
+    alignItems: 'center',
+    paddingHorizontal: spacing.xl,
+    paddingBottom: spacing.md,
+    gap: spacing.sm as any,
+  },
+  labelContainerDesktop: {
+    paddingHorizontal: spacing.xxl,
+    alignSelf: 'center',
+  },
+  dotsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 6 as any,
+    marginBottom: spacing.sm,
+  },
+  dot: {
+    height: 8,
+    borderRadius: 4,
+  },
+  dotActive: {
+    width: 24,
+    backgroundColor: colors.dotActive || '#0788B0',
+  },
+  dotInactive: {
+    width: 8,
+    backgroundColor: colors.dotInactive || '#CFCFCF',
+  },
+  boardName: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#000',
+    textAlign: 'center',
   },
 });

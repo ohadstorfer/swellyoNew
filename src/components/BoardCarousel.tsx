@@ -13,11 +13,9 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from './Text';
 import { colors, spacing } from '../styles/theme';
+import { getScreenWidth, getScreenDimensions, useIsDesktopWeb, useScreenDimensions, BREAKPOINTS } from '../utils/responsive';
 
-// Helpers for sizing
-const getScreenWidth = () => Dimensions.get('window').width;
-
-// Helper to detect if we're on desktop web (not mobile web)
+// Helper to detect if we're on desktop web (not mobile web) - kept for StyleSheet compatibility
 const isDesktopWeb = () => {
   if (Platform.OS !== 'web') return false;
   if (typeof window === 'undefined') return false;
@@ -45,16 +43,55 @@ interface BoardCarouselProps {
   boards: BoardType[];
   selectedBoardId: number;
   onBoardSelect: (board: BoardType) => void;
+  onActiveIndexChange?: (realIndex: number) => void; // Callback to notify parent of active index change
 }
 
 export const BoardCarousel: React.FC<BoardCarouselProps> = ({
   boards,
   selectedBoardId,
   onBoardSelect,
+  onActiveIndexChange,
 }) => {
   const flatListRef = useRef<FlatList<BoardType>>(null);
+  const isDesktop = useIsDesktopWeb();
+  const { width: screenWidth } = useScreenDimensions();
   const [carouselItemWidth, setCarouselItemWidth] = useState(getCarouselItemWidth());
   const initialRealIndex = boards.findIndex((b: BoardType) => b.id === selectedBoardId) || 0;
+  
+  // Calculate responsive board dimensions based on screen width
+  // Scale down on smaller screens to prevent overlap
+  const getResponsiveImageHeight = () => {
+    if (isDesktop) return 500;
+    
+    // Scale based on screen width
+    // iPhone SE (320px): ~280px height
+    // iPhone 12/13/14 (390px): ~350px height  
+    // iPhone 14 Pro Max (430px): ~400px height
+    // Default (450px+): 450px height
+    if (screenWidth <= BREAKPOINTS.xs) {
+      return 280; // iPhone SE and smaller
+    } else if (screenWidth <= BREAKPOINTS.sm) {
+      return 320; // iPhone 8, iPhone SE 2nd gen
+    } else if (screenWidth <= BREAKPOINTS.md) {
+      return 380; // iPhone 12/13/14 standard
+    } else {
+      return 450; // iPhone 14 Pro Max and larger
+    }
+  };
+  
+  const baseImageHeight = getResponsiveImageHeight();
+  
+  // Calculate responsive carousel item minHeight
+  const getResponsiveItemMinHeight = () => {
+    if (isDesktop) return 550;
+    
+    // Scale proportionally with image height
+    // Add padding for side boards that slide down
+    const padding = baseImageHeight * 0.2; // Extra space for side boards
+    return baseImageHeight + padding;
+  };
+  
+  const carouselItemMinHeight = getResponsiveItemMinHeight();
   
   // Animated value for smooth scrolling
   const scrollX = useRef(new Animated.Value(0)).current;
@@ -88,14 +125,21 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
   // Edge threshold - jump back to middle when we get too close to edges
   const EDGE_THRESHOLD = 100;
 
-  // Update width on resize (web)
+  // Update width on resize (web and native)
   React.useEffect(() => {
+    const updateWidth = () => setCarouselItemWidth(getCarouselItemWidth());
+    
     if (Platform.OS === 'web') {
-      const updateWidth = () => setCarouselItemWidth(getCarouselItemWidth());
       if (typeof window !== 'undefined') {
         window.addEventListener('resize', updateWidth);
         return () => window.removeEventListener('resize', updateWidth);
       }
+    } else {
+      // On native, listen to Dimensions changes
+      const subscription = Dimensions.addEventListener('change', () => {
+        updateWidth();
+      });
+      return () => subscription?.remove();
     }
   }, []);
 
@@ -104,10 +148,17 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
       const virtualIndex = viewableItems[0].index as number;
       setActiveVirtualIndex(virtualIndex);
       
+      // Get real index once
+      const realIndex = getRealIndex(virtualIndex);
+      
+      // Notify parent of active index change
+      if (onActiveIndexChange) {
+        onActiveIndexChange(realIndex);
+      }
+      
       // Check if we're near edges and need to jump back to middle
       if (virtualIndex < EDGE_THRESHOLD) {
         // Near the start, jump to middle with same real board
-        const realIndex = getRealIndex(virtualIndex);
         const newVirtualIndex = START_INDEX + realIndex;
         setTimeout(() => {
           flatListRef.current?.scrollToIndex({ index: newVirtualIndex, animated: false });
@@ -116,7 +167,6 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
         }, 50);
       } else if (virtualIndex > INFINITE_SIZE - EDGE_THRESHOLD) {
         // Near the end, jump to middle with same real board
-        const realIndex = getRealIndex(virtualIndex);
         const newVirtualIndex = START_INDEX + realIndex;
         setTimeout(() => {
           flatListRef.current?.scrollToIndex({ index: newVirtualIndex, animated: false });
@@ -126,8 +176,7 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
       }
       
       // Always update the selected board
-        const realIndex = getRealIndex(virtualIndex);
-        onBoardSelect(boards[realIndex]);
+      onBoardSelect(boards[realIndex]);
     }
   }).current;
 
@@ -172,7 +221,7 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
     // Don't render if not visible (optimization)
     const distance = Math.abs(index - activeVirtualIndex);
     if (!isVisible && distance > 1) {
-      return <View style={[styles.carouselItem, { width: carouselItemWidth }]} />;
+      return <View style={[styles.carouselItem, { width: carouselItemWidth, minHeight: carouselItemMinHeight }]} />;
     }
 
     // Animated values based on scroll position for smooth transitions
@@ -199,7 +248,7 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
     });
 
     // Interpolate vertical position: side boards slide down
-    const baseImageHeight = isDesktopWeb() ? 500 : 450;
+    // Use the responsive baseImageHeight calculated at component level
     const centerBoardHeight = baseImageHeight;
     const sideBoardHeight = baseImageHeight * 0.89;
     const verticalOffsetValue = (centerBoardHeight - sideBoardHeight) + (baseImageHeight * 0.15);
@@ -220,7 +269,7 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
       : centerImageWidth * 0.89; // Side boards are 89% of center board size
 
     return (
-      <View style={[styles.carouselItem, { width: carouselItemWidth }]}> 
+      <View style={[styles.carouselItem, { width: carouselItemWidth, minHeight: carouselItemMinHeight }]}> 
         <TouchableOpacity
           activeOpacity={0.9}
           onPress={() => handleBoardPress(index)}
@@ -241,7 +290,7 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
             >
         <Image
           source={{ uri: item.imageUrl }}
-          style={[styles.boardImage, { width: imageWidth }]}
+          style={[styles.boardImage, { width: imageWidth, height: baseImageHeight }]}
           resizeMode="contain"
         />
             </Animated.View>
@@ -250,19 +299,13 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
     );
   };
 
-  const renderDots = () => {
-    const currentRealIndex = getRealIndex(activeVirtualIndex);
-    return (
-    <View style={styles.dotsContainer}>
-      {boards.map((_board: BoardType, index: number) => (
-        <View
-          key={index}
-            style={[styles.dot, index === currentRealIndex ? styles.dotActive : styles.dotInactive]}
-        />
-      ))}
-    </View>
-  );
-  };
+  // Notify parent of active index changes
+  React.useEffect(() => {
+    if (onActiveIndexChange) {
+      const currentRealIndex = getRealIndex(activeVirtualIndex);
+      onActiveIndexChange(currentRealIndex);
+    }
+  }, [activeVirtualIndex, onActiveIndexChange]);
 
   // Ensure initial index is centered and initialize scrollX
   React.useEffect(() => {
@@ -353,9 +396,10 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
 
   return (
     <View style={styles.container}>
-      <View style={styles.carouselWrapper}>
+      <View style={styles.carouselWrapperContainer}>
+        <View style={styles.carouselWrapper}>
         {/* Show arrows only on desktop web */}
-        {isDesktopWeb() && (
+        {isDesktop && (
           <TouchableOpacity style={styles.arrowButton} onPress={scrollToPrevious} activeOpacity={0.7}>
             <Ionicons name="chevron-back" size={24} color={colors.textDark} />
           </TouchableOpacity>
@@ -393,16 +437,12 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
         />
 
         {/* Show arrows only on desktop web */}
-        {isDesktopWeb() && (
+        {isDesktop && (
           <TouchableOpacity style={[styles.arrowButton, styles.arrowButtonRight]} onPress={scrollToNext} activeOpacity={0.7}>
             <Ionicons name="chevron-forward" size={24} color={colors.textDark} />
           </TouchableOpacity>
         )}
       </View>
-
-      <View style={styles.labelContainer}>
-        {renderDots()}
-        <Text style={styles.boardName}>{boards[getRealIndex(activeVirtualIndex)]?.name || ''}</Text>
       </View>
     </View>
   );
@@ -424,27 +464,26 @@ const styles = StyleSheet.create({
       alignSelf: 'center',
     }),
   },
-  carouselWrapper: {
+  carouselWrapperContainer: {
     width: '100%',
-    overflow: 'hidden',
     position: 'relative',
     ...(isDesktopWeb() && {
       maxWidth: 700,
       alignSelf: 'center',
-      // @ts-ignore
-      WebkitOverflowScrolling: 'touch',
-      // @ts-ignore
-      scrollBehavior: 'smooth',
     }),
     ...(Platform.OS === 'web' && !isDesktopWeb() && {
-      // Mobile web: keep original behavior
       maxWidth: 600,
       alignSelf: 'center',
-      // @ts-ignore
-      WebkitOverflowScrolling: 'touch',
-      // @ts-ignore
-      scrollBehavior: 'smooth',
     }),
+  },
+  carouselWrapper: {
+    width: '100%',
+    overflow: 'hidden',
+    position: 'relative',
+    // @ts-ignore
+    WebkitOverflowScrolling: 'touch',
+    // @ts-ignore
+    scrollBehavior: 'smooth',
   },
   arrowButton: {
     position: 'absolute',
@@ -480,12 +519,8 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-start', // Align to top so center board is higher
     alignItems: 'center',
     paddingTop: spacing.md, // Top padding for center board
-    paddingBottom: spacing.xxl, // More bottom padding for side boards to sit lower
-    minHeight: 500, // Bigger height to accommodate larger boards
-    ...(isDesktopWeb() && {
-      minHeight: 550,
-      paddingTop: spacing.lg,
-    }),
+    // paddingBottom removed - labelContainer will be positioned absolutely below center board
+    // minHeight is set dynamically via inline style
     ...(Platform.OS === 'web' && { paddingHorizontal: 0 }),
   },
   boardTouchable: {
@@ -499,22 +534,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   boardImage: {
-    height: 450, // Increased from 400 - bigger boards
-    ...(isDesktopWeb() && {
-      height: 500, // Increased from 450 - even larger on desktop
-      // @ts-ignore
-      objectFit: 'contain' as any,
-    }),
-    ...(Platform.OS === 'web' && !isDesktopWeb() && {
-      // Mobile web: keep original
-      // @ts-ignore
-      objectFit: 'contain' as any,
-    }),
-  },
-  labelContainer: {
-    alignItems: 'center',
-    marginTop: spacing.md,
-    gap: spacing.sm as any,
+    // Height is set dynamically via inline style based on screen size
+    // @ts-ignore
+    objectFit: 'contain' as any,
   },
   dotsContainer: {
     flexDirection: 'row',
