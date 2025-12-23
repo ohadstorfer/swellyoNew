@@ -160,17 +160,74 @@ interface VideoCarouselProps {
   videos: VideoLevel[];
   selectedVideoId: number;
   onVideoSelect: (video: VideoLevel) => void;
+  availableVideoHeight?: number; // Available space for main video - will size dynamically to fit
 }
 
 export const VideoCarousel: React.FC<VideoCarouselProps> = ({
   videos,
   selectedVideoId,
   onVideoSelect,
+  availableVideoHeight,
 }) => {
   const flatListRef = useRef<FlatList<VideoLevel>>(null);
   const [containerWidth, setContainerWidth] = useState(0);
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const thumbnailFadeAnim = useRef(new Animated.Value(1)).current;
+  
+  // Calculate video dimensions based on available height
+  // Maintain aspect ratio while fitting available space
+  // Make smaller on smaller screens to ensure it fits with gaps
+  const getVideoDimensions = () => {
+    const screenWidth = getScreenWidth();
+    
+    if (availableVideoHeight && availableVideoHeight > 0) {
+      // Use available height to calculate width maintaining aspect ratio
+      // Default aspect ratio: 340/324 (mobile) or 300/286 (desktop)
+      const aspectRatio = isDesktopWeb() ? 300 / 286 : 340 / 324;
+      
+      // On smaller screens, reduce the height slightly to ensure gaps are maintained
+      let calculatedHeight = availableVideoHeight;
+      if (screenWidth <= 375) {
+        // iPhone SE and similar: reduce by 10% to ensure gaps
+        calculatedHeight = availableVideoHeight * 0.9;
+      } else if (screenWidth <= 414) {
+        // iPhone 12/13/14: reduce by 5% to ensure gaps
+        calculatedHeight = availableVideoHeight * 0.95;
+      }
+      
+      const calculatedWidth = calculatedHeight * aspectRatio;
+      
+      // Ensure width doesn't exceed screen bounds
+      const maxWidth = getScreenWidth() - 32; // 16px padding on each side
+      const finalWidth = Math.min(calculatedWidth, maxWidth);
+      const finalHeight = finalWidth / aspectRatio;
+      
+      return { width: finalWidth, height: finalHeight };
+    }
+    
+    // Fallback to default sizing (smaller on smaller screens)
+    if (isDesktopWeb()) {
+      return {
+        width: Math.min(300, getScreenWidth() - 52),
+        height: Math.min(300, getScreenWidth() - 52) * (286 / 300),
+      };
+    } else {
+      // Scale down on smaller screens
+      let baseWidth = 340;
+      if (screenWidth <= 375) {
+        baseWidth = 280; // Smaller on iPhone SE
+      } else if (screenWidth <= 414) {
+        baseWidth = 320; // Medium on iPhone 12/13/14
+      }
+      
+      return {
+        width: Math.min(baseWidth, getScreenWidth() - 32),
+        height: Math.min(baseWidth, getScreenWidth() - 32) * (324 / 340),
+      };
+    }
+  };
+  
+  const videoDimensions = getVideoDimensions();
   
   // Get the selected video directly from selectedVideoId
   const selectedVideo = React.useMemo(() => {
@@ -404,10 +461,10 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { flex: 1, justifyContent: 'flex-end' }]}>
       {/* Main Video Display */}
       <View style={styles.mainVideoContainer}>
-        <View style={styles.videoWrapper}>
+        <View style={[styles.videoWrapper, { width: videoDimensions.width, height: videoDimensions.height }]}>
           <Animated.View
             style={[
               styles.mainVideo,
@@ -556,29 +613,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 16,
-    marginBottom: 16, // Native mobile and mobile web: same as mobile web
+    flex: 1, // Take up available space
     ...(isDesktopWeb() && {
       paddingHorizontal: 26,
       overflow: 'visible',
-      marginBottom: 8, // Desktop: reduced spacing
-      paddingTop: 8, // Desktop: minimal top padding
     }),
   },
   videoWrapper: {
-    width: Math.min(340, getScreenWidth() - 32), // Mobile: full width
-    aspectRatio: 340 / 324, // Mobile: original aspect ratio
-    maxWidth: 340, // Mobile: original max width
+    // Width and height are set dynamically via inline style based on availableVideoHeight
     minWidth: 280,
     borderRadius: 24,
     overflow: 'hidden',
     position: 'relative',
     backgroundColor: '#000',
     alignSelf: 'center',
-    ...(isDesktopWeb() && {
-      width: Math.min(300, getScreenWidth() - 52), // Desktop: smaller
-      aspectRatio: 300 / 286, // Desktop: slightly smaller
-      maxWidth: 300, // Desktop: smaller max width
-    }),
   },
   mainVideo: {
     width: '100%',
@@ -637,11 +685,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 0,
     overflow: 'hidden',
-    marginTop: 100, // Native mobile and mobile web: same as mobile web
+    paddingBottom: 16, // Space above button
+    flexShrink: 0, // Don't shrink, keep fixed size at bottom
     ...(isDesktopWeb() && {
       // Desktop web only
       overflow: 'visible',
-      marginTop: 16, // Desktop: reduced spacing
       marginBottom: 8, // Desktop: minimal bottom margin
     }),
   },

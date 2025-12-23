@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   Platform,
   Image,
-  Dimensions,
 } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -17,15 +16,7 @@ import { colors, spacing } from '../styles/theme';
 import { OnboardingData } from './OnboardingStep1Screen';
 import { getVideoUrl as getVideoUrlUtil } from '../services/media/videoService';
 import { getImageUrl } from '../services/media/imageService';
-
-const getScreenWidth = () => Dimensions.get('window').width;
-
-// Helper to detect if we're on desktop web (not mobile web)
-const isDesktopWeb = () => {
-  if (Platform.OS !== 'web') return false;
-  if (typeof window === 'undefined') return false;
-  return window.innerWidth > 768; // Desktop breakpoint
-};
+import { useIsDesktopWeb, useScreenDimensions, responsiveWidth, getScreenWidth } from '../utils/responsive';
 
 interface OnboardingStep2ScreenProps {
   onNext: (data: OnboardingData) => void;
@@ -109,8 +100,118 @@ export const OnboardingStep2Screen: React.FC<OnboardingStep2ScreenProps> = ({
   updateFormData,
   isLoading = false,
 }) => {
+  const isDesktop = useIsDesktopWeb();
+  const { height: screenHeight, width: screenWidth } = useScreenDimensions();
+  
   // Get board type from initial data (default to 0 if not set)
   const boardType = initialData.boardType ?? 0;
+  
+  // Calculate responsive dimensions
+  const progressBarWidth = isDesktop ? 300 : 237;
+  const buttonContainerMaxWidth = isDesktop ? 400 : undefined;
+  const buttonWidth = responsiveWidth(90, 280, 320, 0); // 90% width, min 280px, max 320px, same as Step 1
+  
+  // Calculate responsive title font size to fit in 2 lines
+  // Title text: "Select the video that best represents\nhow you surf."
+  const calculateTitleFontSize = () => {
+    const titleText = "Select the video that best represents\nhow you surf.";
+    const baseFontSize = 20;
+    const minFontSize = 16;
+    const lineHeight = 1.4; // lineHeight ratio
+    
+    // Calculate available width for title (accounting for padding)
+    const horizontalPadding = isDesktop ? 32 * 2 : 10 * 2; // padding on both sides
+    const availableWidth = screenWidth - horizontalPadding;
+    
+    // Estimate if text fits in 2 lines with base font size
+    // Rough estimation: average character width is ~0.6 * fontSize
+    const avgCharWidth = baseFontSize * 0.6;
+    const longestLine = Math.max(
+      "Select the video that best represents".length,
+      "how you surf.".length
+    );
+    const estimatedWidth = longestLine * avgCharWidth;
+    
+    // If estimated width exceeds available width, reduce font size
+    if (estimatedWidth > availableWidth) {
+      // Calculate font size that would fit
+      const calculatedSize = (availableWidth / longestLine) / 0.6;
+      // Use the smaller of calculated size or base size, but not less than min
+      return Math.max(minFontSize, Math.min(calculatedSize, baseFontSize));
+    }
+    
+    return baseFontSize;
+  };
+  
+  const titleFontSize = calculateTitleFontSize();
+  
+  // Calculate available space between title and thumbnails for main video
+  // This will be used to dynamically size the main video
+  // Includes gaps for proper spacing
+  const calculateAvailableVideoHeight = () => {
+    // Header: 44px + padding
+    const headerHeight = 44 + (isDesktop ? spacing.lg : spacing.sm) + spacing.md;
+    
+    // Progress bar: 4px + padding
+    const progressHeight = 4 + (isDesktop ? spacing.sm * 2 : spacing.md * 2);
+    
+    // Title: 2 lines with dynamic font size + padding
+    // lineHeight is 1.4 * fontSize, so 2 lines = 2 * lineHeight
+    const titleLineHeight = titleFontSize * 1.4;
+    const titleTwoLinesHeight = titleLineHeight * 2;
+    const titlePadding = (isDesktop ? spacing.md : spacing.xs) + (Platform.OS !== 'web' ? spacing.lg : spacing.md);
+    const titleHeight = titleTwoLinesHeight + titlePadding;
+    
+    // Gap between title and video
+    const gapAboveVideo = spacing.md;
+    
+    // Thumbnails section: approximate height (~100px for thumbnails + padding)
+    const thumbnailsHeight = 100 + spacing.md;
+    
+    // Gap between video and thumbnails
+    const gapBelowVideo = spacing.md;
+    
+    // Button: 56px + padding
+    const buttonHeight = 56 + spacing.xl;
+    
+    // Calculate total used space including gaps
+    const totalUsedSpace = headerHeight + progressHeight + titleHeight + gapAboveVideo + gapBelowVideo + thumbnailsHeight + buttonHeight;
+    
+    // Available space for main video (in the spacer area)
+    const availableSpace = screenHeight - totalUsedSpace;
+    
+    // Ensure minimum height (at least 180px for smaller screens) and maximum reasonable height
+    // On smaller screens, be more conservative with minimum
+    const minHeight = screenWidth <= 375 ? 180 : 200;
+    if (availableSpace < minHeight) {
+      return minHeight;
+    }
+    
+    // Cap at reasonable maximum (smaller on smaller screens)
+    const maxHeight = screenWidth <= 375 ? 400 : (screenWidth <= 414 ? 450 : 500);
+    if (availableSpace > maxHeight) {
+      return maxHeight;
+    }
+    
+    return availableSpace;
+  };
+  
+  const availableVideoHeight = calculateAvailableVideoHeight();
+  
+  // Calculate background video container height
+  // Background video should cover the area from top to where main video ends
+  // It includes: header + progress + title + main video area
+  const calculateBackgroundVideoHeight = () => {
+    const headerHeight = 44 + (isDesktop ? spacing.lg : spacing.sm) + spacing.md;
+    const progressHeight = 4 + (isDesktop ? spacing.sm * 2 : spacing.md * 2);
+    const titleHeight = 28 + (isDesktop ? spacing.md : spacing.xs) + (Platform.OS !== 'web' ? spacing.lg : spacing.md);
+    const mainVideoArea = availableVideoHeight;
+    
+    // Total height covers up to the end of main video area
+    return headerHeight + progressHeight + titleHeight + mainVideoArea + 48; // 48px for rounded bottom
+  };
+  
+  const backgroundVideoHeight = calculateBackgroundVideoHeight();
 
   // Get videos with resolved URLs for the selected board type
   const surfLevelVideos = React.useMemo(() => getSurfLevelVideos(boardType), [boardType]);
@@ -211,7 +312,7 @@ export const OnboardingStep2Screen: React.FC<OnboardingStep2ScreenProps> = ({
   return (
     <SafeAreaView style={styles.container}>
       {/* Background Video/Image with 20% opacity */}
-      <View style={styles.backgroundVideoContainer}>
+      <View style={[styles.backgroundVideoContainer, { height: backgroundVideoHeight }]}>
         <View style={styles.backgroundVideoWrapper}>
           {selectedVideo.videoUrl ? (
             <VideoView
@@ -232,9 +333,9 @@ export const OnboardingStep2Screen: React.FC<OnboardingStep2ScreenProps> = ({
         </View>
       </View>
 
-      <View style={styles.content}>
+      <View style={[styles.content, isDesktop && styles.contentDesktop]}>
         {/* Header */}
-        <View style={styles.header}>
+        <View style={[styles.header, isDesktop && styles.headerDesktop]}>
           <TouchableOpacity onPress={onBack} style={styles.backButton}>
             <Ionicons name="arrow-back" size={24} color="#222B30" />
           </TouchableOpacity>
@@ -247,30 +348,31 @@ export const OnboardingStep2Screen: React.FC<OnboardingStep2ScreenProps> = ({
         </View>
 
         {/* Progress Bar */}
-        <View style={styles.progressContainer}>
-          <View style={styles.progressBar}>
+        <View style={[styles.progressContainer, isDesktop && styles.progressContainerDesktop]}>
+          <View style={[styles.progressBar, { width: progressBarWidth }]}>
             <View style={[styles.progressFill, { width: '40%' }]} />
           </View>
         </View>
 
         {/* Title */}
-        <View style={styles.titleContainer}>
-          <Text style={styles.title}>
+        <View style={[styles.titleContainer, isDesktop && styles.titleContainerDesktop]}>
+          <Text style={[styles.title, { fontSize: titleFontSize, lineHeight: titleFontSize * 1.4 }]} numberOfLines={2}>
             Select the video that best represents{'\n'}how you surf.
           </Text>
         </View>
 
-        {/* Video Carousel */}
-        <View style={styles.carouselContainer}>
+        {/* Video Carousel - main video fills available space, thumbnails at bottom */}
+        <View style={[styles.videoCarouselContainer, isDesktop && styles.videoCarouselContainerDesktop]}>
           <VideoCarousel
             videos={surfLevelVideos}
             selectedVideoId={selectedVideoId}
             onVideoSelect={handleVideoSelect}
+            availableVideoHeight={availableVideoHeight}
           />
         </View>
 
-        {/* Next Button */}
-        <View style={styles.buttonContainer}>
+        {/* Next Button - fixed at bottom */}
+        <View style={[styles.buttonContainer, isDesktop && styles.buttonContainerDesktop, buttonContainerMaxWidth && { maxWidth: buttonContainerMaxWidth }]}>
           <TouchableOpacity 
             onPress={handleNext}
             activeOpacity={0.8}
@@ -281,7 +383,7 @@ export const OnboardingStep2Screen: React.FC<OnboardingStep2ScreenProps> = ({
               colors={['#00A2B6', '#0788B0']}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 0 }}
-              style={styles.gradientButton}
+              style={[styles.gradientButton, { width: buttonWidth }]}
             >
               <Text style={styles.buttonText}>
                 {isLoading ? 'Loading...' : 'Next'}
@@ -306,7 +408,7 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    height: 640,
+    // Height is set dynamically via inline style to match main video area
     overflow: 'hidden',
     borderBottomLeftRadius: 48,
     borderBottomRightRadius: 48,
@@ -329,25 +431,25 @@ const styles = StyleSheet.create({
     zIndex: 1,
     width: '100%',
     maxWidth: '100%',
-    overflow: 'hidden', // Mobile: keep original
-    ...(isDesktopWeb() && {
-      overflow: 'visible',
-      alignItems: 'center',
-      minHeight: 0, // Allow flex to shrink if needed
-    }),
+    overflow: 'hidden',
+  },
+  contentDesktop: {
+    overflow: 'visible',
+    alignItems: 'center',
+    minHeight: 0,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: spacing.md,
-    paddingTop: spacing.sm, // Mobile: keep original
-    paddingBottom: spacing.md, // Mobile: keep original
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.md,
     minHeight: 44,
-    ...(isDesktopWeb() && {
-      paddingTop: spacing.sm, // Desktop: minimal top padding
-      paddingBottom: spacing.sm, // Desktop: reduced bottom padding
-    }),
+  },
+  headerDesktop: {
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.sm,
   },
   backButton: {
     width: 60,
@@ -377,18 +479,14 @@ const styles = StyleSheet.create({
   },
   progressContainer: {
     paddingHorizontal: spacing.md,
-    paddingBottom: spacing.md, // Mobile native: keep original
+    paddingBottom: spacing.md,
     alignItems: 'center',
-    ...(Platform.OS === 'web' && !isDesktopWeb() && {
-      // Mobile web: reduce spacing to match image
-      paddingBottom: spacing.sm,
-    }),
-    ...(isDesktopWeb() && {
-      paddingBottom: spacing.sm, // Desktop: reduced bottom padding
-    }),
+  },
+  progressContainerDesktop: {
+    paddingBottom: spacing.sm,
   },
   progressBar: {
-    width: 237,
+    // Width is set dynamically via inline style
     height: 4,
     backgroundColor: '#BDBDBD',
     borderRadius: 8,
@@ -400,72 +498,51 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   titleContainer: {
-    paddingHorizontal: 16,
-    paddingTop: spacing.xl, // Mobile web: same as mobile web
-    paddingBottom: spacing.md, // Mobile web: same as mobile web
+    paddingHorizontal: 10,
+    paddingTop: spacing.xs,
+    paddingBottom: Platform.OS !== 'web' ? spacing.lg : spacing.md, // More space on native mobile
     alignItems: 'center',
     maxWidth: '100%',
-    ...(Platform.OS !== 'web' && {
-      // Native mobile (Expo Go) ONLY: add more space below title to prevent covering video
-      paddingBottom: spacing.lg, // Increased bottom padding for native mobile
-    }),
-    ...(isDesktopWeb() && {
-      // Desktop web ONLY - keep desktop styles unchanged
-      paddingHorizontal: 32,
-      paddingTop: spacing.md, // Desktop: reduced top padding
-      paddingBottom: spacing.xs || 4, // Desktop: minimal bottom padding
-    }),
+  },
+  titleContainerDesktop: {
+    paddingHorizontal: 32,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.xs || 4,
   },
   title: {
-    fontSize: 20, // Native mobile and mobile web: same as mobile web
+    // fontSize and lineHeight are set dynamically via inline style
     fontWeight: '700',
     fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'System',
     color: colors.textPrimary || '#333333',
     textAlign: 'center',
-    lineHeight: 28, // Native mobile and mobile web: same as mobile web
   },
-  carouselContainer: {
+  videoCarouselContainer: {
     flex: 1,
-    justifyContent: 'center',
-    paddingVertical: spacing.sm, // Mobile web: keep current (8px)
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    paddingHorizontal: spacing.xl,
+    paddingBottom: 0, // No padding, thumbnails and button handle their own spacing
     width: '100%',
-    maxWidth: '100%',
-    overflow: 'hidden',
-    ...(Platform.OS !== 'web' && {
-      // Native mobile (Expo Go) ONLY: add more space above video to prevent title overlap
-      paddingTop: 80, // 80px top padding for native mobile
-      paddingBottom: spacing.sm, // Keep bottom padding same as web mobile
-    }),
-    ...(isDesktopWeb() && {
-      maxWidth: 600,
-      alignSelf: 'center',
-      minHeight: 0,
-      overflow: 'visible',
-      paddingTop: 8, // Desktop: minimal top padding
-      paddingBottom: 8, // Desktop: minimal bottom padding
-      paddingVertical: 0, // Desktop: override vertical padding
-    }),
+    minHeight: 0, // Allow flex to shrink
+  },
+  videoCarouselContainerDesktop: {
+    paddingHorizontal: spacing.xxl,
   },
   buttonContainer: {
-    paddingHorizontal: 16,
-    paddingTop: spacing.md, // Native mobile and mobile web: same as mobile web
-    paddingBottom: 24, // Native mobile and mobile web: same as mobile web
+    paddingHorizontal: spacing.xl,
+    paddingBottom: spacing.xl,
     alignItems: 'center',
     width: '100%',
-    maxWidth: '100%',
-    ...(isDesktopWeb() && {
-      paddingHorizontal: 32,
-      flexShrink: 0,
-      paddingTop: spacing.md, // Desktop: reduced top padding
-      paddingBottom: 24, // Desktop: reduced bottom padding
-    }),
+    flexShrink: 0, // Don't shrink, keep fixed size at bottom
+  },
+  buttonContainerDesktop: {
+    paddingHorizontal: spacing.xxl,
+    paddingBottom: spacing.xxl,
+    alignSelf: 'center',
   },
   gradientButton: {
     height: 56,
-    width: Platform.OS === 'web' 
-      ? Math.min(330, getScreenWidth() - 64) 
-      : Math.min(330, getScreenWidth() - 64),
-    maxWidth: 330,
+    // Width is set dynamically via inline style using responsiveWidth
     borderRadius: 999,
     justifyContent: 'center',
     alignItems: 'center',
