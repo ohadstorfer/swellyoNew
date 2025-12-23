@@ -138,7 +138,7 @@ class MessagingService {
       // OPTIMIZATION 3: Batch fetch all member data for all conversations
       const { data: allMembersData, error: allMembersError } = await supabase
         .from('conversation_members')
-        .select('conversation_id, user_id, role, joined_at, last_read_message_id, last_read_at, preferences')
+        .select('conversation_id, user_id, role, adv_role, joined_at, last_read_message_id, last_read_at, preferences')
         .in('conversation_id', conversationIds);
 
       if (allMembersError) {

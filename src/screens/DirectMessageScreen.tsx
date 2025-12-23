@@ -19,6 +19,7 @@ import { colors, spacing, typography, borderRadius } from '../styles/theme';
 import { messagingService, Message } from '../services/messaging/messagingService';
 import { supabaseAuthService } from '../services/auth/supabaseAuthService';
 import { getImageUrl } from '../services/media/imageService';
+import { supabase } from '../config/supabase';
 
 interface DirectMessageScreenProps {
   conversationId?: string; // Optional: undefined for pending conversations (will be created on first message)
@@ -66,6 +67,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const [loadingMessage, setLoadingMessage] = useState<string>('');
   const [isFetchingMessages, setIsFetchingMessages] = useState(true);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [otherUserAdvRole, setOtherUserAdvRole] = useState<'adv_giver' | 'adv_seeker' | null>(null);
   const [inputHeight, setInputHeight] = useState(34); // Initial height for one line
   const scrollViewRef = useRef<ScrollView>(null);
   const textInputRef = useRef<TextInput>(null);
@@ -122,6 +124,30 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     }
   }, [currentConversationId]);
 
+  const loadOtherUserAdvRole = async () => {
+    if (!currentConversationId || !otherUserId) return;
+    
+    try {
+      const { data, error } = await supabase
+        .from('conversation_members')
+        .select('adv_role')
+        .eq('conversation_id', currentConversationId)
+        .eq('user_id', otherUserId)
+        .single();
+      
+      if (error) {
+        console.error('Error fetching other user adv_role:', error);
+        return;
+      }
+      
+      if (data && (data.adv_role === 'adv_giver' || data.adv_role === 'adv_seeker')) {
+        setOtherUserAdvRole(data.adv_role);
+      }
+    } catch (error) {
+      console.error('Error loading other user adv_role:', error);
+    }
+  };
+
   const loadMessages = async () => {
     if (!currentConversationId) {
       setMessages([]);
@@ -133,6 +159,8 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       setIsFetchingMessages(true);
       const msgs = await messagingService.getMessages(currentConversationId);
       setMessages(msgs);
+      // Load other user's adv_role
+      await loadOtherUserAdvRole();
       // Scroll to bottom after messages load
       setTimeout(() => scrollToBottom(), 200);
     } catch (error) {
@@ -178,6 +206,9 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
           
           targetConversationId = conversation.id;
           setCurrentConversationId(targetConversationId);
+          
+          // Load other user's adv_role for the new conversation
+          await loadOtherUserAdvRole();
           
           // Notify parent component that conversation was created
           if (onConversationCreated) {
@@ -345,12 +376,22 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         <View
           style={[
             styles.messageBubble,
-            isOwnMessage ? styles.userMessageBubble : styles.botMessageBubble,
+            isOwnMessage 
+              ? styles.userMessageBubble 
+              : [
+                  styles.botMessageBubble,
+                  otherUserAdvRole === 'adv_giver' && styles.botMessageBubbleGiveAdv,
+                  otherUserAdvRole === 'adv_seeker' && styles.botMessageBubbleGetAdv,
+                ],
           ]}
         >
           {/* Message text container with gap */}
           <View style={styles.messageTextContainer}>
-            <Text style={isOwnMessage ? styles.userMessageText : styles.botMessageText}>
+            <Text style={[
+              isOwnMessage ? styles.userMessageText : styles.botMessageText,
+              !isOwnMessage && otherUserAdvRole === 'adv_giver' && styles.botMessageTextGiveAdv,
+              !isOwnMessage && otherUserAdvRole === 'adv_seeker' && styles.botMessageTextGetAdv,
+            ]}>
               {message.body || ''}
             </Text>
           </View>
@@ -753,6 +794,12 @@ const styles = StyleSheet.create({
       boxShadow: '0px 0px 20px rgba(0, 0, 0, 0.08)',
     }),
   },
+  botMessageBubbleGiveAdv: {
+    backgroundColor: '#05BCD3',
+  },
+  botMessageBubbleGetAdv: {
+    backgroundColor: '#DBCDBC',
+  },
   messageTextContainer: {
     marginBottom: 10, // Gap between text and timestamp (Figma: gap-[10px])
     width: '100%',
@@ -770,6 +817,12 @@ const styles = StyleSheet.create({
     fontWeight: '500', // Figma: font-medium
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
     lineHeight: 16, // Figma: leading-[normal]
+  },
+  botMessageTextGiveAdv: {
+    color: '#FFFFFF',
+  },
+  botMessageTextGetAdv: {
+    color: '#333333', // Keep dark text for beige background
   },
   timestampContainer: {
     alignItems: 'flex-start',
