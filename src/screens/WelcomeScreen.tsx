@@ -20,6 +20,7 @@ import { supabaseAuthService } from '../services/auth/supabaseAuthService';
 import { isSupabaseConfigured } from '../config/supabase';
 import { useOnboarding } from '../context/OnboardingContext';
 import { getImageUrl } from '../services/media/imageService';
+import { useIsMobile, responsiveWidth } from '../utils/responsive';
 
 interface WelcomeScreenProps {
   onGetStarted: () => void;
@@ -62,9 +63,11 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
   const [isLoading, setIsLoading] = useState(false);
   const { setUser, updateFormData, checkOnboardingStatus, isComplete } = useOnboarding();
   
-  // Detect if we're on mobile (native or web on mobile device)
-  const isMobile = Platform.OS === 'ios' || Platform.OS === 'android' || 
-    (Platform.OS === 'web' && typeof window !== 'undefined' && window.innerWidth <= 768);
+  // Use responsive hook for accurate mobile detection
+  const isMobile = useIsMobile();
+  
+  // Calculate responsive button width
+  const buttonWidth = responsiveWidth(90, 280, 320, 0);
 
   useEffect(() => {
     // Load Montserrat font from Google Fonts for web
@@ -333,7 +336,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
             <TouchableOpacity
               onPress={handleGoogleSignIn}
               disabled={isLoading}
-              style={[styles.getStartedButton, isLoading && styles.buttonDisabled]}
+              style={[styles.getStartedButton, { width: buttonWidth }, isLoading && styles.buttonDisabled]}
               activeOpacity={0.8}
             >
               <View style={styles.buttonContent}>
@@ -349,7 +352,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
               <Button
                 title="Demo Chat"
                 onPress={onDemoChat}
-                style={[styles.getStartedButton, styles.demoButton]}
+                style={[styles.getStartedButton, { width: buttonWidth }, styles.demoButton]}
               />
             )}
             </View>
@@ -424,9 +427,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   getStartedButton: {
-    width: '90%',
-    maxWidth: 320,
-    minWidth: 280,
+    // Width is set dynamically via inline style using responsiveWidth
     backgroundColor: colors.white,
     borderWidth: 1,
     borderColor: '#d8dadc',
