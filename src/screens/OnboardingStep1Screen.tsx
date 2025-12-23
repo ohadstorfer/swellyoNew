@@ -12,13 +12,7 @@ import { Text } from '../components/Text';
 import { BoardCarousel } from '../components/BoardCarousel';
 import { colors, spacing, typography } from '../styles/theme';
 import { useOnboarding } from '../context/OnboardingContext';
-
-// Helper to detect if we're on desktop web (not mobile web)
-const isDesktopWeb = () => {
-  if (Platform.OS !== 'web') return false;
-  if (typeof window === 'undefined') return false;
-  return window.innerWidth > 768; // Desktop breakpoint
-};
+import { useIsDesktopWeb } from '../utils/responsive';
 
 interface OnboardingStep1ScreenProps {
   onNext: (data: OnboardingData) => void;
@@ -83,9 +77,14 @@ export const OnboardingStep1Screen: React.FC<OnboardingStep1ScreenProps> = ({
   isLoading = false,
 }) => {
   const { markOnboardingComplete } = useOnboarding();
+  const isDesktop = useIsDesktopWeb();
   const [selectedBoardId, setSelectedBoardId] = useState<number>(
     initialData.boardType ?? 0
   );
+  
+  // Calculate responsive dimensions
+  const progressBarWidth = isDesktop ? 300 : 237;
+  const buttonContainerMaxWidth = isDesktop ? 400 : undefined;
 
   const handleBoardSelect = (board: BoardType) => {
     setSelectedBoardId(board.id);
@@ -116,9 +115,9 @@ export const OnboardingStep1Screen: React.FC<OnboardingStep1ScreenProps> = ({
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.content}>
+      <View style={[styles.content, isDesktop && styles.contentDesktop]}>
         {/* Header */}
-        <View style={styles.header}>
+        <View style={[styles.header, isDesktop && styles.headerDesktop]}>
           <TouchableOpacity onPress={onBack} style={styles.backButton}>
             <Ionicons name="arrow-back" size={24} color="#222B30" />
           </TouchableOpacity>
@@ -131,21 +130,21 @@ export const OnboardingStep1Screen: React.FC<OnboardingStep1ScreenProps> = ({
         </View>
 
         {/* Progress Bar */}
-        <View style={styles.progressContainer}>
-          <View style={styles.progressBar}>
+        <View style={[styles.progressContainer, isDesktop && styles.progressContainerDesktop]}>
+          <View style={[styles.progressBar, { width: progressBarWidth }]}>
             <View style={[styles.progressFill, { width: '20%' }]} />
           </View>
         </View>
 
         {/* Title */}
-        <View style={styles.titleContainer}>
+        <View style={[styles.titleContainer, isDesktop && styles.titleContainerDesktop]}>
           <Text style={styles.title}>
             Nice to meet you, {initialData.nickname || 'Jake'}!
           </Text>
         </View>
 
         {/* Subtitle */}
-        <View style={styles.subtitleContainer}>
+        <View style={[styles.subtitleContainer, isDesktop && styles.subtitleContainerDesktop]}>
           <Text style={styles.subtitle}>What is your choice style?</Text>
           <Text style={styles.description}>
             Select one... you can add more later!
@@ -153,7 +152,7 @@ export const OnboardingStep1Screen: React.FC<OnboardingStep1ScreenProps> = ({
         </View>
 
         {/* Board Carousel */}
-        <View style={styles.carouselContainer}>
+        <View style={[styles.carouselContainer, isDesktop && styles.carouselContainerDesktop]}>
           <BoardCarousel
             boards={BOARD_TYPES}
             selectedBoardId={selectedBoardId}
@@ -162,7 +161,7 @@ export const OnboardingStep1Screen: React.FC<OnboardingStep1ScreenProps> = ({
         </View>
 
         {/* Next Button */}
-        <View style={styles.buttonContainer}>
+        <View style={[styles.buttonContainer, isDesktop && styles.buttonContainerDesktop, buttonContainerMaxWidth && { maxWidth: buttonContainerMaxWidth }]}>
           <TouchableOpacity 
             onPress={handleNext}
             activeOpacity={0.8}
@@ -193,11 +192,11 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-    ...(isDesktopWeb() && {
-      maxWidth: 800,
-      alignSelf: 'center',
-      width: '100%',
-    }),
+  },
+  contentDesktop: {
+    maxWidth: 800,
+    alignSelf: 'center',
+    width: '100%',
   },
   header: {
     flexDirection: 'row',
@@ -206,10 +205,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingTop: Platform.OS === 'web' ? spacing.md : spacing.sm,
     height: 44,
-    ...(isDesktopWeb() && {
-      paddingHorizontal: spacing.xl,
-      paddingTop: spacing.lg,
-    }),
+  },
+  headerDesktop: {
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.lg,
   },
   backButton: {
     width: 60,
@@ -244,19 +243,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.md,
     alignItems: 'center',
-    ...(isDesktopWeb() && {
-      paddingVertical: spacing.sm,
-    }),
+  },
+  progressContainerDesktop: {
+    paddingVertical: spacing.sm,
   },
   progressBar: {
-    width: 237,
+    // Width is set dynamically via inline style
     height: 4,
     backgroundColor: colors.progressBackground,
     borderRadius: 8,
     overflow: 'hidden',
-    ...(isDesktopWeb() && {
-      width: 300,
-    }),
   },
   progressFill: {
     height: '100%',
@@ -268,10 +264,10 @@ const styles = StyleSheet.create({
     paddingTop: spacing.lg,
     alignItems: 'center',
     paddingBottom: 36, // gap-[36px] from Figma
-    ...(isDesktopWeb() && {
-      paddingTop: spacing.xl,
-      paddingBottom: 36,
-    }),
+  },
+  titleContainerDesktop: {
+    paddingTop: spacing.xl,
+    paddingBottom: 36,
   },
   title: {
     fontSize: 24, // var(--Size-2-xl, 24px)
@@ -283,20 +279,16 @@ const styles = StyleSheet.create({
     color: '#0788B0', // var(--Text-brand, #0788B0)
     textAlign: 'center',
     lineHeight: 28.8, // 120% of 24px
-    ...(isDesktopWeb() && {
-      fontSize: 24,
-      lineHeight: 28.8,
-    }),
   },
   subtitleContainer: {
     paddingHorizontal: spacing.lg,
     alignItems: 'center',
     gap: 8, // gap-[8px] from Figma
     marginTop: -8, // Adjust to account for titleContainer paddingBottom
-    ...(isDesktopWeb() && {
-      paddingTop: 0,
-      paddingBottom: spacing.sm,
-    }),
+  },
+  subtitleContainerDesktop: {
+    paddingTop: 0,
+    paddingBottom: spacing.sm,
   },
   subtitle: {
     fontSize: 18, // var(--Size-lg, 18px)
@@ -324,20 +316,19 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     marginTop: -spacing.xl,
-    ...(isDesktopWeb() && {
-      marginTop: -spacing.lg,
-      paddingHorizontal: spacing.lg,
-    }),
+  },
+  carouselContainerDesktop: {
+    marginTop: -spacing.lg,
+    paddingHorizontal: spacing.lg,
   },
   buttonContainer: {
     paddingHorizontal: spacing.xl,
     paddingBottom: spacing.xl,
-    ...(isDesktopWeb() && {
-      paddingHorizontal: spacing.xxl,
-      paddingBottom: spacing.xxl,
-      maxWidth: 400,
-      alignSelf: 'center',
-    }),
+  },
+  buttonContainerDesktop: {
+    paddingHorizontal: spacing.xxl,
+    paddingBottom: spacing.xxl,
+    alignSelf: 'center',
   },
   gradientButton: {
     height: 56,
