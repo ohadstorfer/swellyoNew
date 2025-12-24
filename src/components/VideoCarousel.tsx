@@ -294,15 +294,90 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
     (player: any) => {
       if (player && selectedVideo.videoUrl) {
         try {
+          // Set properties required for autoplay
           player.loop = true;
           player.muted = true;
-          player.play();
+          
+          // Try to play immediately
+          const playPromise = player.play();
+          if (playPromise !== undefined) {
+            playPromise.catch((error: any) => {
+              // Autoplay may be blocked, will retry in useEffect
+              if (__DEV__ && error.name !== 'NotAllowedError') {
+                console.warn('[VideoCarousel] Initial play attempt:', error.message);
+              }
+            });
+          }
         } catch (error) {
           console.error('Error initializing video player:', error);
         }
       }
     }
   );
+
+  // Robust autoplay implementation - tries multiple times and handles all cases
+  useEffect(() => {
+    if (!mainVideoPlayer || !selectedVideo.videoUrl) return;
+
+    let isMounted = true;
+    let hasPlayed = false;
+
+    // Function to attempt playing the video
+    const attemptPlay = async () => {
+      if (!isMounted || !mainVideoPlayer || hasPlayed) return;
+
+      try {
+        // Ensure properties are set before playing
+        mainVideoPlayer.loop = true;
+        mainVideoPlayer.muted = true;
+
+        // Play and handle promise
+        const playPromise = mainVideoPlayer.play();
+        if (playPromise !== undefined) {
+          await playPromise;
+          hasPlayed = true;
+          if (__DEV__) {
+            console.log('[VideoCarousel] Video playing successfully');
+          }
+        }
+      } catch (error: any) {
+        // Silently handle autoplay restrictions - will retry
+        if (__DEV__ && error.name !== 'NotAllowedError') {
+          console.warn('[VideoCarousel] Play attempt failed:', error.message);
+        }
+        hasPlayed = false;
+      }
+    };
+
+    // Try to play immediately
+    attemptPlay();
+
+    // Retry on a short delay (helps with some browsers)
+    const retryTimeout = setTimeout(() => {
+      if (!hasPlayed) {
+        attemptPlay();
+      }
+    }, 100);
+
+    // For web, also try on visibility change (when tab becomes visible)
+    let visibilityHandler: (() => void) | null = null;
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      visibilityHandler = () => {
+        if (document.visibilityState === 'visible' && !hasPlayed) {
+          attemptPlay();
+        }
+      };
+      document.addEventListener('visibilitychange', visibilityHandler);
+    }
+
+    return () => {
+      isMounted = false;
+      clearTimeout(retryTimeout);
+      if (visibilityHandler && typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', visibilityHandler);
+      }
+    };
+  }, [mainVideoPlayer, selectedVideo.videoUrl]);
 
   // Update player source when video changes
   useEffect(() => {
@@ -315,12 +390,19 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
       
       mainVideoPlayer.replaceAsync(videoUrl).then(() => {
         if (mainVideoPlayer) {
+          // Set properties required for autoplay
           mainVideoPlayer.loop = true;
           mainVideoPlayer.muted = true;
-          try {
-            mainVideoPlayer.play();
-          } catch (playError: any) {
-            console.error('Error playing video:', playError);
+          
+          // Try to play after source is replaced
+          const playPromise = mainVideoPlayer.play();
+          if (playPromise !== undefined) {
+            playPromise.catch((playError: any) => {
+              // Autoplay may be blocked, but the useEffect above will retry
+              if (__DEV__ && playError.name !== 'NotAllowedError') {
+                console.warn('[VideoCarousel] Play after replace failed:', playError.message);
+              }
+            });
           }
         }
       }).catch((error: any) => {

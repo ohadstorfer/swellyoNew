@@ -520,7 +520,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'flex-end',
     alignItems: 'center',
-    paddingHorizontal: spacing.xl,
+    paddingHorizontal: spacing.sm,
     paddingBottom: 0, // No padding, thumbnails and button handle their own spacing
     width: '100%',
     minHeight: 0, // Allow flex to shrink
