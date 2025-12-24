@@ -316,11 +316,78 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
   );
 
   // Robust autoplay implementation - tries multiple times and handles all cases
+  // Also sets playsInline for iOS Safari to prevent fullscreen
   useEffect(() => {
     if (!mainVideoPlayer || !selectedVideo.videoUrl) return;
 
     let isMounted = true;
     let hasPlayed = false;
+
+    // For web, ensure playsInline is set on the underlying video element (iOS Safari)
+    // Also prevent all video interactions
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      // Find the video element and set playsInline attribute
+      const setPlaysInline = () => {
+        // Find all video elements (there might be multiple)
+        const videoElements = document.querySelectorAll('video');
+        videoElements.forEach((videoElement) => {
+          // Set playsInline attributes for iOS Safari
+          videoElement.setAttribute('playsinline', 'true');
+          videoElement.setAttribute('webkit-playsinline', 'true');
+          videoElement.setAttribute('x5-playsinline', 'true'); // For some Android browsers
+          
+          // Prevent controls and interactions
+          videoElement.controls = false;
+          videoElement.setAttribute('controls', 'false');
+          
+          // Prevent fullscreen
+          videoElement.setAttribute('disablePictureInPicture', 'true');
+          
+          // Prevent video interactions via event listeners
+          const preventInteraction = (e: Event) => {
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+          };
+          
+          videoElement.addEventListener('touchstart', preventInteraction, { passive: false });
+          videoElement.addEventListener('touchend', preventInteraction, { passive: false });
+          videoElement.addEventListener('touchmove', preventInteraction, { passive: false });
+          videoElement.addEventListener('click', preventInteraction, { passive: false });
+          videoElement.addEventListener('dblclick', preventInteraction, { passive: false });
+          
+          // Prevent context menu
+          videoElement.addEventListener('contextmenu', preventInteraction, { passive: false });
+          
+          // Set CSS to prevent interactions
+          (videoElement.style as any).pointerEvents = 'none';
+          (videoElement.style as any).userSelect = 'none';
+          (videoElement.style as any).WebkitUserSelect = 'none';
+          (videoElement.style as any).touchAction = 'none';
+          (videoElement.style as any).WebkitTouchCallout = 'none';
+        });
+      };
+      
+      // Try immediately and after delays (video element might not be ready)
+      setPlaysInline();
+      setTimeout(setPlaysInline, 100);
+      setTimeout(setPlaysInline, 500);
+      setTimeout(setPlaysInline, 1000);
+      
+      // Also listen for new video elements being added
+      const observer = new MutationObserver(() => {
+        setPlaysInline();
+      });
+      
+      observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+      });
+      
+      return () => {
+        observer.disconnect();
+      };
+    }
 
     // Function to attempt playing the video
     const attemptPlay = async () => {
@@ -545,8 +612,25 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
   return (
     <View style={[styles.container, { flex: 1, justifyContent: 'flex-end' }]}>
       {/* Main Video Display */}
-      <View style={styles.mainVideoContainer} pointerEvents="box-none">
-        <View style={[styles.videoWrapper, { width: videoDimensions.width, height: videoDimensions.height }]} pointerEvents="none">
+      <View style={styles.mainVideoContainer}>
+        <View 
+          style={[styles.videoWrapper, { width: videoDimensions.width, height: videoDimensions.height }]}
+          {...(Platform.OS === 'web' && {
+            // Prevent default touch behaviors on web (especially iOS Safari)
+            onTouchStart: (e: any) => {
+              e.preventDefault();
+              e.stopPropagation();
+            },
+            onTouchMove: (e: any) => {
+              e.preventDefault();
+              e.stopPropagation();
+            },
+            onTouchEnd: (e: any) => {
+              e.preventDefault();
+              e.stopPropagation();
+            },
+          } as any)}
+        >
           <Animated.View
             style={[
               styles.mainVideo,
@@ -575,6 +659,30 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
               />
             )}
           </Animated.View>
+          
+          {/* Transparent overlay to prevent video interactions on iOS Safari */}
+          <View 
+            style={styles.videoOverlay}
+            {...(Platform.OS === 'web' && {
+              // Prevent default touch behaviors on web (especially iOS Safari)
+              onTouchStart: (e: any) => {
+                e.preventDefault();
+                e.stopPropagation();
+              },
+              onTouchMove: (e: any) => {
+                e.preventDefault();
+                e.stopPropagation();
+              },
+              onTouchEnd: (e: any) => {
+                e.preventDefault();
+                e.stopPropagation();
+              },
+              onClick: (e: any) => {
+                e.preventDefault();
+                e.stopPropagation();
+              },
+            } as any)}
+          />
           
           {/* Gradient Overlay */}
           {/* <LinearGradient
@@ -605,9 +713,6 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
           <View style={styles.titleContainer}>
             <Text style={styles.videoTitle}>{selectedVideo.name}</Text>
           </View>
-          
-          {/* Transparent overlay to prevent video interactions on iOS */}
-          <View style={styles.videoOverlay} />
         </View>
       </View>
 
@@ -716,9 +821,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#000',
     alignSelf: 'center',
     // Prevent all interactions with video wrapper
-    pointerEvents: 'none',
     ...(Platform.OS === 'web' && {
-      // Prevent video controls and interactions on web
+      // Prevent video controls and interactions on web (especially iOS Safari)
       userSelect: 'none' as any,
       WebkitUserSelect: 'none' as any,
       touchAction: 'none' as any,
@@ -749,8 +853,7 @@ const styles = StyleSheet.create({
       // Apply to all web (desktop and mobile web)
       objectFit: 'cover' as any,
       objectPosition: 'center center' as any,
-      // Prevent video controls on web browsers
-      pointerEvents: 'none' as any,
+      // Prevent video controls on web browsers (especially iOS Safari)
       userSelect: 'none' as any,
       WebkitUserSelect: 'none' as any,
       touchAction: 'none' as any,
@@ -758,6 +861,17 @@ const styles = StyleSheet.create({
       WebkitTouchCallout: 'none' as any,
       WebkitTapHighlightColor: 'transparent' as any,
     }),
+  },
+  videoOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'transparent',
+    zIndex: 10,
+    // This overlay catches all touch events to prevent video interaction
+    // pointerEvents: 'auto' is implicit, will block all interactions with video
   },
   gradientOverlay: {
     position: 'absolute',
@@ -789,17 +903,6 @@ const styles = StyleSheet.create({
     bottom: 20,
     left: 20,
     right: 20,
-    pointerEvents: 'none', // Allow clicks to pass through to overlay
-  },
-  videoOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'transparent',
-    // This overlay catches all touch events to prevent video interaction
-    // pointerEvents: 'auto' is implicit, will block all interactions with video
   },
   videoTitle: {
     color: '#FFF',
