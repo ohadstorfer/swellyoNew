@@ -545,8 +545,8 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
   return (
     <View style={[styles.container, { flex: 1, justifyContent: 'flex-end' }]}>
       {/* Main Video Display */}
-      <View style={styles.mainVideoContainer}>
-        <View style={[styles.videoWrapper, { width: videoDimensions.width, height: videoDimensions.height }]}>
+      <View style={styles.mainVideoContainer} pointerEvents="box-none">
+        <View style={[styles.videoWrapper, { width: videoDimensions.width, height: videoDimensions.height }]} pointerEvents="none">
           <Animated.View
             style={[
               styles.mainVideo,
@@ -554,16 +554,19 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
                 opacity: fadeAnim,
               },
             ]}
+            pointerEvents="none"
           >
             {selectedVideo.videoUrl ? (
-              <VideoView
-                player={mainVideoPlayer}
-                style={styles.videoPlayer}
-                contentFit="cover"
-                nativeControls={false}
-                allowsFullscreen={false}
-                allowsPictureInPicture={false}
-              />
+              <View style={styles.videoPlayerContainer} pointerEvents="none">
+                <VideoView
+                  player={mainVideoPlayer}
+                  style={styles.videoPlayer}
+                  contentFit="cover"
+                  nativeControls={false}
+                  allowsFullscreen={false}
+                  allowsPictureInPicture={false}
+                />
+              </View>
             ) : (
               <Image
                 source={{ uri: selectedVideo.thumbnailUrl }}
@@ -602,6 +605,9 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
           <View style={styles.titleContainer}>
             <Text style={styles.videoTitle}>{selectedVideo.name}</Text>
           </View>
+          
+          {/* Transparent overlay to prevent video interactions on iOS */}
+          <View style={styles.videoOverlay} />
         </View>
       </View>
 
@@ -709,19 +715,48 @@ const styles = StyleSheet.create({
     position: 'relative',
     backgroundColor: '#000',
     alignSelf: 'center',
+    // Prevent all interactions with video wrapper
+    pointerEvents: 'none',
+    ...(Platform.OS === 'web' && {
+      // Prevent video controls and interactions on web
+      userSelect: 'none' as any,
+      WebkitUserSelect: 'none' as any,
+      touchAction: 'none' as any,
+      WebkitTouchCallout: 'none' as any,
+    }),
   },
   mainVideo: {
     width: '100%',
     height: '100%',
     overflow: 'hidden',
   },
+  videoPlayerContainer: {
+    width: '100%',
+    height: '100%',
+    pointerEvents: 'none', // Prevent all interactions with video
+    ...(Platform.OS === 'web' && {
+      // Prevent video controls and interactions on web
+      userSelect: 'none' as any,
+      WebkitUserSelect: 'none' as any,
+      touchAction: 'none' as any,
+    }),
+  },
   videoPlayer: {
     width: '100%',
     height: '100%',
+    pointerEvents: 'none', // Prevent all interactions with video
     ...(Platform.OS === 'web' && {
       // Apply to all web (desktop and mobile web)
       objectFit: 'cover' as any,
       objectPosition: 'center center' as any,
+      // Prevent video controls on web browsers
+      pointerEvents: 'none' as any,
+      userSelect: 'none' as any,
+      WebkitUserSelect: 'none' as any,
+      touchAction: 'none' as any,
+      // Prevent context menu and video controls
+      WebkitTouchCallout: 'none' as any,
+      WebkitTapHighlightColor: 'transparent' as any,
     }),
   },
   gradientOverlay: {
@@ -754,6 +789,17 @@ const styles = StyleSheet.create({
     bottom: 20,
     left: 20,
     right: 20,
+    pointerEvents: 'none', // Allow clicks to pass through to overlay
+  },
+  videoOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'transparent',
+    // This overlay catches all touch events to prevent video interaction
+    // pointerEvents: 'auto' is implicit, will block all interactions with video
   },
   videoTitle: {
     color: '#FFF',
