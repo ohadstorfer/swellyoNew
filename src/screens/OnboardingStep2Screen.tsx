@@ -208,7 +208,7 @@ export const OnboardingStep2Screen: React.FC<OnboardingStep2ScreenProps> = ({
     const mainVideoArea = availableVideoHeight;
     
     // Total height covers up to the end of main video area
-    return headerHeight + progressHeight + titleHeight + mainVideoArea + 48; // 48px for rounded bottom
+    return headerHeight + progressHeight + titleHeight + mainVideoArea + 35; // 48px for rounded bottom
   };
   
   const backgroundVideoHeight = calculateBackgroundVideoHeight();
