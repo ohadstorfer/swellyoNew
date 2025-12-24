@@ -324,21 +324,111 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
     let hasPlayed = false;
 
     // For web, ensure playsInline is set on the underlying video element (iOS Safari)
-    // Also prevent all video interactions
+    // Also prevent all video interactions and hide controls
     if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      // Inject global CSS to hide all video controls
+      const injectControlHidingCSS = () => {
+        const styleId = 'video-carousel-hide-controls';
+        if (document.getElementById(styleId)) return; // Already injected
+        
+        const style = document.createElement('style');
+        style.id = styleId;
+        style.textContent = `
+          /* Hide all video controls */
+          video::-webkit-media-controls {
+            display: none !important;
+            opacity: 0 !important;
+            visibility: hidden !important;
+            pointer-events: none !important;
+          }
+          video::-webkit-media-controls-enclosure {
+            display: none !important;
+            opacity: 0 !important;
+            visibility: hidden !important;
+            pointer-events: none !important;
+          }
+          video::-webkit-media-controls-panel {
+            display: none !important;
+            opacity: 0 !important;
+            visibility: hidden !important;
+            pointer-events: none !important;
+          }
+          video::-webkit-media-controls-play-button {
+            display: none !important;
+            opacity: 0 !important;
+            visibility: hidden !important;
+            pointer-events: none !important;
+          }
+          video::-webkit-media-controls-start-playback-button {
+            display: none !important;
+            opacity: 0 !important;
+            visibility: hidden !important;
+            pointer-events: none !important;
+          }
+          video::-webkit-media-controls-timeline {
+            display: none !important;
+            opacity: 0 !important;
+            visibility: hidden !important;
+            pointer-events: none !important;
+          }
+          video::-webkit-media-controls-current-time-display {
+            display: none !important;
+            opacity: 0 !important;
+            visibility: hidden !important;
+            pointer-events: none !important;
+          }
+          video::-webkit-media-controls-time-remaining-display {
+            display: none !important;
+            opacity: 0 !important;
+            visibility: hidden !important;
+            pointer-events: none !important;
+          }
+          video::-webkit-media-controls-mute-button {
+            display: none !important;
+            opacity: 0 !important;
+            visibility: hidden !important;
+            pointer-events: none !important;
+          }
+          video::-webkit-media-controls-volume-slider {
+            display: none !important;
+            opacity: 0 !important;
+            visibility: hidden !important;
+            pointer-events: none !important;
+          }
+          video::-webkit-media-controls-fullscreen-button {
+            display: none !important;
+            opacity: 0 !important;
+            visibility: hidden !important;
+            pointer-events: none !important;
+          }
+          /* Hide controls for all browsers */
+          video::--webkit-media-controls {
+            display: none !important;
+          }
+          /* Ensure video has no controls attribute */
+          video[controls] {
+            -webkit-appearance: none !important;
+          }
+        `;
+        document.head.appendChild(style);
+      };
+      
+      // Inject CSS immediately
+      injectControlHidingCSS();
+      
       // Find the video element and set playsInline attribute
       const setPlaysInline = () => {
         // Find all video elements (there might be multiple)
         const videoElements = document.querySelectorAll('video');
         videoElements.forEach((videoElement) => {
+          // Remove controls attribute completely (not just set to false)
+          videoElement.removeAttribute('controls');
+          videoElement.controls = false;
+          
           // Set playsInline attributes for iOS Safari
           videoElement.setAttribute('playsinline', 'true');
           videoElement.setAttribute('webkit-playsinline', 'true');
           videoElement.setAttribute('x5-playsinline', 'true'); // For some Android browsers
-          
-          // Prevent controls and interactions
-          videoElement.controls = false;
-          videoElement.setAttribute('controls', 'false');
           
           // Prevent fullscreen
           videoElement.setAttribute('disablePictureInPicture', 'true');
@@ -359,12 +449,16 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
           // Prevent context menu
           videoElement.addEventListener('contextmenu', preventInteraction, { passive: false });
           
-          // Set CSS to prevent interactions
+          // Set CSS to prevent interactions and hide controls
           (videoElement.style as any).pointerEvents = 'none';
           (videoElement.style as any).userSelect = 'none';
           (videoElement.style as any).WebkitUserSelect = 'none';
           (videoElement.style as any).touchAction = 'none';
           (videoElement.style as any).WebkitTouchCallout = 'none';
+          
+          // Force hide controls with inline styles
+          (videoElement.style as any).WebkitAppearance = 'none';
+          (videoElement.style as any).appearance = 'none';
         });
       };
       
@@ -649,6 +743,11 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
                   nativeControls={false}
                   allowsFullscreen={false}
                   allowsPictureInPicture={false}
+                  {...(Platform.OS === 'web' && {
+                    // Web-specific props to prevent controls
+                    controls: false,
+                    disablePictureInPicture: true,
+                  } as any)}
                 />
               </View>
             ) : (
@@ -860,6 +959,9 @@ const styles = StyleSheet.create({
       // Prevent context menu and video controls
       WebkitTouchCallout: 'none' as any,
       WebkitTapHighlightColor: 'transparent' as any,
+      // Hide controls with CSS
+      WebkitAppearance: 'none' as any,
+      appearance: 'none' as any,
     }),
   },
   videoOverlay: {
