@@ -8,11 +8,14 @@ import {
   TextInput,
   Image,
 } from 'react-native';
+import { TextInput as PaperTextInput } from 'react-native-paper';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 // @ts-ignore - react-native-keyboard-aware-scroll-view types may not be available
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import Svg, { Circle, Rect, Defs, Filter, FeFlood, FeColorMatrix, FeOffset, FeGaussianBlur, FeComposite, FeBlend, Path } from 'react-native-svg';
+// Platform-specific wrapper - automatically uses .native.tsx on native and .web.tsx on web
+import { CountryPicker, Country, CountryCode } from '../components/CountryPickerWrapper';
 // Image picker will be conditionally imported
 import { Text } from '../components/Text';
 import { colors, spacing, typography } from '../styles/theme';
@@ -30,6 +33,17 @@ interface FieldProps {
   label: string;
   value: string;
   onChangeText: (text: string) => void;
+  placeholder?: string;
+  width?: number;
+  style?: any;
+  keyboardType?: 'default' | 'numeric' | 'number-pad' | 'phone-pad';
+  numericOnly?: boolean;
+}
+
+interface CountryFieldProps {
+  label: string;
+  value: string;
+  onSelect: (countryName: string) => void;
   placeholder?: string;
   width?: number;
   style?: any;
@@ -69,15 +83,28 @@ const Field: React.FC<FieldProps> = ({
   placeholder,
   width,
   style,
+  keyboardType = 'default',
+  numericOnly = false,
 }) => {
   const [isFocused, setIsFocused] = useState(false);
-  const inputRef = useRef<TextInput>(null);
+  const inputRef = useRef<any>(null);
   const hasValue = value.trim().length > 0;
   const showCheck = hasValue && !isFocused;
 
   const handleContainerPress = () => {
     if (inputRef.current) {
       inputRef.current.focus();
+    }
+  };
+
+  // Handle text change with numeric filtering if needed
+  const handleTextChange = (text: string) => {
+    if (numericOnly) {
+      // Only allow digits
+      const numericText = text.replace(/[^0-9]/g, '');
+      onChangeText(numericText);
+    } else {
+      onChangeText(text);
     }
   };
 
@@ -95,29 +122,54 @@ const Field: React.FC<FieldProps> = ({
       {/* Pencil Icon on Left - always shown */}
       <PencilIcon size={24} />
       
-      {/* Input Container - Always show TextInput for editing */}
+      {/* Input Container - Use React Native Paper TextInput */}
       <View style={styles.inputContainer}>
-      <TextInput
+        <PaperTextInput
           ref={inputRef}
-          style={[
-            inputStyle,
-            Platform.OS === 'web' && styles.fieldInputWeb,
-          ]}
-        value={value}
-        onChangeText={onChangeText}
-        placeholder={placeholder || label}
-        placeholderTextColor={colors.textSecondary}
+          mode="flat"
+          value={value}
+          onChangeText={handleTextChange}
+          placeholder={placeholder || label}
           onFocus={() => setIsFocused(true)}
           onBlur={() => setIsFocused(false)}
           editable={true}
-          selectTextOnFocus={false}
-          clearButtonMode="never"
           autoCapitalize="none"
           autoCorrect={false}
+          keyboardType={keyboardType}
           returnKeyType="next"
           blurOnSubmit={true}
-      />
-    </View>
+          dense={false}
+          style={[
+            styles.paperTextInput,
+            inputStyle,
+            Platform.OS === 'web' && styles.fieldInputWeb,
+            {
+              // fontSize and lineHeight come from inputStyle (fieldInputFilled or fieldInput)
+              color: hasValue && !isFocused ? colors.textPrimary : colors.textSecondary,
+            },
+          ]}
+          contentStyle={[
+            styles.paperTextInputContent,
+            {
+              // fontSize and lineHeight come from inputStyle (fieldInputFilled or fieldInput)
+              color: hasValue && !isFocused ? colors.textPrimary : colors.textSecondary,
+            },
+          ]}
+          underlineColor="transparent"
+          activeUnderlineColor="transparent"
+          selectionColor={colors.primary || '#00A2B6'}
+          placeholderTextColor={colors.textSecondary}
+          theme={{
+            colors: {
+              primary: colors.primary || '#00A2B6',
+              text: hasValue && !isFocused ? colors.textPrimary : colors.textSecondary,
+              placeholder: colors.textSecondary,
+              background: 'transparent',
+              onSurface: hasValue && !isFocused ? colors.textPrimary : colors.textSecondary,
+            },
+          }}
+        />
+      </View>
 
       {/* Check Icon on Right when field has value and not focused */}
       {showCheck && (
@@ -126,6 +178,260 @@ const Field: React.FC<FieldProps> = ({
         </View>
       )}
     </TouchableOpacity>
+  );
+};
+
+// Comprehensive country list for web
+const COUNTRIES = [
+  'Afghanistan', 'Albania', 'Algeria', 'Argentina', 'Australia', 'Austria',
+  'Bahrain', 'Bangladesh', 'Belgium', 'Brazil', 'Bulgaria', 'Canada',
+  'Chile', 'China', 'Colombia', 'Croatia', 'Czech Republic', 'Denmark',
+  'Egypt', 'Estonia', 'Finland', 'France', 'Germany', 'Greece',
+  'Hong Kong', 'Hungary', 'Iceland', 'India', 'Indonesia', 'Ireland',
+  'Israel', 'Italy', 'Japan', 'Jordan', 'Kenya', 'Kuwait',
+  'Latvia', 'Lebanon', 'Lithuania', 'Luxembourg', 'Malaysia', 'Mexico',
+  'Morocco', 'Netherlands', 'New Zealand', 'Nigeria', 'Norway', 'Oman',
+  'Pakistan', 'Peru', 'Philippines', 'Poland', 'Portugal', 'Qatar',
+  'Romania', 'Russia', 'Saudi Arabia', 'Singapore', 'Slovakia', 'Slovenia',
+  'South Africa', 'South Korea', 'Spain', 'Sweden', 'Switzerland', 'Taiwan',
+  'Thailand', 'Turkey', 'Ukraine', 'United Arab Emirates', 'United Kingdom', 'United States',
+  'Vietnam', 'Yemen'
+].sort();
+
+// Country Field Component - matches Field styling but uses CountryPicker (native) or custom dropdown (web)
+const CountryField: React.FC<CountryFieldProps> = ({
+  label,
+  value,
+  onSelect,
+  placeholder,
+  width,
+  style,
+}) => {
+  const [isPickerVisible, setIsPickerVisible] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [countryCode, setCountryCode] = useState<any>('US');
+  const hasValue = value.trim().length > 0;
+  const showCheck = hasValue;
+
+  // Try to find country code from country name
+  const getCountryCodeFromName = (countryName: string): string => {
+    const nameToCode: Record<string, string> = {
+      'United States': 'US', 'United Kingdom': 'GB', 'Canada': 'CA',
+      'Australia': 'AU', 'Germany': 'DE', 'France': 'FR', 'Spain': 'ES',
+      'Italy': 'IT', 'Japan': 'JP', 'China': 'CN', 'India': 'IN',
+      'Brazil': 'BR', 'Mexico': 'MX', 'Netherlands': 'NL', 'Sweden': 'SE',
+      'Norway': 'NO', 'Denmark': 'DK', 'Finland': 'FI', 'Poland': 'PL',
+      'Portugal': 'PT', 'Greece': 'GR', 'Ireland': 'IE', 'Switzerland': 'CH',
+      'Austria': 'AT', 'Belgium': 'BE', 'New Zealand': 'NZ', 'South Africa': 'ZA',
+      'Argentina': 'AR', 'Chile': 'CL', 'Colombia': 'CO', 'Peru': 'PE',
+      'Israel': 'IL', 'Turkey': 'TR', 'Russia': 'RU', 'South Korea': 'KR',
+      'Thailand': 'TH', 'Indonesia': 'ID', 'Philippines': 'PH', 'Vietnam': 'VN',
+      'Singapore': 'SG', 'Malaysia': 'MY',
+    };
+    return nameToCode[countryName] || 'US';
+  };
+
+  // Initialize country code from value if available
+  React.useEffect(() => {
+    if (value && value.trim().length > 0 && Platform.OS !== 'web') {
+      const code = getCountryCodeFromName(value);
+      setCountryCode(code);
+    }
+  }, [value]);
+
+  // Web-specific handlers
+  const filteredCountries = COUNTRIES.filter(country =>
+    country.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const handleWebSelect = (countryName: string) => {
+    onSelect(countryName);
+    setIsPickerVisible(false);
+    setSearchQuery('');
+  };
+
+  // Native-specific handler
+  const handleNativeSelect = (country: any) => {
+    setCountryCode(country.cca2);
+    const countryName = typeof country.name === 'string' 
+      ? country.name 
+      : country.name?.common || 'Unknown';
+    onSelect(countryName);
+    setIsPickerVisible(false);
+  };
+
+  // Determine text style based on state
+  const textStyle = hasValue 
+    ? styles.fieldInputFilled 
+    : styles.fieldInput;
+
+  // Web implementation
+  if (Platform.OS === 'web') {
+    return (
+      <>
+        <TouchableOpacity
+          style={[styles.fieldContainer, width && { width }, style]}
+          activeOpacity={0.7}
+          onPress={() => setIsPickerVisible(true)}
+        >
+          <PencilIcon size={24} />
+          <View style={styles.inputContainer}>
+            <Text
+              style={[textStyle, styles.fieldInputWeb]}
+              numberOfLines={1}
+            >
+              {hasValue ? value : (placeholder || label)}
+            </Text>
+          </View>
+          {showCheck && (
+            <View style={styles.checkIconContainer}>
+              <CheckIcon size={16} />
+            </View>
+          )}
+        </TouchableOpacity>
+
+        {/* Web Modal */}
+        {isPickerVisible && (
+          <TouchableOpacity
+            style={styles.webModalOverlay}
+            activeOpacity={1}
+            onPress={() => {
+              setIsPickerVisible(false);
+              setSearchQuery('');
+            }}
+          >
+            <TouchableOpacity
+              style={styles.webModalContent}
+              activeOpacity={1}
+              onPress={(e) => {
+                // Prevent closing when clicking inside the modal
+                e.stopPropagation();
+              }}
+            >
+              <View style={styles.webModalHeader}>
+                <Text style={styles.webModalTitle}>Select Country</Text>
+                <TouchableOpacity
+                  onPress={() => {
+                    setIsPickerVisible(false);
+                    setSearchQuery('');
+                  }}
+                  style={styles.webModalCloseButton}
+                >
+                  <Ionicons name="close" size={24} color="#333" />
+                </TouchableOpacity>
+              </View>
+              
+              <TextInput
+                style={styles.webSearchInput}
+                placeholder="Search countries..."
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                autoFocus
+              />
+
+              <View style={styles.webCountryList}>
+                {filteredCountries.map((country) => (
+                  <TouchableOpacity
+                    key={country}
+                    style={[
+                      styles.webCountryItem,
+                      value === country && styles.webCountryItemSelected,
+                    ]}
+                    onPress={() => handleWebSelect(country)}
+                  >
+                    <Text
+                      style={[
+                        styles.webCountryText,
+                        value === country && styles.webCountryTextSelected,
+                      ]}
+                    >
+                      {country}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+                {filteredCountries.length === 0 && (
+                  <Text style={styles.webNoResults}>No countries found</Text>
+                )}
+              </View>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        )}
+      </>
+    );
+  }
+
+  // Native implementation
+  if (!CountryPicker) {
+    // Fallback if CountryPicker is not available
+    return (
+      <TouchableOpacity
+        style={[styles.fieldContainer, width && { width }, style]}
+        activeOpacity={0.7}
+      >
+        <PencilIcon size={24} />
+        <View style={styles.inputContainer}>
+          <Text
+            style={[textStyle]}
+            numberOfLines={1}
+          >
+            {hasValue ? value : (placeholder || label)}
+          </Text>
+        </View>
+        {showCheck && (
+          <View style={styles.checkIconContainer}>
+            <CheckIcon size={16} />
+          </View>
+        )}
+      </TouchableOpacity>
+    );
+  }
+
+  return (
+    <>
+      <TouchableOpacity
+        style={[styles.fieldContainer, width && { width }, style]}
+        activeOpacity={0.7}
+        onPress={() => setIsPickerVisible(true)}
+      >
+        <PencilIcon size={24} />
+        <View style={styles.inputContainer}>
+          <Text
+            style={[textStyle]}
+            numberOfLines={1}
+          >
+            {hasValue ? value : (placeholder || label)}
+          </Text>
+        </View>
+        {showCheck && (
+          <View style={styles.checkIconContainer}>
+            <CheckIcon size={16} />
+          </View>
+        )}
+      </TouchableOpacity>
+
+      {CountryPicker && (
+        <CountryPicker
+          visible={isPickerVisible}
+          withFilter
+          withFlag
+          withCountryNameButton={false}
+          withAlphaFilter
+          withCallingCode={false}
+          withEmoji
+          countryCode={countryCode}
+          onSelect={handleNativeSelect}
+          onClose={() => setIsPickerVisible(false)}
+          theme={{
+            primaryColor: '#00A2B6',
+            primaryColorVariant: '#0788B0',
+            backgroundColor: colors.white || '#FFFFFF',
+            onBackgroundTextColor: colors.textPrimary || '#333333',
+            fontSize: 16,
+            fontFamily: 'Inter',
+          }}
+        />
+      )}
+    </>
   );
 };
 
@@ -328,12 +634,12 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
             />
 
             <View style={styles.rowContainer}>
-              <Field
+              <CountryField
                 label="Location"
                 value={location}
-                onChangeText={(text) => {
-                  setLocation(text);
-                  updateFormData({ location: text });
+                onSelect={(countryName) => {
+                  setLocation(countryName);
+                  updateFormData({ location: countryName });
                 }}
                 placeholder="Where are you from?*"
                 width={212}
@@ -347,8 +653,10 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
                   updateFormData({ age: ageNum });
                 }}
                 placeholder="Age*"
-                    width={118}
+                width={118}
                 style={styles.ageField}
+                keyboardType="numeric"
+                numericOnly={true}
               />
             </View>
             </View>
@@ -581,9 +889,9 @@ const styles = StyleSheet.create({
   },
   fieldInputFilled: {
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '400',
-    lineHeight: 24,
+    lineHeight: 22,
     color: colors.textPrimary,
     padding: 0,
     margin: 0,
@@ -594,6 +902,23 @@ const styles = StyleSheet.create({
   fieldInputWeb: {
     // @ts-ignore - web-specific CSS property
     outline: 'none',
+  },
+  paperTextInput: {
+    backgroundColor: 'transparent',
+    paddingHorizontal: 0,
+    margin: 0,
+    height: '100%',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    fontWeight: '400',
+  },
+  paperTextInputContent: {
+    paddingHorizontal: 0,
+    margin: 0,
+    minHeight: 0,
+    height: '100%',
+    ...(Platform.OS === 'web' && {
+      outline: 'none',
+    }),
   },
   checkIconContainer: {
     width: 24,
@@ -636,6 +961,90 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: {
     opacity: 0.6,
+  },
+  // Web modal styles
+  webModalOverlay: {
+    position: 'fixed' as any,
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    zIndex: 1000,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  webModalContent: {
+    backgroundColor: colors.white || '#FFFFFF',
+    borderRadius: 12,
+    width: '90%',
+    maxWidth: 500,
+    maxHeight: '80%',
+    overflow: 'hidden',
+    ...(Platform.OS === 'web' && {
+      boxShadow: '0 4px 20px rgba(0, 0, 0, 0.15)',
+    }),
+  },
+  webModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: spacing.lg,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E0E0E0',
+  },
+  webModalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat',
+    color: colors.textPrimary || '#333333',
+  },
+  webModalCloseButton: {
+    padding: spacing.xs,
+  },
+  webSearchInput: {
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    borderRadius: 8,
+    padding: spacing.md,
+    margin: spacing.lg,
+    fontSize: 16,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    color: colors.textPrimary || '#333333',
+    ...(Platform.OS === 'web' && {
+      outlineStyle: 'none',
+    }),
+  },
+  webCountryList: {
+    maxHeight: 400,
+    ...(Platform.OS === 'web' && {
+      overflowY: 'auto' as any,
+    }),
+  },
+  webCountryItem: {
+    padding: spacing.md,
+    paddingHorizontal: spacing.lg,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  webCountryItemSelected: {
+    backgroundColor: '#F0F9FA',
+  },
+  webCountryText: {
+    fontSize: 16,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    color: colors.textPrimary || '#333333',
+  },
+  webCountryTextSelected: {
+    color: '#00A2B6',
+    fontWeight: '600',
+  },
+  webNoResults: {
+    padding: spacing.lg,
+    textAlign: 'center',
+    fontSize: 16,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    color: colors.textSecondary || '#666666',
   },
 });
 

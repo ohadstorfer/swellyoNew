@@ -111,7 +111,7 @@ export const OnboardingStep3Screen: React.FC<OnboardingStep3ScreenProps> = ({
             <Ionicons name="arrow-back" size={24} color="#222B30" />
           </TouchableOpacity>
 
-          <Text style={styles.stepText}>Step 3/5</Text>
+          <Text style={styles.stepText}>Step 3/4</Text>
 
           <View style={styles.skipButton}>
             {/* Skip button is hidden/opacity 0 in Figma */}

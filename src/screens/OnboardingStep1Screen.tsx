@@ -170,10 +170,7 @@ export const OnboardingStep1Screen: React.FC<OnboardingStep1ScreenProps> = ({
     handleNext();
   };
 
-  const handleHomepage = () => {
-    // Mark onboarding as complete to show conversations screen (homepage)
-    markOnboardingComplete();
-  };
+  // Removed handleHomepage - home button removed
 
   return (
     <SafeAreaView style={styles.container}>
@@ -184,11 +181,13 @@ export const OnboardingStep1Screen: React.FC<OnboardingStep1ScreenProps> = ({
             <Ionicons name="arrow-back" size={24} color="#222B30" />
           </TouchableOpacity>
 
-          <Text style={styles.stepText}>Step 1/5</Text>
+          <View style={styles.stepTextContainer}>
+            <Text style={styles.stepText}>Step 1/4</Text>
+          </View>
 
-          <TouchableOpacity onPress={handleHomepage} style={styles.homepageButton}>
-            <Ionicons name="home" size={24} color="#222B30" />
-          </TouchableOpacity>
+          <View style={styles.homepageButton}>
+            {/* Empty space to balance the back button and keep Step 1/5 centered */}
+          </View>
         </View>
 
         {/* Progress Bar */}
@@ -291,6 +290,15 @@ const styles = StyleSheet.create({
     width: 60,
     alignItems: 'flex-start',
   },
+  stepTextContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    zIndex: 0,
+  },
   stepText: {
     fontSize: 12,
     fontWeight: '400',
@@ -312,9 +320,7 @@ const styles = StyleSheet.create({
   },
   homepageButton: {
     width: 60,
-    alignItems: 'flex-end',
-    justifyContent: 'center',
-    paddingHorizontal: 10,
+    // Empty space to balance the back button and keep Step 1/5 centered
   },
   progressContainer: {
     paddingHorizontal: spacing.md,

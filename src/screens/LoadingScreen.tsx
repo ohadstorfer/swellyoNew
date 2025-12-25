@@ -28,30 +28,268 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
   // Get video URL using the utility function
   const videoUrl = getVideoUrl('/Loading 4 to 5.mp4');
 
-  // Create video player
+  // Create video player with robust autoplay setup
   const player = useVideoPlayer(videoUrl, (player: any) => {
     if (player) {
-      player.loop = false;
-      player.muted = false;
-      player.play();
+      try {
+        // Set properties required for autoplay (muted is required for iOS Safari)
+        player.loop = false; // Don't loop - play once
+        player.muted = true; // Must be muted for autoplay on iOS Safari
+        
+        // Try to play immediately
+        const playPromise = player.play();
+        if (playPromise !== undefined) {
+          playPromise.catch((error: any) => {
+            // Autoplay may be blocked, will retry in useEffect
+            if (__DEV__ && error.name !== 'NotAllowedError') {
+              console.warn('[LoadingScreen] Initial play attempt:', error.message);
+            }
+          });
+        }
+      } catch (error) {
+        console.error('Error initializing video player:', error);
+      }
     }
   });
 
-  // Ensure video plays after mount
+  // Robust autoplay implementation - tries multiple times and handles all cases
+  // Also sets playsInline for iOS Safari to prevent fullscreen
   useEffect(() => {
-    if (player) {
-      const playVideo = async () => {
-        try {
-          player.loop = false;
-          player.muted = false;
-          await player.play();
-        } catch (error) {
-          console.error('Error playing loading video:', error);
+    if (!player || !videoUrl) return;
+
+    let isMounted = true;
+    let hasPlayed = false;
+
+    // For web, ensure playsInline is set on the underlying video element (iOS Safari)
+    // Also prevent all video interactions and hide controls
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      // Inject global CSS to hide all video controls
+      const injectControlHidingCSS = () => {
+        const styleId = 'loading-screen-hide-controls';
+        if (document.getElementById(styleId)) return; // Already injected
+        
+        const style = document.createElement('style');
+        style.id = styleId;
+        style.textContent = `
+          /* Hide all video controls */
+          video::-webkit-media-controls {
+            display: none !important;
+            opacity: 0 !important;
+            visibility: hidden !important;
+            pointer-events: none !important;
+          }
+          video::-webkit-media-controls-enclosure {
+            display: none !important;
+            opacity: 0 !important;
+            visibility: hidden !important;
+            pointer-events: none !important;
+          }
+          video::-webkit-media-controls-panel {
+            display: none !important;
+            opacity: 0 !important;
+            visibility: hidden !important;
+            pointer-events: none !important;
+          }
+          video::-webkit-media-controls-play-button {
+            display: none !important;
+            opacity: 0 !important;
+            visibility: hidden !important;
+            pointer-events: none !important;
+          }
+          video::-webkit-media-controls-start-playback-button {
+            display: none !important;
+            opacity: 0 !important;
+            visibility: hidden !important;
+            pointer-events: none !important;
+          }
+          video::-webkit-media-controls-timeline {
+            display: none !important;
+            opacity: 0 !important;
+            visibility: hidden !important;
+            pointer-events: none !important;
+          }
+          video::-webkit-media-controls-current-time-display {
+            display: none !important;
+            opacity: 0 !important;
+            visibility: hidden !important;
+            pointer-events: none !important;
+          }
+          video::-webkit-media-controls-time-remaining-display {
+            display: none !important;
+            opacity: 0 !important;
+            visibility: hidden !important;
+            pointer-events: none !important;
+          }
+          video::-webkit-media-controls-mute-button {
+            display: none !important;
+            opacity: 0 !important;
+            visibility: hidden !important;
+            pointer-events: none !important;
+          }
+          video::-webkit-media-controls-volume-slider {
+            display: none !important;
+            opacity: 0 !important;
+            visibility: hidden !important;
+            pointer-events: none !important;
+          }
+          video::-webkit-media-controls-fullscreen-button {
+            display: none !important;
+            opacity: 0 !important;
+            visibility: hidden !important;
+            pointer-events: none !important;
+          }
+          video::--webkit-media-controls {
+            display: none !important;
+          }
+          video[controls] {
+            -webkit-appearance: none !important;
+          }
+        `;
+        document.head.appendChild(style);
+      };
+      
+      // Inject CSS immediately
+      injectControlHidingCSS();
+      
+      // Find the video element and set playsInline attribute
+      const setPlaysInline = () => {
+        // Find all video elements (there might be multiple)
+        const videoElements = document.querySelectorAll('video');
+        videoElements.forEach((videoElement) => {
+          // Remove controls attribute completely (not just set to false)
+          videoElement.removeAttribute('controls');
+          videoElement.controls = false;
+          
+          // Set playsInline attributes for iOS Safari
+          videoElement.setAttribute('playsinline', 'true');
+          videoElement.setAttribute('webkit-playsinline', 'true');
+          videoElement.setAttribute('x5-playsinline', 'true'); // For some Android browsers
+          
+          // Prevent fullscreen
+          videoElement.setAttribute('disablePictureInPicture', 'true');
+          
+          // Prevent video interactions via event listeners
+          const preventInteraction = (e: Event) => {
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+          };
+          
+          videoElement.addEventListener('touchstart', preventInteraction, { passive: false });
+          videoElement.addEventListener('touchend', preventInteraction, { passive: false });
+          videoElement.addEventListener('touchmove', preventInteraction, { passive: false });
+          videoElement.addEventListener('click', preventInteraction, { passive: false });
+          videoElement.addEventListener('dblclick', preventInteraction, { passive: false });
+          
+          // Prevent context menu
+          videoElement.addEventListener('contextmenu', preventInteraction, { passive: false });
+          
+          // Set CSS to prevent interactions and hide controls
+          (videoElement.style as any).pointerEvents = 'none';
+          (videoElement.style as any).userSelect = 'none';
+          (videoElement.style as any).WebkitUserSelect = 'none';
+          (videoElement.style as any).touchAction = 'none';
+          (videoElement.style as any).WebkitTouchCallout = 'none';
+          
+          // Force hide controls with inline styles
+          (videoElement.style as any).WebkitAppearance = 'none';
+          (videoElement.style as any).appearance = 'none';
+        });
+      };
+      
+      // Try immediately and after delays (video element might not be ready)
+      setPlaysInline();
+      setTimeout(setPlaysInline, 100);
+      setTimeout(setPlaysInline, 500);
+      setTimeout(setPlaysInline, 1000);
+      
+      // Also listen for new video elements being added
+      const observer = new MutationObserver(() => {
+        setPlaysInline();
+      });
+      
+      observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+      });
+      
+      // Store observer for cleanup (will be accessed in cleanup function)
+      (window as any).__loadingScreenObserver = observer;
+    }
+
+    // Function to attempt playing the video
+    const attemptPlay = async () => {
+      if (!isMounted || !player || hasPlayed) return;
+      
+      try {
+        // Ensure properties are set before playing
+        player.loop = false; // Don't loop - play once
+        player.muted = true; // Must be muted for autoplay on iOS Safari
+
+        // Play and handle promise
+        const playPromise = player.play();
+        if (playPromise !== undefined) {
+          await playPromise;
+          hasPlayed = true;
+          if (__DEV__) {
+            console.log('[LoadingScreen] Video playing successfully');
+          }
+        }
+      } catch (error: any) {
+        // Silently handle autoplay restrictions - will retry
+        if (__DEV__ && error.name !== 'NotAllowedError') {
+          console.warn('[LoadingScreen] Play attempt failed:', error.message);
+        }
+        hasPlayed = false;
+      }
+    };
+
+    // Try to play immediately
+    attemptPlay();
+
+    // Retry on a short delay (helps with some browsers)
+    const retryTimeout = setTimeout(() => {
+      if (!hasPlayed) {
+        attemptPlay();
+      }
+    }, 100);
+
+    // For web, also try on visibility change (when tab becomes visible)
+    let visibilityHandler: (() => void) | null = null;
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      visibilityHandler = () => {
+        if (document.visibilityState === 'visible' && !hasPlayed) {
+          attemptPlay();
         }
       };
-      playVideo();
+      document.addEventListener('visibilitychange', visibilityHandler);
     }
-  }, [player]);
+
+    // Cleanup function for web-specific code (MutationObserver)
+    let webCleanup: (() => void) | null = null;
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      // The cleanup for MutationObserver is returned from the web block above
+      // We'll call it in the main cleanup
+      webCleanup = (() => {
+        if (typeof window !== 'undefined' && (window as any).__loadingScreenObserver) {
+          (window as any).__loadingScreenObserver.disconnect();
+          delete (window as any).__loadingScreenObserver;
+        }
+      });
+    }
+
+    return () => {
+      isMounted = false;
+      clearTimeout(retryTimeout);
+      if (visibilityHandler && typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', visibilityHandler);
+      }
+      // Clean up MutationObserver if it exists
+      if (webCleanup) {
+        webCleanup();
+      }
+    };
+  }, [player, videoUrl]);
 
   useEffect(() => {
     // Auto-navigate to step 5 after video completes or timeout
@@ -92,19 +330,14 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
           <Ionicons name="arrow-back" size={24} color="#222B30" />
         </TouchableOpacity>
 
-        <Text style={styles.stepText}>Step 4/5</Text>
+        
 
         <View style={styles.skipButton}>
           {/* Skip button is hidden in this step */}
         </View>
       </View>
 
-      {/* Progress Bar */}
-      <View style={styles.progressContainer}>
-        <View style={styles.progressBar}>
-          <View style={[styles.progressFill, { width: '100%' }]} />
-        </View>
-      </View>
+     
 
       {/* Main Content */}
       <View style={styles.content}>
@@ -115,12 +348,60 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
 
         {/* Video */}
         <View style={styles.videoContainer}>
-          <VideoView
-            player={player}
-            style={styles.video}
-            contentFit="cover"
-            nativeControls={false}
-          />
+          <View 
+            style={styles.videoWrapper}
+            {...(Platform.OS === 'web' && {
+              // Prevent default touch behaviors on web (especially iOS Safari)
+              onTouchStart: (e: any) => {
+                e.preventDefault();
+                e.stopPropagation();
+              },
+              onTouchMove: (e: any) => {
+                e.preventDefault();
+                e.stopPropagation();
+              },
+              onTouchEnd: (e: any) => {
+                e.preventDefault();
+                e.stopPropagation();
+              },
+            } as any)}
+          >
+            <View style={styles.videoPlayerContainer} pointerEvents="none">
+              <VideoView
+                player={player}
+                style={styles.video}
+                contentFit="cover"
+                nativeControls={false}
+                allowsFullscreen={false}
+                allowsPictureInPicture={false}
+                {...(Platform.OS === 'web' && {
+                  // Web-specific props to prevent controls
+                  controls: false,
+                  disablePictureInPicture: true,
+                } as any)}
+              />
+            </View>
+            
+            {/* Transparent overlay to prevent video interactions on iOS Safari */}
+            <View 
+              style={styles.videoOverlay}
+              {...(Platform.OS === 'web' && {
+                // Prevent default touch behaviors on web (especially iOS Safari)
+                onTouchStart: (e: any) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                },
+                onTouchMove: (e: any) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                },
+                onTouchEnd: (e: any) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                },
+              } as any)}
+            />
+          </View>
         </View>
       </View>
     </SafeAreaView>
@@ -200,21 +481,56 @@ const styles = StyleSheet.create({
     backgroundColor: '#FAFAFA',
     position: 'relative',
   },
-  video: {
+  videoWrapper: {
+    width: '100%',
+    height: '100%',
+    position: 'relative',
+  },
+  videoPlayerContainer: {
     width: '100%',
     height: '100%',
     position: 'absolute',
     top: 0,
     left: 0,
+    pointerEvents: 'none', // Prevent all interactions with video
     ...(Platform.OS === 'web' && {
-      // Web-specific styles to ensure video is visible
+      // Prevent video controls and interactions on web
+      userSelect: 'none' as any,
+      WebkitUserSelect: 'none' as any,
+      touchAction: 'none' as any,
+      WebkitTouchCallout: 'none' as any,
+    }),
+  },
+  video: {
+    width: '100%',
+    height: '100%',
+    pointerEvents: 'none', // Prevent all interactions with video
+    ...(Platform.OS === 'web' && {
+      // Apply to all web (desktop and mobile web)
       objectFit: 'cover' as any,
       display: 'block' as any,
       visibility: 'visible' as any,
       opacity: 1,
       mixBlendMode: 'darken' as any, 
       backgroundColor: '#FAFAFA',
+      // Prevent interactions
+      userSelect: 'none' as any,
+      WebkitUserSelect: 'none' as any,
+      touchAction: 'none' as any,
+      WebkitTouchCallout: 'none' as any,
+      WebkitAppearance: 'none' as any,
+      appearance: 'none' as any,
     } as any),
+  },
+  videoOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'transparent',
+    zIndex: 10,
+    // pointerEvents: 'auto' is implicit, will block all interactions with video
   },
   videoPlaceholder: {
     width: '100%',
