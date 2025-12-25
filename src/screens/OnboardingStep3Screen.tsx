@@ -3,17 +3,16 @@ import {
   View,
   StyleSheet,
   SafeAreaView,
-  ScrollView,
   TouchableOpacity,
   Platform,
-  KeyboardAvoidingView,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { TravelExperienceSlider } from '../components/TravelExperienceSlider';
 import { Text } from '../components/Text';
-import { colors, spacing, typography } from '../styles/theme';
+import { colors, spacing } from '../styles/theme';
 import { OnboardingData } from './OnboardingStep1Screen';
+import { useIsDesktopWeb, useScreenDimensions, responsiveWidth } from '../utils/responsive';
 
 interface OnboardingStep3ScreenProps {
   onNext: (data: OnboardingData) => void;
@@ -30,6 +29,9 @@ export const OnboardingStep3Screen: React.FC<OnboardingStep3ScreenProps> = ({
   updateFormData,
   isLoading = false,
 }) => {
+  const isDesktop = useIsDesktopWeb();
+  const { height: screenHeight } = useScreenDimensions();
+  
   const [formData, setFormData] = useState<OnboardingData>({
     nickname: initialData.nickname || '',
     userEmail: initialData.userEmail || '',
@@ -41,6 +43,33 @@ export const OnboardingStep3Screen: React.FC<OnboardingStep3ScreenProps> = ({
   });
 
   const [errors, setErrors] = useState<Partial<Record<keyof OnboardingData, string>>>({});
+
+  // Calculate responsive dimensions
+  const progressBarWidth = isDesktop ? 300 : 237;
+  const buttonContainerMaxWidth = isDesktop ? 400 : undefined;
+  const buttonWidth = responsiveWidth(90, 280, 320, 0); // 90% width, min 280px, max 320px, same as Step 1 and 2
+
+  // Calculate available space between header and button for content
+  const calculateAvailableContentHeight = () => {
+    // Header: 44px + padding
+    const headerHeight = 44 + (isDesktop ? spacing.lg : spacing.sm) + spacing.md;
+    
+    // Progress bar: 4px + padding
+    const progressHeight = 4 + (isDesktop ? spacing.sm * 2 : spacing.md * 2);
+    
+    // Button: 56px + padding
+    const buttonHeight = 56 + spacing.xl;
+    
+    // Calculate total used space
+    const totalUsedSpace = headerHeight + progressHeight + buttonHeight;
+    
+    // Available space for content
+    const availableSpace = screenHeight - totalUsedSpace - 16; // 16px buffer
+    
+    return Math.max(400, availableSpace); // Minimum 400px
+  };
+  
+  const availableContentHeight = calculateAvailableContentHeight();
 
   const validateForm = (): boolean => {
     const newErrors: Partial<Record<keyof OnboardingData, string>> = {};
@@ -75,72 +104,57 @@ export const OnboardingStep3Screen: React.FC<OnboardingStep3ScreenProps> = ({
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.gradient}>
-        <KeyboardAvoidingView
-          style={styles.keyboardView}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        >
-          <ScrollView
-            style={styles.scrollView}
-            contentContainerStyle={styles.scrollContent}
-            showsVerticalScrollIndicator={false}
+      <View style={[styles.content, isDesktop && styles.contentDesktop]}>
+        {/* Header */}
+        <View style={[styles.header, isDesktop && styles.headerDesktop]}>
+          <TouchableOpacity onPress={onBack} style={styles.backButton}>
+            <Ionicons name="arrow-back" size={24} color="#222B30" />
+          </TouchableOpacity>
+
+          <Text style={styles.stepText}>Step 3/5</Text>
+
+          <View style={styles.skipButton}>
+            {/* Skip button is hidden/opacity 0 in Figma */}
+          </View>
+        </View>
+
+        {/* Progress Bar */}
+        <View style={[styles.progressContainer, isDesktop && styles.progressContainerDesktop]}>
+          <View style={[styles.progressBar, { width: progressBarWidth }]}>
+            <View style={[styles.progressFill, { width: '60%' }]} />
+          </View>
+        </View>
+
+        {/* Content - Travel Experience Slider */}
+        <View style={[styles.sliderContainer, { height: availableContentHeight }]}>
+          <TravelExperienceSlider
+            value={formData.travelExperience}
+            onValueChange={handleTravelExperienceChange}
+            error={errors.travelExperience}
+            availableHeight={availableContentHeight}
+          />
+        </View>
+
+        {/* Next Button - fixed at bottom */}
+        <View style={[styles.buttonContainer, isDesktop && styles.buttonContainerDesktop, buttonContainerMaxWidth && { maxWidth: buttonContainerMaxWidth }]}>
+          <TouchableOpacity 
+            onPress={handleNext}
+            activeOpacity={0.8}
+            disabled={isLoading}
+            style={isLoading && styles.buttonDisabled}
           >
-            {/* Header with Step Process */}
-            <View style={styles.header}>
-              <View style={styles.headerContent}>
-                <TouchableOpacity onPress={onBack} style={styles.backButton}>
-                  <Ionicons name="arrow-back" size={24} color={colors.textDark} />
-                </TouchableOpacity>
-                
-                <View style={styles.stepTextContainer}>
-                  <Text style={styles.stepText}>Step 3/5</Text>
-                </View>
-                
-                <TouchableOpacity onPress={handleNext} style={styles.skipButton}>
-                  {/* <Text style={styles.skipText}>Skip</Text> */}
-                </TouchableOpacity>
-              </View>
-              
-              {/* Progress Bar */}
-              <View style={styles.progressContainer}>
-                <View style={styles.progressBar}>
-                  <View style={[styles.progressFill, { width: '60%' }]} />
-                </View>
-              </View>
-            </View>
-
-            {/* Form Content */}
-            <View style={styles.content}>
-              <TravelExperienceSlider
-                value={formData.travelExperience}
-                onValueChange={handleTravelExperienceChange}
-                error={errors.travelExperience}
-              />
-              
-            </View>
-
-            {/* Next Button */}
-            <View style={styles.buttonContainer}>
-              <TouchableOpacity
-                style={[styles.nextButton, isLoading && styles.buttonDisabled]}
-                onPress={handleNext}
-                activeOpacity={0.8}
-                disabled={isLoading}
-              >
-                <LinearGradient
-                  colors={['#00A2B6', '#0788B0']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={styles.buttonGradient}
-                >
-                  <Text style={styles.buttonText}>
-                    {isLoading ? 'Loading...' : 'Next'}
-                  </Text>
-                </LinearGradient>
-              </TouchableOpacity>
-            </View>
-          </ScrollView>
-        </KeyboardAvoidingView>
+            <LinearGradient
+              colors={['#00A2B6', '#0788B0']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={[styles.gradientButton, { width: buttonWidth }]}
+            >
+              <Text style={styles.buttonText}>
+                {isLoading ? 'Loading...' : 'Next'}
+              </Text>
+            </LinearGradient>
+          </TouchableOpacity>
+        </View>
       </View>
     </SafeAreaView>
   );
@@ -149,115 +163,98 @@ export const OnboardingStep3Screen: React.FC<OnboardingStep3ScreenProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FAFAFA',
+    backgroundColor: colors.backgroundGray || '#FAFAFA',
   },
-  gradient: {
-    flex: 1,
-    backgroundColor: '#FAFAFA',
-  },
-  keyboardView: {
+  content: {
     flex: 1,
   },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    flexGrow: 1,
-    paddingBottom: spacing.xxl,
+  contentDesktop: {
+    maxWidth: 800,
+    alignSelf: 'center',
+    width: '100%',
   },
   header: {
-    paddingHorizontal: spacing.md,
-    paddingTop: Platform.OS === 'web' ? spacing.xxl : spacing.lg,
-    paddingBottom: spacing.md,
-  },
-  headerContent: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: spacing.md,
-    height: 24,
+    alignItems: 'center',
+    paddingHorizontal: spacing.md,
+    paddingTop: Platform.OS === 'web' ? spacing.md : spacing.sm,
+    height: 44,
+  },
+  headerDesktop: {
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.lg,
   },
   backButton: {
     width: 60,
     alignItems: 'flex-start',
-    justifyContent: 'center',
-  },
-  stepTextContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   stepText: {
-    ...typography.bodySmall,
     fontSize: 12,
     fontWeight: '400',
-    lineHeight: 15,
     color: colors.textPrimary,
     textAlign: 'center',
+    lineHeight: 15,
   },
   skipButton: {
     width: 60,
     alignItems: 'flex-end',
-    justifyContent: 'center',
-  },
-  skipText: {
-    ...typography.bodySmall,
-    fontSize: 12,
-    fontWeight: '400',
-    lineHeight: 15,
-    color: colors.textSecondary,
-    textAlign: 'right',
+    paddingHorizontal: 10,
+    opacity: 0, // Hidden in Figma design
   },
   progressContainer: {
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.md,
     alignItems: 'center',
-    width: '100%',
+  },
+  progressContainerDesktop: {
+    paddingBottom: spacing.sm,
   },
   progressBar: {
-    width: 237,
+    // Width is set dynamically via inline style
     height: 4,
     backgroundColor: '#BDBDBD',
     borderRadius: 8,
     overflow: 'hidden',
   },
   progressFill: {
-    height: 4,
+    height: '100%',
     backgroundColor: '#333333',
     borderRadius: 8,
   },
-  content: {
+  sliderContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingTop: spacing.xl,
-    position: 'relative',
+    minHeight: 0, // Allow flex to shrink
   },
   buttonContainer: {
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.xl,
-    paddingBottom: spacing.xxl,
+    paddingHorizontal: spacing.xl,
+    paddingBottom: spacing.xl,
     alignItems: 'center',
+    width: '100%',
+    flexShrink: 0, // Don't shrink, keep fixed size at bottom
   },
-  nextButton: {
-    width: 330,
+  buttonContainerDesktop: {
+    paddingHorizontal: spacing.xxl,
+    paddingBottom: spacing.xxl,
+    alignSelf: 'center',
+  },
+  gradientButton: {
     height: 56,
+    // Width is set dynamically via inline style using responsiveWidth
     borderRadius: 999,
-    overflow: 'hidden',
-    minWidth: 150,
-  },
-  buttonGradient: {
-    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
   },
   buttonText: {
-    ...typography.button,
-    fontSize: 20,
+    fontSize: 16,
     fontWeight: '700',
-    lineHeight: 32,
-    color: '#FFFFFF',
+    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'System',
+    color: colors.white || '#FFF',
     textAlign: 'center',
+    lineHeight: 24,
   },
   buttonDisabled: {
     opacity: 0.6,
