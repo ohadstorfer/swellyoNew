@@ -623,12 +623,20 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
             </TouchableOpacity>
             
             <View style={styles.avatar}>
-              <View style={styles.avatarImageContainer}>
+              {/* Ellipse 11 background with purple ring and gray fill */}
+              <View style={styles.avatarRing}>
                 <Image
-                  source={{ uri: getImageUrl('/Swelly avatar.png') }}
-                  style={styles.avatarImage}
-                  resizeMode="cover"
+                  source={{ uri: getImageUrl('/Ellipse 11.svg') }}
+                  style={styles.ellipseBackground}
+                  resizeMode="contain"
                 />
+                <View style={styles.avatarImageContainer}>
+                  <Image
+                    source={{ uri: getImageUrl('/Swelly avatar onboarding.png') }}
+                    style={styles.avatarImage}
+                    resizeMode="cover"
+                  />
+                </View>
               </View>
             </View>
           </View>
@@ -774,25 +782,51 @@ const styles = StyleSheet.create({
     width: 62,
     height: 68,
     aspectRatio: 62 / 68,
-    borderRadius: 31,
-    overflow: 'hidden',
-    // backgroundColor: '#D3D3D3', // lightgray fallback
     position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarRing: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 31,
+    overflow: 'visible', // Changed to 'visible' to show full ellipse border
+    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ellipseBackground: {
+    position: 'absolute',
+    // Make it slightly larger to ensure border is fully visible
+    width: '105%', // Slightly larger to show full border
+    height: '105%', // Slightly larger to show full border
+    top: '-2.5%', // Offset to center the larger size
+    left: '-2.5%', // Offset to center the larger size
+    zIndex: 0, // Behind the avatar image
+    // resizeMode="contain" maintains the original aspect ratio
+    ...(Platform.OS === 'web' && {
+      objectFit: 'contain' as any, // Maintain original aspect ratio
+    }),
   },
   avatarImageContainer: {
     position: 'absolute',
-    width: 62 * 1.52147, // 152.147% of 62px
-    height: 68 * 1.08344, // 108.344% of 68px
-    left: -10.983,
-    top: 0,
+    // Container for the avatar image, centered horizontally
+    // Making it bigger: 75px width and height
+    // Ellipse is 62px wide, so center 75px: (62 - 75) / 2 = -6.5px
+    width: 75,
+    height: 75,
+    left: -6.1, 
+    top: -5.1, 
     overflow: 'hidden',
+    zIndex: 1, 
   },
   avatarImage: {
-    width: '100%',
-    height: '100%',
+    // Image dimensions: 64px width, 69.33px height, aspect-ratio 12/13
+    width: 75,
+    height: 75 , // 69.33px
     ...(Platform.OS === 'web' && {
       objectFit: 'cover' as any,
-      objectPosition: '0px 0px' as any,
+      // aspectRatio: '12/13' as any,
       backgroundRepeat: 'no-repeat' as any,
     }),
   },
