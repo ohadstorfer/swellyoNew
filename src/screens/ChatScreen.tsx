@@ -12,6 +12,7 @@ import {
   Image,
   ImageBackground,
 } from 'react-native';
+import { TextInput as PaperTextInput } from 'react-native-paper';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../components/Text';
 import { colors, spacing, typography, borderRadius } from '../styles/theme';
@@ -67,7 +68,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
   const [matchedUsers, setMatchedUsers] = useState<any[]>(persistedMatchedUsers || []); // Store matched users for rendering cards
   const [destinationCountry, setDestinationCountry] = useState<string>(persistedDestination || ''); // Store destination for cards
   const scrollViewRef = useRef<ScrollView>(null);
-  const textInputRef = useRef<TextInput>(null);
+  const textInputRef = useRef<any>(null);
 
   // Calculate progress based on conversation length
   // Estimate: typical conversation is 6-10 message pairs (12-20 messages total)
@@ -504,7 +505,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
   // Reset input height when text is cleared
   useEffect(() => {
     if (!inputText.trim()) {
-      setInputHeight(34);
+      setInputHeight(34); // Reset to single line height
     }
   }, [inputText]);
 
@@ -692,40 +693,91 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
             </TouchableOpacity>
           </View>
           
-          <View style={styles.inputContainer}>
+          <View style={[
+            styles.inputContainer,
+            // Dynamically adjust container height based on input height
+            // Container height = inputHeight + vertical padding (8px top + 8px bottom = 16px)
+            // Minimum 48px for single line
+            { minHeight: Math.max(48, inputHeight + 16) }
+          ]}>
             <View style={styles.inputInnerContainer}>
-              {!inputText && (
-                <Text style={[
-                  styles.placeholderText,
-                  inputHeight <= 34 ? styles.placeholderCentered : styles.placeholderTop
-                ]}>
-                  Type your message..
-                </Text>
-              )}
-              <TextInput
+              <PaperTextInput
                 ref={textInputRef}
-                style={[styles.textInput, { height: Math.max(34, Math.min(inputHeight, 120)) }]}
-                placeholder=""
+                mode="flat"
                 value={inputText}
                 onChangeText={setInputText}
-                multiline
+                placeholder="Type your message.."
+                multiline={true}
                 maxLength={500}
-                onSubmitEditing={sendMessage}
-                returnKeyType="send"
+                onSubmitEditing={undefined} // Disable default submit on Enter (we handle it manually)
+                returnKeyType="default" // Always default to allow multiline
                 blurOnSubmit={false}
-                onContentSizeChange={(event) => {
+                onContentSizeChange={(event: any) => {
+                  // Best practice: Smooth expansion based on actual content size
                   const { height } = event.nativeEvent.contentSize;
-                  // Set height, but cap at max (120px for ~6 lines)
-                  setInputHeight(Math.min(height, 120));
-                }}
-                onKeyPress={(e) => {
-                  if (Platform.OS === 'web' && e.nativeEvent.key === 'Enter' && !(e.nativeEvent as any).shiftKey) {
-                    e.preventDefault();
-                    sendMessage();
+                  
+                  if (!height || height < 0) return; // Guard against invalid values
+                  
+                  // Calculate proper height:
+                  // - Minimum: 34px (single line with proper line height)
+                  // - Maximum: 120px (~6 lines, approximately 5-6 lines of text)
+                  // - Use content height if it's larger than minimum
+                  const calculatedHeight = Math.max(34, Math.ceil(height));
+                  const cappedHeight = Math.min(calculatedHeight, 120);
+                  
+                  // Only update if height actually changed (prevents unnecessary re-renders)
+                  // Use a small threshold to avoid jittery updates
+                  if (Math.abs(cappedHeight - inputHeight) >= 1) {
+                    setInputHeight(cappedHeight);
                   }
                 }}
+                onKeyPress={(e: any) => {
+                  // Best practice: Enter sends, Shift+Enter creates new line
+                  if (Platform.OS === 'web' && e.nativeEvent.key === 'Enter') {
+                    const isShiftPressed = (e.nativeEvent as any).shiftKey;
+                    
+                    if (!isShiftPressed) {
+                      // Enter without Shift: send message
+                      e.preventDefault();
+                      sendMessage();
+                    }
+                    // Shift+Enter: allow new line (default behavior, don't prevent)
+                  }
+                }}
+                // Enable scrolling only when we've reached max height
                 scrollEnabled={inputHeight >= 120}
+                // Ensure text aligns to top when multiline
                 textAlignVertical="top"
+                style={[
+                  styles.paperTextInput,
+                  { 
+                    // Dynamic height: starts at 34px, expands up to 120px
+                    height: inputHeight,
+                    maxHeight: 120,
+                  }
+                ]}
+                contentStyle={[
+                  styles.paperTextInputContent,
+                  {
+                    // Ensure content has proper padding and alignment
+                    paddingTop: 0,
+                    paddingBottom: 0,
+                    minHeight: 34,
+                  }
+                ]}
+                underlineColor="transparent"
+                activeUnderlineColor="transparent"
+                selectionColor={colors.primary || '#B72DF2'}
+                placeholderTextColor="#7B7B7B"
+                textColor="#333333"
+                theme={{
+                  colors: {
+                    primary: colors.primary || '#B72DF2',
+                    text: '#333333',
+                    placeholder: '#7B7B7B',
+                    background: 'transparent',
+                  },
+                }}
               />
             </View>
             
@@ -736,7 +788,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
             >
               <Ionicons 
                 name={inputText.trim() ? "arrow-up" : "mic"} 
-                size={24} 
+                size={20} 
                 color="#FFFFFF" 
               />
             </TouchableOpacity>
@@ -987,18 +1039,22 @@ const styles = StyleSheet.create({
   inputContainer: {
     flex: 1,
     flexDirection: 'row',
-    alignItems: 'flex-end',
+    alignItems: 'flex-end', // Align items to bottom for proper button alignment
     backgroundColor: colors.white,
     paddingLeft: 10,
     paddingRight: 8,
-    paddingVertical: 8,
-    minHeight: 48, // Ensure consistent height
+    paddingTop: 8,
+    paddingBottom: 8,
+    // Dynamic minHeight: 48px for single line (34px text + 14px padding)
+    // Will expand as inputHeight grows
+    minHeight: 48,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 32,
     borderBottomLeftRadius: 20,
     borderBottomRightRadius: 32,
     ...(Platform.OS === 'web' && {
       boxShadow: '0px 0px 20px rgba(0, 0, 0, 0.08)',
+      transition: 'min-height 0.2s ease' as any, // Smooth height transitions
     }),
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 0 },
@@ -1010,47 +1066,43 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: 8,
     paddingVertical: 0,
-    justifyContent: 'flex-start',
-    minHeight: 34, // Ensure minimum height for proper centering
+    justifyContent: 'flex-start', // Align content to top for multiline
+    minHeight: 34, // Minimum single line height
     position: 'relative',
   },
-  placeholderText: {
-    position: 'absolute',
-    left: 8,
-    fontSize: 14,
-    fontWeight: '400',
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
-    lineHeight: 22,
-    color: '#7B7B7B',
-    pointerEvents: 'none',
-    zIndex: 1,
-  },
-  placeholderCentered: {
-    top: '50%',
-    transform: [{ translateY: -11 }], // Half of lineHeight (22/2)
-  },
-  placeholderTop: {
-    top: 8,
-  },
-  textInput: {
+  paperTextInput: {
+    backgroundColor: 'transparent',
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+    margin: 0,
     fontSize: 18,
     fontWeight: '400',
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
-    lineHeight: 22, // Slightly larger for better readability
-    color: '#333333',
-    padding: 0,
-    margin: 0,
-    textAlignVertical: 'top',
-    includeFontPadding: false,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    lineHeight: 22, // Line height for proper text spacing
+    minHeight: 34, // Single line minimum
+    textAlignVertical: 'top', // Align text to top for multiline
     ...(Platform.OS === 'web' && {
-      // @ts-ignore - web-specific CSS properties
-      overflow: 'auto' as any,
-      resize: 'none' as any,
+      outline: 'none' as any,
+      resize: 'none' as any, // Prevent manual resizing on web
+      overflow: 'auto' as any, // Allow scrolling when content exceeds max height
+    }),
+  },
+  paperTextInputContent: {
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+    margin: 0,
+    minHeight: 34, // Single line minimum
+    fontSize: 18,
+    lineHeight: 22, // Consistent line height
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    textAlignVertical: 'top', // Top alignment for multiline
+    ...(Platform.OS === 'web' && {
+      outline: 'none' as any,
     }),
   },
   sendButton: {
-    width: 48,
-    height: 48,
+    width: 35,
+    height: 35,
     borderRadius: 48,
     backgroundColor: '#B72DF2',
     justifyContent: 'center',
