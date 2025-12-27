@@ -476,14 +476,21 @@ export default function ConversationsScreen({
         onPress={onSwellyPress}
       >
         <View style={styles.conversationContent}>
-          {/* Swelly avatar with border */}
+          {/* Swelly avatar with ellipse design - matching ChatScreen */}
           <View style={styles.swellyAvatarContainer}>
-            <View style={styles.swellyAvatarBorder}>
+            <View style={styles.swellyAvatarRing}>
               <Image
-                source={{ uri: getImageUrl('/Swelly avatar.png') }}
-                style={styles.swellyAvatar}
-                resizeMode="cover"
+                source={{ uri: getImageUrl('/Ellipse 11.svg') }}
+                style={styles.swellyEllipseBackground}
+                resizeMode="contain"
               />
+              <View style={styles.swellyAvatarImageContainer}>
+                <Image
+                  source={{ uri: getImageUrl('/Swelly avatar onboarding.png') }}
+                  style={styles.swellyAvatarImage}
+                  resizeMode="cover"
+                />
+              </View>
             </View>
           </View>
 
@@ -1060,23 +1067,56 @@ const styles = StyleSheet.create({
   swellyAvatarContainer: {
     width: 62,
     height: 68,
-    marginRight: 8,
+    aspectRatio: 62 / 68,
     position: 'relative',
-  },
-  swellyAvatarBorder: {
-    width: 62,
-    height: 62,
-    borderRadius: 31,
-    borderWidth: 2,
-    borderColor: '#B72DF2',
-    overflow: 'hidden',
-    backgroundColor: '#D9D9D9',
     alignItems: 'center',
     justifyContent: 'center',
+    marginRight: 8,
+    zIndex: 1,
   },
-  swellyAvatar: {
+  swellyAvatarRing: {
     width: '100%',
     height: '100%',
+    borderRadius: 31,
+    overflow: 'visible', // Changed to 'visible' to show full ellipse border
+    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1, // Ensure ring is above other elements
+  },
+  swellyEllipseBackground: {
+    position: 'absolute',
+    // Make it slightly larger to ensure border is fully visible
+    width: '105%', // Slightly larger to show full border
+    height: '105%', // Slightly larger to show full border
+    top: '-2.5%', // Offset to center the larger size
+    left: '-2.5%', // Offset to center the larger size
+    zIndex: 0, // Behind the avatar image
+    // resizeMode="contain" maintains the original aspect ratio
+    ...(Platform.OS === 'web' && {
+      objectFit: 'contain' as any, // Maintain original aspect ratio
+    }),
+  },
+  swellyAvatarImageContainer: {
+    position: 'absolute',
+    // Container for the avatar image, centered horizontally
+    // Making it bigger: 75px width and height
+    // Ellipse is 62px wide, so center 75px: (62 - 75) / 2 = -6.5px
+    width: 75,
+    height: 75,
+    left: -6.1, 
+    top: -5.1, 
+    overflow: 'hidden',
+    zIndex: 1, 
+  },
+  swellyAvatarImage: {
+    // Image dimensions: 75px width and height
+    width: 75,
+    height: 75,
+    ...(Platform.OS === 'web' && {
+      objectFit: 'cover' as any,
+      backgroundRepeat: 'no-repeat' as any,
+    }),
   },
   swellyTextContainer: {
     flex: 1,

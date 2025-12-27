@@ -41,27 +41,181 @@ export const BackgroundVideo: React.FC<BackgroundVideoProps> = ({
     console.log('[BackgroundVideo] Is Mobile Web:', isMobileWeb());
   }
 
-  // Web-specific: Optimized for fast loading and immediate autoplay
+  // Web-specific: Optimized for fast loading and immediate autoplay with non-interactive behavior
   if (Platform.OS === 'web') {
     useEffect(() => {
       const videoElement = videoRef.current;
       if (!videoElement) return;
 
+      let isMounted = true;
+      let hasPlayed = false;
+
+      // Inject global CSS to hide all video controls
+      const injectControlHidingCSS = () => {
+        const styleId = 'background-video-hide-controls';
+        if (document.getElementById(styleId)) return; // Already injected
+        
+        const style = document.createElement('style');
+        style.id = styleId;
+        style.textContent = `
+          /* Hide all video controls */
+          video::-webkit-media-controls {
+            display: none !important;
+            opacity: 0 !important;
+            visibility: hidden !important;
+            pointer-events: none !important;
+          }
+          video::-webkit-media-controls-enclosure {
+            display: none !important;
+            opacity: 0 !important;
+            visibility: hidden !important;
+            pointer-events: none !important;
+          }
+          video::-webkit-media-controls-panel {
+            display: none !important;
+            opacity: 0 !important;
+            visibility: hidden !important;
+            pointer-events: none !important;
+          }
+          video::-webkit-media-controls-play-button {
+            display: none !important;
+            opacity: 0 !important;
+            visibility: hidden !important;
+            pointer-events: none !important;
+          }
+          video::-webkit-media-controls-start-playback-button {
+            display: none !important;
+            opacity: 0 !important;
+            visibility: hidden !important;
+            pointer-events: none !important;
+          }
+          video::-webkit-media-controls-timeline {
+            display: none !important;
+            opacity: 0 !important;
+            visibility: hidden !important;
+            pointer-events: none !important;
+          }
+          video::-webkit-media-controls-current-time-display {
+            display: none !important;
+            opacity: 0 !important;
+            visibility: hidden !important;
+            pointer-events: none !important;
+          }
+          video::-webkit-media-controls-time-remaining-display {
+            display: none !important;
+            opacity: 0 !important;
+            visibility: hidden !important;
+            pointer-events: none !important;
+          }
+          video::-webkit-media-controls-mute-button {
+            display: none !important;
+            opacity: 0 !important;
+            visibility: hidden !important;
+            pointer-events: none !important;
+          }
+          video::-webkit-media-controls-volume-slider {
+            display: none !important;
+            opacity: 0 !important;
+            visibility: hidden !important;
+            pointer-events: none !important;
+          }
+          video::-webkit-media-controls-fullscreen-button {
+            display: none !important;
+            opacity: 0 !important;
+            visibility: hidden !important;
+            pointer-events: none !important;
+          }
+          /* Hide controls for all browsers */
+          video::--webkit-media-controls {
+            display: none !important;
+          }
+          /* Ensure video has no controls attribute */
+          video[controls] {
+            -webkit-appearance: none !important;
+          }
+        `;
+        document.head.appendChild(style);
+      };
+      
+      // Inject CSS immediately
+      injectControlHidingCSS();
+      
+      // Find the video element and set playsInline attribute and prevent interactions
+      const setPlaysInline = () => {
+        // Find all video elements (there might be multiple)
+        const videoElements = document.querySelectorAll('video');
+        videoElements.forEach((videoEl) => {
+          // Remove controls attribute completely
+          videoEl.removeAttribute('controls');
+          videoEl.controls = false;
+          
+          // Set playsInline attributes for iOS Safari
+          videoEl.setAttribute('playsinline', 'true');
+          videoEl.setAttribute('webkit-playsinline', 'true');
+          videoEl.setAttribute('x5-playsinline', 'true'); // For some Android browsers
+          
+          // Prevent fullscreen
+          videoEl.setAttribute('disablePictureInPicture', 'true');
+          
+          // Prevent video interactions via event listeners
+          const preventInteraction = (e: Event) => {
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+          };
+          
+          videoEl.addEventListener('touchstart', preventInteraction, { passive: false });
+          videoEl.addEventListener('touchend', preventInteraction, { passive: false });
+          videoEl.addEventListener('touchmove', preventInteraction, { passive: false });
+          videoEl.addEventListener('click', preventInteraction, { passive: false });
+          videoEl.addEventListener('dblclick', preventInteraction, { passive: false });
+          
+          // Prevent context menu
+          videoEl.addEventListener('contextmenu', preventInteraction, { passive: false });
+          
+          // Set CSS to prevent interactions and hide controls
+          (videoEl.style as any).pointerEvents = 'none';
+          (videoEl.style as any).userSelect = 'none';
+          (videoEl.style as any).WebkitUserSelect = 'none';
+          (videoEl.style as any).touchAction = 'none';
+          (videoEl.style as any).WebkitTouchCallout = 'none';
+          
+          // Force hide controls with inline styles
+          (videoEl.style as any).WebkitAppearance = 'none';
+          (videoEl.style as any).appearance = 'none';
+        });
+      };
+      
       // Set all attributes immediately for fastest loading
       videoElement.setAttribute('playsinline', 'true');
       videoElement.setAttribute('webkit-playsinline', 'true');
+      videoElement.setAttribute('x5-playsinline', 'true');
+      videoElement.removeAttribute('controls');
+      videoElement.controls = false;
+      videoElement.setAttribute('disablePictureInPicture', 'true');
       videoElement.loop = true;
       videoElement.muted = true;
-      videoElement.preload = 'auto'; // Always auto for fastest loading
+      videoElement.preload = 'auto';
       videoElement.playsInline = true;
       
-      let hasPlayed = false;
+      // Apply non-interactive styles
+      (videoElement.style as any).pointerEvents = 'none';
+      (videoElement.style as any).userSelect = 'none';
+      (videoElement.style as any).WebkitUserSelect = 'none';
+      (videoElement.style as any).touchAction = 'none';
+      (videoElement.style as any).WebkitTouchCallout = 'none';
+      (videoElement.style as any).WebkitAppearance = 'none';
+      (videoElement.style as any).appearance = 'none';
 
       // Aggressive play function - tries multiple times immediately
       const attemptPlay = async () => {
-        if (hasPlayed) return;
+        if (!isMounted || hasPlayed) return;
         
         try {
+          // Ensure properties are set before playing
+          videoElement.loop = true;
+          videoElement.muted = true;
+          
           const playPromise = videoElement.play();
           if (playPromise !== undefined) {
             await playPromise;
@@ -71,10 +225,11 @@ export const BackgroundVideo: React.FC<BackgroundVideoProps> = ({
             }
           }
         } catch (error: any) {
-          // Silently handle autoplay restrictions - will retry on next event
+          // Silently handle autoplay restrictions - will retry
           if (__DEV__ && error.name !== 'NotAllowedError') {
             console.warn('[BackgroundVideo] Play attempt:', error.message);
           }
+          hasPlayed = false;
         }
       };
 
@@ -118,6 +273,20 @@ export const BackgroundVideo: React.FC<BackgroundVideoProps> = ({
         setUseImageFallback(true);
       };
 
+      // Prevent interactions via event listeners
+      const preventInteraction = (e: Event) => {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+      };
+      
+      videoElement.addEventListener('touchstart', preventInteraction, { passive: false });
+      videoElement.addEventListener('touchend', preventInteraction, { passive: false });
+      videoElement.addEventListener('touchmove', preventInteraction, { passive: false });
+      videoElement.addEventListener('click', preventInteraction, { passive: false });
+      videoElement.addEventListener('dblclick', preventInteraction, { passive: false });
+      videoElement.addEventListener('contextmenu', preventInteraction, { passive: false });
+
       // Add all event listeners for fastest possible playback
       videoElement.addEventListener('loadstart', handleLoadedStart);
       videoElement.addEventListener('loadedmetadata', handleLoadedMetadata);
@@ -126,16 +295,50 @@ export const BackgroundVideo: React.FC<BackgroundVideoProps> = ({
       videoElement.addEventListener('canplaythrough', handleCanPlayThrough);
       videoElement.addEventListener('error', handleError);
 
-      // Immediate play attempt
+      // Try immediately and after delays (video element might not be ready)
+      setPlaysInline();
       attemptPlay();
-
-      // Also try after a tiny delay (catches cases where element isn't ready)
-      const timeoutId = setTimeout(() => {
+      setTimeout(() => {
+        setPlaysInline();
         attemptPlay();
       }, 100);
+      setTimeout(() => {
+        setPlaysInline();
+        attemptPlay();
+      }, 500);
+      setTimeout(() => {
+        setPlaysInline();
+        attemptPlay();
+      }, 1000);
+      
+      // Also listen for new video elements being added
+      const observer = new MutationObserver(() => {
+        setPlaysInline();
+      });
+      
+      observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+      });
+
+      // Retry on visibility change (when tab becomes visible)
+      const handleVisibilityChange = () => {
+        if (!document.hidden) {
+          attemptPlay();
+        }
+      };
+      document.addEventListener('visibilitychange', handleVisibilityChange);
 
       return () => {
-        clearTimeout(timeoutId);
+        isMounted = false;
+        observer.disconnect();
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+        videoElement.removeEventListener('touchstart', preventInteraction);
+        videoElement.removeEventListener('touchend', preventInteraction);
+        videoElement.removeEventListener('touchmove', preventInteraction);
+        videoElement.removeEventListener('click', preventInteraction);
+        videoElement.removeEventListener('dblclick', preventInteraction);
+        videoElement.removeEventListener('contextmenu', preventInteraction);
         videoElement.removeEventListener('loadstart', handleLoadedStart);
         videoElement.removeEventListener('loadedmetadata', handleLoadedMetadata);
         videoElement.removeEventListener('loadeddata', handleLoadedData);
@@ -150,33 +353,52 @@ export const BackgroundVideo: React.FC<BackgroundVideoProps> = ({
         {useImageFallback ? (
           <View style={styles.fallbackContainer} />
         ) : (
-          // @ts-ignore - HTML5 video element for web
-          <video
-            ref={videoRef}
-            autoPlay
-            loop
-            muted
-            playsInline
-            {...(isMobileWeb() && { 'webkit-playsinline': true } as any)}
-            preload="auto"
-            style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              width: '100%',
-              height: '100%',
-              objectFit: 'cover',
-              zIndex: 0,
-              pointerEvents: 'none',
-            } as any}
-            onError={(e: any) => {
-              if (__DEV__) {
-                console.error('[BackgroundVideo] HTML5 video onError:', e);
-              }
-              setVideoError('Video failed to load');
-              setUseImageFallback(true);
-            }}
-          >
+          <>
+            {/* Transparent overlay to intercept touch events */}
+            <View 
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                zIndex: 1,
+                backgroundColor: 'transparent',
+              } as any}
+            />
+            {/* @ts-ignore - HTML5 video element for web */}
+            <video
+              ref={videoRef}
+              autoPlay
+              loop
+              muted
+              playsInline
+              {...(isMobileWeb() && { 'webkit-playsinline': true } as any)}
+              preload="auto"
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                height: '100%',
+                objectFit: 'cover',
+                zIndex: 0,
+                pointerEvents: 'none',
+                userSelect: 'none',
+                WebkitUserSelect: 'none',
+                touchAction: 'none',
+                WebkitTouchCallout: 'none',
+                WebkitAppearance: 'none',
+                appearance: 'none',
+              } as any}
+              onError={(e: any) => {
+                if (__DEV__) {
+                  console.error('[BackgroundVideo] HTML5 video onError:', e);
+                }
+                setVideoError('Video failed to load');
+                setUseImageFallback(true);
+              }}
+            >
             {/* Optimized source order for fastest loading */}
             {/* Mobile web: MP4 first (fastest iOS loading), then WebM */}
             {isMobileWeb() ? (
@@ -198,6 +420,7 @@ export const BackgroundVideo: React.FC<BackgroundVideoProps> = ({
               </>
             )}
           </video>
+          </>
         )}
       </View>
     );
@@ -299,12 +522,26 @@ export const BackgroundVideo: React.FC<BackgroundVideoProps> = ({
 
   return (
     <View style={[styles.container, webContainerStyle as any]}>
+      {/* Transparent overlay to intercept touch events on native */}
+      <View 
+        style={{
+          ...StyleSheet.absoluteFillObject,
+          zIndex: 1,
+          backgroundColor: 'transparent',
+        }}
+        pointerEvents="box-none"
+      />
       <VideoView
         player={player}
         style={[styles.video, webVideoStyle as any]}
         contentFit="cover"
         nativeControls={false}
         allowsFullscreen={false}
+        allowsPictureInPicture={false}
+        {...(Platform.OS === 'web' && {
+          controls: false,
+          disablePictureInPicture: true,
+        } as any)}
       />
     </View>
   );

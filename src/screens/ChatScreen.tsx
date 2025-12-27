@@ -64,7 +64,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
   const [isInitializing, setIsInitializing] = useState(true);
   const [chatId, setChatId] = useState<string | null>(persistedChatId || null);
   const [isFinished, setIsFinished] = useState(false);
-  const [inputHeight, setInputHeight] = useState(34); // Initial height for one line
+  const [inputHeight, setInputHeight] = useState(25); // Initial height for one line
   const [matchedUsers, setMatchedUsers] = useState<any[]>(persistedMatchedUsers || []); // Store matched users for rendering cards
   const [destinationCountry, setDestinationCountry] = useState<string>(persistedDestination || ''); // Store destination for cards
   const scrollViewRef = useRef<ScrollView>(null);
@@ -505,7 +505,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
   // Reset input height when text is cleared
   useEffect(() => {
     if (!inputText.trim()) {
-      setInputHeight(34); // Reset to single line height
+      setInputHeight(25); // Reset to single line height
     }
   }, [inputText]);
 
@@ -722,7 +722,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
                   // - Minimum: 34px (single line with proper line height)
                   // - Maximum: 120px (~6 lines, approximately 5-6 lines of text)
                   // - Use content height if it's larger than minimum
-                  const calculatedHeight = Math.max(34, Math.ceil(height));
+                  const calculatedHeight = Math.max(25, Math.ceil(height));
                   const cappedHeight = Math.min(calculatedHeight, 120);
                   
                   // Only update if height actually changed (prevents unnecessary re-renders)
@@ -746,14 +746,19 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
                 }}
                 // Enable scrolling only when we've reached max height
                 scrollEnabled={inputHeight >= 120}
-                // Ensure text aligns to top when multiline
-                textAlignVertical="top"
+                // Center text vertically for single line, top for multiline
+                textAlignVertical={inputHeight <= 25 ? "center" : "top"}
                 style={[
                   styles.paperTextInput,
                   { 
                     // Dynamic height: starts at 34px, expands up to 120px
                     height: inputHeight,
                     maxHeight: 120,
+                    // Center placeholder vertically for single line
+                    ...(inputHeight <= 25 && {
+                      paddingTop: 5,// Center based on line height (22px)
+                      // paddingBottom: (34 - 22) / 2,
+                    }),
                   }
                 ]}
                 contentStyle={[
@@ -762,7 +767,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
                     // Ensure content has proper padding and alignment
                     paddingTop: 0,
                     paddingBottom: 0,
-                    minHeight: 34,
+                    minHeight: 25.
                   }
                 ]}
                 underlineColor="transparent"
@@ -781,17 +786,19 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
               />
             </View>
             
-            <TouchableOpacity 
-              style={[styles.sendButton, (!inputText.trim() || isLoading) && styles.sendButtonDisabled]}
-              onPress={sendMessage}
-              disabled={!inputText.trim() || isLoading}
-            >
-              <Ionicons 
-                name={inputText.trim() ? "arrow-up" : "mic"} 
-                size={20} 
-                color="#FFFFFF" 
-              />
-            </TouchableOpacity>
+            <View style={styles.sendButtonWrapper}>
+              <TouchableOpacity 
+                style={[styles.sendButton, (!inputText.trim() || isLoading) && styles.sendButtonDisabled]}
+                onPress={sendMessage}
+                disabled={!inputText.trim() || isLoading}
+              >
+                <Ionicons 
+                  name={inputText.trim() ? "arrow-up" : "mic"} 
+                  size={20} 
+                  color="#FFFFFF" 
+                />
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </KeyboardAvoidingView>
@@ -822,13 +829,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginRight: spacing.sm,
+    // Ensure proper spacing and prevent overlap
+    minWidth: 24 + 8 + 62, // backButton width + margin + avatar width
   },
   backButton: {
     width: 24,
     height: 24,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 5,
+    marginRight: 8, // Increased margin to ensure clear separation
+    zIndex: 0, // Lower z-index than avatar to prevent overlap
   },
   avatar: {
     width: 62,
@@ -837,6 +847,7 @@ const styles = StyleSheet.create({
     position: 'relative',
     alignItems: 'center',
     justifyContent: 'center',
+    zIndex: 1, // Higher z-index to ensure avatar is above back button
   },
   avatarRing: {
     width: '100%',
@@ -846,6 +857,7 @@ const styles = StyleSheet.create({
     position: 'relative',
     alignItems: 'center',
     justifyContent: 'center',
+    zIndex: 1, // Ensure ring is above back button
   },
   ellipseBackground: {
     position: 'absolute',
@@ -1039,7 +1051,7 @@ const styles = StyleSheet.create({
   inputContainer: {
     flex: 1,
     flexDirection: 'row',
-    alignItems: 'flex-end', // Align items to bottom for proper button alignment
+    alignItems: 'center', // Center align items vertically to prevent send button from affecting line height
     backgroundColor: colors.white,
     paddingLeft: 10,
     paddingRight: 8,
@@ -1066,9 +1078,12 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: 8,
     paddingVertical: 0,
-    justifyContent: 'flex-start', // Align content to top for multiline
-    minHeight: 34, // Minimum single line height
+    // Center content vertically for single line, flex-start for multiline
+    justifyContent: 'center',
+    minHeight: 25, // Minimum single line height
     position: 'relative',
+    // Ensure proper alignment for placeholder
+    alignSelf: 'stretch',
   },
   paperTextInput: {
     backgroundColor: 'transparent',
@@ -1079,26 +1094,34 @@ const styles = StyleSheet.create({
     fontWeight: '400',
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     lineHeight: 22, // Line height for proper text spacing
-    minHeight: 34, // Single line minimum
-    textAlignVertical: 'top', // Align text to top for multiline
+    minHeight: 25, // Single line minimum
+    textAlign: 'left', // Ensure text aligns to left
     ...(Platform.OS === 'web' && {
       outline: 'none' as any,
       resize: 'none' as any, // Prevent manual resizing on web
       overflow: 'auto' as any, // Allow scrolling when content exceeds max height
+      textAlign: 'left' as any, // Left align text on web
     }),
   },
   paperTextInputContent: {
     paddingHorizontal: 0,
     paddingVertical: 0,
     margin: 0,
-    minHeight: 34, // Single line minimum
+    minHeight: 25, // Single line minimum
     fontSize: 18,
     lineHeight: 22, // Consistent line height
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
-    textAlignVertical: 'top', // Top alignment for multiline
+    textAlign: 'left', // Left align text
     ...(Platform.OS === 'web' && {
       outline: 'none' as any,
+      textAlign: 'left' as any, // Left align text on web
     }),
+  },
+  sendButtonWrapper: {
+    // Isolate send button to prevent it from affecting input line height
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 8,
   },
   sendButton: {
     width: 35,
