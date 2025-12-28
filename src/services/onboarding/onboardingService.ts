@@ -21,6 +21,7 @@ export interface OnboardingStepData {
   boardType?: number;
   surfLevel?: number;
   travelExperience?: number;
+  isDemoUser?: boolean; // Whether this is a demo user
 }
 
 class OnboardingService {
@@ -120,6 +121,7 @@ class OnboardingService {
         boardType: data.boardType,
         surfLevel: data.surfLevel,
         travelExperience: data.travelExperience,
+        isDemoUser: data.isDemoUser ?? false, // Pass demo user flag
       });
       console.log('Step 4 (complete profile) saved to Supabase successfully');
     } catch (error: any) {
@@ -151,6 +153,7 @@ class OnboardingService {
         boardType: data.boardType,
         surfLevel: data.surfLevel,
         travelExperience: data.travelExperience,
+        isDemoUser: data.isDemoUser ?? false, // Pass demo user flag
       });
       console.log('Onboarding data saved to Supabase successfully');
     } catch (error: any) {

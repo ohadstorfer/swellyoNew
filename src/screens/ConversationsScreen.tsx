@@ -37,13 +37,20 @@ export default function ConversationsScreen({
   onProfilePress,
   onViewUserProfile,
 }: ConversationsScreenProps) {
-  const { resetOnboarding } = useOnboarding();
+  const { resetOnboarding, user: contextUser } = useOnboarding();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(false); // Start as false to show conversations immediately
   const [filter, setFilter] = useState<FilterType>('all');
-  const [userName, setUserName] = useState('User');
+  // Initialize with cached user data from context for immediate display
+  const [userName, setUserName] = useState(() => {
+    if (contextUser?.nickname) return contextUser.nickname;
+    if (contextUser?.email) return contextUser.email.split('@')[0];
+    return 'User';
+  });
   const [userAvatar, setUserAvatar] = useState<string | null>(null);
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(() => {
+    return contextUser?.id?.toString() || null;
+  });
   const [showMenu, setShowMenu] = useState(false);
   const [showSearchModal, setShowSearchModal] = useState(false);
   const [selectedConversation, setSelectedConversation] = useState<{
@@ -54,8 +61,20 @@ export default function ConversationsScreen({
     isDirect?: boolean;
   } | null>(null);
 
+  // Update user info when context user changes (immediate sync)
+  useEffect(() => {
+    if (contextUser) {
+      const newName = contextUser.nickname || (contextUser.email ? contextUser.email.split('@')[0] : 'User');
+      setUserName(newName);
+      const userId = contextUser.id?.toString() || null;
+      setCurrentUserId(userId);
+    }
+  }, [contextUser]);
+
   useEffect(() => {
     loadConversations();
+    // Load user info in background (non-blocking)
+    // UI already shows cached data from context, so this is just a refresh
     loadUserInfo();
 
     // Subscribe to conversation updates
@@ -70,16 +89,25 @@ export default function ConversationsScreen({
 
   const loadUserInfo = async () => {
     try {
+      // Update from server in the background (optimistic update)
+      // The UI already shows cached data from context, so this is just a refresh
       const user = await supabaseAuthService.getCurrentUser();
       if (user) {
-        setUserName(user.nickname || user.email.split('@')[0]);
-        setCurrentUserId(user.id);
-        if (user.photo) {
-          setUserAvatar(user.photo);
+        // Only update if values have changed to avoid unnecessary re-renders
+        const newName = user.nickname || user.email.split('@')[0];
+        if (newName !== userName) {
+          setUserName(newName);
+        }
+        if (user.id !== currentUserId) {
+          setCurrentUserId(user.id);
+        }
+        if (user.photo !== userAvatar) {
+          setUserAvatar(user.photo || null);
         }
       }
     } catch (error) {
       console.error('Error loading user info:', error);
+      // Don't clear the cached data on error - keep showing what we have
     }
   };
 
@@ -501,13 +529,13 @@ export default function ConversationsScreen({
               styles.swellyLastMessage,
               Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
             ]} numberOfLines={1}>
-              Did you see the new exhibit at the MAM?
+              Yo! Let's connect!
             </Text>
           </View>
         </View>
 
         {/* Time and unread badge */}
-        <View style={styles.swellyTimeContainer}>
+        {/* <View style={styles.swellyTimeContainer}>
           <Text style={[
             styles.swellyTimeText,
             Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
@@ -518,7 +546,7 @@ export default function ConversationsScreen({
               Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
             ]}>2</Text>
           </View>
-        </View>
+        </View> */}
       </TouchableOpacity>
     );
   };

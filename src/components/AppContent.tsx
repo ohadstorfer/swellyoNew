@@ -14,7 +14,7 @@ import { messagingService } from '../services/messaging/messagingService';
 import { useOnboarding } from '../context/OnboardingContext';
 
 export const AppContent: React.FC = () => {
-  const { currentStep, formData, setCurrentStep, updateFormData, saveStepToSupabase, isComplete, markOnboardingComplete } = useOnboarding();
+  const { currentStep, formData, setCurrentStep, updateFormData, saveStepToSupabase, isComplete, markOnboardingComplete, isDemoUser, setIsDemoUser, setUser } = useOnboarding();
   const [showLoading, setShowLoading] = useState(false);
   const [isSavingStep1, setIsSavingStep1] = useState(false);
   const [isSavingStep2, setIsSavingStep2] = useState(false);
@@ -25,8 +25,31 @@ export const AppContent: React.FC = () => {
     setCurrentStep(1);
   };
 
-  const handleDemoChat = () => {
-    setCurrentStep(1); // Go directly to chat screen
+  const handleDemoChat = async () => {
+    try {
+      // Create demo user and authenticate
+      const { supabaseAuthService } = await import('../services/auth/supabaseAuthService');
+      const demoUser = await supabaseAuthService.createDemoUser();
+      
+      // Set demo user in context
+      setUser({
+        id: parseInt(demoUser.id.replace(/-/g, '').substring(0, 15), 16) || Date.now(),
+        email: demoUser.email,
+        nickname: demoUser.nickname,
+        googleId: demoUser.googleId || demoUser.id,
+        createdAt: demoUser.createdAt,
+        updatedAt: demoUser.updatedAt,
+      });
+      
+      // Mark as demo user
+      setIsDemoUser(true);
+      
+      // Start onboarding process
+      setCurrentStep(1);
+    } catch (error: any) {
+      console.error('Error creating demo user:', error);
+      Alert.alert('Error', 'Failed to create demo user. Please try again.');
+    }
   };
 
   const handleStep1Next = async (data: OnboardingData) => {
@@ -131,6 +154,7 @@ export const AppContent: React.FC = () => {
         boardType: data.boardType,
         surfLevel: data.surfLevel,
         travelExperience: data.travelExperience,
+        isDemoUser: isDemoUser, // Pass demo user flag
       });
       
       setShowLoading(true); // Show loading screen

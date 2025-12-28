@@ -19,6 +19,8 @@ interface OnboardingContextType {
   saveStepToSupabase: (stepData: Partial<OnboardingData>) => Promise<void>;
   markOnboardingComplete: () => void;
   checkOnboardingStatus: () => Promise<boolean>;
+  isDemoUser: boolean;
+  setIsDemoUser: (isDemo: boolean) => void;
 }
 
 const OnboardingContext = createContext<OnboardingContextType | undefined>(undefined);
@@ -43,6 +45,7 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const [user, setUser] = useState<User | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
   const [isComplete, setIsComplete] = useState(false);
+  const [isDemoUser, setIsDemoUser] = useState(false);
 
   // Load saved data on mount
   useEffect(() => {
@@ -180,6 +183,7 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         boardType: dataToSave.boardType,
         surfLevel: dataToSave.surfLevel,
         travelExperience: dataToSave.travelExperience,
+        isDemoUser: isDemoUser, // Pass demo user flag
       });
       console.log('Step data saved to Supabase successfully');
     } catch (supabaseError) {
@@ -278,6 +282,8 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     saveStepToSupabase,
     markOnboardingComplete,
     checkOnboardingStatus,
+    isDemoUser,
+    setIsDemoUser,
   };
 
   return (

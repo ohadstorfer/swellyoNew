@@ -57,7 +57,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
   persistedDestination,
   onChatStateChange,
 }) => {
-  const { setCurrentStep, formData } = useOnboarding();
+  const { setCurrentStep, formData, isDemoUser } = useOnboarding();
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -449,6 +449,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
             travelBuddies: response.data.travel_buddies,
             lifestyleKeywords: response.data.lifestyle_keywords,
             waveTypeKeywords: response.data.wave_type_keywords,
+            isDemoUser: isDemoUser, // Pass demo user flag from context
           });
           console.log('Swelly conversation results saved successfully');
         } catch (error) {

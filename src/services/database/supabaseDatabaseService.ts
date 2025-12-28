@@ -69,16 +69,40 @@ class SupabaseDatabaseService {
     location?: string;
     googleId?: string;
     userType?: string; // New user_type column
+    userId?: string; // Optional: for demo user creation, bypasses auth check
   }): Promise<User> {
     if (!isSupabaseConfigured()) {
       throw new Error('Supabase is not configured. Please set up your Supabase credentials.');
     }
 
     try {
-      // Get the current authenticated user
-      const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
+      // Get the current authenticated user, or use provided userId for demo users
+      let authUser;
+      if (userData.userId) {
+        // For demo users, we have the userId from signUp but might not be authenticated yet
+        // Try to get the current session first
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user?.id === userData.userId) {
+          // User is authenticated, use session user
+          authUser = session.user;
+        } else {
+          // User not authenticated yet, but we have userId from signUp
+          // Create a minimal user object for database operations
+          // Note: This will only work if RLS allows inserts for unauthenticated users
+          // or if we're using a service role (which we're not on client)
+          // For now, we'll try to use the userId directly and let RLS handle it
+          authUser = { id: userData.userId, email: userData.email } as any;
+        }
+      } else {
+        // Normal flow: get authenticated user
+        const { data: { user }, error: authError } = await supabase.auth.getUser();
+        if (authError || !user) {
+          throw new Error('User not authenticated. Please sign in first.');
+        }
+        authUser = user;
+      }
       
-      if (authError || !authUser) {
+      if (!authUser || !authUser.id) {
         throw new Error('User not authenticated. Please sign in first.');
       }
 
@@ -170,6 +194,7 @@ class SupabaseDatabaseService {
     travelBuddies?: 'solo' | '2' | 'crew';
     lifestyleKeywords?: string[];
     waveTypeKeywords?: string[];
+    isDemoUser?: boolean; // Whether this is a demo user
   }): Promise<SupabaseSurfer> {
     if (!isSupabaseConfigured()) {
       throw new Error('Supabase is not configured. Please set up your Supabase credentials.');
@@ -259,6 +284,7 @@ class SupabaseDatabaseService {
         travel_buddies: surferData.travelBuddies,
         lifestyle_keywords: surferData.lifestyleKeywords,
         wave_type_keywords: surferData.waveTypeKeywords,
+        is_demo_user: surferData.isDemoUser ?? false, // Set is_demo_user flag
       };
 
       let savedSurfer: SupabaseSurfer;
@@ -330,6 +356,7 @@ class SupabaseDatabaseService {
     boardType?: number;
     surfLevel?: number;
     travelExperience?: number;
+    isDemoUser?: boolean; // Whether this is a demo user
   }): Promise<{ user: User; surfer: SupabaseSurfer }> {
     try {
       // Save user data (only email goes to users table)
@@ -372,6 +399,7 @@ class SupabaseDatabaseService {
         surfLevel: onboardingData.surfLevel, // Will be validated to 1-5 range
         travelExperience: travelExperienceEnum,
         profileImageUrl: onboardingData.profilePicture,
+        isDemoUser: onboardingData.isDemoUser ?? false, // Pass is_demo_user flag
       });
 
       return { user, surfer };

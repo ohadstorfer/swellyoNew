@@ -80,12 +80,15 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
   const [profileData, setProfileData] = useState<SupabaseSurfer | null>(null);
   const [loading, setLoading] = useState(true);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [imageError, setImageError] = useState(false);
   
   // Determine if we're viewing our own profile or another user's
   const isViewingOwnProfile = !userId;
 
   useEffect(() => {
     loadProfileData();
+    // Reset image error when profile data changes
+    setImageError(false);
   }, [userId]);
 
   const loadProfileData = async () => {
@@ -263,11 +266,21 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
         {/* Profile Picture - Centered */}
         <View style={styles.profilePictureContainer}>
           <View style={styles.profilePictureWrapper}>
-            {profileData.profile_image_url ? (
+            {profileData.profile_image_url && !imageError ? (
               <Image
                 source={{ uri: profileData.profile_image_url }}
                 style={styles.profilePicture}
                 resizeMode="cover"
+                onError={(error) => {
+                  console.error('Error loading profile image:', error, 'URL:', profileData.profile_image_url);
+                  setImageError(true);
+                }}
+                onLoad={() => {
+                  setImageError(false);
+                }}
+                {...(Platform.OS === 'web' && {
+                  objectFit: 'cover' as any,
+                })}
               />
             ) : (
               <View style={styles.profilePicturePlaceholder}>
@@ -601,6 +614,10 @@ const styles = StyleSheet.create({
   profilePicture: {
     width: '100%',
     height: '100%',
+    ...(Platform.OS === 'web' && {
+      objectFit: 'cover' as any,
+      display: 'block' as any,
+    }),
   },
   profilePicturePlaceholder: {
     width: '100%',

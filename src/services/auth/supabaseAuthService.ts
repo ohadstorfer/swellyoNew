@@ -381,6 +381,118 @@ class SupabaseAuthService {
   }
 
   /**
+   * Create a demo user for testing/demo purposes
+   * Creates an anonymous user with a random email
+   */
+  async createDemoUser(): Promise<User> {
+    if (!isSupabaseConfigured()) {
+      throw new Error('Supabase is not configured. Please set EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY in your .env file.');
+    }
+
+    try {
+      // Try anonymous sign-in first (doesn't require email)
+      // If that's not available, fall back to email/password
+      try {
+        const { data: { user: anonUser, session: anonSession }, error: anonError } = await supabase.auth.signInAnonymously();
+        
+        if (!anonError && anonUser && anonSession) {
+          // Anonymous sign-in successful
+          const demoEmail = anonUser.email || `demo-${anonUser.id}@anonymous.supabase.co`;
+          
+          // Create user profile in users table
+          const { supabaseDatabaseService } = await import('../database/supabaseDatabaseService');
+          await supabaseDatabaseService.saveUser({
+            email: demoEmail,
+            nickname: 'Demo User',
+            googleId: anonUser.id,
+          });
+
+          // Convert to app User format
+          return this.convertSupabaseUserToAppUser(anonUser);
+        }
+      } catch (anonErr) {
+        console.log('Anonymous sign-in not available, using email/password:', anonErr);
+      }
+
+      // Fallback: Generate a unique demo email with a simple format
+      // Use a simple numeric format that Supabase will definitely accept
+      const timestamp = Date.now();
+      const randomNum = Math.floor(Math.random() * 1000000);
+      // Use a simple format without special characters
+      const demoEmail = `demo${timestamp}${randomNum}@test.com`;
+      const demoPassword = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15) + 'A1!';
+      
+      // Sign up the demo user
+      const { data: { user: supabaseUser }, error: signUpError } = await supabase.auth.signUp({
+        email: demoEmail,
+        password: demoPassword,
+        options: {
+          data: {
+            full_name: 'Demo User',
+            name: 'Demo User',
+          },
+          emailRedirectTo: undefined, // Don't require email confirmation for demo users
+        },
+      });
+
+      if (signUpError) {
+        throw signUpError;
+      }
+
+      if (!supabaseUser) {
+        throw new Error('Failed to create demo user');
+      }
+
+      // Check if user is already authenticated (some Supabase configs auto-sign-in)
+      let { data: { session } } = await supabase.auth.getSession();
+      let finalUser = supabaseUser;
+      
+      // If not authenticated, sign in the user immediately after signup
+      // This is necessary because signUp doesn't automatically sign in the user in some configs
+      if (!session || session.user.id !== supabaseUser.id) {
+        const { data: { session: newSession, user: signedInUser }, error: signInError } = await supabase.auth.signInWithPassword({
+          email: demoEmail,
+          password: demoPassword,
+        });
+
+        if (signInError) {
+          // If signIn fails (e.g., email confirmation required), we can't proceed
+          // In production, you might want to disable email confirmation for demo users
+          // or use a service role key on the server side
+          console.error('Failed to sign in demo user after signUp:', signInError);
+          throw new Error('Failed to authenticate demo user. Please ensure email confirmation is disabled for demo users in Supabase settings.');
+        }
+
+        if (newSession?.user) {
+          finalUser = newSession.user;
+        } else if (signedInUser) {
+          finalUser = signedInUser;
+        }
+      }
+      
+      // Verify we have an authenticated session before proceeding
+      const { data: { session: verifySession } } = await supabase.auth.getSession();
+      if (!verifySession || verifySession.user.id !== finalUser.id) {
+        throw new Error('Demo user authentication failed. Please check Supabase email confirmation settings.');
+      }
+      
+      // Create user profile in users table
+      const { supabaseDatabaseService } = await import('../database/supabaseDatabaseService');
+      await supabaseDatabaseService.saveUser({
+        email: demoEmail,
+        nickname: 'Demo User',
+        googleId: finalUser.id,
+      });
+
+      // Convert to app User format
+      return this.convertSupabaseUserToAppUser(finalUser);
+    } catch (error: any) {
+      console.error('Error creating demo user:', error);
+      throw new Error('Failed to create demo user: ' + (error.message || String(error)));
+    }
+  }
+
+  /**
    * Listen to auth state changes
    */
   onAuthStateChange(callback: (user: User | null) => void) {
