@@ -538,10 +538,10 @@ export const BackgroundVideo: React.FC<BackgroundVideoProps> = ({
         nativeControls={false}
         allowsFullscreen={false}
         allowsPictureInPicture={false}
-        {...(Platform.OS === 'web' && {
-          controls: false,
-          disablePictureInPicture: true,
-        } as any)}
+      {...((Platform.OS as string) === 'web' && {
+        controls: false,
+        disablePictureInPicture: true,
+      } as any)}
       />
     </View>
   );

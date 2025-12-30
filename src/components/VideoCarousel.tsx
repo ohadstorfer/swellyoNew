@@ -549,26 +549,29 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
         return;
       }
       
-      mainVideoPlayer.replaceAsync(videoUrl).then(() => {
-        if (mainVideoPlayer) {
-          // Set properties required for autoplay
-          mainVideoPlayer.loop = true;
-          mainVideoPlayer.muted = true;
-          
-          // Try to play after source is replaced
-          const playPromise = mainVideoPlayer.play();
-          if (playPromise !== undefined) {
-            playPromise.catch((playError: any) => {
-              // Autoplay may be blocked, but the useEffect above will retry
-              if (__DEV__ && playError.name !== 'NotAllowedError') {
-                console.warn('[VideoCarousel] Play after replace failed:', playError.message);
-              }
-            });
+      const replacePromise = mainVideoPlayer.replaceAsync(videoUrl);
+      if (replacePromise && typeof replacePromise.then === 'function') {
+        replacePromise.then(() => {
+          if (mainVideoPlayer) {
+            // Set properties required for autoplay
+            mainVideoPlayer.loop = true;
+            mainVideoPlayer.muted = true;
+            
+            // Try to play after source is replaced
+            const playPromise = mainVideoPlayer.play();
+            if (playPromise !== undefined && typeof (playPromise as any).catch === 'function') {
+              (playPromise as any).catch((playError: any) => {
+                // Autoplay may be blocked, but the useEffect above will retry
+                if (__DEV__ && playError.name !== 'NotAllowedError') {
+                  console.warn('[VideoCarousel] Play after replace failed:', playError.message);
+                }
+              });
+            }
           }
-        }
-      }).catch((error: any) => {
-        console.error('Error replacing video:', error, 'URL:', videoUrl);
-      });
+        }).catch((error: any) => {
+          console.error('Error replacing video:', error, 'URL:', videoUrl);
+        });
+      }
     }
   }, [selectedVideo.videoUrl, selectedVideo.name, mainVideoPlayer]);
 

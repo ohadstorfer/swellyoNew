@@ -152,8 +152,9 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
     : SURF_LEVEL_MAP[1];
 
   // Get travel experience display info
-  const travelExpInfo = profileData.travel_experience
-    ? TRAVEL_EXPERIENCE_MAP[profileData.travel_experience.toLowerCase()] || TRAVEL_EXPERIENCE_MAP['new_nomad']
+  const travelExpKey = profileData.travel_experience?.toLowerCase() as keyof typeof TRAVEL_EXPERIENCE_MAP;
+  const travelExpInfo = profileData.travel_experience && travelExpKey in TRAVEL_EXPERIENCE_MAP
+    ? TRAVEL_EXPERIENCE_MAP[travelExpKey]
     : TRAVEL_EXPERIENCE_MAP['new_nomad'];
 
   // Get destinations array (top 3)
