@@ -44,13 +44,12 @@ const SURF_LEVEL_MAP: { [key: number]: { name: string; progress: number } } = {
 };
 
 // Travel experience mapping (enum to number of trips)
-const TRAVEL_EXPERIENCE_MAP: { [key: string]: { trips: number; progress: number } } = {
-  'new_nomad': { trips: 3, progress: 10 }, // ~10% of bar (3 trips out of 30+)
-  'rising_voyager': { trips: 7, progress: 23 }, // ~23% of bar
-  'wave_hunter': { trips: 15, progress: 50 }, // ~50% of bar
-  'chicken_joe': { trips: 30, progress: 100 }, // 100% of bar
+const TRAVEL_EXPERIENCE_MAP = {
+  new_nomad: { trips: 0, progress: 10 },       // 0–3
+  rising_voyager: { trips: 4, progress: 30 }, // 4–9
+  wave_hunter: { trips: 10, progress: 65 },   // 10–19
+  chicken_joe: { trips: 20, progress: 100 },  // 20+
 };
-
 // Lifestyle keyword to icon mapping (simplified - using Ionicons for now)
 const LIFESTYLE_ICON_MAP: { [key: string]: string } = {
   'yoga': 'fitness-outline',
@@ -371,7 +370,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
               </View>
               <View style={styles.progressLabels}>
                 <Text style={styles.progressLabel}>0 trips</Text>
-                <Text style={styles.progressLabel}>30+ trips</Text>
+                <Text style={styles.progressLabel}>20+ trips</Text>
               </View>
             </View>
           </View>

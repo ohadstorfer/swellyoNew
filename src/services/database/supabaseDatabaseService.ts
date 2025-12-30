@@ -61,7 +61,7 @@ class SupabaseDatabaseService {
    * Note: users table stores id, email, role, and user_type
    */
   async saveUser(userData: {
-    email: string;
+    email?: string; // Optional: if not provided, will use auth user's email
     nickname?: string;
     profilePicture?: string;
     pronouns?: string;
@@ -113,9 +113,12 @@ class SupabaseDatabaseService {
         .eq('id', authUser.id)
         .single();
 
+      // Determine the email to use: prefer provided email, fallback to auth user email, then existing user email
+      const emailToUse = userData.email || authUser.email || existingUser?.email || '';
+      
       const userDataToSave: Partial<SupabaseUser> = {
         id: authUser.id,
-        email: userData.email || authUser.email || '',
+        email: emailToUse,
         user_type: userData.userType,
         // Note: users table has id, email, role, user_type - other data goes to surfers table
       };
@@ -123,23 +126,41 @@ class SupabaseDatabaseService {
       let savedUser: SupabaseUser;
 
       if (existingUser) {
-        // Update existing user (email and user_type can be updated in users table)
-        const updateData: Partial<SupabaseUser> = { email: userDataToSave.email };
-        if (userDataToSave.user_type !== undefined) {
+        // Update existing user (only update email if it's different and not empty)
+        // Only update user_type if it's provided and different
+        const updateData: Partial<SupabaseUser> = {};
+        
+        // Only update email if:
+        // 1. A new email was provided AND
+        // 2. It's different from the existing email AND
+        // 3. It's not empty
+        if (userData.email && userData.email !== existingUser.email && userData.email.trim() !== '') {
+          updateData.email = userDataToSave.email;
+        }
+        
+        // Only update user_type if it's provided and different
+        if (userDataToSave.user_type !== undefined && userDataToSave.user_type !== existingUser.user_type) {
           updateData.user_type = userDataToSave.user_type;
         }
-        const { data, error } = await supabase
-          .from('users')
-          .update(updateData)
-          .eq('id', authUser.id)
-          .select()
-          .single();
+        
+        // Only perform update if there are actual changes
+        if (Object.keys(updateData).length > 0) {
+          const { data, error } = await supabase
+            .from('users')
+            .update(updateData)
+            .eq('id', authUser.id)
+            .select()
+            .single();
 
-        if (error) {
-          throw error;
+          if (error) {
+            throw error;
+          }
+
+          savedUser = data;
+        } else {
+          // No changes needed, return existing user
+          savedUser = existingUser;
         }
-
-        savedUser = data;
       } else {
         // Create new user
         const insertData: any = {
@@ -360,14 +381,30 @@ class SupabaseDatabaseService {
   }): Promise<{ user: User; surfer: SupabaseSurfer }> {
     try {
       // Save user data (only email goes to users table)
-      const user = await this.saveUser({
-        email: onboardingData.userEmail || '',
+      // Only pass email if it's provided and not empty
+      // This prevents trying to update email to empty string during onboarding steps
+      const userDataToSave: {
+        email?: string;
+        nickname?: string;
+        profilePicture?: string;
+        pronouns?: string;
+        age?: number;
+        location?: string;
+        userType?: string;
+      } = {
         nickname: onboardingData.nickname, // Will be used for surfer.name
         profilePicture: onboardingData.profilePicture, // Will be used for surfer.profile_image_url
         pronouns: onboardingData.pronouns, // Will be used for surfer.pronoun
         age: onboardingData.age, // Will be used for surfer.age
         location: onboardingData.location, // Will be used for surfer.country_from
-      });
+      };
+      
+      // Only include email if it's provided and not empty
+      if (onboardingData.userEmail && onboardingData.userEmail.trim() !== '') {
+        userDataToSave.email = onboardingData.userEmail;
+      }
+      
+      const user = await this.saveUser(userDataToSave);
 
       // Convert travelExperience (number of trips) to enum string
       // Map number of trips to category:
