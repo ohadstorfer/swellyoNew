@@ -2,9 +2,11 @@
 // Metro automatically resolves platform-specific extensions (.native.tsx, .web.tsx)
 // This base file is only used if platform-specific files don't exist
 
-export type Country = any;
+export type Country = {
+  cca2: string;
+  name: string | { common: string };
+};
 export type CountryCode = string;
 
-export const CountryPicker: any = null;
-export { Country, CountryCode };
+export const CountryPicker: React.ComponentType<any> | null = null;
 

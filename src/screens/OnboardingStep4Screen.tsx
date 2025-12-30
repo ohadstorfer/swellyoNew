@@ -20,6 +20,8 @@ import { CountryPicker, Country, CountryCode } from '../components/CountryPicker
 import { Text } from '../components/Text';
 import { colors, spacing, typography } from '../styles/theme';
 import { OnboardingData } from './OnboardingStep1Screen';
+import { uploadProfileImage } from '../services/storage/storageService';
+import { supabase } from '../config/supabase';
 
 interface OnboardingStep4ScreenProps {
   onNext: (data: OnboardingData) => void;
@@ -475,6 +477,7 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
   const [age, setAge] = useState<string>(
     initialData.age ? initialData.age.toString() : ''
   );
+  const [isUploading, setIsUploading] = useState(false);
 
   const pickImage = async () => {
     if (Platform.OS === 'web') {
@@ -527,7 +530,33 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
 
   const keyboardAwareScrollViewRef = useRef<any>(null);
 
-  const handleNext = () => {
+  const handleNext = async () => {
+    let finalProfilePicture = profilePicture;
+    
+    // If we have a local image (base64 or file://), upload it
+    if (profilePicture && (profilePicture.startsWith('data:') || profilePicture.startsWith('file://') || profilePicture.startsWith('content://'))) {
+      setIsUploading(true);
+      try {
+        // Get current user ID
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const result = await uploadProfileImage(profilePicture, user.id);
+          if (result.success && result.url) {
+            finalProfilePicture = result.url;
+            console.log('[OnboardingStep4] Image uploaded successfully:', result.url);
+          } else {
+            console.warn('[OnboardingStep4] Image upload failed:', result.error);
+            // Continue with the local image as fallback
+          }
+        }
+      } catch (error) {
+        console.error('[OnboardingStep4] Error uploading image:', error);
+        // Continue with the local image as fallback
+      } finally {
+        setIsUploading(false);
+      }
+    }
+    
     const formData: OnboardingData = {
       nickname: name,
       userEmail: initialData.userEmail || '',
@@ -536,7 +565,7 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
       boardType: initialData.boardType ?? 0,
       surfLevel: initialData.surfLevel ?? -1,
       travelExperience: initialData.travelExperience ?? 0,
-      profilePicture: profilePicture || undefined,
+      profilePicture: finalProfilePicture || undefined,
     };
     onNext(formData);
   };
@@ -669,8 +698,8 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
           <TouchableOpacity 
             onPress={handleNext} 
             activeOpacity={0.8}
-            disabled={isLoading}
-            style={isLoading && styles.buttonDisabled}
+            disabled={isLoading || isUploading}
+            style={(isLoading || isUploading) && styles.buttonDisabled}
           >
             <LinearGradient
               colors={['#00A2B6', '#0788B0']}
@@ -679,7 +708,7 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
               style={styles.gradientButton}
             >
               <Text style={styles.buttonText}>
-                {isLoading ? 'Loading...' : 'Next'}
+                {isUploading ? 'Uploading...' : isLoading ? 'Loading...' : 'Next'}
               </Text>
             </LinearGradient>
           </TouchableOpacity>
