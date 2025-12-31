@@ -491,8 +491,8 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
           const reader = new FileReader();
           reader.onload = (event: any) => {
             const imageUri = event.target.result;
+            // Only set local state for preview - upload happens in handleNext
             setProfilePicture(imageUri);
-            updateFormData({ profilePicture: imageUri });
           };
           reader.readAsDataURL(file);
         }
@@ -517,8 +517,8 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
 
         if (!result.canceled && result.assets[0]) {
           const imageUri = result.assets[0].uri;
+          // Only set local state for preview - upload happens in handleNext
           setProfilePicture(imageUri);
-          updateFormData({ profilePicture: imageUri });
         }
       } catch (error) {
         console.warn('expo-image-picker not available, please install it for native image picking');
