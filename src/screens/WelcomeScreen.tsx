@@ -24,7 +24,7 @@ import { useIsMobile, responsiveWidth } from '../utils/responsive';
 
 interface WelcomeScreenProps {
   onGetStarted: () => void;
-  onDemoChat?: () => void;
+  onDemoChat?: () => void | Promise<void>;
 }
 
 // Google logo path from public/welcome page folder
@@ -61,6 +61,7 @@ const GoogleIcon: React.FC = () => {
 
 export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDemoChat }) => {
   const [isLoading, setIsLoading] = useState(false);
+  const [isDemoLoading, setIsDemoLoading] = useState(false);
   const { setUser, updateFormData, checkOnboardingStatus, isComplete } = useOnboarding();
   
   // Use responsive hook for accurate mobile detection
@@ -299,6 +300,22 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
     console.log('Login pressed');
   };
 
+  const handleDemoChat = async () => {
+    if (!onDemoChat || isDemoLoading) return;
+    
+    try {
+      setIsDemoLoading(true);
+      // Call the demo chat handler (it's async and will navigate to onboarding)
+      await onDemoChat();
+    } catch (error: any) {
+      console.error('Error in demo chat:', error);
+      Alert.alert('Error', 'Failed to start demo. Please try again.');
+      setIsDemoLoading(false);
+    }
+    // Note: We don't set isDemoLoading to false here because navigation happens
+    // The component will unmount when navigating to onboarding
+  };
+
 
   console.log('WelcomeScreen rendering - Platform:', Platform.OS);
   
@@ -349,11 +366,21 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
             
             {/* Demo Chat Button */}
             {onDemoChat && (
-              <Button
-                title="Demo Chat"
-                onPress={onDemoChat}
-                style={[styles.getStartedButton, { width: buttonWidth }, styles.demoButton]}
-              />
+              <TouchableOpacity
+                onPress={handleDemoChat}
+                disabled={isDemoLoading || isLoading}
+                style={[
+                  styles.getStartedButton, 
+                  { width: buttonWidth }, 
+                  styles.demoButton,
+                  (isDemoLoading || isLoading) && styles.buttonDisabled
+                ]}
+                activeOpacity={0.8}
+              >
+                <RNText style={styles.getStartedButtonText} numberOfLines={1}>
+                  {isDemoLoading ? "Loading..." : "Demo Chat"}
+                </RNText>
+              </TouchableOpacity>
             )}
             </View>
 
@@ -475,6 +502,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   getStartedButtonText: {
+    textAlign: 'center',
     color: '#000',
     fontSize: 16,
     fontWeight: '600', // Inter SemiBold
