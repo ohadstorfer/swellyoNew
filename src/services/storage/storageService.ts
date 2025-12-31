@@ -51,6 +51,24 @@ export const uploadProfileImage = async (
       return { success: false, error: 'Missing image or user ID' };
     }
 
+    // Check if bucket exists first
+    const { data: buckets, error: bucketError } = await supabase.storage.listBuckets();
+    
+    if (bucketError) {
+      console.warn('[StorageService] Error checking buckets:', bucketError);
+      return { success: false, error: 'Storage not available' };
+    }
+
+    const bucketExists = buckets?.some(bucket => bucket.name === 'profile-images');
+    
+    if (!bucketExists) {
+      console.warn('[StorageService] Bucket "profile-images" does not exist. Skipping upload.');
+      return { 
+        success: false, 
+        error: 'Storage bucket not configured. Please create "profile-images" bucket in Supabase Storage.' 
+      };
+    }
+
     // Generate a unique filename
     const fileExtension = 'jpg';
     const fileName = `${userId}/profile-${Date.now()}.${fileExtension}`;

@@ -129,9 +129,9 @@ const Field: React.FC<FieldProps> = ({
         <PaperTextInput
           ref={inputRef}
           mode="flat"
-          value={value}
+        value={value}
           onChangeText={handleTextChange}
-          placeholder={placeholder || label}
+        placeholder={placeholder || label}
           onFocus={() => setIsFocused(true)}
           onBlur={() => setIsFocused(false)}
           editable={true}
@@ -170,8 +170,8 @@ const Field: React.FC<FieldProps> = ({
               onSurface: hasValue && !isFocused ? colors.textPrimary : colors.textSecondary,
             },
           }}
-        />
-      </View>
+      />
+    </View>
 
       {/* Check Icon on Right when field has value and not focused */}
       {showCheck && (
@@ -546,8 +546,13 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
             console.log('[OnboardingStep4] Image uploaded successfully:', result.url);
           } else {
             console.warn('[OnboardingStep4] Image upload failed:', result.error);
-            // Continue with the local image as fallback
+            // For demo users or if bucket doesn't exist, use base64 directly
+            // The database can store base64 images (though not ideal for large images)
+            finalProfilePicture = profilePicture;
           }
+        } else {
+          // No user authenticated, use base64 directly
+          finalProfilePicture = profilePicture;
         }
       } catch (error) {
         console.error('[OnboardingStep4] Error uploading image:', error);
@@ -682,7 +687,7 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
                   updateFormData({ age: ageNum });
                 }}
                 placeholder="Age*"
-                width={118}
+                    width={118}
                 style={styles.ageField}
                 keyboardType="numeric"
                 numericOnly={true}

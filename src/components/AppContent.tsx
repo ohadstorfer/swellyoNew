@@ -27,6 +27,23 @@ export const AppContent: React.FC = () => {
 
   const handleDemoChat = async () => {
     try {
+      // Clear any cached onboarding data from localStorage first
+      const AsyncStorage = await import('@react-native-async-storage/async-storage');
+      await AsyncStorage.default.removeItem('@swellyo_onboarding');
+      
+      // Clear formData immediately to prevent cached data from being used
+      updateFormData({
+        nickname: '',
+        userEmail: '',
+        location: '',
+        age: 0,
+        boardType: -1, // No board selected by default - will show Short Board (index 0)
+        surfLevel: 0,
+        travelExperience: 0,
+        profilePicture: undefined,
+        pronouns: undefined,
+      });
+      
       // Create demo user and authenticate
       const { supabaseAuthService } = await import('../services/auth/supabaseAuthService');
       const demoUser = await supabaseAuthService.createDemoUser();
@@ -43,6 +60,19 @@ export const AppContent: React.FC = () => {
       
       // Mark as demo user
       setIsDemoUser(true);
+      
+      // Ensure formData is still cleared (in case it was set during user creation)
+      updateFormData({
+        nickname: '',
+        userEmail: '',
+        location: '',
+        age: 0,
+        boardType: -1, // No board selected by default
+        surfLevel: 0,
+        travelExperience: 0,
+        profilePicture: undefined,
+        pronouns: undefined,
+      });
       
       // Start onboarding process
       setCurrentStep(1);

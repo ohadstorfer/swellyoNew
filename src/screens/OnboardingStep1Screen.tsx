@@ -79,11 +79,13 @@ export const OnboardingStep1Screen: React.FC<OnboardingStep1ScreenProps> = ({
   const { markOnboardingComplete } = useOnboarding();
   const isDesktop = useIsDesktopWeb();
   const { height: screenHeight } = useScreenDimensions();
-  const [selectedBoardId, setSelectedBoardId] = useState<number>(
-    initialData.boardType ?? 0
-  );
+  const defaultBoardType = (initialData.boardType !== undefined && initialData.boardType >= 0 && initialData.boardType <= 3) 
+    ? initialData.boardType 
+    : 0;
+  
+  const [selectedBoardId, setSelectedBoardId] = useState<number>(defaultBoardType);
   const [activeBoardIndex, setActiveBoardIndex] = useState<number>(
-    BOARD_TYPES.findIndex(b => b.id === selectedBoardId) || 0
+    defaultBoardType >= 0 ? BOARD_TYPES.findIndex(b => b.id === defaultBoardType) : 0
   );
   
   // Calculate responsive dimensions
@@ -200,7 +202,7 @@ export const OnboardingStep1Screen: React.FC<OnboardingStep1ScreenProps> = ({
         {/* Title */}
         <View style={[styles.titleContainer, isDesktop && styles.titleContainerDesktop]}>
           <Text style={styles.title}>
-            Nice to meet you, {initialData.nickname || 'Jake'}!
+            Nice to meet you, {initialData.nickname || 'User'}!
           </Text>
         </View>
 
