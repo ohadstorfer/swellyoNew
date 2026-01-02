@@ -701,6 +701,43 @@ export default function ConversationsScreen({
               }}
             >
               <View style={styles.menuContainer}>
+                {/* My Profile */}
+                <TouchableOpacity
+                  style={styles.menuItem}
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    console.log('My Profile menu item pressed');
+                    setShowMenu(false);
+                    if (onProfilePress) {
+                      onProfilePress();
+                    }
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="person-outline" size={20} color="#222B30" />
+                  <Text style={styles.menuItemText}>My Profile</Text>
+                </TouchableOpacity>
+
+                {/* My Shaper */}
+                <TouchableOpacity
+                  style={styles.menuItem}
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    console.log('My Shaper menu item pressed');
+                    // Placeholder - does nothing for now
+                    setShowMenu(false);
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Image
+                    source={{ uri: getImageUrl('/Shaper icon.svg') }}
+                    style={styles.menuItemIcon}
+                    resizeMode="contain"
+                  />
+                  <Text style={styles.menuItemText}>My Shaper</Text>
+                </TouchableOpacity>
+
+                {/* Logout */}
                 <TouchableOpacity
                   style={styles.menuItem}
                   onPress={(e) => {
@@ -710,7 +747,7 @@ export default function ConversationsScreen({
                   }}
                   activeOpacity={0.7}
                 >
-                  <Ionicons name="log-out-outline" size={20} color="#222B30" />
+                  <Ionicons name="arrow-forward-circle-outline" size={20} color="#222B30" />
                   <Text style={styles.menuItemText}>Logout</Text>
                 </TouchableOpacity>
               </View>
@@ -1199,7 +1236,7 @@ const styles = StyleSheet.create({
   },
   menuContainer: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 16,
+    borderRadius: 12,
     minWidth: 200,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -1208,20 +1245,26 @@ const styles = StyleSheet.create({
     elevation: 5,
     overflow: 'hidden',
     zIndex: 1000,
+    paddingVertical: 4,
   },
   menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 12,
+  },
+  menuItemIcon: {
+    width: 20,
+    height: 20,
   },
   menuItemText: {
-    fontFamily: 'Inter',
-    fontSize: 12,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    fontSize: 14,
     fontWeight: '400',
     color: '#222B30',
-    lineHeight: 15,
+    lineHeight: 20,
+    flex: 1,
   },
 });
 

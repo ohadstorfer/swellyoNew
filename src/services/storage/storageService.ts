@@ -51,24 +51,6 @@ export const uploadProfileImage = async (
       return { success: false, error: 'Missing image or user ID' };
     }
 
-    // Check if bucket exists first
-    const { data: buckets, error: bucketError } = await supabase.storage.listBuckets();
-    
-    if (bucketError) {
-      console.warn('[StorageService] Error checking buckets:', bucketError);
-      return { success: false, error: 'Storage not available' };
-    }
-
-    const bucketExists = buckets?.some(bucket => bucket.name === 'profile-images');
-    
-    if (!bucketExists) {
-      console.warn('[StorageService] Bucket "profile-images" does not exist. Skipping upload.');
-      return { 
-        success: false, 
-        error: 'Storage bucket not configured. Please create "profile-images" bucket in Supabase Storage.' 
-      };
-    }
-
     // Generate a unique filename
     const fileExtension = 'jpg';
     const fileName = `${userId}/profile-${Date.now()}.${fileExtension}`;
@@ -90,7 +72,8 @@ export const uploadProfileImage = async (
       return { success: false, error: 'Unsupported image format' };
     }
 
-    // Upload to Supabase Storage
+    // Try to upload directly - this is more reliable than checking buckets first
+    // (bucket check might fail due to permissions, but upload might still work)
     const { data, error } = await supabase.storage
       .from('profile-images')
       .upload(fileName, blob, {
@@ -100,7 +83,23 @@ export const uploadProfileImage = async (
 
     if (error) {
       console.error('[StorageService] Upload error:', error);
-      return { success: false, error: error.message };
+      
+      // Check if it's a bucket not found error
+      if (error.message?.includes('Bucket not found') || error.message?.includes('does not exist')) {
+        // Try to check if bucket exists (for better error message)
+        const { data: buckets } = await supabase.storage.listBuckets();
+        const bucketExists = buckets?.some(bucket => bucket.name === 'profile-images');
+        
+        if (!bucketExists) {
+          return { 
+            success: false, 
+            error: 'Storage bucket "profile-images" does not exist. Please create it in Supabase Storage.' 
+          };
+        }
+      }
+      
+      // For other errors (permissions, etc.), return the error
+      return { success: false, error: error.message || 'Upload failed' };
     }
 
     // Get the public URL

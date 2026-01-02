@@ -286,6 +286,9 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
           onPress={() => handleBoardPress(index)}
           disabled={isScrolling}
           style={styles.boardTouchable}
+          // Allow touch events to pass through for horizontal scrolling
+          delayPressIn={50}
+          delayPressOut={0}
         >
             <Animated.View
               style={[
@@ -424,6 +427,7 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
           horizontal
           pagingEnabled={false}
           showsHorizontalScrollIndicator={false}
+          scrollEnabled={true}
           onViewableItemsChanged={onViewableItemsChanged}
           viewabilityConfig={viewabilityConfig}
           initialScrollIndex={initialVirtualIndex >= 0 ? initialVirtualIndex : START_INDEX}
@@ -444,7 +448,20 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
               flatListRef.current?.scrollToIndex({ index: info.index, animated: false });
             });
           }}
-          {...(Platform.OS === 'web' && { style: { overflowX: 'hidden' as any } as any })}
+          // Mobile web and native: ensure proper touch scrolling
+          {...(Platform.OS === 'web' && {
+            style: {
+              overflowX: 'hidden' as any,
+              WebkitOverflowScrolling: 'touch' as any,
+              touchAction: 'pan-x' as any, // Allow horizontal panning, prevent vertical
+            } as any,
+          })}
+          // Native: ensure proper scroll behavior
+          {...(Platform.OS !== 'web' && {
+            bounces: true,
+            alwaysBounceHorizontal: true,
+            alwaysBounceVertical: false,
+          })}
         />
 
         {/* Show arrows only on desktop web */}
@@ -495,6 +512,15 @@ const styles = StyleSheet.create({
     WebkitOverflowScrolling: 'touch',
     // @ts-ignore
     scrollBehavior: 'smooth',
+    // Ensure touch events work properly on mobile
+    ...(Platform.OS === 'web' && {
+      // @ts-ignore
+      touchAction: 'pan-x',
+      // @ts-ignore
+      userSelect: 'none',
+      // @ts-ignore
+      WebkitUserSelect: 'none',
+    }),
   },
   arrowButton: {
     position: 'absolute',
@@ -539,6 +565,11 @@ const styles = StyleSheet.create({
     height: '100%',
     justifyContent: 'center',
     alignItems: 'center',
+    // Ensure touch events don't interfere with horizontal scrolling
+    ...(Platform.OS === 'web' && {
+      // @ts-ignore
+      touchAction: 'pan-x',
+    }),
   },
   boardWrapper: {
     justifyContent: 'flex-start', // Align boards to top

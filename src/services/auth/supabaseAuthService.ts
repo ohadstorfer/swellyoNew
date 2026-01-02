@@ -243,12 +243,40 @@ class SupabaseAuthService {
       // Get or create user profile in Supabase
       const userProfile = await this.getOrCreateUserProfile(supabaseUser);
 
+      // Try to get the actual name from surfers table (for users who completed onboarding)
+      let displayName = userProfile.nickname || supabaseUser.user_metadata?.full_name || supabaseUser.user_metadata?.name || 'User';
+      let profileImage = supabaseUser.user_metadata?.avatar_url || supabaseUser.user_metadata?.picture;
+      
+      try {
+        const { supabaseDatabaseService } = await import('../database/supabaseDatabaseService');
+        const { surfer } = await supabaseDatabaseService.getCurrentUserData();
+        
+        // If surfer exists and has a name that's not a default value, use it
+        if (surfer?.name && 
+            surfer.name.trim() !== '' && 
+            surfer.name !== 'User' && 
+            surfer.name !== 'Demo User') {
+          displayName = surfer.name;
+        }
+        
+        // Also use profile image from surfer if available
+        if (surfer?.profile_image_url) {
+          profileImage = surfer.profile_image_url;
+        }
+      } catch (surferError) {
+        // If we can't get surfer data, just use the nickname from user profile
+        // This is not critical, so we continue with the existing displayName
+        if (__DEV__) {
+          console.log('Could not get surfer name, using user profile nickname:', surferError);
+        }
+      }
+
       return {
         id: supabaseUser.id,
         email: supabaseUser.email || '',
-        nickname: userProfile.nickname || supabaseUser.user_metadata?.full_name || supabaseUser.user_metadata?.name || 'User',
+        nickname: displayName,
         googleId: supabaseUser.app_metadata?.provider_id || supabaseUser.id,
-        photo: supabaseUser.user_metadata?.avatar_url || supabaseUser.user_metadata?.picture,
+        photo: profileImage,
         createdAt: supabaseUser.created_at || new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };

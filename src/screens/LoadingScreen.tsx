@@ -194,6 +194,10 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
           // Force hide controls with inline styles
           (videoElement.style as any).WebkitAppearance = 'none';
           (videoElement.style as any).appearance = 'none';
+          
+          // Set transparent background for video element
+          (videoElement.style as any).backgroundColor = 'transparent';
+          (videoElement.style as any).background = 'transparent';
         });
       };
       
@@ -478,13 +482,14 @@ const styles = StyleSheet.create({
     height: 294,
     borderRadius: 0,
     overflow: 'hidden',
-    backgroundColor: '#FAFAFA',
+    backgroundColor: 'transparent', // Transparent background to match page
     position: 'relative',
   },
   videoWrapper: {
     width: '100%',
     height: '100%',
     position: 'relative',
+    backgroundColor: 'transparent', // Transparent background
   },
   videoPlayerContainer: {
     width: '100%',
@@ -492,6 +497,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 0,
     left: 0,
+    backgroundColor: 'transparent', // Transparent background
     pointerEvents: 'none', // Prevent all interactions with video
     ...(Platform.OS === 'web' && {
       // Prevent video controls and interactions on web
@@ -505,14 +511,14 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
     pointerEvents: 'none', // Prevent all interactions with video
+    backgroundColor: 'transparent', // Transparent background for native
     ...(Platform.OS === 'web' && {
       // Apply to all web (desktop and mobile web)
       objectFit: 'cover' as any,
       display: 'block' as any,
       visibility: 'visible' as any,
       opacity: 1,
-      mixBlendMode: 'darken' as any, 
-      backgroundColor: '#FAFAFA',
+      backgroundColor: 'transparent', // Transparent background for web
       // Prevent interactions
       userSelect: 'none' as any,
       WebkitUserSelect: 'none' as any,
@@ -544,4 +550,5 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
 });
+
 

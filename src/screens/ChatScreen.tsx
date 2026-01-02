@@ -23,6 +23,7 @@ import { supabaseDatabaseService } from '../services/database/supabaseDatabaseSe
 import { MatchedUserCard } from '../components/MatchedUserCard';
 import { messagingService } from '../services/messaging/messagingService';
 import { findMatchingUsers } from '../services/matching/matchingService';
+import { findMatchingUsersV3 } from '../services/matching/matchingServiceV3';
 import { supabaseAuthService } from '../services/auth/supabaseAuthService';
 
 interface Message {
@@ -365,7 +366,12 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
             };
             console.log('Request data being passed to findMatchingUsers:', JSON.stringify(requestData, null, 2));
             console.log('queryFilters in request:', requestData.queryFilters);
-            const matchedUsers = await findMatchingUsers(requestData, currentUser.id);
+            
+            // Use V3 matching algorithm (can be toggled via environment variable or feature flag)
+            const useV3Matching = process.env.EXPO_PUBLIC_USE_V3_MATCHING === 'true';
+            const matchedUsers = useV3Matching
+              ? await findMatchingUsersV3(requestData, currentUser.id)
+              : await findMatchingUsers(requestData, currentUser.id);
             
             console.log('Matched users found:', matchedUsers.length, matchedUsers);
             console.log('Filters from non-negotiable step:', response.data.filtersFromNonNegotiableStep);

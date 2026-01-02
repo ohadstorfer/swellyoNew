@@ -543,20 +543,29 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
           const result = await uploadProfileImage(profilePicture, user.id);
           if (result.success && result.url) {
             finalProfilePicture = result.url;
-            console.log('[OnboardingStep4] Image uploaded successfully:', result.url);
+            console.log('[OnboardingStep4] Image uploaded successfully to storage:', result.url);
           } else {
-            console.warn('[OnboardingStep4] Image upload failed:', result.error);
-            // For demo users or if bucket doesn't exist, use base64 directly
-            // The database can store base64 images (though not ideal for large images)
-            finalProfilePicture = profilePicture;
+            // Only fall back to base64 if it's a bucket/permission issue
+            const isBucketError = result.error?.includes('bucket') || result.error?.includes('Bucket');
+            if (isBucketError) {
+              console.warn('[OnboardingStep4] Storage bucket issue, using base64 fallback:', result.error);
+              finalProfilePicture = profilePicture;
+            } else {
+              // For other errors, log but still try to use base64 as fallback
+              console.error('[OnboardingStep4] Image upload failed (non-bucket error):', result.error);
+              console.warn('[OnboardingStep4] Falling back to base64 image. Please check storage permissions.');
+              finalProfilePicture = profilePicture;
+            }
           }
         } else {
           // No user authenticated, use base64 directly
+          console.warn('[OnboardingStep4] No authenticated user, using base64 image');
           finalProfilePicture = profilePicture;
         }
       } catch (error) {
         console.error('[OnboardingStep4] Error uploading image:', error);
         // Continue with the local image as fallback
+        finalProfilePicture = profilePicture;
       } finally {
         setIsUploading(false);
       }
