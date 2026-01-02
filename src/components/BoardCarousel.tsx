@@ -135,6 +135,7 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
   const [activeVirtualIndex, setActiveVirtualIndex] = useState(initialVirtualIndex);
   const [isScrolling, setIsScrolling] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const lastScrollOffset = useRef<number>(0);
   
   // Track touch start position to distinguish taps from swipes
   const touchStartX = useRef<number | null>(null);
@@ -236,8 +237,69 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
   };
 
   // Handle scroll end - user finished dragging
-  const handleScrollEndDrag = () => {
+  const handleScrollEndDrag = (event: any) => {
     setIsDragging(false);
+    
+    // On web, manually snap to nearest item when drag ends
+    if (Platform.OS === 'web') {
+      const offsetX = event.nativeEvent.contentOffset.x;
+      lastScrollOffset.current = offsetX;
+      
+      // Calculate which item should be centered
+      const nearestIndex = Math.round(offsetX / carouselItemWidth);
+      const targetOffset = nearestIndex * carouselItemWidth;
+      
+      // Snap to the nearest item
+      if (flatListRef.current) {
+        setTimeout(() => {
+          flatListRef.current?.scrollToOffset({
+            offset: targetOffset,
+            animated: true,
+          });
+          
+          // Update active index
+          const realIndex = getRealIndex(nearestIndex);
+          setActiveVirtualIndex(nearestIndex);
+          onBoardSelect(boards[realIndex]);
+          if (onActiveIndexChange) {
+            onActiveIndexChange(realIndex);
+          }
+        }, 50);
+      }
+    }
+  };
+
+  // Handle momentum scroll end - snap to center on web
+  const handleMomentumScrollEnd = (event: any) => {
+    setIsDragging(false);
+    
+    // On web, ensure we snap to the center item
+    if (Platform.OS === 'web') {
+      const offsetX = event.nativeEvent.contentOffset.x;
+      lastScrollOffset.current = offsetX;
+      
+      // Calculate which item should be centered
+      const nearestIndex = Math.round(offsetX / carouselItemWidth);
+      const targetOffset = nearestIndex * carouselItemWidth;
+      
+      // Only snap if we're not already at the target
+      if (Math.abs(offsetX - targetOffset) > 5) {
+        if (flatListRef.current) {
+          flatListRef.current.scrollToOffset({
+            offset: targetOffset,
+            animated: true,
+          });
+          
+          // Update active index
+          const realIndex = getRealIndex(nearestIndex);
+          setActiveVirtualIndex(nearestIndex);
+          onBoardSelect(boards[realIndex]);
+          if (onActiveIndexChange) {
+            onActiveIndexChange(realIndex);
+          }
+        }
+      }
+    }
   };
 
   const renderBoard = ({ item, index }: { item: BoardType; index: number }) => {
@@ -368,20 +430,28 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
           return;
         }
 
-        // Ensure the scroll element has proper touch CSS
+        // Ensure the scroll element has proper touch CSS and scroll snap
         if (scrollElement.style) {
-          scrollElement.style.overflowX = 'scroll';
+          scrollElement.style.overflowX = 'auto';
           scrollElement.style.overflowY = 'hidden';
           scrollElement.style.WebkitOverflowScrolling = 'touch';
           scrollElement.style.touchAction = 'pan-x';
           scrollElement.style.msOverflowStyle = 'none';
           scrollElement.style.scrollbarWidth = 'none';
           
-          // Hide scrollbar
+          // CSS Scroll Snap for better snapping behavior
+          scrollElement.style.scrollSnapType = 'x mandatory';
+          scrollElement.style.webkitScrollSnapType = 'x mandatory';
+          
+          // Hide scrollbar and add scroll snap to children
           const style = document.createElement('style');
           style.textContent = `
             ${scrollElement.className ? `.${scrollElement.className}` : ''}::-webkit-scrollbar {
               display: none;
+            }
+            ${scrollElement.className ? `.${scrollElement.className}` : ''} > * {
+              scroll-snap-align: center;
+              -webkit-scroll-snap-align: center;
             }
           `;
           if (!document.head.querySelector(`style[data-board-carousel]`)) {
@@ -521,7 +591,7 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
           onScrollBeginDrag={handleScrollBeginDrag}
           onScrollEndDrag={handleScrollEndDrag}
           onMomentumScrollBegin={() => setIsDragging(true)}
-          onMomentumScrollEnd={() => setIsDragging(false)}
+          onMomentumScrollEnd={handleMomentumScrollEnd}
           scrollEventThrottle={16}
           onScrollToIndexFailed={(info) => {
             const wait = new Promise(resolve => setTimeout(resolve, 500));
@@ -535,7 +605,7 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
               overflowX: 'auto' as any, // Use 'auto' to enable scrolling (works better than 'scroll' on mobile)
               overflowY: 'hidden' as any,
               WebkitOverflowScrolling: 'touch' as any,
-              touchAction: 'pan-x pan-y pinch-zoom' as any, // Allow horizontal panning, prevent vertical scroll interference
+              touchAction: 'pan-x' as any, // Only horizontal panning for carousel
               // @ts-ignore
               '-webkit-overflow-scrolling': 'touch',
               // @ts-ignore
@@ -544,6 +614,11 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
               'scrollbar-width': 'none', // Hide scrollbar on Firefox
               // @ts-ignore
               '-webkit-tap-highlight-color': 'transparent', // Remove tap highlight on mobile
+              // CSS Scroll Snap for better snapping on web
+              // @ts-ignore
+              scrollSnapType: 'x mandatory',
+              // @ts-ignore
+              '-webkit-scroll-snap-type': 'x mandatory',
             } as any,
             // Ensure the underlying scroll view can handle touches
             nestedScrollEnabled: true,
@@ -650,6 +725,13 @@ const styles = StyleSheet.create({
     // Add horizontal padding to center items properly (one item width on each side)
     paddingLeft: getCarouselItemWidth(),
     paddingRight: getCarouselItemWidth(),
+    // CSS Scroll Snap for web
+    ...(Platform.OS === 'web' && {
+      // @ts-ignore
+      scrollSnapType: 'x mandatory',
+      // @ts-ignore
+      '-webkit-scroll-snap-type': 'x mandatory',
+    }),
   },
   carouselItem: {
     justifyContent: 'flex-start', // Align to top so center board is higher
@@ -657,7 +739,14 @@ const styles = StyleSheet.create({
     paddingTop: spacing.md, // Top padding for center board
     // paddingBottom removed - labelContainer will be positioned absolutely below center board
     // minHeight is set dynamically via inline style
-    ...(Platform.OS === 'web' && { paddingHorizontal: 0 }),
+    ...(Platform.OS === 'web' && { 
+      paddingHorizontal: 0,
+      // CSS Scroll Snap for web - each item is a snap point
+      // @ts-ignore
+      scrollSnapAlign: 'center',
+      // @ts-ignore
+      '-webkit-scroll-snap-align': 'center',
+    }),
   },
   boardTouchable: {
     width: '100%',
