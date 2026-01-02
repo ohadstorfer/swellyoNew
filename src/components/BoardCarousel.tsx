@@ -138,6 +138,7 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
   const dragStartOffset = useRef<number>(0); // Track scroll position when drag starts
   const dragStartIndex = useRef<number>(initialVirtualIndex); // Track index when drag starts
   const isControllingScroll = useRef<boolean>(false); // Flag to prevent scroll event loops
+  const lastScrollTime = useRef<number>(0); // Throttle scroll clamping
   
   // Track touch start position to distinguish taps from swipes
   const touchStartX = useRef<number | null>(null);
@@ -240,12 +241,15 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
     // Store the initial scroll position and index when drag starts
     dragStartOffset.current = event.nativeEvent.contentOffset.x;
     dragStartIndex.current = activeVirtualIndex;
+    
+    // On web, prevent default scroll behavior to have full control
+    if (Platform.OS === 'web' && flatListWebRef.current) {
+      // Store the scroll element for later use
+    }
   };
 
   // Handle scroll end - user finished dragging
   const handleScrollEndDrag = (event: any) => {
-    setIsDragging(false);
-    
     const offsetX = event.nativeEvent.contentOffset.x;
     const scrollDelta = offsetX - dragStartOffset.current;
     
@@ -278,51 +282,9 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
     
     const targetOffset = targetIndex * carouselItemWidth;
     
-    // Snap to the target item (one board from start position)
-    if (flatListRef.current) {
-      setIsScrolling(true);
-      flatListRef.current.scrollToOffset({
-        offset: targetOffset,
-        animated: true,
-      });
-      
-      // Update active index
-      const realIndex = getRealIndex(targetIndex);
-      setActiveVirtualIndex(targetIndex);
-      onBoardSelect(boards[realIndex]);
-      if (onActiveIndexChange) {
-        onActiveIndexChange(realIndex);
-      }
-      
-      // Update scrollX for animations
-      Animated.timing(scrollX, {
-        toValue: targetOffset,
-        duration: 300,
-        useNativeDriver: false,
-      }).start();
-      
-      setTimeout(() => setIsScrolling(false), 350);
-    }
-  };
-
-  // Handle momentum scroll end - ensure we're at the correct position
-  const handleMomentumScrollEnd = (event: any) => {
+    // Immediately disable scrolling to prevent momentum
+    setIsScrolling(true);
     setIsDragging(false);
-    
-    // With pagingEnabled, the scroll should already be at a page boundary
-    // Just update the active index based on the current scroll position
-    const offsetX = event.nativeEvent.contentOffset.x;
-    const currentIndex = Math.round(offsetX / carouselItemWidth);
-    
-    // Handle edge cases for infinite carousel
-    let targetIndex = currentIndex;
-    if (targetIndex < EDGE_THRESHOLD) {
-      const realIndex = getRealIndex(targetIndex);
-      targetIndex = START_INDEX + realIndex;
-    } else if (targetIndex > INFINITE_SIZE - EDGE_THRESHOLD) {
-      const realIndex = getRealIndex(targetIndex);
-      targetIndex = START_INDEX + realIndex;
-    }
     
     // Update active index
     const realIndex = getRealIndex(targetIndex);
@@ -330,6 +292,89 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
     onBoardSelect(boards[realIndex]);
     if (onActiveIndexChange) {
       onActiveIndexChange(realIndex);
+    }
+    
+    // On web, immediately stop momentum by setting scrollLeft directly
+    if (Platform.OS === 'web' && flatListWebRef.current) {
+      // Stop all momentum immediately
+      flatListWebRef.current.scrollLeft = targetOffset;
+      scrollX.setValue(targetOffset);
+      
+      // Re-enable scrolling after a short delay
+      setTimeout(() => {
+        setIsScrolling(false);
+      }, 50);
+    } else {
+      // Native: animate to target position
+      if (flatListRef.current) {
+        flatListRef.current.scrollToOffset({
+          offset: targetOffset,
+          animated: true,
+        });
+        
+        // Update scrollX for animations
+        Animated.timing(scrollX, {
+          toValue: targetOffset,
+          duration: 300,
+          useNativeDriver: false,
+        }).start();
+        
+        setTimeout(() => {
+          setIsScrolling(false);
+        }, 350);
+      } else {
+        setIsScrolling(false);
+      }
+    }
+  };
+
+  // Handle momentum scroll end - ensure we're at the correct position
+  const handleMomentumScrollEnd = (event: any) => {
+    setIsDragging(false);
+    
+    // On native, momentum might have continued, so we need to snap to the correct position
+    // The handleScrollEndDrag should have already handled the snapping, but this is a safety check
+    const offsetX = event.nativeEvent.contentOffset.x;
+    const currentIndex = Math.round(offsetX / carouselItemWidth);
+    const expectedOffset = currentIndex * carouselItemWidth;
+    
+    // Only adjust if we're significantly off (more than 10px)
+    if (Math.abs(offsetX - expectedOffset) > 10) {
+      // Calculate which board we should be on based on drag start
+      const scrollDelta = offsetX - dragStartOffset.current;
+      const swipeThreshold = carouselItemWidth * 0.25;
+      
+      let targetIndex = dragStartIndex.current;
+      if (Math.abs(scrollDelta) > swipeThreshold) {
+        targetIndex = scrollDelta < 0 
+          ? dragStartIndex.current + 1 
+          : dragStartIndex.current - 1;
+      }
+      
+      // Handle edge cases
+      if (targetIndex < EDGE_THRESHOLD) {
+        const realIndex = getRealIndex(targetIndex);
+        targetIndex = START_INDEX + realIndex;
+      } else if (targetIndex > INFINITE_SIZE - EDGE_THRESHOLD) {
+        const realIndex = getRealIndex(targetIndex);
+        targetIndex = START_INDEX + realIndex;
+      }
+      
+      const targetOffset = targetIndex * carouselItemWidth;
+      
+      if (flatListRef.current) {
+        flatListRef.current.scrollToOffset({
+          offset: targetOffset,
+          animated: true,
+        });
+        
+        const realIndex = getRealIndex(targetIndex);
+        setActiveVirtualIndex(targetIndex);
+        onBoardSelect(boards[realIndex]);
+        if (onActiveIndexChange) {
+          onActiveIndexChange(realIndex);
+        }
+      }
     }
   };
 
@@ -461,7 +506,7 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
           return;
         }
 
-        // Ensure the scroll element has proper touch CSS and scroll snap
+        // Ensure the scroll element has proper touch CSS
         if (scrollElement.style) {
           scrollElement.style.overflowX = 'auto';
           scrollElement.style.overflowY = 'hidden';
@@ -470,19 +515,11 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
           scrollElement.style.msOverflowStyle = 'none';
           scrollElement.style.scrollbarWidth = 'none';
           
-          // CSS Scroll Snap for better snapping behavior
-          scrollElement.style.scrollSnapType = 'x mandatory';
-          scrollElement.style.webkitScrollSnapType = 'x mandatory';
-          
-          // Hide scrollbar and add scroll snap to children
+          // Hide scrollbar
           const style = document.createElement('style');
           style.textContent = `
             ${scrollElement.className ? `.${scrollElement.className}` : ''}::-webkit-scrollbar {
               display: none;
-            }
-            ${scrollElement.className ? `.${scrollElement.className}` : ''} > * {
-              scroll-snap-align: center;
-              -webkit-scroll-snap-align: center;
             }
           `;
           if (!document.head.querySelector(`style[data-board-carousel]`)) {
@@ -605,58 +642,20 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
           horizontal
           pagingEnabled={false} // We'll handle paging manually
           showsHorizontalScrollIndicator={false}
-          scrollEnabled={true}
+          scrollEnabled={!isScrolling} // Disable scroll during programmatic scrolling
           onViewableItemsChanged={onViewableItemsChanged}
           viewabilityConfig={viewabilityConfig}
           initialScrollIndex={initialVirtualIndex >= 0 ? initialVirtualIndex : START_INDEX}
           getItemLayout={(_, index) => ({ length: carouselItemWidth, offset: carouselItemWidth * index, index })}
           snapToAlignment="center"
           snapToInterval={carouselItemWidth}
-          decelerationRate={0} // Disable momentum - we'll handle movement manually
+          decelerationRate={Platform.OS === 'web' ? 0 : 'fast'} // No momentum on web, fast on native
           disableIntervalMomentum={true} // Disable momentum to prevent scrolling past one item
           contentContainerStyle={styles.carouselContent}
           contentInsetAdjustmentBehavior="never"
           onScroll={Animated.event(
             [{ nativeEvent: { contentOffset: { x: scrollX } } }],
-            { 
-              useNativeDriver: false,
-              listener: (event: any) => {
-                // During drag, limit scroll to one board's range from start position
-                if (isDragging && !isControllingScroll.current && dragStartOffset.current !== null) {
-                  const currentOffset = event.nativeEvent.contentOffset.x;
-                  const startOffset = dragStartOffset.current;
-                  const maxOffset = startOffset + carouselItemWidth; // One board to the right
-                  const minOffset = startOffset - carouselItemWidth; // One board to the left
-                  
-                  // Clamp the scroll position to prevent scrolling past one board
-                  if (currentOffset > maxOffset) {
-                    isControllingScroll.current = true;
-                    if (flatListRef.current) {
-                      flatListRef.current.scrollToOffset({
-                        offset: maxOffset,
-                        animated: false,
-                      });
-                      scrollX.setValue(maxOffset);
-                    }
-                    setTimeout(() => {
-                      isControllingScroll.current = false;
-                    }, 10);
-                  } else if (currentOffset < minOffset) {
-                    isControllingScroll.current = true;
-                    if (flatListRef.current) {
-                      flatListRef.current.scrollToOffset({
-                        offset: minOffset,
-                        animated: false,
-                      });
-                      scrollX.setValue(minOffset);
-                    }
-                    setTimeout(() => {
-                      isControllingScroll.current = false;
-                    }, 10);
-                  }
-                }
-              }
-            }
+            { useNativeDriver: false }
           )}
           onScrollBeginDrag={handleScrollBeginDrag}
           onScrollEndDrag={handleScrollEndDrag}
