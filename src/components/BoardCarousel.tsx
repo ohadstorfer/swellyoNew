@@ -135,7 +135,6 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
   const [activeVirtualIndex, setActiveVirtualIndex] = useState(initialVirtualIndex);
   const [isScrolling, setIsScrolling] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
-  const lastScrollOffset = useRef<number>(0);
   const dragStartOffset = useRef<number>(0); // Track scroll position when drag starts
   const dragStartIndex = useRef<number>(initialVirtualIndex); // Track index when drag starts
   
@@ -165,28 +164,8 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
   }, []);
 
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
-    if (viewableItems.length > 0 && viewableItems[0].index !== null && !isScrolling && !isDragging) {
+    if (viewableItems.length > 0 && viewableItems[0].index !== null && !isScrolling) {
       const virtualIndex = viewableItems[0].index as number;
-      
-      // Limit movement to one board from drag start during active drag
-      // This prevents multiple boards from scrolling past in a single swipe
-      if (dragStartIndex.current !== null) {
-        const maxIndex = dragStartIndex.current + 1;
-        const minIndex = dragStartIndex.current - 1;
-        if (virtualIndex > maxIndex || virtualIndex < minIndex) {
-          // Don't update if we've moved more than one board - snap back
-          const clampedIndex = Math.max(minIndex, Math.min(maxIndex, virtualIndex));
-          const clampedOffset = clampedIndex * carouselItemWidth;
-          if (flatListRef.current) {
-            flatListRef.current.scrollToOffset({
-              offset: clampedOffset,
-              animated: true,
-            });
-          }
-          return;
-        }
-      }
-      
       setActiveVirtualIndex(virtualIndex);
       
       // Get real index once
@@ -268,29 +247,23 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
     const offsetX = event.nativeEvent.contentOffset.x;
     const scrollDelta = offsetX - dragStartOffset.current;
     
-    // Determine swipe direction and limit to one board movement
-    let targetIndex = dragStartIndex.current;
+    // Determine swipe direction and move exactly one board
+    // Threshold: must swipe at least 30% of item width to trigger movement
+    const swipeThreshold = carouselItemWidth * 0.3;
     
-    if (Math.abs(scrollDelta) > carouselItemWidth * 0.3) {
+    let targetIndex = dragStartIndex.current; // Default: stay on current board
+    
+    if (Math.abs(scrollDelta) > swipeThreshold) {
       // Significant swipe detected - move one board in the swipe direction
-      if (scrollDelta > 0) {
-        // Swiped right (towards end) - move to previous board (left)
-        targetIndex = dragStartIndex.current - 1;
-      } else {
-        // Swiped left (towards start) - move to next board (right)
+      if (scrollDelta < 0) {
+        // Swiped left (negative delta = scrolled left = moved to next board) - move to next board
         targetIndex = dragStartIndex.current + 1;
+      } else {
+        // Swiped right (positive delta = scrolled right = moved to previous board) - move to previous board
+        targetIndex = dragStartIndex.current - 1;
       }
-    } else {
-      // Small swipe - stay on current board
-      targetIndex = dragStartIndex.current;
     }
-    
-    // Ensure target index is within bounds
-    if (targetIndex < 0) {
-      targetIndex = 0;
-    } else if (targetIndex >= INFINITE_SIZE) {
-      targetIndex = INFINITE_SIZE - 1;
-    }
+    // If swipe is too small, stay on current board (targetIndex = dragStartIndex.current)
     
     // Handle edge cases for infinite carousel
     if (targetIndex < EDGE_THRESHOLD) {
@@ -302,31 +275,31 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
     }
     
     const targetOffset = targetIndex * carouselItemWidth;
-    lastScrollOffset.current = targetOffset;
     
     // Snap to the target item (one board from start position)
     if (flatListRef.current) {
-      setTimeout(() => {
-        flatListRef.current?.scrollToOffset({
-          offset: targetOffset,
-          animated: true,
-        });
-        
-        // Update active index
-        const realIndex = getRealIndex(targetIndex);
-        setActiveVirtualIndex(targetIndex);
-        onBoardSelect(boards[realIndex]);
-        if (onActiveIndexChange) {
-          onActiveIndexChange(realIndex);
-        }
-        
-        // Update scrollX for animations
-        Animated.timing(scrollX, {
-          toValue: targetOffset,
-          duration: 300,
-          useNativeDriver: false,
-        }).start();
-      }, 50);
+      setIsScrolling(true);
+      flatListRef.current.scrollToOffset({
+        offset: targetOffset,
+        animated: true,
+      });
+      
+      // Update active index
+      const realIndex = getRealIndex(targetIndex);
+      setActiveVirtualIndex(targetIndex);
+      onBoardSelect(boards[realIndex]);
+      if (onActiveIndexChange) {
+        onActiveIndexChange(realIndex);
+      }
+      
+      // Update scrollX for animations
+      Animated.timing(scrollX, {
+        toValue: targetOffset,
+        duration: 300,
+        useNativeDriver: false,
+      }).start();
+      
+      setTimeout(() => setIsScrolling(false), 350);
     }
   };
 
@@ -334,63 +307,27 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
   const handleMomentumScrollEnd = (event: any) => {
     setIsDragging(false);
     
-    // On native, the momentum scrolling should already be limited by decelerationRate
-    // But we ensure we're at the correct position
+    // The snapping should already be handled by handleScrollEndDrag
+    // This is just a safety check to ensure we're aligned
     const offsetX = event.nativeEvent.contentOffset.x;
-    const nearestIndex = Math.round(offsetX / carouselItemWidth);
-    const targetOffset = nearestIndex * carouselItemWidth;
+    const currentIndex = Math.round(offsetX / carouselItemWidth);
+    const expectedOffset = currentIndex * carouselItemWidth;
     
-    // Only adjust if we're significantly off (more than 10% of item width)
-    if (Math.abs(offsetX - targetOffset) > carouselItemWidth * 0.1) {
-      // Calculate which direction to move (limit to one board)
-      const currentIndex = Math.round(offsetX / carouselItemWidth);
-      let targetIndex = currentIndex;
-      
-      // Determine if we should move to next or previous based on position
-      if (offsetX > targetOffset + carouselItemWidth * 0.1) {
-        // We're past the center, move to next
-        targetIndex = currentIndex + 1;
-      } else if (offsetX < targetOffset - carouselItemWidth * 0.1) {
-        // We're before the center, move to previous
-        targetIndex = currentIndex - 1;
-      }
-      
-      // Ensure we don't move more than one board from drag start
-      const maxIndex = dragStartIndex.current + 1;
-      const minIndex = dragStartIndex.current - 1;
-      targetIndex = Math.max(minIndex, Math.min(maxIndex, targetIndex));
-      
-      // Handle edge cases for infinite carousel
-      if (targetIndex < EDGE_THRESHOLD) {
-        const realIndex = getRealIndex(targetIndex);
-        targetIndex = START_INDEX + realIndex;
-      } else if (targetIndex > INFINITE_SIZE - EDGE_THRESHOLD) {
-        const realIndex = getRealIndex(targetIndex);
-        targetIndex = START_INDEX + realIndex;
-      }
-      
-      const finalTargetOffset = targetIndex * carouselItemWidth;
-      
+    // Only adjust if we're significantly off (more than 5px)
+    if (Math.abs(offsetX - expectedOffset) > 5) {
       if (flatListRef.current) {
         flatListRef.current.scrollToOffset({
-          offset: finalTargetOffset,
+          offset: expectedOffset,
           animated: true,
         });
         
         // Update active index
-        const realIndex = getRealIndex(targetIndex);
-        setActiveVirtualIndex(targetIndex);
+        const realIndex = getRealIndex(currentIndex);
+        setActiveVirtualIndex(currentIndex);
         onBoardSelect(boards[realIndex]);
         if (onActiveIndexChange) {
           onActiveIndexChange(realIndex);
         }
-        
-        // Update scrollX for animations
-        Animated.timing(scrollX, {
-          toValue: finalTargetOffset,
-          duration: 300,
-          useNativeDriver: false,
-        }).start();
       }
     }
   };
@@ -675,8 +612,7 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
           snapToAlignment="center"
           snapToInterval={carouselItemWidth}
           decelerationRate="fast"
-          disableIntervalMomentum={false} // Allow momentum but we'll limit it manually
-          disableScrollViewPanResponder={false}
+          disableIntervalMomentum={true} // Disable momentum to prevent scrolling past one item
           contentContainerStyle={styles.carouselContent}
           contentInsetAdjustmentBehavior="never"
           onScroll={Animated.event(
