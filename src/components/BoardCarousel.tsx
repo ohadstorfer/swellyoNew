@@ -9,6 +9,7 @@ import {
   Platform,
   TouchableOpacity,
   Animated,
+  Pressable,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from './Text';
@@ -55,6 +56,7 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
   availableBoardHeight,
 }) => {
   const flatListRef = useRef<FlatList<BoardType>>(null);
+  const flatListWebRef = useRef<any>(null); // Ref for web DOM element
   const isDesktop = useIsDesktopWeb();
   const { width: screenWidth } = useScreenDimensions();
   const [carouselItemWidth, setCarouselItemWidth] = useState(getCarouselItemWidth());
@@ -132,6 +134,11 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
   const initialVirtualIndex = START_INDEX + initialRealIndex;
   const [activeVirtualIndex, setActiveVirtualIndex] = useState(initialVirtualIndex);
   const [isScrolling, setIsScrolling] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  
+  // Track touch start position to distinguish taps from swipes
+  const touchStartX = useRef<number | null>(null);
+  const touchStartY = useRef<number | null>(null);
   
   // Edge threshold - jump back to middle when we get too close to edges
   const EDGE_THRESHOLD = 100;
@@ -223,6 +230,16 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
         }
   };
 
+  // Handle scroll begin - user is dragging
+  const handleScrollBeginDrag = () => {
+    setIsDragging(true);
+  };
+
+  // Handle scroll end - user finished dragging
+  const handleScrollEndDrag = () => {
+    setIsDragging(false);
+  };
+
   const renderBoard = ({ item, index }: { item: BoardType; index: number }) => {
     const isActive = index === activeVirtualIndex;
     const isLeft = index === activeVirtualIndex - 1;
@@ -281,14 +298,17 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
 
     return (
       <View style={[styles.carouselItem, { width: carouselItemWidth, minHeight: carouselItemMinHeight }]}> 
-        <TouchableOpacity
-          activeOpacity={0.9}
-          onPress={() => handleBoardPress(index)}
-          disabled={isScrolling}
+        <View
           style={styles.boardTouchable}
-          // Allow touch events to pass through for horizontal scrolling
-          delayPressIn={50}
-          delayPressOut={0}
+          // Use onStartShouldSetResponder to allow FlatList to handle horizontal gestures
+          onStartShouldSetResponder={() => {
+            // Don't capture responder - let FlatList handle it
+            return false;
+          }}
+          onResponderTerminationRequest={() => {
+            // Allow FlatList to take over
+            return true;
+          }}
         >
             <Animated.View
               style={[
@@ -308,7 +328,7 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
           resizeMode="contain"
         />
             </Animated.View>
-        </TouchableOpacity>
+        </View>
       </View>
     );
   };
@@ -320,6 +340,63 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
       onActiveIndexChange(currentRealIndex);
     }
   }, [activeVirtualIndex, onActiveIndexChange]);
+
+  // Web-specific: Add touch event listeners for mobile web scrolling
+  React.useEffect(() => {
+    if (Platform.OS === 'web' && !isDesktop && flatListRef.current) {
+      // Get the underlying DOM element
+      const getScrollElement = () => {
+        if (flatListRef.current) {
+          // React Native Web FlatList renders a ScrollView which has a div with class
+          // Try to find the scrollable element
+          const node = (flatListRef.current as any)._component || (flatListRef.current as any);
+          if (node) {
+            const scrollElement = node.getScrollableNode?.() || node._scrollViewRef?.current || node;
+            if (scrollElement && scrollElement.style) {
+              return scrollElement;
+            }
+          }
+        }
+        return null;
+      };
+
+      const setupWebTouchScrolling = () => {
+        const scrollElement = getScrollElement();
+        if (!scrollElement) {
+          // Retry after a short delay
+          setTimeout(setupWebTouchScrolling, 100);
+          return;
+        }
+
+        // Ensure the scroll element has proper touch CSS
+        if (scrollElement.style) {
+          scrollElement.style.overflowX = 'scroll';
+          scrollElement.style.overflowY = 'hidden';
+          scrollElement.style.WebkitOverflowScrolling = 'touch';
+          scrollElement.style.touchAction = 'pan-x';
+          scrollElement.style.msOverflowStyle = 'none';
+          scrollElement.style.scrollbarWidth = 'none';
+          
+          // Hide scrollbar
+          const style = document.createElement('style');
+          style.textContent = `
+            ${scrollElement.className ? `.${scrollElement.className}` : ''}::-webkit-scrollbar {
+              display: none;
+            }
+          `;
+          if (!document.head.querySelector(`style[data-board-carousel]`)) {
+            style.setAttribute('data-board-carousel', 'true');
+            document.head.appendChild(style);
+          }
+        }
+
+        flatListWebRef.current = scrollElement;
+      };
+
+      // Setup after initial render
+      setTimeout(setupWebTouchScrolling, 200);
+    }
+  }, [isDesktop]);
 
   // Ensure initial index is centered and initialize scrollX
   React.useEffect(() => {
@@ -441,6 +518,10 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
             [{ nativeEvent: { contentOffset: { x: scrollX } } }],
             { useNativeDriver: false }
           )}
+          onScrollBeginDrag={handleScrollBeginDrag}
+          onScrollEndDrag={handleScrollEndDrag}
+          onMomentumScrollBegin={() => setIsDragging(true)}
+          onMomentumScrollEnd={() => setIsDragging(false)}
           scrollEventThrottle={16}
           onScrollToIndexFailed={(info) => {
             const wait = new Promise(resolve => setTimeout(resolve, 500));
@@ -451,16 +532,30 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
           // Mobile web and native: ensure proper touch scrolling
           {...(Platform.OS === 'web' && {
             style: {
-              overflowX: 'hidden' as any,
+              overflowX: 'auto' as any, // Use 'auto' to enable scrolling (works better than 'scroll' on mobile)
+              overflowY: 'hidden' as any,
               WebkitOverflowScrolling: 'touch' as any,
-              touchAction: 'pan-x' as any, // Allow horizontal panning, prevent vertical
+              touchAction: 'pan-x pan-y pinch-zoom' as any, // Allow horizontal panning, prevent vertical scroll interference
+              // @ts-ignore
+              '-webkit-overflow-scrolling': 'touch',
+              // @ts-ignore
+              '-ms-overflow-style': 'none', // Hide scrollbar on IE/Edge
+              // @ts-ignore
+              'scrollbar-width': 'none', // Hide scrollbar on Firefox
+              // @ts-ignore
+              '-webkit-tap-highlight-color': 'transparent', // Remove tap highlight on mobile
             } as any,
+            // Ensure the underlying scroll view can handle touches
+            nestedScrollEnabled: true,
+            // Web-specific: ensure scroll events fire
+            scrollEventThrottle: 16,
           })}
           // Native: ensure proper scroll behavior
           {...(Platform.OS !== 'web' && {
             bounces: true,
             alwaysBounceHorizontal: true,
             alwaysBounceVertical: false,
+            nestedScrollEnabled: true,
           })}
         />
 
@@ -515,11 +610,15 @@ const styles = StyleSheet.create({
     // Ensure touch events work properly on mobile
     ...(Platform.OS === 'web' && {
       // @ts-ignore
-      touchAction: 'pan-x',
+      touchAction: 'pan-x', // Only horizontal for wrapper
       // @ts-ignore
       userSelect: 'none',
       // @ts-ignore
       WebkitUserSelect: 'none',
+      // @ts-ignore
+      '-webkit-overflow-scrolling': 'touch',
+      // @ts-ignore
+      '-webkit-tap-highlight-color': 'transparent',
     }),
   },
   arrowButton: {
@@ -565,10 +664,12 @@ const styles = StyleSheet.create({
     height: '100%',
     justifyContent: 'center',
     alignItems: 'center',
-    // Ensure touch events don't interfere with horizontal scrolling
+    // Ensure touch events can pass through to FlatList
     ...(Platform.OS === 'web' && {
       // @ts-ignore
-      touchAction: 'pan-x',
+      pointerEvents: 'auto', // Allow pointer events but don't block scrolling
+      // @ts-ignore
+      touchAction: 'pan-x pan-y', // Allow panning in both directions
     }),
   },
   boardWrapper: {
