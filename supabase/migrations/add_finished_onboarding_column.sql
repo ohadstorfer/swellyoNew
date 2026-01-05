@@ -11,3 +11,4 @@ ON public.surfers(finished_onboarding)
 WHERE finished_onboarding = true;
 
 
+

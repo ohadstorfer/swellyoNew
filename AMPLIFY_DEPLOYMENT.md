@@ -114,3 +114,4 @@ Amplify automatically deploys when you push to your connected branch. You can:
 - [Supabase Documentation](https://supabase.com/docs)
 
 
+

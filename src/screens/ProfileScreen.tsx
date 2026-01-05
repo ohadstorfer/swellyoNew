@@ -157,9 +157,11 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
     ? TRAVEL_EXPERIENCE_MAP[travelExpKey]
     : TRAVEL_EXPERIENCE_MAP['new_nomad'];
 
-  // Get destinations array (top 3)
+  // Get destinations array (top 3 by longest stay - sorted by time_in_days descending)
   const topDestinations = profileData.destinations_array 
-    ? profileData.destinations_array.slice(0, 3)
+    ? [...profileData.destinations_array]
+        .sort((a, b) => (b.time_in_days || 0) - (a.time_in_days || 0)) // Sort by time_in_days descending
+        .slice(0, 3) // Take top 3
     : [];
 
   // Get lifestyle keywords

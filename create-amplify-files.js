@@ -44,3 +44,4 @@ files.forEach(file => {
 console.log('All Amplify required files created successfully!');
 
 
+

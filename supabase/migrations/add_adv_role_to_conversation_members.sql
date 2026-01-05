@@ -15,3 +15,4 @@ COMMENT ON COLUMN public.conversation_members.adv_role IS
 'Role in trip planning context: adv_giver (recommended user) or adv_seeker (initiating user). NULL for non-trip-planning conversations.';
 
 
+

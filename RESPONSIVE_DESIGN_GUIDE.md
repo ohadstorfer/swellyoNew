@@ -240,3 +240,4 @@ const styles = StyleSheet.create({
 - [React Native: Dimensions](https://reactnative.dev/docs/dimensions)
 - [CSS-Tricks: Responsive Design](https://css-tricks.com/snippets/css/media-queries-for-standard-devices/)
 
+

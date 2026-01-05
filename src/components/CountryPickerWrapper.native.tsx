@@ -7,3 +7,4 @@ import type { Country, CountryCode } from 'react-native-country-picker-modal';
 export const CountryPicker = CountryPickerModule;
 export type { Country, CountryCode };
 
+

@@ -21,6 +21,7 @@ import { useOnboarding } from '../context/OnboardingContext';
 import { getImageUrl } from '../services/media/imageService';
 import { UserSearchModal } from '../components/UserSearchModal';
 import { DirectMessageScreen } from './DirectMessageScreen';
+import { SwellyShaperScreen } from './SwellyShaperScreen';
 
 interface ConversationsScreenProps {
   onConversationPress?: (conversationId: string) => void;
@@ -40,6 +41,7 @@ export default function ConversationsScreen({
   const { resetOnboarding, user: contextUser } = useOnboarding();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(false); // Start as false to show conversations immediately
+  const [conversationsLoaded, setConversationsLoaded] = useState(false); // Track if conversations have been loaded
   const [filter, setFilter] = useState<FilterType>('all');
   // Initialize with cached user data from context for immediate display
   const [userName, setUserName] = useState(() => {
@@ -60,6 +62,7 @@ export default function ConversationsScreen({
     otherUserAvatar: string | null;
     isDirect?: boolean;
   } | null>(null);
+  const [showSwellyShaper, setShowSwellyShaper] = useState(false);
 
   // Update user info when context user changes (immediate sync)
   useEffect(() => {
@@ -118,35 +121,92 @@ export default function ConversationsScreen({
       const convos = await messagingService.getConversations();
       setConversations(convos);
       setLoading(false);
+      setConversationsLoaded(true); // Mark as loaded after successful fetch
     } catch (error) {
       console.error('Error loading conversations:', error);
       setLoading(false);
+      setConversationsLoaded(true); // Mark as loaded even on error
     }
   };
 
+  // Create fake "Swellyo Team" welcome conversation
+  const createWelcomeConversation = (): Conversation => {
+    const now = new Date();
+    const welcomeTime = formatTime(now.toISOString());
+    
+    return {
+      id: 'welcome-conversation-fake-id',
+      title: 'Swellyo Team',
+      is_direct: true,
+      metadata: { type: null, isWelcome: true },
+      created_by: 'system',
+      created_at: now.toISOString(),
+      updated_at: now.toISOString(),
+      last_message: {
+        id: 'welcome-message-fake-id',
+        conversation_id: 'welcome-conversation-fake-id',
+        sender_id: 'swellyo-team',
+        body: 'Welcome',
+        rendered_body: null,
+        attachments: [],
+        is_system: false,
+        edited: false,
+        deleted: false,
+        created_at: now.toISOString(),
+        updated_at: now.toISOString(),
+        sender_name: 'Swellyo Team',
+      },
+      unread_count: 2,
+      other_user: {
+        conversation_id: 'welcome-conversation-fake-id',
+        user_id: 'swellyo-team',
+        role: 'member',
+        adv_role: null,
+        joined_at: now.toISOString(),
+        preferences: {},
+        name: 'Swellyo Team',
+        profile_image_url: undefined,
+      },
+      members: [],
+    };
+  };
+
   const getFilteredConversations = () => {
-    if (filter === 'all') return conversations;
+    let filtered = conversations;
     
-    if (!currentUserId) return conversations;
+    if (filter !== 'all' && currentUserId) {
+      filtered = conversations.filter(conv => {
+        // Skip welcome conversation for filters
+        if (conv.metadata?.isWelcome) return false;
+        
+        // Find the current user's member record in this conversation
+        const currentUserMember = conv.members?.find(member => member.user_id === currentUserId);
+        
+        if (!currentUserMember) return false;
+        
+        // "Get Adv" (advisor filter) = user is adv_seeker (seeking advice)
+        if (filter === 'advisor') {
+          return currentUserMember.adv_role === 'adv_seeker';
+        }
+        
+        // "Give Adv" (seeker filter) = user is adv_giver (giving advice)
+        if (filter === 'seeker') {
+          return currentUserMember.adv_role === 'adv_giver';
+        }
+        
+        return true;
+      });
+    }
     
-    return conversations.filter(conv => {
-      // Find the current user's member record in this conversation
-      const currentUserMember = conv.members?.find(member => member.user_id === currentUserId);
-      
-      if (!currentUserMember) return false;
-      
-      // "Get Adv" (advisor filter) = user is adv_seeker (seeking advice)
-      if (filter === 'advisor') {
-        return currentUserMember.adv_role === 'adv_seeker';
-      }
-      
-      // "Give Adv" (seeker filter) = user is adv_giver (giving advice)
-      if (filter === 'seeker') {
-        return currentUserMember.adv_role === 'adv_giver';
-      }
-      
-      return true;
-    });
+    // Add welcome conversation only if:
+    // 1. Conversations have been loaded
+    // 2. No real conversations exist
+    // 3. Filter is 'all' (welcome message doesn't apply to filtered views)
+    if (conversationsLoaded && filtered.length === 0 && filter === 'all') {
+      return [createWelcomeConversation()];
+    }
+    
+    return filtered;
   };
 
   const getAdvisorCount = () => {
@@ -379,7 +439,85 @@ export default function ConversationsScreen({
     onConversationPress?.(conv.id);
   };
 
+  const renderWelcomeConversation = (conv: Conversation) => {
+    const lastMessageText = conv.last_message?.body || '';
+    const lastMessageTime = conv.last_message ? formatTime(conv.last_message.created_at) : '';
+    const unreadCount = conv.unread_count || 0;
+
+    return (
+      <TouchableOpacity
+        key={conv.id}
+        style={styles.conversationItem}
+        onPress={() => {
+          // Welcome conversation is not clickable - do nothing
+        }}
+        activeOpacity={1}
+      >
+        <View style={styles.conversationContent}>
+          {/* Two overlapping avatars for Swellyo Team - matching Figma design */}
+          <View style={styles.welcomeAvatarContainer}>
+            {/* First avatar - behind */}
+            <View style={[styles.welcomeAvatar, styles.welcomeAvatarBack]}>
+              <Image
+                source={{ uri: getImageUrl('/User Avatar 1.png') }}
+                style={styles.welcomeAvatarImage}
+                resizeMode="cover"
+              />
+            </View>
+            {/* Second avatar - in front with negative margin for overlap */}
+            <View style={[styles.welcomeAvatar, styles.welcomeAvatarFront]}>
+              <Image
+                source={{ uri: getImageUrl('/User Avatar 2.png') }}
+                style={styles.welcomeAvatarImage}
+                resizeMode="cover"
+              />
+            </View>
+          </View>
+
+          {/* Text content */}
+          <View style={styles.textContainer}>
+            <Text style={[
+              styles.conversationName,
+              Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
+            ]} numberOfLines={1}>
+              Swellyo Team
+            </Text>
+            <Text style={[
+              styles.lastMessage,
+              Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
+            ]} numberOfLines={1}>
+              {lastMessageText}
+            </Text>
+          </View>
+        </View>
+
+        {/* Time and unread badge - cyan color for welcome */}
+        <View style={styles.timeContainer}>
+          {lastMessageTime ? (
+            <Text style={[
+              styles.welcomeTimeText,
+              Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
+            ]}>{lastMessageTime}</Text>
+          ) : null}
+          {unreadCount > 0 ? (
+            <View style={styles.welcomeUnreadBadge}>
+              <Text style={[
+                styles.unreadBadgeText,
+                Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
+              ]}>{unreadCount}</Text>
+            </View>
+          ) : null}
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
   const renderConversationItem = (conv: Conversation) => {
+    // Skip rendering welcome conversation here - it's handled separately
+    if (conv.metadata?.isWelcome) {
+      return renderWelcomeConversation(conv);
+    }
+
     const conversationType = getConversationType(conv);
     const displayName = conv.is_direct
       ? conv.other_user?.name || 'Unknown User'
@@ -568,6 +706,18 @@ export default function ConversationsScreen({
     }
   }, []);
 
+  // Early return for SwellyShaperScreen - must come BEFORE DirectMessageScreen
+  if (showSwellyShaper) {
+    return (
+      <SwellyShaperScreen
+        onBack={() => {
+          setShowSwellyShaper(false);
+          loadConversations(); // Refresh conversations in case profile was updated
+        }}
+      />
+    );
+  }
+
   // Early return for DirectMessageScreen - must come AFTER all hooks
   if (selectedConversation) {
     return (
@@ -663,6 +813,27 @@ export default function ConversationsScreen({
             ) : (
               <>
                 {filteredConversations.map(renderConversationItem)}
+                
+                {/* Welcome message instructional text - only show when welcome conversation is displayed */}
+                {conversationsLoaded && conversations.length === 0 && filter === 'all' && (
+                  <View style={styles.welcomeInstructionContainer}>
+                    <Text style={[
+                      styles.welcomeInstructionText,
+                      Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
+                    ]}>
+                      Let Swelly know where you are headed{'\n'}
+                      for the next surf adventure!{'\n'}
+                      {'\n'}
+                      Get connected to travelers who have{'\n'}
+                      deeper knowledge about the destination.{'\n'}
+                      {'\n'}
+                      Give and receive advice!
+                    </Text>
+                    <View style={styles.welcomeArrowContainer}>
+                      <Ionicons name="arrow-down" size={24} color="#7B7B7B" />
+                    </View>
+                  </View>
+                )}
               </>
             )}
           </ScrollView>
@@ -724,8 +895,8 @@ export default function ConversationsScreen({
                   onPress={(e) => {
                     e.stopPropagation();
                     console.log('My Shaper menu item pressed');
-                    // Placeholder - does nothing for now
                     setShowMenu(false);
+                    setShowSwellyShaper(true);
                   }}
                   activeOpacity={0.7}
                 >
@@ -1265,6 +1436,73 @@ const styles = StyleSheet.create({
     color: '#222B30',
     lineHeight: 20,
     flex: 1,
+  },
+  // Welcome conversation styles - matching Figma design
+  welcomeAvatarContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingLeft: 0,
+    paddingRight: 16,
+    position: 'relative',
+  },
+  welcomeAvatar: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    borderWidth: 1,
+    borderColor: '#FFFFFF',
+    overflow: 'hidden',
+  },
+  welcomeAvatarImage: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    ...(Platform.OS === 'web' && {
+      objectFit: 'cover' as any,
+    }),
+  },
+  welcomeAvatarBack: {
+    marginRight: -16, // Negative margin for overlap
+    zIndex: 1,
+  },
+  welcomeAvatarFront: {
+    marginRight: -16, // Negative margin for overlap (or 0 if last)
+    zIndex: 2,
+  },
+  welcomeTimeText: {
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    fontSize: 12,
+    fontWeight: '400',
+    lineHeight: 15,
+    color: '#05BCD3',
+    textAlign: 'right',
+  },
+  welcomeUnreadBadge: {
+    borderRadius: 16,
+    width: 20,
+    height: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#05BCD3',
+  },
+  welcomeInstructionContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 24,
+    paddingHorizontal: 16,
+    gap: 10,
+  },
+  welcomeInstructionText: {
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    fontSize: 14,
+    fontWeight: '400',
+    lineHeight: 18,
+    color: '#7B7B7B',
+    textAlign: 'center',
+  },
+  welcomeArrowContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });
 
