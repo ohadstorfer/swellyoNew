@@ -130,3 +130,4 @@ catch (error: any) {
 4. **Skeleton Loading**: Use skeleton screens instead of spinners for better UX
 
 
+

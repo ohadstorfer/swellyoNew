@@ -1,0 +1,785 @@
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+
+const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY')
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+
+interface ChatRequest {
+  message: string
+  chat_id?: string
+  conversation_id?: string
+}
+
+interface ChatResponse {
+  chat_id?: string
+  return_message: string
+  is_finished: boolean
+  data?: any
+}
+
+const SWELLY_SHAPER_PROMPT = `
+You are Swelly Shaper, a friendly AI assistant helping surfers edit and update their profiles through natural conversation. You're laid-back, helpful, and make profile editing feel easy and conversational. Your tone is relaxed, friendly, and supportive - like a helpful friend updating a profile together.
+
+IMPORTANT FORMATTING RULES:
+- Keep all text clean and simple - NO markdown formatting (no **, no *, no __, no _, no #, no brackets, etc.)
+- Write in plain text only - do not attempt to bold, italicize, or format text in any way
+- Use emojis sparingly and naturally, but avoid markdown syntax
+- Keep responses readable and conversational without any formatting codes
+
+YOUR GOAL: Help users update their profile fields through natural conversation. When a user wants to change something, identify the field and extract the value, then return it in a structured format.
+
+PROFILE FIELDS YOU CAN UPDATE:
+1. name - User's name or nickname
+2. age - User's age (number)
+3. pronoun - Preferred pronouns (e.g., "he/him", "she/her", "they/them")
+4. country_from - Country of origin
+5. surfboard_type - Type of surfboard: "shortboard", "midlength", "longboard", or "soft_top"
+6. surf_level - Surf skill level from 1-5 (1 = beginner, 5 = expert)
+7. travel_experience - Travel experience level: "beginner", "intermediate", or "experienced"
+8. bio - Biography/description about the user
+9. destinations_array - Array of past trips with format: [{"destination_name": "Location, Area", "time_in_days": number}]
+10. travel_type - Travel budget: "budget", "mid", or "high"
+11. travel_buddies - Travel companions: "solo", "2" (one friend/partner), or "crew" (group)
+12. lifestyle_keywords - Array of lifestyle interests (e.g., ["yoga", "party", "nature", "culture"])
+13. wave_type_keywords - Array of wave preferences (e.g., ["barrels", "big waves", "reef", "mellow"])
+
+CONVERSATION FLOW:
+1. Start with a friendly welcome message asking what they'd like to change
+2. Listen to what the user wants to update OR what they're telling you about
+3. Identify which field(s) they want to change - even if they don't explicitly ask
+4. Extract the value(s) from their message - be smart about inferring intent
+5. If the value is clear, confirm and update immediately
+6. If the value is unclear, ask a clarifying question
+7. You can handle multiple field updates in one message
+8. IMPORTANT: Users often share information naturally without directly asking to update fields - extract ALL relevant profile information from their message
+
+SMART EXTRACTION:
+- If user mentions a trip/destination with duration → extract to destinations_array
+- If user mentions their board type, skill level, age, location, etc. → update those fields
+- If user mentions preferences (waves, lifestyle, travel style) → extract keywords
+- If user says "I learned to surf on X" → they want to update surfboard_type
+- If user says "I'm X years old" or "I turned X" → update age
+- If user mentions time spent somewhere → likely a trip to add
+- If user describes their experience level → update surf_level or travel_experience
+- Always look for multiple pieces of information in a single message
+
+EXTRACTION RULES:
+- For surf_level: Extract number 1-5 (convert text like "beginner" to 1, "intermediate" to 3, "advanced" to 4, "expert" to 5)
+- For surfboard_type: Map variations to standard values:
+  - "short", "shortboard" → "shortboard"
+  - "mid", "midlength" → "midlength"
+  - "long", "longboard" → "longboard"
+  - "soft top", "foam", "foamie" → "soft_top"
+- For destinations_array: Extract destination name and duration, convert weeks/months to days (1 week = 7 days, 1 month = 30 days)
+- For travel_type: Map to "budget", "mid", or "high"
+- For travel_buddies: Map to "solo", "2", or "crew"
+- For arrays (lifestyle_keywords, wave_type_keywords): Extract keywords from the message
+
+Response format: Always return JSON with this structure:
+{
+  "return_message": "Your conversational message here",
+  "is_finished": false,
+  "data": null
+}
+
+When you've identified a field to update and extracted the value, set is_finished: true and include the data:
+{
+  "return_message": "Great! I've updated your [field name] to [value]. ✅",
+  "is_finished": true,
+  "data": {
+    "field": "field_name",
+    "value": extracted_value
+  }
+}
+
+For multiple updates in one message, you can return multiple fields:
+{
+  "return_message": "Great! I've updated your profile. ✅",
+  "is_finished": true,
+  "data": {
+    "updates": [
+      {"field": "field_name_1", "value": value1},
+      {"field": "field_name_2", "value": value2}
+    ]
+  }
+}
+
+SPECIAL HANDLING:
+- For destinations_array: When user says "add trip to [destination] for [duration]", extract and format as:
+  {"field": "destinations_array", "value": [{"destination_name": "Location", "time_in_days": number}]}
+- Profile pictures cannot be updated via text - inform user they need to use the profile screen
+
+EXAMPLES:
+
+User: "change my board to shortboard"
+Response: {
+  "return_message": "Got it! I've updated your surfboard type to shortboard. ✅",
+  "is_finished": true,
+  "data": {
+    "field": "surfboard_type",
+    "value": "shortboard"
+  }
+}
+
+User: "I'm 25 years old"
+Response: {
+  "return_message": "Perfect! I've updated your age to 25. ✅",
+  "is_finished": true,
+  "data": {
+    "field": "age",
+    "value": 25
+  }
+}
+
+User: "I just came back from a trip. It was in mexico, 3 months."
+Response: {
+  "return_message": "Awesome! I've added a trip to Mexico for 3 months to your profile. ✅",
+  "is_finished": true,
+  "data": {
+    "field": "destinations_array",
+    "value": [{"destination_name": "Mexico", "time_in_days": 90}]
+  }
+}
+
+User: "change my level to 4"
+Response: {
+  "return_message": "Nice! I've updated your surf level to 4. ✅",
+  "is_finished": true,
+  "data": {
+    "field": "surf_level",
+    "value": 4
+  }
+}
+
+User: "I want to update my bio to say I love surfing and traveling"
+Response: {
+  "return_message": "Perfect! I've updated your bio. ✅",
+  "is_finished": true,
+  "data": {
+    "field": "bio",
+    "value": "I love surfing and traveling"
+  }
+}
+
+COMPLEX EXAMPLES (Multiple fields from natural conversation):
+
+User: "I just came back from a 3 weeks surf trip to El Salvador, where I learned to surf on a shortboard."
+Response: {
+  "return_message": "Awesome! I've added your trip to El Salvador (3 weeks) and updated your surfboard type to shortboard. ✅",
+  "is_finished": true,
+  "data": {
+    "updates": [
+      {"field": "destinations_array", "value": [{"destination_name": "El Salvador", "time_in_days": 21}]},
+      {"field": "surfboard_type", "value": "shortboard"}
+    ]
+  }
+}
+
+User: "I'm turning 28 next month and I've been surfing for 5 years now, so I'd say I'm at an advanced level."
+Response: {
+  "return_message": "Got it! I've updated your age to 28 and surf level to 4 (advanced). ✅",
+  "is_finished": true,
+  "data": {
+    "updates": [
+      {"field": "age", "value": 28},
+      {"field": "surf_level", "value": 4}
+    ]
+  }
+}
+
+User: "Last year I spent 6 months in Costa Rica, mostly in Tamarindo. It was amazing, I got really into yoga and the local food scene there."
+Response: {
+  "return_message": "Sounds like an epic trip! I've added Costa Rica to your destinations and updated your lifestyle interests to include yoga and food. ✅",
+  "is_finished": true,
+  "data": {
+    "updates": [
+      {"field": "destinations_array", "value": [{"destination_name": "Costa Rica, Tamarindo", "time_in_days": 180}]},
+      {"field": "lifestyle_keywords", "value": ["yoga", "food", "local culture"]}
+    ]
+  }
+}
+
+User: "I've been traveling solo for the past few years, mostly on a budget. Just got back from 2 months in Sri Lanka where I surfed some amazing reef breaks."
+Response: {
+  "return_message": "That's awesome! I've updated your travel style to solo and budget, added Sri Lanka to your trips, and noted your preference for reef breaks. ✅",
+  "is_finished": true,
+  "data": {
+    "updates": [
+      {"field": "travel_buddies", "value": "solo"},
+      {"field": "travel_type", "value": "budget"},
+      {"field": "destinations_array", "value": [{"destination_name": "Sri Lanka", "time_in_days": 60}]},
+      {"field": "wave_type_keywords", "value": ["reef"]}
+    ]
+  }
+}
+
+User: "I'm from Brazil originally, but I've been living in California for the past 3 years. I ride a midlength now and I'm probably intermediate level."
+Response: {
+  "return_message": "Perfect! I've updated your country to Brazil, surfboard type to midlength, and surf level to 3 (intermediate). ✅",
+  "is_finished": true,
+  "data": {
+    "updates": [
+      {"field": "country_from", "value": "Brazil"},
+      {"field": "surfboard_type", "value": "midlength"},
+      {"field": "surf_level", "value": 3}
+    ]
+  }
+}
+
+User: "I went to Indonesia for 4 months, spent time in Bali and Lombok. Got really into the party scene there and met some amazing people. I prefer bigger, more powerful waves."
+Response: {
+  "return_message": "Epic trip! I've added Indonesia to your destinations, updated your lifestyle to include party/nightlife, and noted your preference for big, powerful waves. ✅",
+  "is_finished": true,
+  "data": {
+    "updates": [
+      {"field": "destinations_array", "value": [{"destination_name": "Indonesia, Bali/Lombok", "time_in_days": 120}]},
+      {"field": "lifestyle_keywords", "value": ["party", "nightlife"]},
+      {"field": "wave_type_keywords", "value": ["big waves", "powerful"]}
+    ]
+  }
+}
+
+User: "I'm 24, use they/them pronouns, and I'm from Australia. I've been surfing for about 2 years so I'm still learning but getting better."
+Response: {
+  "return_message": "Got it! I've updated your age to 24, pronouns to they/them, country to Australia, and surf level to 2 (novice/intermediate). ✅",
+  "is_finished": true,
+  "data": {
+    "updates": [
+      {"field": "age", "value": 24},
+      {"field": "pronoun", "value": "they/them"},
+      {"field": "country_from", "value": "Australia"},
+      {"field": "surf_level", "value": 2}
+    ]
+  }
+}
+
+IMPORTANT FOR COMPLEX MESSAGES:
+- Always extract ALL relevant information from the user's message, even if they don't explicitly ask to change it
+- If they mention a trip, extract destination and duration
+- If they mention their board type, skill level, age, etc., update those fields
+- If they mention preferences (waves, lifestyle, travel style), extract keywords
+- Combine multiple updates into a single response with the "updates" array format
+- Be smart about inferring intent - if they say "I learned to surf on a shortboard", they want to update their board type
+- If they mention time spent somewhere, it's likely a trip to add to destinations_array
+
+CRITICAL RULES:
+- Always return JSON format, even when is_finished is false
+- NEVER use markdown formatting in return_message
+- Be conversational and friendly
+- Extract values accurately from natural language
+- Handle typos and variations gracefully
+- If unsure about a value, ask a clarifying question before setting is_finished: true
+`
+
+async function getChatHistory(chatId: string, supabase: any): Promise<any[]> {
+  try {
+    const { data, error } = await supabase
+      .from('swelly_chat_history')
+      .select('messages')
+      .eq('chat_id', chatId)
+      .single()
+
+    if (error || !data) {
+      return []
+    }
+
+    return data.messages || []
+  } catch (error) {
+    console.error('Error fetching chat history:', error)
+    return []
+  }
+}
+
+async function saveChatHistory(chatId: string, messages: any[], userId: string | null, conversationId: string | null, supabase: any): Promise<void> {
+  try {
+    const { error } = await supabase
+      .from('swelly_chat_history')
+      .upsert({
+        chat_id: chatId,
+        user_id: userId,
+        conversation_id: conversationId,
+        messages: messages,
+        updated_at: new Date().toISOString()
+      }, {
+        onConflict: 'chat_id'
+      })
+
+    if (error) {
+      console.error('Error saving chat history:', error)
+    }
+  } catch (error) {
+    console.error('Error saving chat history:', error)
+  }
+}
+
+async function callOpenAI(messages: any[]): Promise<string> {
+  if (!OPENAI_API_KEY) {
+    throw new Error('OPENAI_API_KEY is not set')
+  }
+
+  const requestBody = {
+    model: 'gpt-4o',
+    messages: messages,
+    temperature: 0.7,
+    max_completion_tokens: 1000,
+    response_format: { type: 'json_object' },
+  }
+
+  console.log('Sending request to OpenAI:', JSON.stringify(requestBody, null, 2))
+
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${OPENAI_API_KEY}`
+    },
+    body: JSON.stringify(requestBody)
+  })
+
+  if (!response.ok) {
+    const errorText = await response.text()
+    console.error('OpenAI API error:', response.status, response.statusText, errorText)
+    throw new Error(`OpenAI API error: ${response.status} ${response.statusText} - ${errorText}`)
+  }
+
+  const data = await response.json()
+  console.log('OpenAI API response:', JSON.stringify(data, null, 2))
+  
+  const assistantMessage = data.choices[0]?.message?.content || ''
+  console.log('Extracted assistant message:', assistantMessage)
+  
+  return assistantMessage
+}
+
+async function updateUserProfile(userId: string, field: string, value: any, supabase: any): Promise<void> {
+  try {
+    // Get current surfer profile
+    const { data: surferData, error: surferError } = await supabase
+      .from('surfers')
+      .select('*')
+      .eq('user_id', userId)
+      .single()
+
+    if (surferError || !surferData) {
+      throw new Error('Surfer profile not found')
+    }
+
+    // Map field names to database column names
+    const fieldMapping: { [key: string]: string } = {
+      name: 'name',
+      age: 'age',
+      pronoun: 'pronoun',
+      country_from: 'country_from',
+      surfboard_type: 'surfboard_type',
+      surf_level: 'surf_level',
+      travel_experience: 'travel_experience',
+      bio: 'bio',
+      travel_type: 'travel_type',
+      travel_buddies: 'travel_buddies',
+      lifestyle_keywords: 'lifestyle_keywords',
+      wave_type_keywords: 'wave_type_keywords',
+    }
+
+    const dbField = fieldMapping[field] || field
+    const updateData: any = {}
+
+    // Special handling for destinations_array - merge with existing
+    if (field === 'destinations_array' && Array.isArray(value)) {
+      const existingTrips = surferData.destinations_array || []
+      const existingDestinations = new Set(existingTrips.map((t: any) => t.destination_name?.toLowerCase()))
+      const newTrips = value.filter((t: any) => !existingDestinations.has(t.destination_name?.toLowerCase()))
+      updateData.destinations_array = [...existingTrips, ...newTrips]
+    } else if (field === 'surf_level') {
+      // Ensure surf_level is 1-5 (database expects 1-5, not 0-4)
+      const level = typeof value === 'number' ? value : parseInt(value)
+      updateData[dbField] = Math.max(1, Math.min(5, level))
+    } else if (field === 'surfboard_type') {
+      // Map to database enum values
+      const boardTypeMap: { [key: string]: string } = {
+        'shortboard': 'shortboard',
+        'midlength': 'midlength',
+        'longboard': 'longboard',
+        'soft_top': 'soft_top',
+      }
+      updateData[dbField] = boardTypeMap[value] || value
+    } else {
+      updateData[dbField] = value
+    }
+
+    // Update the profile
+    const { error: updateError } = await supabase
+      .from('surfers')
+      .update(updateData)
+      .eq('user_id', userId)
+
+    if (updateError) {
+      console.error('Error updating profile:', updateError)
+      throw updateError
+    }
+
+    console.log('Successfully updated profile field:', field, 'to:', value)
+  } catch (error) {
+    console.error('Error in updateUserProfile:', error)
+    throw error
+  }
+}
+
+serve(async (req: Request) => {
+  // Handle CORS
+  if (req.method === 'OPTIONS') {
+    return new Response(null, {
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
+        'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+      },
+    })
+  }
+
+  try {
+    // Get auth header
+    const authHeader = req.headers.get('Authorization')
+    if (!authHeader) {
+      return new Response(
+        JSON.stringify({ error: 'Missing authorization header' }),
+        { 
+          status: 401, 
+          headers: { 
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+          } 
+        }
+      )
+    }
+
+    // Initialize Supabase client with service role for admin operations
+    const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false
+      }
+    })
+
+    // Get user from auth token
+    const token = authHeader.replace('Bearer ', '')
+    const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token)
+
+    if (userError || !user) {
+      return new Response(
+        JSON.stringify({ error: 'Invalid authentication token' }),
+        { 
+          status: 401, 
+          headers: { 
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+          } 
+        }
+      )
+    }
+
+    const url = new URL(req.url)
+    const path = url.pathname
+
+    // Route: POST /swelly-shaper/new_chat
+    if (path.endsWith('/new_chat') && req.method === 'POST') {
+      const body: ChatRequest = await req.json()
+      
+      // Generate chat ID
+      const chatId = crypto.randomUUID()
+      
+      // Get user's current profile for context
+      let userProfile: any = null
+      try {
+        const { data: surferData, error: surferError } = await supabaseAdmin
+          .from('surfers')
+          .select('*')
+          .eq('user_id', user.id)
+          .single()
+        
+        if (!surferError && surferData) {
+          userProfile = surferData
+          console.log('✅ Fetched user profile for context:', userProfile)
+        }
+      } catch (error) {
+        console.error('Error fetching user profile:', error)
+      }
+
+      // Build system prompt with user profile context
+      let systemPrompt = SWELLY_SHAPER_PROMPT
+      if (userProfile) {
+        const profileContext = `CURRENT USER PROFILE (for reference when helping them edit):
+- name: ${userProfile.name || 'not set'}
+- age: ${userProfile.age || 'not set'}
+- pronoun: ${userProfile.pronoun || 'not set'}
+- country_from: ${userProfile.country_from || 'not set'}
+- surfboard_type: ${userProfile.surfboard_type || 'not set'}
+- surf_level: ${userProfile.surf_level || 'not set'} (1-5 scale)
+- travel_experience: ${userProfile.travel_experience || 'not set'}
+- bio: ${userProfile.bio || 'not set'}
+- travel_type: ${userProfile.travel_type || 'not set'}
+- travel_buddies: ${userProfile.travel_buddies || 'not set'}
+- destinations_array: ${userProfile.destinations_array ? JSON.stringify(userProfile.destinations_array) : 'no trips yet'}
+- lifestyle_keywords: ${userProfile.lifestyle_keywords ? JSON.stringify(userProfile.lifestyle_keywords) : 'not set'}
+- wave_type_keywords: ${userProfile.wave_type_keywords ? JSON.stringify(userProfile.wave_type_keywords) : 'not set'}
+
+Use this context to understand what they currently have and help them update it.`
+        
+        systemPrompt = `${SWELLY_SHAPER_PROMPT}\n\n${profileContext}`
+      }
+      
+      // Initialize chat history
+      const messages = [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: body.message || "Let's shape that profile! Let me know what you would like to edit!" }
+      ]
+
+      // Call OpenAI
+      const assistantMessage = await callOpenAI(messages)
+      messages.push({ role: 'assistant', content: assistantMessage })
+
+      // Save to database
+      await saveChatHistory(chatId, messages, user.id, body.conversation_id || null, supabaseAdmin)
+
+      // Parse JSON response and handle profile updates
+      let parsedResponse: ChatResponse
+      try {
+        console.log('Raw assistant message:', assistantMessage)
+        const parsed = JSON.parse(assistantMessage)
+        console.log('Parsed JSON from ChatGPT:', JSON.stringify(parsed, null, 2))
+        
+        // If conversation is finished and has data, update the profile
+        if (parsed.is_finished && parsed.data) {
+          const updateData = parsed.data
+          
+          // Handle single field update
+          if (updateData.field && updateData.value !== undefined) {
+            await updateUserProfile(user.id, updateData.field, updateData.value, supabaseAdmin)
+          }
+          
+          // Handle multiple field updates
+          if (updateData.updates && Array.isArray(updateData.updates)) {
+            for (const update of updateData.updates) {
+              if (update.field && update.value !== undefined) {
+                await updateUserProfile(user.id, update.field, update.value, supabaseAdmin)
+              }
+            }
+          }
+        }
+        
+        parsedResponse = {
+          chat_id: chatId,
+          return_message: parsed.return_message || assistantMessage,
+          is_finished: parsed.is_finished || false,
+          data: parsed.data || null
+        }
+        
+        console.log('Final response being sent:', JSON.stringify(parsedResponse, null, 2))
+      } catch (parseError) {
+        console.error('Error parsing JSON from ChatGPT:', parseError)
+        console.log('Raw message that failed to parse:', assistantMessage)
+        parsedResponse = {
+          chat_id: chatId,
+          return_message: assistantMessage,
+          is_finished: false,
+          data: null
+        }
+      }
+
+      return new Response(
+        JSON.stringify(parsedResponse),
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+          },
+        }
+      )
+    }
+
+    // Route: POST /swelly-shaper/continue/:chat_id
+    if (path.includes('/continue/') && req.method === 'POST') {
+      const chatId = path.split('/continue/')[1]
+      const body: ChatRequest = await req.json()
+
+      if (!chatId) {
+        return new Response(
+          JSON.stringify({ error: 'Missing chat_id' }),
+          { 
+            status: 400, 
+            headers: { 
+              'Content-Type': 'application/json',
+              'Access-Control-Allow-Origin': '*',
+            } 
+          }
+        )
+      }
+
+      // Get existing chat history
+      let messages = await getChatHistory(chatId, supabaseAdmin)
+      
+      if (messages.length === 0) {
+        return new Response(
+          JSON.stringify({ error: 'Chat not found' }),
+          { 
+            status: 404, 
+            headers: { 
+              'Content-Type': 'application/json',
+              'Access-Control-Allow-Origin': '*',
+            } 
+          }
+        )
+      }
+
+      // Add new user message
+      messages.push({ role: 'user', content: body.message })
+
+      // Call OpenAI
+      const assistantMessage = await callOpenAI(messages)
+      messages.push({ role: 'assistant', content: assistantMessage })
+
+      // Save to database
+      await saveChatHistory(chatId, messages, user.id, body.conversation_id || null, supabaseAdmin)
+
+      // Parse JSON response and handle profile updates
+      let parsedResponse: ChatResponse
+      try {
+        console.log('Raw assistant message (continue):', assistantMessage)
+        const parsed = JSON.parse(assistantMessage)
+        console.log('Parsed JSON from ChatGPT (continue):', JSON.stringify(parsed, null, 2))
+        
+        // If conversation is finished and has data, update the profile
+        if (parsed.is_finished && parsed.data) {
+          const updateData = parsed.data
+          
+          // Handle single field update
+          if (updateData.field && updateData.value !== undefined) {
+            await updateUserProfile(user.id, updateData.field, updateData.value, supabaseAdmin)
+          }
+          
+          // Handle multiple field updates
+          if (updateData.updates && Array.isArray(updateData.updates)) {
+            for (const update of updateData.updates) {
+              if (update.field && update.value !== undefined) {
+                await updateUserProfile(user.id, update.field, update.value, supabaseAdmin)
+              }
+            }
+          }
+        }
+        
+        parsedResponse = {
+          return_message: parsed.return_message || assistantMessage,
+          is_finished: parsed.is_finished || false,
+          data: parsed.data || null
+        }
+        
+        console.log('Final response being sent (continue):', JSON.stringify(parsedResponse, null, 2))
+      } catch (parseError) {
+        console.error('Error parsing JSON from ChatGPT (continue):', parseError)
+        console.log('Raw message that failed to parse (continue):', assistantMessage)
+        parsedResponse = {
+          return_message: assistantMessage,
+          is_finished: false,
+          data: null
+        }
+      }
+
+      return new Response(
+        JSON.stringify(parsedResponse),
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+          },
+        }
+      )
+    }
+
+    // Route: GET /swelly-shaper/:chat_id
+    const chatIdMatch = path.match(/\/([^/]+)$/)
+    if (chatIdMatch && req.method === 'GET' && !path.endsWith('/health')) {
+      const chatId = chatIdMatch[1]
+
+      if (!chatId) {
+        return new Response(
+          JSON.stringify({ error: 'Missing chat_id' }),
+          { 
+            status: 400, 
+            headers: { 
+              'Content-Type': 'application/json',
+              'Access-Control-Allow-Origin': '*',
+            } 
+          }
+        )
+      }
+
+      const messages = await getChatHistory(chatId, supabaseAdmin)
+
+      if (messages.length === 0) {
+        return new Response(
+          JSON.stringify({ error: 'Chat not found' }),
+          { 
+            status: 404, 
+            headers: { 
+              'Content-Type': 'application/json',
+              'Access-Control-Allow-Origin': '*',
+            } 
+          }
+        )
+      }
+
+      return new Response(
+        JSON.stringify({ chat_id: chatId, messages }),
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+          },
+        }
+      )
+    }
+
+    // Health check
+    if (path.endsWith('/health') || path === '/swelly-shaper' || path.endsWith('/swelly-shaper')) {
+      return new Response(
+        JSON.stringify({ status: 'healthy', message: 'Swelly Shaper API is running' }),
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+          },
+        }
+      )
+    }
+
+    return new Response(
+      JSON.stringify({ error: 'Not found' }),
+      { 
+        status: 404, 
+        headers: { 
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        } 
+      }
+    )
+
+  } catch (error: unknown) {
+    console.error('Error:', error)
+    const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred'
+    return new Response(
+      JSON.stringify({ error: errorMessage }),
+      {
+        status: 500,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        },
+      }
+    )
+  }
+})
+

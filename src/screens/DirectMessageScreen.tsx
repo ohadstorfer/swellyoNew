@@ -20,6 +20,7 @@ import { messagingService, Message } from '../services/messaging/messagingServic
 import { supabaseAuthService } from '../services/auth/supabaseAuthService';
 import { getImageUrl } from '../services/media/imageService';
 import { supabase } from '../config/supabase';
+import { ProfileImage } from '../components/ProfileImage';
 
 interface DirectMessageScreenProps {
   conversationId?: string; // Optional: undefined for pending conversations (will be created on first message)
@@ -440,25 +441,12 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
               }}
               activeOpacity={0.7}
             >
-              {otherUserAvatar && otherUserAvatar.trim() !== '' ? (
-                <Image
-                  source={{ uri: otherUserAvatar }}
-                  style={styles.avatarImage}
-                  resizeMode="cover"
-                  onError={(error) => {
-                    console.error('Error loading avatar image:', error, 'URL:', otherUserAvatar);
-                  }}
-                  onLoad={() => {
-                    console.log('Avatar image loaded successfully:', otherUserAvatar);
-                  }}
-                />
-              ) : (
-                <View style={styles.avatarPlaceholder}>
-                  <Text style={styles.avatarPlaceholderText}>
-                    {otherUserName.charAt(0).toUpperCase()}
-                  </Text>
-                </View>
-              )}
+              <ProfileImage
+                imageUrl={otherUserAvatar}
+                name={otherUserName}
+                style={styles.avatarImage}
+                showLoadingIndicator={false}
+              />
             </TouchableOpacity>
           </View>
           

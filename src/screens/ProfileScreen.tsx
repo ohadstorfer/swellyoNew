@@ -9,9 +9,11 @@ import {
   TouchableOpacity,
   Platform,
   Dimensions,
+  Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import Svg, { Circle, Rect, Defs, Filter, FeFlood, FeColorMatrix, FeOffset, FeGaussianBlur, FeComposite, FeBlend } from 'react-native-svg';
 import { Text } from '../components/Text';
 import { Text as RNText } from 'react-native';
 import { colors, spacing, typography } from '../styles/theme';
@@ -19,6 +21,8 @@ import { supabaseDatabaseService, SupabaseSurfer } from '../services/database/su
 import { supabase } from '../config/supabase';
 import { getImageUrl } from '../services/media/imageService';
 import { getCountryFlag } from '../utils/countryFlags';
+import { uploadProfileImage } from '../services/storage/storageService';
+import { ProfileImage } from '../components/ProfileImage';
 
 interface ProfileScreenProps {
   onBack?: () => void;
@@ -75,19 +79,42 @@ const LIFESTYLE_ICON_MAP: { [key: string]: string } = {
   'mobility': 'barbell-outline',
 };
 
+// Plus Icon SVG Component
+const PlusIcon: React.FC<{ size?: number }> = ({ size = 40 }) => {
+  const scale = size / 40;
+  return (
+    <Svg width={size} height={size} viewBox="0 0 40 40" fill="none">
+      <Defs>
+        <Filter id={`filter0_d_3645_6670_${size}`} x="0" y="0" width="40" height="40" filterUnits="userSpaceOnUse">
+          <FeFlood floodOpacity="0" result="BackgroundImageFix"/>
+          <FeColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+          <FeOffset/>
+          <FeGaussianBlur stdDeviation="2"/>
+          <FeComposite in2="hardAlpha" operator="out"/>
+          <FeColorMatrix type="matrix" values="0 0 0 0 0.376471 0 0 0 0 0.396078 0 0 0 0 0.435294 0 0 0 0.45 0"/>
+          <FeBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow_3645_6670"/>
+          <FeBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow_3645_6670" result="shape"/>
+        </Filter>
+      </Defs>
+      <Circle cx="20" cy="20" r="16" fill="white" filter={`url(#filter0_d_3645_6670_${size})`}/>
+      <Circle cx="20" cy="20" r="13" fill="#00A2B6"/>
+      <Rect x="19" y="11" width="2" height="18" rx="1" fill="white"/>
+      <Rect x="29" y="19" width="2" height="18" rx="1" transform="rotate(90 29 19)" fill="white"/>
+    </Svg>
+  );
+};
+
 export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, onMessage }) => {
   const [profileData, setProfileData] = useState<SupabaseSurfer | null>(null);
   const [loading, setLoading] = useState(true);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [imageError, setImageError] = useState(false);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
   
   // Determine if we're viewing our own profile or another user's
   const isViewingOwnProfile = !userId;
 
   useEffect(() => {
     loadProfileData();
-    // Reset image error when profile data changes
-    setImageError(false);
   }, [userId]);
 
   const loadProfileData = async () => {
@@ -118,6 +145,99 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
       console.error('Error loading profile data:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const pickImage = async () => {
+    if (!currentUserId) {
+      Alert.alert('Error', 'You must be logged in to upload a profile image.');
+      return;
+    }
+
+    try {
+      if (Platform.OS === 'web') {
+        // For web, use a file input
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.onchange = async (e: any) => {
+          const file = e.target.files[0];
+          if (file) {
+            const reader = new FileReader();
+            reader.onload = async (event: any) => {
+              const imageUri = event.target.result;
+              await uploadAndUpdateProfile(imageUri);
+            };
+            reader.readAsDataURL(file);
+          }
+        };
+        input.click();
+      } else {
+        // For native, use expo-image-picker
+        try {
+          const ImagePicker = require('expo-image-picker');
+          const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+          if (status !== 'granted') {
+            Alert.alert(
+              'Permission Required',
+              'Sorry, we need camera roll permissions to upload your profile picture!'
+            );
+            return;
+          }
+
+          const result = await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: ImagePicker.MediaTypeOptions.Images,
+            allowsEditing: true,
+            aspect: [1, 1],
+            quality: 0.8,
+          });
+
+          if (!result.canceled && result.assets[0]) {
+            const imageUri = result.assets[0].uri;
+            await uploadAndUpdateProfile(imageUri);
+          }
+        } catch (error) {
+          console.warn('expo-image-picker not available:', error);
+          Alert.alert(
+            'Image Picker Not Available',
+            'Please install expo-image-picker for native platforms.'
+          );
+        }
+      }
+    } catch (error) {
+      console.error('Error picking image:', error);
+      Alert.alert('Error', 'Failed to pick image. Please try again.');
+    }
+  };
+
+  const uploadAndUpdateProfile = async (imageUri: string) => {
+    if (!currentUserId) return;
+
+    setIsUploadingImage(true);
+    try {
+      // Upload image to storage
+      const result = await uploadProfileImage(imageUri, currentUserId);
+      
+      if (result.success && result.url) {
+        // Update profile with new image URL
+        await supabaseDatabaseService.saveSurfer({
+          profileImageUrl: result.url,
+        });
+
+        // Reload profile data to show new image
+        await loadProfileData();
+        
+        Alert.alert('Success', 'Profile picture updated successfully!');
+      } else {
+        const errorMessage = result.error || 'Failed to upload image';
+        console.error('Upload failed:', errorMessage);
+        Alert.alert('Upload Failed', errorMessage);
+      }
+    } catch (error) {
+      console.error('Error uploading profile image:', error);
+      Alert.alert('Error', 'Failed to upload profile picture. Please try again.');
+    } finally {
+      setIsUploadingImage(false);
     }
   };
 
@@ -268,30 +388,31 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
         {/* Profile Picture - Centered */}
         <View style={styles.profilePictureContainer}>
           <View style={styles.profilePictureWrapper}>
-            {profileData.profile_image_url && !imageError ? (
-              <Image
-                source={{ uri: profileData.profile_image_url }}
-                style={styles.profilePicture}
-                resizeMode="cover"
-                onError={(error) => {
-                  console.error('Error loading profile image:', error, 'URL:', profileData.profile_image_url);
-                  setImageError(true);
-                }}
-                onLoad={() => {
-                  setImageError(false);
-                }}
-                {...(Platform.OS === 'web' && {
-                  objectFit: 'cover' as any,
-                })}
-              />
-            ) : (
-              <View style={styles.profilePicturePlaceholder}>
-                <Text style={styles.profilePictureInitials}>
-                  {getInitials(profileData.name || 'User')}
-                </Text>
-              </View>
-            )}
+            <ProfileImage
+              imageUrl={profileData.profile_image_url}
+              name={profileData.name || 'User'}
+              style={styles.profilePicture}
+              showLoadingIndicator={false}
+            />
           </View>
+          {/* Plus Icon Overlay - Only show when viewing own profile */}
+          {isViewingOwnProfile && (
+            <TouchableOpacity
+              style={styles.plusIconContainer}
+              onPress={pickImage}
+              disabled={isUploadingImage}
+              activeOpacity={0.7}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              {isUploadingImage ? (
+                <View style={styles.uploadingContainer}>
+                  <Ionicons name="hourglass-outline" size={20} color="#FFFFFF" />
+                </View>
+              ) : (
+                <PlusIcon size={40} />
+              )}
+            </TouchableOpacity>
+          )}
         </View>
 
         {/* Profile Info Section - Board and Name Row */}
@@ -634,6 +755,29 @@ const styles = StyleSheet.create({
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
     color: '#7B7B7B',
     textAlign: 'center',
+  },
+  plusIconContainer: {
+    position: 'absolute',
+    bottom: -5, // Slightly outside the border for better visibility
+    right: -5,  // Slightly outside the border for better visibility
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 20,
+    backgroundColor: 'transparent', // Make container transparent
+    // Add shadow for better visibility (only on the icon itself, not the container)
+    ...(Platform.OS === 'web' && {
+      filter: 'drop-shadow(0px 2px 4px rgba(0, 0, 0, 0.2))',
+    }),
+  },
+  uploadingContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0, 162, 182, 0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   profileInfoSection: {
     position: 'absolute',

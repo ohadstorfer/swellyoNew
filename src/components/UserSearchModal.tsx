@@ -13,6 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Text } from './Text';
 import { colors, spacing, typography, borderRadius } from '../styles/theme';
 import { supabase } from '../config/supabase';
+import { ProfileImage } from './ProfileImage';
 
 interface User {
   user_id: string;
@@ -199,18 +200,12 @@ export const UserSearchModal: React.FC<UserSearchModalProps> = ({
                   style={styles.userItem}
                   onPress={() => handleUserPress(item.user_id)}
                 >
-                  {item.profile_image_url ? (
-                    <Image
-                      source={{ uri: item.profile_image_url }}
-                      style={styles.avatar}
-                    />
-                  ) : (
-                    <View style={[styles.avatar, styles.avatarPlaceholder]}>
-                      <Text style={styles.avatarPlaceholderText}>
-                        {item.name.charAt(0).toUpperCase()}
-                      </Text>
-                    </View>
-                  )}
+                  <ProfileImage
+                    imageUrl={item.profile_image_url}
+                    name={item.name}
+                    style={styles.avatar}
+                    showLoadingIndicator={false}
+                  />
                   <View style={styles.userInfo}>
                     <Text style={styles.userName}>{item.name}</Text>
                     <Text style={styles.userEmail}>{item.email}</Text>

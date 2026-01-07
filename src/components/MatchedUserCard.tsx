@@ -15,6 +15,7 @@ import { colors, spacing } from '../styles/theme';
 import { MatchedUser } from '../types/tripPlanning';
 import { getImageUrl } from '../services/media/imageService';
 import { getCountryFlag } from '../utils/countryFlags';
+import { ProfileImage } from './ProfileImage';
 
 interface MatchedUserCardProps {
   user: MatchedUser;
@@ -106,19 +107,12 @@ export const MatchedUserCard: React.FC<MatchedUserCardProps> = ({
         <View style={styles.userDetails}>
           {/* Profile Picture */}
           <View style={styles.avatarContainer}>
-            {profileImageUrl ? (
-              <Image
-                source={{ uri: profileImageUrl }}
-                style={styles.avatar}
-                resizeMode="cover"
-              />
-            ) : (
-              <View style={[styles.avatar, styles.avatarPlaceholder]}>
-                <Text style={styles.avatarPlaceholderText}>
-                  {getInitials(user.name)}
-                </Text>
-              </View>
-            )}
+            <ProfileImage
+              imageUrl={profileImageUrl}
+              name={user.name}
+              style={styles.avatar}
+              showLoadingIndicator={false}
+            />
           </View>
 
           {/* Name and Info */}

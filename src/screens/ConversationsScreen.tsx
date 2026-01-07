@@ -22,6 +22,7 @@ import { getImageUrl } from '../services/media/imageService';
 import { UserSearchModal } from '../components/UserSearchModal';
 import { DirectMessageScreen } from './DirectMessageScreen';
 import { SwellyShaperScreen } from './SwellyShaperScreen';
+import { ProfileImage } from '../components/ProfileImage';
 
 interface ConversationsScreenProps {
   onConversationPress?: (conversationId: string) => void;
@@ -542,15 +543,12 @@ export default function ConversationsScreen({
         <View style={styles.conversationContent}>
           {/* Avatar with adv role icon */}
           <View style={styles.avatarContainer}>
-            {avatarUrl ? (
-              <Image source={{ uri: avatarUrl }} style={styles.avatar} />
-            ) : (
-              <View style={[styles.avatar, styles.avatarPlaceholder]}>
-                <Text style={styles.avatarPlaceholderText}>
-                  {displayName.charAt(0).toUpperCase()}
-                </Text>
-              </View>
-            )}
+            <ProfileImage
+              imageUrl={avatarUrl}
+              name={displayName}
+              style={styles.avatar}
+              showLoadingIndicator={false}
+            />
             
             {/* Adv role icon badge */}
             {userAdvRole === 'adv_seeker' && (
@@ -749,15 +747,12 @@ export default function ConversationsScreen({
           onPress={onProfilePress}
           activeOpacity={0.7}
         >
-          {userAvatar ? (
-            <Image source={{ uri: userAvatar }} style={styles.headerAvatar} />
-          ) : (
-            <View style={[styles.headerAvatar, styles.avatarPlaceholder]}>
-              <Text style={styles.avatarPlaceholderText}>
-                {userName.charAt(0).toUpperCase()}
-              </Text>
-            </View>
-          )}
+          <ProfileImage
+            imageUrl={userAvatar}
+            name={userName}
+            style={styles.headerAvatar}
+            showLoadingIndicator={false}
+          />
           <Text style={styles.headerTitle}>Hello {userName}</Text>
         </TouchableOpacity>
 
