@@ -66,7 +66,7 @@ export interface MatchedUser {
   country_from?: string;
   age?: number;
   days_in_destination?: number; // Days spent in the destination country
-  destinations_array?: Array<{ destination_name: string; time_in_days: number }>; // For reference
+  destinations_array?: Array<{ destination_name: string; time_in_days: number; time_in_text?: string }>; // For reference
 }
 
 export interface TripPlanningData {

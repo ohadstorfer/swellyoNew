@@ -38,7 +38,7 @@ PROFILE FIELDS YOU CAN UPDATE:
 6. surf_level - Surf skill level from 1-5 (1 = beginner, 5 = expert)
 7. travel_experience - Travel experience level: "beginner", "intermediate", or "experienced"
 8. bio - Biography/description about the user
-9. destinations_array - Array of past trips with format: [{"destination_name": "Location, Area", "time_in_days": number}]
+9. destinations_array - Array of past trips with format: [{"destination_name": "Location, Area", "time_in_days": number, "time_in_text": "X days/weeks/months/years"}]
 10. travel_type - Travel budget: "budget", "mid", or "high"
 11. travel_buddies - Travel companions: "solo", "2" (one friend/partner), or "crew" (group)
 12. lifestyle_keywords - Array of lifestyle interests (e.g., ["yoga", "party", "nature", "culture"])
@@ -71,7 +71,23 @@ EXTRACTION RULES:
   - "mid", "midlength" → "midlength"
   - "long", "longboard" → "longboard"
   - "soft top", "foam", "foamie" → "soft_top"
-- For destinations_array: Extract destination name and duration, convert weeks/months to days (1 week = 7 days, 1 month = 30 days)
+- For destinations_array: Extract destination name and duration. YOU must:
+  - Convert their response to approximate days (1 week = 7 days, 1 month = 30 days, 1 year = 365 days) and save as time_in_days
+  - Extract the ORIGINAL time expression from the user's input and save as time_in_text
+  - CRITICAL FORMATTING RULES FOR time_in_text:
+    * For durations LESS than 1 year: Format as "X days" / "X weeks" / "X months" (preserve user's wording)
+    * For durations 1 year or MORE: ALWAYS round to years or half-years (e.g., "1 year", "1.5 years", "2 years", "2.5 years", "3 years")
+    * NEVER use "X years and Y months" format - always round to nearest year or half-year
+    * Examples:
+      - 2 years and 5 months → "2.5 years" (round 5 months to 0.5 years)
+      - 2 years and 6 months → "2.5 years" (round 6 months to 0.5 years)
+      - 2 years and 7 months → "2.5 years" (round 7 months to 0.5 years)
+      - 2 years and 8 months → "2.5 years" (round 8 months to 0.5 years)
+      - 2 years and 9 months → "3 years" (round 9 months up to next year)
+      - 1 year and 3 months → "1.5 years"
+      - 3 years and 2 months → "3 years" (round down)
+      - 3 years and 4 months → "3.5 years" (round 4 months to 0.5 years)
+  - IMPORTANT: If user mentions updating an existing trip (e.g., "I was in Australia for 3 months but it should be 2 years"), you should UPDATE the existing trip, not add a new one
 - For travel_type: Map to "budget", "mid", or "high"
 - For travel_buddies: Map to "solo", "2", or "crew"
 - For arrays (lifestyle_keywords, wave_type_keywords): Extract keywords from the message
@@ -106,8 +122,21 @@ For multiple updates in one message, you can return multiple fields:
 }
 
 SPECIAL HANDLING:
-- For destinations_array: When user says "add trip to [destination] for [duration]", extract and format as:
-  {"field": "destinations_array", "value": [{"destination_name": "Location", "time_in_days": number}]}
+- For destinations_array: 
+  - When user says "add trip to [destination] for [duration]", extract and format as:
+    {"field": "destinations_array", "value": [{"destination_name": "Location", "time_in_days": number, "time_in_text": "X days/weeks/months/years"}]}
+  - When user says they want to UPDATE an existing trip (e.g., "I was in Australia for 3 months but it should be 2 years"), you should UPDATE the existing trip by matching the country name
+  - Always extract both time_in_days (calculated) and time_in_text (preserved from user input, rounded to years/half-years if 1+ year)
+  - Examples:
+    * User says "3 weeks" → time_in_days: 21, time_in_text: "3 weeks"
+    * User says "2 months" → time_in_days: 60, time_in_text: "2 months"
+    * User says "6 months" → time_in_days: 180, time_in_text: "6 months"
+    * User says "1 year" → time_in_days: 365, time_in_text: "1 year"
+    * User says "1.5 years" or "a year and a half" → time_in_days: 547, time_in_text: "1.5 years"
+    * User says "2 years and 5 months" → time_in_days: 905, time_in_text: "2.5 years" (ALWAYS round to half-years, never "2 years and 5 months")
+    * User says "2 years and 6 months" → time_in_days: 915, time_in_text: "2.5 years"
+    * User says "3 years and 2 months" → time_in_days: 1095, time_in_text: "3 years" (round down)
+    * User says "3 years and 4 months" → time_in_days: 1115, time_in_text: "3.5 years"
 - Profile pictures cannot be updated via text - inform user they need to use the profile screen
 
 EXAMPLES:
@@ -138,7 +167,7 @@ Response: {
   "is_finished": true,
   "data": {
     "field": "destinations_array",
-    "value": [{"destination_name": "Mexico", "time_in_days": 90}]
+    "value": [{"destination_name": "Mexico", "time_in_days": 90, "time_in_text": "3 months"}]
   }
 }
 
@@ -170,7 +199,7 @@ Response: {
   "is_finished": true,
   "data": {
     "updates": [
-      {"field": "destinations_array", "value": [{"destination_name": "El Salvador", "time_in_days": 21}]},
+      {"field": "destinations_array", "value": [{"destination_name": "El Salvador", "time_in_days": 21, "time_in_text": "3 weeks"}]},
       {"field": "surfboard_type", "value": "shortboard"}
     ]
   }
@@ -194,7 +223,7 @@ Response: {
   "is_finished": true,
   "data": {
     "updates": [
-      {"field": "destinations_array", "value": [{"destination_name": "Costa Rica, Tamarindo", "time_in_days": 180}]},
+      {"field": "destinations_array", "value": [{"destination_name": "Costa Rica, Tamarindo", "time_in_days": 180, "time_in_text": "6 months"}]},
       {"field": "lifestyle_keywords", "value": ["yoga", "food", "local culture"]}
     ]
   }
@@ -208,9 +237,19 @@ Response: {
     "updates": [
       {"field": "travel_buddies", "value": "solo"},
       {"field": "travel_type", "value": "budget"},
-      {"field": "destinations_array", "value": [{"destination_name": "Sri Lanka", "time_in_days": 60}]},
+      {"field": "destinations_array", "value": [{"destination_name": "Sri Lanka", "time_in_days": 60, "time_in_text": "2 months"}]},
       {"field": "wave_type_keywords", "value": ["reef"]}
     ]
+  }
+}
+
+User: "I did a trip to Australia, and it says that I've been there for 3 months. But I actually been there for 2 years and 5 or 6 months."
+Response: {
+  "return_message": "Got it! I've updated your trip to Australia to 2 years and 5 months. ✅",
+  "is_finished": true,
+  "data": {
+    "field": "destinations_array",
+    "value": [{"destination_name": "Australia", "time_in_days": 905, "time_in_text": "2.5 years"}]
   }
 }
 
@@ -233,7 +272,7 @@ Response: {
   "is_finished": true,
   "data": {
     "updates": [
-      {"field": "destinations_array", "value": [{"destination_name": "Indonesia, Bali/Lombok", "time_in_days": 120}]},
+      {"field": "destinations_array", "value": [{"destination_name": "Indonesia, Bali/Lombok", "time_in_days": 120, "time_in_text": "4 months"}]},
       {"field": "lifestyle_keywords", "value": ["party", "nightlife"]},
       {"field": "wave_type_keywords", "value": ["big waves", "powerful"]}
     ]
@@ -257,11 +296,13 @@ Response: {
 IMPORTANT FOR COMPLEX MESSAGES:
 - Always extract ALL relevant information from the user's message, even if they don't explicitly ask to change it
 - If they mention a trip, extract destination and duration
+- If they mention updating an EXISTING trip (e.g., "I was in Australia for 3 months but it should be 2 years"), UPDATE the existing trip by matching the country name, don't add a new one
 - If they mention their board type, skill level, age, etc., update those fields
 - If they mention preferences (waves, lifestyle, travel style), extract keywords
 - Combine multiple updates into a single response with the "updates" array format
 - Be smart about inferring intent - if they say "I learned to surf on a shortboard", they want to update their board type
 - If they mention time spent somewhere, it's likely a trip to add to destinations_array
+- When updating existing trips, match by country name (e.g., "Australia" matches "Australia, Gold Coast")
 
 CRITICAL RULES:
 - Always return JSON format, even when is_finished is false
@@ -270,6 +311,8 @@ CRITICAL RULES:
 - Extract values accurately from natural language
 - Handle typos and variations gracefully
 - If unsure about a value, ask a clarifying question before setting is_finished: true
+- For durations 1 year or more: ALWAYS round to years or half-years (e.g., "2.5 years", "3 years"), NEVER use "X years and Y months" format
+- When user mentions updating an existing trip, match by country name and UPDATE the existing entry, don't add a duplicate
 `
 
 async function getChatHistory(chatId: string, supabase: any): Promise<any[]> {
@@ -352,6 +395,71 @@ async function callOpenAI(messages: any[]): Promise<string> {
   return assistantMessage
 }
 
+/**
+ * Extract country name from destination string
+ * Handles formats like "Australia, Gold Coast" or "Australia" or "Gold Coast, Australia"
+ */
+function extractCountryFromDestination(destination: string): string {
+  if (!destination) return ''
+  
+  // Split by comma and get the first part (usually country)
+  const parts = destination.split(',').map(p => p.trim())
+  
+  // If destination contains common country names, extract it
+  const commonCountries = [
+    'australia', 'usa', 'united states', 'sri lanka', 'costa rica', 'el salvador',
+    'indonesia', 'portugal', 'spain', 'france', 'brazil', 'nicaragua', 'panama',
+    'mexico', 'peru', 'chile', 'philippines', 'maldives', 'south africa',
+    'morocco', 'japan', 'new zealand', 'fiji', 'tahiti', 'hawaii'
+  ]
+  
+  const destLower = destination.toLowerCase()
+  
+  // Check if any part matches a common country
+  for (const part of parts) {
+    const partLower = part.toLowerCase()
+    for (const country of commonCountries) {
+      if (partLower === country || partLower.includes(country) || country.includes(partLower)) {
+        return country
+      }
+    }
+  }
+  
+  // Fallback: return first part (usually country)
+  return parts[0]?.toLowerCase() || destination.toLowerCase()
+}
+
+/**
+ * Check if two destinations match by country name
+ */
+function destinationsMatchByCountry(dest1: string, dest2: string): boolean {
+  if (!dest1 || !dest2) return false
+  
+  // Exact match (case-insensitive)
+  if (dest1.toLowerCase() === dest2.toLowerCase()) {
+    return true
+  }
+  
+  // Extract countries
+  const country1 = extractCountryFromDestination(dest1)
+  const country2 = extractCountryFromDestination(dest2)
+  
+  // Match if countries are the same
+  if (country1 && country2 && country1 === country2) {
+    return true
+  }
+  
+  // Also check if one contains the other
+  const dest1Lower = dest1.toLowerCase()
+  const dest2Lower = dest2.toLowerCase()
+  
+  if (dest1Lower.includes(dest2Lower) || dest2Lower.includes(dest1Lower)) {
+    return true
+  }
+  
+  return false
+}
+
 async function updateUserProfile(userId: string, field: string, value: any, supabase: any): Promise<void> {
   try {
     // Get current surfer profile
@@ -384,12 +492,39 @@ async function updateUserProfile(userId: string, field: string, value: any, supa
     const dbField = fieldMapping[field] || field
     const updateData: any = {}
 
-    // Special handling for destinations_array - merge with existing
+    // Special handling for destinations_array - update existing or add new
     if (field === 'destinations_array' && Array.isArray(value)) {
       const existingTrips = surferData.destinations_array || []
-      const existingDestinations = new Set(existingTrips.map((t: any) => t.destination_name?.toLowerCase()))
-      const newTrips = value.filter((t: any) => !existingDestinations.has(t.destination_name?.toLowerCase()))
-      updateData.destinations_array = [...existingTrips, ...newTrips]
+      const updatedTrips = [...existingTrips]
+      
+      // For each new trip, check if it matches an existing one by country
+      for (const newTrip of value) {
+        const newDestName = newTrip.destination_name || ''
+        let foundMatch = false
+        
+        // Try to find matching existing trip by country
+        for (let i = 0; i < updatedTrips.length; i++) {
+          const existingDestName = updatedTrips[i].destination_name || ''
+          
+          if (destinationsMatchByCountry(newDestName, existingDestName)) {
+            // Update existing trip with new data
+            updatedTrips[i] = {
+              ...updatedTrips[i],
+              ...newTrip, // Overwrite with new data (time_in_days, time_in_text, etc.)
+              destination_name: existingDestName // Keep original destination name format
+            }
+            foundMatch = true
+            break
+          }
+        }
+        
+        // If no match found, add as new trip
+        if (!foundMatch) {
+          updatedTrips.push(newTrip)
+        }
+      }
+      
+      updateData.destinations_array = updatedTrips
     } else if (field === 'surf_level') {
       // Ensure surf_level is 1-5 (database expects 1-5, not 0-4)
       const level = typeof value === 'number' ? value : parseInt(value)

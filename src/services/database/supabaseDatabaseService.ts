@@ -34,7 +34,7 @@ export interface SupabaseSurfer {
   profile_image_url?: string; // varchar(2048), nullable
   // Swelly conversation results
   onboarding_summary_text?: string; // text, nullable
-  destinations_array?: Array<{ destination_name: string; time_in_days: number }>; // jsonb, nullable
+  destinations_array?: Array<{ destination_name: string; time_in_days: number; time_in_text?: string }>; // jsonb, nullable
   travel_type?: 'budget' | 'mid' | 'high'; // text, nullable
   travel_buddies?: 'solo' | '2' | 'crew'; // text, nullable
   lifestyle_keywords?: string[]; // text[], nullable
@@ -210,7 +210,7 @@ class SupabaseDatabaseService {
     // Swelly conversation results
     onboardingSummaryText?: string;
     finishedOnboarding?: boolean; // Whether user has completed onboarding
-    destinationsArray?: Array<{ destination_name: string; time_in_days: number }>;
+    destinationsArray?: Array<{ destination_name: string; time_in_days: number; time_in_text?: string }>;
     travelType?: 'budget' | 'mid' | 'high';
     travelBuddies?: 'solo' | '2' | 'crew';
     lifestyleKeywords?: string[];

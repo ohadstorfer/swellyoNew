@@ -31,7 +31,23 @@ YOUR GOAL: Collect the following information in a structured format. Only set is
 
 IMPORTANT: All questions must feel natural and conversational, like a friend asking - NOT like a form or questionnaire. Use Swelly's voice and personality. Avoid being too direct or formal. Make questions flow naturally in the conversation.
 
-1. DESTINATIONS_ARRAY (past trips): Ask for surf destinations the user has visited, and ask for how long they stayed at each (e.g., "3 weeks", "2 months", "6 months"). YOU must convert their response to approximate days (1 week = 7 days, 1 month = 30 days). Format: [{"destination_name": "Location, Area", "time_in_days": number}]
+1. DESTINATIONS_ARRAY (past trips): Ask for surf destinations the user has visited, and ask for how long they stayed at each (e.g., "3 weeks", "2 months", "6 months"). YOU must:
+   - Convert their response to approximate days (1 week = 7 days, 1 month = 30 days, 1 year = 365 days) and save as time_in_days
+   - Extract the ORIGINAL time expression from the user's input and save as time_in_text
+   - CRITICAL FORMATTING RULES FOR time_in_text:
+     * For durations LESS than 1 year: Format as "X days" / "X weeks" / "X months" (preserve user's wording)
+     * For durations 1 year or MORE: ALWAYS round to years or half-years (e.g., "1 year", "1.5 years", "2 years", "2.5 years", "3 years")
+     * NEVER use "X years and Y months" format - always round to nearest year or half-year
+     * Examples:
+       - 2 years and 5 months → "2.5 years" (round 5 months to 0.5 years)
+       - 2 years and 6 months → "2.5 years" (round 6 months to 0.5 years)
+       - 2 years and 7 months → "2.5 years" (round 7 months to 0.5 years)
+       - 2 years and 8 months → "2.5 years" (round 8 months to 0.5 years)
+       - 2 years and 9 months → "3 years" (round 9 months up to next year)
+       - 1 year and 3 months → "1.5 years"
+       - 3 years and 2 months → "3 years" (round down)
+       - 3 years and 4 months → "3.5 years" (round 4 months to 0.5 years)
+   - Format: [{"destination_name": "Location, Area", "time_in_days": number, "time_in_text": "X days/weeks/months/years"}]
 
 2. TRAVEL_TYPE: Ask about their travel budget level in a natural, Swelly-style way. Must extract one of: "budget", "mid", or "high". Example: "Are you on a budget shredder, mid-range for a good amount of comfort, or looking to treat yourself well, no matter the cost?" - Keep it conversational and in Swelly's voice, not too direct.
 
@@ -62,7 +78,7 @@ Response format: Always return JSON with this structure:
 When is_finished is true, the data object MUST have this exact structure:
 {
   "destinations_array": [
-    {"destination_name": "State/Country, Specific-area", "time_in_days": number},
+    {"destination_name": "State/Country, Specific-area", "time_in_days": number, "time_in_text": "X days/weeks/months/years"},
     ...
   ],
   "travel_type": "budget" | "mid" | "high",
@@ -138,9 +154,9 @@ support sustainabilty, not too much on it. doing valley ball and climbing. love 
    "is_finished": true,
    "data": {
         "destinations_array": [
-          {"destination_name": "San Diego, South County", "time_in_days": 210},
-          {"destination_name": "Sri Lanka, Ahangama/Kabalana/Midigama", "time_in_days": 60},
-          {"destination_name": "Maldives, Thulusdhoo/Himmafushi", "time_in_days": 30}
+          {"destination_name": "San Diego, South County", "time_in_days": 210, "time_in_text": "7 months"},
+          {"destination_name": "Sri Lanka, Ahangama/Kabalana/Midigama", "time_in_days": 60, "time_in_text": "2 months"},
+          {"destination_name": "Maldives, Thulusdhoo/Himmafushi", "time_in_days": 30, "time_in_text": "1 month"}
         ],
         "travel_type": "budget",
         "travel_buddies": "2",
@@ -150,8 +166,26 @@ support sustainabilty, not too much on it. doing valley ball and climbing. love 
     }
 }
 
-CRITICAL RULES:
-- When asking about PAST destinations, ask for duration in natural terms (weeks, months) and YOU convert to days (1 week = 7 days, 1 month = 30 days)
+CRITICAL RULES FOR DESTINATIONS:
+- When asking about PAST destinations, ask for duration in natural terms (weeks, months, years)
+- YOU must convert to days (1 week = 7 days, 1 month = 30 days, 1 year = 365 days) for time_in_days
+- YOU must extract and preserve the ORIGINAL time expression from the user's input for time_in_text
+- CRITICAL FORMATTING RULES FOR time_in_text:
+  * For durations LESS than 1 year: Format as "X days" / "X weeks" / "X months" (preserve user's wording)
+  * For durations 1 year or MORE: ALWAYS round to years or half-years (e.g., "1 year", "1.5 years", "2 years", "2.5 years", "3 years")
+  * NEVER use "X years and Y months" format - always round to nearest year or half-year
+- Examples:
+  * User says "3 weeks" → time_in_days: 21, time_in_text: "3 weeks"
+  * User says "2 months" → time_in_days: 60, time_in_text: "2 months"
+  * User says "6 months" → time_in_days: 180, time_in_text: "6 months"
+  * User says "1 year" → time_in_days: 365, time_in_text: "1 year"
+  * User says "1.5 years" or "a year and a half" → time_in_days: 547, time_in_text: "1.5 years"
+  * User says "2 years and 5 months" → time_in_days: 905, time_in_text: "2.5 years" (ALWAYS round to half-years, never "2 years and 5 months")
+  * User says "2 years and 6 months" → time_in_days: 915, time_in_text: "2.5 years"
+  * User says "3 years and 2 months" → time_in_days: 1095, time_in_text: "3 years" (round down)
+  * User says "3 years and 4 months" → time_in_days: 1115, time_in_text: "3.5 years"
+  * User says "3 months" → time_in_days: 90, time_in_text: "3 months" (NOT "90 days")
+- Always prefer the user's original wording (weeks/months/years) over converting to days in time_in_text, BUT for durations ≥ 1 year, always round to years/half-years
 - Ask travel_type and travel_buddies as separate, direct questions
 - Extract specific keywords for lifestyle_keywords and wave_type_keywords - don't use vague descriptions
 - Only set is_finished: true when you have ALL 6 pieces of information
@@ -249,58 +283,135 @@ function transformSwellyData(data: any): any {
 /**
  * Parse destinations string into structured array
  * Example: "San Diego (7mo), Sri Lanka (2x 1mo)" 
- * -> [{destination_name: "San Diego", time_in_days: 210}, ...]
+ * -> [{destination_name: "San Diego", time_in_days: 210, time_in_text: "7 months"}, ...]
  */
-function parseDestinations(destinationsStr: string): Array<{ destination_name: string; time_in_days: number }> {
-  const result: Array<{ destination_name: string; time_in_days: number }> = []
+function parseDestinations(destinationsStr: string): Array<{ destination_name: string; time_in_days: number; time_in_text: string }> {
+  const result: Array<{ destination_name: string; time_in_days: number; time_in_text: string }> = []
   
   // Split by common separators (comma, semicolon, "and")
   const parts = destinationsStr.split(/[,;]| and /i).map(s => s.trim()).filter(s => s)
   
   for (const part of parts) {
     // Extract destination name and time
-    // Patterns: "San Diego (7mo)", "Sri Lanka (2x 1mo)", "Maldives 1 month"
-    const timeMatch = part.match(/(\d+)\s*(mo|month|months|week|weeks|day|days)/i)
+    // Patterns: "San Diego (7mo)", "Sri Lanka (2x 1mo)", "Maldives 1 month", "El Salvador 3 months", "Australia 2 years and 5 months"
+    const timeMatch = part.match(/(\d+(?:\.\d+)?)\s*(mo|month|months|week|weeks|day|days|year|years)/i)
     const multiplierMatch = part.match(/(\d+)x|twice|thrice/i)
+    const yearHalfMatch = part.match(/(\d+\.5|one and a half|1\.5)\s*(year|years)/i)
+    // Pattern for "X years and Y months" format
+    const yearsAndMonthsMatch = part.match(/(\d+)\s*(?:year|years)\s+and\s+(\d+)\s*(?:month|months)/i)
     
     let timeInDays = 30 // Default to 1 month
+    let timeInText = "1 month" // Default text
     
-    if (timeMatch) {
-      let days = parseInt(timeMatch[1])
+    // Handle "X years and Y months" format - round to years/half-years
+    if (yearsAndMonthsMatch) {
+      const years = parseInt(yearsAndMonthsMatch[1])
+      const months = parseInt(yearsAndMonthsMatch[2])
+      const totalDays = (years * 365) + (months * 30)
+      timeInDays = totalDays
+      
+      // Round to nearest year or half-year
+      const totalYears = years + (months / 12)
+      if (months <= 2) {
+        // 0-2 months: round down to whole years
+        timeInText = `${years} ${years === 1 ? 'year' : 'years'}`
+      } else if (months <= 8) {
+        // 3-8 months: round to half-year
+        timeInText = `${years}.5 years`
+      } else {
+        // 9+ months: round up to next year
+        timeInText = `${years + 1} ${years + 1 === 1 ? 'year' : 'years'}`
+      }
+    } else if (timeMatch) {
+      const value = parseFloat(timeMatch[1])
       const unit = timeMatch[2].toLowerCase()
+      let multiplier = 1
       
-      if (unit.includes('mo') || unit.includes('month')) {
-        days = days * 30
-      } else if (unit.includes('week')) {
-        days = days * 7
-      }
-      
+      // Handle multipliers (2x, twice, etc.)
       if (multiplierMatch) {
-        const multiplier = multiplierMatch[0].includes('twice') ? 2 : 
-                          multiplierMatch[0].includes('thrice') ? 3 :
-                          parseInt(multiplierMatch[1]) || 1
-        days = days * multiplier
+        multiplier = multiplierMatch[0].includes('twice') ? 2 : 
+                    multiplierMatch[0].includes('thrice') ? 3 :
+                    parseInt(multiplierMatch[1]) || 1
       }
       
-      timeInDays = days
+      // Calculate days and text
+      if (unit.includes('year')) {
+        const totalYears = value * multiplier
+        timeInDays = Math.round(totalYears * 365)
+        if (totalYears === 1) {
+          timeInText = "1 year"
+        } else if (totalYears % 1 === 0.5) {
+          timeInText = `${Math.floor(totalYears)}.5 years`
+        } else {
+          timeInText = `${totalYears} years`
+        }
+      } else if (unit.includes('mo') || unit.includes('month')) {
+        const totalMonths = value * multiplier
+        timeInDays = Math.round(totalMonths * 30)
+        // If 12+ months, convert to years/half-years
+        if (totalMonths >= 12) {
+          const years = totalMonths / 12
+          if (years >= 1 && years < 1.5) {
+            timeInText = "1 year"
+          } else if (years >= 1.5 && years < 2) {
+            timeInText = "1.5 years"
+          } else {
+            const roundedYears = Math.round(years * 2) / 2
+            if (roundedYears === Math.floor(roundedYears)) {
+              timeInText = `${roundedYears} ${roundedYears === 1 ? 'year' : 'years'}`
+            } else {
+              timeInText = `${roundedYears} years`
+            }
+          }
+        } else {
+          if (totalMonths === 1) {
+            timeInText = "1 month"
+          } else {
+            timeInText = `${totalMonths} months`
+          }
+        }
+      } else if (unit.includes('week')) {
+        const totalWeeks = value * multiplier
+        timeInDays = Math.round(totalWeeks * 7)
+        if (totalWeeks === 1) {
+          timeInText = "1 week"
+        } else {
+          timeInText = `${totalWeeks} weeks`
+        }
+      } else if (unit.includes('day')) {
+        const totalDays = value * multiplier
+        timeInDays = Math.round(totalDays)
+        if (totalDays === 1) {
+          timeInText = "1 day"
+        } else {
+          timeInText = `${totalDays} days`
+        }
+      }
+    } else if (yearHalfMatch) {
+      // Handle "1.5 years" or "one and a half years"
+      timeInDays = 547 // 1.5 * 365
+      timeInText = "1.5 years"
     }
     
     // Extract destination name (remove time info)
     let destinationName = part
       .replace(/\([^)]*\)/g, '') // Remove parentheses
-      .replace(/\d+\s*(mo|month|months|week|weeks|day|days)/gi, '') // Remove time
-      .replace(/\d+x|twice|thrice/gi, '') // Remove multipliers
+      .replace(/\d+\s*(?:year|years)\s+and\s+\d+\s*(?:month|months)/gi, '') // Remove "X years and Y months"
+      .replace(/\d+(?:\.\d+)?\s*(mo|month|months|week|weeks|day|days|year|years)/gi, '') // Remove time
+      .replace(/\d+x|twice|thrice|one and a half/gi, '') // Remove multipliers
+      .replace(/\s+and\s+/gi, ' ') // Remove remaining "and" connectors
       .trim()
     
     if (destinationName) {
       result.push({
         destination_name: destinationName,
-        time_in_days: timeInDays
+        time_in_days: timeInDays,
+        time_in_text: timeInText
       })
     }
   }
   
-  return result.length > 0 ? result : [{ destination_name: destinationsStr, time_in_days: 30 }]
+  return result.length > 0 ? result : [{ destination_name: destinationsStr, time_in_days: 30, time_in_text: "1 month" }]
 }
 
 /**
