@@ -139,10 +139,14 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
   const dragStartIndex = useRef<number>(initialVirtualIndex); // Track index when drag starts
   const isControllingScroll = useRef<boolean>(false); // Flag to prevent scroll event loops
   const lastScrollTime = useRef<number>(0); // Throttle scroll clamping
+  const hasHandledScrollEnd = useRef<boolean>(false); // Flag to prevent double-triggering of scroll end handlers
+  const lockedScrollOffset = useRef<number | null>(null); // Lock scroll position during gesture
   
-  // Track touch start position to distinguish taps from swipes
+  // Track touch events for precise swipe detection
   const touchStartX = useRef<number | null>(null);
   const touchStartY = useRef<number | null>(null);
+  const touchStartTime = useRef<number | null>(null);
+  const isGestureActive = useRef<boolean>(false);
   
   // Edge threshold - jump back to middle when we get too close to edges
   const EDGE_THRESHOLD = 100;
@@ -166,7 +170,9 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
   }, []);
 
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
-    if (viewableItems.length > 0 && viewableItems[0].index !== null && !isScrolling) {
+    // Only update viewable items if we're not scrolling and not dragging
+    // This prevents automatic movements during user swipes
+    if (viewableItems.length > 0 && viewableItems[0].index !== null && !isScrolling && !isDragging) {
       const virtualIndex = viewableItems[0].index as number;
       setActiveVirtualIndex(virtualIndex);
       
@@ -234,121 +240,234 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
         }
   };
 
-  // Handle scroll begin - user is dragging
-  const handleScrollBeginDrag = (event: any) => {
-    setIsDragging(true);
-    isControllingScroll.current = false;
-    // Store the initial scroll position and index when drag starts
-    dragStartOffset.current = event.nativeEvent.contentOffset.x;
-    dragStartIndex.current = activeVirtualIndex;
+  // Handle touch start - track initial touch position and disable scrolling
+  const handleTouchStart = (event: any) => {
+    // Prevent default to avoid conflicts with FlatList scrolling
+    if (Platform.OS === 'web') {
+      event.preventDefault?.();
+    }
     
-    // On web, prevent default scroll behavior to have full control
+    const touch = event.nativeEvent?.touches?.[0] || event.nativeEvent || event;
+    const pageX = touch.pageX ?? touch.clientX ?? touch.x;
+    const pageY = touch.pageY ?? touch.clientY ?? touch.y;
+    
+    if (pageX === undefined || pageY === undefined) {
+      return; // Invalid touch event
+    }
+    
+    touchStartX.current = pageX;
+    touchStartY.current = pageY;
+    touchStartTime.current = Date.now();
+    isGestureActive.current = true;
+    hasHandledScrollEnd.current = false;
+    
+    // Store the initial scroll position and index when touch starts
+    dragStartIndex.current = activeVirtualIndex;
+    lockedScrollOffset.current = activeVirtualIndex * carouselItemWidth;
+    
+    // Immediately disable scrolling completely - no visual scrolling during gesture
+    setIsDragging(true);
+    setIsScrolling(true);
+    
+    // Lock the scroll position to prevent any visual movement
     if (Platform.OS === 'web' && flatListWebRef.current) {
-      // Store the scroll element for later use
+      flatListWebRef.current.style.overflow = 'hidden'; // Prevent scrolling
+      // Lock scroll position
+      if (lockedScrollOffset.current !== null) {
+        flatListWebRef.current.scrollLeft = lockedScrollOffset.current;
+      }
+    }
+    
+    // On native, also lock the scroll position
+    if (flatListRef.current && lockedScrollOffset.current !== null) {
+      flatListRef.current.scrollToOffset({
+        offset: lockedScrollOffset.current,
+        animated: false,
+      });
     }
   };
 
-  // Handle scroll end - user finished dragging
-  const handleScrollEndDrag = (event: any) => {
-    const offsetX = event.nativeEvent.contentOffset.x;
-    const scrollDelta = offsetX - dragStartOffset.current;
+  // Handle touch end - calculate swipe and move exactly one board
+  const handleTouchEnd = (event: any) => {
+    if (!isGestureActive.current || touchStartX.current === null || touchStartTime.current === null) {
+      // Reset state if gesture wasn't active
+      setIsDragging(false);
+      setIsScrolling(false);
+      return;
+    }
     
-    // Determine swipe direction and move exactly one board
-    // Threshold: must swipe at least 30% of item width to trigger movement
-    const swipeThreshold = carouselItemWidth * 0.3;
+    // Prevent default to avoid conflicts
+    if (Platform.OS === 'web') {
+      event.preventDefault?.();
+    }
     
-    let targetIndex = dragStartIndex.current; // Default: stay on current board
+    const touch = event.nativeEvent?.changedTouches?.[0] || event.nativeEvent || event;
+    const pageX = touch.pageX ?? touch.clientX ?? touch.x;
+    const pageY = touch.pageY ?? touch.clientY ?? touch.y;
     
-    if (Math.abs(scrollDelta) > swipeThreshold) {
-      // Significant swipe detected - move one board in the swipe direction
-      if (scrollDelta < 0) {
-        // Swiped left (negative delta = scrolled left = moved to next board) - move to next board
+    if (pageX === undefined || pageY === undefined) {
+      // Reset if invalid
+      touchStartX.current = null;
+      touchStartY.current = null;
+      touchStartTime.current = null;
+      isGestureActive.current = false;
+      setIsDragging(false);
+      setIsScrolling(false);
+      return;
+    }
+    
+    const touchEndX = pageX;
+    const touchEndY = pageY;
+    const touchEndTime = Date.now();
+    
+    // Calculate swipe distance and direction
+    const deltaX = touchEndX - touchStartX.current;
+    const deltaY = touchEndY - touchStartY.current;
+    const deltaTime = touchEndTime - touchStartTime.current;
+    
+    // Reset touch tracking
+    touchStartX.current = null;
+    touchStartY.current = null;
+    touchStartTime.current = null;
+    isGestureActive.current = false;
+    
+    // Prevent double-triggering
+    if (hasHandledScrollEnd.current) {
+      setIsDragging(false);
+      setIsScrolling(false);
+      return;
+    }
+    hasHandledScrollEnd.current = true;
+    
+    // Determine if this is a horizontal swipe (not vertical scroll)
+    // Any horizontal movement (even tiny) should trigger a board change
+    const isHorizontalSwipe = Math.abs(deltaX) > Math.abs(deltaY);
+    const minSwipeDistance = 5; // Very small threshold - any meaningful swipe counts
+    const maxSwipeTime = 1000; // Increased time window to allow slower swipes
+    
+    // Check if it's a valid horizontal swipe - ANY horizontal swipe moves one board
+    if (isHorizontalSwipe && Math.abs(deltaX) > minSwipeDistance && deltaTime < maxSwipeTime) {
+      // Determine direction: negative deltaX = swiped left (next), positive = swiped right (previous)
+      // Always move exactly one board, regardless of swipe distance
+      let targetIndex = dragStartIndex.current;
+      
+      if (deltaX < 0) {
+        // Swiped left - move to next board
         targetIndex = dragStartIndex.current + 1;
       } else {
-        // Swiped right (positive delta = scrolled right = moved to previous board) - move to previous board
+        // Swiped right - move to previous board
         targetIndex = dragStartIndex.current - 1;
       }
-    }
-    // If swipe is too small, stay on current board (targetIndex = dragStartIndex.current)
-    
-    // Handle edge cases for infinite carousel
-    if (targetIndex < EDGE_THRESHOLD) {
-      const realIndex = getRealIndex(targetIndex);
-      targetIndex = START_INDEX + realIndex;
-    } else if (targetIndex > INFINITE_SIZE - EDGE_THRESHOLD) {
-      const realIndex = getRealIndex(targetIndex);
-      targetIndex = START_INDEX + realIndex;
-    }
-    
-    const targetOffset = targetIndex * carouselItemWidth;
-    
-    // Immediately disable scrolling to prevent momentum
-    setIsScrolling(true);
-    setIsDragging(false);
-    
-    // Update active index
-    const realIndex = getRealIndex(targetIndex);
-    setActiveVirtualIndex(targetIndex);
-    onBoardSelect(boards[realIndex]);
-    if (onActiveIndexChange) {
-      onActiveIndexChange(realIndex);
-    }
-    
-    // On web, immediately stop momentum by setting scrollLeft directly
-    if (Platform.OS === 'web' && flatListWebRef.current) {
-      // Stop all momentum immediately
-      flatListWebRef.current.scrollLeft = targetOffset;
-      scrollX.setValue(targetOffset);
       
-      // Re-enable scrolling after a short delay
-      setTimeout(() => {
-        setIsScrolling(false);
-      }, 50);
-    } else {
-      // Native: animate to target position
+      // Handle edge cases for infinite carousel
+      if (targetIndex < EDGE_THRESHOLD) {
+        const realIndex = getRealIndex(targetIndex);
+        targetIndex = START_INDEX + realIndex;
+      } else if (targetIndex > INFINITE_SIZE - EDGE_THRESHOLD) {
+        const realIndex = getRealIndex(targetIndex);
+        targetIndex = START_INDEX + realIndex;
+      }
+      
+      const targetOffset = targetIndex * carouselItemWidth;
+      
+      // Update active index immediately
+      const realIndex = getRealIndex(targetIndex);
+      setActiveVirtualIndex(targetIndex);
+      onBoardSelect(boards[realIndex]);
+      if (onActiveIndexChange) {
+        onActiveIndexChange(realIndex);
+      }
+      
+      // Unlock scroll position
+      lockedScrollOffset.current = null;
+      
+      // Snap to target position with smooth animation
       if (flatListRef.current) {
+        // Snap to target position with animation
         flatListRef.current.scrollToOffset({
           offset: targetOffset,
           animated: true,
         });
         
-        // Update scrollX for animations
+        // Animate scrollX for smooth transitions
         Animated.timing(scrollX, {
           toValue: targetOffset,
           duration: 300,
           useNativeDriver: false,
         }).start();
         
+        // On web, re-enable scrolling after animation
+        if (Platform.OS === 'web' && flatListWebRef.current) {
+          setTimeout(() => {
+            flatListWebRef.current.style.overflow = 'auto';
+          }, 300);
+        }
+        
+        // Re-enable scrolling after animation completes
         setTimeout(() => {
           setIsScrolling(false);
+          setIsDragging(false);
+          hasHandledScrollEnd.current = false;
         }, 350);
       } else {
         setIsScrolling(false);
+        setIsDragging(false);
+        hasHandledScrollEnd.current = false;
+      }
+    } else {
+      // Not a valid swipe - reset state and stay on current board
+      setIsDragging(false);
+      setIsScrolling(false);
+      hasHandledScrollEnd.current = false;
+    }
+  };
+
+  // Handle scroll begin - user is dragging (fallback for when touch events don't fire)
+  const handleScrollBeginDrag = (event: any) => {
+    // Only use this as a fallback if touch events didn't fire
+    if (!isGestureActive.current) {
+      setIsDragging(true);
+      isControllingScroll.current = false;
+      hasHandledScrollEnd.current = false;
+      dragStartOffset.current = event.nativeEvent.contentOffset.x;
+      dragStartIndex.current = activeVirtualIndex;
+      lockedScrollOffset.current = dragStartOffset.current;
+    } else {
+      // If gesture is active, prevent scrolling by locking position
+      if (lockedScrollOffset.current !== null && flatListRef.current) {
+        flatListRef.current.scrollToOffset({
+          offset: lockedScrollOffset.current,
+          animated: false,
+        });
       }
     }
   };
 
-  // Handle momentum scroll end - ensure we're at the correct position
-  const handleMomentumScrollEnd = (event: any) => {
-    setIsDragging(false);
+  // Handle scroll end - user finished dragging (fallback for when touch events don't fire)
+  // This should rarely be used since we disable scrolling, but kept as safety fallback
+  const handleScrollEndDrag = (event: any) => {
+    // If touch events already handled it, ignore this
+    if (hasHandledScrollEnd.current || !isDragging) {
+      return;
+    }
     
-    // On native, momentum might have continued, so we need to snap to the correct position
-    // The handleScrollEndDrag should have already handled the snapping, but this is a safety check
+    // Fallback: use scroll delta if touch events didn't fire
+    // Use very small threshold - any horizontal movement moves one board
     const offsetX = event.nativeEvent.contentOffset.x;
-    const currentIndex = Math.round(offsetX / carouselItemWidth);
-    const expectedOffset = currentIndex * carouselItemWidth;
+    const scrollDelta = offsetX - dragStartOffset.current;
+    const swipeThreshold = 10; // Very small threshold - any swipe counts
     
-    // Only adjust if we're significantly off (more than 10px)
-    if (Math.abs(offsetX - expectedOffset) > 10) {
-      // Calculate which board we should be on based on drag start
-      const scrollDelta = offsetX - dragStartOffset.current;
-      const swipeThreshold = carouselItemWidth * 0.25;
+    if (Math.abs(scrollDelta) > swipeThreshold) {
+      hasHandledScrollEnd.current = true;
+      setIsScrolling(true);
+      setIsDragging(false);
       
+      // Always move exactly one board
       let targetIndex = dragStartIndex.current;
-      if (Math.abs(scrollDelta) > swipeThreshold) {
-        targetIndex = scrollDelta < 0 
-          ? dragStartIndex.current + 1 
-          : dragStartIndex.current - 1;
+      if (scrollDelta < 0) {
+        targetIndex = dragStartIndex.current + 1; // Swiped left - next board
+      } else {
+        targetIndex = dragStartIndex.current - 1; // Swiped right - previous board
       }
       
       // Handle edge cases
@@ -361,12 +480,96 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
       }
       
       const targetOffset = targetIndex * carouselItemWidth;
+      const realIndex = getRealIndex(targetIndex);
+      setActiveVirtualIndex(targetIndex);
+      onBoardSelect(boards[realIndex]);
+      if (onActiveIndexChange) {
+        onActiveIndexChange(realIndex);
+      }
+      
+      // Unlock scroll position
+      lockedScrollOffset.current = null;
       
       if (flatListRef.current) {
+        // Snap with smooth animation
         flatListRef.current.scrollToOffset({
           offset: targetOffset,
           animated: true,
         });
+        
+        // Animate scrollX for smooth transitions
+        Animated.timing(scrollX, {
+          toValue: targetOffset,
+          duration: 300,
+          useNativeDriver: false,
+        }).start();
+        
+        if (Platform.OS === 'web' && flatListWebRef.current) {
+          setTimeout(() => {
+            flatListWebRef.current.style.overflow = 'auto';
+          }, 300);
+        }
+        
+        setTimeout(() => {
+          setIsScrolling(false);
+          hasHandledScrollEnd.current = false;
+        }, 350);
+      } else {
+        setIsScrolling(false);
+        hasHandledScrollEnd.current = false;
+      }
+    } else {
+      setIsDragging(false);
+      if (Platform.OS === 'web' && flatListWebRef.current) {
+        flatListWebRef.current.style.overflow = 'auto';
+      }
+    }
+  };
+
+  // Handle momentum scroll end - ensure we're at the correct position
+  // This should only be a safety check - handleScrollEndDrag should have already handled the movement
+  const handleMomentumScrollEnd = (event: any) => {
+    setIsDragging(false);
+    
+    // Always ignore momentum scroll end if we've already handled scroll end or are scrolling
+    // This prevents any automatic movements after user swipe
+    if (isScrolling || hasHandledScrollEnd.current) {
+      return;
+    }
+    
+    // With decelerationRate={0}, momentum should not happen, but this is a safety check
+    // Only snap if we're significantly off from the expected position
+    const offsetX = event.nativeEvent.contentOffset.x;
+    const currentIndex = Math.round(offsetX / carouselItemWidth);
+    const expectedOffset = currentIndex * carouselItemWidth;
+    
+    // Only adjust if we're significantly off (more than 30% of item width)
+    // This ensures we only snap if something went wrong, not during normal operation
+    if (Math.abs(offsetX - expectedOffset) > carouselItemWidth * 0.3) {
+      // Snap to the nearest board based on current position
+      const nearestIndex = Math.round(offsetX / carouselItemWidth);
+      
+      // Handle edge cases
+      let targetIndex = nearestIndex;
+      if (targetIndex < EDGE_THRESHOLD) {
+        const realIndex = getRealIndex(targetIndex);
+        targetIndex = START_INDEX + realIndex;
+      } else if (targetIndex > INFINITE_SIZE - EDGE_THRESHOLD) {
+        const realIndex = getRealIndex(targetIndex);
+        targetIndex = START_INDEX + realIndex;
+      }
+      
+      const targetOffset = targetIndex * carouselItemWidth;
+      
+      if (flatListRef.current) {
+        setIsScrolling(true);
+        // Snap immediately without animation
+        flatListRef.current.scrollToOffset({
+          offset: targetOffset,
+          animated: false,
+        });
+        
+        scrollX.setValue(targetOffset);
         
         const realIndex = getRealIndex(targetIndex);
         setActiveVirtualIndex(targetIndex);
@@ -374,6 +577,7 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
         if (onActiveIndexChange) {
           onActiveIndexChange(realIndex);
         }
+        setTimeout(() => setIsScrolling(false), 100);
       }
     }
   };
@@ -626,7 +830,46 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
   return (
     <View style={styles.container}>
       <View style={styles.carouselWrapperContainer}>
-        <View style={styles.carouselWrapper}>
+        <View 
+          style={styles.carouselWrapper}
+          onTouchStart={handleTouchStart}
+          onTouchMove={(event) => {
+            // Prevent any scrolling during gesture - just track the movement
+            if (isGestureActive.current) {
+              if (Platform.OS === 'web') {
+                event.preventDefault?.();
+                // Lock scroll position during gesture
+                if (flatListWebRef.current && lockedScrollOffset.current !== null) {
+                  flatListWebRef.current.scrollLeft = lockedScrollOffset.current;
+                }
+              } else {
+                // On native, prevent scrolling by maintaining locked position
+                if (flatListRef.current && lockedScrollOffset.current !== null) {
+                  flatListRef.current.scrollToOffset({
+                    offset: lockedScrollOffset.current,
+                    animated: false,
+                  });
+                }
+              }
+            }
+          }}
+          onTouchEnd={handleTouchEnd}
+          onTouchCancel={() => {
+            // Reset touch tracking if gesture is cancelled
+            touchStartX.current = null;
+            touchStartY.current = null;
+            touchStartTime.current = null;
+            isGestureActive.current = false;
+            lockedScrollOffset.current = null;
+            setIsDragging(false);
+            setIsScrolling(false);
+            hasHandledScrollEnd.current = false;
+            // Re-enable scrolling on web
+            if (Platform.OS === 'web' && flatListWebRef.current) {
+              flatListWebRef.current.style.overflow = 'auto';
+            }
+          }}
+        >
         {/* Show arrows only on desktop web */}
         {isDesktop && (
           <TouchableOpacity style={styles.arrowButton} onPress={scrollToPrevious} activeOpacity={0.7}>
@@ -642,21 +885,28 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
           horizontal
           pagingEnabled={false} // We'll handle paging manually
           showsHorizontalScrollIndicator={false}
-          scrollEnabled={!isScrolling} // Disable scroll during programmatic scrolling
+          scrollEnabled={false} // Always disable native scrolling - we handle it manually via touch events
           onViewableItemsChanged={onViewableItemsChanged}
           viewabilityConfig={viewabilityConfig}
           initialScrollIndex={initialVirtualIndex >= 0 ? initialVirtualIndex : START_INDEX}
           getItemLayout={(_, index) => ({ length: carouselItemWidth, offset: carouselItemWidth * index, index })}
-          snapToAlignment="center"
-          snapToInterval={carouselItemWidth}
-          decelerationRate={Platform.OS === 'web' ? 0 : 'fast'} // No momentum on web, fast on native
+          snapToAlignment={undefined} // Disable automatic snapping - we handle it manually
+          snapToInterval={undefined} // Disable automatic snapping - we handle it manually
+          decelerationRate={0} // Disable momentum completely - always move exactly one board per swipe
           disableIntervalMomentum={true} // Disable momentum to prevent scrolling past one item
           contentContainerStyle={styles.carouselContent}
           contentInsetAdjustmentBehavior="never"
-          onScroll={Animated.event(
-            [{ nativeEvent: { contentOffset: { x: scrollX } } }],
-            { useNativeDriver: false }
-          )}
+          onScroll={(event) => {
+            // During gesture, prevent scroll updates to keep position locked
+            if (isGestureActive.current && lockedScrollOffset.current !== null) {
+              // Don't update scrollX during gesture - keep it locked
+              scrollX.setValue(lockedScrollOffset.current);
+            } else {
+              // Normal scroll tracking when not in gesture
+              const offsetX = event.nativeEvent.contentOffset.x;
+              scrollX.setValue(offsetX);
+            }
+          }}
           onScrollBeginDrag={handleScrollBeginDrag}
           onScrollEndDrag={handleScrollEndDrag}
           onMomentumScrollBegin={() => setIsDragging(true)}
@@ -683,11 +933,7 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
               'scrollbar-width': 'none', // Hide scrollbar on Firefox
               // @ts-ignore
               '-webkit-tap-highlight-color': 'transparent', // Remove tap highlight on mobile
-              // CSS Scroll Snap for better snapping on web
-              // @ts-ignore
-              scrollSnapType: 'x mandatory',
-              // @ts-ignore
-              '-webkit-scroll-snap-type': 'x mandatory',
+              // Disable CSS Scroll Snap - we handle snapping manually
             } as any,
             // Ensure the underlying scroll view can handle touches
             nestedScrollEnabled: true,
@@ -794,13 +1040,7 @@ const styles = StyleSheet.create({
     // Add horizontal padding to center items properly (one item width on each side)
     paddingLeft: getCarouselItemWidth(),
     paddingRight: getCarouselItemWidth(),
-    // CSS Scroll Snap for web
-    ...(Platform.OS === 'web' && {
-      // @ts-ignore
-      scrollSnapType: 'x mandatory',
-      // @ts-ignore
-      '-webkit-scroll-snap-type': 'x mandatory',
-    }),
+    // Disable CSS Scroll Snap - we handle snapping manually
   },
   carouselItem: {
     justifyContent: 'flex-start', // Align to top so center board is higher
@@ -810,11 +1050,7 @@ const styles = StyleSheet.create({
     // minHeight is set dynamically via inline style
     ...(Platform.OS === 'web' && { 
       paddingHorizontal: 0,
-      // CSS Scroll Snap for web - each item is a snap point
-      // @ts-ignore
-      scrollSnapAlign: 'center',
-      // @ts-ignore
-      '-webkit-scroll-snap-align': 'center',
+      // Disable CSS Scroll Snap - we handle snapping manually
     }),
   },
   boardTouchable: {
