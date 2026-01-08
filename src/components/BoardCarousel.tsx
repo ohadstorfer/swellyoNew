@@ -242,11 +242,6 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
 
   // Handle touch start - track initial touch position and disable scrolling
   const handleTouchStart = (event: any) => {
-    // Prevent default to avoid conflicts with FlatList scrolling
-    if (Platform.OS === 'web') {
-      event.preventDefault?.();
-    }
-    
     const touch = event.nativeEvent?.touches?.[0] || event.nativeEvent || event;
     const pageX = touch.pageX ?? touch.clientX ?? touch.x;
     const pageY = touch.pageY ?? touch.clientY ?? touch.y;
@@ -294,11 +289,6 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
       setIsDragging(false);
       setIsScrolling(false);
       return;
-    }
-    
-    // Prevent default to avoid conflicts
-    if (Platform.OS === 'web') {
-      event.preventDefault?.();
     }
     
     const touch = event.nativeEvent?.changedTouches?.[0] || event.nativeEvent || event;
@@ -835,9 +825,10 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
           onTouchStart={handleTouchStart}
           onTouchMove={(event) => {
             // Prevent any scrolling during gesture - just track the movement
+            // Note: We don't use preventDefault() here because React Native Web uses passive listeners
+            // Instead, we lock the scroll position directly
             if (isGestureActive.current) {
               if (Platform.OS === 'web') {
-                event.preventDefault?.();
                 // Lock scroll position during gesture
                 if (flatListWebRef.current && lockedScrollOffset.current !== null) {
                   flatListWebRef.current.scrollLeft = lockedScrollOffset.current;

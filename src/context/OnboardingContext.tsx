@@ -224,6 +224,7 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     setFormData({});
     setUser(null);
     setIsComplete(false);
+    setIsDemoUser(false); // Reset demo user flag
     try {
       await AsyncStorage.removeItem(STORAGE_KEY);
     } catch (error) {

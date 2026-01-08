@@ -14,7 +14,7 @@ import { messagingService } from '../services/messaging/messagingService';
 import { useOnboarding } from '../context/OnboardingContext';
 
 export const AppContent: React.FC = () => {
-  const { currentStep, formData, setCurrentStep, updateFormData, saveStepToSupabase, isComplete, markOnboardingComplete, isDemoUser, setIsDemoUser, setUser } = useOnboarding();
+  const { currentStep, formData, setCurrentStep, updateFormData, saveStepToSupabase, isComplete, markOnboardingComplete, isDemoUser, setIsDemoUser, setUser, resetOnboarding } = useOnboarding();
   const [showLoading, setShowLoading] = useState(false);
   const [isSavingStep1, setIsSavingStep1] = useState(false);
   const [isSavingStep2, setIsSavingStep2] = useState(false);
@@ -326,8 +326,25 @@ export const AppContent: React.FC = () => {
     setCurrentStep(4); // Go back to step 4
   };
 
-  const handleStep1Back = () => {
-    setCurrentStep(0); // Go back to welcome screen
+  const handleStep1Back = async () => {
+    // If user is a demo user, log them out first before going back to welcome screen
+    if (isDemoUser) {
+      try {
+        console.log('Demo user detected, logging out before going back to welcome screen...');
+        const { authService } = await import('../services/auth/authService');
+        await authService.signOut();
+        console.log('Demo user logged out successfully');
+        
+        // Reset onboarding state (this also resets the demo user flag)
+        await resetOnboarding();
+        console.log('Onboarding state reset');
+      } catch (error) {
+        console.error('Error logging out demo user:', error);
+        // Continue with navigation even if logout fails
+      }
+    }
+    // Navigate to welcome screen after logout completes (or immediately if not demo user)
+    setCurrentStep(0);
   };
 
   const handleStep2Back = () => {

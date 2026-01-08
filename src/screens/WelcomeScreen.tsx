@@ -62,7 +62,7 @@ const GoogleIcon: React.FC = () => {
 export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDemoChat }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [isDemoLoading, setIsDemoLoading] = useState(false);
-  const { setUser, updateFormData, checkOnboardingStatus, isComplete } = useOnboarding();
+  const { setUser, updateFormData, checkOnboardingStatus, isComplete, isDemoUser, setIsDemoUser, resetOnboarding, user } = useOnboarding();
   
   // Use responsive hook for accurate mobile detection
   const isMobile = useIsMobile();
@@ -221,6 +221,37 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
     console.log('Google Sign-In button pressed');
     try {
       setIsLoading(true);
+      
+      // Check if there's any existing user session and log out first
+      const hasExistingSession = user !== null || isDemoUser;
+      
+      if (hasExistingSession) {
+        console.log('Existing user session detected, logging out before Google sign-in...');
+        try {
+          // Check if there's an active Supabase session
+          if (isSupabaseConfigured()) {
+            const { supabaseAuthService } = await import('../services/auth/supabaseAuthService');
+            const isSignedIn = await supabaseAuthService.isSignedIn();
+            if (isSignedIn) {
+              // Sign out from auth service (Supabase)
+              await authService.signOut();
+              console.log('User logged out successfully');
+            }
+          } else {
+            // For non-Supabase auth, still try to sign out
+            await authService.signOut();
+            console.log('User logged out successfully');
+          }
+          
+          // Reset onboarding state (this also resets the demo user flag)
+          await resetOnboarding();
+          console.log('Onboarding state reset');
+        } catch (logoutError) {
+          console.error('Error logging out user:', logoutError);
+          // Continue with Google sign-in even if logout fails
+        }
+      }
+      
       console.log('Starting Google Sign-In process...');
       
       if (Platform.OS === 'web') {

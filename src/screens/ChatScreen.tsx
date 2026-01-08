@@ -11,6 +11,7 @@ import {
   Platform,
   Image,
   ImageBackground,
+  Animated,
 } from 'react-native';
 import { TextInput as PaperTextInput } from 'react-native-paper';
 import { Ionicons } from '@expo/vector-icons';
@@ -536,6 +537,68 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
     }
   };
 
+  // Typing animation component
+  const TypingIndicator = () => {
+    const dot1 = useRef(new Animated.Value(0)).current;
+    const dot2 = useRef(new Animated.Value(0)).current;
+    const dot3 = useRef(new Animated.Value(0)).current;
+
+    useEffect(() => {
+      const animateDot = (dot: Animated.Value, delay: number) => {
+        return Animated.loop(
+          Animated.sequence([
+            Animated.delay(delay),
+            Animated.timing(dot, {
+              toValue: 1,
+              duration: 400,
+              useNativeDriver: true,
+            }),
+            Animated.timing(dot, {
+              toValue: 0,
+              duration: 400,
+              useNativeDriver: true,
+            }),
+          ])
+        );
+      };
+
+      const animations = [
+        animateDot(dot1, 0),
+        animateDot(dot2, 200),
+        animateDot(dot3, 400),
+      ];
+
+      animations.forEach(anim => anim.start());
+
+      return () => {
+        animations.forEach(anim => anim.stop());
+      };
+    }, []);
+
+    const opacity1 = dot1.interpolate({
+      inputRange: [0, 1],
+      outputRange: [0.3, 1],
+    });
+
+    const opacity2 = dot2.interpolate({
+      inputRange: [0, 1],
+      outputRange: [0.3, 1],
+    });
+
+    const opacity3 = dot3.interpolate({
+      inputRange: [0, 1],
+      outputRange: [0.3, 1],
+    });
+
+    return (
+      <View style={styles.typingContainer}>
+        <Animated.View style={[styles.typingDot, { opacity: opacity1 }]} />
+        <Animated.View style={[styles.typingDot, { opacity: opacity2 }]} />
+        <Animated.View style={[styles.typingDot, { opacity: opacity3 }]} />
+      </View>
+    );
+  };
+
   const renderMessage = (message: Message) => {
     // If this message has matched users, render cards instead
     if (message.isMatchedUsers && matchedUsers.length > 0) {
@@ -685,7 +748,9 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
           {(isLoading || isInitializing) && (
             <View style={[styles.messageContainer, styles.botMessageContainer]}>
               <View style={[styles.messageBubble, styles.botMessageBubble]}>
-                <Text style={styles.botMessageText}>Swelly is typing...</Text>
+                <View style={styles.messageTextContainer}>
+                  <TypingIndicator />
+                </View>
               </View>
             </View>
           )}
@@ -1141,6 +1206,18 @@ const styles = StyleSheet.create({
   },
   sendButtonDisabled: {
     opacity: 0.5,
+  },
+  typingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 4,
+  },
+  typingDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#333333',
   },
 });
 
