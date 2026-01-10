@@ -21,9 +21,10 @@ export interface ShaperChatRequest {
 
 export interface ShaperChatResponse {
   chat_id?: string;
-  return_message: string;
-  is_finished: boolean;
+  return_message?: string;
+  is_finished?: boolean;
   data?: any;
+  messages?: Array<{ role: string; content: string }>; // For chat history response
 }
 
 class SwellyShaperService {
@@ -231,6 +232,36 @@ class SwellyShaperService {
       return shaperResponse;
     } catch (error) {
       console.error('[SwellyShaperService] Error processing message:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get chat history for a specific conversation
+   */
+  async getChatHistory(chatId: string): Promise<ShaperChatResponse> {
+    try {
+      const url = this.getFunctionUrl(`/${chatId}`);
+      const headers = await this.getAuthHeaders();
+      
+      console.log('[SwellyShaperService] Getting chat history:', url);
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        headers,
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[SwellyShaperService] Error response:', errorText);
+        throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+      }
+
+      const result = await response.json();
+      console.log('[SwellyShaperService] Chat history:', result);
+      return result;
+    } catch (error) {
+      console.error('[SwellyShaperService] Error getting chat history:', error);
       throw error;
     }
   }

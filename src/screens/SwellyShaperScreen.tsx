@@ -13,44 +13,136 @@ import {
 } from 'react-native';
 import { TextInput as PaperTextInput } from 'react-native-paper';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Text } from '../components/Text';
 import { colors, spacing } from '../styles/theme';
 import { swellyShaperService } from '../services/swelly/swellyShaperService';
 import { getImageUrl } from '../services/media/imageService';
+import { UserProfileCard } from '../components/UserProfileCard';
+import { supabaseDatabaseService, SupabaseSurfer } from '../services/database/supabaseDatabaseService';
+import { supabase } from '../config/supabase';
 
 interface Message {
   id: string;
   text: string;
   isUser: boolean;
   timestamp: string;
+  showProfileCard?: boolean; // Flag to show profile card after this message
 }
 
 interface SwellyShaperScreenProps {
   onBack: () => void;
+  onViewProfile?: () => void; // Callback when user wants to view profile
 }
 
-export const SwellyShaperScreen: React.FC<SwellyShaperScreenProps> = ({ onBack }) => {
+const SWELLY_SHAPER_CHAT_ID_KEY = '@swellyo_swelly_shaper_chat_id';
+
+export const SwellyShaperScreen: React.FC<SwellyShaperScreenProps> = ({ onBack, onViewProfile }) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
   const [inputHeight, setInputHeight] = useState(25); // Initial height for one line
+  const [profileData, setProfileData] = useState<SupabaseSurfer | null>(null);
   const scrollViewRef = useRef<ScrollView>(null);
   const textInputRef = useRef<any>(null);
 
-  // Initialize with static welcome message (not part of conversation)
+  // Load chat_id from storage and profile data on mount
   useEffect(() => {
-    // Reset chat to start fresh
-    swellyShaperService.resetChat();
-    
-    // Set static welcome message - this is just UI, not part of the conversation
-    setMessages([{
-      id: 'welcome',
-      text: "Let's shape that profile! Let me know what you would like to edit!",
-      isUser: false,
-      timestamp: new Date().toISOString(),
-    }]);
-    setIsInitializing(false);
+    const initializeChat = async () => {
+      try {
+        // Load saved chat_id
+        const savedChatId = await AsyncStorage.getItem(SWELLY_SHAPER_CHAT_ID_KEY);
+        const initialMessages: Message[] = [];
+        
+        // Always add static welcome message - this is just UI, not part of the conversation
+        initialMessages.push({
+          id: 'welcome',
+          text: "Let's shape that profile! Let me know what you would like to edit!",
+          isUser: false,
+          timestamp: new Date().toISOString(),
+        });
+
+        if (savedChatId) {
+          // Restore chat_id to service
+          (swellyShaperService as any).chatId = savedChatId;
+          
+          try {
+            // Load chat history from database
+            const historyResponse = await swellyShaperService.getChatHistory(savedChatId) as any;
+            if (historyResponse.messages && Array.isArray(historyResponse.messages)) {
+              // Convert OpenAI format messages to UI Message format
+              // Skip system messages and the initial user message if it's the welcome
+              historyResponse.messages.forEach((msg: any, index: number) => {
+                if (msg.role === 'system') return; // Skip system messages
+                
+                // Skip the first user message if it's the welcome message
+                if (index === 1 && msg.role === 'user' && 
+                    (msg.content.includes("Let's shape") || msg.content.includes("welcome"))) {
+                  return;
+                }
+                
+                // Extract text content - assistant messages may be JSON, extract return_message
+                let textContent = msg.content;
+                if (msg.role === 'assistant') {
+                  try {
+                    // Try to parse as JSON to extract return_message
+                    const parsed = JSON.parse(msg.content);
+                    if (parsed.return_message) {
+                      textContent = parsed.return_message;
+                    }
+                  } catch (e) {
+                    // If not JSON, use content as-is
+                    textContent = msg.content;
+                  }
+                }
+                
+                // Convert to Message format
+                const message: Message = {
+                  id: `history-${index}-${Date.now()}`,
+                  text: textContent,
+                  isUser: msg.role === 'user',
+                  timestamp: new Date().toISOString(),
+                };
+                
+                initialMessages.push(message);
+              });
+              
+              console.log('[SwellyShaperScreen] Loaded chat history:', initialMessages.length, 'messages');
+            }
+          } catch (historyError) {
+            console.error('[SwellyShaperScreen] Error loading chat history:', historyError);
+            // Continue with just welcome message if history load fails
+          }
+        } else {
+          // Reset chat to start fresh
+          swellyShaperService.resetChat();
+        }
+
+        // Load current user's profile data
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const surferData = await supabaseDatabaseService.getSurferByUserId(user.id);
+          setProfileData(surferData);
+        }
+
+        setMessages(initialMessages);
+      } catch (error) {
+        console.error('Error initializing chat:', error);
+        swellyShaperService.resetChat();
+        // Set static welcome message even on error
+        setMessages([{
+          id: 'welcome',
+          text: "Let's shape that profile! Let me know what you would like to edit!",
+          isUser: false,
+          timestamp: new Date().toISOString(),
+        }]);
+      } finally {
+        setIsInitializing(false);
+      }
+    };
+
+    initializeChat();
   }, []);
 
   // Scroll to bottom when messages change
@@ -84,15 +176,31 @@ export const SwellyShaperScreen: React.FC<SwellyShaperScreenProps> = ({ onBack }
       // Process message and get response
       const response = await swellyShaperService.processMessage(userMessage);
       
+      // Save chat_id to AsyncStorage if we have one
+      const chatId = (swellyShaperService as any).chatId;
+      if (chatId) {
+        await AsyncStorage.setItem(SWELLY_SHAPER_CHAT_ID_KEY, chatId);
+      }
+      
       // Add bot response
       const botMsg: Message = {
         id: (Date.now() + 1).toString(),
         text: response.message,
         isUser: false,
         timestamp: new Date().toISOString(),
+        showProfileCard: response.updatedFields && response.updatedFields.length > 0, // Show card if profile was updated
       };
       
       setMessages(prev => [...prev, botMsg]);
+
+      // Reload profile data if profile was updated
+      if (response.updatedFields && response.updatedFields.length > 0) {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const surferData = await supabaseDatabaseService.getSurferByUserId(user.id);
+          setProfileData(surferData);
+        }
+      }
     } catch (error) {
       console.error('Error processing message:', error);
       const errorMsg: Message = {
@@ -200,34 +308,52 @@ export const SwellyShaperScreen: React.FC<SwellyShaperScreenProps> = ({ onBack }
 
     // Regular message rendering - match ChatScreen style
     return (
-      <View
-        key={message.id}
-        style={[
-          styles.messageContainer,
-          message.isUser ? styles.userMessageContainer : styles.normalBotMessageContainer,
-        ]}
-      >
+      <React.Fragment key={message.id}>
         <View
           style={[
-            styles.messageBubble,
-            message.isUser ? styles.userMessageBubble : styles.normalBotMessageBubble,
+            styles.messageContainer,
+            message.isUser ? styles.userMessageContainer : styles.normalBotMessageContainer,
           ]}
         >
-          <View style={styles.messageTextContainer}>
-            <Text style={message.isUser ? styles.userMessageText : styles.normalBotMessageText}>
-              {message.text}
-            </Text>
-          </View>
-          <View style={styles.timestampContainer}>
-            <Text style={[
-              styles.timestamp,
-              message.isUser ? styles.userTimestamp : styles.botTimestamp,
-            ]}>
-              {formatTime(message.timestamp)}
-            </Text>
+          <View
+            style={[
+              styles.messageBubble,
+              message.isUser ? styles.userMessageBubble : styles.normalBotMessageBubble,
+            ]}
+          >
+            <View style={styles.messageTextContainer}>
+              <Text style={message.isUser ? styles.userMessageText : styles.normalBotMessageText}>
+                {message.text}
+              </Text>
+            </View>
+            <View style={styles.timestampContainer}>
+              <Text style={[
+                styles.timestamp,
+                message.isUser ? styles.userTimestamp : styles.botTimestamp,
+              ]}>
+                {formatTime(message.timestamp)}
+              </Text>
+            </View>
           </View>
         </View>
-      </View>
+        {/* Show UserProfileCard after successful profile update - rendered separately to not affect message layout */}
+        {message.showProfileCard && profileData && (
+          <View style={styles.profileCardContainer}>
+            <UserProfileCard 
+              profileData={profileData}
+              onPress={() => {
+                // Navigate to profile screen
+                if (onViewProfile) {
+                  onViewProfile();
+                } else {
+                  // Fallback to onBack if onViewProfile not provided
+                  onBack();
+                }
+              }}
+            />
+          </View>
+        )}
+      </React.Fragment>
     );
   };
 
@@ -694,6 +820,12 @@ const styles = StyleSheet.create({
   },
   botTimestamp: {
     color: 'rgba(123, 123, 123, 0.5)',
+  },
+  profileCardContainer: {
+    marginTop: spacing.sm,
+    marginBottom: spacing.md,
+    marginHorizontal: 0, // No horizontal margin for maximum width
+    width: 'auto', // Dynamic width with no side gaps
   },
   gradientOverlay: {
     position: 'absolute',

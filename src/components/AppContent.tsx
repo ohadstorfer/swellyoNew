@@ -10,6 +10,7 @@ import { ChatScreen } from '../screens/ChatScreen';
 import ConversationsScreen from '../screens/ConversationsScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
 import { DirectMessageScreen } from '../screens/DirectMessageScreen';
+import { SwellyShaperScreen } from '../screens/SwellyShaperScreen';
 import { messagingService } from '../services/messaging/messagingService';
 import { useOnboarding } from '../context/OnboardingContext';
 
@@ -204,7 +205,9 @@ export const AppContent: React.FC = () => {
 
   const [showProfile, setShowProfile] = useState(false);
   const [showTripPlanningChat, setShowTripPlanningChat] = useState(false);
+  const [showSwellyShaper, setShowSwellyShaper] = useState(false);
   const [viewingUserId, setViewingUserId] = useState<string | null>(null);
+  const [profileFromSwellyShaper, setProfileFromSwellyShaper] = useState(false); // Track if profile was opened from Swelly Shaper
   
   // Trip planning chat state - persisted between navigations
   const [tripPlanningChatId, setTripPlanningChatId] = useState<string | null>(null);
@@ -226,11 +229,32 @@ export const AppContent: React.FC = () => {
   };
 
   const handleProfileBack = () => {
-    // Navigate back - restore trip planning chat if it was open
-    setShowProfile(false);
-    setViewingUserId(null);
-    // If we were in trip planning chat before viewing profile, restore it
-    // This is handled by the user navigating back to conversations and clicking Swelly again
+    // If profile was opened from Swelly Shaper, go back to Swelly Shaper
+    if (profileFromSwellyShaper) {
+      setShowProfile(false);
+      setShowSwellyShaper(true);
+      setProfileFromSwellyShaper(false); // Reset flag
+    } else {
+      // Normal navigation - go back to conversations/home
+      setShowProfile(false);
+      setViewingUserId(null);
+    }
+  };
+
+  const handleSwellyShaperBack = () => {
+    // Navigate back from Swelly Shaper to profile
+    // Set flag so back button knows to return to Swelly Shaper
+    setProfileFromSwellyShaper(true);
+    setShowSwellyShaper(false);
+    setShowProfile(true);
+  };
+
+  const handleSwellyShaperViewProfile = () => {
+    // Navigate from Swelly Shaper to profile
+    // Set flag so back button knows to return to Swelly Shaper
+    setProfileFromSwellyShaper(true);
+    setShowSwellyShaper(false);
+    setShowProfile(true);
   };
 
   const handleConversationPress = (conversationId: string) => {
@@ -251,6 +275,8 @@ export const AppContent: React.FC = () => {
 
   const handleProfilePress = () => {
     // Navigate to profile page from conversations page
+    // Reset flag since this is normal navigation (not from Swelly Shaper)
+    setProfileFromSwellyShaper(false);
     setShowProfile(true);
     setViewingUserId(null); // View own profile
   };
@@ -258,6 +284,8 @@ export const AppContent: React.FC = () => {
   const handleViewUserProfile = (userId: string) => {
     console.log('[AppContent] handleViewUserProfile called with userId:', userId);
     // Navigate to another user's profile
+    // Reset flag since this is normal navigation (not from Swelly Shaper)
+    setProfileFromSwellyShaper(false);
     // Close trip planning chat if open
     setShowTripPlanningChat(false);
     // Close conversation to show profile screen
@@ -371,6 +399,16 @@ export const AppContent: React.FC = () => {
     console.log('[AppContent] Rendering check - selectedConversation:', selectedConversation ? 'exists' : 'null');
     console.log('[AppContent] Rendering check - showTripPlanningChat:', showTripPlanningChat);
     
+    // Show Swelly Shaper screen if requested (check before profile)
+    if (showSwellyShaper) {
+      return (
+        <SwellyShaperScreen 
+          onBack={handleSwellyShaperBack}
+          onViewProfile={handleSwellyShaperViewProfile}
+        />
+      );
+    }
+
     // Show profile screen if requested (check before conversation)
     if (showProfile) {
       console.log('[AppContent] Rendering ProfileScreen for userId:', viewingUserId);
@@ -379,6 +417,12 @@ export const AppContent: React.FC = () => {
           onBack={handleProfileBack}
           userId={viewingUserId ?? undefined}
           onMessage={handleStartConversation}
+          onEdit={() => {
+            // When clicking edit, preserve the flag if it was already set
+            // (user came from Swelly Shaper), so they can navigate back
+            setShowProfile(false);
+            setShowSwellyShaper(true);
+          }}
         />
       );
     }

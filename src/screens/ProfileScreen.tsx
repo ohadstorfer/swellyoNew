@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import Svg, { Circle, Rect, Defs, Filter, FeFlood, FeColorMatrix, FeOffset, FeGaussianBlur, FeComposite, FeBlend } from 'react-native-svg';
+import Svg, { Circle, Rect, Defs, Filter, FeFlood, FeColorMatrix, FeOffset, FeGaussianBlur, FeComposite, FeBlend, Path } from 'react-native-svg';
 import { Text } from '../components/Text';
 import { Text as RNText } from 'react-native';
 import { colors, spacing, typography } from '../styles/theme';
@@ -28,6 +28,8 @@ interface ProfileScreenProps {
   onBack?: () => void;
   userId?: string; // Optional: if provided, view this user's profile instead of current user's
   onMessage?: (userId: string) => void; // Callback when message button is clicked
+  onContinueEdit?: () => void; // Callback when "continue edit" button is clicked
+  onEdit?: () => void; // Callback when edit button is clicked
 }
 
 // Board type mapping
@@ -79,6 +81,33 @@ const LIFESTYLE_ICON_MAP: { [key: string]: string } = {
   'mobility': 'barbell-outline',
 };
 
+// Back Button Icon Component - Matches Figma design (chevron-left)
+const BackButtonIcon: React.FC = () => {
+  return (
+    <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M15 18L9 12L15 6"
+        stroke="#222B30"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+};
+
+// Edit Button Icon Component - Matches Figma design (edit-02/pencil)
+const EditButtonIcon: React.FC = () => {
+  return (
+    <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M11.5312 18.5199L11.2583 17.8213L11.5312 18.5199ZM7.47478 19.2988L7.09978 19.9483L7.09978 19.9483L7.47478 19.2988ZM6.12116 15.3964L5.37971 15.5093L6.12116 15.3964ZM6.61146 12.7941L7.26098 13.1691L6.61146 12.7941ZM6.02731 14.0314L5.29028 13.8925H5.29028L6.02731 14.0314ZM13.5397 16.7941L14.1892 17.1691L13.5397 16.7941ZM12.7602 17.9186L13.249 18.4875H13.249L12.7602 17.9186ZM10.4099 6.21503L9.76038 5.84003L10.4099 6.21503ZM17.3381 10.215L16.6886 9.84003L12.8901 16.4191L13.5397 16.7941L14.1892 17.1691L17.9876 10.59L17.3381 10.215ZM6.61146 12.7941L7.26098 13.1691L11.0594 6.59003L10.4099 6.21503L9.76038 5.84003L5.96194 12.4191L6.61146 12.7941ZM11.5312 18.5199L11.2583 17.8213C10.1618 18.2497 9.41502 18.5394 8.83854 18.6741C8.28167 18.8042 8.02898 18.7527 7.84978 18.6493L7.47478 19.2988L7.09978 19.9483C7.75305 20.3255 8.45392 20.3044 9.17981 20.1348C9.88609 19.9698 10.7513 19.6298 11.8041 19.2184L11.5312 18.5199ZM6.12116 15.3964L5.37971 15.5093C5.5499 16.6267 5.68805 17.546 5.89829 18.2402C6.11436 18.9536 6.44651 19.5712 7.09978 19.9483L7.47478 19.2988L7.84978 18.6493C7.67059 18.5458 7.49965 18.3527 7.33389 17.8054C7.16229 17.2388 7.03986 16.4472 6.86261 15.2835L6.12116 15.3964ZM6.61146 12.7941L5.96194 12.4191C5.64012 12.9765 5.38246 13.4033 5.29028 13.8925L6.02731 14.0314L6.76434 14.1702C6.7983 13.99 6.88802 13.8151 7.26098 13.1691L6.61146 12.7941ZM6.12116 15.3964L6.86261 15.2835C6.7503 14.546 6.73039 14.3505 6.76434 14.1702L6.02731 14.0314L5.29028 13.8925C5.1981 14.3817 5.2828 14.873 5.37971 15.5093L6.12116 15.3964ZM13.5397 16.7941L12.8901 16.4191C12.5172 17.0651 12.4105 17.2303 12.2715 17.3498L12.7602 17.9186L13.249 18.4875C13.6266 18.1631 13.8674 17.7265 14.1892 17.1691L13.5397 16.7941ZM11.5312 18.5199L11.8041 19.2184C12.4036 18.9842 12.8714 18.8119 13.249 18.4875L12.7602 17.9186L12.2715 17.3498C12.1324 17.4693 11.953 17.5498 11.2583 17.8213L11.5312 18.5199ZM15.874 4.75093L15.499 5.40045C16.3339 5.88245 16.8939 6.20761 17.2797 6.50537C17.6483 6.78983 17.7658 6.98144 17.8135 7.15945L18.5379 6.96534L19.2623 6.77123C19.0956 6.14904 18.6976 5.70485 18.1961 5.31785C17.7119 4.94416 17.0471 4.56221 16.249 4.10141L15.874 4.75093ZM17.3381 10.215L17.9876 10.59C18.4484 9.79189 18.8331 9.12875 19.0657 8.56299C19.3065 7.97711 19.4291 7.39341 19.2623 6.77123L18.5379 6.96534L17.8135 7.15945C17.8612 7.33747 17.8553 7.56212 17.6783 7.99278C17.493 8.44357 17.1706 9.00517 16.6886 9.84003L17.3381 10.215ZM15.874 4.75093L16.249 4.10141C15.4509 3.6406 14.7877 3.2559 14.222 3.02337C13.6361 2.78257 13.0524 2.65997 12.4302 2.82668L12.6243 3.55113L12.8184 4.27557C12.9964 4.22787 13.2211 4.23376 13.6518 4.41076C14.1025 4.59604 14.6641 4.91844 15.499 5.40045L15.874 4.75093ZM10.4099 6.21503L11.0594 6.59003C11.5414 5.75517 11.8666 5.19516 12.1643 4.80931C12.4488 4.4407 12.6404 4.32327 12.8184 4.27557L12.6243 3.55113L12.4302 2.82668C11.808 2.99339 11.3638 3.39142 10.9768 3.89291C10.6031 4.37716 10.2212 5.04189 9.76038 5.84003L10.4099 6.21503ZM17.3381 10.215L17.7131 9.56551L10.7849 5.56551L10.4099 6.21503L10.0349 6.86455L16.9631 10.8645L17.3381 10.215Z"
+        fill="#222B30"
+      />
+    </Svg>
+  );
+};
+
 // Plus Icon SVG Component
 const PlusIcon: React.FC<{ size?: number }> = ({ size = 40 }) => {
   const scale = size / 40;
@@ -104,7 +133,7 @@ const PlusIcon: React.FC<{ size?: number }> = ({ size = 40 }) => {
   );
 };
 
-export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, onMessage }) => {
+export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, onMessage, onContinueEdit, onEdit }) => {
   const [profileData, setProfileData] = useState<SupabaseSurfer | null>(null);
   const [loading, setLoading] = useState(true);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -355,21 +384,22 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
         </View>
 
         {/* Header Buttons */}
+        {/* Back Button - Always visible, goes to ConversationsScreen (home) */}
         <TouchableOpacity style={styles.backButton} onPress={onBack}>
           <View style={styles.backButtonContainer}>
-            <Ionicons name="chevron-back" size={18} color="#222B30" />
-            <Text style={styles.backButtonText}>Continue edit</Text>
+            <BackButtonIcon />
           </View>
         </TouchableOpacity>
 
-        {isViewingOwnProfile ? (
-          <TouchableOpacity style={styles.saveButton}>
-            <View style={styles.saveButtonContainer}>
-              <Ionicons name="cloud-upload-outline" size={18} color="#222B30" />
-              <Text style={styles.saveButtonText}>Save</Text>
+        {/* Edit Button - Only visible when viewing own profile */}
+        {isViewingOwnProfile && onEdit ? (
+          <TouchableOpacity style={styles.editButton} onPress={onEdit}>
+            <View style={styles.editButtonContainer}>
+              <EditButtonIcon />
             </View>
           </TouchableOpacity>
         ) : (
+          // Message Button - Visible when viewing other user's profile
           <TouchableOpacity 
             style={styles.messageButton}
             onPress={() => {
@@ -636,61 +666,57 @@ const styles = StyleSheet.create({
   },
   backButton: {
     position: 'absolute',
-    left: 16,
+    left: spacing.md, // 16px gap from left edge
     top: 54,
     zIndex: 10,
   },
   backButtonContainer: {
-    height: 40,
-    minWidth: 70,
+    width: 44, // 24px icon + 10px padding on each side
+    height: 44,
     borderRadius: 48,
     backgroundColor: colors.white,
-    borderWidth: 1,
-    borderColor: '#EEEEEE',
-    flexDirection: 'row',
+    justifyContent: 'center',
     alignItems: 'center',
-    gap: 4,
-    paddingLeft: 8,
-    paddingRight: 12,
-    paddingVertical: 10,
+    padding: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+    ...(Platform.OS === 'web' && {
+      boxShadow: '0px 2px 4px rgba(0, 0, 0, 0.1)',
+    }),
   },
-  backButtonText: {
-    fontSize: 12,
-    fontWeight: '400',
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
-    lineHeight: 15,
-    color: colors.textPrimary,
-  },
-  saveButton: {
+  editButton: {
     position: 'absolute',
-    left: 307,
+    right: spacing.md, // 16px gap from right edge
     top: 54,
     zIndex: 10,
   },
-  saveButtonContainer: {
-    height: 40,
-    minWidth: 70,
+  editButtonContainer: {
+    width: 44, // 24px icon + 10px padding on each side
+    height: 44,
     borderRadius: 48,
     backgroundColor: colors.white,
-    borderWidth: 1,
-    borderColor: '#EEEEEE',
-    flexDirection: 'row',
+    justifyContent: 'center',
     alignItems: 'center',
-    gap: 4,
-    paddingLeft: 8,
-    paddingRight: 12,
-    paddingVertical: 10,
+    padding: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+    ...(Platform.OS === 'web' && {
+      boxShadow: '0px 2px 4px rgba(0, 0, 0, 0.1)',
+    }),
   },
-  saveButtonText: {
-    fontSize: 12,
-    fontWeight: '400',
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
-    lineHeight: 15,
-    color: colors.textPrimary,
+  editButtonIcon: {
+    width: 24,
+    height: 24,
   },
   messageButton: {
     position: 'absolute',
-    left: 307,
+    right: spacing.md, // 16px gap from right edge
     top: 54,
     zIndex: 10,
   },
@@ -979,8 +1005,8 @@ const styles = StyleSheet.create({
     marginLeft: 4,
   },
   destinationDays: {
-    fontSize: 16,
-    fontWeight: '700',
+    fontSize: 14,
+    fontWeight: '400',
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
     lineHeight: 22,
     color: '#000',
