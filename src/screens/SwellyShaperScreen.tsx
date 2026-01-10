@@ -182,6 +182,18 @@ export const SwellyShaperScreen: React.FC<SwellyShaperScreenProps> = ({ onBack, 
         await AsyncStorage.setItem(SWELLY_SHAPER_CHAT_ID_KEY, chatId);
       }
       
+      // Reload profile data if profile was updated (before adding message to prevent typing indicator)
+      if (response.updatedFields && response.updatedFields.length > 0) {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const surferData = await supabaseDatabaseService.getSurferByUserId(user.id);
+          setProfileData(surferData);
+        }
+      }
+
+      // Set loading to false BEFORE adding message to prevent typing indicator flash
+      setIsLoading(false);
+
       // Add bot response
       const botMsg: Message = {
         id: (Date.now() + 1).toString(),
@@ -192,17 +204,9 @@ export const SwellyShaperScreen: React.FC<SwellyShaperScreenProps> = ({ onBack, 
       };
       
       setMessages(prev => [...prev, botMsg]);
-
-      // Reload profile data if profile was updated
-      if (response.updatedFields && response.updatedFields.length > 0) {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-          const surferData = await supabaseDatabaseService.getSurferByUserId(user.id);
-          setProfileData(surferData);
-        }
-      }
     } catch (error) {
       console.error('Error processing message:', error);
+      setIsLoading(false); // Set loading to false on error too
       const errorMsg: Message = {
         id: (Date.now() + 1).toString(),
         text: "Sorry, I encountered an error. Please try again.",
@@ -210,8 +214,6 @@ export const SwellyShaperScreen: React.FC<SwellyShaperScreenProps> = ({ onBack, 
         timestamp: new Date().toISOString(),
       };
       setMessages(prev => [...prev, errorMsg]);
-    } finally {
-      setIsLoading(false);
     }
   };
 
@@ -342,10 +344,15 @@ export const SwellyShaperScreen: React.FC<SwellyShaperScreenProps> = ({ onBack, 
             <UserProfileCard 
               profileData={profileData}
               onPress={() => {
+                console.log('[SwellyShaperScreen] View Profile button pressed');
+                console.log('[SwellyShaperScreen] onViewProfile exists:', !!onViewProfile);
+                console.log('[SwellyShaperScreen] onViewProfile type:', typeof onViewProfile);
                 // Navigate to profile screen
                 if (onViewProfile) {
+                  console.log('[SwellyShaperScreen] Calling onViewProfile()');
                   onViewProfile();
                 } else {
+                  console.log('[SwellyShaperScreen] onViewProfile not provided, calling onBack()');
                   // Fallback to onBack if onViewProfile not provided
                   onBack();
                 }
@@ -824,8 +831,9 @@ const styles = StyleSheet.create({
   profileCardContainer: {
     marginTop: spacing.sm,
     marginBottom: spacing.md,
-    marginHorizontal: 0, // No horizontal margin for maximum width
-    width: 'auto', // Dynamic width with no side gaps
+    marginLeft: 20, // 10px gap from left side
+    marginRight: 20, // 10px gap from right side
+    alignSelf: 'stretch', // Ensure it stretches to full width minus margins
   },
   gradientOverlay: {
     position: 'absolute',

@@ -351,10 +351,36 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
   };
 
   const getDestinationProgressWidth = (days: number): number => {
-    // Destination progress bar is 243px wide (not 361px)
+    // Destination progress bar is 243px wide
     const progressBarWidth = 243;
-    const maxDays = 365;
-    const progressPercentage = Math.min(100, (days / maxDays) * 100);
+    
+    // Three-tier progress system:
+    // 1st third (0-33.33%): 0 days to 1 month (30 days)
+    // 2nd third (33.33%-66.66%): 1 month to 5 months (30-150 days)
+    // 3rd third (66.66%-100%): 5 to 18 months (150-540 days)
+    
+    let progressPercentage: number;
+    
+    if (days <= 30) {
+      // First third: 0-30 days maps to 0-33.33%
+      progressPercentage = (days / 30) * 33.33;
+    } else if (days <= 150) {
+      // Second third: 30-150 days maps to 33.33%-66.66%
+      const daysInSecondThird = days - 30;
+      const maxDaysInSecondThird = 150 - 30; // 120 days
+      const progressInSecondThird = (daysInSecondThird / maxDaysInSecondThird) * 33.33;
+      progressPercentage = 33.33 + progressInSecondThird;
+    } else if (days <= 540) {
+      // Third third: 150-540 days maps to 66.66%-100%
+      const daysInThirdThird = days - 150;
+      const maxDaysInThirdThird = 540 - 150; // 390 days
+      const progressInThirdThird = (daysInThirdThird / maxDaysInThirdThird) * 33.34;
+      progressPercentage = 66.66 + progressInThirdThird;
+    } else {
+      // Cap at 100% for anything over 18 months
+      progressPercentage = 100;
+    }
+    
     return (progressPercentage / 100) * progressBarWidth;
   };
 

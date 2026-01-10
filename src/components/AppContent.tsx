@@ -229,16 +229,12 @@ export const AppContent: React.FC = () => {
   };
 
   const handleProfileBack = () => {
-    // If profile was opened from Swelly Shaper, go back to Swelly Shaper
-    if (profileFromSwellyShaper) {
-      setShowProfile(false);
-      setShowSwellyShaper(true);
-      setProfileFromSwellyShaper(false); // Reset flag
-    } else {
-      // Normal navigation - go back to conversations/home
-      setShowProfile(false);
-      setViewingUserId(null);
-    }
+    console.log('[AppContent] handleProfileBack called');
+    console.log('[AppContent] Always navigating to conversations/home');
+    // Always navigate back to conversations/home (homepage)
+    setShowProfile(false);
+    setViewingUserId(null);
+    setProfileFromSwellyShaper(false); // Reset flag if it was set
   };
 
   const handleSwellyShaperBack = () => {
@@ -250,11 +246,14 @@ export const AppContent: React.FC = () => {
   };
 
   const handleSwellyShaperViewProfile = () => {
+    console.log('[AppContent] handleSwellyShaperViewProfile called');
+    console.log('[AppContent] Current state - showSwellyShaper:', showSwellyShaper, 'showProfile:', showProfile);
     // Navigate from Swelly Shaper to profile
-    // Set flag so back button knows to return to Swelly Shaper
-    setProfileFromSwellyShaper(true);
+    // Back button will always go to homepage (conversations screen)
+    setViewingUserId(null); // Ensure viewing own profile
     setShowSwellyShaper(false);
     setShowProfile(true);
+    console.log('[AppContent] After state update - should show profile now');
   };
 
   const handleConversationPress = (conversationId: string) => {
@@ -401,6 +400,8 @@ export const AppContent: React.FC = () => {
     
     // Show Swelly Shaper screen if requested (check before profile)
     if (showSwellyShaper) {
+      console.log('[AppContent] Rendering SwellyShaperScreen');
+      console.log('[AppContent] Passing onViewProfile:', typeof handleSwellyShaperViewProfile);
       return (
         <SwellyShaperScreen 
           onBack={handleSwellyShaperBack}
@@ -412,6 +413,7 @@ export const AppContent: React.FC = () => {
     // Show profile screen if requested (check before conversation)
     if (showProfile) {
       console.log('[AppContent] Rendering ProfileScreen for userId:', viewingUserId);
+      console.log('[AppContent] profileFromSwellyShaper flag:', profileFromSwellyShaper);
       return (
         <ProfileScreen 
           onBack={handleProfileBack}
@@ -482,6 +484,7 @@ export const AppContent: React.FC = () => {
         onSwellyPress={handleSwellyPress}
         onProfilePress={handleProfilePress}
         onViewUserProfile={handleViewUserProfile}
+        onSwellyShaperViewProfile={handleSwellyShaperViewProfile}
       />
     );
   }
