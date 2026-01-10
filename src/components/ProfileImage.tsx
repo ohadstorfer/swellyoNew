@@ -1,6 +1,8 @@
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { View, Image, StyleSheet, Platform, ActivityIndicator } from 'react-native';
+import Svg, { Path } from 'react-native-svg';
 import { Text } from './Text';
+import { Shimmer } from './skeletons/Shimmer';
 
 interface ProfileImageProps {
   imageUrl?: string | null;
@@ -40,7 +42,8 @@ export const ProfileImage: React.FC<ProfileImageProps> = ({
     if (currentImageUrlRef.current !== imageUrl) {
       currentImageUrlRef.current = imageUrl;
       setImageError(false);
-      setIsLoading(!!imageUrl); // Only set loading to true if we have an imageUrl
+      // Set loading to true initially (will show skeleton while loading)
+      setIsLoading(true);
     }
   }, [imageUrl]);
 
@@ -102,38 +105,55 @@ export const ProfileImage: React.FC<ProfileImageProps> = ({
         style,
       ]}
     >
-      {hasValidImage ? (
-        <>
-          {isLoading && showLoadingIndicator && (
-            <View style={[styles.loadingOverlay, { borderRadius }]}>
-              <ActivityIndicator size="small" color="#00A2B6" />
+      {/* Always render Image if we have a valid URL (so onLoad can fire) */}
+      {hasValidImage && (
+        <Image
+          source={{ uri: imageUrl! }}
+          style={[
+            styles.image,
+            {
+              borderRadius,
+              opacity: isLoading ? 0 : 1, // Hide image while loading
+            },
+          ]}
+          resizeMode="cover"
+          onError={handleError}
+          onLoad={handleLoad}
+          onLoadStart={handleLoadStart}
+          {...(Platform.OS === 'web' && {
+            loading: 'lazy' as any,
+            decoding: 'async' as any,
+            objectFit: 'cover' as any,
+            // Use smooth interpolation - prefer smooth/blurry over pixelated/jagged edges
+            imageRendering: 'auto' as any,
+            // Use proper width/height for better browser optimization
+            width: containerSize,
+            height: containerSize,
+          })}
+        />
+      )}
+      
+      {/* Show avatar icon while loading with shimmer animation */}
+      {isLoading && (
+        <View style={[styles.loadingIconContainer, { borderRadius }]}>
+          <Shimmer>
+            <View style={styles.iconWrapper}>
+              <Svg width={containerSize * 0.7} height={containerSize * 0.7} viewBox="0 0 24 24" fill="none">
+                <Path
+                  d="M3 20C5.33579 17.5226 8.50702 16 12 16C15.493 16 18.6642 17.5226 21 20M16.5 7.5C16.5 9.98528 14.4853 12 12 12C9.51472 12 7.5 9.98528 7.5 7.5C7.5 5.01472 9.51472 3 12 3C14.4853 3 16.5 5.01472 16.5 7.5Z"
+                  stroke="#222B30"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </Svg>
             </View>
-          )}
-          <Image
-            source={{ uri: imageUrl! }}
-            style={[
-              styles.image,
-              {
-                borderRadius,
-              },
-            ]}
-            resizeMode="cover"
-            onError={handleError}
-            onLoad={handleLoad}
-            onLoadStart={handleLoadStart}
-            {...(Platform.OS === 'web' && {
-              loading: 'lazy' as any,
-              decoding: 'async' as any,
-              objectFit: 'cover' as any,
-              // Use smooth interpolation - prefer smooth/blurry over pixelated/jagged edges
-              imageRendering: 'auto' as any,
-              // Use proper width/height for better browser optimization
-              width: containerSize,
-              height: containerSize,
-            })}
-          />
-        </>
-      ) : (
+          </Shimmer>
+        </View>
+      )}
+      
+      {/* Show initials as fallback when not loading and no valid image */}
+      {!hasValidImage && !isLoading && (
         <View
           style={[
             styles.placeholder,
@@ -206,6 +226,18 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 1,
+  },
+  loadingIconContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    width: '100%',
+    height: '100%',
+    backgroundColor: '#E4E4E4',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });
 

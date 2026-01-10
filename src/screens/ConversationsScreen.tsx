@@ -6,7 +6,6 @@ import {
   ScrollView,
   TouchableOpacity,
   Image,
-  ActivityIndicator,
   Platform,
   Modal,
   Alert,
@@ -23,6 +22,8 @@ import { UserSearchModal } from '../components/UserSearchModal';
 import { DirectMessageScreen } from './DirectMessageScreen';
 import { SwellyShaperScreen } from './SwellyShaperScreen';
 import { ProfileImage } from '../components/ProfileImage';
+import { ConversationListSkeleton, HeaderSkeleton } from '../components/skeletons';
+import { SKELETON_DELAY_MS } from '../constants/loading';
 
 interface ConversationsScreenProps {
   onConversationPress?: (conversationId: string) => void;
@@ -34,14 +35,43 @@ interface ConversationsScreenProps {
 
 type FilterType = 'all' | 'advisor' | 'seeker';
 
+// Three Dots Menu Icon Component
+const ThreeDotsIcon: React.FC = () => {
+  return (
+    <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M12 13C12.5523 13 13 12.5523 13 12C13 11.4477 12.5523 11 12 11C11.4477 11 11 11.4477 11 12C11 12.5523 11.4477 13 12 13Z"
+        stroke="#7B7B7B"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M12 6C12.5523 6 13 5.55228 13 5C13 4.44772 12.5523 4 12 4C11.4477 4 11 4.44772 11 5C11 5.55228 11.4477 6 12 6Z"
+        stroke="#7B7B7B"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M12 20C12.5523 20 13 19.5523 13 19C13 18.4477 12.5523 18 12 18C11.4477 18 11 18.4477 11 19C11 19.5523 11.4477 20 12 20Z"
+        stroke="#7B7B7B"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+};
+
 // Shaper Icon Component
 const ShaperIcon: React.FC = () => {
   return (
-    <Svg width={22} height={16} viewBox="0 0 22 16" fill="none">
+    <Svg width={21} height={15} viewBox="0 0 23 16" fill="none">
       <Path
         d="M1.83027 5.10034L3.45076 4.69035M5.2741 14.5901L3.79351 14.9646M2.33857 4.97188L4.56295 4.40883C5.40001 4.19564 6.23241 4.82702 6.41427 5.80825L7.58009 12.1384C7.76196 13.1197 7.22335 14.0954 6.3863 14.3086L4.16191 14.8717M19.8725 5.10034L18.252 4.69035M16.4287 14.5901L17.9093 14.9646M19.3619 4.97188L17.1375 4.40883C16.3004 4.19564 15.468 4.82702 15.2862 5.80825L14.1203 12.1384C13.9385 13.1197 14.4771 14.0954 15.3141 14.3086L17.5385 14.8717M16.2072 4.44983C15.0869 3.35588 13.969 2.26194 12.8488 1.16799C12.8014 1.11437 12.0982 0.366304 10.7684 0.350217C9.38445 0.334129 8.6429 1.12778 8.60684 1.16799C7.48663 2.26194 6.36867 3.35588 5.24846 4.44983M7.35393 13.4859C7.57543 13.8686 7.91818 14.3086 8.4428 14.6749C9.26121 15.2461 10.1053 15.3472 10.5996 15.35H11.1055C11.4413 15.35 12.36 15.3035 13.2623 14.6749C13.7753 14.3168 14.1157 13.8877 14.3372 13.5078M1.57834 5.16433L2.33727 4.97214C3.17808 4.75922 4.00693 5.38562 4.18857 6.37125L5.35491 12.7003C5.53655 13.6859 5.00218 14.6575 4.16138 14.8705L3.40245 15.0626C2.56164 15.2756 1.73279 14.6492 1.55115 13.6635L0.384808 7.33449C0.203173 6.34886 0.737537 5.37725 1.57834 5.16433ZM18.2963 15.0636L17.5374 14.8714C16.6965 14.6585 16.1622 13.6869 16.3438 12.7013L17.5102 6.37222C17.6918 5.3866 18.5206 4.76019 19.3615 4.97311L20.1204 5.1653C20.9612 5.37822 21.4956 6.34983 21.3139 7.33546L20.1476 13.6645C19.9659 14.6501 19.1371 15.2765 18.2963 15.0636Z"
-        stroke="black"
-        strokeWidth="1"
+       stroke="#222B30"
+        strokeWidth="1.1"
         strokeMiterlimit="10"
       />
     </Svg>
@@ -59,6 +89,8 @@ export default function ConversationsScreen({
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(false); // Start as false to show conversations immediately
   const [conversationsLoaded, setConversationsLoaded] = useState(false); // Track if conversations have been loaded
+  const [showSkeletons, setShowSkeletons] = useState(false); // Delayed skeleton display to avoid flicker
+  const [userInfoLoading, setUserInfoLoading] = useState(false); // Track user info loading state
   const [filter, setFilter] = useState<FilterType>('all');
   // Initialize with cached user data from context for immediate display
   const [userName, setUserName] = useState(() => {
@@ -108,6 +140,12 @@ export default function ConversationsScreen({
   }, []);
 
   const loadUserInfo = async () => {
+    // Only show skeleton if we don't have cached data
+    const hasCachedData = contextUser?.nickname || contextUser?.email;
+    if (!hasCachedData) {
+      setUserInfoLoading(true);
+    }
+    
     try {
       // Update from server in the background (optimistic update)
       // The UI already shows cached data from context, so this is just a refresh
@@ -128,20 +166,30 @@ export default function ConversationsScreen({
     } catch (error) {
       console.error('Error loading user info:', error);
       // Don't clear the cached data on error - keep showing what we have
+    } finally {
+      setUserInfoLoading(false);
     }
   };
 
   const loadConversations = async () => {
     try {
-      // Don't set loading to true immediately - show cached conversations first
-      // This allows names to appear immediately if we have cached data
+      // Delay showing skeletons to avoid flicker for fast loads
+      const skeletonTimeout = setTimeout(() => {
+        setShowSkeletons(true);
+      }, SKELETON_DELAY_MS);
+      
+      setLoading(true);
       const convos = await messagingService.getConversations();
+      
+      clearTimeout(skeletonTimeout);
       setConversations(convos);
       setLoading(false);
+      setShowSkeletons(false);
       setConversationsLoaded(true); // Mark as loaded after successful fetch
     } catch (error) {
       console.error('Error loading conversations:', error);
       setLoading(false);
+      setShowSkeletons(false);
       setConversationsLoaded(true); // Mark as loaded even on error
     }
   };
@@ -766,13 +814,19 @@ export default function ConversationsScreen({
           onPress={onProfilePress}
           activeOpacity={0.7}
         >
-          <ProfileImage
-            imageUrl={userAvatar}
-            name={userName}
-            style={styles.headerAvatar}
-            showLoadingIndicator={false}
-          />
-          <Text style={styles.headerTitle}>Hello {userName}</Text>
+          {userInfoLoading && !contextUser?.nickname && !contextUser?.email ? (
+            <HeaderSkeleton />
+          ) : (
+            <>
+              <ProfileImage
+                imageUrl={userAvatar}
+                name={userName}
+                style={styles.headerAvatar}
+                showLoadingIndicator={false}
+              />
+              <Text style={styles.headerTitle}>Hello {userName}</Text>
+            </>
+          )}
         </TouchableOpacity>
 
         <TouchableOpacity 
@@ -782,7 +836,7 @@ export default function ConversationsScreen({
             setShowMenu(true);
           }}
         >
-          <Ionicons name="ellipsis-vertical" size={24} color="#7B7B7B" />
+          <ThreeDotsIcon />
         </TouchableOpacity>
         
         {/* Gradient border at bottom */}
@@ -820,10 +874,8 @@ export default function ConversationsScreen({
             contentContainerStyle={styles.conversationsListContent}
             showsVerticalScrollIndicator={false}
           >
-            {loading ? (
-              <View style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color="#05BCD3" />
-              </View>
+            {loading && showSkeletons ? (
+              <ConversationListSkeleton count={5} />
             ) : (
               <>
                 {filteredConversations.map(renderConversationItem)}

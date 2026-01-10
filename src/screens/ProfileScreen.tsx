@@ -23,6 +23,7 @@ import { getImageUrl } from '../services/media/imageService';
 import { getCountryFlag } from '../utils/countryFlags';
 import { uploadProfileImage } from '../services/storage/storageService';
 import { ProfileImage } from '../components/ProfileImage';
+import { ProfileSkeleton } from '../components/skeletons';
 
 interface ProfileScreenProps {
   onBack?: () => void;
@@ -169,10 +170,11 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
 
       // Fetch surfer data
       const surferData = await supabaseDatabaseService.getSurferByUserId(targetUserId);
+      
       setProfileData(surferData);
+      setLoading(false);
     } catch (error) {
       console.error('Error loading profile data:', error);
-    } finally {
       setLoading(false);
     }
   };
@@ -270,16 +272,46 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
     }
   };
 
+  // Show skeleton while loading - show immediately to prevent "No profile data found" flash
+  // The showSkeleton delay is handled internally by the skeleton components
   if (loading) {
     return (
       <SafeAreaView style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <Text>Loading profile...</Text>
-        </View>
+        <ScrollView 
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          <ProfileSkeleton />
+        </ScrollView>
+        {/* Header Buttons - Always visible even during loading */}
+        <TouchableOpacity style={styles.backButton} onPress={onBack}>
+          <View style={styles.backButtonContainer}>
+            <BackButtonIcon />
+          </View>
+        </TouchableOpacity>
+        {isViewingOwnProfile && onEdit ? (
+          <TouchableOpacity style={styles.editButton} onPress={onEdit}>
+            <View style={styles.editButtonContainer}>
+              <EditButtonIcon />
+            </View>
+          </TouchableOpacity>
+        ) : userId && onMessage ? (
+          <TouchableOpacity 
+            style={styles.messageButton}
+            onPress={() => onMessage(userId)}
+          >
+            <View style={styles.messageButtonContainer}>
+              <Ionicons name="chatbubble-outline" size={18} color="#222B30" />
+              <Text style={styles.messageButtonText}>Message</Text>
+            </View>
+          </TouchableOpacity>
+        ) : null}
       </SafeAreaView>
     );
   }
 
+  // Only show "No profile data found" when not loading and no data
   if (!profileData) {
     return (
       <SafeAreaView style={styles.container}>
