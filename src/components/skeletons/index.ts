@@ -11,4 +11,5 @@ export {
 } from './ConversationSkeleton';
 export { HeaderSkeleton } from './HeaderSkeleton';
 export { ProfileSkeleton } from './ProfileSkeleton';
+export { MessageSkeleton, MessageListSkeleton } from './MessageSkeleton';
 
