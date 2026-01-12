@@ -28,8 +28,9 @@ export const MessageSkeleton: React.FC<MessageSkeletonProps> = ({
       >
         {/* Message text skeleton */}
         <View style={styles.textContainer}>
-          <TextSkeleton width="80%" height={16} style={styles.textLine1} />
-          <TextSkeleton width="60%" height={16} style={styles.textLine2} />
+          <TextSkeleton width={268} height={10} style={styles.textLine1} />
+          <TextSkeleton width={250} height={10} style={styles.textLine2} />
+          <TextSkeleton width={200} height={10} style={styles.textLine3} />
         </View>
         
         {/* Timestamp skeleton */}
@@ -112,6 +113,9 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   textLine2: {
+    marginBottom: 6,
+  },
+  textLine3: {
     marginBottom: 0,
   },
   timestampContainer: {

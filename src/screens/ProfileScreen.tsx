@@ -50,12 +50,21 @@ const SURF_LEVEL_MAP: { [key: number]: { name: string; progress: number } } = {
   5: { name: 'Charging', progress: 100 }, // 100% of bar
 };
 
-// Travel experience mapping (enum to number of trips)
-const TRAVEL_EXPERIENCE_MAP = {
-  new_nomad: { trips: 0, progress: 10 },       // 0–3
-  rising_voyager: { trips: 4, progress: 30 }, // 4–9
-  wave_hunter: { trips: 10, progress: 65 },   // 10–19
-  chicken_joe: { trips: 20, progress: 100 },  // 20+
+// Helper function to get travel experience info from number of trips
+const getTravelExperienceInfo = (trips: number | undefined | null) => {
+  if (trips === undefined || trips === null || isNaN(trips)) {
+    return { trips: 0, progress: 10, title: 'New Nomad' };
+  }
+  
+  if (trips <= 3) {
+    return { trips, progress: 10, title: 'New Nomad' };
+  } else if (trips <= 9) {
+    return { trips, progress: 30, title: 'Rising Voyager' };
+  } else if (trips <= 19) {
+    return { trips, progress: 65, title: 'Wave Hunter' };
+  } else {
+    return { trips, progress: 100, title: 'Chicken Joe' };
+  }
 };
 // Lifestyle keyword to icon mapping (simplified - using Ionicons for now)
 const LIFESTYLE_ICON_MAP: { [key: string]: string } = {
@@ -333,10 +342,26 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
     : SURF_LEVEL_MAP[1];
 
   // Get travel experience display info
-  const travelExpKey = profileData.travel_experience?.toLowerCase() as keyof typeof TRAVEL_EXPERIENCE_MAP;
-  const travelExpInfo = profileData.travel_experience && travelExpKey in TRAVEL_EXPERIENCE_MAP
-    ? TRAVEL_EXPERIENCE_MAP[travelExpKey]
-    : TRAVEL_EXPERIENCE_MAP['new_nomad'];
+  // Handle travel_experience as integer (number of trips) or legacy enum string
+  let travelExpInfo: { trips: number; progress: number; title: string };
+  const travelExp: number | string | undefined = profileData.travel_experience as any; // Allow both number and string for legacy compatibility
+  if (typeof travelExp === 'number') {
+    // New format: integer (number of trips)
+    travelExpInfo = getTravelExperienceInfo(travelExp);
+  } else if (typeof travelExp === 'string') {
+    // Legacy format: enum string - convert to number of trips
+    const legacyMap: { [key: string]: number } = {
+      'new_nomad': 0,
+      'rising_voyager': 4,
+      'wave_hunter': 10,
+      'chicken_joe': 20,
+    };
+    const trips = legacyMap[travelExp.toLowerCase()] ?? 0;
+    travelExpInfo = getTravelExperienceInfo(trips);
+  } else {
+    // Default fallback
+    travelExpInfo = getTravelExperienceInfo(0);
+  }
 
   // Get destinations array (top 3 by longest stay - sorted by time_in_days descending)
   const topDestinations = profileData.destinations_array 

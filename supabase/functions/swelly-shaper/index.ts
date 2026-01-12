@@ -36,7 +36,7 @@ PROFILE FIELDS YOU CAN UPDATE:
 4. country_from - Country of origin
 5. surfboard_type - Type of surfboard: "shortboard", "midlength", "longboard", or "soft_top"
 6. surf_level - Surf skill level from 1-5 (1 = beginner, 5 = expert)
-7. travel_experience - Travel experience level: "beginner", "intermediate", or "experienced"
+7. travel_experience - Number of surf trips (integer, 0-20+). Examples: 0, 5, 10, 17, 20
 8. bio - Biography/description about the user
 9. destinations_array - Array of past trips with format: [{"destination_name": "Location, Area", "time_in_days": number, "time_in_text": "X days/weeks/months/years"}]
 10. travel_type - Travel budget: "budget", "mid", or "high"
@@ -61,11 +61,20 @@ SMART EXTRACTION:
 - If user says "I learned to surf on X" → they want to update surfboard_type
 - If user says "I'm X years old" or "I turned X" → update age
 - If user mentions time spent somewhere → likely a trip to add
-- If user describes their experience level → update surf_level or travel_experience
+- If user describes their experience level → update surf_level
+- If user mentions number of trips, adding a trip, or changing trip count → update travel_experience (integer 0-20+)
 - Always look for multiple pieces of information in a single message
 
 EXTRACTION RULES:
 - For surf_level: Extract number 1-5 (convert text like "beginner" to 1, "intermediate" to 3, "advanced" to 4, "expert" to 5)
+- For travel_experience: Extract the number of trips (integer 0-20+). Examples:
+  * "Change my amount of trips to 17" → 17
+  * "I just came back from another trip, add it" → current_trips + 1 (you'll see current value in profile context)
+  * "I've done 5 surf trips" → 5
+  * "Update my trips to 10" → 10
+  * "Set my trips to 15" → 15
+  * If user says "add a trip" or "another trip" or "just came back from a trip", increment the current number by 1
+  * Always return an integer between 0 and 20 (cap at 20 for "20+")
 - For surfboard_type: Map variations to standard values:
   - "short", "shortboard" → "shortboard"
   - "mid", "midlength" → "midlength"
@@ -290,6 +299,36 @@ Response: {
       {"field": "country_from", "value": "Australia"},
       {"field": "surf_level", "value": 2}
     ]
+  }
+}
+
+User: "Change my amount of trips to 17"
+Response: {
+  "return_message": "Got it! I've updated your travel experience to 17 trips. ✅",
+  "is_finished": true,
+  "data": {
+    "field": "travel_experience",
+    "value": 17
+  }
+}
+
+User: "I just came back from another trip, add it"
+Response: {
+  "return_message": "Awesome! I've added that trip to your count. ✅",
+  "is_finished": true,
+  "data": {
+    "field": "travel_experience",
+    "value": "add"
+  }
+}
+
+User: "I've done 5 surf trips total"
+Response: {
+  "return_message": "Got it! I've updated your travel experience to 5 trips. ✅",
+  "is_finished": true,
+  "data": {
+    "field": "travel_experience",
+    "value": 5
   }
 }
 
@@ -529,6 +568,17 @@ async function updateUserProfile(userId: string, field: string, value: any, supa
       // Ensure surf_level is 1-5 (database expects 1-5, not 0-4)
       const level = typeof value === 'number' ? value : parseInt(value)
       updateData[dbField] = Math.max(1, Math.min(5, level))
+    } else if (field === 'travel_experience') {
+      // Handle travel_experience as integer (number of trips, 0-20+)
+      // If value is "add" or user wants to increment, get current value and add 1
+      if (value === 'add' || (typeof value === 'string' && value.toLowerCase().includes('add'))) {
+        const currentTrips = surferData.travel_experience || 0
+        updateData[dbField] = Math.min(20, currentTrips + 1) // Cap at 20
+      } else {
+        // Ensure it's an integer between 0 and 20
+        const trips = typeof value === 'number' ? value : parseInt(value)
+        updateData[dbField] = Math.max(0, Math.min(20, Math.round(trips)))
+      }
     } else if (field === 'surfboard_type') {
       // Map to database enum values
       const boardTypeMap: { [key: string]: string } = {

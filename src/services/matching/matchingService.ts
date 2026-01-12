@@ -9,6 +9,29 @@ import { supabase, isSupabaseConfigured } from '../../config/supabase';
 import { supabaseDatabaseService, SupabaseSurfer } from '../database/supabaseDatabaseService';
 import { TripPlanningRequest, MatchedUser, BUDGET_MAP, TRAVEL_EXPERIENCE_MAP, GROUP_TYPE_MAP } from '../../types/tripPlanning';
 
+// Helper function to convert travel_experience (integer or legacy enum string) to comparable numeric level
+// Returns: 1 (new_nomad/0-3), 2 (rising_voyager/4-9), 3 (wave_hunter/10-19), 4 (chicken_joe/20+)
+function getTravelExperienceLevel(travelExp: number | string | undefined | null): number {
+  if (travelExp === undefined || travelExp === null) {
+    return 2; // Default to middle level
+  }
+  
+  // If it's already a number (new format: number of trips)
+  if (typeof travelExp === 'number') {
+    if (travelExp <= 3) return 1; // new_nomad
+    if (travelExp <= 9) return 2; // rising_voyager
+    if (travelExp <= 19) return 3; // wave_hunter
+    return 4; // chicken_joe (20+)
+  }
+  
+  // Legacy format: enum string
+  if (typeof travelExp === 'string') {
+    return TRAVEL_EXPERIENCE_MAP[travelExp.toLowerCase()] || 2;
+  }
+  
+  return 2; // Default fallback
+}
+
 const OPENAI_API_KEY = process.env.EXPO_PUBLIC_OPENAI_API_KEY;
 
 /**
@@ -415,7 +438,14 @@ function checkPrioritizedFilterMatch(
       );
     
     case 'travel_experience':
-      return userSurfer.travel_experience === filterValue;
+      // Handle both integer (new format) and enum string (legacy format)
+      if (typeof filterValue === 'string' && typeof userSurfer.travel_experience === 'string') {
+        return userSurfer.travel_experience === filterValue;
+      }
+      // For integer comparison, convert both to levels
+      const filterLevel = getTravelExperienceLevel(filterValue);
+      const userLevel = getTravelExperienceLevel(userSurfer.travel_experience);
+      return filterLevel === userLevel;
     
     case 'group_type':
     case 'travel_buddies':
@@ -564,9 +594,9 @@ export async function findMatchingUsersV2(
       }
 
       // Step 8: Travel experience compatibility (0-30 points)
-      if (userSurfer.travel_experience && currentUserSurfer.travel_experience) {
-        const requestedExp = TRAVEL_EXPERIENCE_MAP[currentUserSurfer.travel_experience] || 2;
-        const userExp = TRAVEL_EXPERIENCE_MAP[userSurfer.travel_experience] || 2;
+      if (userSurfer.travel_experience !== undefined && currentUserSurfer.travel_experience !== undefined) {
+        const requestedExp = getTravelExperienceLevel(currentUserSurfer.travel_experience);
+        const userExp = getTravelExperienceLevel(userSurfer.travel_experience);
         points += calculateV2SimilarityScore(requestedExp, userExp);
       }
 
@@ -995,9 +1025,9 @@ export async function findMatchingUsers(
       }
 
       // Step 8: Travel experience compatibility (0-30 points)
-      if (userSurfer.travel_experience && currentUserSurfer.travel_experience) {
-        const requestedExp = TRAVEL_EXPERIENCE_MAP[currentUserSurfer.travel_experience] || 2;
-        const userExp = TRAVEL_EXPERIENCE_MAP[userSurfer.travel_experience] || 2;
+      if (userSurfer.travel_experience !== undefined && currentUserSurfer.travel_experience !== undefined) {
+        const requestedExp = getTravelExperienceLevel(currentUserSurfer.travel_experience);
+        const userExp = getTravelExperienceLevel(userSurfer.travel_experience);
         points += calculateV2SimilarityScore(requestedExp, userExp);
       }
 

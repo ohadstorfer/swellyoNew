@@ -62,8 +62,16 @@ const SurfLevelIcon: React.FC = () => {
   );
 };
 
+// Helper function to format trips display
+const formatTrips = (trips: number): string => {
+  if (trips === 0) return '0 trips';
+  if (trips === 1) return '1 trip';
+  if (trips >= 20) return '20+ trips';
+  return `${trips} trips`;
+};
+
 export const UserProfileCard: React.FC<UserProfileCardProps> = ({ profileData, onPress }) => {
-  const destinationsCount = profileData.destinations_array?.length || 0;
+  const travelExperienceTrips = profileData.travel_experience ?? 0;
   const surfLevel = profileData.surf_level || 1;
   const surfLevelName = SURF_LEVEL_MAP[surfLevel] || SURF_LEVEL_MAP[1];
 
@@ -108,11 +116,11 @@ export const UserProfileCard: React.FC<UserProfileCardProps> = ({ profileData, o
 
             {/* Info Items */}
             <View style={styles.infoContainer}>
-              {/* Trips Count */}
+              {/* Travel Experience (Trips Count) */}
               <View style={styles.infoItem}>
               <SurfLevelIcon />
                 <Text style={styles.infoText}>
-                  {destinationsCount} {destinationsCount === 1 ? 'Trip' : 'Trips'}
+                  {formatTrips(travelExperienceTrips)}
                 </Text>
               </View>
 

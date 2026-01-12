@@ -923,7 +923,7 @@ const styles = StyleSheet.create({
     color: 'rgba(123, 123, 123, 0.5)', // Dark timestamp on white background for outbound messages
   },
   botTimestamp: {
-    color: 'rgba(123, 123, 123, 0.5)', // Figma: text-[color:var(--text\/secondary,#7b7b7b)] opacity-50
+    color: '#FFFFFF', // White timestamp for received messages
   },
   inputWrapper: {
     flexDirection: 'row',

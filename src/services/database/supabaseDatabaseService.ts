@@ -29,7 +29,7 @@ export interface SupabaseSurfer {
   country_from?: string; // varchar(255), nullable
   surfboard_type?: string; // surfboard_type enum, nullable
   surf_level?: number; // integer, nullable, check 1-5
-  travel_experience?: string; // travel_experience enum, nullable
+  travel_experience?: number; // number of trips (0-20+), nullable
   bio?: string; // text, nullable
   profile_image_url?: string; // varchar(2048), nullable
   // Swelly conversation results
@@ -203,7 +203,7 @@ class SupabaseDatabaseService {
     countryFrom?: string;
     surfboardType?: string; // surfboard_type enum
     surfLevel?: number; // 1-5
-    travelExperience?: string; // travel_experience enum
+    travelExperience?: number; // number of trips (0-20+)
     bio?: string;
     profileImageUrl?: string;
     boardType?: number; // Legacy support - will be converted to surfboardType enum
@@ -406,27 +406,8 @@ class SupabaseDatabaseService {
       
       const user = await this.saveUser(userDataToSave);
 
-      // Convert travelExperience (number of trips) to enum string
-      // Map number of trips to category:
-      // 0-3 trips: new_nomad
-      // 4-9 trips: rising_voyager
-      // 10-19 trips: wave_hunter
-      // 20+ trips: chicken_joe
-      let travelExperienceEnum: string | undefined;
-      if (onboardingData.travelExperience !== undefined) {
-        const trips = onboardingData.travelExperience;
-        if (trips <= 3) {
-          travelExperienceEnum = 'new_nomad';
-        } else if (trips <= 9) {
-          travelExperienceEnum = 'rising_voyager';
-        } else if (trips <= 19) {
-          travelExperienceEnum = 'wave_hunter';
-        } else {
-          travelExperienceEnum = 'chicken_joe'; // 20+
-        }
-      }
-
       // Save surfer data (all profile and preference data goes here)
+      // travelExperience is now saved as integer (number of trips, 0-20+)
       const surfer = await this.saveSurfer({
         name: onboardingData.nickname || 'User',
         age: onboardingData.age,
@@ -434,7 +415,7 @@ class SupabaseDatabaseService {
         countryFrom: onboardingData.location,
         boardType: onboardingData.boardType, // Will be converted to surfboard_type enum
         surfLevel: onboardingData.surfLevel, // Will be validated to 1-5 range
-        travelExperience: travelExperienceEnum,
+        travelExperience: onboardingData.travelExperience, // Save as integer (number of trips)
         profileImageUrl: onboardingData.profilePicture,
         isDemoUser: onboardingData.isDemoUser ?? false, // Pass is_demo_user flag
       });

@@ -20,6 +20,29 @@ import { TripPlanningRequest, MatchedUser, BUDGET_MAP, TRAVEL_EXPERIENCE_MAP, GR
 
 const OPENAI_API_KEY = process.env.EXPO_PUBLIC_OPENAI_API_KEY;
 
+// Helper function to convert travel_experience (integer or legacy enum string) to comparable numeric level
+// Returns: 1 (new_nomad/0-3), 2 (rising_voyager/4-9), 3 (wave_hunter/10-19), 4 (chicken_joe/20+)
+function getTravelExperienceLevel(travelExp: number | string | undefined | null): number {
+  if (travelExp === undefined || travelExp === null) {
+    return 2; // Default to middle level
+  }
+  
+  // If it's already a number (new format: number of trips)
+  if (typeof travelExp === 'number') {
+    if (travelExp <= 3) return 1; // new_nomad
+    if (travelExp <= 9) return 2; // rising_voyager
+    if (travelExp <= 19) return 3; // wave_hunter
+    return 4; // chicken_joe (20+)
+  }
+  
+  // Legacy format: enum string
+  if (typeof travelExp === 'string') {
+    return TRAVEL_EXPERIENCE_MAP[travelExp.toLowerCase()] || 2;
+  }
+  
+  return 2; // Default fallback
+}
+
 /**
  * Fixed area options for normalization
  */
@@ -641,8 +664,13 @@ function calculateLayer3PriorityScore(
   }
 
   // Travel experience priority (1-50)
-  if (priorities.travel_experience && userSurfer.travel_experience === priorities.travel_experience) {
-    priorityScore += 20; // Very helpful
+  // Handle both integer (new format) and enum string (legacy format)
+  if (priorities.travel_experience && userSurfer.travel_experience !== undefined) {
+    const priorityLevel = getTravelExperienceLevel(priorities.travel_experience);
+    const userLevel = getTravelExperienceLevel(userSurfer.travel_experience);
+    if (priorityLevel === userLevel) {
+      priorityScore += 20; // Very helpful
+    }
   }
 
   // Group type priority (1-50)
@@ -718,9 +746,9 @@ function calculateLayer4GeneralScore(
   }
 
   // Travel experience similarity (0-30 points)
-  if (userSurfer.travel_experience && currentUserSurfer.travel_experience) {
-    const userExp = TRAVEL_EXPERIENCE_MAP[userSurfer.travel_experience] || 2;
-    const currentExp = TRAVEL_EXPERIENCE_MAP[currentUserSurfer.travel_experience] || 2;
+  if (userSurfer.travel_experience !== undefined && currentUserSurfer.travel_experience !== undefined) {
+    const userExp = getTravelExperienceLevel(userSurfer.travel_experience);
+    const currentExp = getTravelExperienceLevel(currentUserSurfer.travel_experience);
     const diff = Math.abs(currentExp - userExp);
     score += Math.max(0, 30 - (diff * 10));
   }
