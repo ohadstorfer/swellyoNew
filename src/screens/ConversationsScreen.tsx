@@ -442,7 +442,6 @@ export default function ConversationsScreen({
       <TouchableOpacity
         style={[
           styles.filterButton,
-          type === 'all' && styles.filterButtonAll,
           isActive ? styles.filterButtonActive : styles.filterButtonInactive,
         ]}
         onPress={() => setFilter(type)}
@@ -1112,9 +1111,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     gap: 10,
   },
-  filterButtonAll: {
-    width: 60,
-  },
   filterButtonActive: {
     ...(Platform.OS === 'web' ? {
       backgroundColor: 'var(--Colors-Neutral-300, #EEE)',
@@ -1351,7 +1347,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#B72DF2',
     minHeight: 104,
-    width: 361,
+    width: '90%', 
     shadowColor: '#B72DF2',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.24,

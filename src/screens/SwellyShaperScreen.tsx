@@ -21,6 +21,8 @@ import { getImageUrl } from '../services/media/imageService';
 import { UserProfileCard } from '../components/UserProfileCard';
 import { supabaseDatabaseService, SupabaseSurfer } from '../services/database/supabaseDatabaseService';
 import { supabase } from '../config/supabase';
+import { MessageListSkeleton } from '../components/skeletons';
+import { SKELETON_DELAY_MS } from '../constants/loading';
 
 interface Message {
   id: string;
@@ -42,6 +44,7 @@ export const SwellyShaperScreen: React.FC<SwellyShaperScreenProps> = ({ onBack, 
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
+  const [showSkeletons, setShowSkeletons] = useState(false); // Delayed skeleton display to avoid flicker
   const [inputHeight, setInputHeight] = useState(25); // Initial height for one line
   const [profileData, setProfileData] = useState<SupabaseSurfer | null>(null);
   const scrollViewRef = useRef<ScrollView>(null);
@@ -144,6 +147,21 @@ export const SwellyShaperScreen: React.FC<SwellyShaperScreenProps> = ({ onBack, 
 
     initializeChat();
   }, []);
+
+  // Delay showing skeletons to avoid flicker for fast loads
+  useEffect(() => {
+    if (isInitializing) {
+      const skeletonTimeout = setTimeout(() => {
+        setShowSkeletons(true);
+      }, SKELETON_DELAY_MS);
+
+      return () => {
+        clearTimeout(skeletonTimeout);
+      };
+    } else {
+      setShowSkeletons(false);
+    }
+  }, [isInitializing]);
 
   // Scroll to bottom when messages change
   useEffect(() => {
@@ -364,16 +382,6 @@ export const SwellyShaperScreen: React.FC<SwellyShaperScreenProps> = ({ onBack, 
     );
   };
 
-  if (isInitializing) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <Text>Loading...</Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
   return (
     <SafeAreaView style={styles.container}>
       {/* Header */}
@@ -431,15 +439,21 @@ export const SwellyShaperScreen: React.FC<SwellyShaperScreenProps> = ({ onBack, 
             contentContainerStyle={styles.messagesContent}
             showsVerticalScrollIndicator={false}
           >
-            {messages.map(renderMessage)}
-            {isLoading && (
-              <View style={[styles.messageContainer, styles.normalBotMessageContainer]}>
-                <View style={[styles.messageBubble, styles.normalBotMessageBubble]}>
-                  <View style={styles.messageTextContainer}>
-                    <TypingIndicator />
+            {isInitializing && showSkeletons ? (
+              <MessageListSkeleton count={5} />
+            ) : (
+              <>
+                {messages.map(renderMessage)}
+                {isLoading && (
+                  <View style={[styles.messageContainer, styles.normalBotMessageContainer]}>
+                    <View style={[styles.messageBubble, styles.normalBotMessageBubble]}>
+                      <View style={styles.messageTextContainer}>
+                        <TypingIndicator />
+                      </View>
+                    </View>
                   </View>
-                </View>
-              </View>
+                )}
+              </>
             )}
           </ScrollView>
           
