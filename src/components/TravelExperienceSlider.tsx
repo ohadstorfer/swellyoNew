@@ -303,6 +303,16 @@ export const TravelExperienceSlider: React.FC<TravelExperienceSliderProps> = ({
             maximumTrackTintColor="transparent"
             thumbTintColor="#FFFFFF"
           />
+          
+          {/* Custom thumb overlay with shadow */}
+          <View
+            style={[
+              styles.customThumb,
+              {
+                left: (currentTrips / MAX_TRIPS) * BAR_WIDTH - KNOB_SIZE / 2,
+              },
+            ]}
+          />
         </View>
       </View>
 
@@ -414,6 +424,26 @@ const styles = StyleSheet.create({
     width: BAR_WIDTH,
     height: KNOB_SIZE,
     zIndex: 2,
+  },
+  customThumb: {
+    position: 'absolute',
+    width: KNOB_SIZE,
+    height: KNOB_SIZE,
+    borderRadius: KNOB_SIZE / 2,
+    backgroundColor: '#FFFFFF',
+    zIndex: 3,
+    pointerEvents: 'none', // Allow touches to pass through to slider
+    // iOS shadow
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.10,
+    shadowRadius: 12,
+    // Android elevation
+    elevation: 8,
+    // Web filter shadow
+    ...(Platform.OS === 'web' && {
+      filter: 'drop-shadow(0 6px 12px rgba(0, 0, 0, 0.10)) drop-shadow(0 0.5px 4px rgba(0, 0, 0, 0.10))',
+    } as any),
   },
   errorText: {
     ...typography.body,

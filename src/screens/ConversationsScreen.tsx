@@ -86,7 +86,7 @@ export default function ConversationsScreen({
   onViewUserProfile,
   onSwellyShaperViewProfile,
 }: ConversationsScreenProps) {
-  const { resetOnboarding, user: contextUser } = useOnboarding();
+  const { resetOnboarding, setCurrentStep, user: contextUser } = useOnboarding();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(false); // Start as false to show conversations immediately
   const [conversationsLoaded, setConversationsLoaded] = useState(false); // Track if conversations have been loaded
@@ -376,10 +376,14 @@ export default function ConversationsScreen({
         await authService.signOut();
         console.log('Auth service sign out successful');
         
-        // Reset onboarding state (this will navigate to WelcomeScreen)
+        // Reset onboarding state
         console.log('Calling resetOnboarding()...');
         await resetOnboarding();
         console.log('Reset onboarding successful');
+        
+        // Explicitly set step to -1 to go to WelcomeScreen (not OnboardingWelcomeScreen)
+        setCurrentStep(-1);
+        console.log('Navigated to WelcomeScreen');
         
         console.log('User logged out successfully');
       } catch (error) {
@@ -988,7 +992,7 @@ export default function ConversationsScreen({
                 </TouchableOpacity>
 
                 {/* Swellyo Team Welcome - Testing */}
-                <TouchableOpacity
+                {/* <TouchableOpacity
                   style={styles.menuItem}
                   onPress={(e) => {
                     e.stopPropagation();
@@ -1000,7 +1004,7 @@ export default function ConversationsScreen({
                 >
                   <Ionicons name="chatbubbles-outline" size={20} color="#222B30" />
                   <Text style={styles.menuItemText}>Swellyo Team Welcome</Text>
-                </TouchableOpacity>
+                </TouchableOpacity> */}
 
                 {/* Logout */}
                 <TouchableOpacity
