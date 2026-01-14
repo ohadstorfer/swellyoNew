@@ -84,6 +84,12 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
 
     // Check for existing session and OAuth return
     const checkAuthState = async () => {
+      // Don't auto-sign-in if user is explicitly null (e.g., after logout)
+      if (user === null && !isDemoUser) {
+        console.log('User is null, skipping auto-sign-in (likely after logout)');
+        return;
+      }
+      
       // First, check if we have an existing Supabase session
       if (isSupabaseConfigured()) {
         try {
