@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Alert } from 'react-native';
 import { WelcomeScreen } from '../screens/WelcomeScreen';
+import { OnboardingWelcomeScreen } from '../screens/OnboardingWelcomeScreen';
 import { OnboardingStep1Screen, OnboardingData } from '../screens/OnboardingStep1Screen';
 import { OnboardingStep2Screen } from '../screens/OnboardingStep2Screen';
 import { OnboardingStep3Screen } from '../screens/OnboardingStep3Screen';
@@ -23,7 +24,7 @@ export const AppContent: React.FC = () => {
   const [isSavingStep4, setIsSavingStep4] = useState(false);
 
   const handleGetStarted = () => {
-    setCurrentStep(1);
+    setCurrentStep(0); // Go to onboarding welcome/explanation screen first
   };
 
   const handleDemoChat = async () => {
@@ -75,8 +76,8 @@ export const AppContent: React.FC = () => {
         pronouns: undefined,
       });
       
-      // Start onboarding process
-      setCurrentStep(1);
+      // Start onboarding process - go to explanation screen first
+      setCurrentStep(0);
     } catch (error: any) {
       console.error('Error creating demo user:', error);
       Alert.alert('Error', 'Failed to create demo user. Please try again.');
@@ -365,12 +366,14 @@ export const AppContent: React.FC = () => {
         // Reset onboarding state (this also resets the demo user flag)
         await resetOnboarding();
         console.log('Onboarding state reset');
+        // After reset, go back to initial welcome screen (not onboarding welcome)
+        return;
       } catch (error) {
         console.error('Error logging out demo user:', error);
         // Continue with navigation even if logout fails
       }
     }
-    // Navigate to welcome screen after logout completes (or immediately if not demo user)
+    // Navigate to onboarding welcome screen (step 0)
     setCurrentStep(0);
   };
 
@@ -489,6 +492,37 @@ export const AppContent: React.FC = () => {
     );
   }
 
+  // Show onboarding welcome/explanation screen if we're on step 0
+  if (currentStep === 0) {
+    return (
+      <OnboardingWelcomeScreen
+        onNext={() => {
+          setCurrentStep(1);
+        }}
+        onBack={async () => {
+          // Log out user (both regular Google auth users and demo users) before going back to welcome screen
+          try {
+            console.log('Logging out user before going back to welcome screen...');
+            const { authService } = await import('../services/auth/authService');
+            await authService.signOut();
+            console.log('User logged out successfully');
+            
+            // Reset onboarding state (this also resets the demo user flag)
+            await resetOnboarding();
+            console.log('Onboarding state reset');
+            // After reset, go back to initial welcome screen (not onboarding welcome)
+            // The resetOnboarding should handle navigation, but we'll also set step to -1
+            setCurrentStep(-1);
+          } catch (error) {
+            console.error('Error logging out user:', error);
+            // Continue with navigation even if logout fails
+            setCurrentStep(-1);
+          }
+        }}
+      />
+    );
+  }
+
   // Show onboarding step 1 if we're on step 1
   if (currentStep === 1) {
     console.log('Rendering OnboardingStep1Screen with initialData:', formData);
@@ -570,6 +604,8 @@ export const AppContent: React.FC = () => {
     );
   }
 
-  // Show welcome screen by default (step 0, before onboarding)
+  // Show welcome screen by default (before onboarding starts, when currentStep is -1 or not 0-5)
+  // Note: currentStep === 0 shows OnboardingWelcomeScreen (handled above)
+  // This handles: initial load, or when user hasn't started onboarding yet
   return <WelcomeScreen onGetStarted={handleGetStarted} onDemoChat={handleDemoChat} />;
 };

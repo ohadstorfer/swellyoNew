@@ -21,6 +21,7 @@ import { getImageUrl } from '../services/media/imageService';
 import { UserSearchModal } from '../components/UserSearchModal';
 import { DirectMessageScreen } from './DirectMessageScreen';
 import { SwellyShaperScreen } from './SwellyShaperScreen';
+import { SwellyoTeamWelcome } from './SwellyoTeamWelcome';
 import { ProfileImage } from '../components/ProfileImage';
 import { ConversationListSkeleton, HeaderSkeleton } from '../components/skeletons';
 import { SKELETON_DELAY_MS } from '../constants/loading';
@@ -112,6 +113,7 @@ export default function ConversationsScreen({
     isDirect?: boolean;
   } | null>(null);
   const [showSwellyShaper, setShowSwellyShaper] = useState(false);
+  const [showSwellyoTeamWelcome, setShowSwellyoTeamWelcome] = useState(false);
 
   // Update user info when context user changes (immediate sync)
   useEffect(() => {
@@ -513,9 +515,10 @@ export default function ConversationsScreen({
         key={conv.id}
         style={styles.conversationItem}
         onPress={() => {
-          // Welcome conversation is not clickable - do nothing
+          // Navigate to Swellyo Team Welcome screen
+          setShowSwellyoTeamWelcome(true);
         }}
-        activeOpacity={1}
+        activeOpacity={0.7}
       >
         <View style={styles.conversationContent}>
           {/* Two overlapping avatars for Swellyo Team - matching Figma design */}
@@ -767,6 +770,21 @@ export default function ConversationsScreen({
     }
   }, []);
 
+  // Early return for SwellyoTeamWelcome - must come BEFORE other screens
+  if (showSwellyoTeamWelcome) {
+    return (
+      <SwellyoTeamWelcome
+        onBack={() => {
+          setShowSwellyoTeamWelcome(false);
+        }}
+        onDropInWithSwelly={() => {
+          // Navigate back to conversations screen (homepage)
+          setShowSwellyoTeamWelcome(false);
+        }}
+      />
+    );
+  }
+
   // Early return for SwellyShaperScreen - must come BEFORE DirectMessageScreen
   if (showSwellyShaper) {
     console.log('[ConversationsScreen] Rendering SwellyShaperScreen');
@@ -967,6 +985,21 @@ export default function ConversationsScreen({
                 >
                   <ShaperIcon />
                   <Text style={styles.menuItemText}>My Shaper</Text>
+                </TouchableOpacity>
+
+                {/* Swellyo Team Welcome - Testing */}
+                <TouchableOpacity
+                  style={styles.menuItem}
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    console.log('Swellyo Team Welcome menu item pressed');
+                    setShowMenu(false);
+                    setShowSwellyoTeamWelcome(true);
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="chatbubbles-outline" size={20} color="#222B30" />
+                  <Text style={styles.menuItemText}>Swellyo Team Welcome</Text>
                 </TouchableOpacity>
 
                 {/* Logout */}

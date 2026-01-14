@@ -37,7 +37,7 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         return 5; // Go directly to chat screen
       }
     }
-    return 0; // Default to welcome screen
+    return -1; // Default to -1 (WelcomeScreen), not 0 (OnboardingWelcomeScreen)
   };
 
   const [currentStep, setCurrentStep] = useState(getInitialStep());
@@ -115,20 +115,36 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         const isOnSwellyChatRoute = Platform.OS === 'web' && typeof window !== 'undefined' && window.location &&
           ((window.location.pathname || '').includes('swelly_chat') || (window.location.hash || '').includes('swelly_chat'));
         
-        if (!isOnSwellyChatRoute) {
-          setCurrentStep(parsed.currentStep || 0);
-        }
-        
         // Load user data if available
-        if (parsed.user) {
+        const hasUser = parsed.user !== null && parsed.user !== undefined;
+        if (hasUser) {
           setUser(parsed.user);
         }
         
         // Load onboarding completion status - prioritize database value over local storage
-        if (dbOnboardingComplete) {
+        const isOnboardingComplete = dbOnboardingComplete || parsed.isComplete === true;
+        if (isOnboardingComplete) {
           setIsComplete(true);
         } else if (parsed.isComplete !== undefined) {
           setIsComplete(parsed.isComplete);
+        }
+        
+        // Only restore step 0 (OnboardingWelcomeScreen) if:
+        // 1. Not on swelly_chat route
+        // 2. There's a user (logged in)
+        // 3. Onboarding is not complete
+        // Otherwise, default to -1 (WelcomeScreen)
+        if (!isOnSwellyChatRoute) {
+          if (hasUser && !isOnboardingComplete && parsed.currentStep === 0) {
+            // User is logged in and needs onboarding, restore step 0
+            setCurrentStep(0);
+          } else if (parsed.currentStep !== undefined && parsed.currentStep > 0) {
+            // Restore other steps (1-5) if they exist
+            setCurrentStep(parsed.currentStep);
+          } else {
+            // No user or onboarding complete, default to WelcomeScreen
+            setCurrentStep(-1);
+          }
         }
         
         // Ensure form data has the correct structure
