@@ -38,7 +38,7 @@ PROFILE FIELDS YOU CAN UPDATE:
 6. surf_level - Surf skill level from 1-5 (1 = beginner, 5 = expert)
 7. travel_experience - Number of surf trips (integer, 0-20+). Examples: 0, 5, 10, 17, 20
 8. bio - Biography/description about the user
-9. destinations_array - Array of past trips with format: [{"destination_name": "Location, Area", "time_in_days": number, "time_in_text": "X days/weeks/months/years"}]
+9. destinations_array - Array of past trips with format: [{"country": "Country Name", "area": ["Area1", "Area2", "Area3"], "time_in_days": number, "time_in_text": "X days/weeks/months/years"}]
 10. travel_type - Travel budget: "budget", "mid", or "high"
 11. travel_buddies - Travel companions: "solo", "2" (one friend/partner), or "crew" (group)
 12. lifestyle_keywords - Array of lifestyle interests (e.g., ["yoga", "party", "nature", "culture"])
@@ -133,7 +133,13 @@ For multiple updates in one message, you can return multiple fields:
 SPECIAL HANDLING:
 - For destinations_array: 
   - When user says "add trip to [destination] for [duration]", extract and format as:
-    {"field": "destinations_array", "value": [{"destination_name": "Location", "time_in_days": number, "time_in_text": "X days/weeks/months/years"}]}
+    {"field": "destinations_array", "value": [{"country": "Country Name", "area": ["Area1", "Area2"], "time_in_days": number, "time_in_text": "X days/weeks/months/years"}]}
+  - Extract country name and area(s)/town(s) separately. The "area" field is an array that can contain multiple town/area names.
+  - Examples:
+    * "Australia, Gold Coast" → {"country": "Australia", "area": ["Gold Coast"]}
+    * "Australia, Gold Coast, Byron Bay, Noosa" → {"country": "Australia", "area": ["Gold Coast", "Byron Bay", "Noosa"]}
+    * "Costa Rica, Tamarindo" → {"country": "Costa Rica", "area": ["Tamarindo"]}
+    * "El Salvador" → {"country": "El Salvador", "area": []}
   - When user says they want to UPDATE an existing trip (e.g., "I was in Australia for 3 months but it should be 2 years"), you should UPDATE the existing trip by matching the country name
   - Always extract both time_in_days (calculated) and time_in_text (preserved from user input, rounded to years/half-years if 1+ year)
   - Examples:
@@ -176,7 +182,7 @@ Response: {
   "is_finished": true,
   "data": {
     "field": "destinations_array",
-    "value": [{"destination_name": "Mexico", "time_in_days": 90, "time_in_text": "3 months"}]
+    "value": [{"country": "Mexico", "area": [], "time_in_days": 90, "time_in_text": "3 months"}]
   }
 }
 
@@ -208,7 +214,7 @@ Response: {
   "is_finished": true,
   "data": {
     "updates": [
-      {"field": "destinations_array", "value": [{"destination_name": "El Salvador", "time_in_days": 21, "time_in_text": "3 weeks"}]},
+      {"field": "destinations_array", "value": [{"country": "El Salvador", "area": [], "time_in_days": 21, "time_in_text": "3 weeks"}]},
       {"field": "surfboard_type", "value": "shortboard"}
     ]
   }
@@ -232,7 +238,7 @@ Response: {
   "is_finished": true,
   "data": {
     "updates": [
-      {"field": "destinations_array", "value": [{"destination_name": "Costa Rica, Tamarindo", "time_in_days": 180, "time_in_text": "6 months"}]},
+      {"field": "destinations_array", "value": [{"country": "Costa Rica", "area": ["Tamarindo"], "time_in_days": 180, "time_in_text": "6 months"}]},
       {"field": "lifestyle_keywords", "value": ["yoga", "food", "local culture"]}
     ]
   }
@@ -246,7 +252,7 @@ Response: {
     "updates": [
       {"field": "travel_buddies", "value": "solo"},
       {"field": "travel_type", "value": "budget"},
-      {"field": "destinations_array", "value": [{"destination_name": "Sri Lanka", "time_in_days": 60, "time_in_text": "2 months"}]},
+      {"field": "destinations_array", "value": [{"country": "Sri Lanka", "area": [], "time_in_days": 60, "time_in_text": "2 months"}]},
       {"field": "wave_type_keywords", "value": ["reef"]}
     ]
   }
@@ -258,7 +264,7 @@ Response: {
   "is_finished": true,
   "data": {
     "field": "destinations_array",
-    "value": [{"destination_name": "Australia", "time_in_days": 905, "time_in_text": "2.5 years"}]
+    "value": [{"country": "Australia", "area": [], "time_in_days": 905, "time_in_text": "2.5 years"}]
   }
 }
 
@@ -281,7 +287,7 @@ Response: {
   "is_finished": true,
   "data": {
     "updates": [
-      {"field": "destinations_array", "value": [{"destination_name": "Indonesia, Bali/Lombok", "time_in_days": 120, "time_in_text": "4 months"}]},
+      {"field": "destinations_array", "value": [{"country": "Indonesia", "area": ["Bali", "Lombok"], "time_in_days": 120, "time_in_text": "4 months"}]},
       {"field": "lifestyle_keywords", "value": ["party", "nightlife"]},
       {"field": "wave_type_keywords", "value": ["big waves", "powerful"]}
     ]
@@ -538,19 +544,28 @@ async function updateUserProfile(userId: string, field: string, value: any, supa
       
       // For each new trip, check if it matches an existing one by country
       for (const newTrip of value) {
-        const newDestName = newTrip.destination_name || ''
+        // Support both new structure (country, area) and legacy (destination_name)
+        const newCountry = newTrip.country || extractCountryFromDestination(newTrip.destination_name || '')
         let foundMatch = false
         
         // Try to find matching existing trip by country
         for (let i = 0; i < updatedTrips.length; i++) {
-          const existingDestName = updatedTrips[i].destination_name || ''
+          const existingTrip = updatedTrips[i]
+          const existingCountry = existingTrip.country || extractCountryFromDestination(existingTrip.destination_name || '')
           
-          if (destinationsMatchByCountry(newDestName, existingDestName)) {
+          if (newCountry.toLowerCase() === existingCountry.toLowerCase()) {
             // Update existing trip with new data
+            // Merge areas if both have them
+            const mergedAreas = newTrip.area || []
+            const existingAreas = existingTrip.area || []
+            const allAreas = [...new Set([...existingAreas, ...mergedAreas])] // Combine and deduplicate
+            
             updatedTrips[i] = {
-              ...updatedTrips[i],
-              ...newTrip, // Overwrite with new data (time_in_days, time_in_text, etc.)
-              destination_name: existingDestName // Keep original destination name format
+              ...existingTrip,
+              country: existingCountry, // Keep existing country
+              area: allAreas, // Merge areas
+              time_in_days: newTrip.time_in_days ?? existingTrip.time_in_days,
+              time_in_text: newTrip.time_in_text || existingTrip.time_in_text
             }
             foundMatch = true
             break
@@ -558,8 +573,17 @@ async function updateUserProfile(userId: string, field: string, value: any, supa
         }
         
         // If no match found, add as new trip
+        // Convert legacy format to new format if needed
         if (!foundMatch) {
-          updatedTrips.push(newTrip)
+          const tripToAdd = newTrip.country 
+            ? newTrip 
+            : {
+                country: extractCountryFromDestination(newTrip.destination_name || ''),
+                area: (newTrip.destination_name || '').split(',').slice(1).map(a => a.trim()).filter(a => a),
+                time_in_days: newTrip.time_in_days,
+                time_in_text: newTrip.time_in_text
+              }
+          updatedTrips.push(tripToAdd)
         }
       }
       

@@ -621,10 +621,13 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
               </View>
               {topDestinations.map((destination, index) => {
                 const progressWidth = getDestinationProgressWidth(destination.time_in_days);
-                // Extract country name from destination (format: "Area, Country" or just "Country")
-                const destinationParts = destination.destination_name.split(',').map(part => part.trim());
-                const countryName = destinationParts.length > 1 ? destinationParts[destinationParts.length - 1] : destinationParts[0];
-                const countryFlagUrl = getCountryFlag(countryName);
+                // Support both new structure (country, area) and legacy (destination_name)
+                const country = destination.country || (destination as any).destination_name?.split(',')[0]?.trim() || '';
+                const areas = destination.area || [];
+                const displayName = areas.length > 0 
+                  ? `${country}, ${areas.join(', ')}`
+                  : country;
+                const countryFlagUrl = getCountryFlag(country);
                 
                 return (
                   <View key={index} style={styles.destinationCard}>
@@ -637,7 +640,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
                     ) : (
                       <Image
                         source={{ 
-                          uri: `https://source.unsplash.com/86x74/?${encodeURIComponent(destination.destination_name.split(',')[0])},beach,surf`
+                          uri: `https://source.unsplash.com/86x74/?${encodeURIComponent(country)},beach,surf`
                         }}
                         style={styles.destinationImage}
                         resizeMode="cover"
@@ -645,7 +648,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
                     )}
                     <View style={styles.destinationContent}>
                       <View style={styles.destinationTitleRow}>
-                        <Text style={styles.destinationName}>{destination.destination_name}:</Text>
+                        <Text style={styles.destinationName}>{displayName}:</Text>
                         <View style={styles.destinationDaysContainer}>
                           <Text style={styles.destinationDays}>
                             {destination.time_in_text || `${destination.time_in_days} days`}

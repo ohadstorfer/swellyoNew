@@ -100,6 +100,26 @@ async function generateAreaArray(country: string, area: string): Promise<string[
  * Extract country from destination string
  * Handles formats like "Sri Lanka, South" or just "Sri Lanka"
  */
+/**
+ * Extract country from destination (supports both new and legacy formats)
+ */
+function extractCountryFromDestination(
+  dest: { country: string; area: string[] } | { destination_name: string } | string
+): string {
+  // New structure: {country, area[]}
+  if (typeof dest === 'object' && 'country' in dest) {
+    return dest.country;
+  }
+  
+  // Legacy structure: destination_name string or {destination_name: string}
+  const destinationName = typeof dest === 'string' 
+    ? dest 
+    : (dest as any).destination_name || '';
+  
+  const parts = destinationName.split(',').map(p => p.trim());
+  return parts[0] || ''; // First part is usually the country
+}
+
 function extractCountry(destination: string): string {
   const parts = destination.split(',').map(p => p.trim());
   return parts[0]; // First part is usually the country
@@ -107,10 +127,10 @@ function extractCountry(destination: string): string {
 
 /**
  * Check if destination contains the requested country
- * Handles formats like "California, USA", "USA", "United States", etc.
+ * Handles new structure: {country, area[]} and legacy: destination_name string
  */
 function destinationContainsCountry(
-  destination: string | null | undefined,
+  destination: { country: string; area: string[] } | { destination_name: string } | string | null | undefined,
   requestedCountry: string | null | undefined
 ): boolean {
   // Handle null/undefined cases
@@ -118,36 +138,32 @@ function destinationContainsCountry(
     return false;
   }
   
-  const destinationLower = destination.toLowerCase().trim();
+  const country = extractCountryFromDestination(destination);
   const requestedLower = requestedCountry.toLowerCase().trim();
+  const countryLower = country.toLowerCase().trim();
   
-  // Split by comma and check all parts (handles "California, USA" format)
-  const parts = destination.split(',').map(p => p.trim().toLowerCase());
-  
-  // Check if any part exactly matches the country
-  if (parts.some(part => part === requestedLower)) {
+  // Exact match
+  if (countryLower === requestedLower) {
     return true;
   }
   
-  // Also check if the full destination string contains the country
-  // (handles cases like "California USA" without comma)
   // Use word boundary regex to avoid substring matches (e.g., "USA" in "AUS")
   const escapedRequested = requestedLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const regex = new RegExp(`\\b${escapedRequested}\\b`, 'i');
-  if (regex.test(destinationLower)) {
+  if (regex.test(countryLower)) {
     return true;
   }
   
   // Special case: if requested is "USA" and destination contains "United States" or vice versa
   if (requestedLower === 'usa' || requestedLower === 'united states') {
-    if (destinationLower.includes('united states') || destinationLower.includes('usa')) {
+    if (countryLower.includes('united states') || countryLower.includes('usa')) {
       return true;
     }
   }
   
   // Special case: if requested is "UK" and destination contains "United Kingdom" or vice versa
   if (requestedLower === 'uk' || requestedLower === 'united kingdom') {
-    if (destinationLower.includes('united kingdom') || /\buk\b/.test(destinationLower)) {
+    if (countryLower.includes('united kingdom') || /\buk\b/.test(countryLower)) {
       return true;
     }
   }
@@ -157,12 +173,30 @@ function destinationContainsCountry(
 
 /**
  * Check if any generated areas match the destination
+ * Works with new structure: {country, area[]} and legacy: destination_name string
  */
 function destinationMatchesAreas(
-  destination: string,
+  destination: { country: string; area: string[] } | { destination_name: string } | string,
   generatedAreas: string[]
 ): boolean {
-  const destinationLower = destination.toLowerCase();
+  // New structure: {country, area[]}
+  if (typeof destination === 'object' && 'country' in destination) {
+    const areas = destination.area || [];
+    return generatedAreas.some(genArea => 
+      areas.some(destArea => {
+        const destAreaLower = destArea.toLowerCase();
+        const genAreaLower = genArea.toLowerCase();
+        return destAreaLower.includes(genAreaLower) || genAreaLower.includes(destAreaLower);
+      })
+    );
+  }
+  
+  // Legacy structure: destination_name string
+  const destinationName = typeof destination === 'string' 
+    ? destination 
+    : (destination as any).destination_name || '';
+  
+  const destinationLower = destinationName.toLowerCase();
   return generatedAreas.some(area => 
     destinationLower.includes(area.toLowerCase()) || 
     area.toLowerCase().includes(destinationLower.split(',')[1]?.trim().toLowerCase() || '')
@@ -387,7 +421,11 @@ function calculateV2SimilarityScore(requested: number, user: number): number {
 /**
  * Check if area matches any of the generated areas
  */
-function areaMatches(destinationName: string, generatedAreas: string[]): boolean {
+function areaMatches(
+  destination: { country: string; area: string[] } | { destination_name: string } | string,
+  generatedAreas: string[]
+): boolean {
+  return destinationMatchesAreas(destination, generatedAreas);
   const destLower = destinationName.toLowerCase();
   return generatedAreas.some(area => destLower.includes(area.toLowerCase()));
 }
@@ -524,7 +562,7 @@ export async function findMatchingUsersV2(
         return false;
       }
       return surfer.destinations_array.some((dest: any) => 
-        destinationContainsCountry(dest.destination_name || '', request.destination_country)
+        destinationContainsCountry(dest, request.destination_country)
       );
     });
 
@@ -539,7 +577,7 @@ export async function findMatchingUsersV2(
       let daysInDestination = 0;
       if (userSurfer.destinations_array) {
         const matchingDestinations = userSurfer.destinations_array.filter(dest =>
-          destinationContainsCountry(dest.destination_name, request.destination_country)
+          destinationContainsCountry(dest, request.destination_country)
         );
         daysInDestination = matchingDestinations.reduce((sum, dest) => sum + (dest.time_in_days || 0), 0);
       }
@@ -566,13 +604,17 @@ export async function findMatchingUsersV2(
       // Step 5: Add 30 points for area matches
       if (userSurfer.destinations_array && generatedAreas.length > 0) {
         for (const dest of userSurfer.destinations_array) {
-          if (destinationContainsCountry(dest.destination_name, request.destination_country)) {
-            if (areaMatches(dest.destination_name, generatedAreas)) {
+          if (destinationContainsCountry(dest, request.destination_country)) {
+            if (areaMatches(dest, generatedAreas)) {
               points += 30;
               // Track which area matched
-              const matchedArea = generatedAreas.find(area => 
-                dest.destination_name.toLowerCase().includes(area.toLowerCase())
-              );
+              const destAreas = 'area' in dest ? dest.area : [];
+              const destName = 'destination_name' in dest ? dest.destination_name : '';
+              const matchedArea = generatedAreas.find(area => {
+                const areaLower = area.toLowerCase();
+                return destAreas.some(da => da.toLowerCase().includes(areaLower)) ||
+                       destName.toLowerCase().includes(areaLower);
+              });
               if (matchedArea && !userEntry.matchedAreas.includes(matchedArea)) {
                 userEntry.matchedAreas.push(matchedArea);
               }
@@ -853,7 +895,7 @@ export async function findMatchingUsers(
       country_from: s.country_from,
       destinations_count: s.destinations_array?.length || 0,
       has_el_salvador: s.destinations_array?.some((d: any) => 
-        d.destination_name?.toLowerCase().includes('el salvador')
+        destinationContainsCountry(d, 'El Salvador')
       ) || false
     })));
 
@@ -870,7 +912,7 @@ export async function findMatchingUsers(
           : []
         
         const match = destinations.find((d: any) => 
-          d.destination_name?.toLowerCase().includes(destination.toLowerCase()) &&
+          destinationContainsCountry(d, destination) &&
           d.time_in_days >= min_days
         )
         return !!match
@@ -941,7 +983,7 @@ export async function findMatchingUsers(
           return false;
         }
         return surfer.destinations_array.some((dest: any) => 
-          destinationContainsCountry(dest.destination_name || '', request.destination_country)
+          destinationContainsCountry(dest, request.destination_country)
         );
       });
       console.log(`Filtered to ${surfersWithDestination.length} surfers with matching destinations (from ${filteredSurfers.length} total)`);
@@ -968,7 +1010,7 @@ export async function findMatchingUsers(
       let daysInDestination = 0;
       if (request.destination_country && userSurfer.destinations_array) {
         const matchingDestinations = userSurfer.destinations_array.filter(dest =>
-          destinationContainsCountry(dest.destination_name, request.destination_country)
+          destinationContainsCountry(dest, request.destination_country)
         );
         daysInDestination = matchingDestinations.reduce((sum, dest) => sum + (dest.time_in_days || 0), 0);
       } else if (!request.destination_country && userSurfer.destinations_array) {
@@ -997,13 +1039,17 @@ export async function findMatchingUsers(
       // Step 5: Add 30 points for area matches
       if (request.area && request.destination_country && userSurfer.destinations_array && generatedAreas.length > 0) {
         for (const dest of userSurfer.destinations_array) {
-          if (destinationContainsCountry(dest.destination_name, request.destination_country)) {
-            if (areaMatches(dest.destination_name, generatedAreas)) {
+          if (destinationContainsCountry(dest, request.destination_country)) {
+            if (areaMatches(dest, generatedAreas)) {
               points += 30;
               // Track which area matched
-              const matchedArea = generatedAreas.find(area => 
-                dest.destination_name.toLowerCase().includes(area.toLowerCase())
-              );
+              const destAreas = 'area' in dest ? dest.area : [];
+              const destName = 'destination_name' in dest ? dest.destination_name : '';
+              const matchedArea = generatedAreas.find(area => {
+                const areaLower = area.toLowerCase();
+                return destAreas.some(da => da.toLowerCase().includes(areaLower)) ||
+                       destName.toLowerCase().includes(areaLower);
+              });
               if (matchedArea && !userEntry.matchedAreas.includes(matchedArea)) {
                 userEntry.matchedAreas.push(matchedArea);
               }

@@ -371,13 +371,51 @@ async function normalizeDestination(
 
 /**
  * Extract destination hierarchy from user's destinations_array
- * Parses format like "Sri Lanka, South-West, Weligama" or "Sri Lanka, South"
+ * Works with new structure: {country, area[]} or legacy: destination_name string
  */
-function parseUserDestination(destinationName: string): {
+function parseUserDestination(
+  destination: { country: string; area: string[] } | { destination_name: string } | string
+): {
   country: string;
   area?: AreaOption[];
   towns?: string[];
 } {
+  // Handle new structure: {country, area[]}
+  if (typeof destination === 'object' && 'country' in destination) {
+    const country = destination.country;
+    const areas = destination.area || [];
+    
+    // Try to identify which areas match AREA_OPTIONS and which are towns
+    const areaParts: AreaOption[] = [];
+    const townParts: string[] = [];
+
+    for (const area of areas) {
+      const areaLower = area.toLowerCase();
+      const matchedArea = AREA_OPTIONS.find(opt => 
+        areaLower === opt || 
+        areaLower.includes(opt) || 
+        opt.includes(areaLower)
+      );
+      
+      if (matchedArea) {
+        areaParts.push(matchedArea);
+      } else {
+        townParts.push(area);
+      }
+    }
+
+    return {
+      country,
+      area: areaParts.length > 0 ? areaParts : undefined,
+      towns: townParts.length > 0 ? townParts : undefined,
+    };
+  }
+
+  // Handle legacy structure: destination_name string or {destination_name: string}
+  const destinationName = typeof destination === 'string' 
+    ? destination 
+    : (destination as any).destination_name || '';
+  
   const parts = destinationName.split(',').map(p => p.trim());
   const country = parts[0] || '';
   
@@ -415,10 +453,56 @@ function parseUserDestination(destinationName: string): {
 }
 
 /**
+ * Check if requested area/town is in user's area array (for area priority matching)
+ * This checks the raw area names from the request against the user's area array
+ */
+function hasRequestedAreaInArray(
+  userDestination: { country: string; area: string[] } | { destination_name: string } | string,
+  requestedArea: string | null | undefined
+): boolean {
+  if (!requestedArea) return false;
+  
+  // Support new structure: {country, area[]}
+  if (typeof userDestination === 'object' && 'country' in userDestination) {
+    const areas = userDestination.area || [];
+    const requestedLower = requestedArea.toLowerCase();
+    return areas.some(area => area.toLowerCase() === requestedLower || 
+                              area.toLowerCase().includes(requestedLower) ||
+                              requestedLower.includes(area.toLowerCase()));
+  }
+  
+  // Legacy structure: destination_name string - parse it
+  if (typeof userDestination === 'string') {
+    const parts = userDestination.split(',').map(p => p.trim());
+    if (parts.length > 1) {
+      const requestedLower = requestedArea.toLowerCase();
+      return parts.slice(1).some(part => part.toLowerCase() === requestedLower ||
+                                         part.toLowerCase().includes(requestedLower) ||
+                                         requestedLower.includes(part.toLowerCase()));
+    }
+  }
+  
+  // Legacy structure: {destination_name: string}
+  if (typeof userDestination === 'object' && 'destination_name' in userDestination) {
+    const destName = (userDestination as any).destination_name || '';
+    const parts = destName.split(',').map((p: string) => p.trim());
+    if (parts.length > 1) {
+      const requestedLower = requestedArea.toLowerCase();
+      return parts.slice(1).some(part => part.toLowerCase() === requestedLower ||
+                                         part.toLowerCase().includes(requestedLower) ||
+                                         requestedLower.includes(part.toLowerCase()));
+    }
+  }
+  
+  return false;
+}
+
+/**
  * Check if user destination matches normalized destination
+ * Works with new structure: {country, area[]} or legacy: destination_name string
  */
 function destinationMatches(
-  userDestination: string,
+  userDestination: { country: string; area: string[] } | { destination_name: string } | string,
   normalizedDest: NormalizedDestination
 ): {
   countryMatch: boolean;
@@ -851,8 +935,23 @@ export async function findMatchingUsersV3(
 
     console.log(`Found ${allSurfers.length} total surfers`);
 
-    // Step 5: Process each user through 4-layer matching
-    const matchingResults: UserMatchingResult[] = [];
+    // Step 5: Filter surfers by country match first (destination-based querying)
+    console.log('Step 5: Filtering surfers by destination country...');
+    const countryMatchedSurfers: Array<{
+      surfer: SupabaseSurfer;
+      hasAreaMatch: boolean; // True if requested area is in their area array
+      daysInDestination: number;
+      bestMatch: {
+        countryMatch: boolean;
+        areaMatch: boolean;
+        townMatch: boolean;
+        matchedAreas: AreaOption[];
+        matchedTowns: string[];
+      };
+    }> = [];
+
+    // Get requested area from request (raw area name, not normalized)
+    const requestedArea = request.area || null;
 
     for (const userSurfer of allSurfers) {
       // Find matching destinations and calculate days
@@ -864,13 +963,24 @@ export async function findMatchingUsersV3(
         matchedAreas: AreaOption[];
         matchedTowns: string[];
       } | null = null;
+      let hasAreaMatch = false;
 
       if (userSurfer.destinations_array && userSurfer.destinations_array.length > 0) {
         for (const dest of userSurfer.destinations_array) {
-          const match = destinationMatches(dest.destination_name, normalizedDest);
+          // Support both new structure (country, area) and legacy (destination_name)
+          const destForMatch = 'country' in dest ? dest : (dest as any).destination_name || '';
+          const match = destinationMatches(destForMatch, normalizedDest);
           
           if (match.countryMatch) {
             daysInDestination += dest.time_in_days || 0;
+            
+            // Check if requested area is in this destination's area array
+            // This checks the raw area name from the request against the user's area array
+            if (requestedArea) {
+              if (hasRequestedAreaInArray(dest, requestedArea)) {
+                hasAreaMatch = true;
+              }
+            }
             
             // Track best match (prefer area + town matches)
             if (!bestMatch || 
@@ -886,6 +996,25 @@ export async function findMatchingUsersV3(
       if (!bestMatch || !bestMatch.countryMatch || daysInDestination === 0) {
         continue;
       }
+
+      // Add to country-matched surfers
+      countryMatchedSurfers.push({
+        surfer: userSurfer,
+        hasAreaMatch,
+        daysInDestination,
+        bestMatch,
+      });
+    }
+
+    console.log(`Found ${countryMatchedSurfers.length} surfers with matching country`);
+    const withAreaMatch = countryMatchedSurfers.filter(s => s.hasAreaMatch).length;
+    const withoutAreaMatch = countryMatchedSurfers.length - withAreaMatch;
+    console.log(`  - ${withAreaMatch} with area match, ${withoutAreaMatch} without area match`);
+
+    // Step 6: Process each user through 4-layer matching
+    const matchingResults: UserMatchingResult[] = [];
+
+    for (const { surfer: userSurfer, hasAreaMatch, daysInDestination, bestMatch } of countryMatchedSurfers) {
 
       // LAYER 1: Check explicit hard requirements
       const layer1Result = checkLayer1HardRequirements(userSurfer, request, normalizedDest);
@@ -953,7 +1082,9 @@ export async function findMatchingUsersV3(
       );
 
       // Calculate total score (priority + general)
-      const totalScore = priorityScore + layer4Result.score;
+      // Add area priority boost: +1000 points for area matches (ensures they appear first)
+      const areaPriorityBoost = hasAreaMatch ? 1000 : 0;
+      const totalScore = priorityScore + layer4Result.score + areaPriorityBoost;
 
       matchingResults.push({
         user_id: userSurfer.user_id,
@@ -971,16 +1102,19 @@ export async function findMatchingUsersV3(
       });
     }
 
-    // Step 6: Filter to only users who passed both Layer 1 and Layer 2
+    // Step 7: Filter to only users who passed both Layer 1 and Layer 2
     const passedUsers = matchingResults.filter(r => r.passedLayer1 && r.passedLayer2);
 
-    // Step 7: Sort by total score (descending)
+    // Step 8: Sort by total score (descending)
+    // Area matches (with +1000 boost) will naturally appear first
     passedUsers.sort((a, b) => b.totalScore - a.totalScore);
 
-    // Step 8: Return top 3 users
-    const topUsers = passedUsers.slice(0, 3);
+    // Step 9: Return top users (area matches prioritized via score boost)
+    // The +1000 boost ensures area matches appear first, then sorted by other scores
+    const topUsers = passedUsers.slice(0, 10);
 
-    console.log(`Found ${passedUsers.length} users who passed filters, returning top 3`);
+    console.log(`Found ${passedUsers.length} users who passed filters, returning top users`);
+    console.log(`Area priority: ${passedUsers.filter(u => u.totalScore >= 1000).length} users with area match boost`);
     console.log('Top users:', topUsers.map(u => ({
       user_id: u.user_id,
       name: u.surfer.name,

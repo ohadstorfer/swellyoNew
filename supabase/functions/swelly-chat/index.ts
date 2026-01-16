@@ -47,7 +47,7 @@ IMPORTANT: All questions must feel natural and conversational, like a friend ask
        - 1 year and 3 months → "1.5 years"
        - 3 years and 2 months → "3 years" (round down)
        - 3 years and 4 months → "3.5 years" (round 4 months to 0.5 years)
-   - Format: [{"destination_name": "Location, Area", "time_in_days": number, "time_in_text": "X days/weeks/months/years"}]
+   - Format: [{"country": "Country Name", "area": ["Area1", "Area2"], "time_in_days": number, "time_in_text": "X days/weeks/months/years"}]
 
 2. TRAVEL_TYPE: Ask about their travel budget level in a natural, Swelly-style way. Must extract one of: "budget", "mid", or "high". Example: "Are you on a budget shredder, mid-range for a good amount of comfort, or looking to treat yourself well, no matter the cost?" - Keep it conversational and in Swelly's voice, not too direct.
 
@@ -78,7 +78,7 @@ Response format: Always return JSON with this structure:
 When is_finished is true, the data object MUST have this exact structure:
 {
   "destinations_array": [
-    {"destination_name": "State/Country, Specific-area", "time_in_days": number, "time_in_text": "X days/weeks/months/years"},
+    {"country": "Country Name", "area": ["Area1", "Area2"], "time_in_days": number, "time_in_text": "X days/weeks/months/years"},
     ...
   ],
   "travel_type": "budget" | "mid" | "high",
@@ -154,9 +154,9 @@ support sustainabilty, not too much on it. doing valley ball and climbing. love 
    "is_finished": true,
    "data": {
         "destinations_array": [
-          {"destination_name": "San Diego, South County", "time_in_days": 210, "time_in_text": "7 months"},
-          {"destination_name": "Sri Lanka, Ahangama/Kabalana/Midigama", "time_in_days": 60, "time_in_text": "2 months"},
-          {"destination_name": "Maldives, Thulusdhoo/Himmafushi", "time_in_days": 30, "time_in_text": "1 month"}
+          {"country": "USA", "area": ["San Diego", "South County"], "time_in_days": 210, "time_in_text": "7 months"},
+          {"country": "Sri Lanka", "area": ["Ahangama", "Kabalana", "Midigama"], "time_in_days": 60, "time_in_text": "2 months"},
+          {"country": "Maldives", "area": ["Thulusdhoo", "Himmafushi"], "time_in_days": 30, "time_in_text": "1 month"}
         ],
         "travel_type": "budget",
         "travel_buddies": "2",
@@ -514,6 +514,203 @@ async function callOpenAI(messages: any[]): Promise<string> {
   return assistantMessage
 }
 
+/**
+ * Enrich area with related names, nicknames, and nearby towns using GPT API
+ * @param country - Country name
+ * @param area - The primary area/town name mentioned by user
+ * @returns Array of related area names (with the original area first)
+ */
+async function enrichAreaWithRelatedNames(country: string, area: string): Promise<string[]> {
+  if (!OPENAI_API_KEY) {
+    console.warn('OpenAI API key not configured, returning original area only')
+    return [area]
+  }
+
+  if (!area || !area.trim()) {
+    return []
+  }
+
+  try {
+    const prompt = `Given a surf destination area: "${area}" in "${country}"
+
+Your task: Research and find related names, nicknames, and nearby small towns/areas that surfers might use to refer to this location.
+
+Return a JSON object with this structure:
+{
+  "related_areas": ["area1", "area2", "area3", ...]
+}
+
+Rules:
+- Include the original area name as the FIRST item in the array
+- Add common nicknames or alternative names for this area
+- Add nearby small towns or areas that are part of the same surf region
+- Add any other ways surfers might refer to this location
+- Keep names concise (town/area names, not full descriptions)
+- Return 3-8 related names total (including the original)
+- Only include names that are actually related to this specific area
+- Do NOT include the country name in the areas
+
+Examples:
+- Input: country="Australia", area="Gold Coast" → {
+  "related_areas": ["Gold Coast", "GC", "Surfers Paradise", "Burleigh Heads", "Coolangatta", "Tweed Heads"]
+}
+- Input: country="Costa Rica", area="Tamarindo" → {
+  "related_areas": ["Tamarindo", "Tama", "Playa Tamarindo", "Langosta", "Playa Grande", "Avellanas"]
+}
+- Input: country="Sri Lanka", area="Weligama" → {
+  "related_areas": ["Weligama", "Weli", "Midigama", "Mirissa", "Polhena"]
+}
+
+Return ONLY the JSON object, no other text.`
+
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a helpful assistant that returns only valid JSON objects. Do not include any explanatory text.',
+          },
+          {
+            role: 'user',
+            content: prompt,
+          },
+        ],
+        temperature: 0.3,
+        max_tokens: 300,
+        response_format: { type: 'json_object' },
+      }),
+    })
+
+    if (!response.ok) {
+      throw new Error(`OpenAI API error: ${response.status}`)
+    }
+
+    const data = await response.json()
+    const content = data.choices[0]?.message?.content?.trim()
+    
+    if (!content) {
+      throw new Error('No content in OpenAI response')
+    }
+
+    const parsed = JSON.parse(content)
+    const relatedAreas = parsed.related_areas || []
+    
+    // Ensure the original area is first, and remove duplicates
+    const uniqueAreas = [area]
+    for (const relatedArea of relatedAreas) {
+      if (relatedArea && relatedArea.toLowerCase() !== area.toLowerCase() && !uniqueAreas.some(a => a.toLowerCase() === relatedArea.toLowerCase())) {
+        uniqueAreas.push(relatedArea)
+      }
+    }
+
+    return uniqueAreas
+  } catch (error) {
+    console.error('Error enriching area with related names:', error)
+    // Fallback: return just the original area
+    return [area]
+  }
+}
+
+/**
+ * Process and enrich destinations array with related area names
+ * @param destinations - Array of destinations from GPT response
+ * @returns Processed destinations with enriched areas
+ */
+async function processDestinationsArray(destinations: any[]): Promise<any[]> {
+  if (!destinations || !Array.isArray(destinations)) {
+    return []
+  }
+
+  const processed: any[] = []
+
+  for (const dest of destinations) {
+    // Support both new format (country, area) and legacy (destination_name)
+    let country: string
+    let areas: string[] = []
+
+    if (dest.country) {
+      // New format
+      country = dest.country
+      areas = dest.area || []
+    } else if (dest.destination_name) {
+      // Legacy format - parse it
+      const parts = dest.destination_name.split(',').map((p: string) => p.trim())
+      country = parts[0] || ''
+      areas = parts.length > 1 ? parts.slice(1) : []
+    } else {
+      // Skip invalid destinations
+      console.warn('Skipping invalid destination:', dest)
+      continue
+    }
+
+    // If no areas mentioned, save with empty array
+    if (areas.length === 0) {
+      processed.push({
+        country,
+        area: [],
+        time_in_days: dest.time_in_days || 0,
+        time_in_text: dest.time_in_text,
+      })
+      continue
+    }
+
+    // Enrich ALL areas mentioned by the user
+    const allEnrichedNames: string[] = []
+    
+    // Enrich each area sequentially
+    for (const area of areas) {
+      const enrichedNames = await enrichAreaWithRelatedNames(country, area)
+      // enrichedNames includes the original area as first item, so skip it
+      // Add all related names (excluding the original which is already in areas)
+      for (let i = 1; i < enrichedNames.length; i++) {
+        const relatedName = enrichedNames[i]
+        // Only add if it's not already in the original areas list
+        if (!areas.some(a => a.toLowerCase() === relatedName.toLowerCase())) {
+          allEnrichedNames.push(relatedName)
+        }
+      }
+    }
+    
+    // Combine: original areas first, then all enriched names
+    // Remove duplicates while preserving order (originals first, then enriched)
+    const seen = new Set<string>()
+    const uniqueAreas: string[] = []
+    
+    // First pass: add all original areas (preserve order)
+    for (const area of areas) {
+      const lower = area.toLowerCase()
+      if (!seen.has(lower)) {
+        seen.add(lower)
+        uniqueAreas.push(area)
+      }
+    }
+    
+    // Second pass: add enriched names (excluding originals)
+    for (const enrichedName of allEnrichedNames) {
+      const lower = enrichedName.toLowerCase()
+      if (!seen.has(lower)) {
+        seen.add(lower)
+        uniqueAreas.push(enrichedName)
+      }
+    }
+
+    processed.push({
+      country,
+      area: uniqueAreas,
+      time_in_days: dest.time_in_days || 0,
+      time_in_text: dest.time_in_text,
+    })
+  }
+
+  return processed
+}
+
 serve(async (req: Request) => {
   // Handle CORS
   if (req.method === 'OPTIONS') {
@@ -602,6 +799,14 @@ serve(async (req: Request) => {
         if (parsed.is_finished && parsed.data) {
           console.log('Conversation finished. Original data:', JSON.stringify(parsed.data, null, 2))
           transformedData = transformSwellyData(parsed.data)
+          
+          // Process and enrich destinations array with related area names
+          if (transformedData.destinations_array && Array.isArray(transformedData.destinations_array)) {
+            console.log('Processing destinations array for enrichment...')
+            transformedData.destinations_array = await processDestinationsArray(transformedData.destinations_array)
+            console.log('Enriched destinations array:', JSON.stringify(transformedData.destinations_array, null, 2))
+          }
+          
           console.log('Transformed data:', JSON.stringify(transformedData, null, 2))
         }
         
@@ -692,6 +897,14 @@ serve(async (req: Request) => {
         if (parsed.is_finished && parsed.data) {
           console.log('Conversation finished (continue). Original data:', JSON.stringify(parsed.data, null, 2))
           transformedData = transformSwellyData(parsed.data)
+          
+          // Process and enrich destinations array with related area names
+          if (transformedData.destinations_array && Array.isArray(transformedData.destinations_array)) {
+            console.log('Processing destinations array for enrichment (continue)...')
+            transformedData.destinations_array = await processDestinationsArray(transformedData.destinations_array)
+            console.log('Enriched destinations array (continue):', JSON.stringify(transformedData.destinations_array, null, 2))
+          }
+          
           console.log('Transformed data (continue):', JSON.stringify(transformedData, null, 2))
         }
         
