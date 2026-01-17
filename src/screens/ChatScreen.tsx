@@ -22,6 +22,7 @@ import { useOnboarding } from '../context/OnboardingContext';
 import { getImageUrl } from '../services/media/imageService';
 import { supabaseDatabaseService } from '../services/database/supabaseDatabaseService';
 import { messagingService } from '../services/messaging/messagingService';
+import { analyticsService } from '../services/analytics/analyticsService';
 
 interface Message {
   id: string;
@@ -47,6 +48,7 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
   const [chatId, setChatId] = useState<string | null>(null);
   const [isFinished, setIsFinished] = useState(false);
   const [inputHeight, setInputHeight] = useState(25); // Initial height for one line
+  const [onboardingStartTime] = useState<number>(Date.now()); // Track when onboarding chat started
   const scrollViewRef = useRef<ScrollView>(null);
   const textInputRef = useRef<any>(null);
 
@@ -239,8 +241,24 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
         }
         
         // Navigate to profile screen after a short delay (onboarding only)
+        console.log('[OnboardingChatScreen] Chat finished, preparing to complete onboarding...', {
+          onboardingStartTime: new Date(onboardingStartTime).toISOString(),
+          currentTime: new Date().toISOString(),
+          elapsedSeconds: (Date.now() - onboardingStartTime) / 1000,
+        });
+        
         setTimeout(() => {
+          // Calculate duration and track onboarding_step2_completed
+          const durationSeconds = (Date.now() - onboardingStartTime) / 1000;
+          console.log('[OnboardingChatScreen] Tracking onboarding_step2_completed...', {
+            durationSeconds: Math.round(durationSeconds),
+            timestamp: new Date().toISOString(),
+          });
+          
+          analyticsService.trackOnboardingStep2Completed(durationSeconds);
+          
           // Mark onboarding as complete and navigate to profile
+          console.log('[OnboardingChatScreen] Calling onChatComplete callback...');
           onChatComplete?.();
         }, 1500);
       }

@@ -26,6 +26,7 @@ import { findMatchingUsers } from '../services/matching/matchingService';
 import { findMatchingUsersV3 } from '../services/matching/matchingServiceV3';
 import { supabaseAuthService } from '../services/auth/supabaseAuthService';
 import { MatchedUser, TripPlanningRequest } from '../types/tripPlanning';
+import { analyticsService } from '../services/analytics/analyticsService';
 
 interface Message {
   id: string;
@@ -138,6 +139,9 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   useEffect(() => {
     const initializeChat = async () => {
       try {
+        // Track swelly_chat_entered
+        analyticsService.trackSwellyChatEntered();
+        
         console.log('Testing API connection...');
         const health = await swellyService.healthCheck();
         console.log('API health check successful:', health);
@@ -321,6 +325,10 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         };
         setMessages(prev => [...prev, matchesMessage]);
         setMatchedUsers(pendingPartialMatches);
+        
+        // Track Swelly list created for partial matches
+        analyticsService.trackSwellyListCreated(pendingPartialMatches.length, 'partial_match');
+        
         setPendingPartialMatches(null);
         
         if (onChatStateChange) {
@@ -458,6 +466,10 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
               setMatchedUsers(matchedUsers);
               setDestinationCountry(response.data.destination_country);
               
+              // Track Swelly list created
+              const intentType = requestData.purpose?.purpose_type || 'general_guidance';
+              analyticsService.trackSwellyListCreated(matchedUsers.length, intentType);
+              
               // Notify parent to persist state for when user returns
               if (onChatStateChange) {
                 onChatStateChange(chatId, matchedUsers, response.data.destination_country);
@@ -487,7 +499,9 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
               }
             }
           } else {
-            // No matches found
+            // No matches found - track search failure
+            analyticsService.trackSwellySearchFailed();
+            
             const noMatchesMessage: Message = {
               id: (Date.now() + 3).toString(),
               text: response.data.filtersFromNonNegotiableStep
@@ -505,6 +519,10 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         } catch (error) {
           console.error('Error finding matching users:', error);
           console.error('Error details:', error);
+          
+          // Track swelly_search_failed
+          analyticsService.trackSwellySearchFailed('error');
+          
           const errorMessage: Message = {
             id: (Date.now() + 2).toString(),
             text: `Sorry, there was an error finding matches: ${error instanceof Error ? error.message : String(error)}. Please try again later.`,
@@ -553,6 +571,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   };
 
   const handleViewProfile = (userId: string) => {
+    // Note: profile_view_clicked is tracked in MatchedUserCard to avoid duplication
     if (onViewUserProfile) {
       // Pass true to indicate this profile view came from trip planning chat
       onViewUserProfile(userId, true);

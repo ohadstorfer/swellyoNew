@@ -24,6 +24,7 @@ import { getCountryFlag } from '../utils/countryFlags';
 import { uploadProfileImage } from '../services/storage/storageService';
 import { ProfileImage } from '../components/ProfileImage';
 import { ProfileSkeleton } from '../components/skeletons';
+import { analyticsService } from '../services/analytics/analyticsService';
 
 interface ProfileScreenProps {
   onBack?: () => void;

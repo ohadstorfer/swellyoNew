@@ -16,6 +16,7 @@ import { MatchedUser } from '../types/tripPlanning';
 import { getImageUrl } from '../services/media/imageService';
 import { getCountryFlag } from '../utils/countryFlags';
 import { ProfileImage } from './ProfileImage';
+import { analyticsService } from '../services/analytics/analyticsService';
 
 interface MatchedUserCardProps {
   user: MatchedUser;
@@ -166,7 +167,11 @@ export const MatchedUserCard: React.FC<MatchedUserCardProps> = ({
         <View style={styles.actionsContainer}>
           <TouchableOpacity
             style={[styles.actionButton, styles.actionButtonWithBorder]}
-            onPress={() => onSendMessage(user.user_id)}
+            onPress={() => {
+              // Track connect clicked
+              analyticsService.trackConnectClicked();
+              onSendMessage(user.user_id);
+            }}
             activeOpacity={0.7}
           >
             <Text style={styles.sendMessageText}>Send Message</Text>
@@ -174,7 +179,11 @@ export const MatchedUserCard: React.FC<MatchedUserCardProps> = ({
           
           <TouchableOpacity
             style={styles.actionButton}
-            onPress={() => onViewProfile(user.user_id)}
+            onPress={() => {
+              // Track profile_view_clicked from swelly_list
+              analyticsService.trackProfileViewClicked('swelly_list');
+              onViewProfile(user.user_id);
+            }}
             activeOpacity={0.7}
           >
             <Text style={styles.viewProfileText}>View Profile</Text>

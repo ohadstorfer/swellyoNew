@@ -23,6 +23,7 @@ import { supabase } from '../config/supabase';
 import { ProfileImage } from '../components/ProfileImage';
 import { MessageListSkeleton } from '../components/skeletons';
 import { SKELETON_DELAY_MS } from '../constants/loading';
+import { analyticsService } from '../services/analytics/analyticsService';
 
 interface DirectMessageScreenProps {
   conversationId?: string; // Optional: undefined for pending conversations (will be created on first message)
@@ -73,6 +74,9 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const [otherUserAdvRole, setOtherUserAdvRole] = useState<'adv_giver' | 'adv_seeker' | null>(null);
   const [inputHeight, setInputHeight] = useState(25); // Initial height for one line
   const [showSkeletons, setShowSkeletons] = useState(false);
+  const [hasTrackedFirstMessage, setHasTrackedFirstMessage] = useState(false);
+  const [hasTrackedFirstReply, setHasTrackedFirstReply] = useState(false);
+  const [firstMessageSentTime, setFirstMessageSentTime] = useState<number | null>(null);
   const scrollViewRef = useRef<ScrollView>(null);
   const textInputRef = useRef<any>(null);
 
@@ -114,6 +118,15 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       const unsubscribe = messagingService.subscribeToMessages(
         currentConversationId,
         (newMessage) => {
+              // Track first reply received (only once, and only if message is from other user)
+              if (!hasTrackedFirstReply && newMessage.sender_id !== currentUserId && currentUserId) {
+                const timeToReplyMinutes = firstMessageSentTime 
+                  ? (Date.now() - firstMessageSentTime) / (1000 * 60)
+                  : undefined;
+                analyticsService.trackReplyReceived(timeToReplyMinutes, currentConversationId);
+                setHasTrackedFirstReply(true);
+              }
+          
           // Check if message already exists (avoid duplicates)
           setMessages((prev) => {
             const exists = prev.some(msg => msg.id === newMessage.id);
@@ -237,6 +250,15 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
           const unsubscribe = messagingService.subscribeToMessages(
             targetConversationId,
             (newMessage) => {
+              // Track first reply received (only once, and only if message is from other user)
+              if (!hasTrackedFirstReply && newMessage.sender_id !== currentUserId && currentUserId) {
+                const timeToReplyMinutes = firstMessageSentTime 
+                  ? (Date.now() - firstMessageSentTime) / (1000 * 60)
+                  : undefined;
+                analyticsService.trackReplyReceived(timeToReplyMinutes, targetConversationId);
+                setHasTrackedFirstReply(true);
+              }
+              
               setMessages((prev) => {
                 const exists = prev.some(msg => msg.id === newMessage.id);
                 if (exists) {
@@ -301,6 +323,13 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       
       // Send message to server
       const sentMessage = await messagingService.sendMessage(targetConversationId, messageText);
+      
+      // Track first message sent (only if this is a new conversation and we haven't tracked it yet)
+      if (!hasTrackedFirstMessage && !conversationId) {
+        analyticsService.trackFirstMessageSent(targetConversationId);
+        setHasTrackedFirstMessage(true);
+        setFirstMessageSentTime(Date.now());
+      }
       
       // Replace optimistic message with real message from server
       setMessages((prev) => {

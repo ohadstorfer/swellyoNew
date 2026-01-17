@@ -15,6 +15,7 @@ import { DirectMessageScreen } from '../screens/DirectMessageScreen';
 import { SwellyShaperScreen } from '../screens/SwellyShaperScreen';
 import { messagingService } from '../services/messaging/messagingService';
 import { useOnboarding } from '../context/OnboardingContext';
+import { analyticsService } from '../services/analytics/analyticsService';
 
 export const AppContent: React.FC = () => {
   const { currentStep, formData, setCurrentStep, updateFormData, saveStepToSupabase, isComplete, markOnboardingComplete, isDemoUser, setIsDemoUser, setUser, resetOnboarding } = useOnboarding();
@@ -97,6 +98,9 @@ export const AppContent: React.FC = () => {
       // Save Step 1 data to Supabase (board type) using onboarding service
       const { onboardingService } = await import('../services/onboarding/onboardingService');
       await onboardingService.saveStep1(data.boardType);
+      
+      // Track onboarding step 1 completion
+      analyticsService.trackOnboardingStep1Completed();
       
       // Soft Top (id: 3) skips step 2 and goes directly to step 3
       if (data.boardType === 3) {
@@ -203,6 +207,8 @@ export const AppContent: React.FC = () => {
   const handleLoadingComplete = () => {
     setShowLoading(false);
     setCurrentStep(5); // Go to step 5 (Swelly chat screen)
+    // Start tracking onboarding abandonment (12 min timer)
+    analyticsService.startOnboardingAbandonTracking();
   };
 
   const [showProfile, setShowProfile] = useState(false);
@@ -226,9 +232,17 @@ export const AppContent: React.FC = () => {
   } | null>(null);
 
   const handleChatComplete = async () => {
+    console.log('[AppContent] handleChatComplete called');
+    
     // Mark onboarding as complete and navigate to profile
     await markOnboardingComplete();
+    console.log('[AppContent] Onboarding marked as complete');
+    
+    // Note: onboarding_step2_completed is already tracked in ChatScreen.tsx with duration
+    // This duplicate call is removed to avoid double tracking
+    
     setShowProfile(true);
+    console.log('[AppContent] Navigating to profile screen');
   };
 
   const handleProfileBack = () => {
