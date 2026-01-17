@@ -209,6 +209,7 @@ export const AppContent: React.FC = () => {
   const [showSwellyShaper, setShowSwellyShaper] = useState(false);
   const [viewingUserId, setViewingUserId] = useState<string | null>(null);
   const [profileFromSwellyShaper, setProfileFromSwellyShaper] = useState(false); // Track if profile was opened from Swelly Shaper
+  const [profileFromTripPlanningChat, setProfileFromTripPlanningChat] = useState(false); // Track if profile was opened from trip planning chat
   
   // Trip planning chat state - persisted between navigations
   const [tripPlanningChatId, setTripPlanningChatId] = useState<string | null>(null);
@@ -231,8 +232,20 @@ export const AppContent: React.FC = () => {
 
   const handleProfileBack = () => {
     console.log('[AppContent] handleProfileBack called');
-    console.log('[AppContent] Always navigating to conversations/home');
-    // Always navigate back to conversations/home (homepage)
+    console.log('[AppContent] profileFromTripPlanningChat:', profileFromTripPlanningChat);
+    
+    // If profile was opened from trip planning chat, return to chat
+    if (profileFromTripPlanningChat) {
+      console.log('[AppContent] Returning to trip planning chat');
+      setShowProfile(false);
+      setViewingUserId(null);
+      setProfileFromTripPlanningChat(false); // Reset flag
+      setShowTripPlanningChat(true); // Return to chat
+      return;
+    }
+    
+    // Otherwise, navigate back to conversations/home (homepage)
+    console.log('[AppContent] Navigating to conversations/home');
     setShowProfile(false);
     setViewingUserId(null);
     setProfileFromSwellyShaper(false); // Reset flag if it was set
@@ -281,13 +294,19 @@ export const AppContent: React.FC = () => {
     setViewingUserId(null); // View own profile
   };
 
-  const handleViewUserProfile = (userId: string) => {
-    console.log('[AppContent] handleViewUserProfile called with userId:', userId);
+  const handleViewUserProfile = (userId: string, fromTripPlanningChat?: boolean) => {
+    console.log('[AppContent] handleViewUserProfile called with userId:', userId, 'fromTripPlanningChat:', fromTripPlanningChat);
     // Navigate to another user's profile
-    // Reset flag since this is normal navigation (not from Swelly Shaper)
+    // Reset flags
     setProfileFromSwellyShaper(false);
-    // Close trip planning chat if open
-    setShowTripPlanningChat(false);
+    setProfileFromTripPlanningChat(fromTripPlanningChat || false);
+    
+    // If coming from trip planning chat, don't close it - we'll return to it on back
+    if (!fromTripPlanningChat) {
+      // Close trip planning chat if open (only if not coming from it)
+      setShowTripPlanningChat(false);
+    }
+    
     // Close conversation to show profile screen
     console.log('[AppContent] Closing conversation, setting selectedConversation to null');
     setSelectedConversation(null);

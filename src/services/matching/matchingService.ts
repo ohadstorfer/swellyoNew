@@ -8,6 +8,7 @@
 import { supabase, isSupabaseConfigured } from '../../config/supabase';
 import { supabaseDatabaseService, SupabaseSurfer } from '../database/supabaseDatabaseService';
 import { TripPlanningRequest, MatchedUser, BUDGET_MAP, TRAVEL_EXPERIENCE_MAP, GROUP_TYPE_MAP } from '../../types/tripPlanning';
+import { analyzeMatchQuality, calculateDataCompleteness } from './matchQualityAnalyzer';
 
 // Helper function to convert travel_experience (integer or legacy enum string) to comparable numeric level
 // Returns: 1 (new_nomad/0-3), 2 (rising_voyager/4-9), 3 (wave_hunter/10-19), 4 (chicken_joe/20+)
@@ -116,7 +117,7 @@ function extractCountryFromDestination(
     ? dest 
     : (dest as any).destination_name || '';
   
-  const parts = destinationName.split(',').map(p => p.trim());
+  const parts = destinationName.split(',').map((p: string) => p.trim());
   return parts[0] || ''; // First part is usually the country
 }
 
@@ -426,8 +427,6 @@ function areaMatches(
   generatedAreas: string[]
 ): boolean {
   return destinationMatchesAreas(destination, generatedAreas);
-  const destLower = destinationName.toLowerCase();
-  return generatedAreas.some(area => destLower.includes(area.toLowerCase()));
 }
 
 /**
@@ -609,7 +608,7 @@ export async function findMatchingUsersV2(
               points += 30;
               // Track which area matched
               const destAreas = 'area' in dest ? dest.area : [];
-              const destName = 'destination_name' in dest ? dest.destination_name : '';
+              const destName = ('destination_name' in dest ? dest.destination_name : '') as string;
               const matchedArea = generatedAreas.find(area => {
                 const areaLower = area.toLowerCase();
                 return destAreas.some(da => da.toLowerCase().includes(areaLower)) ||
@@ -719,7 +718,7 @@ export async function findMatchingUsersV2(
       common_wave_keywords: entry.commonWaveKeywords,
       surfboard_type: entry.surfer.surfboard_type || undefined,
       surf_level: entry.surfer.surf_level || undefined,
-      travel_experience: entry.surfer.travel_experience || undefined,
+      travel_experience: entry.surfer.travel_experience?.toString() || undefined, // Convert to string
       country_from: entry.surfer.country_from || undefined,
       age: entry.surfer.age || undefined,
       days_in_destination: entry.daysInDestination,
@@ -813,10 +812,15 @@ export async function findMatchingUsers(
         console.log(`  - Filtering by age_max: ${request.queryFilters.age_max}`);
       }
       
-      // Filter by surfboard_type
-      if (request.queryFilters.surfboard_type && request.queryFilters.surfboard_type.length > 0) {
-        query = query.in('surfboard_type', request.queryFilters.surfboard_type);
-        console.log(`  - Filtering by surfboard_type: ${request.queryFilters.surfboard_type.join(', ')}`);
+      // Filter by surfboard_type (handle both string and array)
+      if (request.queryFilters.surfboard_type) {
+        const surfboardTypes = Array.isArray(request.queryFilters.surfboard_type) 
+          ? request.queryFilters.surfboard_type 
+          : [request.queryFilters.surfboard_type];
+        if (surfboardTypes.length > 0) {
+          query = query.in('surfboard_type', surfboardTypes);
+          console.log(`  - Filtering by surfboard_type: ${surfboardTypes.join(', ')}`);
+        }
       }
       
       // Filter by surf_level
@@ -976,6 +980,7 @@ export async function findMatchingUsers(
     let surfersWithDestination = filteredSurfers;
     
     // Only filter by destination if destination_country is provided
+    // NOTE: destination_country is NOT required - users can request surfers without a destination
     if (request.destination_country) {
       console.log(`Filtering by destination: ${request.destination_country}`);
       surfersWithDestination = filteredSurfers.filter((surfer: any) => {
@@ -988,8 +993,10 @@ export async function findMatchingUsers(
       });
       console.log(`Filtered to ${surfersWithDestination.length} surfers with matching destinations (from ${filteredSurfers.length} total)`);
     } else {
-      console.log('⚠️ No destination_country provided - skipping destination filtering, will score all filtered surfers');
+      console.log('ℹ️ No destination_country provided - matching by other criteria only (destination not required)');
       console.log(`Proceeding with ${filteredSurfers.length} surfers (no destination filter applied)`);
+      // Use all filtered surfers when no destination is specified
+      surfersWithDestination = filteredSurfers;
     }
     
     // Step 7: Create user_points map and calculate scores using unified V2 point system
@@ -1044,7 +1051,7 @@ export async function findMatchingUsers(
               points += 30;
               // Track which area matched
               const destAreas = 'area' in dest ? dest.area : [];
-              const destName = 'destination_name' in dest ? dest.destination_name : '';
+              const destName = ('destination_name' in dest ? dest.destination_name : '') as string;
               const matchedArea = generatedAreas.find(area => {
                 const areaLower = area.toLowerCase();
                 return destAreas.some(da => da.toLowerCase().includes(areaLower)) ||
@@ -1146,37 +1153,102 @@ export async function findMatchingUsers(
       country_from: u.surfer.country_from
     })));
 
-    // Format as MatchedUser array
-    const matchedUsers: MatchedUser[] = sortedUsers.map(entry => ({
-      user_id: entry.surfer.user_id,
-      name: entry.surfer.name,
-      profile_image_url: entry.surfer.profile_image_url || null,
-      match_score: entry.points,
-      matched_areas: entry.matchedAreas,
-      common_lifestyle_keywords: entry.commonLifestyleKeywords,
-      common_wave_keywords: entry.commonWaveKeywords,
-      surfboard_type: entry.surfer.surfboard_type || undefined,
-      surf_level: entry.surfer.surf_level || undefined,
-      travel_experience: entry.surfer.travel_experience || undefined,
-      country_from: entry.surfer.country_from || undefined,
-      age: entry.surfer.age || undefined,
-      days_in_destination: entry.daysInDestination,
-      destinations_array: entry.surfer.destinations_array,
-    }));
+    // Format as MatchedUser array with match quality analysis
+    const matchedUsersWithQuality = sortedUsers.map(entry => {
+      // Create destination match info for quality analysis
+      const destinationMatch = {
+        countryMatch: request.destination_country 
+          ? entry.surfer.destinations_array?.some((dest: any) => 
+              destinationContainsCountry(dest, request.destination_country!)
+            ) || false
+          : false, // If no destination requested, countryMatch is false (not applicable)
+        areaMatch: request.area && request.destination_country
+          ? entry.matchedAreas.length > 0
+          : false,
+        townMatch: false, // Not used in this matching service
+        matchedAreas: entry.matchedAreas,
+        matchedTowns: [],
+      };
+      
+      // Analyze match quality
+      const matchQuality = analyzeMatchQuality(request, entry.surfer, destinationMatch);
+      
+      return {
+        user_id: entry.surfer.user_id,
+        name: entry.surfer.name,
+        profile_image_url: entry.surfer.profile_image_url || null,
+        match_score: entry.points,
+        matched_areas: entry.matchedAreas,
+        common_lifestyle_keywords: entry.commonLifestyleKeywords,
+        common_wave_keywords: entry.commonWaveKeywords,
+        surfboard_type: entry.surfer.surfboard_type || undefined,
+        surf_level: entry.surfer.surf_level || undefined,
+        travel_experience: entry.surfer.travel_experience?.toString() || undefined, // Convert to string
+        country_from: entry.surfer.country_from || undefined,
+        age: entry.surfer.age || undefined,
+        days_in_destination: entry.daysInDestination,
+        destinations_array: entry.surfer.destinations_array,
+        matchQuality, // Add match quality
+      };
+    });
+    
+    // Check if any criteria were requested
+    const hasCriteria = !!(
+      request.destination_country ||
+      request.area ||
+      request.non_negotiable_criteria?.country_from ||
+      request.non_negotiable_criteria?.age_range ||
+      request.non_negotiable_criteria?.surfboard_type ||
+      request.non_negotiable_criteria?.surf_level_min ||
+      request.non_negotiable_criteria?.surf_level_max ||
+      request.queryFilters?.age_min ||
+      request.queryFilters?.age_max ||
+      request.queryFilters?.country_from ||
+      request.queryFilters?.surfboard_type ||
+      request.queryFilters?.surf_level_min ||
+      request.queryFilters?.surf_level_max
+    );
+    
+    // Filter by matchCount > 1 only if criteria were requested
+    // If no criteria (e.g., "random user"), return all users regardless of matchCount
+    const validMatches = hasCriteria
+      ? matchedUsersWithQuality.filter(u => u.matchQuality && u.matchQuality.matchCount > 1)
+      : matchedUsersWithQuality; // No criteria = return all (will be sorted by score)
+    
+    // Sort by match count (desc), then by score (desc), then by data completeness
+    validMatches.sort((a, b) => {
+      if (!a.matchQuality || !b.matchQuality) return 0;
+      if (b.matchQuality.matchCount !== a.matchQuality.matchCount) {
+        return b.matchQuality.matchCount - a.matchQuality.matchCount;
+      }
+      if (b.match_score !== a.match_score) {
+        return b.match_score - a.match_score;
+      }
+      const aCompleteness = calculateDataCompleteness(a as any);
+      const bCompleteness = calculateDataCompleteness(b as any);
+      return bCompleteness - aCompleteness;
+    });
+    
+    // Return top 3
+    const topMatches: MatchedUser[] = validMatches.slice(0, 3);
+    
+    console.log(`After match quality filter (matchCount > 1): ${validMatches.length} valid matches`);
+    console.log(`Returning top ${topMatches.length} matches`);
 
     console.log('=== MATCHING COMPLETE ===');
-    console.log(`Found ${matchedUsers.length} matched users`);
-    if (matchedUsers.length > 0) {
-      console.log('Matched users:', matchedUsers.map(u => ({ 
+    console.log(`Found ${topMatches.length} matched users (after quality filter)`);
+    if (topMatches.length > 0) {
+      console.log('Matched users:', topMatches.map((u: MatchedUser) => ({ 
         name: u.name, 
         match_score: u.match_score,
+        matchCount: u.matchQuality?.matchCount,
         days_in_destination: u.days_in_destination,
         country_from: u.country_from
       })));
     }
     console.log('==========================');
     
-    return matchedUsers;
+    return topMatches;
   } catch (error) {
     console.error('Error in findMatchingUsers:', error);
     throw error;

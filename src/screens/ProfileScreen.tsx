@@ -648,7 +648,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
                     )}
                     <View style={styles.destinationContent}>
                       <View style={styles.destinationTitleRow}>
-                        <Text style={styles.destinationName}>{displayName}:</Text>
+                        <Text style={styles.destinationName}>{country}:</Text>
                         <View style={styles.destinationDaysContainer}>
                           <Text style={styles.destinationDays}>
                             {destination.time_in_text || `${destination.time_in_days} days`}

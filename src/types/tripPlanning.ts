@@ -51,6 +51,36 @@ export interface TripPlanningRequest {
   } | null; // V2: Prioritized filters from user prompts (e.g., "prioritize longboarders")
 }
 
+export interface MatchQuality {
+  exactMatch: boolean;
+  matchCount: number; // Number of criteria that matched (must be > 1 for partial matches)
+  matchedCriteria: {
+    destination_country: boolean;
+    area?: boolean | null; // null if area not requested
+    country_from?: boolean | null; // null if not requested or surfer data missing
+    age?: boolean | null; // null if not requested or surfer data missing
+    surfboard_type?: boolean | null; // null if not requested or surfer data missing
+    surf_level?: boolean | null; // null if not requested or surfer data missing
+    travel_experience?: boolean | null; // null if not requested or surfer data missing
+    lifestyle_keywords?: boolean | null; // null if not requested or surfer data missing
+    wave_type_keywords?: boolean | null; // null if not requested or surfer data missing
+  };
+  differences: {
+    area?: { requested: string; found: string | null }; // null if no area match
+    age?: { requested: [number, number] | number; found: number | null }; // null if surfer age missing
+    surfboard_type?: { requested: string[]; found: string | null }; // null if surfer board type missing
+    surf_level?: { requested: [number, number] | number; found: number | null }; // null if surfer level missing
+    country_from?: { requested: string[]; found: string | null }; // null if surfer country missing
+  };
+  missingData: {
+    age?: boolean; // true if surfer has no age data
+    country_from?: boolean; // true if surfer has no country_from data
+    surfboard_type?: boolean; // true if surfer has no board type
+    surf_level?: boolean; // true if surfer has no surf level
+    travel_experience?: boolean; // true if surfer has no travel experience
+  };
+}
+
 export interface MatchedUser {
   user_id: string;
   email?: string;
@@ -67,6 +97,7 @@ export interface MatchedUser {
   age?: number;
   days_in_destination?: number; // Days spent in the destination country
   destinations_array?: Array<{ country: string; area: string[]; time_in_days: number; time_in_text?: string }>; // For reference
+  matchQuality?: MatchQuality; // Add this field
 }
 
 export interface TripPlanningData {

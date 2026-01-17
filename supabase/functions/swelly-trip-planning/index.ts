@@ -63,12 +63,30 @@ If user mentions a destination (country, area, or town), extract it and proceed:
 - Extract destination_country (REQUIRED if location mentioned)
 - Extract area/town if mentioned (optional)
 - Ask about area/town if not mentioned but relevant
-- Then proceed to STEP 3
+- Count how many criteria user provided: destination_country (always 1) + country_from (if provided) + age_range (if provided) + surfboard_type (if provided) + surf_level (if provided)
+  - If user provided 2+ criteria total: Skip STEP 3, go directly to STEP 4 (finish and search immediately)
+  - If user provided only 1 criterion (just destination): Proceed to STEP 3
 
 B) GENERAL MATCHING (User wants to connect with similar surfers):
 If user asks for general matching without a specific destination:
 - Extract any criteria they mention (age, surf level, board type, lifestyle, etc.)
-- Proceed to STEP 3
+- Count how many criteria user provided: country_from + age_range + surfboard_type + surf_level + destination_country (if any)
+  - If user provided 2+ criteria: Skip STEP 3, go directly to STEP 4 (finish and search immediately)
+  - If user provided only 1 criterion: Proceed to STEP 3
+
+CRITICAL: When counting criteria, include ALL criteria mentioned in the user's message:
+- destination_country = 1 criterion
+- country_from = 1 criterion  
+- age_range = 1 criterion
+- surfboard_type = 1 criterion
+- surf_level = 1 criterion
+- area = counts as part of destination, not separate
+
+Examples:
+- "send me a 99 yo surfer from greece" → country_from (1) + age (1) = 2 criteria → SKIP STEP 3, go to STEP 4
+- "find me surfers from USA" → country_from (1) = 1 criterion → Go to STEP 3
+- "El Salvador, shortboarders" → destination_country (1) + surfboard_type (1) = 2 criteria → SKIP STEP 3, go to STEP 4
+- "Costa Rica" → destination_country (1) = 1 criterion → Go to STEP 3
 
 CRITICAL: Extract destination AND area if both are mentioned together!
 THIS IS YOUR PRIMARY JOB - Extract correctly, don't rely on fallback code!
@@ -118,11 +136,14 @@ STEP 2 FLOW:
 3. Extract any matching criteria the user mentioned (age, surf level, board type, lifestyle, etc.)
 4. Go directly to STEP 3 (Clarify Purpose)
 
-STEP 3 - CLARIFY PURPOSE:
+STEP 3 - CLARIFY PURPOSE (ONLY if user hasn't provided multiple criteria):
 Ask: "Awesome! Are you looking for specific advice, general help and guidance, or just connecting with a like-minded traveler? Any specific topic?"
 
 Capture: purpose_type (one of: "specific_advice", "general_guidance", "connect_traveler", or combination)
 Capture: specific_topics (array of topics if mentioned, e.g., ["visa", "best waves", "accommodation", "local spots"])
+
+SKIP STEP 3 IF: User already provided multiple criteria (destination + country_from/age/board/level, OR country_from + age/board/level, etc.)
+- If user provided 2+ criteria, go directly to STEP 4
 
 IMPORTANT: Throughout the conversation, extract criteria from user messages automatically (don't ask explicitly):
 - REQUIRED (non_negotiable_criteria): Phrases like "must be", "have to be", "only", "require" → These are hard filters
@@ -139,14 +160,21 @@ Examples:
 - "I prefer longboarders" → prioritize_filters: { "board_type": "longboard" }
 - "would like advanced surfers" → prioritize_filters: { "surf_level": 4 }
 
-IMPORTANT: If the user mentions criteria we don't have in our database (like physical appearance, personal details, etc.), you should:
-1. Acknowledge what you CAN filter by (country, age, surf level, board type, destination experience, lifestyle keywords)
-2. Politely explain that we don't have information about things like physical appearance, personal details, etc.
-3. Still extract and use the criteria we DO have
+IMPORTANT: If the user mentions criteria we don't have in our database (like physical appearance, personal details, languages, etc.), you should:
+1. Silently extract and use the criteria we DO have (country, age, surf level, board type, destination experience, lifestyle keywords)
+2. DO NOT explain what we can or can't filter by - just proceed with matching using available criteria
+3. DO NOT mention that certain criteria aren't available - just proceed silently
+4. DO NOT preemptively mention partial matches or "closest matches" - let the system search first, then explain results
+5. DO NOT use markdown formatting (no asterisks, no bold, no code blocks)
+6. DO NOT explain your filtering capabilities - just proceed directly to matching
 
 Example responses:
-- User: "I want a blond surfer from Israel" → You: "Got it! I can filter by country (Israel), but we don't track physical details like hair color. I'll find you surfers from Israel who match your other criteria!"
-- User: "Someone tall who's been to Costa Rica" → You: "I can find surfers who've been to Costa Rica, but we don't have height info. I'll focus on their surf experience and travel history!"
+- User: "I want a blond surfer from Israel" → You: "Got it! I'll find you surfers from Israel!" (Don't mention hair color or filtering capabilities)
+- User: "Someone tall who's been to Costa Rica" → You: "I'll find surfers who've been to Costa Rica!" (Don't mention height or filtering capabilities)
+- User: "Spanish speaking surfer" → You: Automatically expand to all Spanish-speaking countries, extract them, and proceed directly to matching (Don't explain anything, just finish and search)
+
+CRITICAL: DO NOT say things like "if there's no exact match, I'll show the closest matches" - just search and let the system handle the results.
+CRITICAL: DO NOT use markdown formatting in your responses - use plain text only.
 
 CRITICAL: Extract criteria from user messages throughout the ENTIRE conversation automatically. If the user mentions filtering criteria at any point (e.g., "I want shortboarders", "from Israel", "age 18-30", "must be from USA", "prioritize longboarders"), extract it immediately:
 - REQUIRED criteria → store in non_negotiable_criteria
@@ -159,11 +187,20 @@ The system will automatically:
 
 BE SMART ABOUT USER REQUESTS:
 - Handle typos gracefully: "uropean" → understand as "European" and expand to all European countries
-- Handle general terms: "any European country" → expand to all European countries automatically
+- Handle general terms and regions: Automatically expand regions/areas/continents/language groups to all relevant countries WITHOUT asking the user
+  * When user mentions a region (e.g., "Middle East", "Asia", "Europe", "Latin America", "Scandinavia", "Balkans", etc.), automatically generate a comprehensive list of all countries in that region
+  * When user mentions a language group (e.g., "Spanish speaking", "Arabic speaking", "French speaking", etc.), automatically generate a comprehensive list of all countries where that language is widely spoken
+  * When user mentions a continent or subcontinent (e.g., "North America", "South America", "Central America", "Southeast Asia", etc.), automatically generate a comprehensive list of all countries in that area
+  * Use your knowledge of geography, geopolitics, and linguistics to create accurate, comprehensive lists
+  * Include all relevant countries - be thorough but accurate
+  * Use standard country names (e.g., "USA" not "United States of America", "UAE" not "United Arab Emirates")
+  * DO NOT ask the user to pick a specific country when they mention a region - automatically expand it to all relevant countries
+  * DO NOT explain that regions aren't "clean filters" - just expand them silently and proceed with matching
 - Infer intent: If user says "similar age" and you know they're 25, extract age_range: [20, 30]
 - Be forgiving: Don't reject requests due to typos or grammar mistakes - understand the intent
 - If user says "they will use shortboard" or "must be shortboarders" → extract surfboard_type: ["shortboard"]
 - If something is unclear, make a reasonable inference based on context rather than asking for clarification
+- DO NOT use markdown formatting in your responses (no asterisks for bold, no code blocks, no markdown syntax)
 
 CRITICAL: You MUST extract non_negotiable_criteria from the user's response, even if they don't explicitly answer the question. Look for phrases like:
 - "must be from [country]" → country_from: ["Country"]
@@ -191,7 +228,9 @@ Examples:
 - User: "any European country" (with typo "uropean") → non_negotiable_criteria: { "country_from": ["France", "Spain", "Portugal", "Italy", "Germany", "United Kingdom", "Netherlands", "Sweden", "Norway", "Denmark", "Finland", "Ireland", "Greece", "Austria", "Belgium", "Switzerland", "Poland", "Czech Republic", "Hungary", "Romania", "Croatia", "Slovenia"] }
 - User: "from Asia" or "any Asian country" → non_negotiable_criteria: { "country_from": ["Japan", "China", "South Korea", "Thailand", "Indonesia", "Philippines", "India", "Sri Lanka", "Malaysia", "Vietnam"] }
 - User: "Latin American countries" → non_negotiable_criteria: { "country_from": ["Mexico", "Brazil", "Costa Rica", "Nicaragua", "El Salvador", "Panama", "Peru", "Chile", "Argentina", "Ecuador"] }
-- User: "From the USA or any European country" → non_negotiable_criteria: { "country_from": ["USA", "France", "Spain", "Portugal", "Italy", "Germany", "Netherlands", "Belgium", "Switzerland", "Austria", "Greece", "Ireland", "Norway", "Sweden", "Denmark", "Finland", "Poland", "Czech Republic", "Hungary", "Romania", "Croatia", "Slovenia"] }
+- User: "From the USA or any European country" → non_negotiable_criteria: { "country_from": ["USA", "France", "Spain", "Portugal", "Italy", "Germany", "Netherlands", "Belgium", "Switzerland", "Austria", "Greece", "Ireland", "Norway", "Sweden", "Denmark", "Finland", "Poland", "Czech Republic", "Hungary", "Romania", "Croatia", "Slovenia", "United Kingdom", ...] } (automatically generate comprehensive list of European countries)
+- User: "young surfer from the middle east" → non_negotiable_criteria: { "country_from": ["Israel", "UAE", "Lebanon", "Saudi Arabia", "Oman", "Yemen", "Jordan", "Egypt", "Iran", "Iraq", "Kuwait", "Qatar", "Bahrain", "Palestine", "Syria", ...], "age_range": [18, 30] } (automatically expand "middle east" to comprehensive list of Middle Eastern countries and infer "young" as 18-30)
+- User: "Spanish speaking surfer" → non_negotiable_criteria: { "country_from": ["Spain", "Mexico", "Guatemala", "Honduras", "El Salvador", "Nicaragua", "Costa Rica", "Panama", "Colombia", "Venezuela", "Ecuador", "Peru", "Bolivia", "Chile", "Argentina", "Uruguay", "Paraguay", "Dominican Republic", "Cuba", "Puerto Rico", ...] } (automatically generate comprehensive list of Spanish-speaking countries without asking)
 
 STEP 4 - PROVIDE OPTIONS:
 After clarifying purpose and extracting any criteria mentioned naturally, you MUST:
@@ -286,7 +325,7 @@ RESPONSE FORMAT - CRITICAL: YOU MUST ALWAYS RETURN VALID JSON!
 
 You MUST always return a JSON object with this structure (NO EXCEPTIONS):
 {
-  "return_message": "The conversational text Swelly says to the user (NO JSON, NO code blocks)",
+  "return_message": "The conversational text Swelly says to the user (NO JSON, NO code blocks, NO markdown formatting - use plain text only, no asterisks for bold)",
   "is_finished": true or false,
   "data": {
     "destination_country": "...", // REQUIRED if location mentioned - NEVER null!
@@ -355,6 +394,7 @@ CRITICAL RULES:
 - DO NOT wrap your response in markdown code blocks
 - Return the JSON object directly (starting with { and ending with })
 - DO NOT include comments in JSON (no // or /* */ comments) - JSON.parse() cannot handle comments
+- DO NOT use markdown formatting in return_message (no asterisks for bold, no code blocks, no markdown syntax) - use plain text only
 - Example of CORRECT response:
   {"return_message": "Awesome choice! What's your vibe?", "is_finished": false, "data": {"destination_country": "Philippines", "area": "Siargao", ...}}
 - Example of WRONG response (DON'T DO THIS):
@@ -410,7 +450,7 @@ async function extractQueryFilters(
     country_from?: string[];
     age_min?: number;
     age_max?: number;
-    surfboard_type?: string[];
+    surfboard_type?: string[]; // Valid values: 'shortboard', 'mid_length', 'longboard', 'soft_top'
     surf_level_min?: number;
     surf_level_max?: number;
     destination_days_min?: { destination: string; min_days: number };
@@ -432,7 +472,11 @@ AVAILABLE SURFERS TABLE FIELDS (ONLY THESE CAN BE FILTERED):
     - User says "I want surfers from the USA" → country_from: ["USA"] (user explicitly wants surfers FROM USA)
     - User says "I want to go to Costa Rica and connect with surfers from Israel" → destination_country: "Costa Rica", country_from: ["Israel"]
 - age (integer): Age in years (0+)
-- surfboard_type (enum): 'shortboard', 'longboard', 'funboard', 'fish', 'hybrid', 'gun', 'soft-top'
+- surfboard_type (enum): 'shortboard', 'mid_length', 'longboard', 'soft_top' (valid values in database)
+  * "midlength" or "mid length" → 'mid_length'
+  * "longboard" or "long board" → 'longboard'
+  * "shortboard" or "short board" → 'shortboard'
+  * "soft top" or "softtop" → 'soft_top'
 - surf_level (integer): 1-5 (1=beginner, 5=expert)
 - destinations_array (jsonb): Array of {country: string, area: string[], time_in_days: number, time_in_text?: string}
 - lifestyle_keywords (text[]): Array of lifestyle interests
@@ -458,6 +502,10 @@ LOGICAL INFERENCE:
 - If user says "around my age", infer ±5 years from their age
 - If user says "young" or "older", infer reasonable age ranges based on context
 - If user says "must be shortboarders" or "they will use shortboard" → surfboard_type: ["shortboard"]
+- If user says "midlength" or "mid length" or "midlength board" → surfboard_type: ["mid_length"]
+- If user says "longboard" or "long board" or "longboarders" → surfboard_type: ["longboard"]
+- If user says "soft top" or "softtop" → surfboard_type: ["soft_top"]
+- If user mentions multiple board types (e.g., "longboard/midlength") → surfboard_type: ["longboard", "mid_length"]
 - If user says "intermediate" or "advanced", infer surf_level ranges
 
 IMPORTANT: If the user mentions criteria that CANNOT be mapped to any of the above fields (e.g., physical appearance like "blond", "tall", "blue eyes", personal details like "married", "has kids", etc.), you MUST:
@@ -758,7 +806,7 @@ When asking QUESTION 3 (travel distance), use their country_from to provide rele
       const messages = [
         { role: 'system', content: systemPrompt },
         // Add explicit instruction for first response - MUST ask STEP 1 question
-        { role: 'system', content: 'CRITICAL: This is the FIRST message in a NEW conversation. The user has just introduced themselves or started the conversation. You MUST respond with STEP 1\'s question: "Hey man, let\'s plan your next trip together. You know where you\'re headed, or wanna work it out with me?" Do NOT skip to STEP 2A or STEP 2B. Do NOT ask about time/season yet. Wait for the user to answer STEP 1 first. Treat their initial message as context/introduction only.' },
+        { role: 'system', content: 'CRITICAL: This is the FIRST message in a NEW conversation. The user has just introduced themselves or started the conversation. You MUST respond with STEP 1\'s question: "Hey 🤙 I can connect you with surfers like you, or match you with someone who\'s surfed a destination you\'re curious about. Tell me what you\'re looking for" Do NOT skip to STEP 2. Wait for the user to answer STEP 1 first. Treat their initial message as context/introduction only.' },
         { role: 'user', content: body.message }
       ]
 
@@ -1075,7 +1123,7 @@ When asking QUESTION 3 (travel distance), use their country_from to provide rele
 
       // If we detected unmappable criteria, add a system message to inform the LLM
       if (unmappableCriteria.length > 0) {
-        const unmappableMessage = `IMPORTANT: The user mentioned criteria we don't have in our database: ${unmappableCriteria.join(', ')}. You should acknowledge this politely and explain that we can filter by: country, age, surf level, board type, destination experience, and lifestyle keywords, but not by physical appearance or personal details. Still proceed with filtering by the criteria we DO have.`
+        const unmappableMessage = `IMPORTANT: The user mentioned criteria we don't have in our database: ${unmappableCriteria.join(', ')}. Silently extract and use the criteria we DO have (country, age, surf level, board type, destination experience, lifestyle keywords). DO NOT explain what we can or can't filter by - just proceed with matching.`
         // Insert before the last user message
         messages.splice(messages.length - 1, 0, { role: 'system', content: unmappableMessage })
       }
@@ -1312,11 +1360,25 @@ When asking QUESTION 3 (travel distance), use their country_from to provide rele
                       console.log(`✅ Extracted surfboard_type: shortboard from "${userMsg}"`)
                     }
                   }
+                  if (userMsgLower.includes('midlength') || userMsgLower.includes('mid length') || userMsgLower.includes('mid-length')) {
+                    tripPlanningData.non_negotiable_criteria.surfboard_type = tripPlanningData.non_negotiable_criteria.surfboard_type || []
+                    if (!tripPlanningData.non_negotiable_criteria.surfboard_type.includes('mid_length')) {
+                      tripPlanningData.non_negotiable_criteria.surfboard_type.push('mid_length')
+                      console.log(`✅ Extracted surfboard_type: mid_length from "${userMsg}"`)
+                    }
+                  }
                   if (userMsgLower.includes('longboard') || userMsgLower.includes('long board')) {
                     tripPlanningData.non_negotiable_criteria.surfboard_type = tripPlanningData.non_negotiable_criteria.surfboard_type || []
                     if (!tripPlanningData.non_negotiable_criteria.surfboard_type.includes('longboard')) {
                       tripPlanningData.non_negotiable_criteria.surfboard_type.push('longboard')
                       console.log(`✅ Extracted surfboard_type: longboard from "${userMsg}"`)
+                    }
+                  }
+                  if (userMsgLower.includes('softtop') || userMsgLower.includes('soft top') || userMsgLower.includes('soft-top')) {
+                    tripPlanningData.non_negotiable_criteria.surfboard_type = tripPlanningData.non_negotiable_criteria.surfboard_type || []
+                    if (!tripPlanningData.non_negotiable_criteria.surfboard_type.includes('soft_top')) {
+                      tripPlanningData.non_negotiable_criteria.surfboard_type.push('soft_top')
+                      console.log(`✅ Extracted surfboard_type: soft_top from "${userMsg}"`)
                     }
                   }
                 }

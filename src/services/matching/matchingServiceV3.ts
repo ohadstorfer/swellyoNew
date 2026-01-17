@@ -17,6 +17,7 @@
 import { supabase, isSupabaseConfigured } from '../../config/supabase';
 import { supabaseDatabaseService, SupabaseSurfer } from '../database/supabaseDatabaseService';
 import { TripPlanningRequest, MatchedUser, BUDGET_MAP, TRAVEL_EXPERIENCE_MAP, GROUP_TYPE_MAP } from '../../types/tripPlanning';
+import { analyzeMatchQuality, hasMinimumMatches, calculateDataCompleteness } from './matchQualityAnalyzer';
 
 const OPENAI_API_KEY = process.env.EXPO_PUBLIC_OPENAI_API_KEY;
 
@@ -97,6 +98,13 @@ export interface UserMatchingResult {
   commonWaveKeywords: string[];
   daysInDestination: number;
   rejectionReason?: string; // Why user was filtered out
+  bestMatch?: {
+    countryMatch: boolean;
+    areaMatch: boolean;
+    townMatch: boolean;
+    matchedAreas: AreaOption[];
+    matchedTowns: string[];
+  }; // Destination match info for quality analysis
 }
 
 /**
@@ -1099,25 +1107,74 @@ export async function findMatchingUsersV3(
         commonLifestyleKeywords: layer4Result.commonLifestyleKeywords,
         commonWaveKeywords: layer4Result.commonWaveKeywords,
         daysInDestination,
+        bestMatch,
       });
     }
 
     // Step 7: Filter to only users who passed both Layer 1 and Layer 2
     const passedUsers = matchingResults.filter(r => r.passedLayer1 && r.passedLayer2);
 
-    // Step 8: Sort by total score (descending)
-    // Area matches (with +1000 boost) will naturally appear first
-    passedUsers.sort((a, b) => b.totalScore - a.totalScore);
+    // Step 7.5: Analyze match quality and filter by matchCount > 1
+    const usersWithQuality = passedUsers.map(result => {
+      const destinationMatch = result.bestMatch || {
+        countryMatch: false,
+        areaMatch: false,
+        townMatch: false,
+        matchedAreas: [],
+        matchedTowns: [],
+      };
+      const matchQuality = analyzeMatchQuality(request, result.surfer, destinationMatch);
+      return {
+        ...result,
+        matchQuality,
+        dataCompleteness: calculateDataCompleteness(result.surfer),
+      };
+    });
 
-    // Step 9: Return top users (area matches prioritized via score boost)
+    // Filter by minimum match count (must match more than 1 criteria)
+    const validMatches = usersWithQuality.filter(u => u.matchQuality.matchCount > 1);
+
+    // If no valid matches, check for area fallback (country-only matches)
+    let finalMatches = validMatches;
+    if (validMatches.length === 0 && request.area) {
+      // Check for country-only matches (area not matched but country matched)
+      const countryOnlyMatches = usersWithQuality.filter(u => 
+        u.matchQuality.matchedCriteria.destination_country && 
+        !u.matchQuality.matchedCriteria.area &&
+        u.matchQuality.matchCount > 1
+      );
+      if (countryOnlyMatches.length > 0) {
+        finalMatches = countryOnlyMatches;
+        console.log(`No area matches found, using ${countryOnlyMatches.length} country-only matches`);
+      }
+    }
+
+    // Step 8: Sort by match count (descending), then by total score (descending), then by data completeness
+    finalMatches.sort((a, b) => {
+      // First by match count
+      if (b.matchQuality.matchCount !== a.matchQuality.matchCount) {
+        return b.matchQuality.matchCount - a.matchQuality.matchCount;
+      }
+      // Then by total score
+      if (b.totalScore !== a.totalScore) {
+        return b.totalScore - a.totalScore;
+      }
+      // Finally by data completeness
+      return b.dataCompleteness - a.dataCompleteness;
+    });
+
+    // Step 9: Return top 3 users (area matches prioritized via score boost)
     // The +1000 boost ensures area matches appear first, then sorted by other scores
-    const topUsers = passedUsers.slice(0, 10);
+    const topUsers = finalMatches.slice(0, 3);
 
-    console.log(`Found ${passedUsers.length} users who passed filters, returning top users`);
-    console.log(`Area priority: ${passedUsers.filter(u => u.totalScore >= 1000).length} users with area match boost`);
+    console.log(`Found ${passedUsers.length} users who passed filters`);
+    console.log(`After match quality filter (matchCount > 1): ${validMatches.length} valid matches`);
+    console.log(`Returning top ${topUsers.length} users`);
+    console.log(`Area priority: ${topUsers.filter(u => u.totalScore >= 1000).length} users with area match boost`);
     console.log('Top users:', topUsers.map(u => ({
       user_id: u.user_id,
       name: u.surfer.name,
+      matchCount: u.matchQuality.matchCount,
       totalScore: u.totalScore,
       priorityScore: u.priorityScore,
       generalScore: u.generalScore,
@@ -1139,6 +1196,7 @@ export async function findMatchingUsersV3(
       age: result.surfer.age,
       days_in_destination: result.daysInDestination,
       destinations_array: result.surfer.destinations_array,
+      matchQuality: result.matchQuality,
     }));
 
     console.log('=== MATCHING V3 COMPLETE ===');

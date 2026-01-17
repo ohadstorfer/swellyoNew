@@ -26,6 +26,7 @@ import { messagingService } from '../services/messaging/messagingService';
 import { findMatchingUsers } from '../services/matching/matchingService';
 import { findMatchingUsersV3 } from '../services/matching/matchingServiceV3';
 import { supabaseAuthService } from '../services/auth/supabaseAuthService';
+import { MatchedUser, TripPlanningRequest } from '../types/tripPlanning';
 
 interface Message {
   id: string;
@@ -35,12 +36,157 @@ interface Message {
   isMatchedUsers?: boolean; // Flag to indicate this message should render matched user cards
 }
 
+/**
+ * Generate question for partial matches - ask user if they want to see them
+ */
+function generatePartialMatchQuestion(
+  matchedUsers: MatchedUser[], 
+  request: TripPlanningRequest, 
+  quality: NonNullable<MatchedUser['matchQuality']>
+): string {
+  const firstMatch = matchedUsers[0];
+  const differenceParts: string[] = [];
 
+  // Build description of what was found vs what was requested
+  if (quality.differences.age) {
+    const { requested, found } = quality.differences.age;
+    const requestedStr = Array.isArray(requested) 
+      ? `${requested[0]}-${requested[1]} years old`
+      : `${requested} years old`;
+    differenceParts.push(`no ${requestedStr} surfers (found ${found} years old instead)`);
+  }
+  if (quality.differences.country_from) {
+    const { requested, found } = quality.differences.country_from;
+    differenceParts.push(`no surfers from ${requested.join(' or ')} (found ${found} instead)`);
+  }
+  if (quality.differences.surfboard_type) {
+    const { requested, found } = quality.differences.surfboard_type;
+    differenceParts.push(`no ${requested.join(' or ')} surfers (found ${found} instead)`);
+  }
+  if (quality.differences.area) {
+    const { requested, found } = quality.differences.area;
+    differenceParts.push(`no surfers who surfed in ${requested} (found ${found || 'other areas'} instead)`);
+  }
+
+  // Build the question message
+  let message = "Bro, I couldn't find exactly what you're looking for";
+  if (differenceParts.length > 0) {
+    message += ` (${differenceParts.join(', ')})`;
+  }
+  
+  // Add what we DID find
+  const foundParts: string[] = [];
+  if (firstMatch.country_from && quality.matchedCriteria.country_from) {
+    foundParts.push(`from ${firstMatch.country_from}`);
+  }
+  if (firstMatch.age && quality.matchedCriteria.age) {
+    foundParts.push(`${firstMatch.age} years old`);
+  }
+  if (firstMatch.surfboard_type && quality.matchedCriteria.surfboard_type) {
+    foundParts.push(`uses a ${firstMatch.surfboard_type}`);
+  }
+  if (request.destination_country && quality.matchedCriteria.destination_country) {
+    foundParts.push(`surfed in ${request.destination_country}`);
+  }
+
+  if (foundParts.length > 0) {
+    message += `, but I did find ${foundParts.join(', ')}`;
+    if (matchedUsers.length > 1) {
+      message += ` (${matchedUsers.length} options)`;
+    }
+  }
+
+  message += ". Would you like me to send them to you, or do you want to change your request?";
+
+  return message;
+}
+
+/**
+ * Generate intelligent fallback message based on match quality (for exact matches)
+ */
+function generateFallbackMessage(matchedUsers: MatchedUser[], request: TripPlanningRequest): string {
+  if (matchedUsers.length === 0) {
+    return "Sorry, I couldn't find any surfers that match your criteria. Would you like to relax some requirements?";
+  }
+
+  const firstMatch = matchedUsers[0];
+  if (!firstMatch.matchQuality) {
+    // Fallback to simple message if no quality data
+    return `Found ${matchedUsers.length} awesome match${matchedUsers.length > 1 ? 'es' : ''} for you!`;
+  }
+
+  const quality = firstMatch.matchQuality;
+  
+  // Check for area fallback (area requested but not matched)
+  if (request.area && quality.matchedCriteria.area === false) {
+    return `Hey, I couldn't find anyone that surfed exactly in ${request.area}, but I can connect you to someone who surfed in ${request.destination_country}`;
+  }
+
+  // Build message for partial matches
+  const matchedParts: string[] = [];
+  const differenceParts: string[] = [];
+
+  // List matched criteria
+  if (quality.matchedCriteria.country_from) {
+    matchedParts.push(`from ${firstMatch.country_from}`);
+  }
+  if (quality.matchedCriteria.surfboard_type) {
+    matchedParts.push(`uses a ${firstMatch.surfboard_type}`);
+  }
+  if (quality.matchedCriteria.age) {
+    matchedParts.push(`${firstMatch.age} years old`);
+  }
+  if (quality.matchedCriteria.surf_level) {
+    matchedParts.push(`surf level ${firstMatch.surf_level}`);
+  }
+
+  // List differences
+  if (quality.differences.age) {
+    const { requested, found } = quality.differences.age;
+    const requestedStr = Array.isArray(requested) 
+      ? `~${Math.round((requested[0] + requested[1]) / 2)}`
+      : String(requested);
+    differenceParts.push(`he's ${found} years old (you asked for ${requestedStr})`);
+  }
+  if (quality.differences.surfboard_type) {
+    const { requested, found } = quality.differences.surfboard_type;
+    differenceParts.push(`uses a ${found} (you asked for ${requested.join(' or ')})`);
+  }
+  if (quality.differences.country_from) {
+    const { requested, found } = quality.differences.country_from;
+    differenceParts.push(`from ${found} (you asked for ${requested.join(' or ')})`);
+  }
+  if (quality.differences.surf_level) {
+    const { requested, found } = quality.differences.surf_level;
+    const requestedStr = Array.isArray(requested) 
+      ? `level ${requested[0]}-${requested[1]}`
+      : `level ${requested}`;
+    differenceParts.push(`surf level ${found} (you asked for ${requestedStr})`);
+  }
+
+  // Build the message
+  let message = '';
+  if (matchedParts.length > 0) {
+    message = `We found a ${matchedParts.join(', ')} surfer that surfed in ${request.destination_country}`;
+  } else {
+    message = `We found a surfer that surfed in ${request.destination_country}`;
+  }
+
+  if (differenceParts.length > 0) {
+    message += ` BUT ${differenceParts.join(' and ')}`;
+  }
+
+  if (matchedUsers.length > 1) {
+    message += `. Here are ${matchedUsers.length} options that best match what you're looking for.`;
+  }
+
+  return message;
+}
 
 interface ChatScreenProps {
   onChatComplete?: () => void;
   conversationType?: 'onboarding' | 'trip-planning';
-  onViewUserProfile?: (userId: string) => void;
+  onViewUserProfile?: (userId: string, fromTripPlanningChat?: boolean) => void;
   onStartConversation?: (userId: string) => void;
   // Props for persisting trip planning state
   persistedChatId?: string | null;
@@ -69,6 +215,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
   const [inputHeight, setInputHeight] = useState(25); // Initial height for one line
   const [matchedUsers, setMatchedUsers] = useState<any[]>(persistedMatchedUsers || []); // Store matched users for rendering cards
   const [destinationCountry, setDestinationCountry] = useState<string>(persistedDestination || ''); // Store destination for cards
+  const [pendingPartialMatches, setPendingPartialMatches] = useState<MatchedUser[] | null>(null); // Store partial matches waiting for user confirmation
   const scrollViewRef = useRef<ScrollView>(null);
   const textInputRef = useRef<any>(null);
 
@@ -168,8 +315,8 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
         let response: SwellyChatResponse;
         
         if (conversationType === 'trip-planning') {
-          // Trip planning: Start with context about user's profile
-          console.log('Initializing trip planning conversation...');
+          // Connecting surfers: Start with context about user's profile
+          console.log('Initializing surfer connection conversation...');
           
           // Build context message from user's profile
           const contextParts: string[] = [];
@@ -193,8 +340,8 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
           }
           
           const contextMessage = contextParts.length > 0
-            ? `Hi! ${contextParts.join(', ')}. I want to plan a new surf trip.`
-            : 'Hi! I want to plan a new surf trip.';
+            ? `Hi! ${contextParts.join(', ')}. I'm looking to connect with surfers.`
+            : 'Hi! I\'m looking to connect with surfers.';
           
           response = await swellyService.startTripPlanningConversation({
             message: contextMessage,
@@ -268,6 +415,48 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
     };
 
     console.log('Sending message:', userMessage.text);
+    
+    // Check if user wants to see pending partial matches
+    if (pendingPartialMatches && pendingPartialMatches.length > 0) {
+      const userText = userMessage.text.toLowerCase();
+      const wantsToSee = userText.includes('yes') || 
+                        userText.includes('send') || 
+                        userText.includes('show') || 
+                        userText.includes('sure') ||
+                        userText.includes('ok') ||
+                        userText.includes('okay') ||
+                        userText.includes('yeah');
+      
+      if (wantsToSee) {
+        // User confirmed - show the partial matches
+        setMessages(prev => [...prev, userMessage]);
+        setInputText('');
+        const matchesMessage: Message = {
+          id: (Date.now() + 1).toString(),
+          text: `Here are ${pendingPartialMatches.length} option${pendingPartialMatches.length > 1 ? 's' : ''} that best match what you're looking for:`,
+          isUser: false,
+          timestamp: new Date().toLocaleTimeString('en-US', { 
+            hour: '2-digit', 
+            minute: '2-digit',
+            hour12: false 
+          }),
+          isMatchedUsers: true,
+        };
+        setMessages(prev => [...prev, matchesMessage]);
+        setMatchedUsers(pendingPartialMatches);
+        setPendingPartialMatches(null);
+        
+        if (onChatStateChange) {
+          onChatStateChange(chatId, pendingPartialMatches, destinationCountry);
+        }
+        return; // Don't process this as a normal message
+      } else if (userText.includes('no') || userText.includes('change') || userText.includes('different')) {
+        // User wants to change request - clear pending matches and continue normal flow
+        setPendingPartialMatches(null);
+        setMatchedUsers([]);
+      }
+    }
+    
     setMessages(prev => [...prev, userMessage]);
     setInputText('');
     setIsLoading(true);
@@ -377,35 +566,70 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
             console.log('Matched users found:', matchedUsers.length, matchedUsers);
             console.log('Filters from non-negotiable step:', response.data.filtersFromNonNegotiableStep);
             
+            // Check if matches are exact or partial
+            // If matchQuality is missing, treat as exact matches (backward compatibility)
+            const hasMatchQuality = matchedUsers.some(u => u.matchQuality);
+            const hasExactMatches = hasMatchQuality 
+              ? matchedUsers.some(u => u.matchQuality?.exactMatch === true)
+              : true; // If no quality data, assume exact matches
+            const hasPartialMatches = matchedUsers.length > 0 && hasMatchQuality && !hasExactMatches;
+            
             // Display matched users
             if (matchedUsers.length > 0) {
-              const matchesMessage: Message = {
-                id: (Date.now() + 3).toString(),
-                text: `Found ${matchedUsers.length} awesome match${matchedUsers.length > 1 ? 'es' : ''} for you!`,
-                isUser: false,
-                timestamp: new Date().toLocaleTimeString('en-US', { 
-                  hour: '2-digit', 
-                  minute: '2-digit',
-                  hour12: false 
-                }),
-                isMatchedUsers: true, // Flag to indicate this message has cards
-              };
-              setMessages(prev => [...prev, matchesMessage]);
-              
-              // Store matched users and destination for rendering cards
-              setMatchedUsers(matchedUsers);
-              setDestinationCountry(response.data.destination_country);
-              
-              // Notify parent to persist state for when user returns
-              if (onChatStateChange) {
-                onChatStateChange(chatId, matchedUsers, response.data.destination_country);
+              if (hasExactMatches || !hasMatchQuality) {
+                // Exact matches - show immediately
+                const matchesMessage: Message = {
+                  id: (Date.now() + 3).toString(),
+                  text: `Found ${matchedUsers.length} awesome match${matchedUsers.length > 1 ? 'es' : ''} for you!`,
+                  isUser: false,
+                  timestamp: new Date().toLocaleTimeString('en-US', { 
+                    hour: '2-digit', 
+                    minute: '2-digit',
+                    hour12: false 
+                  }),
+                  isMatchedUsers: true, // Flag to indicate this message has cards
+                };
+                setMessages(prev => [...prev, matchesMessage]);
+                
+                // Store matched users and destination for rendering cards
+                setMatchedUsers(matchedUsers);
+                setDestinationCountry(response.data.destination_country);
+                
+                // Notify parent to persist state for when user returns
+                if (onChatStateChange) {
+                  onChatStateChange(chatId, matchedUsers, response.data.destination_country);
+                }
+              } else if (hasPartialMatches) {
+                // Partial matches - ask user first
+                const firstMatch = matchedUsers[0];
+                const quality = firstMatch.matchQuality;
+                if (quality) {
+                  const partialMessage = generatePartialMatchQuestion(matchedUsers, requestData, quality);
+                  const askMessage: Message = {
+                    id: (Date.now() + 3).toString(),
+                    text: partialMessage,
+                    isUser: false,
+                    timestamp: new Date().toLocaleTimeString('en-US', { 
+                      hour: '2-digit', 
+                      minute: '2-digit',
+                      hour12: false 
+                    }),
+                    isMatchedUsers: false, // Don't show cards yet - wait for user confirmation
+                  };
+                  setMessages(prev => [...prev, askMessage]);
+                  
+                  // Store partial matches temporarily (will show if user confirms)
+                  setPendingPartialMatches(matchedUsers);
+                  setDestinationCountry(response.data.destination_country);
+                  // Don't set matchedUsers yet - wait for confirmation
+                }
               }
             } else {
               // Different message based on whether filters came from non-negotiable step
               const noMatchesMessage: Message = {
                 id: (Date.now() + 3).toString(),
                 text: response.data.filtersFromNonNegotiableStep
-                  ? "Sorry, I couldn't find any surfers that match all your non-negotiable criteria. Would you like to relax some of those requirements?"
+                  ? "Sorry, I couldn't find any surfers that match all your criteria. Would you like to relax some of those requirements?"
                   : "Hmm, couldn't find any perfect matches right now, but don't worry! More surfers are joining every day. Check back soon!",
                 isUser: false,
                 timestamp: new Date().toLocaleTimeString('en-US', { 
@@ -530,7 +754,9 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
 
   const handleViewProfile = (userId: string) => {
     if (onViewUserProfile) {
-      onViewUserProfile(userId);
+      // Pass true to indicate this profile view came from trip planning chat
+      const isFromTripPlanning = conversationType === 'trip-planning';
+      onViewUserProfile(userId, isFromTripPlanning);
     } else {
       // Fallback: show alert or navigate
       Alert.alert('Profile', `View profile for user: ${userId}`);
@@ -722,9 +948,11 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
           </TouchableOpacity>
         </View>
         
-        <View style={styles.progressBar}>
-          <View style={[styles.progressFill, { width: `${progressPercentage}%` }]} />
-        </View>
+        {conversationType !== 'trip-planning' && (
+          <View style={styles.progressBar}>
+            <View style={[styles.progressFill, { width: `${progressPercentage}%` }]} />
+          </View>
+        )}
       </View>
 
       {/* Chat Messages */}
