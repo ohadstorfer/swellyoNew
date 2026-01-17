@@ -21,12 +21,7 @@ import { swellyService, SwellyChatResponse } from '../services/swelly/swellyServ
 import { useOnboarding } from '../context/OnboardingContext';
 import { getImageUrl } from '../services/media/imageService';
 import { supabaseDatabaseService } from '../services/database/supabaseDatabaseService';
-import { MatchedUserCard } from '../components/MatchedUserCard';
 import { messagingService } from '../services/messaging/messagingService';
-import { findMatchingUsers } from '../services/matching/matchingService';
-import { findMatchingUsersV3 } from '../services/matching/matchingServiceV3';
-import { supabaseAuthService } from '../services/auth/supabaseAuthService';
-import { MatchedUser, TripPlanningRequest } from '../types/tripPlanning';
 
 interface Message {
   id: string;
@@ -36,186 +31,22 @@ interface Message {
   isMatchedUsers?: boolean; // Flag to indicate this message should render matched user cards
 }
 
-/**
- * Generate question for partial matches - ask user if they want to see them
- */
-function generatePartialMatchQuestion(
-  matchedUsers: MatchedUser[], 
-  request: TripPlanningRequest, 
-  quality: NonNullable<MatchedUser['matchQuality']>
-): string {
-  const firstMatch = matchedUsers[0];
-  const differenceParts: string[] = [];
 
-  // Build description of what was found vs what was requested
-  if (quality.differences.age) {
-    const { requested, found } = quality.differences.age;
-    const requestedStr = Array.isArray(requested) 
-      ? `${requested[0]}-${requested[1]} years old`
-      : `${requested} years old`;
-    differenceParts.push(`no ${requestedStr} surfers (found ${found} years old instead)`);
-  }
-  if (quality.differences.country_from) {
-    const { requested, found } = quality.differences.country_from;
-    differenceParts.push(`no surfers from ${requested.join(' or ')} (found ${found} instead)`);
-  }
-  if (quality.differences.surfboard_type) {
-    const { requested, found } = quality.differences.surfboard_type;
-    differenceParts.push(`no ${requested.join(' or ')} surfers (found ${found} instead)`);
-  }
-  if (quality.differences.area) {
-    const { requested, found } = quality.differences.area;
-    differenceParts.push(`no surfers who surfed in ${requested} (found ${found || 'other areas'} instead)`);
-  }
-
-  // Build the question message
-  let message = "Bro, I couldn't find exactly what you're looking for";
-  if (differenceParts.length > 0) {
-    message += ` (${differenceParts.join(', ')})`;
-  }
-  
-  // Add what we DID find
-  const foundParts: string[] = [];
-  if (firstMatch.country_from && quality.matchedCriteria.country_from) {
-    foundParts.push(`from ${firstMatch.country_from}`);
-  }
-  if (firstMatch.age && quality.matchedCriteria.age) {
-    foundParts.push(`${firstMatch.age} years old`);
-  }
-  if (firstMatch.surfboard_type && quality.matchedCriteria.surfboard_type) {
-    foundParts.push(`uses a ${firstMatch.surfboard_type}`);
-  }
-  if (request.destination_country && quality.matchedCriteria.destination_country) {
-    foundParts.push(`surfed in ${request.destination_country}`);
-  }
-
-  if (foundParts.length > 0) {
-    message += `, but I did find ${foundParts.join(', ')}`;
-    if (matchedUsers.length > 1) {
-      message += ` (${matchedUsers.length} options)`;
-    }
-  }
-
-  message += ". Would you like me to send them to you, or do you want to change your request?";
-
-  return message;
-}
-
-/**
- * Generate intelligent fallback message based on match quality (for exact matches)
- */
-function generateFallbackMessage(matchedUsers: MatchedUser[], request: TripPlanningRequest): string {
-  if (matchedUsers.length === 0) {
-    return "Sorry, I couldn't find any surfers that match your criteria. Would you like to relax some requirements?";
-  }
-
-  const firstMatch = matchedUsers[0];
-  if (!firstMatch.matchQuality) {
-    // Fallback to simple message if no quality data
-    return `Found ${matchedUsers.length} awesome match${matchedUsers.length > 1 ? 'es' : ''} for you!`;
-  }
-
-  const quality = firstMatch.matchQuality;
-  
-  // Check for area fallback (area requested but not matched)
-  if (request.area && quality.matchedCriteria.area === false) {
-    return `Hey, I couldn't find anyone that surfed exactly in ${request.area}, but I can connect you to someone who surfed in ${request.destination_country}`;
-  }
-
-  // Build message for partial matches
-  const matchedParts: string[] = [];
-  const differenceParts: string[] = [];
-
-  // List matched criteria
-  if (quality.matchedCriteria.country_from) {
-    matchedParts.push(`from ${firstMatch.country_from}`);
-  }
-  if (quality.matchedCriteria.surfboard_type) {
-    matchedParts.push(`uses a ${firstMatch.surfboard_type}`);
-  }
-  if (quality.matchedCriteria.age) {
-    matchedParts.push(`${firstMatch.age} years old`);
-  }
-  if (quality.matchedCriteria.surf_level) {
-    matchedParts.push(`surf level ${firstMatch.surf_level}`);
-  }
-
-  // List differences
-  if (quality.differences.age) {
-    const { requested, found } = quality.differences.age;
-    const requestedStr = Array.isArray(requested) 
-      ? `~${Math.round((requested[0] + requested[1]) / 2)}`
-      : String(requested);
-    differenceParts.push(`he's ${found} years old (you asked for ${requestedStr})`);
-  }
-  if (quality.differences.surfboard_type) {
-    const { requested, found } = quality.differences.surfboard_type;
-    differenceParts.push(`uses a ${found} (you asked for ${requested.join(' or ')})`);
-  }
-  if (quality.differences.country_from) {
-    const { requested, found } = quality.differences.country_from;
-    differenceParts.push(`from ${found} (you asked for ${requested.join(' or ')})`);
-  }
-  if (quality.differences.surf_level) {
-    const { requested, found } = quality.differences.surf_level;
-    const requestedStr = Array.isArray(requested) 
-      ? `level ${requested[0]}-${requested[1]}`
-      : `level ${requested}`;
-    differenceParts.push(`surf level ${found} (you asked for ${requestedStr})`);
-  }
-
-  // Build the message
-  let message = '';
-  if (matchedParts.length > 0) {
-    message = `We found a ${matchedParts.join(', ')} surfer that surfed in ${request.destination_country}`;
-  } else {
-    message = `We found a surfer that surfed in ${request.destination_country}`;
-  }
-
-  if (differenceParts.length > 0) {
-    message += ` BUT ${differenceParts.join(' and ')}`;
-  }
-
-  if (matchedUsers.length > 1) {
-    message += `. Here are ${matchedUsers.length} options that best match what you're looking for.`;
-  }
-
-  return message;
-}
-
-interface ChatScreenProps {
+interface OnboardingChatScreenProps {
   onChatComplete?: () => void;
-  conversationType?: 'onboarding' | 'trip-planning';
-  onViewUserProfile?: (userId: string, fromTripPlanningChat?: boolean) => void;
-  onStartConversation?: (userId: string) => void;
-  // Props for persisting trip planning state
-  persistedChatId?: string | null;
-  persistedMatchedUsers?: any[];
-  persistedDestination?: string;
-  onChatStateChange?: (chatId: string | null, matchedUsers: any[], destination: string) => void;
 }
 
-export const ChatScreen: React.FC<ChatScreenProps> = ({ 
+export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({ 
   onChatComplete,
-  conversationType = 'onboarding',
-  onViewUserProfile,
-  onStartConversation,
-  persistedChatId,
-  persistedMatchedUsers,
-  persistedDestination,
-  onChatStateChange,
 }) => {
   const { setCurrentStep, formData, isDemoUser } = useOnboarding();
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
-  const [chatId, setChatId] = useState<string | null>(persistedChatId || null);
+  const [chatId, setChatId] = useState<string | null>(null);
   const [isFinished, setIsFinished] = useState(false);
   const [inputHeight, setInputHeight] = useState(25); // Initial height for one line
-  const [matchedUsers, setMatchedUsers] = useState<any[]>(persistedMatchedUsers || []); // Store matched users for rendering cards
-  const [destinationCountry, setDestinationCountry] = useState<string>(persistedDestination || ''); // Store destination for cards
-  const [pendingPartialMatches, setPendingPartialMatches] = useState<MatchedUser[] | null>(null); // Store partial matches waiting for user confirmation
   const scrollViewRef = useRef<ScrollView>(null);
   const textInputRef = useRef<any>(null);
 
@@ -247,129 +78,23 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
         const health = await swellyService.healthCheck();
         console.log('API health check successful:', health);
         
-        // If we have a persisted chatId for trip planning, restore the conversation
-        if (conversationType === 'trip-planning' && persistedChatId) {
-          console.log('Restoring trip planning conversation from chatId:', persistedChatId);
-          try {
-            const history = await swellyService.getTripPlanningHistory(persistedChatId);
-            console.log('Restored history:', history);
-            
-            if (history && history.messages && history.messages.length > 0) {
-              // Convert backend messages to UI format
-              const restoredMessages: Message[] = [];
-              let messageId = 1;
-              
-              for (const msg of history.messages) {
-                // Skip system messages
-                if (msg.role === 'system') continue;
-                
-                // Parse assistant messages that might be JSON
-                let messageText = msg.content;
-                if (msg.role === 'assistant') {
-                  try {
-                    const parsed = JSON.parse(msg.content);
-                    messageText = parsed.return_message || msg.content;
-                  } catch {
-                    // Not JSON, use as-is
-                  }
-                }
-                
-                restoredMessages.push({
-                  id: String(messageId++),
-                  text: messageText,
-                  isUser: msg.role === 'user',
-                  timestamp: new Date().toLocaleTimeString('en-US', { 
-                    hour: '2-digit', 
-                    minute: '2-digit',
-                    hour12: false 
-                  }),
-                });
-              }
-              
-              // If we have persisted matched users, add the matched users message
-              if (persistedMatchedUsers && persistedMatchedUsers.length > 0) {
-                restoredMessages.push({
-                  id: String(messageId++),
-                  text: `Found ${persistedMatchedUsers.length} awesome match${persistedMatchedUsers.length > 1 ? 'es' : ''} for you!`,
-                  isUser: false,
-                  timestamp: new Date().toLocaleTimeString('en-US', { 
-                    hour: '2-digit', 
-                    minute: '2-digit',
-                    hour12: false 
-                  }),
-                  isMatchedUsers: true,
-                });
-                setIsFinished(true);
-              }
-              
-              setMessages(restoredMessages);
-              setIsInitializing(false);
-              return; // Exit early, we've restored the conversation
-            }
-          } catch (restoreError) {
-            console.error('Failed to restore trip planning conversation:', restoreError);
-            // Fall through to start a new conversation
-          }
-        }
-        
-        let response: SwellyChatResponse;
-        
-        if (conversationType === 'trip-planning') {
-          // Connecting surfers: Start with context about user's profile
-          console.log('Initializing surfer connection conversation...');
-          
-          // Build context message from user's profile
-          const contextParts: string[] = [];
-          if (formData.nickname) contextParts.push(`I'm ${formData.nickname}`);
-          if (formData.age) contextParts.push(`${formData.age} years old`);
-          if (formData.location) contextParts.push(`from ${formData.location}`);
-          
-          const boardTypeNames: { [key: number]: string } = {
-            0: 'shortboard',
-            1: 'midlength',
-            2: 'longboard',
-            3: 'soft top',
-          };
-          if (formData.boardType !== undefined) {
-            contextParts.push(`surfing ${boardTypeNames[formData.boardType] || 'surfboard'}`);
-          }
-          
-          if (formData.surfLevel !== undefined) {
-            const levelNames = ['beginner', 'beginner-intermediate', 'intermediate', 'intermediate-advanced', 'advanced'];
-            contextParts.push(`${levelNames[formData.surfLevel] || 'intermediate'} level`);
-          }
-          
-          const contextMessage = contextParts.length > 0
-            ? `Hi! ${contextParts.join(', ')}. I'm looking to connect with surfers.`
-            : 'Hi! I\'m looking to connect with surfers.';
-          
-          response = await swellyService.startTripPlanningConversation({
-            message: contextMessage,
-          });
-        } else {
-          // Onboarding: Send initial context message using actual onboarding data
-          console.log('Initializing onboarding chat with user profile data...');
+        // Onboarding: Send initial context message using actual onboarding data
+        console.log('Initializing onboarding chat with user profile data...');
         console.log('Form data:', formData);
         
         // Use initializeWithProfile to build context from onboarding data
         // This will use the actual data collected during onboarding steps 1-4
-          response = await swellyService.initializeWithProfile({
+        const response = await swellyService.initializeWithProfile({
           nickname: formData.nickname,
           age: formData.age,
           boardType: formData.boardType,
           surfLevel: formData.surfLevel,
           travelExperience: formData.travelExperience,
         });
-        }
         
         console.log('Chat initialized with response:', response);
         const newChatId = response.chat_id || null;
         setChatId(newChatId);
-        
-        // Notify parent of new chatId
-        if (conversationType === 'trip-planning' && onChatStateChange) {
-          onChatStateChange(newChatId, [], '');
-        }
         
         // Set the first message from Swelly's response
         setMessages([
@@ -398,7 +123,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
     };
     
     initializeChat();
-  }, [formData, conversationType]); // Re-run if formData or conversationType changes
+  }, [formData]); // Re-run if formData changes
 
   const sendMessage = async () => {
     if (!inputText.trim() || isLoading) return;
@@ -415,48 +140,6 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
     };
 
     console.log('Sending message:', userMessage.text);
-    
-    // Check if user wants to see pending partial matches
-    if (pendingPartialMatches && pendingPartialMatches.length > 0) {
-      const userText = userMessage.text.toLowerCase();
-      const wantsToSee = userText.includes('yes') || 
-                        userText.includes('send') || 
-                        userText.includes('show') || 
-                        userText.includes('sure') ||
-                        userText.includes('ok') ||
-                        userText.includes('okay') ||
-                        userText.includes('yeah');
-      
-      if (wantsToSee) {
-        // User confirmed - show the partial matches
-        setMessages(prev => [...prev, userMessage]);
-        setInputText('');
-        const matchesMessage: Message = {
-          id: (Date.now() + 1).toString(),
-          text: `Here are ${pendingPartialMatches.length} option${pendingPartialMatches.length > 1 ? 's' : ''} that best match what you're looking for:`,
-          isUser: false,
-          timestamp: new Date().toLocaleTimeString('en-US', { 
-            hour: '2-digit', 
-            minute: '2-digit',
-            hour12: false 
-          }),
-          isMatchedUsers: true,
-        };
-        setMessages(prev => [...prev, matchesMessage]);
-        setMatchedUsers(pendingPartialMatches);
-        setPendingPartialMatches(null);
-        
-        if (onChatStateChange) {
-          onChatStateChange(chatId, pendingPartialMatches, destinationCountry);
-        }
-        return; // Don't process this as a normal message
-      } else if (userText.includes('no') || userText.includes('change') || userText.includes('different')) {
-        // User wants to change request - clear pending matches and continue normal flow
-        setPendingPartialMatches(null);
-        setMatchedUsers([]);
-      }
-    }
-    
     setMessages(prev => [...prev, userMessage]);
     setInputText('');
     setIsLoading(true);
@@ -467,27 +150,15 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
       if (chatId) {
         // Continue existing chat
         console.log('Continuing chat with ID:', chatId);
-        if (conversationType === 'trip-planning') {
-          response = await swellyService.continueTripPlanningConversation(chatId, {
-            message: userMessage.text,
-          });
-        } else {
         response = await swellyService.continueConversation(chatId, {
           message: userMessage.text,
         });
-        }
       } else {
         // This shouldn't happen since we initialize chat on mount, but fallback just in case
         console.log('Starting new chat (fallback)');
-        if (conversationType === 'trip-planning') {
-          response = await swellyService.startTripPlanningConversation({
-            message: userMessage.text,
-          });
-        } else {
         response = await swellyService.startNewConversation({
           message: userMessage.text,
         });
-        }
         console.log('New chat response:', response);
         setChatId(response.chat_id || null);
       }
@@ -505,7 +176,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
 
       setMessages(prev => [...prev, botMessage]);
 
-      // If chat is finished, handle completion based on conversation type
+      // If chat is finished, handle completion (onboarding only)
       console.log('Response check:', { 
         is_finished: response.is_finished, 
         has_data: !!response.data,
@@ -515,160 +186,19 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
       if (response.is_finished && response.data) {
         setIsFinished(true);
         
-        if (conversationType === 'trip-planning') {
-          // Trip planning: Trigger matching algorithm
-          try {
-            // Get current user ID
-            const currentUser = await supabaseAuthService.getCurrentUser();
-            if (!currentUser || !currentUser.id) {
-              throw new Error('User not authenticated');
-            }
-            
-            // Show "finding matches..." message
-            const findingMatchesMessage: Message = {
-              id: (Date.now() + 2).toString(),
-              text: 'Finding the perfect surfers for you...',
-              isUser: false,
-              timestamp: new Date().toLocaleTimeString('en-US', { 
-                hour: '2-digit', 
-                minute: '2-digit',
-                hour12: false 
-              }),
-            };
-            setMessages(prev => [...prev, findingMatchesMessage]);
-            
-            // Find matching users
-            console.log('Finding matches with data:', response.data);
-            console.log('Query filters from response:', response.data.queryFilters);
-            const requestData = {
-              destination_country: response.data.destination_country,
-              area: response.data.area || null,
-              budget: response.data.budget || null,
-              destination_known: response.data.destination_known || false,
-              purpose: response.data.purpose || {
-                purpose_type: 'general_guidance',
-                specific_topics: [],
-              },
-              non_negotiable_criteria: response.data.non_negotiable_criteria || null,
-              user_context: response.data.user_context || null,
-              queryFilters: response.data.queryFilters || null, // Pass AI-extracted query filters
-              filtersFromNonNegotiableStep: response.data.filtersFromNonNegotiableStep || false, // Track if filters came from non-negotiable step
-            };
-            console.log('Request data being passed to findMatchingUsers:', JSON.stringify(requestData, null, 2));
-            console.log('queryFilters in request:', requestData.queryFilters);
-            
-            // Use V3 matching algorithm (can be toggled via environment variable or feature flag)
-            const useV3Matching = process.env.EXPO_PUBLIC_USE_V3_MATCHING === 'true';
-            const matchedUsers = useV3Matching
-              ? await findMatchingUsersV3(requestData, currentUser.id)
-              : await findMatchingUsers(requestData, currentUser.id);
-            
-            console.log('Matched users found:', matchedUsers.length, matchedUsers);
-            console.log('Filters from non-negotiable step:', response.data.filtersFromNonNegotiableStep);
-            
-            // Check if matches are exact or partial
-            // If matchQuality is missing, treat as exact matches (backward compatibility)
-            const hasMatchQuality = matchedUsers.some(u => u.matchQuality);
-            const hasExactMatches = hasMatchQuality 
-              ? matchedUsers.some(u => u.matchQuality?.exactMatch === true)
-              : true; // If no quality data, assume exact matches
-            const hasPartialMatches = matchedUsers.length > 0 && hasMatchQuality && !hasExactMatches;
-            
-            // Display matched users
-            if (matchedUsers.length > 0) {
-              if (hasExactMatches || !hasMatchQuality) {
-                // Exact matches - show immediately
-                const matchesMessage: Message = {
-                  id: (Date.now() + 3).toString(),
-                  text: `Found ${matchedUsers.length} awesome match${matchedUsers.length > 1 ? 'es' : ''} for you!`,
-                  isUser: false,
-                  timestamp: new Date().toLocaleTimeString('en-US', { 
-                    hour: '2-digit', 
-                    minute: '2-digit',
-                    hour12: false 
-                  }),
-                  isMatchedUsers: true, // Flag to indicate this message has cards
-                };
-                setMessages(prev => [...prev, matchesMessage]);
-                
-                // Store matched users and destination for rendering cards
-                setMatchedUsers(matchedUsers);
-                setDestinationCountry(response.data.destination_country);
-                
-                // Notify parent to persist state for when user returns
-                if (onChatStateChange) {
-                  onChatStateChange(chatId, matchedUsers, response.data.destination_country);
-                }
-              } else if (hasPartialMatches) {
-                // Partial matches - ask user first
-                const firstMatch = matchedUsers[0];
-                const quality = firstMatch.matchQuality;
-                if (quality) {
-                  const partialMessage = generatePartialMatchQuestion(matchedUsers, requestData, quality);
-                  const askMessage: Message = {
-                    id: (Date.now() + 3).toString(),
-                    text: partialMessage,
-                    isUser: false,
-                    timestamp: new Date().toLocaleTimeString('en-US', { 
-                      hour: '2-digit', 
-                      minute: '2-digit',
-                      hour12: false 
-                    }),
-                    isMatchedUsers: false, // Don't show cards yet - wait for user confirmation
-                  };
-                  setMessages(prev => [...prev, askMessage]);
-                  
-                  // Store partial matches temporarily (will show if user confirms)
-                  setPendingPartialMatches(matchedUsers);
-                  setDestinationCountry(response.data.destination_country);
-                  // Don't set matchedUsers yet - wait for confirmation
-                }
-              }
-            } else {
-              // Different message based on whether filters came from non-negotiable step
-              const noMatchesMessage: Message = {
-                id: (Date.now() + 3).toString(),
-                text: response.data.filtersFromNonNegotiableStep
-                  ? "Sorry, I couldn't find any surfers that match all your criteria. Would you like to relax some of those requirements?"
-                  : "Hmm, couldn't find any perfect matches right now, but don't worry! More surfers are joining every day. Check back soon!",
-                isUser: false,
-                timestamp: new Date().toLocaleTimeString('en-US', { 
-                  hour: '2-digit', 
-                  minute: '2-digit',
-                  hour12: false 
-                }),
-              };
-              setMessages(prev => [...prev, noMatchesMessage]);
-            }
-          } catch (error) {
-            console.error('Error finding matching users:', error);
-            console.error('Error details:', error);
-            const errorMessage: Message = {
-              id: (Date.now() + 2).toString(),
-              text: `Sorry, there was an error finding matches: ${error instanceof Error ? error.message : String(error)}. Please try again later.`,
-              isUser: false,
-              timestamp: new Date().toLocaleTimeString('en-US', { 
-                hour: '2-digit', 
-                minute: '2-digit',
-                hour12: false 
-              }),
-            };
-            setMessages(prev => [...prev, errorMessage]);
-          }
-        } else {
-          // Onboarding: Save user profile and Swelly conversation results to database
-          // Show "creating profile..." message
-          const creatingProfileMessage: Message = {
-            id: (Date.now() + 2).toString(),
-            text: 'Creating your profile...',
-            isUser: false,
-            timestamp: new Date().toLocaleTimeString('en-US', { 
-              hour: '2-digit', 
-              minute: '2-digit',
-              hour12: false 
-            }),
-          };
-          setMessages(prev => [...prev, creatingProfileMessage]);
+        // Onboarding: Save user profile and Swelly conversation results to database
+        // Show "creating profile..." message
+        const creatingProfileMessage: Message = {
+          id: (Date.now() + 2).toString(),
+          text: 'Creating your profile...',
+          isUser: false,
+          timestamp: new Date().toLocaleTimeString('en-US', { 
+            hour: '2-digit', 
+            minute: '2-digit',
+            hour12: false 
+          }),
+        };
+        setMessages(prev => [...prev, creatingProfileMessage]);
         
         // Save Swelly conversation results to surfers table
         try {
@@ -708,14 +238,12 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
           }
         }
         
-          // Navigate to profile screen after a short delay (onboarding only)
+        // Navigate to profile screen after a short delay (onboarding only)
         setTimeout(() => {
-            // Mark onboarding as complete and navigate to profile
-            onChatComplete?.();
-          }, 1500);
-        }
+          // Mark onboarding as complete and navigate to profile
+          onChatComplete?.();
+        }, 1500);
       }
-
     } catch (error) {
       console.error('Error sending message:', error);
       Alert.alert('Error', 'Failed to send message. Please try again.');
@@ -741,27 +269,6 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
     }
   }, [inputText]);
 
-
-  const handleSendMessage = async (userId: string) => {
-    // Navigate to conversation (conversation will be created when first message is sent)
-    if (onStartConversation) {
-      onStartConversation(userId);
-    } else {
-      // Fallback: navigate back to conversations
-      onChatComplete?.();
-    }
-  };
-
-  const handleViewProfile = (userId: string) => {
-    if (onViewUserProfile) {
-      // Pass true to indicate this profile view came from trip planning chat
-      const isFromTripPlanning = conversationType === 'trip-planning';
-      onViewUserProfile(userId, isFromTripPlanning);
-    } else {
-      // Fallback: show alert or navigate
-      Alert.alert('Profile', `View profile for user: ${userId}`);
-    }
-  };
 
   // Typing animation component
   const TypingIndicator = () => {
@@ -826,43 +333,6 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
   };
 
   const renderMessage = (message: Message) => {
-    // If this message has matched users, render cards instead
-    if (message.isMatchedUsers && matchedUsers.length > 0) {
-      return (
-        <View key={message.id} style={styles.matchedUsersContainer}>
-          <View style={styles.messageContainer}>
-            <View style={styles.botMessageContainer}>
-              <View style={styles.botMessageBubble}>
-                <View style={styles.messageTextContainer}>
-                  <Text style={styles.botMessageText}>
-                    {message.text}
-                  </Text>
-        </View>
-                <View style={styles.timestampContainer}>
-                  <Text style={styles.botTimestamp}>
-                    {message.timestamp}
-        </Text>
-                </View>
-              </View>
-            </View>
-          </View>
-          
-          {/* Render matched user cards */}
-          <View style={styles.matchedUsersCards}>
-            {matchedUsers.map((user) => (
-              <MatchedUserCard
-                key={user.user_id}
-                user={user}
-                destinationCountry={destinationCountry}
-                onSendMessage={handleSendMessage}
-                onViewProfile={handleViewProfile}
-              />
-            ))}
-      </View>
-    </View>
-  );
-    }
-
     // Regular message rendering
     return (
     <View
@@ -905,15 +375,8 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
             <TouchableOpacity 
               style={styles.backButton}
               onPress={() => {
-                // If onChatComplete is provided, it means we're in post-onboarding mode
-                if (onChatComplete) {
-                  onChatComplete(); // Go to conversations list
-                } else {
-                  setCurrentStep(4); // Go back to onboarding step 4
-                  if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location) {
-                    window.location.href = '/'; // Navigate to main app
-                  }
-                }
+                // Go back to onboarding step 4
+                setCurrentStep(4);
               }}
             >
               <Ionicons name="chevron-back" size={24} color="#222B30" />
@@ -948,11 +411,9 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
           </TouchableOpacity>
         </View>
         
-        {conversationType !== 'trip-planning' && (
-          <View style={styles.progressBar}>
-            <View style={[styles.progressFill, { width: `${progressPercentage}%` }]} />
-          </View>
-        )}
+        <View style={styles.progressBar}>
+          <View style={[styles.progressFill, { width: `${progressPercentage}%` }]} />
+        </View>
       </View>
 
       {/* Chat Messages */}
@@ -1251,14 +712,6 @@ const styles = StyleSheet.create({
   messagesContent: {
     padding: spacing.md,
     paddingBottom: spacing.lg,
-    gap: 16,
-  },
-  matchedUsersContainer: {
-    marginBottom: 16,
-    paddingHorizontal: spacing.md,
-  },
-  matchedUsersCards: {
-    marginTop: 12,
     gap: 16,
   },
   messageContainer: {

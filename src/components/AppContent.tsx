@@ -7,7 +7,8 @@ import { OnboardingStep2Screen } from '../screens/OnboardingStep2Screen';
 import { OnboardingStep3Screen } from '../screens/OnboardingStep3Screen';
 import { OnboardingStep4Screen } from '../screens/OnboardingStep4Screen';
 import { LoadingScreen } from '../screens/LoadingScreen';
-import { ChatScreen } from '../screens/ChatScreen';
+import { OnboardingChatScreen } from '../screens/ChatScreen';
+import { TripPlanningChatScreen } from '../screens/TripPlanningChatScreen';
 import ConversationsScreen from '../screens/ConversationsScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
 import { DirectMessageScreen } from '../screens/DirectMessageScreen';
@@ -483,9 +484,8 @@ export const AppContent: React.FC = () => {
     // Show trip planning chat if requested
     if (showTripPlanningChat) {
       return (
-        <ChatScreen 
+        <TripPlanningChatScreen 
           onChatComplete={handleTripPlanningChatBack} 
-          conversationType="trip-planning"
           onViewUserProfile={handleViewUserProfile}
           onStartConversation={handleStartConversation}
           persistedChatId={tripPlanningChatId}
@@ -646,16 +646,11 @@ export const AppContent: React.FC = () => {
     );
   }
 
-  // Show chat screen if we're on step 5 (Swelly chat)
-  // Determine conversation type: if onboarding is complete, it's trip planning
+  // Show onboarding chat screen if we're on step 5 (Swelly chat)
   if (currentStep === 5) {
-    const conversationType = isComplete ? 'trip-planning' : 'onboarding';
     return (
-      <ChatScreen 
+      <OnboardingChatScreen 
         onChatComplete={handleChatComplete} 
-        conversationType={conversationType}
-        onViewUserProfile={handleViewUserProfile}
-        onStartConversation={handleStartConversation}
       />
     );
   }
