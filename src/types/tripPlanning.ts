@@ -20,7 +20,6 @@ export interface TripPlanningRequest {
     age_range?: [number, number]; // e.g., [20, 30]
     surf_level_min?: number;
     surf_level_max?: number;
-    must_have_keywords?: string[]; // e.g., ["yoga", "remote-work"]
     other?: string;
   } | null;
   user_context?: {
@@ -35,8 +34,6 @@ export interface TripPlanningRequest {
     surf_level_min?: number;
     surf_level_max?: number;
     destination_days_min?: { destination: string; min_days: number };
-    lifestyle_keywords?: string[];
-    wave_type_keywords?: string[];
   } | null; // AI-extracted Supabase query filters
   filtersFromNonNegotiableStep?: boolean; // true if filters were mentioned during STEP 4 (non-negotiable criteria)
   prioritize_filters?: {
@@ -44,8 +41,6 @@ export interface TripPlanningRequest {
     board_type?: string;
     surf_level?: number;
     age_range?: [number, number];
-    lifestyle_keywords?: string[];
-    wave_type_keywords?: string[];
     travel_experience?: string;
     group_type?: string;
   } | null; // V2: Prioritized filters from user prompts (e.g., "prioritize longboarders")
@@ -62,8 +57,6 @@ export interface MatchQuality {
     surfboard_type?: boolean | null; // null if not requested or surfer data missing
     surf_level?: boolean | null; // null if not requested or surfer data missing
     travel_experience?: boolean | null; // null if not requested or surfer data missing
-    lifestyle_keywords?: boolean | null; // null if not requested or surfer data missing
-    wave_type_keywords?: boolean | null; // null if not requested or surfer data missing
   };
   differences: {
     area?: { requested: string; found: string | null }; // null if no area match
@@ -115,7 +108,6 @@ export interface TripPlanningData {
     age_range?: [number, number];
     surf_level_min?: number;
     surf_level_max?: number;
-    must_have_keywords?: string[];
     other?: string;
   } | null;
   user_context?: {

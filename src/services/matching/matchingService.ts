@@ -173,6 +173,30 @@ function destinationContainsCountry(
 }
 
 /**
+ * Check if destination matches any of the requested countries (handles comma-separated strings)
+ * This is a convenience function that splits comma-separated country strings and checks each one
+ */
+function destinationMatchesAnyCountry(
+  destination: { country: string; area: string[] } | { destination_name: string } | string | null | undefined,
+  requestedCountries: string | null | undefined
+): boolean {
+  if (!destination || !requestedCountries) {
+    return false;
+  }
+  
+  // Split comma-separated countries into array
+  const countries = requestedCountries
+    .split(',')
+    .map(c => c.trim())
+    .filter(c => c.length > 0);
+  
+  // Check if destination matches ANY of the requested countries
+  return countries.some(country => 
+    destinationContainsCountry(destination, country)
+  );
+}
+
+/**
  * Check if any generated areas match the destination
  * Works with new structure: {country, area[]} and legacy: destination_name string
  */
@@ -342,17 +366,6 @@ function applyMustHaveFilters(
     if (userSurfer.surf_level > criteria.surf_level_max) return true;
   }
 
-  // Filter by must_have_keywords (lifestyle or wave keywords)
-  if (criteria.must_have_keywords && criteria.must_have_keywords.length > 0) {
-    const userLifestyle = (userSurfer.lifestyle_keywords || []).map(k => k.toLowerCase());
-    const userWave = (userSurfer.wave_type_keywords || []).map(k => k.toLowerCase());
-    const required = criteria.must_have_keywords.map(k => k.toLowerCase());
-    
-    const hasAll = required.every(keyword =>
-      userLifestyle.includes(keyword) || userWave.includes(keyword)
-    );
-    if (!hasAll) return true;
-  }
 
   return false; // User passes all filters
 }
@@ -458,22 +471,6 @@ function checkPrioritizedFilterMatch(
       const [minAge, maxAge] = filterValue;
       return userSurfer.age >= minAge && userSurfer.age <= maxAge;
     
-    case 'lifestyle_keywords':
-      if (!Array.isArray(filterValue) || !userSurfer.lifestyle_keywords) return false;
-      return filterValue.some(keyword => 
-        userSurfer.lifestyle_keywords!.some(userKeyword => 
-          userKeyword.toLowerCase() === keyword.toLowerCase()
-        )
-      );
-    
-    case 'wave_type_keywords':
-      if (!Array.isArray(filterValue) || !userSurfer.wave_type_keywords) return false;
-      return filterValue.some(keyword => 
-        userSurfer.wave_type_keywords!.some(userKeyword => 
-          userKeyword.toLowerCase() === keyword.toLowerCase()
-        )
-      );
-    
     case 'travel_experience':
       // Handle both integer (new format) and enum string (legacy format)
       if (typeof filterValue === 'string' && typeof userSurfer.travel_experience === 'string') {
@@ -561,7 +558,7 @@ export async function findMatchingUsersV2(
         return false;
       }
       return surfer.destinations_array.some((dest: any) => 
-        destinationContainsCountry(dest, request.destination_country)
+        destinationMatchesAnyCountry(dest, request.destination_country)
       );
     });
 
@@ -576,7 +573,7 @@ export async function findMatchingUsersV2(
       let daysInDestination = 0;
       if (userSurfer.destinations_array) {
         const matchingDestinations = userSurfer.destinations_array.filter(dest =>
-          destinationContainsCountry(dest, request.destination_country)
+          destinationMatchesAnyCountry(dest, request.destination_country)
         );
         daysInDestination = matchingDestinations.reduce((sum, dest) => sum + (dest.time_in_days || 0), 0);
       }
@@ -603,7 +600,7 @@ export async function findMatchingUsersV2(
       // Step 5: Add 30 points for area matches
       if (userSurfer.destinations_array && generatedAreas.length > 0) {
         for (const dest of userSurfer.destinations_array) {
-          if (destinationContainsCountry(dest, request.destination_country)) {
+          if (destinationMatchesAnyCountry(dest, request.destination_country)) {
             if (areaMatches(dest, generatedAreas)) {
               points += 30;
               // Track which area matched
@@ -657,27 +654,6 @@ export async function findMatchingUsersV2(
         }
       }
 
-      // Step 11: Lifestyle keywords (+5 points per match)
-      if (userSurfer.lifestyle_keywords && currentUserSurfer.lifestyle_keywords) {
-        const commonKeywords = userSurfer.lifestyle_keywords.filter(keyword =>
-          currentUserSurfer.lifestyle_keywords!.some(
-            currentKeyword => currentKeyword.toLowerCase() === keyword.toLowerCase()
-          )
-        );
-        points += commonKeywords.length * 5;
-        userEntry.commonLifestyleKeywords = commonKeywords;
-      }
-
-      // Step 12: Wave keywords (+5 points per match)
-      if (userSurfer.wave_type_keywords && currentUserSurfer.wave_type_keywords) {
-        const commonKeywords = userSurfer.wave_type_keywords.filter(keyword =>
-          currentUserSurfer.wave_type_keywords!.some(
-            currentKeyword => currentKeyword.toLowerCase() === keyword.toLowerCase()
-          )
-        );
-        points += commonKeywords.length * 5;
-        userEntry.commonWaveKeywords = commonKeywords;
-      }
 
       // Step 13: Prioritized filters (+50 points per match)
       if (request.prioritize_filters) {
@@ -833,17 +809,6 @@ export async function findMatchingUsers(
         console.log(`  - Filtering by surf_level_max: ${request.queryFilters.surf_level_max}`);
       }
       
-      // Filter by lifestyle_keywords (array contains)
-      if (request.queryFilters.lifestyle_keywords && request.queryFilters.lifestyle_keywords.length > 0) {
-        query = query.contains('lifestyle_keywords', request.queryFilters.lifestyle_keywords);
-        console.log(`  - Filtering by lifestyle_keywords: ${request.queryFilters.lifestyle_keywords.join(', ')}`);
-      }
-      
-      // Filter by wave_type_keywords (array contains)
-      if (request.queryFilters.wave_type_keywords && request.queryFilters.wave_type_keywords.length > 0) {
-        query = query.contains('wave_type_keywords', request.queryFilters.wave_type_keywords);
-        console.log(`  - Filtering by wave_type_keywords: ${request.queryFilters.wave_type_keywords.join(', ')}`);
-      }
     } else {
       console.log('⚠️ No query filters provided - querying all surfers');
     }
@@ -972,26 +937,86 @@ export async function findMatchingUsers(
       name: s.name, 
       country_from: s.country_from 
     })));
+    
 
     // Step 6: Pre-filter by destination BEFORE scoring (more efficient)
     // Filter out users who don't have the destination in their destinations_array
     console.log('Step 6: Pre-filtering by destination...');
     
     let surfersWithDestination = filteredSurfers;
+    let surfersFilteredByDestination: SupabaseSurfer[] = []; // Track surfers filtered out by destination
     
     // Only filter by destination if destination_country is provided
     // NOTE: destination_country is NOT required - users can request surfers without a destination
     if (request.destination_country) {
       console.log(`Filtering by destination: ${request.destination_country}`);
+      
+      // Split comma-separated countries for logging
+      const requestedCountries = request.destination_country
+        .split(',')
+        .map(c => c.trim())
+        .filter(c => c.length > 0);
+      console.log(`Split into countries:`, requestedCountries);
+      
+      // Debug: Log sample destination data from first few surfers
+      if (filteredSurfers.length > 0) {
+        console.log(`Sample destination data from first 3 surfers:`);
+        filteredSurfers.slice(0, 3).forEach((surfer: any, idx: number) => {
+          if (surfer.destinations_array && Array.isArray(surfer.destinations_array)) {
+            const dests = surfer.destinations_array.map((d: any) => {
+              if (typeof d === 'object' && 'country' in d) {
+                return `{country: "${d.country}", area: [${(d.area || []).join(', ')}]}`;
+              } else if (typeof d === 'object' && 'destination_name' in d) {
+                return `{destination_name: "${d.destination_name}"}`;
+              }
+              return String(d);
+            }).join('; ');
+            console.log(`  Surfer ${idx + 1} (${surfer.name}): [${dests}]`);
+          } else {
+            console.log(`  Surfer ${idx + 1} (${surfer.name}): no destinations_array`);
+          }
+        });
+      }
+      
+      // Track surfers that passed other filters but don't have the destination
+      surfersFilteredByDestination = filteredSurfers.filter((surfer: any) => {
+        if (!surfer.destinations_array || !Array.isArray(surfer.destinations_array)) {
+          return true; // This surfer doesn't have the destination
+        }
+        const hasMatch = surfer.destinations_array.some((dest: any) => 
+          destinationMatchesAnyCountry(dest, request.destination_country)
+        );
+        if (!hasMatch) {
+          // Debug: log what destinations this surfer has
+          const surferDestinations = surfer.destinations_array.map((d: any) => {
+            if (typeof d === 'object' && 'country' in d) {
+              return d.country;
+            } else if (typeof d === 'object' && 'destination_name' in d) {
+              return d.destination_name;
+            }
+            return String(d);
+          }).join(', ');
+          console.log(`  ❌ ${surfer.name} (${surfer.country_from}) - no destination match. Has: [${surferDestinations}]`);
+        }
+        return !hasMatch;
+      }) as SupabaseSurfer[];
+      
       surfersWithDestination = filteredSurfers.filter((surfer: any) => {
         if (!surfer.destinations_array || !Array.isArray(surfer.destinations_array)) {
           return false;
         }
-        return surfer.destinations_array.some((dest: any) => 
-          destinationContainsCountry(dest, request.destination_country)
+        const hasMatch = surfer.destinations_array.some((dest: any) => 
+          destinationMatchesAnyCountry(dest, request.destination_country)
         );
+        if (hasMatch) {
+          console.log(`  ✅ ${surfer.name} (${surfer.country_from}) - destination match found`);
+        }
+        return hasMatch;
       });
       console.log(`Filtered to ${surfersWithDestination.length} surfers with matching destinations (from ${filteredSurfers.length} total)`);
+      if (surfersWithDestination.length === 0 && filteredSurfers.length > 0) {
+        console.log(`⚠️ All ${filteredSurfers.length} surfers were filtered out by destination requirement`);
+      }
     } else {
       console.log('ℹ️ No destination_country provided - matching by other criteria only (destination not required)');
       console.log(`Proceeding with ${filteredSurfers.length} surfers (no destination filter applied)`);
@@ -1017,7 +1042,7 @@ export async function findMatchingUsers(
       let daysInDestination = 0;
       if (request.destination_country && userSurfer.destinations_array) {
         const matchingDestinations = userSurfer.destinations_array.filter(dest =>
-          destinationContainsCountry(dest, request.destination_country)
+          destinationMatchesAnyCountry(dest, request.destination_country)
         );
         daysInDestination = matchingDestinations.reduce((sum, dest) => sum + (dest.time_in_days || 0), 0);
       } else if (!request.destination_country && userSurfer.destinations_array) {
@@ -1046,7 +1071,7 @@ export async function findMatchingUsers(
       // Step 5: Add 30 points for area matches
       if (request.area && request.destination_country && userSurfer.destinations_array && generatedAreas.length > 0) {
         for (const dest of userSurfer.destinations_array) {
-          if (destinationContainsCountry(dest, request.destination_country)) {
+          if (destinationMatchesAnyCountry(dest, request.destination_country)) {
             if (areaMatches(dest, generatedAreas)) {
               points += 30;
               // Track which area matched
@@ -1100,27 +1125,6 @@ export async function findMatchingUsers(
         }
       }
 
-      // Step 11: Lifestyle keywords (+5 points per match)
-      if (userSurfer.lifestyle_keywords && currentUserSurfer.lifestyle_keywords) {
-        const commonKeywords = userSurfer.lifestyle_keywords.filter(keyword =>
-          currentUserSurfer.lifestyle_keywords!.some(
-            currentKeyword => currentKeyword.toLowerCase() === keyword.toLowerCase()
-          )
-        );
-        points += commonKeywords.length * 5;
-        userEntry.commonLifestyleKeywords = commonKeywords;
-      }
-
-      // Step 12: Wave keywords (+5 points per match)
-      if (userSurfer.wave_type_keywords && currentUserSurfer.wave_type_keywords) {
-        const commonKeywords = userSurfer.wave_type_keywords.filter(keyword =>
-          currentUserSurfer.wave_type_keywords!.some(
-            currentKeyword => currentKeyword.toLowerCase() === keyword.toLowerCase()
-          )
-        );
-        points += commonKeywords.length * 5;
-        userEntry.commonWaveKeywords = commonKeywords;
-      }
 
       // Step 13: Prioritized filters (+50 points per match)
       if (request.prioritize_filters) {
@@ -1159,7 +1163,7 @@ export async function findMatchingUsers(
       const destinationMatch = {
         countryMatch: request.destination_country 
           ? entry.surfer.destinations_array?.some((dest: any) => 
-              destinationContainsCountry(dest, request.destination_country!)
+              destinationMatchesAnyCountry(dest, request.destination_country!)
             ) || false
           : false, // If no destination requested, countryMatch is false (not applicable)
         areaMatch: request.area && request.destination_country
@@ -1215,6 +1219,11 @@ export async function findMatchingUsers(
       ? matchedUsersWithQuality.filter(u => u.matchQuality && u.matchQuality.matchCount > 1)
       : matchedUsersWithQuality; // No criteria = return all (will be sorted by score)
     
+    // Store rejected matches for analysis (if no valid matches found)
+    const rejectedMatches = hasCriteria && validMatches.length === 0
+      ? matchedUsersWithQuality.filter(u => u.matchQuality && u.matchQuality.matchCount <= 1)
+      : [];
+    
     // Sort by match count (desc), then by score (desc), then by data completeness
     validMatches.sort((a, b) => {
       if (!a.matchQuality || !b.matchQuality) return 0;
@@ -1234,6 +1243,22 @@ export async function findMatchingUsers(
     
     console.log(`After match quality filter (matchCount > 1): ${validMatches.length} valid matches`);
     console.log(`Returning top ${topMatches.length} matches`);
+    
+    // Create a result object to store metadata (even if topMatches is empty)
+    const result = topMatches as any;
+    
+    // Store rejected matches and destination-filtered surfers in the return value for analysis if needed
+    if (rejectedMatches.length > 0) {
+      result.__rejectedMatches = rejectedMatches;
+      console.log(`  📊 Stored ${rejectedMatches.length} rejected matches for analysis`);
+    }
+    // Store surfers that passed other filters but were filtered out by destination
+    if (surfersWithDestination.length === 0 && filteredSurfers.length > 0 && request.destination_country) {
+      result.__destinationFilteredSurfers = surfersFilteredByDestination;
+      result.__passedOtherFilters = filteredSurfers.length;
+      console.log(`  📊 Stored ${surfersFilteredByDestination.length} destination-filtered surfers for analysis (${filteredSurfers.length} passed other filters)`);
+    }
+    
 
     console.log('=== MATCHING COMPLETE ===');
     console.log(`Found ${topMatches.length} matched users (after quality filter)`);
@@ -1246,12 +1271,274 @@ export async function findMatchingUsers(
         country_from: u.country_from
       })));
     }
+    
+    // Log metadata for debugging
+    if ((result as any).__destinationFilteredSurfers) {
+      console.log(`📊 Metadata stored: ${(result as any).__destinationFilteredSurfers.length} destination-filtered surfers, ${(result as any).__passedOtherFilters} passed other filters`);
+    }
+    if ((result as any).__rejectedMatches) {
+      console.log(`📊 Metadata stored: ${(result as any).__rejectedMatches.length} rejected matches`);
+    }
+    
     console.log('==========================');
     
-    return topMatches;
+    return result;
   } catch (error) {
     console.error('Error in findMatchingUsers:', error);
     throw error;
+  }
+}
+
+/**
+ * Analyze why no matches were found and generate a helpful explanation
+ * Uses the existing match quality analysis from the matching process
+ * This is more efficient and accurate than querying the database again
+ */
+export function analyzeNoMatchesReason(
+  request: TripPlanningRequest,
+  rejectedMatches: MatchedUser[], // Matches that were found but filtered out (matchCount <= 1)
+  destinationFilteredSurfers?: SupabaseSurfer[], // Surfers that passed other filters but don't have the destination
+  passedOtherFiltersCount?: number // Count of surfers that passed other filters
+): string {
+  try {
+    // Case 2: Surfers passed other filters but were filtered out by destination
+    if (destinationFilteredSurfers && destinationFilteredSurfers.length > 0 && request.destination_country) {
+      const requestedCountries = request.destination_country
+        .split(',')
+        .map(c => c.trim())
+        .filter(c => c.length > 0);
+      
+      const countriesStr = requestedCountries.length === 1 
+        ? requestedCountries[0] 
+        : `any of those countries (${requestedCountries.slice(0, 3).join(', ')}${requestedCountries.length > 3 ? '...' : ''})`;
+      
+      // Check if any of the filtered surfers are from the requested countries
+      const hasCountryFromMatch = destinationFilteredSurfers.some((surfer: any) => {
+        const requestedCountriesFrom = request.non_negotiable_criteria?.country_from || 
+                                       request.queryFilters?.country_from || null;
+        if (!requestedCountriesFrom || !surfer.country_from) return false;
+        const userCountry = surfer.country_from.toLowerCase();
+        return requestedCountriesFrom.some(
+          c => userCountry.includes(c.toLowerCase()) || c.toLowerCase().includes(userCountry)
+        );
+      });
+      
+      let message = `Hey, I found ${passedOtherFiltersCount || destinationFilteredSurfers.length} surfer${passedOtherFiltersCount !== 1 ? 's' : ''} that match your other criteria (age, board type, country), but none of them have surfed in ${countriesStr}`;
+      
+      if (hasCountryFromMatch) {
+        const countryFrom = request.non_negotiable_criteria?.country_from || request.queryFilters?.country_from || [];
+        const countryStr = Array.isArray(countryFrom) && countryFrom.length === 1 ? countryFrom[0] : 'those countries';
+        message += `. I do have surfers from ${countryStr}, but they haven't surfed there yet`;
+      }
+      
+      message += `. Try searching for surfers who have surfed in ${requestedCountries[0]} or other destinations, or remove the destination requirement`;
+      
+      return message;
+    }
+    
+    // Case 2: No rejected matches to analyze
+    if (!rejectedMatches || rejectedMatches.length === 0) {
+      return "Couldn't find any matches right now, but more surfers are joining every day. Check back soon!";
+    }
+    
+    const reasons: string[] = [];
+    const suggestions: string[] = [];
+    
+    // Analyze which criteria failed across all rejected matches
+    // Count how many matches failed each criterion
+    const failedCriteria: { [key: string]: { count: number; details: any } } = {};
+    
+    rejectedMatches.forEach(match => {
+      if (!match.matchQuality) return;
+      
+      const { matchedCriteria, differences, missingData } = match.matchQuality;
+      
+      // Check destination_country
+      if (request.destination_country && matchedCriteria.destination_country === false) {
+        if (!failedCriteria.destination_country) {
+          failedCriteria.destination_country = { count: 0, details: null };
+        }
+        failedCriteria.destination_country.count++;
+      }
+      
+      // Check area (if requested)
+      if (request.area && request.destination_country && matchedCriteria.area === false) {
+        if (!failedCriteria.area) {
+          failedCriteria.area = { count: 0, details: differences.area };
+        }
+        failedCriteria.area.count++;
+      }
+      
+      // Check country_from
+      if (matchedCriteria.country_from === false) {
+        if (!failedCriteria.country_from) {
+          failedCriteria.country_from = { count: 0, details: differences.country_from };
+        }
+        failedCriteria.country_from.count++;
+      }
+      
+      // Check age
+      if (matchedCriteria.age === false) {
+        if (!failedCriteria.age) {
+          failedCriteria.age = { count: 0, details: differences.age };
+        }
+        failedCriteria.age.count++;
+      }
+      
+      // Check surfboard_type
+      if (matchedCriteria.surfboard_type === false) {
+        if (!failedCriteria.surfboard_type) {
+          failedCriteria.surfboard_type = { count: 0, details: differences.surfboard_type };
+        }
+        failedCriteria.surfboard_type.count++;
+      }
+      
+      // Check surf_level
+      if (matchedCriteria.surf_level === false) {
+        if (!failedCriteria.surf_level) {
+          failedCriteria.surf_level = { count: 0, details: differences.surf_level };
+        }
+        failedCriteria.surf_level.count++;
+      }
+    });
+    
+    // Build reasons based on failed criteria (prioritize by importance)
+    // 1. Destination (most important)
+    if (failedCriteria.destination_country && failedCriteria.destination_country.count === rejectedMatches.length) {
+      const requestedCountries = request.destination_country
+        .split(',')
+        .map(c => c.trim())
+        .filter(c => c.length > 0);
+      if (requestedCountries.length === 1) {
+        reasons.push(`no surfers who have surfed in ${requestedCountries[0]}`);
+      } else {
+        reasons.push(`no surfers who have surfed in any of those countries`);
+      }
+    }
+    
+    // 2. Area (if destination was requested)
+    if (request.area && request.destination_country && failedCriteria.area && failedCriteria.area.count === rejectedMatches.length) {
+      reasons.push(`no surfers who have surfed in ${request.area}`);
+    }
+    
+    // 3. Country_from
+    if (failedCriteria.country_from && failedCriteria.country_from.count === rejectedMatches.length) {
+      const requestedCountries = failedCriteria.country_from.details?.requested || [];
+      const countriesStr = requestedCountries.length === 1 
+        ? requestedCountries[0] 
+        : requestedCountries.join(' or ');
+      reasons.push(`no surfers from ${countriesStr}`);
+    }
+    
+    // 4. Age
+    if (failedCriteria.age && failedCriteria.age.count === rejectedMatches.length) {
+      const ageDetails = failedCriteria.age.details;
+      if (ageDetails && Array.isArray(ageDetails.requested) && ageDetails.requested.length === 2) {
+        const [minAge, maxAge] = ageDetails.requested;
+        reasons.push(`no surfers between ${minAge} and ${maxAge} years old`);
+        // Find closest age from rejected matches
+        const ages = rejectedMatches
+          .map(m => m.age)
+          .filter(a => a !== null && a !== undefined) as number[];
+        if (ages.length > 0) {
+          const minAvailable = Math.min(...ages);
+          const maxAvailable = Math.max(...ages);
+          if (minAge > maxAvailable) {
+            suggestions.push(`try a lower age range (we have surfers up to ${maxAvailable} years old)`);
+          } else if (maxAge < minAvailable) {
+            suggestions.push(`try a higher age range (our youngest surfer is ${minAvailable} years old)`);
+          } else {
+            suggestions.push(`try expanding the age range (we have surfers from ${minAvailable} to ${maxAvailable} years old)`);
+          }
+        }
+      }
+    }
+    
+    // 5. Surfboard_type
+    if (failedCriteria.surfboard_type && failedCriteria.surfboard_type.count === rejectedMatches.length) {
+      const boardDetails = failedCriteria.surfboard_type.details;
+      if (boardDetails) {
+        const requestedBoards = Array.isArray(boardDetails.requested) 
+          ? boardDetails.requested 
+          : [boardDetails.requested];
+        const boardTypeNames: { [key: string]: string } = {
+          'shortboard': 'shortboard',
+          'mid_length': 'midlength',
+          'longboard': 'longboard',
+          'soft_top': 'soft top',
+        };
+        const boardStr = requestedBoards.length === 1 
+          ? (boardTypeNames[requestedBoards[0]] || requestedBoards[0])
+          : requestedBoards.map((b: string) => boardTypeNames[b] || b).join(' or ');
+        reasons.push(`no surfers using ${boardStr}`);
+        // Find available board types from rejected matches
+        const availableBoards = [...new Set(rejectedMatches
+          .map(m => m.surfboard_type)
+          .filter(b => b !== null && b !== undefined))] as string[];
+        if (availableBoards.length > 0) {
+          const boardNames = availableBoards.map((b: string) => boardTypeNames[b] || b).join(', ');
+          suggestions.push(`try other board types (we have ${boardNames} surfers)`);
+        }
+      }
+    }
+    
+    // 6. Surf_level
+    if (failedCriteria.surf_level && failedCriteria.surf_level.count === rejectedMatches.length) {
+      const levelDetails = failedCriteria.surf_level.details;
+      if (levelDetails) {
+        const requestedLevel = levelDetails.requested;
+        const levelRange = Array.isArray(requestedLevel) 
+          ? requestedLevel 
+          : [requestedLevel, requestedLevel];
+        const [minLevel, maxLevel] = levelRange;
+        const levelNames: { [key: number]: string } = {
+          1: 'beginner',
+          2: 'beginner-intermediate',
+          3: 'intermediate',
+          4: 'intermediate-advanced',
+          5: 'advanced',
+        };
+        const levelStr = minLevel === maxLevel 
+          ? levelNames[minLevel] || `level ${minLevel}`
+          : `level ${minLevel}-${maxLevel}`;
+        reasons.push(`no ${levelStr} surfers`);
+        // Find available levels from rejected matches
+        const availableLevels = [...new Set(rejectedMatches
+          .map(m => m.surf_level)
+          .filter(l => l !== null && l !== undefined))] as number[];
+        if (availableLevels.length > 0) {
+          const minAvailable = Math.min(...availableLevels);
+          const maxAvailable = Math.max(...availableLevels);
+          suggestions.push(`try adjusting the skill level (we have surfers from level ${minAvailable} to ${maxAvailable})`);
+        }
+      }
+    }
+    
+    // Build the message
+    if (reasons.length === 0) {
+      return "Couldn't find any matches right now, but more surfers are joining every day. Check back soon!";
+    }
+    
+    let message = "Hey, I couldn't find anyone that matches your criteria because ";
+    
+    if (reasons.length === 1) {
+      message += `there's ${reasons[0]}`;
+    } else if (reasons.length === 2) {
+      message += `there's ${reasons[0]} and ${reasons[1]}`;
+    } else {
+      message += `there's ${reasons.slice(0, -1).join(', ')}, and ${reasons[reasons.length - 1]}`;
+    }
+    
+    if (suggestions.length > 0) {
+      message += `. ${suggestions[0]}`;
+    } else {
+      message += `. Try relaxing some of your requirements or check back later as more surfers join!`;
+    }
+    
+    return message;
+  } catch (error) {
+    console.error('Error analyzing no matches reason:', error);
+    return "Couldn't find any matches right now. Try adjusting your search criteria or check back later!";
   }
 }
 

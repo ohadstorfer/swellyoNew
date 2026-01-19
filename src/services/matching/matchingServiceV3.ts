@@ -522,7 +522,40 @@ function destinationMatches(
   const userDest = parseUserDestination(userDestination);
   
   // Country must always match
-  const countryMatch = userDest.country.toLowerCase() === normalizedDest.country.toLowerCase();
+  // Handle comma-separated countries (e.g., "Belize, Costa Rica, El Salvador")
+  const requestedCountries = normalizedDest.country
+    .split(',')
+    .map(c => c.trim().toLowerCase())
+    .filter(c => c.length > 0);
+  
+  const userCountryLower = userDest.country.toLowerCase().trim();
+  
+  // Check if user's country matches any of the requested countries
+  const countryMatch = requestedCountries.some(reqCountry => {
+    // Exact match
+    if (userCountryLower === reqCountry) {
+      return true;
+    }
+    
+    // Word boundary match to avoid substring issues
+    const escapedReq = reqCountry.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`\\b${escapedReq}\\b`, 'i');
+    if (regex.test(userCountryLower)) {
+      return true;
+    }
+    
+    // Special cases for USA/UK
+    if ((reqCountry === 'usa' || reqCountry === 'united states') && 
+        (userCountryLower.includes('united states') || userCountryLower.includes('usa'))) {
+      return true;
+    }
+    if ((reqCountry === 'uk' || reqCountry === 'united kingdom') && 
+        (userCountryLower.includes('united kingdom') || /\buk\b/.test(userCountryLower))) {
+      return true;
+    }
+    
+    return false;
+  });
   
   if (!countryMatch) {
     return {
@@ -632,21 +665,6 @@ function checkLayer1HardRequirements(
     }
   }
 
-  // Check must_have_keywords
-  if (criteria.must_have_keywords && criteria.must_have_keywords.length > 0) {
-    const userKeywords = [
-      ...(userSurfer.lifestyle_keywords || []),
-      ...(userSurfer.wave_type_keywords || []),
-    ];
-    
-    const hasAllKeywords = criteria.must_have_keywords.every(keyword =>
-      userKeywords.some(uk => uk.toLowerCase().includes(keyword.toLowerCase()))
-    );
-    
-    if (!hasAllKeywords) {
-      return { passed: false, reason: 'Must-have keywords not matched' };
-    }
-  }
 
   return { passed: true };
 }
@@ -737,23 +755,6 @@ function calculateLayer3PriorityScore(
     }
   }
 
-  // Lifestyle keywords priority (1-50)
-  if (priorities.lifestyle_keywords && priorities.lifestyle_keywords.length > 0) {
-    const userKeywords = userSurfer.lifestyle_keywords || [];
-    const matches = priorities.lifestyle_keywords.filter(keyword =>
-      userKeywords.some(uk => uk.toLowerCase().includes(keyword.toLowerCase()))
-    );
-    priorityScore += Math.min(50, matches.length * 15); // Up to 50 points
-  }
-
-  // Wave keywords priority (1-50)
-  if (priorities.wave_type_keywords && priorities.wave_type_keywords.length > 0) {
-    const userKeywords = userSurfer.wave_type_keywords || [];
-    const matches = priorities.wave_type_keywords.filter(keyword =>
-      userKeywords.some(uk => uk.toLowerCase().includes(keyword.toLowerCase()))
-    );
-    priorityScore += Math.min(50, matches.length * 15); // Up to 50 points
-  }
 
   // Travel experience priority (1-50)
   // Handle both integer (new format) and enum string (legacy format)
@@ -861,27 +862,6 @@ function calculateLayer4GeneralScore(
     }
   }
 
-  // Lifestyle keywords match (+5 points per match, max 25)
-  if (userSurfer.lifestyle_keywords && currentUserSurfer.lifestyle_keywords) {
-    const matches = userSurfer.lifestyle_keywords.filter(uk =>
-      currentUserSurfer.lifestyle_keywords!.some(ck =>
-        uk.toLowerCase().includes(ck.toLowerCase()) || ck.toLowerCase().includes(uk.toLowerCase())
-      )
-    );
-    score += Math.min(25, matches.length * 5);
-    commonLifestyleKeywords.push(...matches);
-  }
-
-  // Wave keywords match (+5 points per match, max 25)
-  if (userSurfer.wave_type_keywords && currentUserSurfer.wave_type_keywords) {
-    const matches = userSurfer.wave_type_keywords.filter(uk =>
-      currentUserSurfer.wave_type_keywords!.some(ck =>
-        uk.toLowerCase().includes(ck.toLowerCase()) || ck.toLowerCase().includes(uk.toLowerCase())
-      )
-    );
-    score += Math.min(25, matches.length * 5);
-    commonWaveKeywords.push(...matches);
-  }
 
   return {
     score,

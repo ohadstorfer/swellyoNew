@@ -55,37 +55,6 @@ function compareSurfLevel(
   return surferLevel >= min && surferLevel <= max;
 }
 
-/**
- * Null-safe lifestyle keywords comparison
- */
-function compareLifestyleKeywords(
-  requested: string[] | null | undefined,
-  surferKeywords: string[] | null | undefined
-): boolean | null {
-  if (!requested || !surferKeywords || surferKeywords.length === 0) return null;
-  return requested.some(rk => 
-    surferKeywords.some(sk => 
-      sk.toLowerCase().includes(rk.toLowerCase()) || 
-      rk.toLowerCase().includes(sk.toLowerCase())
-    )
-  );
-}
-
-/**
- * Null-safe wave type keywords comparison
- */
-function compareWaveTypeKeywords(
-  requested: string[] | null | undefined,
-  surferKeywords: string[] | null | undefined
-): boolean | null {
-  if (!requested || !surferKeywords || surferKeywords.length === 0) return null;
-  return requested.some(rk => 
-    surferKeywords.some(sk => 
-      sk.toLowerCase().includes(rk.toLowerCase()) || 
-      rk.toLowerCase().includes(sk.toLowerCase())
-    )
-  );
-}
 
 /**
  * Calculate data completeness score for a surfer
@@ -119,8 +88,6 @@ export function countMatchedCriteria(matchedCriteria: MatchQuality['matchedCrite
   if (matchedCriteria.surfboard_type === true) count++;
   if (matchedCriteria.surf_level === true) count++;
   if (matchedCriteria.travel_experience === true) count++;
-  if (matchedCriteria.lifestyle_keywords === true) count++;
-  if (matchedCriteria.wave_type_keywords === true) count++;
   
   return count;
 }
@@ -236,19 +203,6 @@ export function analyzeMatchQuality(
     matchedCriteria.travel_experience = null;
   }
   
-  // Check lifestyle_keywords
-  const requestedLifestyle = request.queryFilters?.lifestyle_keywords || null;
-  if (requestedLifestyle) {
-    const lifestyleMatch = compareLifestyleKeywords(requestedLifestyle, surfer.lifestyle_keywords || undefined);
-    matchedCriteria.lifestyle_keywords = lifestyleMatch;
-  }
-  
-  // Check wave_type_keywords
-  const requestedWave = request.queryFilters?.wave_type_keywords || null;
-  if (requestedWave) {
-    const waveMatch = compareWaveTypeKeywords(requestedWave, surfer.wave_type_keywords || undefined);
-    matchedCriteria.wave_type_keywords = waveMatch;
-  }
   
   // Count matches
   const matchCount = countMatchedCriteria(matchedCriteria);

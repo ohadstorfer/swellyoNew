@@ -223,7 +223,7 @@ export default function ConversationsScreen({
         updated_at: now.toISOString(),
         sender_name: 'Swellyo Team',
       },
-      unread_count: 2,
+      unread_count: 1,
       other_user: {
         conversation_id: 'welcome-conversation-fake-id',
         user_id: 'swellyo-team',

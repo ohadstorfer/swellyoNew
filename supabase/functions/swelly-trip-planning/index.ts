@@ -69,7 +69,7 @@ If user mentions a destination (country, area, or town), extract it and proceed:
 
 B) GENERAL MATCHING (User wants to connect with similar surfers):
 If user asks for general matching without a specific destination:
-- Extract any criteria they mention (age, surf level, board type, lifestyle, etc.)
+- Extract any criteria they mention (age, surf level, board type, etc.)
 - Count how many criteria user provided: country_from + age_range + surfboard_type + surf_level + destination_country (if any)
   - If user provided 2+ criteria: Skip STEP 3, go directly to STEP 4 (finish and search immediately)
   - If user provided only 1 criterion: Proceed to STEP 3
@@ -133,7 +133,7 @@ If user mentions both country and area/region in the same message, extract BOTH 
 STEP 2 FLOW:
 1. Extract destination_country (and area if mentioned) immediately if user mentioned a destination
 2. If area/region not mentioned but destination is mentioned, ask for specific area/town (if relevant)
-3. Extract any matching criteria the user mentioned (age, surf level, board type, lifestyle, etc.)
+3. Extract any matching criteria the user mentioned (age, surf level, board type, etc.)
 4. Go directly to STEP 3 (Clarify Purpose)
 
 STEP 3 - CLARIFY PURPOSE (ONLY if user hasn't provided multiple criteria):
@@ -161,12 +161,17 @@ Examples:
 - "would like advanced surfers" → prioritize_filters: { "surf_level": 4 }
 
 IMPORTANT: If the user mentions criteria we don't have in our database (like physical appearance, personal details, languages, etc.), you should:
-1. Silently extract and use the criteria we DO have (country, age, surf level, board type, destination experience, lifestyle keywords)
+1. Silently extract and use the criteria we DO have (country, age, surf level, board type, destination experience)
 2. DO NOT explain what we can or can't filter by - just proceed with matching using available criteria
 3. DO NOT mention that certain criteria aren't available - just proceed silently
 4. DO NOT preemptively mention partial matches or "closest matches" - let the system search first, then explain results
 5. DO NOT use markdown formatting (no asterisks, no bold, no code blocks)
 6. DO NOT explain your filtering capabilities - just proceed directly to matching
+
+⚠️ CRITICAL: DESTINATION HANDLING ⚠️
+- If user mentions a destination/region (e.g., "surfed in Central America", "want to go to Southeast Asia", "has been to Europe"), ALWAYS expand it to countries and put in destination_country
+- Example: "surfed in Central America" → destination_country: "Belize, Costa Rica, El Salvador, Guatemala, Honduras, Nicaragua, Panama" (comma-separated)
+- Example: "surfed in Southeast Asia" → destination_country: "Thailand, Indonesia, Philippines, Malaysia, Vietnam, Cambodia, Myanmar"
 
 Example responses:
 - User: "I want a blond surfer from Israel" → You: "Got it! I'll find you surfers from Israel!" (Don't mention hair color or filtering capabilities)
@@ -183,7 +188,7 @@ CRITICAL: Extract criteria from user messages throughout the ENTIRE conversation
 The system will automatically:
 - Apply filtering logic regardless of when criteria was mentioned
 - If no exact matches found, return the closest matches
-- Score matches based on all criteria (destination, age, surf level, board type, lifestyle, wave preferences, etc.)
+- Score matches based on all criteria (destination, age, surf level, board type, etc.)
 
 BE SMART ABOUT USER REQUESTS:
 - Handle typos gracefully: "uropean" → understand as "European" and expand to all European countries
@@ -196,6 +201,7 @@ BE SMART ABOUT USER REQUESTS:
   * Use standard country names (e.g., "USA" not "United States of America", "UAE" not "United Arab Emirates")
   * DO NOT ask the user to pick a specific country when they mention a region - automatically expand it to all relevant countries
   * DO NOT explain that regions aren't "clean filters" - just expand them silently and proceed with matching
+  * ⚠️ CRITICAL: When user mentions a region/continent as a DESTINATION (e.g., "surfed in Central America", "want to go to Southeast Asia"), expand it to countries and put in destination_country as comma-separated string (e.g., "Belize, Costa Rica, El Salvador, Guatemala, Honduras, Nicaragua, Panama")
 - Infer intent: If user says "similar age" and you know they're 25, extract age_range: [20, 30]
 - Be forgiving: Don't reject requests due to typos or grammar mistakes - understand the intent
 - If user says "they will use shortboard" or "must be shortboarders" → extract surfboard_type: ["shortboard"]
@@ -214,6 +220,11 @@ CRITICAL: You MUST extract non_negotiable_criteria from the user's response, eve
 - "must be shortboarders" → surfboard_type: ["shortboard"]
 - "similar age" → age_range: [min, max] (infer from context)
 - "surf level [X]" → surf_level_min: X
+
+⚠️ CRITICAL: DESTINATION NAMES/REGIONS MUST GO IN destination_country! ⚠️
+- If user mentions "Central America", "Southeast Asia", "Europe", or any region/continent → Expand to countries and put in destination_country (comma-separated)
+- Example: "surfed in Central America" → destination_country: "Belize, Costa Rica, El Salvador, Guatemala, Honduras, Nicaragua, Panama"
+- Example: "surfed in Southeast Asia" → destination_country: "Thailand, Indonesia, Philippines, Malaysia, Vietnam, Cambodia, Myanmar"
 
 Examples:
 - User: "the surfers have to be from Israel or the USA" → non_negotiable_criteria: { "country_from": ["Israel", "USA"] }
@@ -254,14 +265,14 @@ If user requests surfers who surfed/stayed/traveled in a specific place:
 3. Priority scoring applies based on prioritize_filters
 
 GENERAL MATCHING (no specific destination):
-- Match based on user criteria (age, surf level, board type, lifestyle, wave preferences, etc.)
+- Match based on user criteria (age, surf level, board type, etc.)
 - Use priority scoring system for preferences
 - Match surfers with similar profiles and interests
 
 INTENT-DRIVEN RULES (for different request types):
 - Surf spots: Country + Area required, Town only if explicitly needed, Skill level required
 - Hikes: Area required, Extra weight for like-minded travelers
-- Stays / providers: Area required, Town if requested, Budget + lifestyle matter
+- Stays / providers: Area required, Town if requested, Budget matters
 - Equipment: Area required, Priority on experience, Surf style should NOT be inferred as required (shortboarders can recommend longboard shops)
 - Choosing towns within an area: Area required, Priority on time spent in area + like-minded travelers
 
@@ -296,7 +307,6 @@ DATA STRUCTURE (when is_finished: true):
     "age_range": [min, max], // array or null
     "surf_level_min": number, // number or null
     "surf_level_max": number, // number or null
-    "must_have_keywords": ["keyword1"], // array or null
     "other": "text description" // string or null
   },
   "prioritize_filters": {
@@ -308,8 +318,6 @@ DATA STRUCTURE (when is_finished: true):
     "board_type": { "value": "shortboard", "priority": 15 }, // e.g., "prioritize longboarders" → priority: 15
     "surf_level": { "value": 4, "priority": 30 }, // e.g., "prioritize advanced surfers" → priority: 30 (major advantage)
     "age_range": { "value": [20, 30], "priority": 10 }, // e.g., "prioritize younger surfers" → priority: 10
-    "lifestyle_keywords": { "value": ["yoga"], "priority": 15 }, // e.g., "prioritize yoga enthusiasts" → priority: 15
-    "wave_type_keywords": { "value": ["big waves"], "priority": 20 }, // e.g., "prioritize big wave surfers" → priority: 20
     "travel_experience": { "value": "wave_hunter", "priority": 25 }, // e.g., "prioritize experienced travelers" → priority: 25
     "group_type": { "value": "solo", "priority": 10 } // e.g., "prioritize solo travelers" → priority: 10
   },
@@ -454,8 +462,6 @@ async function extractQueryFilters(
     surf_level_min?: number;
     surf_level_max?: number;
     destination_days_min?: { destination: string; min_days: number };
-    lifestyle_keywords?: string[];
-    wave_type_keywords?: string[];
   };
   unmappableCriteria?: string[]; // Criteria that user mentioned but can't be mapped to database fields
   explanation: string;
@@ -479,8 +485,6 @@ AVAILABLE SURFERS TABLE FIELDS (ONLY THESE CAN BE FILTERED):
   * "soft top" or "softtop" → 'soft_top'
 - surf_level (integer): 1-5 (1=beginner, 5=expert)
 - destinations_array (jsonb): Array of {country: string, area: string[], time_in_days: number, time_in_text?: string}
-- lifestyle_keywords (text[]): Array of lifestyle interests
-- wave_type_keywords (text[]): Array of wave preferences
 
 IMPORTANT: Handle typos, general terms, and variations intelligently:
 
@@ -533,9 +537,7 @@ Extract filters from the user's request. Return ONLY valid JSON in this format (
     "destination_days_min": {
       "destination": "Costa Rica",
       "min_days": 30
-    },
-    "lifestyle_keywords": ["yoga"],
-    "wave_type_keywords": ["big waves"]
+    }
   },
   "unmappableCriteria": ["blond", "tall"],
   "explanation": "Brief explanation of what filters were extracted and what couldn't be mapped"
@@ -1123,7 +1125,7 @@ When asking QUESTION 3 (travel distance), use their country_from to provide rele
 
       // If we detected unmappable criteria, add a system message to inform the LLM
       if (unmappableCriteria.length > 0) {
-        const unmappableMessage = `IMPORTANT: The user mentioned criteria we don't have in our database: ${unmappableCriteria.join(', ')}. Silently extract and use the criteria we DO have (country, age, surf level, board type, destination experience, lifestyle keywords). DO NOT explain what we can or can't filter by - just proceed with matching.`
+        const unmappableMessage = `IMPORTANT: The user mentioned criteria we don't have in our database: ${unmappableCriteria.join(', ')}. Silently extract and use the criteria we DO have (country, age, surf level, board type, destination experience). DO NOT explain what we can or can't filter by - just proceed with matching.`
         // Insert before the last user message
         messages.splice(messages.length - 1, 0, { role: 'system', content: unmappableMessage })
       }
@@ -1670,8 +1672,7 @@ When asking QUESTION 3 (travel distance), use their country_from to provide rele
             (tripPlanningData.non_negotiable_criteria.country_from && tripPlanningData.non_negotiable_criteria.country_from.length > 0) ||
             (tripPlanningData.non_negotiable_criteria.age_range && Array.isArray(tripPlanningData.non_negotiable_criteria.age_range) && tripPlanningData.non_negotiable_criteria.age_range.length === 2) ||
             (tripPlanningData.non_negotiable_criteria.surf_level_min !== undefined && tripPlanningData.non_negotiable_criteria.surf_level_min !== null) ||
-            (tripPlanningData.non_negotiable_criteria.surf_level_max !== undefined && tripPlanningData.non_negotiable_criteria.surf_level_max !== null) ||
-            (tripPlanningData.non_negotiable_criteria.must_have_keywords && tripPlanningData.non_negotiable_criteria.must_have_keywords.length > 0)
+            (tripPlanningData.non_negotiable_criteria.surf_level_max !== undefined && tripPlanningData.non_negotiable_criteria.surf_level_max !== null)
           
           if (hasNonNegotiableValues && !tripPlanningData.filtersFromNonNegotiableStep) {
             tripPlanningData.filtersFromNonNegotiableStep = true

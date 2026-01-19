@@ -499,14 +499,42 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
               }
             }
           } else {
-            // No matches found - track search failure
+            // No matches found - analyze why and generate helpful message
             analyticsService.trackSwellySearchFailed();
+            
+            // Import and use the analysis function
+            const { analyzeNoMatchesReason } = await import('../services/matching/matchingService');
+            
+            // Get rejected matches and destination-filtered surfers from the result (if available)
+            const rejectedMatches = (matchedUsers as any).__rejectedMatches || [];
+            const destinationFilteredSurfers = (matchedUsers as any).__destinationFilteredSurfers || [];
+            const passedOtherFiltersCount = (matchedUsers as any).__passedOtherFilters || 0;
+            const mustHaveKeywordsFilteredOut = (matchedUsers as any).__mustHaveKeywordsFilteredOut || false;
+            const mustHaveKeywords = (matchedUsers as any).__mustHaveKeywords || [];
+            
+            console.log('[TripPlanningChatScreen] No matches found. Analyzing reason...', {
+              rejectedMatchesCount: rejectedMatches.length,
+              destinationFilteredSurfersCount: destinationFilteredSurfers.length,
+              passedOtherFiltersCount,
+              hasDestinationFiltered: !!destinationFilteredSurfers.length,
+              mustHaveKeywordsFilteredOut,
+              mustHaveKeywords,
+            });
+            
+            const explanation = analyzeNoMatchesReason(
+              requestData, 
+              rejectedMatches,
+              destinationFilteredSurfers,
+              passedOtherFiltersCount,
+              mustHaveKeywordsFilteredOut,
+              mustHaveKeywords
+            );
+            
+            console.log('[TripPlanningChatScreen] Generated explanation:', explanation);
             
             const noMatchesMessage: Message = {
               id: (Date.now() + 3).toString(),
-              text: response.data.filtersFromNonNegotiableStep
-                ? "Sorry, I couldn't find any surfers that match all your criteria. Would you like to relax some of those requirements?"
-                : "Hmm, couldn't find any perfect matches right now, but don't worry! More surfers are joining every day. Check back soon!",
+              text: explanation,
               isUser: false,
               timestamp: new Date().toLocaleTimeString('en-US', { 
                 hour: '2-digit', 

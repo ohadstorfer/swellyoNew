@@ -238,6 +238,20 @@ class AnalyticsService {
     this.track('onboarding_step2_completed', properties);
     this.hasCompletedOnboarding = true;
     this.clearOnboardingAbandonTimer();
+    
+    // Note: PostHog surveys with popover presentation will show automatically
+    // when the survey is configured to trigger on the "onboarding_step2_completed" event.
+    // The event has been tracked above, so PostHog should evaluate survey conditions.
+    // 
+    // For surveys to work, ensure:
+    // 1. Survey is set to "Popover" presentation mode in PostHog
+    // 2. Survey display condition targets "onboarding_step2_completed" event
+    // 3. Survey status is "Launched" (not "Draft")
+    // 4. PostHogSurveyProvider is added to the app (if using provider pattern)
+    // 
+    // Since we're using instance-based PostHog, surveys should trigger automatically
+    // when the event is captured, assuming proper configuration in PostHog dashboard.
+    console.log('[Analytics] ✅ Onboarding completed - survey should trigger if configured in PostHog');
   }
 
   /**
