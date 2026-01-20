@@ -188,7 +188,7 @@ export const OnboardingStep1Screen: React.FC<OnboardingStep1ScreenProps> = ({
           </View>
 
           <View style={styles.homepageButton}>
-            {/* Empty space to balance the back button and keep Step 1/5 centered */}
+            {/* Empty space to balance the back button and keep Step 1/4 centered */}
           </View>
         </View>
 

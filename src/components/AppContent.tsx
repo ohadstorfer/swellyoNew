@@ -388,25 +388,7 @@ export const AppContent: React.FC = () => {
     setCurrentStep(4); // Go back to step 4
   };
 
-  const handleStep1Back = async () => {
-    // If user is a demo user, log them out first before going back to welcome screen
-    if (isDemoUser) {
-      try {
-        console.log('Demo user detected, logging out before going back to welcome screen...');
-        const { authService } = await import('../services/auth/authService');
-        await authService.signOut();
-        console.log('Demo user logged out successfully');
-        
-        // Reset onboarding state (this also resets the demo user flag)
-        await resetOnboarding();
-        console.log('Onboarding state reset');
-        // After reset, go back to initial welcome screen (not onboarding welcome)
-        return;
-      } catch (error) {
-        console.error('Error logging out demo user:', error);
-        // Continue with navigation even if logout fails
-      }
-    }
+  const handleStep1Back = () => {
     // Navigate to onboarding welcome screen (step 0)
     setCurrentStep(0);
   };

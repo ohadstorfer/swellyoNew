@@ -18,8 +18,9 @@ export interface TripPlanningRequest {
     country_from?: string[]; // e.g., ["Israel"]
     surfboard_type?: string[]; // e.g., ["shortboard"]
     age_range?: [number, number]; // e.g., [20, 30]
-    surf_level_min?: number;
-    surf_level_max?: number;
+    surf_level_min?: number; // Legacy: numeric level (1-5)
+    surf_level_max?: number; // Legacy: numeric level (1-5)
+    surf_level_category?: string; // New: category-based ('beginner', 'intermediate', 'advanced', 'pro')
     other?: string;
   } | null;
   user_context?: {
@@ -31,15 +32,17 @@ export interface TripPlanningRequest {
     age_min?: number;
     age_max?: number;
     surfboard_type?: string[];
-    surf_level_min?: number;
-    surf_level_max?: number;
+    surf_level_min?: number; // Legacy support - numeric level (1-5)
+    surf_level_max?: number; // Legacy support - numeric level (1-5)
+    surf_level_category?: string; // New: category-based filtering ('beginner', 'intermediate', 'advanced', 'pro')
     destination_days_min?: { destination: string; min_days: number };
   } | null; // AI-extracted Supabase query filters
   filtersFromNonNegotiableStep?: boolean; // true if filters were mentioned during STEP 4 (non-negotiable criteria)
   prioritize_filters?: {
     origin_country?: string;
     board_type?: string;
-    surf_level?: number;
+    surf_level?: number; // Legacy: numeric level (1-5)
+    surf_level_category?: string; // New: category-based ('beginner', 'intermediate', 'advanced', 'pro')
     age_range?: [number, number];
     travel_experience?: string;
     group_type?: string;

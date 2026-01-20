@@ -465,6 +465,9 @@ function checkPrioritizedFilterMatch(
     case 'surf_level':
       return userSurfer.surf_level === filterValue;
     
+    case 'surf_level_category':
+      return userSurfer.surf_level_category === filterValue;
+    
     case 'age_range':
       if (!Array.isArray(filterValue) || filterValue.length !== 2) return false;
       if (!userSurfer.age) return false;
@@ -799,14 +802,27 @@ export async function findMatchingUsers(
         }
       }
       
-      // Filter by surf_level
-      if (request.queryFilters.surf_level_min !== undefined && request.queryFilters.surf_level_min !== null && typeof request.queryFilters.surf_level_min === 'number') {
-        query = query.gte('surf_level', request.queryFilters.surf_level_min);
-        console.log(`  - Filtering by surf_level_min: ${request.queryFilters.surf_level_min}`);
+      // Filter by surf_level_category (preferred method)
+      if (request.queryFilters.surf_level_category) {
+        query = query.eq('surf_level_category', request.queryFilters.surf_level_category);
+        console.log(`  - Filtering by surf_level_category: ${request.queryFilters.surf_level_category}`);
+        
+        // If board type is also specified, filter by both (required for category-based filtering)
+        if (request.queryFilters.surfboard_type && request.queryFilters.surfboard_type.length > 0) {
+          query = query.in('surfboard_type', request.queryFilters.surfboard_type);
+          console.log(`  - Also filtering by surfboard_type: ${request.queryFilters.surfboard_type.join(', ')}`);
+        }
       }
-      if (request.queryFilters.surf_level_max !== undefined && request.queryFilters.surf_level_max !== null && typeof request.queryFilters.surf_level_max === 'number') {
-        query = query.lte('surf_level', request.queryFilters.surf_level_max);
-        console.log(`  - Filtering by surf_level_max: ${request.queryFilters.surf_level_max}`);
+      // Legacy: Filter by numeric surf_level (for backward compatibility)
+      else {
+        if (request.queryFilters.surf_level_min !== undefined && request.queryFilters.surf_level_min !== null && typeof request.queryFilters.surf_level_min === 'number') {
+          query = query.gte('surf_level', request.queryFilters.surf_level_min);
+          console.log(`  - Filtering by surf_level_min: ${request.queryFilters.surf_level_min}`);
+        }
+        if (request.queryFilters.surf_level_max !== undefined && request.queryFilters.surf_level_max !== null && typeof request.queryFilters.surf_level_max === 'number') {
+          query = query.lte('surf_level', request.queryFilters.surf_level_max);
+          console.log(`  - Filtering by surf_level_max: ${request.queryFilters.surf_level_max}`);
+        }
       }
       
     } else {

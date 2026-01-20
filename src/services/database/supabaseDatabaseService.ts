@@ -29,6 +29,8 @@ export interface SupabaseSurfer {
   country_from?: string; // varchar(255), nullable
   surfboard_type?: string; // surfboard_type enum, nullable
   surf_level?: number; // integer, nullable, check 1-5
+  surf_level_description?: string; // text, nullable - board-specific description (e.g., "Snapping", "Cross Stepping")
+  surf_level_category?: string; // text, nullable - general category: 'beginner', 'intermediate', 'advanced', 'pro'
   travel_experience?: number; // number of trips (0-20+), nullable
   bio?: string; // text, nullable
   profile_image_url?: string; // varchar(2048), nullable
@@ -279,6 +281,43 @@ class SupabaseDatabaseService {
         surfLevel = Math.max(1, Math.min(5, surfLevel));
       }
 
+      // Calculate surf_level_description and surf_level_category from board type and numeric level
+      let surfLevelDescription: string | undefined = surferData.surfLevelDescription;
+      let surfLevelCategory: string | undefined = surferData.surfLevelCategory;
+      
+      // If not explicitly provided, calculate from board type and numeric level
+      // Use surferData.surfLevel (0-4) for mapping, not the converted surfLevel (1-5)
+      if (surferData.surfLevel !== undefined && (surfLevelDescription === undefined || surfLevelCategory === undefined)) {
+        const boardTypeForMapping = surferData.boardType !== undefined 
+          ? surferData.boardType 
+          : (surfboardType ? (surfboardType === 'shortboard' ? 0 : 
+                              surfboardType === 'mid_length' ? 1 :
+                              surfboardType === 'longboard' ? 2 : 3) : undefined);
+        
+        if (boardTypeForMapping !== undefined) {
+          try {
+            const { getSurfLevelMapping } = await import('../../utils/surfLevelMapping');
+            const mapping = getSurfLevelMapping(boardTypeForMapping, surferData.surfLevel);
+            if (mapping) {
+              surfLevelDescription = mapping.description || undefined;
+              surfLevelCategory = mapping.category;
+              console.log('✅ Calculated surf level mapping:', {
+                boardType: boardTypeForMapping,
+                surfLevel: surferData.surfLevel,
+                description: surfLevelDescription,
+                category: surfLevelCategory,
+              });
+            } else {
+              console.warn('⚠️ No mapping found for boardType:', boardTypeForMapping, 'surfLevel:', surferData.surfLevel);
+            }
+          } catch (error) {
+            console.error('❌ Error calculating surf level mapping:', error);
+          }
+        } else {
+          console.warn('⚠️ Cannot calculate surf level mapping - boardTypeForMapping is undefined');
+        }
+      }
+
       // Truncate profile_image_url if it's too long (max 2048 characters)
       let profileImageUrl = surferData.profileImageUrl;
       if (profileImageUrl && profileImageUrl.length > 2048) {
@@ -294,6 +333,8 @@ class SupabaseDatabaseService {
         country_from: surferData.countryFrom,
         surfboard_type: surfboardType,
         surf_level: surfLevel,
+        surf_level_description: surfLevelDescription,
+        surf_level_category: surfLevelCategory,
         travel_experience: surferData.travelExperience,
         bio: surferData.bio,
         profile_image_url: profileImageUrl,
@@ -473,7 +514,7 @@ class SupabaseDatabaseService {
       // destinations_map does NOT exist - only destinations_array exists
       const { data, error } = await supabase
         .from('surfers')
-        .select('user_id, name, age, pronoun, country_from, surfboard_type, surf_level, travel_experience, bio, profile_image_url, destinations_array, lifestyle_keywords, wave_type_keywords, travel_buddies, created_at, updated_at, finished_onboarding')
+        .select('user_id, name, age, pronoun, country_from, surfboard_type, surf_level, surf_level_description, surf_level_category, travel_experience, bio, profile_image_url, destinations_array, lifestyle_keywords, wave_type_keywords, travel_buddies, created_at, updated_at, finished_onboarding')
         .eq('user_id', userId)
         .single();
 

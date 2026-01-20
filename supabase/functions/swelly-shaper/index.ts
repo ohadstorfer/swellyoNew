@@ -66,7 +66,21 @@ SMART EXTRACTION:
 - Always look for multiple pieces of information in a single message
 
 EXTRACTION RULES:
-- For surf_level: Extract number 1-5 (convert text like "beginner" to 1, "intermediate" to 3, "advanced" to 4, "expert" to 5)
+- For surf_level: 
+  * CRITICAL: When user mentions surf level by category (e.g., "beginner", "intermediate", "advanced", "pro"), you MUST convert to numeric level based on their current board type:
+    - "beginner" → 1 (database level 1)
+    - "intermediate" → 2 (database level 2) 
+    - "advanced" → 3 (database level 3)
+    - "pro" → 4 (database level 4)
+  * If user provides a numeric level (1-5), use it directly
+  * IMPORTANT: The system will automatically calculate surf_level_description and surf_level_category based on the numeric level and board type - you only need to provide the numeric level
+  * When confirming updates, ALWAYS refer to the level by its category name (e.g., "beginner", "intermediate", "advanced", "pro") in your response, NOT the number
+  * Examples:
+    - User: "I'm a beginner" → Extract: surf_level: 1, Response: "Got it! I've updated your surf level to beginner. ✅"
+    - User: "Change my level to intermediate" → Extract: surf_level: 2, Response: "Perfect! I've updated your surf level to intermediate. ✅"
+    - User: "I'm advanced now" → Extract: surf_level: 3, Response: "Awesome! I've updated your surf level to advanced. ✅"
+    - User: "I'm pro" → Extract: surf_level: 4, Response: "Rad! I've updated your surf level to pro. ✅"
+    - User: "Change my level to 3" → Extract: surf_level: 3, Response: "Got it! I've updated your surf level to advanced. ✅" (refer to category, not number)
 - For travel_experience: Extract the number of trips (integer 0-20+). Examples:
   * "Change my amount of trips to 17" → 17
   * "I just came back from another trip, add it" → current_trips + 1 (you'll see current value in profile context)
@@ -188,7 +202,47 @@ Response: {
 
 User: "change my level to 4"
 Response: {
-  "return_message": "Nice! I've updated your surf level to 4. ✅",
+  "return_message": "Nice! I've updated your surf level to advanced. ✅",
+  "is_finished": true,
+  "data": {
+    "field": "surf_level",
+    "value": 3
+  }
+}
+
+User: "I'm a beginner"
+Response: {
+  "return_message": "Got it! I've updated your surf level to beginner. ✅",
+  "is_finished": true,
+  "data": {
+    "field": "surf_level",
+    "value": 1
+  }
+}
+
+User: "I'm intermediate now"
+Response: {
+  "return_message": "Perfect! I've updated your surf level to intermediate. ✅",
+  "is_finished": true,
+  "data": {
+    "field": "surf_level",
+    "value": 2
+  }
+}
+
+User: "Change my level to advanced"
+Response: {
+  "return_message": "Awesome! I've updated your surf level to advanced. ✅",
+  "is_finished": true,
+  "data": {
+    "field": "surf_level",
+    "value": 3
+  }
+}
+
+User: "I'm pro"
+Response: {
+  "return_message": "Rad! I've updated your surf level to pro. ✅",
   "is_finished": true,
   "data": {
     "field": "surf_level",
@@ -222,12 +276,12 @@ Response: {
 
 User: "I'm turning 28 next month and I've been surfing for 5 years now, so I'd say I'm at an advanced level."
 Response: {
-  "return_message": "Got it! I've updated your age to 28 and surf level to 4 (advanced). ✅",
+  "return_message": "Got it! I've updated your age to 28 and surf level to advanced. ✅",
   "is_finished": true,
   "data": {
     "updates": [
       {"field": "age", "value": 28},
-      {"field": "surf_level", "value": 4}
+      {"field": "surf_level", "value": 3}
     ]
   }
 }
@@ -270,13 +324,13 @@ Response: {
 
 User: "I'm from Brazil originally, but I've been living in California for the past 3 years. I ride a midlength now and I'm probably intermediate level."
 Response: {
-  "return_message": "Perfect! I've updated your country to Brazil, surfboard type to midlength, and surf level to 3 (intermediate). ✅",
+  "return_message": "Perfect! I've updated your country to Brazil, surfboard type to midlength, and surf level to intermediate. ✅",
   "is_finished": true,
   "data": {
     "updates": [
       {"field": "country_from", "value": "Brazil"},
       {"field": "surfboard_type", "value": "midlength"},
-      {"field": "surf_level", "value": 3}
+      {"field": "surf_level", "value": 2}
     ]
   }
 }
@@ -296,7 +350,7 @@ Response: {
 
 User: "I'm 24, use they/them pronouns, and I'm from Australia. I've been surfing for about 2 years so I'm still learning but getting better."
 Response: {
-  "return_message": "Got it! I've updated your age to 24, pronouns to they/them, country to Australia, and surf level to 2 (novice/intermediate). ✅",
+  "return_message": "Got it! I've updated your age to 24, pronouns to they/them, country to Australia, and surf level to intermediate. ✅",
   "is_finished": true,
   "data": {
     "updates": [
@@ -579,7 +633,7 @@ async function updateUserProfile(userId: string, field: string, value: any, supa
             ? newTrip 
             : {
                 country: extractCountryFromDestination(newTrip.destination_name || ''),
-                area: (newTrip.destination_name || '').split(',').slice(1).map(a => a.trim()).filter(a => a),
+                area: (newTrip.destination_name || '').split(',').slice(1).map((a: string) => a.trim()).filter((a: string) => a),
                 time_in_days: newTrip.time_in_days,
                 time_in_text: newTrip.time_in_text
               }
@@ -589,9 +643,83 @@ async function updateUserProfile(userId: string, field: string, value: any, supa
       
       updateData.destinations_array = updatedTrips
     } else if (field === 'surf_level') {
+      // Handle both numeric and text-based surf level inputs
+      let level: number
+      if (typeof value === 'number') {
+        level = value
+      } else if (typeof value === 'string') {
+        // Convert category text to numeric level
+        const categoryLower = value.toLowerCase().trim()
+        const categoryMap: { [key: string]: number } = {
+          'beginner': 1,
+          'intermediate': 2,
+          'advanced': 3,
+          'pro': 4,
+          'expert': 4, // "expert" maps to "pro" (level 4)
+        }
+        if (categoryMap[categoryLower]) {
+          level = categoryMap[categoryLower]
+        } else {
+          // Try to parse as number
+          level = parseInt(value)
+        }
+      } else {
+        level = parseInt(value)
+      }
+      
       // Ensure surf_level is 1-5 (database expects 1-5, not 0-4)
-      const level = typeof value === 'number' ? value : parseInt(value)
-      updateData[dbField] = Math.max(1, Math.min(5, level))
+      level = Math.max(1, Math.min(5, level))
+      updateData[dbField] = level
+      
+      // Calculate surf_level_description and surf_level_category from board type and numeric level
+      // Get current board type from surfer data
+      const boardTypeEnum = surferData.surfboard_type
+      if (boardTypeEnum) {
+        // Convert database level (1-5) to app level (0-4) for mapping
+        const appLevel = level - 1
+        
+        // Map board type enum to number for mapping function
+        const boardTypeMap: { [key: string]: number } = {
+          'shortboard': 0,
+          'mid_length': 1,
+          'longboard': 2,
+          'soft_top': 3,
+        }
+        const boardTypeNumber = boardTypeMap[boardTypeEnum]
+        
+        if (boardTypeNumber !== undefined) {
+          // Calculate mapping based on board type and level
+          const levelMappings: { [key: string]: { [key: number]: { description: string | null, category: string } } } = {
+            'shortboard': {
+              0: { description: 'Dipping My Toes', category: 'beginner' },
+              1: { description: 'Cruising Around', category: 'intermediate' },
+              2: { description: 'Snapping', category: 'advanced' },
+              3: { description: 'Charging', category: 'pro' },
+            },
+            'longboard': {
+              0: { description: 'Dipping My Toes', category: 'beginner' },
+              1: { description: 'Cruising Around', category: 'intermediate' },
+              2: { description: 'Cross Stepping', category: 'advanced' },
+              3: { description: 'Hanging Toes', category: 'pro' },
+            },
+            'mid_length': {
+              0: { description: 'Dipping My Toes', category: 'beginner' },
+              1: { description: 'Cruising Around', category: 'intermediate' },
+              2: { description: 'Carving Turns', category: 'advanced' },
+              3: { description: 'Charging', category: 'pro' },
+            },
+            'soft_top': {
+              0: { description: null, category: 'beginner' },
+            },
+          }
+          
+          const mapping = levelMappings[boardTypeEnum]?.[appLevel]
+          if (mapping) {
+            updateData.surf_level_description = mapping.description
+            updateData.surf_level_category = mapping.category
+          }
+        }
+      }
     } else if (field === 'travel_experience') {
       // Handle travel_experience as integer (number of trips, 0-20+)
       // If value is "add" or user wants to increment, get current value and add 1
@@ -607,11 +735,50 @@ async function updateUserProfile(userId: string, field: string, value: any, supa
       // Map to database enum values
       const boardTypeMap: { [key: string]: string } = {
         'shortboard': 'shortboard',
-        'midlength': 'midlength',
+        'midlength': 'mid_length',
+        'mid_length': 'mid_length',
         'longboard': 'longboard',
         'soft_top': 'soft_top',
       }
       updateData[dbField] = boardTypeMap[value] || value
+      
+      // When board type changes, recalculate surf_level_description and surf_level_category
+      // if surf_level exists
+      if (surferData.surf_level) {
+        const boardTypeEnum = boardTypeMap[value] || value
+        const level = surferData.surf_level
+        const appLevel = level - 1 // Convert database level (1-5) to app level (0-4)
+        
+        const levelMappings: { [key: string]: { [key: number]: { description: string | null, category: string } } } = {
+          'shortboard': {
+            0: { description: 'Dipping My Toes', category: 'beginner' },
+            1: { description: 'Cruising Around', category: 'intermediate' },
+            2: { description: 'Snapping', category: 'advanced' },
+            3: { description: 'Charging', category: 'pro' },
+          },
+          'longboard': {
+            0: { description: 'Dipping My Toes', category: 'beginner' },
+            1: { description: 'Cruising Around', category: 'intermediate' },
+            2: { description: 'Cross Stepping', category: 'advanced' },
+            3: { description: 'Hanging Toes', category: 'pro' },
+          },
+          'mid_length': {
+            0: { description: 'Dipping My Toes', category: 'beginner' },
+            1: { description: 'Cruising Around', category: 'intermediate' },
+            2: { description: 'Carving Turns', category: 'advanced' },
+            3: { description: 'Charging', category: 'pro' },
+          },
+          'soft_top': {
+            0: { description: null, category: 'beginner' },
+          },
+        }
+        
+        const mapping = levelMappings[boardTypeEnum]?.[appLevel]
+        if (mapping) {
+          updateData.surf_level_description = mapping.description
+          updateData.surf_level_category = mapping.category
+        }
+      }
     } else {
       updateData[dbField] = value
     }
@@ -723,7 +890,9 @@ serve(async (req: Request) => {
 - pronoun: ${userProfile.pronoun || 'not set'}
 - country_from: ${userProfile.country_from || 'not set'}
 - surfboard_type: ${userProfile.surfboard_type || 'not set'}
-- surf_level: ${userProfile.surf_level || 'not set'} (1-5 scale)
+- surf_level: ${userProfile.surf_level || 'not set'} (1-5 scale, where 1=beginner, 2=intermediate, 3=advanced, 4=pro)
+- surf_level_category: ${userProfile.surf_level_category || 'not set'} (beginner/intermediate/advanced/pro)
+- surf_level_description: ${userProfile.surf_level_description || 'not set'} (board-specific description)
 - travel_experience: ${userProfile.travel_experience || 'not set'}
 - bio: ${userProfile.bio || 'not set'}
 - travel_type: ${userProfile.travel_type || 'not set'}
@@ -731,6 +900,8 @@ serve(async (req: Request) => {
 - destinations_array: ${userProfile.destinations_array ? JSON.stringify(userProfile.destinations_array) : 'no trips yet'}
 - lifestyle_keywords: ${userProfile.lifestyle_keywords ? JSON.stringify(userProfile.lifestyle_keywords) : 'not set'}
 - wave_type_keywords: ${userProfile.wave_type_keywords ? JSON.stringify(userProfile.wave_type_keywords) : 'not set'}
+
+IMPORTANT: When referring to surf level in your responses, ALWAYS use the category name (beginner/intermediate/advanced/pro), NOT the numeric level. The system automatically updates all three fields (surf_level, surf_level_description, surf_level_category) when you update the numeric level.
 
 Use this context to understand what they currently have and help them update it.`
         

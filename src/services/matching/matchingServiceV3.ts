@@ -652,16 +652,31 @@ function checkLayer1HardRequirements(
     }
   }
 
-  // Check surf_level filters
-  if (criteria.surf_level_min !== undefined) {
-    if (!userSurfer.surf_level || userSurfer.surf_level < criteria.surf_level_min) {
-      return { passed: false, reason: 'Surf level minimum not met' };
+  // Check surf_level filters - prefer category-based filtering
+  // If surf_level_category is specified, use it (requires board type match)
+  if (criteria.surf_level_category) {
+    if (!userSurfer.surf_level_category || userSurfer.surf_level_category !== criteria.surf_level_category) {
+      return { passed: false, reason: 'Surf level category not matched' };
+    }
+    // If board type is also specified, ensure it matches
+    if (criteria.surfboard_type && criteria.surfboard_type.length > 0) {
+      if (!userSurfer.surfboard_type || !criteria.surfboard_type.includes(userSurfer.surfboard_type)) {
+        return { passed: false, reason: 'Surfboard type not matched for category filter' };
+      }
     }
   }
-  
-  if (criteria.surf_level_max !== undefined) {
-    if (!userSurfer.surf_level || userSurfer.surf_level > criteria.surf_level_max) {
-      return { passed: false, reason: 'Surf level maximum exceeded' };
+  // Legacy: Check numeric surf_level filters (for backward compatibility)
+  else {
+    if (criteria.surf_level_min !== undefined) {
+      if (!userSurfer.surf_level || userSurfer.surf_level < criteria.surf_level_min) {
+        return { passed: false, reason: 'Surf level minimum not met' };
+      }
+    }
+    
+    if (criteria.surf_level_max !== undefined) {
+      if (!userSurfer.surf_level || userSurfer.surf_level > criteria.surf_level_max) {
+        return { passed: false, reason: 'Surf level maximum exceeded' };
+      }
     }
   }
 
@@ -737,8 +752,17 @@ function calculateLayer3PriorityScore(
     }
   }
 
-  // Surf level priority (1-50)
-  if (priorities.surf_level !== undefined && userSurfer.surf_level === priorities.surf_level) {
+  // Surf level priority (1-50) - prefer category-based
+  if (priorities.surf_level_category && userSurfer.surf_level_category === priorities.surf_level_category) {
+    // Exception: if asking for advanced surf spots and user is advanced
+    if (intent === 'surf_spots' && priorities.surf_level_category === 'advanced') {
+      priorityScore += 100; // Exception: almost always surface
+    } else {
+      priorityScore += 35; // Major advantage
+    }
+  }
+  // Legacy: numeric surf level priority
+  else if (priorities.surf_level !== undefined && userSurfer.surf_level === priorities.surf_level) {
     // Exception: if asking for advanced surf spots and user is advanced
     if (intent === 'surf_spots' && priorities.surf_level >= 4) {
       priorityScore += 100; // Exception: almost always surface

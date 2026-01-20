@@ -158,7 +158,8 @@ Examples:
 - "must be from Israel" → non_negotiable_criteria: { "country_from": ["Israel"] }
 - "prioritize surfers from Israel" → prioritize_filters: { "origin_country": "Israel" }
 - "I prefer longboarders" → prioritize_filters: { "board_type": "longboard" }
-- "would like advanced surfers" → prioritize_filters: { "surf_level": 4 }
+- "would like advanced surfers" → If board type specified: queryFilters: { "surf_level_category": "advanced", "surfboard_type": ["shortboard"] }
+  If board type NOT specified: Ask user which board type, then set both fields
 
 IMPORTANT: If the user mentions criteria we don't have in our database (like physical appearance, personal details, languages, etc.), you should:
 1. Silently extract and use the criteria we DO have (country, age, surf level, board type, destination experience)
@@ -219,7 +220,8 @@ CRITICAL: You MUST extract non_negotiable_criteria from the user's response, eve
 - "from [country] or any country within [country]" → country_from: ["Country1", "Country2"] (extract both)
 - "must be shortboarders" → surfboard_type: ["shortboard"]
 - "similar age" → age_range: [min, max] (infer from context)
-- "surf level [X]" → surf_level_min: X
+- "surf level [X]" → surf_level_category: "beginner"/"intermediate"/"advanced"/"pro" (convert numeric to category)
+- "beginner" / "intermediate" / "advanced" / "pro" → surf_level_category: "beginner"/"intermediate"/"advanced"/"pro"
 
 ⚠️ CRITICAL: DESTINATION NAMES/REGIONS MUST GO IN destination_country! ⚠️
 - If user mentions "Central America", "Southeast Asia", "Europe", or any region/continent → Expand to countries and put in destination_country (comma-separated)
@@ -305,8 +307,9 @@ DATA STRUCTURE (when is_finished: true):
     "country_from": ["country1"], // array or null
     "surfboard_type": ["type1"], // array or null
     "age_range": [min, max], // array or null
-    "surf_level_min": number, // number or null
-    "surf_level_max": number, // number or null
+    "surf_level_category": string, // 'beginner', 'intermediate', 'advanced', or 'pro' - PREFERRED
+    "surf_level_min": number, // Legacy: number or null (only use if category not available)
+    "surf_level_max": number, // Legacy: number or null (only use if category not available)
     "other": "text description" // string or null
   },
   "prioritize_filters": {
@@ -316,7 +319,8 @@ DATA STRUCTURE (when is_finished: true):
     // These are preferences (not requirements) that get bonus points in matching
     "origin_country": { "value": "Israel", "priority": 20 }, // e.g., "prioritize surfers from Israel" → priority: 20
     "board_type": { "value": "shortboard", "priority": 15 }, // e.g., "prioritize longboarders" → priority: 15
-    "surf_level": { "value": 4, "priority": 30 }, // e.g., "prioritize advanced surfers" → priority: 30 (major advantage)
+    "surf_level_category": { "value": "advanced", "priority": 30 }, // e.g., "prioritize advanced surfers" → priority: 30 (major advantage)
+    "surfboard_type": { "value": "shortboard", "priority": 15 }, // REQUIRED when using surf_level_category - category-based filtering requires board type
     "age_range": { "value": [20, 30], "priority": 10 }, // e.g., "prioritize younger surfers" → priority: 10
     "travel_experience": { "value": "wave_hunter", "priority": 25 }, // e.g., "prioritize experienced travelers" → priority: 25
     "group_type": { "value": "solo", "priority": 10 } // e.g., "prioritize solo travelers" → priority: 10
@@ -459,8 +463,9 @@ async function extractQueryFilters(
     age_min?: number;
     age_max?: number;
     surfboard_type?: string[]; // Valid values: 'shortboard', 'mid_length', 'longboard', 'soft_top'
-    surf_level_min?: number;
-    surf_level_max?: number;
+    surf_level_min?: number; // Legacy: numeric level (1-5) - prefer surf_level_category
+    surf_level_max?: number; // Legacy: numeric level (1-5) - prefer surf_level_category
+    surf_level_category?: string; // Preferred: 'beginner', 'intermediate', 'advanced', 'pro'
     destination_days_min?: { destination: string; min_days: number };
   };
   unmappableCriteria?: string[]; // Criteria that user mentioned but can't be mapped to database fields
@@ -483,8 +488,19 @@ AVAILABLE SURFERS TABLE FIELDS (ONLY THESE CAN BE FILTERED):
   * "longboard" or "long board" → 'longboard'
   * "shortboard" or "short board" → 'shortboard'
   * "soft top" or "softtop" → 'soft_top'
-- surf_level (integer): 1-5 (1=beginner, 5=expert)
+- surf_level (integer): 1-5 (1=beginner, 5=expert) - LEGACY: Use surf_level_category instead
+- surf_level_category (text): 'beginner', 'intermediate', 'advanced', or 'pro' - PREFERRED for filtering
+- surf_level_description (text): Board-specific description (e.g., "Snapping", "Cross Stepping") - for display only
 - destinations_array (jsonb): Array of {country: string, area: string[], time_in_days: number, time_in_text?: string}
+
+⚠️ CRITICAL: When user mentions surf level by category (e.g., "intermediate", "advanced", "beginner", "pro"):
+- ALWAYS use surf_level_category (NOT numeric surf_level_min/max)
+- If user says "intermediate surfer" WITHOUT specifying board type, you MUST ask which board type (shortboard, longboard, mid-length)
+- Category-based filtering REQUIRES surfboard_type to be specified
+- Examples:
+  * "intermediate surfer" → surf_level_category: "intermediate", surfboard_type: ASK USER (required)
+  * "advanced shortboarder" → surf_level_category: "advanced", surfboard_type: ["shortboard"]
+  * "beginner longboarder" → surf_level_category: "beginner", surfboard_type: ["longboard"]
 
 IMPORTANT: Handle typos, general terms, and variations intelligently:
 
@@ -510,7 +526,14 @@ LOGICAL INFERENCE:
 - If user says "longboard" or "long board" or "longboarders" → surfboard_type: ["longboard"]
 - If user says "soft top" or "softtop" → surfboard_type: ["soft_top"]
 - If user mentions multiple board types (e.g., "longboard/midlength") → surfboard_type: ["longboard", "mid_length"]
-- If user says "intermediate" or "advanced", infer surf_level ranges
+- If user says "intermediate" or "advanced" or "beginner" or "pro":
+  * Use surf_level_category (NOT numeric ranges)
+  * If board type is NOT specified, you MUST ask the user which board type
+  * Category-based filtering requires both surf_level_category AND surfboard_type
+  * Examples:
+    - "intermediate" → surf_level_category: "intermediate", surfboard_type: ASK USER
+    - "advanced shortboarder" → surf_level_category: "advanced", surfboard_type: ["shortboard"]
+    - "beginner" → surf_level_category: "beginner", surfboard_type: ASK USER
 
 IMPORTANT: If the user mentions criteria that CANNOT be mapped to any of the above fields (e.g., physical appearance like "blond", "tall", "blue eyes", personal details like "married", "has kids", etc.), you MUST:
 1. Include them in "unmappableCriteria" array
@@ -532,8 +555,7 @@ Extract filters from the user's request. Return ONLY valid JSON in this format (
     "age_min": 18,
     "age_max": 30,
     "surfboard_type": ["longboard"],
-    "surf_level_min": 3,
-    "surf_level_max": 4,
+    "surf_level_category": "advanced",
     "destination_days_min": {
       "destination": "Costa Rica",
       "min_days": 30
@@ -578,8 +600,10 @@ CRITICAL RULES - BE SMART AND FLEXIBLE:
    - "young" → infer age_max: 30
    - "older" → infer age_min: 35
    - "must be shortboarders" / "they will use shortboard" → surfboard_type: ["shortboard"]
-   - "intermediate" → surf_level_min: 2, surf_level_max: 4
-   - "advanced" → surf_level_min: 4, surf_level_max: 5
+   - "intermediate" → surf_level_category: "intermediate" (REQUIRES surfboard_type to be specified)
+   - "advanced" → surf_level_category: "advanced" (REQUIRES surfboard_type to be specified)
+   - "beginner" → surf_level_category: "beginner" (REQUIRES surfboard_type to be specified)
+   - "pro" → surf_level_category: "pro" (REQUIRES surfboard_type to be specified)
 
 4. NORMALIZATION RULES:
    - Age ranges: "18-30" or "between 18 and 30" → age_min: 18, age_max: 30
@@ -790,15 +814,18 @@ serve(async (req: Request) => {
       if (userProfile) {
         const profileContext = `USER PROFILE CONTEXT (use this when asking destination discovery questions):
 - country_from: ${userProfile.country_from || 'not specified'}
-- surf_level: ${userProfile.surf_level || 'not specified'} (1=beginner, 5=expert)
+- surf_level: ${userProfile.surf_level || 'not specified'} (1=beginner, 2=intermediate, 3=advanced, 4=pro)
+- surf_level_category: ${userProfile.surf_level_category || 'not specified'} (beginner/intermediate/advanced/pro)
 - age: ${userProfile.age || 'not specified'}
 - surfboard_type: ${userProfile.surfboard_type || 'not specified'}
 - travel_experience: ${userProfile.travel_experience || 'not specified'}
 
-When asking QUESTION 2 (wave type), adapt the question based on their surf_level:
-- If surf_level is 4-5 (advanced): Ask about "Heavy and challenging, high performance playground, or mellow but fun"
-- If surf_level is 2-3 (intermediate): Ask about "challenging, playful, or more mellow"
-- If surf_level is 1 (beginner): Ask about "mellow and forgiving, or ready to step it up"
+IMPORTANT: When referring to surf level in your responses, ALWAYS use the category name (beginner/intermediate/advanced/pro), NOT the numeric level.
+
+When asking QUESTION 2 (wave type), adapt the question based on their surf_level_category:
+- If surf_level_category is "advanced" or "pro": Ask about "Heavy and challenging, high performance playground, or mellow but fun"
+- If surf_level_category is "intermediate": Ask about "challenging, playful, or more mellow"
+- If surf_level_category is "beginner": Ask about "mellow and forgiving, or ready to step it up"
 
 When asking QUESTION 3 (travel distance), use their country_from to provide relevant examples.`
         systemPrompt = TRIP_PLANNING_PROMPT + '\n\n' + profileContext
@@ -977,15 +1004,18 @@ When asking QUESTION 3 (travel distance), use their country_from to provide rele
       if (userProfile) {
         const profileContext = `USER PROFILE CONTEXT (use this when asking destination discovery questions):
 - country_from: ${userProfile.country_from || 'not specified'}
-- surf_level: ${userProfile.surf_level || 'not specified'} (1=beginner, 5=expert)
+- surf_level: ${userProfile.surf_level || 'not specified'} (1=beginner, 2=intermediate, 3=advanced, 4=pro)
+- surf_level_category: ${userProfile.surf_level_category || 'not specified'} (beginner/intermediate/advanced/pro)
 - age: ${userProfile.age || 'not specified'}
 - surfboard_type: ${userProfile.surfboard_type || 'not specified'}
 - travel_experience: ${userProfile.travel_experience || 'not specified'}
 
-When asking QUESTION 2 (wave type), adapt the question based on their surf_level:
-- If surf_level is 4-5 (advanced): Ask about "Heavy and challenging, high performance playground, or mellow but fun"
-- If surf_level is 2-3 (intermediate): Ask about "challenging, playful, or more mellow"
-- If surf_level is 1 (beginner): Ask about "mellow and forgiving, or ready to step it up"
+IMPORTANT: When referring to surf level in your responses, ALWAYS use the category name (beginner/intermediate/advanced/pro), NOT the numeric level.
+
+When asking QUESTION 2 (wave type), adapt the question based on their surf_level_category:
+- If surf_level_category is "advanced" or "pro": Ask about "Heavy and challenging, high performance playground, or mellow but fun"
+- If surf_level_category is "intermediate": Ask about "challenging, playful, or more mellow"
+- If surf_level_category is "beginner": Ask about "mellow and forgiving, or ready to step it up"
 
 When asking QUESTION 3 (travel distance), use their country_from to provide relevant examples.`
         messages.splice(0, 1, { role: 'system', content: TRIP_PLANNING_PROMPT + '\n\n' + profileContext })
