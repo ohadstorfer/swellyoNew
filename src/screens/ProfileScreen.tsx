@@ -14,17 +14,21 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Circle, Rect, Defs, Filter, FeFlood, FeColorMatrix, FeOffset, FeGaussianBlur, FeComposite, FeBlend, Path } from 'react-native-svg';
+import { useVideoPlayer, VideoView } from 'expo-video';
 import { Text } from '../components/Text';
 import { Text as RNText } from 'react-native';
 import { colors, spacing, typography } from '../styles/theme';
 import { supabaseDatabaseService, SupabaseSurfer } from '../services/database/supabaseDatabaseService';
 import { supabase } from '../config/supabase';
 import { getImageUrl } from '../services/media/imageService';
+import { getVideoUrl as getVideoUrlUtil } from '../services/media/videoService';
 import { getCountryFlag } from '../utils/countryFlags';
 import { uploadProfileImage } from '../services/storage/storageService';
 import { ProfileImage } from '../components/ProfileImage';
 import { ProfileSkeleton } from '../components/skeletons';
 import { analyticsService } from '../services/analytics/analyticsService';
+import { getSurfLevelMappingFromEnum } from '../utils/surfLevelMapping';
+import { useScreenDimensions } from '../utils/responsive';
 
 interface ProfileScreenProps {
   onBack?: () => void;
@@ -67,6 +71,84 @@ const getTravelExperienceInfo = (trips: number | undefined | null) => {
     return { trips, progress: 100, title: 'Chicken Joe' };
   }
 };
+
+// Helper function to get travel level image URL based on number of trips
+const getTravelLevelImageUrl = (trips: number): string => {
+  if (trips <= 3) {
+    return getImageUrl('/Travel levels/Travel 111.png');
+  } else if (trips <= 9) {
+    return getImageUrl('/Travel levels/Travel 222.png');
+  } else if (trips <= 19) {
+    return getImageUrl('/Travel levels/Travel 333.png');
+  } else {
+    return getImageUrl('/Travel levels/Travel 444.png');
+  }
+};
+
+// Board-specific video definitions (same as OnboardingStep2Screen)
+const BOARD_VIDEO_DEFINITIONS: { [boardType: number]: Array<{ name: string; videoFileName: string; thumbnailFileName: string }> } = {
+  0: [ // Shortboard
+    { name: 'Dipping My Toes', videoFileName: 'Dipping My Toes.mp4', thumbnailFileName: 'Dipping My Toes thumbnail.PNG' },
+    { name: 'Cruising Around', videoFileName: 'Cruising Around.mp4', thumbnailFileName: 'Cruising Around thumbnail.PNG' },
+    { name: 'Snapping', videoFileName: 'Snapping.mp4', thumbnailFileName: 'Snapping thumbnail.PNG' },
+    { name: 'Charging', videoFileName: 'Charging.mp4', thumbnailFileName: 'Charging thumbnail.PNG' },
+  ],
+  1: [ // Midlength
+    { name: 'Dipping My Toes', videoFileName: 'Dipping My Toes.mp4', thumbnailFileName: 'Dipping My Toes thumbnail.PNG' },
+    { name: 'Cruising Around', videoFileName: 'Cruising Around.mp4', thumbnailFileName: 'Cruising Around thumbnail.PNG' },
+    { name: 'Trimming Lines', videoFileName: 'Trimming Lines.mp4', thumbnailFileName: 'Trimming Lines thumbnail.PNG' },
+    { name: 'Carving Turns', videoFileName: 'Carving Turns.mp4', thumbnailFileName: 'Carving Turns thumbnail.PNG' },
+  ],
+  2: [ // Longboard
+    { name: 'Dipping My Toes', videoFileName: 'Dipping My Toes.mp4', thumbnailFileName: 'Dipping My Toes thumbnail.PNG' },
+    { name: 'Cruising Around', videoFileName: 'Cruising Around.mp4', thumbnailFileName: 'Cruising Around thumbnail.PNG' },
+    { name: 'Cross Stepping', videoFileName: 'CrossStepping.mp4', thumbnailFileName: 'CrossStepping thumbnail.PNG' },
+    { name: 'Hanging Toes', videoFileName: 'Hanging Toes.mp4', thumbnailFileName: 'Hanging Toes thumbnail.PNG' },
+  ],
+};
+
+// Helper function to get board folder name from board type
+const getBoardFolder = (boardType: number): string => {
+  const folderMap: { [key: number]: string } = {
+    0: 'shortboard',
+    1: 'midlength',
+    2: 'longboard',
+  };
+  return folderMap[boardType] || 'shortboard';
+};
+
+// Helper function to map board type string to number
+const mapBoardTypeToNumber = (boardType: string): number => {
+  const boardTypeLower = boardType.toLowerCase();
+  if (boardTypeLower === 'shortboard') return 0;
+  if (boardTypeLower === 'midlength' || boardTypeLower === 'mid_length') return 1;
+  if (boardTypeLower === 'longboard') return 2;
+  return 0; // Default to shortboard
+};
+
+// Helper function to get surf level video URL
+const getSurfLevelVideoUrl = (boardType: string, surfLevel: number): string | null => {
+  const boardTypeNum = mapBoardTypeToNumber(boardType);
+  const boardVideos = BOARD_VIDEO_DEFINITIONS[boardTypeNum];
+  if (!boardVideos || boardVideos.length === 0) {
+    return null;
+  }
+  
+  // Convert database surf level (1-5) to app level (0-4)
+  const appLevel = surfLevel - 1;
+  
+  // Clamp to valid range
+  const videoIndex = Math.max(0, Math.min(appLevel, boardVideos.length - 1));
+  const video = boardVideos[videoIndex];
+  
+  if (!video) {
+    return null;
+  }
+  
+  const boardFolder = getBoardFolder(boardTypeNum);
+  const videoPath = `/surf level/${boardFolder}/${video.videoFileName}`;
+  return getVideoUrlUtil(videoPath);
+};
 // Lifestyle keyword to icon mapping (simplified - using Ionicons for now)
 const LIFESTYLE_ICON_MAP: { [key: string]: string } = {
   'yoga': 'fitness-outline',
@@ -90,6 +172,258 @@ const LIFESTYLE_ICON_MAP: { [key: string]: string } = {
   'exploring': 'map-outline',
   'adventure': 'compass-outline',
   'mobility': 'barbell-outline',
+};
+
+// Surf Skill Card Component
+interface SurfSkillCardProps {
+  boardType: string;
+  surfLevel: number;
+  surfLevelDescription: string | null;
+  surfLevelCategory: string;
+  surfLevelProgress: number;
+}
+
+const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
+  boardType,
+  surfLevel,
+  surfLevelDescription,
+  surfLevelCategory,
+  surfLevelProgress,
+}) => {
+  const videoUrl = getSurfLevelVideoUrl(boardType, surfLevel);
+  
+  // Create video player
+  const videoPlayer = useVideoPlayer(
+    videoUrl || '',
+    (player: any) => {
+      if (player && videoUrl) {
+        try {
+          player.loop = true;
+          player.muted = true;
+          const playPromise = player.play();
+          if (playPromise !== undefined) {
+            playPromise.catch((error: any) => {
+              if (__DEV__ && error.name !== 'NotAllowedError') {
+                console.warn('[SurfSkillCard] Initial play attempt:', error.message);
+              }
+            });
+          }
+        } catch (error) {
+          console.error('Error initializing video player:', error);
+        }
+      }
+    }
+  );
+
+  // Robust autoplay implementation
+  useEffect(() => {
+    if (!videoPlayer || !videoUrl) return;
+
+    let isMounted = true;
+    let hasPlayed = false;
+
+    // For web, ensure playsInline is set and hide all controls
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      const injectControlHidingCSS = () => {
+        const styleId = 'surf-skill-card-hide-controls';
+        if (document.getElementById(styleId)) return;
+        
+        const style = document.createElement('style');
+        style.id = styleId;
+        style.textContent = `
+          video::-webkit-media-controls { display: none !important; opacity: 0 !important; visibility: hidden !important; pointer-events: none !important; }
+          video::-webkit-media-controls-enclosure { display: none !important; opacity: 0 !important; visibility: hidden !important; pointer-events: none !important; }
+          video::-webkit-media-controls-panel { display: none !important; opacity: 0 !important; visibility: hidden !important; pointer-events: none !important; }
+          video::-webkit-media-controls-play-button { display: none !important; opacity: 0 !important; visibility: hidden !important; pointer-events: none !important; }
+          video::-webkit-media-controls-start-playback-button { display: none !important; opacity: 0 !important; visibility: hidden !important; pointer-events: none !important; }
+          video::-webkit-media-controls-timeline { display: none !important; opacity: 0 !important; visibility: hidden !important; pointer-events: none !important; }
+          video::-webkit-media-controls-current-time-display { display: none !important; opacity: 0 !important; visibility: hidden !important; pointer-events: none !important; }
+          video::-webkit-media-controls-time-remaining-display { display: none !important; opacity: 0 !important; visibility: hidden !important; pointer-events: none !important; }
+          video::-webkit-media-controls-mute-button { display: none !important; opacity: 0 !important; visibility: hidden !important; pointer-events: none !important; }
+          video::-webkit-media-controls-volume-slider { display: none !important; opacity: 0 !important; visibility: hidden !important; pointer-events: none !important; }
+          video::-webkit-media-controls-fullscreen-button { display: none !important; opacity: 0 !important; visibility: hidden !important; pointer-events: none !important; }
+        `;
+        document.head.appendChild(style);
+      };
+      
+      injectControlHidingCSS();
+      
+      const setPlaysInline = () => {
+        const videoElements = document.querySelectorAll('video');
+        videoElements.forEach((videoElement) => {
+          videoElement.removeAttribute('controls');
+          videoElement.controls = false;
+          videoElement.setAttribute('playsinline', 'true');
+          videoElement.setAttribute('webkit-playsinline', 'true');
+          videoElement.setAttribute('x5-playsinline', 'true');
+          videoElement.setAttribute('disablePictureInPicture', 'true');
+          
+          const preventInteraction = (e: Event) => {
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+          };
+          
+          videoElement.addEventListener('touchstart', preventInteraction, { passive: false });
+          videoElement.addEventListener('touchend', preventInteraction, { passive: false });
+          videoElement.addEventListener('touchmove', preventInteraction, { passive: false });
+          videoElement.addEventListener('click', preventInteraction, { passive: false });
+          videoElement.addEventListener('dblclick', preventInteraction, { passive: false });
+          videoElement.addEventListener('contextmenu', preventInteraction, { passive: false });
+          
+          (videoElement.style as any).pointerEvents = 'none';
+          (videoElement.style as any).userSelect = 'none';
+          (videoElement.style as any).WebkitUserSelect = 'none';
+          (videoElement.style as any).touchAction = 'none';
+          (videoElement.style as any).WebkitTouchCallout = 'none';
+        });
+      };
+      
+      setPlaysInline();
+      setTimeout(setPlaysInline, 100);
+      setTimeout(setPlaysInline, 500);
+      setTimeout(setPlaysInline, 1000);
+      
+      const observer = new MutationObserver(() => {
+        setPlaysInline();
+      });
+      
+      observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+      });
+      
+      return () => {
+        observer.disconnect();
+      };
+    }
+
+    const attemptPlay = async () => {
+      if (!isMounted || !videoPlayer || hasPlayed) return;
+
+      try {
+        videoPlayer.loop = true;
+        videoPlayer.muted = true;
+        const playPromise = videoPlayer.play();
+        if (playPromise !== undefined) {
+          await playPromise;
+          hasPlayed = true;
+        }
+      } catch (error: any) {
+        if (__DEV__ && error.name !== 'NotAllowedError') {
+          console.warn('[SurfSkillCard] Play attempt failed:', error.message);
+        }
+        hasPlayed = false;
+      }
+    };
+
+    attemptPlay();
+    const retryTimeout = setTimeout(() => {
+      if (!hasPlayed) {
+        attemptPlay();
+      }
+    }, 100);
+
+    return () => {
+      isMounted = false;
+      clearTimeout(retryTimeout);
+    };
+  }, [videoPlayer, videoUrl]);
+
+  // Update player source when video URL changes
+  useEffect(() => {
+    if (videoUrl && videoPlayer) {
+      const replacePromise = videoPlayer.replaceAsync(videoUrl);
+      if (replacePromise && typeof replacePromise.then === 'function') {
+        replacePromise.then(() => {
+          if (videoPlayer) {
+            videoPlayer.loop = true;
+            videoPlayer.muted = true;
+            const playPromise = videoPlayer.play();
+            if (playPromise !== undefined && typeof (playPromise as any).catch === 'function') {
+              (playPromise as any).catch((playError: any) => {
+                if (__DEV__ && playError.name !== 'NotAllowedError') {
+                  console.warn('[SurfSkillCard] Play after replace failed:', playError.message);
+                }
+              });
+            }
+          }
+        }).catch((error: any) => {
+          console.error('Error replacing video:', error, 'URL:', videoUrl);
+        });
+      }
+    }
+  }, [videoUrl, videoPlayer, boardType, surfLevel]);
+
+  // Get category subtitle
+  const getCategorySubtitle = (category: string): string => {
+    const categoryMap: { [key: string]: string } = {
+      'beginner': 'Just Starting',
+      'intermediate': 'Doing good',
+      'advanced': 'Excellent',
+      'pro': 'Pro',
+    };
+    return categoryMap[category.toLowerCase()] || 'Just Starting';
+  };
+
+  const displayName = surfLevelDescription || 'Dipping My Toes';
+  const subtitle = getCategorySubtitle(surfLevelCategory);
+
+  return (
+    <View style={styles.surfSkillCard}>
+      {/* Video Container with Overlaid Text */}
+      <View style={styles.surfSkillVideoContainer}>
+        {videoUrl ? (
+          <View style={styles.surfSkillVideoWrapper} pointerEvents="none">
+            <VideoView
+              player={videoPlayer}
+              style={styles.surfSkillVideo}
+              contentFit="cover"
+              nativeControls={false}
+              allowsFullscreen={false}
+              allowsPictureInPicture={false}
+              {...(Platform.OS === 'web' && {
+                controls: false,
+                disablePictureInPicture: true,
+              } as any)}
+            />
+            {/* Transparent overlay to prevent interactions */}
+            <View style={styles.surfSkillVideoOverlay} />
+            
+            {/* Title - Overlaid on video, top left */}
+            <View style={styles.surfSkillTitleOverlay}>
+              <Text style={styles.surfSkillTitleOverlayText}>Surf Skill</Text>
+            </View>
+            
+            {/* Expand Icon - Overlaid on video, top right */}
+            <View style={styles.surfSkillExpandIcon}>
+              <Svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                <Path
+                  d="M14 10L21 3M21 3H15M21 3V9M10 14L3 21M3 21H9M3 21L3 15"
+                  stroke="white"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </Svg>
+            </View>
+            
+            {/* Level Name and Subtitle - Overlaid on video, bottom left */}
+            <View style={styles.surfSkillContentOverlay}>
+              <View style={styles.surfSkillNameContainer}>
+                <Text style={styles.surfSkillNameOverlay}>{displayName}</Text>
+              </View>
+              <Text style={styles.surfSkillSubtitleOverlay}>{subtitle}</Text>
+            </View>
+          </View>
+        ) : (
+          <View style={styles.surfSkillVideoPlaceholder}>
+            <Text style={styles.surfSkillVideoPlaceholderText}>No video available</Text>
+          </View>
+        )}
+      </View>
+    </View>
+  );
 };
 
 // Back Button Icon Component - Matches Figma design (chevron-left)
@@ -145,6 +479,26 @@ const PlusIcon: React.FC<{ size?: number }> = ({ size = 40 }) => {
 };
 
 export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, onMessage, onContinueEdit, onEdit }) => {
+  // Load Inter font from Google Fonts for web
+  useEffect(() => {
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      // Check if Inter font is already loaded
+      if (!document.querySelector('link[href*="fonts.googleapis.com/css2?family=Inter"]')) {
+        const link = document.createElement('link');
+        link.href = 'https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap';
+        link.rel = 'stylesheet';
+        document.head.appendChild(link);
+      }
+    }
+  }, []);
+  
+  // Get screen dimensions for responsive design
+  const { width: screenWidth } = useScreenDimensions();
+  
+  // Calculate content width: always use full width minus 16px padding on each side
+  // This ensures content scales properly on all screen sizes while maintaining consistent padding
+  const contentWidth = screenWidth - 32; // 16px padding each side
+  
   const [profileData, setProfileData] = useState<SupabaseSurfer | null>(null);
   const [loading, setLoading] = useState(true);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -444,11 +798,16 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView 
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
+      <ImageBackground
+        source={{ uri: getImageUrl('/chat background.png') }}
+        style={styles.backgroundImage}
+        resizeMode="cover"
       >
+        <ScrollView 
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
         {/* Cover Image */}
         <View style={styles.coverContainer}>
           <ImageBackground
@@ -532,13 +891,10 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
         {/* Profile Info Section - Board and Name Row */}
         <View style={styles.profileInfoSection}>
           <View style={styles.profileInfoRow}>
-            {/* Board Image - Left side */}
-            <View style={styles.boardImageContainer}>
-              <Image
-                source={{ uri: boardTypeInfo.imageUrl }}
-                style={styles.boardImage}
-                resizeMode="contain"
-              />
+            {/* Board Image - Left side - REMOVED */}
+            {/* NOTE: Board image removed but container kept to maintain layout spacing */}
+            <View style={[styles.boardImageContainer, { opacity: 0, pointerEvents: 'none' }]}>
+              {/* Board image removed - container kept for layout spacing */}
             </View>
 
             {/* Name and Details - Centered below profile image, vertically aligned with board */}
@@ -558,60 +914,77 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
                   {profileData.age ? `${profileData.age} yo` : ''}
                   {profileData.age && profileData.country_from ? ' | ' : ''}
                   {profileData.country_from || ''}
-                  {profileData.country_from && boardTypeInfo.name ? ' | ' : ''}
-                  {boardTypeInfo.name}
+                  {/* NOTE: Board name removed from profile details */}
+                  {/* {profileData.country_from && boardTypeInfo.name ? ' | ' : ''}
+                  {boardTypeInfo.name} */}
                 </Text>
               </View>
             </View>
           </View>
 
-          {/* Content Container - Surf Skill, Travel Experience, Destinations */}
-          <View style={styles.contentContainer}>
-          {/* Surf Skill Section */}
-          <View style={styles.skillSection}>
-            <View style={styles.skillTitleRow}>
-              <Text style={styles.skillTitle}>Surf Skill:</Text>
-              <Text style={styles.skillValue}>{surfLevelInfo.name}</Text>
-            </View>
-            <View style={styles.progressBarContainer}>
-              <View style={styles.progressBar}>
-                <LinearGradient
-                  colors={['#05BCD3', '#00A2B6']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={[styles.progressFill, { width: getSurfSkillProgressWidth() }]}
-                />
-                <View style={[styles.progressEmpty, { flex: 1 }]} />
+          {/* Content Container - Surf Style, Travel Experience, Destinations */}
+          <View style={[styles.contentContainer, { width: contentWidth }]}>
+          {/* Cards Row - Surf Style and Travel Experience */}
+          <View style={styles.cardsRow}>
+            {/* Surf Style Section - New Figma Design */}
+            <View style={styles.surfStyleCard}>
+              {/* Title */}
+              <View style={styles.surfStyleTitleContainer}>
+                <Text style={styles.surfStyleTitle}>Surf Style</Text>
               </View>
-              <View style={styles.progressLabels}>
-                <Text style={styles.progressLabel}>Deeping my toes</Text>
-                <Text style={styles.progressLabel}>Charging</Text>
+              
+              {/* Board Type Name and Label - Aligned to Bottom */}
+              <View style={styles.surfStyleContent}>
+                <View style={styles.surfStyleNameContainer}>
+                  <Text style={styles.surfStyleName}>{boardTypeInfo.name}</Text>
+                </View>
+                <Text style={styles.surfStyleLabel}>Board</Text>
+              </View>
+              
+              {/* Board Illustration */}
+              <View style={styles.surfStyleIllustration}>
+                <Image
+                  source={{ uri: boardTypeInfo.imageUrl }}
+                  style={styles.surfStyleImage}
+                  resizeMode="contain"
+                />
+              </View>
+            </View>
+
+            {/* Travel Experience Section - New Figma Design */}
+            <View style={styles.travelExperienceCard}>
+              {/* Title */}
+              <View style={styles.travelExperienceTitleContainer}>
+                <Text style={styles.travelExperienceTitle}>Travel Experience</Text>
+              </View>
+              
+              {/* Trip Count and Label - Aligned to Bottom */}
+              <View style={styles.travelExperienceContent}>
+                <View style={styles.travelExperienceNumberContainer}>
+                  <Text style={styles.travelExperienceNumber}>{travelExpInfo.trips}</Text>
+                </View>
+                <Text style={styles.travelExperienceLabel}>Trips</Text>
+              </View>
+              
+              {/* Travel Illustration */}
+              <View style={styles.travelExperienceIllustration}>
+                <Image
+                  source={{ uri: getTravelLevelImageUrl(travelExpInfo.trips) }}
+                  style={styles.travelExperienceImage}
+                  resizeMode="contain"
+                />
               </View>
             </View>
           </View>
 
-          {/* Travel Experience Section */}
-          <View style={styles.skillSection}>
-            <View style={styles.skillTitleRow}>
-              <Text style={styles.skillTitle}>Travel Experience:</Text>
-              <Text style={styles.skillValue}>{travelExpInfo.trips} trips</Text>
-            </View>
-            <View style={styles.progressBarContainer}>
-              <View style={styles.progressBar}>
-                <LinearGradient
-                  colors={['#05BCD3', '#00A2B6']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={[styles.progressFill, { width: getTravelExpProgressWidth() }]}
-                />
-                <View style={[styles.progressEmpty, { flex: 1 }]} />
-              </View>
-              <View style={styles.progressLabels}>
-                <Text style={styles.progressLabel}>0 trips</Text>
-                <Text style={styles.progressLabel}>20+ trips</Text>
-              </View>
-            </View>
-          </View>
+          {/* Surf Skill Card with Video */}
+          <SurfSkillCard
+            boardType={profileData.surfboard_type || 'shortboard'}
+            surfLevel={profileData.surf_level || 1}
+            surfLevelDescription={profileData.surf_level_description || null}
+            surfLevelCategory={profileData.surf_level_category || 'beginner'}
+            surfLevelProgress={surfLevelInfo.progress}
+          />
 
           {/* Top Destinations Section */}
           {topDestinations.length > 0 && (
@@ -707,6 +1080,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
           </View>
         </View>
       </ScrollView>
+      </ImageBackground>
     </SafeAreaView>
   );
 };
@@ -721,6 +1095,11 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingBottom: spacing.xl,
+  },
+  backgroundImage: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
   },
   loadingContainer: {
     flex: 1,
@@ -906,8 +1285,10 @@ const styles = StyleSheet.create({
   contentContainer: {
     marginTop: 16,
     width: '100%',
+    // paddingHorizontal: 16,
     gap: 24,
     alignItems: 'center',
+    alignSelf: 'center', // Center the container on larger screens
   },
   profileInfoRow: {
     flexDirection: 'row',
@@ -1026,6 +1407,253 @@ const styles = StyleSheet.create({
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
     lineHeight: 20,
     color: colors.black,
+  },
+  travelExperienceCard: {
+    backgroundColor: colors.white,
+    borderRadius: 16,
+    padding: 16,
+    flex: 1,
+    height: 140,
+    position: 'relative',
+    justifyContent: 'space-between',
+    shadowColor: '#596E7C',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.15,
+    shadowRadius: 16,
+    elevation: 4,
+    ...(Platform.OS === 'web' && {
+      boxShadow: '0px 2px 16px 0px rgba(89, 110, 124, 0.15)',
+    }),
+  },
+  travelExperienceTitleContainer: {
+    // Title at top - no margin needed with space-between
+  },
+  travelExperienceTitle: {
+    fontSize: 12,
+    fontWeight: '400',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    lineHeight: 15,
+    color: colors.textPrimary, // #333
+  },
+  travelExperienceContent: {
+    gap: 4,
+    // Content aligned to bottom via space-between
+  },
+  travelExperienceNumberContainer: {
+    marginBottom: 4,
+  },
+  travelExperienceNumber: {
+    fontSize: 24,
+    fontWeight: '700',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    lineHeight: 22,
+    color: colors.textPrimary,
+  },
+  travelExperienceLabel: {
+    fontSize: 12,
+    fontWeight: '400',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    lineHeight: 14,
+    color: '#A0A0A0',
+  },
+  travelExperienceIllustration: {
+    position: 'absolute',
+    left: 71,
+    top: 34,
+    width: 96,
+    height: 96,
+  },
+  travelExperienceImage: {
+    width: '100%',
+    height: '100%',
+    ...(Platform.OS === 'web' && {
+      objectFit: 'cover' as any,
+    }),
+  },
+  cardsRow: {
+    flexDirection: 'row',
+    gap: 16,
+    width: '100%',
+    // marginBottom: 16,
+  },
+  surfStyleCard: {
+    backgroundColor: colors.white,
+    borderRadius: 16,
+    padding: 16,
+    flex: 1,
+    height: 140,
+    position: 'relative',
+    justifyContent: 'space-between',
+    shadowColor: '#596E7C',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.15,
+    shadowRadius: 16,
+    elevation: 4,
+    ...(Platform.OS === 'web' && {
+      boxShadow: '0px 2px 16px 0px rgba(89, 110, 124, 0.15)',
+    }),
+  },
+  surfStyleTitleContainer: {
+    // Title at top - no margin needed with space-between
+  },
+  surfStyleTitle: {
+    fontSize: 12,
+    fontWeight: '400',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    lineHeight: 15,
+    color: colors.textPrimary, // #333
+  },
+  surfStyleContent: {
+    gap: 4,
+    // Content aligned to bottom via space-between
+  },
+  surfStyleNameContainer: {
+    marginBottom: 4,
+  },
+  surfStyleName: {
+    fontSize: 16,
+    fontWeight: '700',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    lineHeight: 22,
+    color: colors.textPrimary,
+  },
+  surfStyleLabel: {
+    fontSize: 12,
+    fontWeight: '400',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    lineHeight: 14,
+    color: '#A0A0A0',
+  },
+  surfStyleIllustration: {
+    position: 'absolute',
+    left: 99,
+    top: 13,
+    width: 75,
+    height: 115,
+  },
+  surfStyleImage: {
+    width: '100%',
+    height: '100%',
+    ...(Platform.OS === 'web' && {
+      objectFit: 'contain' as any,
+    }),
+  },
+  surfSkillCard: {
+    backgroundColor: colors.white,
+    borderRadius: 16,
+    padding: 0,
+    width: '100%',
+    // marginBottom: 16,
+    shadowColor: '#596E7C',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.15,
+    shadowRadius: 16,
+    elevation: 4,
+    ...(Platform.OS === 'web' && {
+      boxShadow: '0px 2px 16px 0px rgba(89, 110, 124, 0.15)',
+    }),
+  },
+  surfSkillVideoContainer: {
+    width: '100%',
+    height: 229,
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: '#000',
+    position: 'relative',
+  },
+  surfSkillVideoWrapper: {
+    width: '100%',
+    height: '100%',
+    position: 'relative',
+  },
+  surfSkillVideo: {
+    width: '100%',
+    height: '100%',
+    pointerEvents: 'none',
+    ...(Platform.OS === 'web' && {
+      objectFit: 'cover' as any,
+      userSelect: 'none' as any,
+      WebkitUserSelect: 'none' as any,
+      touchAction: 'none' as any,
+      WebkitTouchCallout: 'none' as any,
+    }),
+  },
+  surfSkillVideoOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'transparent',
+    zIndex: 1,
+  },
+  surfSkillTitleOverlay: {
+    position: 'absolute',
+    top: 16,
+    left: 16,
+    zIndex: 20,
+    pointerEvents: 'none',
+  },
+  surfSkillTitleOverlayText: {
+    fontSize: 18,
+    fontWeight: '700',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    lineHeight: 22,
+    color: colors.white,
+  },
+  surfSkillExpandIcon: {
+    position: 'absolute',
+    top: 16,
+    right: 16,
+    zIndex: 20,
+    width: 24,
+    height: 24,
+    pointerEvents: 'none',
+  },
+  surfSkillContentOverlay: {
+    position: 'absolute',
+    bottom: 16,
+    left: 16,
+    zIndex: 20,
+    pointerEvents: 'none',
+    gap: 4,
+  },
+  surfSkillNameContainer: {
+    marginBottom: 4,
+  },
+  surfSkillNameOverlay: {
+    fontSize: 18,
+    fontWeight: '700',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    lineHeight: 22,
+    color: colors.white,
+  },
+  surfSkillSubtitleOverlay: {
+    fontSize: 14,
+    fontWeight: '400',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    lineHeight: 20,
+    color: colors.white,
+  },
+  surfSkillVideoPlaceholder: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#000',
+  },
+  surfSkillVideoPlaceholderText: {
+    color: colors.white,
+    fontSize: 14,
   },
   destinationsSection: {
     width: '100%',
@@ -1190,4 +1818,3 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 });
-
