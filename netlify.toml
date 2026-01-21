@@ -6,6 +6,9 @@
   NODE_VERSION = "18"
   # Disable Next.js detection
   NETLIFY_NEXT_PLUGIN_SKIP = "true"
+  # MVP Mode: Set EXPO_PUBLIC_MVP_MODE=true to enable MVP onboarding-only version
+  # When enabled, users will see a thank you screen after completing onboarding instead of the full app
+  # To enable: Add EXPO_PUBLIC_MVP_MODE=true in Netlify dashboard → Site settings → Environment variables
 
 # Handle swelly_chat route - redirect to main app with hash
 [[redirects]]

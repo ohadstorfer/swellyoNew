@@ -13,6 +13,7 @@ import ConversationsScreen from '../screens/ConversationsScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
 import { DirectMessageScreen } from '../screens/DirectMessageScreen';
 import { SwellyShaperScreen } from '../screens/SwellyShaperScreen';
+import { MVPThankYouScreen } from '../screens/MVPThankYouScreen';
 import { messagingService } from '../services/messaging/messagingService';
 import { useOnboarding } from '../context/OnboardingContext';
 import { analyticsService } from '../services/analytics/analyticsService';
@@ -24,6 +25,7 @@ export const AppContent: React.FC = () => {
   const [isSavingStep2, setIsSavingStep2] = useState(false);
   const [isSavingStep3, setIsSavingStep3] = useState(false);
   const [isSavingStep4, setIsSavingStep4] = useState(false);
+  const [showMVPThankYou, setShowMVPThankYou] = useState(false);
 
   const handleGetStarted = () => {
     setCurrentStep(0); // Go to onboarding welcome/explanation screen first
@@ -234,15 +236,25 @@ export const AppContent: React.FC = () => {
   const handleChatComplete = async () => {
     console.log('[AppContent] handleChatComplete called');
     
-    // Mark onboarding as complete and navigate to profile
+    // Mark onboarding as complete
     await markOnboardingComplete();
     console.log('[AppContent] Onboarding marked as complete');
     
     // Note: onboarding_step2_completed is already tracked in ChatScreen.tsx with duration
     // This duplicate call is removed to avoid double tracking
     
-    setShowProfile(true);
-    console.log('[AppContent] Navigating to profile screen');
+    // Check if MVP mode is enabled
+    const isMVPMode = process.env.EXPO_PUBLIC_MVP_MODE === 'true';
+    
+    if (isMVPMode) {
+      // MVP mode: Show thank you screen instead of profile
+      setShowMVPThankYou(true);
+      console.log('[AppContent] MVP mode: Showing thank you screen');
+    } else {
+      // Normal mode: Navigate to profile
+      setShowProfile(true);
+      console.log('[AppContent] Navigating to profile screen');
+    }
   };
 
   const handleProfileBack = () => {
@@ -409,6 +421,19 @@ export const AppContent: React.FC = () => {
   const handleStep4Back = () => {
     setCurrentStep(3); // Go back to step 3
   };
+
+  const handleBackToHomepage = () => {
+    console.log('[AppContent] handleBackToHomepage called');
+    setShowMVPThankYou(false);
+    // Reset to welcome screen
+    resetOnboarding();
+    setCurrentStep(-1);
+  };
+
+  // Check if MVP mode thank you screen should be shown
+  if (showMVPThankYou) {
+    return <MVPThankYouScreen onBackToHomepage={handleBackToHomepage} />;
+  }
 
   // If onboarding is complete, show conversations screen as home page (regardless of currentStep)
   // This check must come FIRST before any step checks
