@@ -26,6 +26,9 @@ export const AppContent: React.FC = () => {
   const [isSavingStep3, setIsSavingStep3] = useState(false);
   const [isSavingStep4, setIsSavingStep4] = useState(false);
   const [showMVPThankYou, setShowMVPThankYou] = useState(false);
+  
+  // Check if MVP mode is enabled
+  const isMVPMode = process.env.EXPO_PUBLIC_MVP_MODE === 'true';
 
   const handleGetStarted = () => {
     setCurrentStep(0); // Go to onboarding welcome/explanation screen first
@@ -432,6 +435,18 @@ export const AppContent: React.FC = () => {
 
   // Check if MVP mode thank you screen should be shown
   if (showMVPThankYou) {
+    return <MVPThankYouScreen onBackToHomepage={handleBackToHomepage} />;
+  }
+
+  // MVP MODE: Block access to conversations, profile, and other features
+  // If onboarding is complete in MVP mode, only show thank you screen
+  // This blocks all other screens (conversations, profile, trip planning, Swelly Shaper, etc.)
+  if (isMVPMode && isComplete) {
+    console.log('[AppContent] MVP mode: Blocking access to non-onboarding features, redirecting to thank you screen');
+    // Set state to show thank you screen (will render on next render cycle)
+    if (!showMVPThankYou) {
+      setShowMVPThankYou(true);
+    }
     return <MVPThankYouScreen onBackToHomepage={handleBackToHomepage} />;
   }
 

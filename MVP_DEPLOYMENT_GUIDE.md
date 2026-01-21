@@ -111,10 +111,50 @@ To disable MVP mode:
 5. **MVP Mode:** User sees "Thank You" screen with "Back to Homepage" button
 6. User clicks "Back to Homepage" → Returns to welcome screen
 
+## PostHog Survey Configuration
+
+To show the onboarding survey on the thank you page:
+
+1. **Create a survey in PostHog:**
+   - Go to PostHog Dashboard → Surveys → Create Survey
+   - Set presentation mode to **"Popover"**
+   - Set display condition to trigger on event: **`onboarding_step2_completed`**
+   - Set survey status to **"Launched"** (not "Draft")
+
+2. **The survey will automatically appear:**
+   - When the thank you screen loads, it tracks the `onboarding_step2_completed` event
+   - PostHog evaluates the survey conditions and shows it automatically
+   - The survey appears as a popover overlay on the thank you screen
+
+3. **Testing:**
+   - Complete the onboarding flow
+   - The survey should appear automatically on the thank you screen
+   - If it doesn't appear, check:
+     - Survey is set to "Launched" status
+     - Survey display condition targets `onboarding_step2_completed` event
+     - Survey presentation mode is "Popover"
+     - PostHog API key is correctly configured
+
+## MVP Mode Blocking
+
+When `EXPO_PUBLIC_MVP_MODE=true`:
+- ✅ Users can complete onboarding (steps 1-4 + Swelly chat)
+- ✅ Users see the thank you screen after onboarding
+- ❌ Users **cannot** access:
+  - Conversations screen
+  - Profile screen
+  - Trip planning chat
+  - Swelly Shaper
+  - Direct messages
+  - Any other non-onboarding features
+
+If a user tries to access these features (e.g., via direct URL or navigation), they will be automatically redirected to the thank you screen.
+
 ## Notes
 
 - The MVP mode only affects what happens after onboarding completion
 - All onboarding functionality remains the same
 - Users can still log out and start over
 - The thank you screen is responsive and works on desktop and mobile
+- PostHog surveys are automatically triggered when the thank you screen loads
 
