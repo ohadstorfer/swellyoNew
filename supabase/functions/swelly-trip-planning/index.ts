@@ -421,6 +421,27 @@ CRITICAL RULES:
 /**
  * Call OpenAI API
  */
+/**
+ * Get pronoun usage instructions based on user's pronoun preference
+ */
+function getPronounInstructions(pronoun: string): string {
+  const pronounLower = pronoun?.toLowerCase() || ''
+  
+  if (pronounLower === 'bro') {
+    return `PRONOUN USAGE:
+The user prefers to be called with masculine terms. You can use "bro", "dude", "man", and similar masculine casual terms when addressing them. This makes the conversation feel more personal and friendly.`
+  } else if (pronounLower === 'sis') {
+    return `PRONOUN USAGE:
+The user prefers to be called with feminine terms. You can use "sis" and similar feminine casual terms when addressing them. This makes the conversation feel more personal and friendly.`
+  } else if (pronounLower === 'none') {
+    return `PRONOUN USAGE:
+The user prefers not to be addressed with gender-specific terms. Avoid calling them "bro", "dude", "sis", "man", or any other gender-specific terms. Use gender-neutral language like their name, "shredder", or just keep it neutral.`
+  }
+  
+  // Default: no specific instructions
+  return ''
+}
+
 async function callOpenAI(messages: Array<{ role: string; content: string }>): Promise<string> {
   if (!OPENAI_API_KEY) {
     throw new Error('OPENAI_API_KEY is not set')
@@ -819,6 +840,7 @@ serve(async (req: Request) => {
 - age: ${userProfile.age || 'not specified'}
 - surfboard_type: ${userProfile.surfboard_type || 'not specified'}
 - travel_experience: ${userProfile.travel_experience || 'not specified'}
+- pronoun: ${userProfile.pronoun || 'not specified'}
 
 IMPORTANT: When referring to surf level in your responses, ALWAYS use the category name (beginner/intermediate/advanced/pro), NOT the numeric level.
 
@@ -827,7 +849,9 @@ When asking QUESTION 2 (wave type), adapt the question based on their surf_level
 - If surf_level_category is "intermediate": Ask about "challenging, playful, or more mellow"
 - If surf_level_category is "beginner": Ask about "mellow and forgiving, or ready to step it up"
 
-When asking QUESTION 3 (travel distance), use their country_from to provide relevant examples.`
+When asking QUESTION 3 (travel distance), use their country_from to provide relevant examples.
+
+${getPronounInstructions(userProfile.pronoun)}`
         systemPrompt = TRIP_PLANNING_PROMPT + '\n\n' + profileContext
       }
 
@@ -1009,6 +1033,7 @@ When asking QUESTION 3 (travel distance), use their country_from to provide rele
 - age: ${userProfile.age || 'not specified'}
 - surfboard_type: ${userProfile.surfboard_type || 'not specified'}
 - travel_experience: ${userProfile.travel_experience || 'not specified'}
+- pronoun: ${userProfile.pronoun || 'not specified'}
 
 IMPORTANT: When referring to surf level in your responses, ALWAYS use the category name (beginner/intermediate/advanced/pro), NOT the numeric level.
 
@@ -1017,7 +1042,9 @@ When asking QUESTION 2 (wave type), adapt the question based on their surf_level
 - If surf_level_category is "intermediate": Ask about "challenging, playful, or more mellow"
 - If surf_level_category is "beginner": Ask about "mellow and forgiving, or ready to step it up"
 
-When asking QUESTION 3 (travel distance), use their country_from to provide relevant examples.`
+When asking QUESTION 3 (travel distance), use their country_from to provide relevant examples.
+
+${getPronounInstructions(userProfile.pronoun)}`
         messages.splice(0, 1, { role: 'system', content: TRIP_PLANNING_PROMPT + '\n\n' + profileContext })
       }
 

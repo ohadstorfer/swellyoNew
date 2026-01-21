@@ -194,6 +194,27 @@ CRITICAL RULES FOR DESTINATIONS:
 `
 
 /**
+ * Get pronoun usage instructions based on user's pronoun preference
+ */
+function getPronounInstructions(pronoun: string): string {
+  const pronounLower = pronoun?.toLowerCase() || ''
+  
+  if (pronounLower === 'bro') {
+    return `PRONOUN USAGE:
+The user prefers to be called with masculine terms. You can use "bro", "dude", "man", and similar masculine casual terms when addressing them. This makes the conversation feel more personal and friendly.`
+  } else if (pronounLower === 'sis') {
+    return `PRONOUN USAGE:
+The user prefers to be called with feminine terms. You can use "sis" and similar feminine casual terms when addressing them. This makes the conversation feel more personal and friendly.`
+  } else if (pronounLower === 'none') {
+    return `PRONOUN USAGE:
+The user prefers not to be addressed with gender-specific terms. Avoid calling them "bro", "dude", "sis", "man", or any other gender-specific terms. Use gender-neutral language like their name, "shredder", or just keep it neutral.`
+  }
+  
+  // Default: no specific instructions
+  return ''
+}
+
+/**
  * Transform Swelly conversation data to match database schema
  * Handles both old format (destinations, travel_style, surf_pref, extras)
  * and new structured format
@@ -774,9 +795,34 @@ serve(async (req: Request) => {
       // Generate chat ID
       const chatId = crypto.randomUUID()
       
+      // Get user's profile for pronoun context
+      let userProfile: any = null
+      try {
+        const { data: surferData, error: surferError } = await supabaseAdmin
+          .from('surfers')
+          .select('pronoun')
+          .eq('user_id', user.id)
+          .single()
+        
+        if (!surferError && surferData) {
+          userProfile = surferData
+          console.log('✅ Fetched user profile for pronoun context:', userProfile)
+        }
+      } catch (error) {
+        console.error('Error fetching user profile:', error)
+        // Continue without profile - not critical
+      }
+      
+      // Build system prompt with pronoun instructions if available
+      let systemPrompt = META_PROMPT
+      if (userProfile?.pronoun) {
+        const pronounInstructions = getPronounInstructions(userProfile.pronoun)
+        systemPrompt = META_PROMPT + '\n\n' + pronounInstructions
+      }
+      
       // Initialize chat history
       const messages = [
-        { role: 'system', content: META_PROMPT },
+        { role: 'system', content: systemPrompt },
         { role: 'user', content: body.message }
       ]
 
@@ -873,6 +919,31 @@ serve(async (req: Request) => {
             } 
           }
         )
+      }
+
+      // Get user's profile for pronoun context (if not already in system message)
+      let userProfile: any = null
+      try {
+        const { data: surferData, error: surferError } = await supabaseAdmin
+          .from('surfers')
+          .select('pronoun')
+          .eq('user_id', user.id)
+          .single()
+        
+        if (!surferError && surferData) {
+          userProfile = surferData
+          console.log('✅ Fetched user profile for pronoun context (continue):', userProfile)
+          
+          // Check if system message already has pronoun instructions
+          const systemMessage = messages.find(m => m.role === 'system')
+          if (systemMessage && userProfile?.pronoun && !systemMessage.content.includes('PRONOUN USAGE')) {
+            const pronounInstructions = getPronounInstructions(userProfile.pronoun)
+            systemMessage.content = systemMessage.content + '\n\n' + pronounInstructions
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching user profile:', error)
+        // Continue without profile - not critical
       }
 
       // Add new user message

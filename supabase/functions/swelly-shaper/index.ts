@@ -414,6 +414,27 @@ CRITICAL RULES:
 - When user mentions updating an existing trip, match by country name and UPDATE the existing entry, don't add a duplicate
 `
 
+/**
+ * Get pronoun usage instructions based on user's pronoun preference
+ */
+function getPronounInstructions(pronoun: string): string {
+  const pronounLower = pronoun?.toLowerCase() || ''
+  
+  if (pronounLower === 'bro') {
+    return `PRONOUN USAGE:
+The user prefers to be called with masculine terms. You can use "bro", "dude", "man", and similar masculine casual terms when addressing them. This makes the conversation feel more personal and friendly.`
+  } else if (pronounLower === 'sis') {
+    return `PRONOUN USAGE:
+The user prefers to be called with feminine terms. You can use "sis" and similar feminine casual terms when addressing them. This makes the conversation feel more personal and friendly.`
+  } else if (pronounLower === 'none') {
+    return `PRONOUN USAGE:
+The user prefers not to be addressed with gender-specific terms. Avoid calling them "bro", "dude", "sis", "man", or any other gender-specific terms. Use gender-neutral language like their name, "shredder", or just keep it neutral.`
+  }
+  
+  // Default: no specific instructions
+  return ''
+}
+
 async function getChatHistory(chatId: string, supabase: any): Promise<any[]> {
   try {
     const { data, error } = await supabase
@@ -902,6 +923,8 @@ serve(async (req: Request) => {
 - wave_type_keywords: ${userProfile.wave_type_keywords ? JSON.stringify(userProfile.wave_type_keywords) : 'not set'}
 
 IMPORTANT: When referring to surf level in your responses, ALWAYS use the category name (beginner/intermediate/advanced/pro), NOT the numeric level. The system automatically updates all three fields (surf_level, surf_level_description, surf_level_category) when you update the numeric level.
+
+${getPronounInstructions(userProfile.pronoun)}
 
 Use this context to understand what they currently have and help them update it.`
         

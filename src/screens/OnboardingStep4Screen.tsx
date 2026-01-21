@@ -437,6 +437,132 @@ const CountryField: React.FC<CountryFieldProps> = ({
   );
 };
 
+// Pronoun Field Component - similar to CountryField but with 3 simple options
+interface PronounFieldProps {
+  label: string;
+  value: string;
+  onSelect: (pronoun: string) => void;
+  placeholder?: string;
+  width?: number;
+  style?: any;
+}
+
+const PRONOUN_OPTIONS = ['Bro', 'Sis', 'None'];
+
+const PronounField: React.FC<PronounFieldProps> = ({
+  label,
+  value,
+  onSelect,
+  placeholder,
+  width,
+  style,
+}) => {
+  const [isPickerVisible, setIsPickerVisible] = useState(false);
+  const hasValue = value.trim().length > 0;
+  const showCheck = hasValue;
+
+  // Get display text from value
+  const getDisplayText = (val: string): string => {
+    if (!val) return placeholder || label;
+    const option = PRONOUN_OPTIONS.find(opt => opt.toLowerCase() === val.toLowerCase());
+    return option || val;
+  };
+
+  const handleSelect = (option: string) => {
+    const optionValue = option.toLowerCase();
+    onSelect(optionValue);
+    setIsPickerVisible(false);
+  };
+
+  // Determine text style based on state
+  const textStyle = hasValue 
+    ? styles.fieldInputFilled 
+    : styles.fieldInput;
+
+  return (
+    <>
+      <TouchableOpacity
+        style={[styles.fieldContainer, width && { width }, style]}
+        activeOpacity={0.7}
+        onPress={() => setIsPickerVisible(true)}
+      >
+        <PencilIcon size={24} />
+        <View style={styles.inputContainer}>
+          <Text
+            style={[textStyle, Platform.OS === 'web' && styles.fieldInputWeb]}
+            numberOfLines={1}
+          >
+            {getDisplayText(value)}
+          </Text>
+        </View>
+        {showCheck && (
+          <View style={styles.checkIconContainer}>
+            <CheckIcon size={16} />
+          </View>
+        )}
+      </TouchableOpacity>
+
+      {/* Modal for pronoun selection */}
+      {isPickerVisible && (
+        <TouchableOpacity
+          style={styles.webModalOverlay}
+          activeOpacity={1}
+          onPress={() => setIsPickerVisible(false)}
+        >
+          <TouchableOpacity
+            style={styles.pronounModalContent}
+            activeOpacity={1}
+            onPress={(e) => {
+              // Prevent closing when clicking inside the modal
+              e.stopPropagation();
+            }}
+          >
+            <View style={styles.webModalHeader}>
+              <Text style={styles.webModalTitle}>How can we call you?</Text>
+              <TouchableOpacity
+                onPress={() => setIsPickerVisible(false)}
+                style={styles.webModalCloseButton}
+              >
+                <Ionicons name="close" size={24} color="#333" />
+              </TouchableOpacity>
+            </View>
+            
+            <View style={styles.pronounModalList}>
+              {PRONOUN_OPTIONS.map((option) => {
+                const isSelected = value.toLowerCase() === option.toLowerCase();
+                return (
+                  <TouchableOpacity
+                    key={option}
+                    style={[
+                      styles.pronounModalItem,
+                      isSelected && styles.pronounModalItemSelected,
+                    ]}
+                    onPress={() => handleSelect(option)}
+                  >
+                    <Text
+                      style={[
+                        styles.pronounModalText,
+                        isSelected && styles.pronounModalTextSelected,
+                      ]}
+                    >
+                      {option}
+                    </Text>
+                    {isSelected && (
+                      <View style={styles.pronounModalCheck}>
+                        <CheckIcon size={16} />
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      )}
+    </>
+  );
+};
+
 // Plus Icon SVG Component
 const PlusIcon: React.FC<{ size?: number }> = ({ size = 40 }) => {
   const scale = size / 40;
@@ -477,6 +603,7 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
   const [age, setAge] = useState<string>(
     initialData.age ? initialData.age.toString() : ''
   );
+  const [pronoun, setPronoun] = useState<string>(initialData.pronouns || '');
   const [isUploading, setIsUploading] = useState(false);
 
   const pickImage = async () => {
@@ -580,6 +707,7 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
       surfLevel: initialData.surfLevel ?? -1,
       travelExperience: initialData.travelExperience ?? 0,
       profilePicture: finalProfilePicture || undefined,
+      pronouns: pronoun || undefined,
     };
     onNext(formData);
   };
@@ -702,6 +830,18 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
                 numericOnly={true}
               />
             </View>
+
+            {/* Pronoun Selection */}
+            <PronounField
+              label="How can we call you?"
+              value={pronoun}
+              onSelect={(selectedPronoun) => {
+                setPronoun(selectedPronoun);
+                updateFormData({ pronouns: selectedPronoun });
+              }}
+              placeholder="How can we call you?*"
+              width={357}
+            />
             </View>
           </View>
         </View>
@@ -1088,5 +1228,48 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     color: colors.textSecondary || '#666666',
+  },
+  pronounModalContent: {
+    backgroundColor: colors.white || '#FFFFFF',
+    borderRadius: 12,
+    width: '90%',
+    maxWidth: 400,
+    overflow: 'hidden',
+    ...(Platform.OS === 'web' && {
+      boxShadow: '0 4px 20px rgba(0, 0, 0, 0.15)',
+    }),
+  },
+  pronounModalList: {
+    maxHeight: 300,
+    ...(Platform.OS === 'web' && {
+      overflowY: 'auto' as any,
+    }),
+  },
+  pronounModalItem: {
+    padding: spacing.md,
+    paddingHorizontal: spacing.lg,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  pronounModalItemSelected: {
+    backgroundColor: '#F0F9FA',
+  },
+  pronounModalText: {
+    fontSize: 16,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    color: colors.textPrimary || '#333333',
+  },
+  pronounModalTextSelected: {
+    color: '#00A2B6',
+    fontWeight: '600',
+  },
+  pronounModalCheck: {
+    width: 24,
+    height: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });
