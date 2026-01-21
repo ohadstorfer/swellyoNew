@@ -415,7 +415,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
                 activeOpacity={0.8}
               >
                 <RNText style={styles.getStartedButtonText} numberOfLines={1}>
-                  {isDemoLoading ? "Loading..." : "Demo Chat"}
+                  {isDemoLoading ? "Loading..." : "Demo"}
                 </RNText>
               </TouchableOpacity>
             )}
