@@ -1,10 +1,10 @@
 import React, { useEffect } from 'react';
 import { View, StyleSheet, TouchableOpacity, SafeAreaView, Platform } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { usePostHog } from 'posthog-react-native';
 import { Text } from '../components/Text';
 import { colors, spacing, typography } from '../styles/theme';
 import { useIsDesktopWeb } from '../utils/responsive';
-import { analyticsService } from '../services/analytics/analyticsService';
 
 interface MVPThankYouScreenProps {
   onBackToHomepage: () => void;
@@ -12,22 +12,29 @@ interface MVPThankYouScreenProps {
 
 export const MVPThankYouScreen: React.FC<MVPThankYouScreenProps> = ({ onBackToHomepage }) => {
   const isDesktop = useIsDesktopWeb();
+  const posthog = usePostHog(); // Get PostHog instance from PostHogProvider
 
   useEffect(() => {
-    // Track event to trigger PostHog survey
+    // Track event using the PostHog instance from provider
+    // This ensures PostHogSurveyProvider sees the event and can show the survey
     // The survey should be configured in PostHog to trigger on "onboarding_step2_completed" event
-    // Since we're using PostHogSurveyProvider, surveys will show automatically when this event is tracked
     console.log('[MVPThankYouScreen] Tracking onboarding_step2_completed to trigger PostHog survey');
     
-    // Track the event (it may have been tracked already, but tracking again ensures survey triggers)
-    // Use a small delay to ensure PostHog has processed any previous events
-    const timer = setTimeout(() => {
-      analyticsService.trackOnboardingStep2Completed();
-      console.log('[MVPThankYouScreen] Event tracked - PostHog survey should appear if configured');
-    }, 500); // Small delay to ensure PostHog is ready
+    if (posthog) {
+      // Use a delay to ensure PostHog is fully ready and the screen is mounted
+      const timer = setTimeout(() => {
+        posthog.capture('onboarding_step2_completed', {
+          // The event may have been tracked already in ChatScreen, but tracking again
+          // ensures the survey provider sees it and can trigger the survey
+        });
+        console.log('[MVPThankYouScreen] Event tracked via PostHogProvider - survey should appear if configured');
+      }, 1000); // Delay to ensure PostHog is ready
 
-    return () => clearTimeout(timer);
-  }, []);
+      return () => clearTimeout(timer);
+    } else {
+      console.warn('[MVPThankYouScreen] PostHog instance not available from provider');
+    }
+  }, [posthog]);
 
   return (
     <SafeAreaView style={styles.container}>
