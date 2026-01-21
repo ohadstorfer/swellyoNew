@@ -499,6 +499,9 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
   // This ensures content scales properly on all screen sizes while maintaining consistent padding
   const contentWidth = screenWidth - 32; // 16px padding each side
   
+  // Check if MVP mode is enabled
+  const isMVPMode = process.env.EXPO_PUBLIC_MVP_MODE === 'true';
+  
   const [profileData, setProfileData] = useState<SupabaseSurfer | null>(null);
   const [loading, setLoading] = useState(true);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -654,7 +657,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
             <BackButtonIcon />
           </View>
         </TouchableOpacity>
-        {isViewingOwnProfile && onEdit ? (
+        {isViewingOwnProfile && onEdit && !isMVPMode ? (
           <TouchableOpacity style={styles.editButton} onPress={onEdit}>
             <View style={styles.editButtonContainer}>
               <EditButtonIcon />

@@ -1,12 +1,19 @@
 import React from 'react';
-import { View, StyleSheet } from 'react-native';
+import { View, StyleSheet, Platform } from 'react-native';
 import { AvatarSkeleton, TextSkeleton, SkeletonBase } from './SkeletonPrimitives';
+import { useScreenDimensions } from '../../utils/responsive';
 
 /**
  * Skeleton loader for ProfileScreen
  * Matches the layout of the actual profile screen
  */
 export const ProfileSkeleton: React.FC = () => {
+  // Get screen dimensions for responsive design
+  const { width: screenWidth } = useScreenDimensions();
+  
+  // Calculate content width: always use full width minus 16px padding on each side
+  const contentWidth = screenWidth - 32; // 16px padding each side
+  
   return (
     <View style={styles.container}>
       {/* Cover Image Skeleton - Always visible */}
@@ -34,33 +41,52 @@ export const ProfileSkeleton: React.FC = () => {
         </View>
 
         {/* Content Container */}
-        <View style={styles.contentContainer}>
-          {/* Surf Skill Section */}
-          <View style={styles.skillSection}>
-            <View style={styles.skillTitleRow}>
-              <TextSkeleton width={100} height={18} />
-              <TextSkeleton width={120} height={18} />
-            </View>
-            <View style={styles.progressBarContainer}>
-              <SkeletonBase width="100%" height={8} borderRadius={4} style={styles.progressBarSkeleton} />
-              <View style={styles.progressLabels}>
-                <TextSkeleton width={100} height={12} />
-                <TextSkeleton width={80} height={12} />
+        <View style={[styles.contentContainer, { width: contentWidth }]}>
+          {/* Cards Row - Surf Style and Travel Experience */}
+          <View style={styles.cardsRow}>
+            {/* Surf Style Card */}
+            <View style={styles.card}>
+              <TextSkeleton width={80} height={15} style={styles.cardTitle} />
+              <View style={styles.cardContent}>
+                <TextSkeleton width={100} height={22} style={styles.cardValue} />
+                <TextSkeleton width={50} height={14} style={styles.cardLabel} />
               </View>
+              {/* Board illustration skeleton */}
+              {/* <View style={styles.cardIllustration}>
+                <SkeletonBase width={75} height={115} borderRadius={8} />
+              </View> */}
+            </View>
+
+            {/* Travel Experience Card */}
+            <View style={styles.card}>
+              <TextSkeleton width={120} height={15} style={styles.cardTitle} />
+              <View style={styles.cardContent}>
+                <TextSkeleton width={30} height={22} style={styles.cardValue} />
+                <TextSkeleton width={40} height={14} style={styles.cardLabel} />
+              </View>
+              {/* Travel illustration skeleton */}
+              {/* <View style={styles.travelIllustration}>
+                <SkeletonBase width={96} height={96} borderRadius={8} />
+              </View> */}
             </View>
           </View>
 
-          {/* Travel Experience Section */}
-          <View style={styles.skillSection}>
-            <View style={styles.skillTitleRow}>
-              <TextSkeleton width={140} height={18} />
-              <TextSkeleton width={80} height={18} />
-            </View>
-            <View style={styles.progressBarContainer}>
-              <SkeletonBase width="100%" height={8} borderRadius={4} style={styles.progressBarSkeleton} />
-              <View style={styles.progressLabels}>
-                <TextSkeleton width={60} height={12} />
-                <TextSkeleton width={80} height={12} />
+          {/* Surf Skill Card */}
+          <View style={styles.surfSkillCard}>
+            <View style={styles.surfSkillVideoContainer}>
+              <SkeletonBase width="100%" height={229} borderRadius={12} />
+              {/* Title overlay skeleton */}
+              <View style={styles.surfSkillTitleOverlay}>
+                <TextSkeleton width={80} height={22} />
+              </View>
+              {/* Expand icon skeleton */}
+              <View style={styles.surfSkillExpandIcon}>
+                <SkeletonBase width={24} height={24} borderRadius={4} />
+              </View>
+              {/* Content overlay skeleton */}
+              <View style={styles.surfSkillContentOverlay}>
+                <TextSkeleton width={140} height={22} style={styles.surfSkillNameSkeleton} />
+                <TextSkeleton width={100} height={20} />
               </View>
             </View>
           </View>
@@ -172,28 +198,103 @@ const styles = StyleSheet.create({
     width: '100%',
     gap: 24,
     alignItems: 'center',
+    alignSelf: 'center',
   },
-  skillSection: {
-    width: '100%',
-    gap: 12,
-  },
-  skillTitleRow: {
+  cardsRow: {
     flexDirection: 'row',
+    gap: 16,
+    width: '100%',
+  },
+  card: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 16,
+    flex: 1,
+    height: 140,
+    position: 'relative',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    width: '100%',
+    shadowColor: '#596E7C',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.15,
+    shadowRadius: 16,
+    elevation: 4,
   },
-  progressBarContainer: {
-    width: '100%',
-    gap: 8,
-  },
-  progressBarSkeleton: {
+  cardTitle: {
     marginBottom: 0,
   },
-  progressLabels: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  cardContent: {
+    gap: 4,
+    marginTop: 'auto',
+  },
+  cardValue: {
+    marginBottom: 4,
+  },
+  cardLabel: {
+    marginBottom: 0,
+  },
+  cardIllustration: {
+    position: 'absolute',
+    left: 99,
+    top: 13,
+    width: 75,
+    height: 115,
+  },
+  travelIllustration: {
+    position: 'absolute',
+    left: 71,
+    top: 34,
+    width: 96,
+    height: 96,
+  },
+  surfSkillCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 0,
     width: '100%',
+    marginBottom: 16,
+    shadowColor: '#596E7C',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.15,
+    shadowRadius: 16,
+    elevation: 4,
+  },
+  surfSkillVideoContainer: {
+    width: '100%',
+    height: 229,
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: '#000',
+    position: 'relative',
+  },
+  surfSkillTitleOverlay: {
+    position: 'absolute',
+    top: 16,
+    left: 16,
+    zIndex: 20,
+  },
+  surfSkillExpandIcon: {
+    position: 'absolute',
+    top: 16,
+    right: 16,
+    zIndex: 20,
+    width: 24,
+    height: 24,
+  },
+  surfSkillContentOverlay: {
+    position: 'absolute',
+    bottom: 16,
+    left: 16,
+    zIndex: 20,
+    gap: 4,
+  },
+  surfSkillNameSkeleton: {
+    marginBottom: 4,
   },
   destinationsSection: {
     width: '100%',

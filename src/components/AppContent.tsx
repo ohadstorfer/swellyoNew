@@ -246,18 +246,10 @@ export const AppContent: React.FC = () => {
     // Note: onboarding_step2_completed is already tracked in ChatScreen.tsx with duration
     // This duplicate call is removed to avoid double tracking
     
-    // Check if MVP mode is enabled
-    const isMVPMode = process.env.EXPO_PUBLIC_MVP_MODE === 'true';
-    
-    if (isMVPMode) {
-      // MVP mode: Show thank you screen instead of profile
-      setShowMVPThankYou(true);
-      console.log('[AppContent] MVP mode: Showing thank you screen');
-    } else {
-      // Normal mode: Navigate to profile
-      setShowProfile(true);
-      console.log('[AppContent] Navigating to profile screen');
-    }
+    // In MVP mode, still show profile after onboarding (user can navigate to thank you via back button)
+    // Normal mode: Navigate to profile
+    setShowProfile(true);
+    console.log('[AppContent] Navigating to profile screen');
   };
 
   const handleProfileBack = () => {
@@ -438,16 +430,13 @@ export const AppContent: React.FC = () => {
     return <MVPThankYouScreen onBackToHomepage={handleBackToHomepage} />;
   }
 
-  // MVP MODE: Block access to conversations, profile, and other features
-  // If onboarding is complete in MVP mode, only show thank you screen
-  // This blocks all other screens (conversations, profile, trip planning, Swelly Shaper, etc.)
-  if (isMVPMode && isComplete) {
-    console.log('[AppContent] MVP mode: Blocking access to non-onboarding features, redirecting to thank you screen');
-    // Set state to show thank you screen (will render on next render cycle)
-    if (!showMVPThankYou) {
-      setShowMVPThankYou(true);
-    }
-    return <MVPThankYouScreen onBackToHomepage={handleBackToHomepage} />;
+  // MVP MODE: Block access to conversations and other features (but allow profile)
+  // In MVP mode, users can access their profile after onboarding
+  // The profile screen will handle MVP-specific behavior (no edit button, back goes to thank you)
+  if (isMVPMode && isComplete && !showProfile && !showSwellyShaper && !selectedConversation && !showTripPlanningChat) {
+    // If user tries to access conversations or other features, redirect to profile
+    console.log('[AppContent] MVP mode: Redirecting to profile');
+    setShowProfile(true);
   }
 
   // If onboarding is complete, show conversations screen as home page (regardless of currentStep)
@@ -473,12 +462,19 @@ export const AppContent: React.FC = () => {
     if (showProfile) {
       console.log('[AppContent] Rendering ProfileScreen for userId:', viewingUserId);
       console.log('[AppContent] profileFromSwellyShaper flag:', profileFromSwellyShaper);
+      
+      // In MVP mode, back button goes to thank you page, and edit button is hidden
+      const handleMVPProfileBack = () => {
+        setShowProfile(false);
+        setShowMVPThankYou(true);
+      };
+      
       return (
         <ProfileScreen 
-          onBack={handleProfileBack}
+          onBack={isMVPMode ? handleMVPProfileBack : handleProfileBack}
           userId={viewingUserId ?? undefined}
           onMessage={handleStartConversation}
-          onEdit={() => {
+          onEdit={isMVPMode ? undefined : () => {
             // When clicking edit, preserve the flag if it was already set
             // (user came from Swelly Shaper), so they can navigate back
             setShowProfile(false);

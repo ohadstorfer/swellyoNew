@@ -15,17 +15,16 @@ export const MVPThankYouScreen: React.FC<MVPThankYouScreenProps> = ({ onBackToHo
   const posthog = usePostHog(); // Get PostHog instance from PostHogProvider
 
   useEffect(() => {
-    // Track event using the PostHog instance from provider
-    // This ensures PostHogSurveyProvider sees the event and can show the survey
-    // The survey should be configured in PostHog to trigger on "onboarding_step2_completed" event
-    console.log('[MVPThankYouScreen] Tracking onboarding_step2_completed to trigger PostHog survey');
+    // Track event when user arrives at thank you screen
+    // The survey should be configured in PostHog to trigger on "mvp_thank_you_screen_viewed" event
+    console.log('[MVPThankYouScreen] Tracking mvp_thank_you_screen_viewed to trigger PostHog survey');
     
     if (posthog) {
       // Use a delay to ensure PostHog is fully ready and the screen is mounted
       const timer = setTimeout(() => {
-        posthog.capture('onboarding_step2_completed', {
-          // The event may have been tracked already in ChatScreen, but tracking again
-          // ensures the survey provider sees it and can trigger the survey
+        posthog.capture('mvp_thank_you_screen_viewed', {
+          // This event is specifically for when user arrives at the thank you screen
+          // Configure PostHog survey to trigger on this event
         });
         console.log('[MVPThankYouScreen] Event tracked via PostHogProvider - survey should appear if configured');
       }, 1000); // Delay to ensure PostHog is ready
