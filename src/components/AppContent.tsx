@@ -239,17 +239,19 @@ export const AppContent: React.FC = () => {
   const handleChatComplete = async () => {
     console.log('[AppContent] handleChatComplete called');
     
-    // Mark onboarding as complete
+    // Set showProfile FIRST to prevent race condition with blocking logic
+    // In MVP mode, still show profile after onboarding (user can navigate to thank you via back button)
+    // Normal mode: Navigate to profile
+    setShowProfile(true);
+    console.log('[AppContent] Navigating to profile screen');
+    
+    // Mark onboarding as complete AFTER setting showProfile
+    // This ensures showProfile is true when isComplete becomes true, preventing blocking logic from redirecting
     await markOnboardingComplete();
     console.log('[AppContent] Onboarding marked as complete');
     
     // Note: onboarding_step2_completed is already tracked in ChatScreen.tsx with duration
     // This duplicate call is removed to avoid double tracking
-    
-    // In MVP mode, still show profile after onboarding (user can navigate to thank you via back button)
-    // Normal mode: Navigate to profile
-    setShowProfile(true);
-    console.log('[AppContent] Navigating to profile screen');
   };
 
   const handleProfileBack = () => {
