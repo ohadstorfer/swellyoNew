@@ -429,10 +429,12 @@ function getPronounInstructions(pronoun: string): string {
   
   if (pronounLower === 'bro') {
     return `PRONOUN USAGE:
-The user prefers to be called with masculine terms. You can use "bro", "dude", "man", and similar masculine casual terms when addressing them. This makes the conversation feel more personal and friendly.`
+The user selected "bro" - they are a man and should be referred to with he/him pronouns. When talking about them or referring to them, use "he", "him", "his". You can also use "bro", "dude", "man", and similar masculine casual terms when addressing them directly. This makes the conversation feel more personal and friendly.
+IMPORTANT: Do NOT use feminine terms like "sis", "she", "her", or any other feminine pronouns or casual terms. Only use masculine terms and he/him pronouns.`
   } else if (pronounLower === 'sis') {
     return `PRONOUN USAGE:
-The user prefers to be called with feminine terms. You can use "sis" and similar feminine casual terms when addressing them. This makes the conversation feel more personal and friendly.`
+The user selected "sis" - they are a woman and should be referred to with she/her pronouns. When talking about them or referring to them, use "she", "her", "hers". You can also use "sis" and similar feminine casual terms when addressing them directly. This makes the conversation feel more personal and friendly.
+IMPORTANT: Do NOT use masculine terms like "bro", "dude", "man", "he", "him", or any other masculine pronouns or casual terms. Only use feminine terms and she/her pronouns.`
   } else if (pronounLower === 'none') {
     return `PRONOUN USAGE:
 The user prefers not to be addressed with gender-specific terms. Avoid calling them "bro", "dude", "sis", "man", or any other gender-specific terms. Use gender-neutral language like their name, "shredder", or just keep it neutral.`

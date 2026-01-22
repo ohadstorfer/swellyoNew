@@ -360,9 +360,9 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
   const getCategorySubtitle = (category: string): string => {
     const categoryMap: { [key: string]: string } = {
       'beginner': 'Just Starting',
-      'intermediate': 'Doing good',
-      'advanced': 'Excellent',
-      'pro': 'Pro',
+      'intermediate':'Getting There',
+      'advanced': 'Doing Good',
+      'pro': 'Excellent',
     };
     return categoryMap[category.toLowerCase()] || 'Just Starting';
   };
@@ -664,7 +664,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
               <EditButtonIcon />
             </View>
           </TouchableOpacity>
-        ) : userId && onMessage ? (
+        ) : userId && onMessage && !isMVPMode ? (
           <TouchableOpacity 
             style={styles.messageButton}
             onPress={() => onMessage(userId)}
@@ -839,13 +839,13 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
         </TouchableOpacity>
 
         {/* Edit Button - Only visible when viewing own profile */}
-        {isViewingOwnProfile && onEdit ? (
+        {isViewingOwnProfile && onEdit && !isMVPMode ? (
           <TouchableOpacity style={styles.editButton} onPress={onEdit}>
             <View style={styles.editButtonContainer}>
               <EditButtonIcon />
             </View>
           </TouchableOpacity>
-        ) : (
+        ) : userId && onMessage && !isMVPMode ? (
           // Message Button - Visible when viewing other user's profile
           <TouchableOpacity 
             style={styles.messageButton}
@@ -860,7 +860,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
               <Text style={styles.messageButtonText}>Message</Text>
             </View>
           </TouchableOpacity>
-        )}
+        ) : null}
 
         {/* Profile Picture - Centered */}
         <View style={styles.profilePictureContainer}>

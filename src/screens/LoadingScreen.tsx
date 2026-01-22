@@ -482,14 +482,14 @@ const styles = StyleSheet.create({
     height: 294,
     borderRadius: 0,
     overflow: 'hidden',
-    backgroundColor: 'transparent', // Transparent background to match page
+    backgroundColor: colors.backgroundGray, // Match container background to prevent flash
     position: 'relative',
   },
   videoWrapper: {
     width: '100%',
     height: '100%',
     position: 'relative',
-    backgroundColor: 'transparent', // Transparent background
+    backgroundColor: colors.backgroundGray, // Match container background
   },
   videoPlayerContainer: {
     width: '100%',
@@ -497,7 +497,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 0,
     left: 0,
-    backgroundColor: 'transparent', // Transparent background
+    backgroundColor: colors.backgroundGray, // Match container background
     pointerEvents: 'none', // Prevent all interactions with video
     ...(Platform.OS === 'web' && {
       // Prevent video controls and interactions on web
@@ -510,23 +510,23 @@ const styles = StyleSheet.create({
   video: {
     width: '100%',
     height: '100%',
-    pointerEvents: 'none', // Prevent all interactions with video
-    backgroundColor: 'transparent', // Transparent background for native
+    pointerEvents: 'none',
+    backgroundColor: colors.backgroundGray, // Match container background for visual blending
+  
     ...(Platform.OS === 'web' && {
-      // Apply to all web (desktop and mobile web)
       objectFit: 'cover' as any,
       display: 'block' as any,
-      visibility: 'visible' as any,
       opacity: 1,
-      backgroundColor: 'transparent', // Transparent background for web
-      // Prevent interactions
+      backgroundColor: colors.backgroundGray, // Match container background to avoid flashing/poster artifacts
+  
+      // Prevent any browser interaction/overlay
       userSelect: 'none' as any,
       WebkitUserSelect: 'none' as any,
       touchAction: 'none' as any,
       WebkitTouchCallout: 'none' as any,
       WebkitAppearance: 'none' as any,
       appearance: 'none' as any,
-    } as any),
+    }),
   },
   videoOverlay: {
     position: 'absolute',
