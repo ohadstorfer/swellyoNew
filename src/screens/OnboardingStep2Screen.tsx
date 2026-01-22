@@ -14,7 +14,7 @@ import { Text } from '../components/Text';
 import { VideoCarousel, VideoLevel } from '../components/VideoCarousel';
 import { colors, spacing } from '../styles/theme';
 import { OnboardingData } from './OnboardingStep1Screen';
-import { getVideoUrl as getVideoUrlUtil } from '../services/media/videoService';
+import { getSurfLevelVideoFromStorage } from '../services/media/videoService';
 import { getImageUrl } from '../services/media/imageService';
 import { useIsDesktopWeb, useScreenDimensions, responsiveWidth, getScreenWidth } from '../utils/responsive';
 
@@ -81,14 +81,15 @@ const getSurfLevelVideos = (boardType: number): VideoLevel[] => {
       return true;
     })
     .map((video, index) => {
-      const videoPath = `/surf level/${boardFolder}/${video.videoFileName}`;
+      // Videos are served from Supabase storage bucket
+      const storagePath = `${boardFolder}/${video.videoFileName}`;
       const thumbnailPath = `/surf level/${boardFolder}/${video.thumbnailFileName}`;
       
       return {
         id: index, // Use index as ID to maintain order
         name: video.name,
         thumbnailUrl: getImageUrl(thumbnailPath),
-        videoUrl: getVideoUrlUtil(videoPath),
+        videoUrl: getSurfLevelVideoFromStorage(storagePath),
       };
     });
 };

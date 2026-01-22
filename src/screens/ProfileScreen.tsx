@@ -21,7 +21,7 @@ import { colors, spacing, typography } from '../styles/theme';
 import { supabaseDatabaseService, SupabaseSurfer } from '../services/database/supabaseDatabaseService';
 import { supabase } from '../config/supabase';
 import { getImageUrl } from '../services/media/imageService';
-import { getVideoUrl as getVideoUrlUtil } from '../services/media/videoService';
+import { getSurfLevelVideoFromStorage } from '../services/media/videoService';
 import { getCountryFlag } from '../utils/countryFlags';
 import { uploadProfileImage } from '../services/storage/storageService';
 import { ProfileImage } from '../components/ProfileImage';
@@ -126,7 +126,7 @@ const mapBoardTypeToNumber = (boardType: string): number => {
   return 0; // Default to shortboard
 };
 
-// Helper function to get surf level video URL
+// Helper function to get surf level video URL from Supabase storage
 const getSurfLevelVideoUrl = (boardType: string, surfLevel: number): string | null => {
   const boardTypeNum = mapBoardTypeToNumber(boardType);
   const boardVideos = BOARD_VIDEO_DEFINITIONS[boardTypeNum];
@@ -146,8 +146,9 @@ const getSurfLevelVideoUrl = (boardType: string, surfLevel: number): string | nu
   }
   
   const boardFolder = getBoardFolder(boardTypeNum);
-  const videoPath = `/surf level/${boardFolder}/${video.videoFileName}`;
-  return getVideoUrlUtil(videoPath);
+  // Use Supabase storage URL instead of local path
+  const storagePath = `${boardFolder}/${video.videoFileName}`;
+  return getSurfLevelVideoFromStorage(storagePath);
 };
 // Lifestyle keyword to icon mapping (simplified - using Ionicons for now)
 const LIFESTYLE_ICON_MAP: { [key: string]: string } = {

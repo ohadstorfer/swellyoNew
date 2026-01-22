@@ -11,9 +11,26 @@ import Constants from 'expo-constants';
  * - Proper MIME types
  * - Optimized compression settings
  * 
- * On web: uses public folder paths
- * On mobile: uses full dev server URL or asset paths
+ * On web: uses public folder paths OR Supabase storage URLs
+ * On mobile: uses full dev server URL or asset paths OR Supabase storage URLs
  */
+
+// Supabase storage configuration
+const SUPABASE_URL = 'https://guvqrlvwfdjnbcxzaofv.supabase.co';
+const SURF_LEVEL_VIDEOS_BUCKET = 'surf-level-videos';
+
+/**
+ * Get the public URL for a video stored in Supabase storage
+ * Path should be relative to the bucket root (e.g., 'shortboard/Dipping My Toes.mp4')
+ */
+export const getSurfLevelVideoFromStorage = (bucketPath: string): string => {
+  // Encode path segments to handle spaces and special characters
+  const pathParts = bucketPath.split('/').filter(Boolean);
+  const encodedParts = pathParts.map(part => encodeURIComponent(part));
+  const encodedPath = encodedParts.join('/');
+  
+  return `${SUPABASE_URL}/storage/v1/object/public/${SURF_LEVEL_VIDEOS_BUCKET}/${encodedPath}`;
+};
 
 /**
  * Video optimization settings
