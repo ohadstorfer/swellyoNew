@@ -463,6 +463,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: spacing.lg,
+    backgroundColor: colors.backgroundGray,
   },
   titleContainer: {
     marginBottom: 36,
@@ -511,13 +512,14 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
     pointerEvents: 'none',
-    backgroundColor: colors.backgroundGray, // Match container background for visual blending
+    // backgroundColor: colors.backgroundGray, // Match container background for visual blending
   
     ...(Platform.OS === 'web' && {
       objectFit: 'cover' as any,
       display: 'block' as any,
       opacity: 1,
-      backgroundColor: colors.backgroundGray, // Match container background to avoid flashing/poster artifacts
+      mixBlendMode: 'darken' as any,
+      // backgroundColor: colors.backgroundGray, // Match container background to avoid flashing/poster artifacts
   
       // Prevent any browser interaction/overlay
       userSelect: 'none' as any,
@@ -535,13 +537,15 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     backgroundColor: 'transparent',
+    // backgroundColor: colors.backgroundGray,
     zIndex: 10,
     // pointerEvents: 'auto' is implicit, will block all interactions with video
   },
   videoPlaceholder: {
     width: '100%',
     height: '100%',
-    backgroundColor: colors.backgroundMedium,
+    // backgroundColor: colors.backgroundMedium,
+    backgroundColor: colors.backgroundGray,
     alignItems: 'center',
     justifyContent: 'center',
   },

@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import Svg, { Path } from 'react-native-svg';
 import { Text } from '../components/Text';
 import { getImageUrl } from '../services/media/imageService';
 import { useScreenDimensions } from '../utils/responsive';
@@ -100,9 +101,10 @@ export const OnboardingWelcomeScreen: React.FC<OnboardingWelcomeScreenProps> = (
           <View style={styles.pointContainer}>
             <View style={styles.pointContent}>
               <View style={styles.pointTitleContainer}>
-                <View style={styles.circledNumber}>
-                  <Text style={[styles.circledNumberText, { fontSize: 15 }]}>1</Text>
-                </View>
+               
+                  <Svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                    <Path d="M7.5 12H7.51M12 12H12.01M16.5 12H16.51M12 21C16.9706 21 21 16.9706 21 12C21 7.02944 16.9706 3 12 3C7.02944 3 3 7.02944 3 12C3 13.1971 3.23374 14.3397 3.65806 15.3845C3.73927 15.5845 3.77988 15.6845 3.798 15.7653C3.81572 15.8443 3.8222 15.9028 3.82221 15.9839C3.82222 16.0667 3.80718 16.1569 3.77711 16.3374L3.18413 19.8952C3.12203 20.2678 3.09098 20.4541 3.14876 20.5888C3.19933 20.7067 3.29328 20.8007 3.41118 20.8512C3.54589 20.909 3.73218 20.878 4.10476 20.8159L7.66265 20.2229C7.84309 20.1928 7.9333 20.1778 8.01613 20.1778C8.09715 20.1778 8.15566 20.1843 8.23472 20.202C8.31554 20.2201 8.41552 20.2607 8.61549 20.3419C9.6603 20.7663 10.8029 21 12 21ZM8 12C8 12.2761 7.77614 12.5 7.5 12.5C7.22386 12.5 7 12.2761 7 12C7 11.7239 7.22386 11.5 7.5 11.5C7.77614 11.5 8 11.7239 8 12ZM12.5 12C12.5 12.2761 12.2761 12.5 12 12.5C11.7239 12.5 11.5 12.2761 11.5 12C11.5 11.7239 11.7239 11.5 12 11.5C12.2761 11.5 12.5 11.7239 12.5 12ZM17 12C17 12.2761 16.7761 12.5 16.5 12.5C16.2239 12.5 16 12.2761 16 12C16 11.7239 16.2239 11.5 16.5 11.5C16.7761 11.5 17 11.7239 17 12Z" stroke="#222B30" strokeLinecap="round" strokeLinejoin="round"/>
+                  </Svg>
                 <Text style={[styles.pointTitle, { fontSize: pointTitleFontSize }]}>
                   Tell us who you are
                 </Text>
@@ -120,9 +122,10 @@ export const OnboardingWelcomeScreen: React.FC<OnboardingWelcomeScreenProps> = (
           <View style={styles.pointContainer}>
             <View style={styles.pointContent}>
               <View style={styles.pointTitleContainer}>
-                <View style={styles.circledNumber}>
-                  <Text style={[styles.circledNumberText, { fontSize: 15 }]}>2</Text>
-                </View>
+                
+                  <Svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                    <Path d="M10 11.5347C11.2335 10.8218 12.7663 10.8218 13.9999 11.5347M8.82843 9.17157C10.3905 10.7337 10.3905 13.2663 8.82843 14.8284C7.26634 16.3905 4.73367 16.3905 3.17157 14.8284C1.60948 13.2663 1.60948 10.7337 3.17157 9.17157C4.73366 7.60948 7.26633 7.60948 8.82843 9.17157ZM20.8284 9.17157C22.3905 10.7337 22.3905 13.2663 20.8284 14.8284C19.2663 16.3905 16.7337 16.3905 15.1716 14.8284C13.6095 13.2663 13.6095 10.7337 15.1716 9.17157C16.7337 7.60948 19.2663 7.60948 20.8284 9.17157Z" stroke="#222B30" strokeLinecap="round" strokeLinejoin="round"/>
+                  </Svg>
                 <Text style={[styles.pointTitle, { fontSize: pointTitleFontSize }]}>
                   Find your people
                 </Text>
@@ -140,9 +143,10 @@ export const OnboardingWelcomeScreen: React.FC<OnboardingWelcomeScreenProps> = (
           <View style={styles.pointContainer}>
             <View style={styles.pointContent}>
               <View style={styles.pointTitleContainer}>
-                <View style={styles.circledNumber}>
-                  <Text style={[styles.circledNumberText, { fontSize: 15 }]}>3</Text>
-                </View>
+                
+                  <Svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                    <Path d="M20.7914 12.6075C21.0355 12.3982 21.1575 12.2936 21.2023 12.1691C21.2415 12.0598 21.2415 11.9403 21.2023 11.831C21.1575 11.7065 21.0355 11.6019 20.7914 11.3926L12.3206 4.13202C11.9004 3.77182 11.6903 3.59172 11.5124 3.58731C11.3578 3.58348 11.2101 3.6514 11.1124 3.77128C11 3.90921 11 4.18595 11 4.73942V9.03468C8.86532 9.40813 6.91159 10.4898 5.45971 12.1139C3.87682 13.8846 3.00123 16.176 3 18.551V19.163C4.04934 17.8989 5.35951 16.8766 6.84076 16.166C8.1467 15.5395 9.55842 15.1684 11 15.0706V19.2607C11 19.8141 11 20.0909 11.1124 20.2288C11.2101 20.3487 11.3578 20.4166 11.5124 20.4128C11.6903 20.4084 11.9004 20.2283 12.3206 19.8681L20.7914 12.6075Z" stroke="#222B30" strokeLinecap="round" strokeLinejoin="round"/>
+                  </Svg>
                 <Text style={[styles.pointTitle, { fontSize: pointTitleFontSize }]}>
                   Share & explore
                 </Text>
@@ -223,19 +227,20 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   ellipseBackground: {
-    width: '85%',
-    height: '85%',
+    width: '100%',
+    height: '100%',
     position: 'absolute',
   },
   avatarImageContainer: {
     position: 'absolute',
     width: '105%',
-    height: '105%',
-    top: '-5%',
+    height: '113%',
+    top: '-13.8%',
     left: '-5%',
     overflow: 'hidden',
     borderRadius: 50,
     zIndex: 1,
+    aspectRatio: 5/13,
   },
   avatarImage: {
     width: '105%',
@@ -294,11 +299,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   pointTitleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    display: 'flex',
+    flexDirection: 'column',
     justifyContent: 'center',
-    gap: 8,
-    marginBottom: 2,
+    alignItems: 'center',
+    gap: 2,
+    alignSelf: 'stretch',
   },
   circledNumber: {
     width: 20,
