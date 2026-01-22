@@ -292,6 +292,9 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
   const mainVideoPlayer = useVideoPlayer(
     selectedVideo.videoUrl || '',
     (player: any) => {
+      if (__DEV__) {
+        console.log('[VideoCarousel] Video player initialized with URL:', selectedVideo.videoUrl);
+      }
       if (player && selectedVideo.videoUrl) {
         try {
           // Set properties required for autoplay
@@ -544,6 +547,9 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
   useEffect(() => {
     if (selectedVideo.videoUrl && mainVideoPlayer) {
       const videoUrl = selectedVideo.videoUrl;
+      if (__DEV__) {
+        console.log('[VideoCarousel] Replacing video URL:', videoUrl, 'for video:', selectedVideo.name);
+      }
       if (!videoUrl) {
         console.warn('No video URL provided for:', selectedVideo.name);
         return;
@@ -750,6 +756,10 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
                     // Web-specific props to prevent controls
                     controls: false,
                     disablePictureInPicture: true,
+                    onError: (error: any) => {
+                      console.error('[VideoCarousel] VideoView error:', error);
+                      console.error('[VideoCarousel] Video URL:', selectedVideo.videoUrl);
+                    },
                   } as any)}
                 />
               </View>

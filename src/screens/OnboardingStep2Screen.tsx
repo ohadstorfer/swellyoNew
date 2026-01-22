@@ -84,12 +84,22 @@ const getSurfLevelVideos = (boardType: number): VideoLevel[] => {
       // Videos are served from Supabase storage bucket
       const storagePath = `${boardFolder}/${video.videoFileName}`;
       const thumbnailPath = `/surf level/${boardFolder}/${video.thumbnailFileName}`;
+      const videoUrl = getSurfLevelVideoFromStorage(storagePath);
+      
+      if (__DEV__) {
+        console.log(`[OnboardingStep2] Video ${index} (${video.name}):`, {
+          storagePath,
+          videoUrl,
+          boardFolder,
+          videoFileName: video.videoFileName,
+        });
+      }
       
       return {
         id: index, // Use index as ID to maintain order
         name: video.name,
         thumbnailUrl: getImageUrl(thumbnailPath),
-        videoUrl: getSurfLevelVideoFromStorage(storagePath),
+        videoUrl,
       };
     });
 };

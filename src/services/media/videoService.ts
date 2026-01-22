@@ -16,8 +16,16 @@ import Constants from 'expo-constants';
  */
 
 // Supabase storage configuration
-const SUPABASE_URL = 'https://guvqrlvwfdjnbcxzaofv.supabase.co';
+// Use the same Supabase URL from environment variables to ensure consistency
+// This should match EXPO_PUBLIC_SUPABASE_URL in your .env file
+const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL?.trim() || '';
 const SURF_LEVEL_VIDEOS_BUCKET = 'surf-level-videos';
+
+if (!SUPABASE_URL) {
+  console.error('[videoService] EXPO_PUBLIC_SUPABASE_URL is not set. Video URLs will not work correctly.');
+} else if (__DEV__) {
+  console.log('[videoService] Using Supabase URL:', SUPABASE_URL);
+}
 
 /**
  * Get the public URL for a video stored in Supabase storage
@@ -25,11 +33,24 @@ const SURF_LEVEL_VIDEOS_BUCKET = 'surf-level-videos';
  */
 export const getSurfLevelVideoFromStorage = (bucketPath: string): string => {
   // Encode path segments to handle spaces and special characters
+  // Supabase storage expects each path segment to be URL-encoded separately
   const pathParts = bucketPath.split('/').filter(Boolean);
-  const encodedParts = pathParts.map(part => encodeURIComponent(part));
+  const encodedParts = pathParts.map(part => {
+    // encodeURIComponent handles spaces, special chars, etc.
+    // This converts "Dipping My Toes.mp4" to "Dipping%20My%20Toes.mp4"
+    return encodeURIComponent(part);
+  });
   const encodedPath = encodedParts.join('/');
   
-  return `${SUPABASE_URL}/storage/v1/object/public/${SURF_LEVEL_VIDEOS_BUCKET}/${encodedPath}`;
+  const url = `${SUPABASE_URL}/storage/v1/object/public/${SURF_LEVEL_VIDEOS_BUCKET}/${encodedPath}`;
+  
+  if (__DEV__) {
+    console.log('[getSurfLevelVideoFromStorage] Input path:', bucketPath);
+    console.log('[getSurfLevelVideoFromStorage] Encoded path:', encodedPath);
+    console.log('[getSurfLevelVideoFromStorage] Generated URL:', url);
+  }
+  
+  return url;
 };
 
 /**
