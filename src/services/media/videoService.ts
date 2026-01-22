@@ -4,10 +4,30 @@ import Constants from 'expo-constants';
 /**
  * Video Service
  * 
- * Provides utilities for handling videos across platforms.
+ * Provides utilities for handling videos across platforms with optimized serving.
+ * Best practices:
+ * - Lazy loading for better performance
+ * - Preload metadata only (not full video)
+ * - Proper MIME types
+ * - Optimized compression settings
+ * 
  * On web: uses public folder paths
  * On mobile: uses full dev server URL or asset paths
  */
+
+/**
+ * Video optimization settings
+ */
+export const VIDEO_OPTIMIZATION = {
+  // Preload strategy: 'none' = don't preload, 'metadata' = preload metadata only, 'auto' = preload full video
+  preload: 'metadata' as const,
+  // Enable lazy loading
+  loading: 'lazy' as const,
+  // Playback settings
+  playsInline: true,
+  muted: true,
+  loop: false,
+};
 
 /**
  * Get the proper video URL for the current platform
@@ -20,6 +40,10 @@ export const getVideoUrl = (path: string): string => {
   
   if (Platform.OS === 'web') {
     // On web, use public folder paths directly
+    // Add cache-busting query param in development to ensure fresh videos
+    if (__DEV__) {
+      return `${normalizedPath}?t=${Date.now()}`;
+    }
     return normalizedPath;
   }
   
@@ -160,6 +184,39 @@ export const getVideoUrl = (path: string): string => {
 };
 
 /**
+ * Get video MIME type based on file extension
+ */
+export const getVideoMimeType = (path: string): string => {
+  const ext = path.toLowerCase().split('.').pop();
+  switch (ext) {
+    case 'mp4':
+      return 'video/mp4';
+    case 'webm':
+      return 'video/webm';
+    case 'mov':
+      return 'video/quicktime';
+    case 'avi':
+      return 'video/x-msvideo';
+    default:
+      return 'video/mp4'; // Default to MP4
+  }
+};
+
+/**
+ * Get optimized video attributes for HTML5 video element
+ */
+export const getVideoAttributes = () => {
+  return {
+    preload: VIDEO_OPTIMIZATION.preload,
+    playsInline: VIDEO_OPTIMIZATION.playsInline,
+    muted: VIDEO_OPTIMIZATION.muted,
+    loop: VIDEO_OPTIMIZATION.loop,
+    // Add loading attribute for lazy loading (if supported)
+    ...(Platform.OS === 'web' && { loading: VIDEO_OPTIMIZATION.loading }),
+  };
+};
+
+/**
  * Get background video source
  */
 export const getBackgroundVideoSource = (): string => {
@@ -180,4 +237,3 @@ export const getBackgroundVideoSourceMP4 = (): string => {
   }
   return getVideoUrl('/swellyo169welcome.mp4');
 };
-

@@ -10,7 +10,8 @@
     "build": "expo export --platform web && cp public/swelly_chat.html dist/ && node update-bundle.js && node create-amplify-files.js",
     "build:netlify": "npm run build:netlify:pre && expo export --platform web && npm run build:netlify:post",
     "build:netlify:pre": "([ -f next.config.js ] && mv next.config.js next.config.js.bak || true) && ([ -d pages ] && mv pages pages.bak || true)",
-    "build:netlify:post": "node update-bundle.js && node create-netlify-redirects.js"
+    "build:netlify:post": "node update-bundle.js && node create-netlify-redirects.js",
+    "compress-videos": "node scripts/compress-videos.js"
   },
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",
@@ -31,6 +32,7 @@
     "expo-status-bar": "~3.0.8",
     "expo-video": "^3.0.14",
     "expo-web-browser": "~15.0.9",
+    "ffmpeg": "^0.0.4",
     "next": "^15.5.2",
     "posthog-react-native": "^4.19.0",
     "react": "19.1.0",
