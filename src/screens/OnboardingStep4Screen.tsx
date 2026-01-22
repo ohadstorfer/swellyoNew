@@ -447,7 +447,7 @@ interface PronounFieldProps {
   style?: any;
 }
 
-const PRONOUN_OPTIONS = ['Bro', 'Sis', 'None'];
+const PRONOUN_OPTIONS = ['Bro', 'Sis', 'Neither'];
 
 const PronounField: React.FC<PronounFieldProps> = ({
   label,
@@ -833,13 +833,13 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
 
             {/* Pronoun Selection */}
             <PronounField
-              label="How can we call you?"
+              label="How should we address you?"
               value={pronoun}
               onSelect={(selectedPronoun) => {
                 setPronoun(selectedPronoun);
                 updateFormData({ pronouns: selectedPronoun });
               }}
-              placeholder="How can we call you?*"
+              placeholder="How should we address you?*"
               width={357}
             />
             </View>
