@@ -36,12 +36,12 @@ const BOARD_VIDEO_DEFINITIONS: { [boardType: number]: Array<{ name: string; vide
     { name: 'Snapping', videoFileName: 'Snapping.mp4', thumbnailFileName: 'Snapping thumbnail.PNG' },
     { name: 'Charging', videoFileName: 'Charging.mp4', thumbnailFileName: 'Charging thumbnail.PNG' },
   ],
-  // Midlength (id: 1): Dipping My Toes, Cruising Around, Trimming Lines, Carving Turns
+  // Midlength (id: 1): Dipping My Toes (beginner), Cruising Around (intermediate), Carving Turns (advanced), Charging (pro)
   1: [
     { name: 'Dipping My Toes', videoFileName: 'Dipping My Toes.mp4', thumbnailFileName: 'Dipping My Toes thumbnail.PNG' },
     { name: 'Cruising Around', videoFileName: 'Cruising Around.mp4', thumbnailFileName: 'Cruising Around thumbnail.PNG' },
-    { name: 'Trimming Lines', videoFileName: 'Trimming Lines.mp4', thumbnailFileName: 'Trimming Lines thumbnail.PNG' },
     { name: 'Carving Turns', videoFileName: 'Carving Turns.mp4', thumbnailFileName: 'Carving Turns thumbnail.PNG' },
+    { name: 'Charging', videoFileName: 'Charging.mp4', thumbnailFileName: 'Charging thumbnail.PNG' },
   ],
   // Longboard (id: 2): Dipping My Toes, Cruising Around, Cross Stepping, Hanging Toes
   2: [
