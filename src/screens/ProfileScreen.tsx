@@ -20,7 +20,7 @@ import { Text as RNText } from 'react-native';
 import { colors, spacing, typography } from '../styles/theme';
 import { supabaseDatabaseService, SupabaseSurfer } from '../services/database/supabaseDatabaseService';
 import { supabase } from '../config/supabase';
-import { getImageUrl } from '../services/media/imageService';
+import { getImageUrl, getCountryImageFromStorage } from '../services/media/imageService';
 import { getSurfLevelVideoFromStorage } from '../services/media/videoService';
 import { getCountryFlag } from '../utils/countryFlags';
 import { uploadProfileImage } from '../services/storage/storageService';
@@ -1005,17 +1005,34 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
                 const displayName = areas.length > 0 
                   ? `${country}, ${areas.join(', ')}`
                   : country;
+                // Try to get country image from Supabase bucket first
+                const countryImageUrl = getCountryImageFromStorage(country);
                 const countryFlagUrl = getCountryFlag(country);
                 
                 return (
                   <View key={index} style={styles.destinationCard}>
-                    {countryFlagUrl ? (
+                    {countryImageUrl ? (
+                      // Use country image from Supabase bucket if available
+                      <Image
+                        source={{ uri: countryImageUrl }}
+                        style={styles.destinationImage}
+                        resizeMode="cover"
+                        onError={() => {
+                          // If bucket image fails to load, fallback to flag or Unsplash
+                          if (__DEV__) {
+                            console.warn(`[ProfileScreen] Country image failed to load: ${countryImageUrl}, falling back`);
+                          }
+                        }}
+                      />
+                    ) : countryFlagUrl ? (
+                      // Fallback to country flag if bucket image not available
                       <Image
                         source={{ uri: countryFlagUrl }}
                         style={styles.destinationImage}
                         resizeMode="cover"
                       />
                     ) : (
+                      // Final fallback to Unsplash
                       <Image
                         source={{ 
                           uri: `https://source.unsplash.com/86x74/?${encodeURIComponent(country)},beach,surf`
@@ -1026,7 +1043,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
                     )}
                     <View style={styles.destinationContent}>
                       <View style={styles.destinationTitleRow}>
-                        <Text style={styles.destinationName}>{country}:</Text>
+                        <Text style={styles.destinationName}>{country}</Text>
                         <View style={styles.destinationDaysContainer}>
                           <Text style={styles.destinationDays}>
                             {destination.time_in_text || `${destination.time_in_days} days`}

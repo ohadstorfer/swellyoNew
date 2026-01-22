@@ -9,6 +9,107 @@ import Constants from 'expo-constants';
  * On mobile: uses full dev server URL with proper encoding
  */
 
+// Supabase storage configuration for country images
+const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL?.trim() || '';
+const COUNTRIES_BUCKET = 'Countries';
+
+/**
+ * Map country names to their image filenames in the Countries bucket
+ * Handles variations like "Brazil.jpg", "Brazil2.jpg", etc.
+ * Returns the base filename (without number) - we use the first available image
+ */
+const getCountryImageFileName = (countryName: string): string | null => {
+  if (!countryName) return null;
+  
+  // Normalize country name: remove extra spaces, handle common variations
+  const normalized = countryName.trim();
+  const lowerCountry = normalized.toLowerCase();
+  
+  // Map of country names to their base image filename (without extension)
+  // Maps to the base name (e.g., "Brazil.jpg" not "Brazil2.jpg")
+  const countryMap: { [key: string]: string } = {
+    'australia': 'Australia',
+    'brazil': 'Brazil',
+    'chile': 'Chile',
+    'costa rica': 'CostaRica',
+    'costa-rica': 'CostaRica',
+    'costarica': 'CostaRica',
+    'el salvador': 'ElSalvador',
+    'el-salvador': 'ElSalvador',
+    'elsalvador': 'ElSalvador',
+    'fiji': 'Fiji',
+    'france': 'France',
+    'hawaii': 'Hawaii',
+    'indonesia': 'Indonesia',
+    'japan': 'Japan',
+    'maldives': 'Maldives',
+    'mexico': 'Mexico',
+    'morocco': 'Morocco',
+    'new zealand': 'NewZealand',
+    'new-zealand': 'NewZealand',
+    'newzealand': 'NewZealand',
+    'nicaragua': 'Nicaragua',
+    'panama': 'Panama',
+    'peru': 'Peru',
+    'philippines': 'Philippines',
+    'portugal': 'Portugal',
+    'south africa': 'SouthAfrica',
+    'south-africa': 'SouthAfrica',
+    'southafrica': 'SouthAfrica',
+    'spain': 'Spain',
+    'sri lanka': 'SriLanka',
+    'sri-lanka': 'SriLanka',
+    'srilanka': 'SriLanka',
+    'tahiti': 'Tahiti',
+    // Handle "Blacks Beach" as a special case
+    'blacks beach': 'Blacks Beach',
+    'blacks-beach': 'Blacks Beach',
+  };
+  
+  const baseFileName = countryMap[lowerCountry];
+  
+  if (!baseFileName) {
+    // If not in map, try to construct from country name
+    // Convert "New Zealand" -> "NewZealand", "Costa Rica" -> "CostaRica", etc.
+    const constructed = normalized
+      .split(/[\s-]+/)
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+      .join('');
+    
+    return `${constructed}.jpg`;
+  }
+  
+  return `${baseFileName}.jpg`;
+};
+
+/**
+ * Get the public URL for a country image stored in Supabase storage
+ * Returns null if country name doesn't match any known image
+ */
+export const getCountryImageFromStorage = (countryName: string): string | null => {
+  if (!SUPABASE_URL) {
+    if (__DEV__) {
+      console.warn('[getCountryImageFromStorage] SUPABASE_URL is not set');
+    }
+    return null;
+  }
+  
+  const fileName = getCountryImageFileName(countryName);
+  if (!fileName) {
+    return null;
+  }
+  
+  // Encode the filename to handle spaces and special characters
+  const encodedFileName = encodeURIComponent(fileName);
+  const url = `${SUPABASE_URL}/storage/v1/object/public/${COUNTRIES_BUCKET}/${encodedFileName}`;
+  
+  if (__DEV__) {
+    console.log('[getCountryImageFromStorage] Country:', countryName, '-> File:', fileName, '-> URL:', url);
+  }
+  
+  return url;
+};
+
 /**
  * Get the proper image URL for the current platform
  * On web: uses public folder paths
