@@ -275,16 +275,21 @@ class SwellyService {
       3: 'soft top surfer',
     };
 
-    const surfLevelNames: { [key: number]: string } = {
-      0: 'beginner',
-      1: 'beginner-intermediate',
-      2: 'intermediate',
-      3: 'intermediate-advanced',
-      4: 'advanced',
-    };
+    // Use the actual calculated surf level category instead of hardcoded mapping
+    let surfLevelName = 'intermediate'; // Default fallback
+    if (userProfile.boardType !== undefined && userProfile.surfLevel !== undefined) {
+      try {
+         const { getSurfLevelMapping } = await import('../../utils/surfLevelMapping');
+        const mapping = getSurfLevelMapping(userProfile.boardType, userProfile.surfLevel);
+        if (mapping && mapping.category) {
+          surfLevelName = mapping.category;
+        }
+      } catch (error) {
+        console.warn('[SwellyService] Failed to get surf level mapping, using default:', error);
+      }
+    }
 
     const boardTypeName = boardTypeNames[userProfile.boardType ?? -1] || 'surfer';
-    const surfLevelName = surfLevelNames[userProfile.surfLevel ?? -1] || 'intermediate';
     const trips = userProfile.travelExperience ?? 0;
     const name = userProfile.nickname || 'User';
     const age = userProfile.age ? `, age ${userProfile.age}` : '';
