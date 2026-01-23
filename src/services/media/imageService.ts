@@ -1,5 +1,6 @@
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
+import { supabase } from '../../config/supabase';
 
 /**
  * Image Service
@@ -69,10 +70,14 @@ const getCountryImageFileName = (countryName: string): string | null => {
   const baseFileName = countryMap[lowerCountry];
   
   if (!baseFileName) {
-    // Country not in the map - return null
-    // This means the image doesn't exist in the Supabase bucket
-    // The caller should use the fallback (flag or placeholder) instead
-    return null;
+    // Country not in the map - construct filename from country name
+    // Convert "New Zealand" -> "NewZealand", "Costa Rica" -> "CostaRica", etc.
+    const constructed = normalized
+      .split(/[\s-]+/)
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+      .join('');
+    
+    return `${constructed}.jpg`;
   }
   
   return `${baseFileName}.jpg`;
@@ -80,7 +85,8 @@ const getCountryImageFileName = (countryName: string): string | null => {
 
 /**
  * Get the public URL for a country image stored in Supabase storage
- * Returns null if country name doesn't match any known image
+ * Always returns a URL (even if image doesn't exist yet) - let Image component's onError handle 404s
+ * This allows us to try bucket first, then fallback to Pexels if needed
  */
 export const getCountryImageFromStorage = (countryName: string): string | null => {
   if (!SUPABASE_URL) {
@@ -188,6 +194,81 @@ export const getCountryImageFromPexels = async (countryName: string): Promise<st
   
   // Fallback to placeholder
   return null;
+};
+
+/**
+ * Upload a country image to Supabase storage bucket
+ * This is called when a Pexels image is successfully fetched for a country
+ * that doesn't have an image in the bucket yet
+ * 
+ * @param countryName - The country name
+ * @param imageUrl - The Pexels image URL to upload
+ * @returns The public URL of the uploaded image, or null if upload failed
+ */
+export const uploadCountryImageToStorage = async (
+  countryName: string,
+  imageUrl: string
+): Promise<string | null> => {
+  if (!SUPABASE_URL || !countryName || !imageUrl) {
+    if (__DEV__) {
+      console.warn('[uploadCountryImageToStorage] Missing required parameters');
+    }
+    return null;
+  }
+
+  try {
+    // Get the filename for this country
+    const fileName = getCountryImageFileName(countryName);
+    if (!fileName) {
+      if (__DEV__) {
+        console.warn('[uploadCountryImageToStorage] Could not generate filename for:', countryName);
+      }
+      return null;
+    }
+
+    // Fetch the image from Pexels URL
+    const response = await fetch(imageUrl);
+    if (!response.ok) {
+      if (__DEV__) {
+        console.warn('[uploadCountryImageToStorage] Failed to fetch image from Pexels:', response.status);
+      }
+      return null;
+    }
+
+    // Convert to blob
+    const blob = await response.blob();
+
+    // Upload to Supabase storage
+    const { data, error } = await supabase.storage
+      .from(COUNTRIES_BUCKET)
+      .upload(fileName, blob, {
+        contentType: 'image/jpeg',
+        upsert: true, // Overwrite if exists
+      });
+
+    if (error) {
+      if (__DEV__) {
+        console.warn('[uploadCountryImageToStorage] Upload error:', error);
+      }
+      return null;
+    }
+
+    // Get the public URL
+    const { data: urlData } = supabase.storage
+      .from(COUNTRIES_BUCKET)
+      .getPublicUrl(data.path);
+
+    if (__DEV__) {
+      console.log('[uploadCountryImageToStorage] Successfully uploaded:', countryName, '->', urlData.publicUrl);
+    }
+
+    return urlData.publicUrl;
+  } catch (error) {
+    if (__DEV__) {
+      console.error('[uploadCountryImageToStorage] Exception:', error);
+    }
+    return null;
+  }
 };
 
 /**

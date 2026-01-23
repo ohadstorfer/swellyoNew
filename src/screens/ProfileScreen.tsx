@@ -517,22 +517,31 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
     loadProfileData();
   }, [userId]);
 
-  // Fetch Pexels images for countries without bucket images
+  // Track which countries have failed bucket loads (so we know to use Pexels)
+  const [failedBucketCountries, setFailedBucketCountries] = useState<Set<string>>(new Set());
+
+  // Pre-fetch Pexels images ONLY for top 3 destinations that might need them
   useEffect(() => {
     if (!profileData || !profileData.destinations_array) return;
 
     const fetchPexelsImages = async () => {
-      const destinations = profileData.destinations_array || [];
+      // Only process top 3 destinations (the ones actually displayed)
+      const topDestinations = profileData.destinations_array 
+        ? [...profileData.destinations_array]
+            .sort((a, b) => (b.time_in_days || 0) - (a.time_in_days || 0))
+            .slice(0, 3)
+        : [];
+
       const pexelsPromises: Promise<void>[] = [];
 
-      destinations.forEach((destination) => {
+      topDestinations.forEach((destination) => {
         const country = destination.country || (destination as any).destination_name?.split(',')[0]?.trim() || '';
         if (!country) return;
 
-        // Only fetch from Pexels if bucket image is not available
-        const bucketImageUrl = getCountryImageFromStorage(country);
-        if (!bucketImageUrl && !pexelsImages[country]) {
-          // Fetch Pexels image in the background
+        // Only fetch Pexels if we don't already have it
+        // We'll check if bucket image exists when it actually loads
+        if (!pexelsImages[country]) {
+          // Pre-fetch Pexels image in the background (as backup)
           pexelsPromises.push(
             getCountryImageFromPexels(country).then((pexelsUrl) => {
               if (pexelsUrl) {
@@ -1049,34 +1058,58 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
                 const displayName = areas.length > 0 
                   ? `${country}, ${areas.join(', ')}`
                   : country;
-                // Try to get country image from Supabase bucket first
+                // Always try bucket first (getCountryImageFromStorage now always returns a URL)
                 const countryImageUrl = getCountryImageFromStorage(country);
                 const pexelsImageUrl = pexelsImages[country] || null;
                 const countryFlagUrl = getCountryFlag(country);
+                const hasFailedBucket = failedBucketCountries.has(country);
+                
+                // Handler for when bucket image fails to load (404)
+                const handleBucketImageError = async () => {
+                  if (__DEV__) {
+                    console.warn(`[ProfileScreen] Bucket image failed to load: ${countryImageUrl}, trying Pexels`);
+                  }
+                  
+                  // Mark this country as having failed bucket load
+                  setFailedBucketCountries((prev) => new Set(prev).add(country));
+                  
+                  // If we don't have Pexels image yet, fetch it
+                  if (!pexelsImageUrl) {
+                    const pexelsUrl = await getCountryImageFromPexels(country);
+                    if (pexelsUrl) {
+                      setPexelsImages((prev) => ({
+                        ...prev,
+                        [country]: pexelsUrl,
+                      }));
+                    }
+                  }
+                };
+                
+                // Determine which image URL to use
+                // If bucket failed, use Pexels; otherwise try bucket first
+                const imageUrlToUse = hasFailedBucket && pexelsImageUrl
+                  ? pexelsImageUrl
+                  : countryImageUrl || pexelsImageUrl || countryFlagUrl || getCountryImageFallback(country);
                 
                 return (
                   <View key={index} style={styles.destinationCard}>
-                    {countryImageUrl ? (
-                      // Use country image from Supabase bucket if available
+                    {!hasFailedBucket && countryImageUrl ? (
+                      // Try bucket first (fastest if image exists)
                       <Image
+                        key={`bucket-${country}`} // Key forces re-render when switching
                         source={{ uri: countryImageUrl }}
                         style={styles.destinationImage}
                         resizeMode="cover"
-                        onError={() => {
-                          // If bucket image fails to load, fallback to Pexels, flag, or placeholder
-                          if (__DEV__) {
-                            console.warn(`[ProfileScreen] Country image failed to load: ${countryImageUrl}, falling back`);
-                          }
-                        }}
+                        onError={handleBucketImageError}
                       />
                     ) : pexelsImageUrl ? (
-                      // Use Pexels image if bucket image not available but Pexels image is loaded
+                      // Use Pexels image if bucket failed or bucket URL couldn't be generated
                       <Image
+                        key={`pexels-${country}`} // Key forces re-render when switching
                         source={{ uri: pexelsImageUrl }}
                         style={styles.destinationImage}
                         resizeMode="cover"
                         onError={() => {
-                          // If Pexels image fails to load, fallback to flag or placeholder
                           if (__DEV__) {
                             console.warn(`[ProfileScreen] Pexels image failed to load: ${pexelsImageUrl}, falling back`);
                           }
