@@ -422,16 +422,16 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
             </View>
 
             {/* Login Prompt */}
-            <View style={styles.loginContainer}>
-            <Text variant="body" style={styles.loginText}>
-              Do you have an account?{' '}
-              <TouchableOpacity onPress={handleGoogleSignIn}>
-                <Text variant="link" style={styles.loginLink}>
-                  {isLoading ? 'Signing in...' : 'Log in'}
-                </Text>
-              </TouchableOpacity>
-            </Text>
-            </View>
+            {/* <View style={styles.loginContainer}>
+              <Text variant="body" style={styles.loginText}>
+                Do you have an account?{' '}
+                <TouchableOpacity onPress={handleGoogleSignIn}>
+                  <Text variant="link" style={styles.loginLink}>
+                    {isLoading ? 'Signing in...' : 'Log in'}
+                  </Text>
+                </TouchableOpacity>
+              </Text>
+            </View> */}
           </View>
         </View>
     </View>
@@ -488,7 +488,7 @@ const styles = StyleSheet.create({
   buttonContainer: {
     alignItems: 'center',
     width: '100%',
-    marginBottom: spacing.md,
+    marginBottom: spacing.xl,
   },
   getStartedButton: {
     // Width is set dynamically via inline style using responsiveWidth
@@ -551,11 +551,11 @@ const styles = StyleSheet.create({
     width: '90%',
     maxWidth: 320,
     height: 50,
+    paddingBottom: spacing.md,
   },
   loginContainer: {
     alignItems: 'center',
     marginTop: spacing.sm,
-    paddingBottom: spacing.sm,
   },
   loginText: {
     textAlign: 'center',
