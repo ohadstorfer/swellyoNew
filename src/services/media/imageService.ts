@@ -111,6 +111,90 @@ export const getCountryImageFromStorage = (countryName: string): string | null =
 };
 
 /**
+ * Get a fallback country image URL
+ * Uses Lorem Picsum - a free, reliable service that doesn't require API keys
+ * Returns a deterministic image URL based on country name
+ * 
+ * Note: For better quality, country-specific images, you can optionally use Pexels API
+ * Get a free API key from https://www.pexels.com/api/ and add it to .env as EXPO_PUBLIC_PEXELS_API_KEY
+ * Then use getCountryImageFromPexels() for async fetching
+ */
+export const getCountryImageFallback = (countryName: string): string => {
+  if (!countryName) {
+    return getCountryImagePlaceholder('Beach');
+  }
+  
+  // Use Lorem Picsum with a deterministic seed based on country name
+  // This ensures the same country always gets the same image
+  return getCountryImagePlaceholder(countryName);
+};
+
+/**
+ * Get a placeholder image for a country
+ * Uses Lorem Picsum - a free, reliable service that doesn't require API keys
+ * Returns a deterministic image URL based on country name
+ */
+const getCountryImagePlaceholder = (countryName: string): string => {
+  // Create a deterministic seed from country name
+  // This ensures the same country always gets the same image
+  const seed = countryName.toLowerCase().split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  const width = 350;
+  const height = 200;
+  
+  // Lorem Picsum: Free, reliable, no API key needed, works on all browsers/devices
+  // Returns a random but deterministic image based on seed
+  // Format: https://picsum.photos/seed/{seed}/{width}/{height}
+  return `https://picsum.photos/seed/${seed}/${width}/${height}`;
+};
+
+/**
+ * Get a fallback country image from Pexels API (optional, requires API key)
+ * Pexels provides free, high-quality stock photos
+ * Falls back to placeholder if Pexels fails or API key is not available
+ * 
+ * Note: This is async and requires API key setup. Use getCountryImageFallback() for immediate synchronous fallback.
+ */
+export const getCountryImageFromPexels = async (countryName: string): Promise<string | null> => {
+  if (!countryName) return null;
+  
+  const PEXELS_API_KEY = process.env.EXPO_PUBLIC_PEXELS_API_KEY;
+  if (!PEXELS_API_KEY) {
+    // No API key, return null to use synchronous fallback
+    return null;
+  }
+  
+  try {
+    // Search for country + beach/surf related images
+    const searchQuery = `${countryName} beach surf`;
+    const encodedQuery = encodeURIComponent(searchQuery);
+    
+    // Pexels API endpoint
+    const apiUrl = `https://api.pexels.com/v1/search?query=${encodedQuery}&per_page=1&orientation=landscape`;
+    
+    const response = await fetch(apiUrl, {
+      headers: {
+        'Authorization': PEXELS_API_KEY,
+      },
+    });
+    
+    if (response.ok) {
+      const data = await response.json();
+      if (data.photos && data.photos.length > 0) {
+        // Return a small/medium size image (src.medium is 350x350, good for thumbnails)
+        return data.photos[0].src.medium || data.photos[0].src.small || data.photos[0].src.tiny;
+      }
+    }
+  } catch (error) {
+    if (__DEV__) {
+      console.warn('[getCountryImageFromPexels] Error fetching from Pexels:', error);
+    }
+  }
+  
+  // Fallback to placeholder
+  return null;
+};
+
+/**
  * Get the proper image URL for the current platform
  * On web: uses public folder paths
  * On mobile: uses full dev server URL with proper encoding

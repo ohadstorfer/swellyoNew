@@ -20,7 +20,7 @@ import { Text as RNText } from 'react-native';
 import { colors, spacing, typography } from '../styles/theme';
 import { supabaseDatabaseService, SupabaseSurfer } from '../services/database/supabaseDatabaseService';
 import { supabase } from '../config/supabase';
-import { getImageUrl, getCountryImageFromStorage } from '../services/media/imageService';
+import { getImageUrl, getCountryImageFromStorage, getCountryImageFallback } from '../services/media/imageService';
 import { getSurfLevelVideoFromStorage } from '../services/media/videoService';
 import { getCountryFlag } from '../utils/countryFlags';
 import { uploadProfileImage } from '../services/storage/storageService';
@@ -1032,13 +1032,18 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
                         resizeMode="cover"
                       />
                     ) : (
-                      // Final fallback to Unsplash
+                      // Final fallback to placeholder service
                       <Image
                         source={{ 
-                          uri: `https://source.unsplash.com/86x74/?${encodeURIComponent(country)},beach,surf`
+                          uri: getCountryImageFallback(country)
                         }}
                         style={styles.destinationImage}
                         resizeMode="cover"
+                        onError={() => {
+                          if (__DEV__) {
+                            console.warn(`[ProfileScreen] Fallback image failed to load for: ${country}`);
+                          }
+                        }}
                       />
                     )}
                     <View style={styles.destinationContent}>
