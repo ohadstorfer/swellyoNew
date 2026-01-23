@@ -10,6 +10,7 @@ import {
   Modal,
   Alert,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Path, G, ClipPath, Defs, Rect } from 'react-native-svg';
@@ -26,6 +27,9 @@ import { ProfileImage } from '../components/ProfileImage';
 import { ConversationListSkeleton, HeaderSkeleton } from '../components/skeletons';
 import { SKELETON_DELAY_MS } from '../constants/loading';
 
+const USER_PROFILE_CACHE_KEY = '@swellyo_user_profile';
+const CACHE_VALIDITY_MS = 24 * 60 * 60 * 1000; // 24 hours
+
 interface ConversationsScreenProps {
   onConversationPress?: (conversationId: string) => void;
   onSwellyPress?: () => void;
@@ -35,6 +39,68 @@ interface ConversationsScreenProps {
 }
 
 type FilterType = 'all' | 'advisor' | 'seeker';
+
+// Cache helper functions
+const loadCachedUserProfile = async (): Promise<{ name: string; photo: string | null; userId: string } | null> => {
+  try {
+    // Check if AsyncStorage is available (handles Safari private mode and other edge cases)
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      try {
+        // Test localStorage availability (Safari private mode throws)
+        const testKey = '__storage_test__';
+        window.localStorage.setItem(testKey, 'test');
+        window.localStorage.removeItem(testKey);
+      } catch (e) {
+        // localStorage not available (e.g., Safari private mode)
+        console.warn('localStorage not available, skipping cache load');
+        return null;
+      }
+    }
+    
+    const cached = await AsyncStorage.getItem(USER_PROFILE_CACHE_KEY);
+    if (cached) {
+      const data = JSON.parse(cached);
+      // Check if cache is still valid (optional - can remove timestamp check for permanent cache)
+      const age = Date.now() - (data.timestamp || 0);
+      if (age < CACHE_VALIDITY_MS) {
+        return { name: data.name, photo: data.photo, userId: data.userId };
+      }
+    }
+  } catch (error) {
+    // Gracefully handle storage errors (Safari private mode, quota exceeded, etc.)
+    console.warn('Error loading cached user profile (will fetch from server):', error);
+  }
+  return null;
+};
+
+const saveCachedUserProfile = async (name: string, photo: string | null, userId: string) => {
+  try {
+    // Check if AsyncStorage is available (handles Safari private mode and other edge cases)
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      try {
+        // Test localStorage availability (Safari private mode throws)
+        const testKey = '__storage_test__';
+        window.localStorage.setItem(testKey, 'test');
+        window.localStorage.removeItem(testKey);
+      } catch (e) {
+        // localStorage not available (e.g., Safari private mode)
+        console.warn('localStorage not available, skipping cache save');
+        return;
+      }
+    }
+    
+    await AsyncStorage.setItem(USER_PROFILE_CACHE_KEY, JSON.stringify({
+      name,
+      photo,
+      userId,
+      timestamp: Date.now(),
+    }));
+  } catch (error) {
+    // Gracefully handle storage errors (Safari private mode, quota exceeded, etc.)
+    // Don't throw - caching is optional, app should work without it
+    console.warn('Error saving cached user profile (non-critical):', error);
+  }
+};
 
 // Three Dots Menu Icon Component
 const ThreeDotsIcon: React.FC = () => {
@@ -127,9 +193,27 @@ export default function ConversationsScreen({
 
   useEffect(() => {
     loadConversations();
-    // Load user info in background (non-blocking)
-    // UI already shows cached data from context, so this is just a refresh
-    loadUserInfo();
+    
+    // Load from cache first, then fetch if needed
+    const initializeUserInfo = async () => {
+      // Try to load from cache
+      const cachedProfile = await loadCachedUserProfile();
+      if (cachedProfile) {
+        // Use cached data immediately
+        setUserName(cachedProfile.name);
+        setUserAvatar(cachedProfile.photo);
+        if (cachedProfile.userId) {
+          setCurrentUserId(cachedProfile.userId);
+        }
+        // Don't fetch from server if we have valid cache
+        return;
+      }
+      
+      // No cache or cache invalid - fetch from server
+      await loadUserInfo();
+    };
+    
+    initializeUserInfo();
 
     // Subscribe to conversation updates
     const unsubscribe = messagingService.subscribeToConversations(() => {
@@ -143,26 +227,34 @@ export default function ConversationsScreen({
 
   const loadUserInfo = async () => {
     // Only show skeleton if we don't have cached data
-    const hasCachedData = contextUser?.nickname || contextUser?.email;
+    const hasCachedData = contextUser?.nickname || contextUser?.email || userAvatar;
     if (!hasCachedData) {
       setUserInfoLoading(true);
     }
     
     try {
-      // Update from server in the background (optimistic update)
-      // The UI already shows cached data from context, so this is just a refresh
+      // Fetch from server
       const user = await supabaseAuthService.getCurrentUser();
       if (user) {
-        // Only update if values have changed to avoid unnecessary re-renders
+        // Extract user data
         const newName = user.nickname || user.email.split('@')[0];
+        const newPhoto = user.photo || null;
+        const newUserId = user.id || null;
+        
+        // Update state
         if (newName !== userName) {
           setUserName(newName);
         }
-        if (user.id !== currentUserId) {
-          setCurrentUserId(user.id);
+        if (newUserId !== currentUserId) {
+          setCurrentUserId(newUserId);
         }
-        if (user.photo !== userAvatar) {
-          setUserAvatar(user.photo || null);
+        if (newPhoto !== userAvatar) {
+          setUserAvatar(newPhoto);
+        }
+        
+        // Save to cache for future visits
+        if (newUserId) {
+          await saveCachedUserProfile(newName, newPhoto, newUserId);
         }
       }
     } catch (error) {
