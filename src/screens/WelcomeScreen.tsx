@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   StyleSheet,
@@ -7,6 +7,7 @@ import {
   Alert,
   Image,
   Text as RNText,
+  Animated,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Logo } from '../components/Logo';
@@ -25,6 +26,7 @@ import { useIsMobile, responsiveWidth } from '../utils/responsive';
 interface WelcomeScreenProps {
   onGetStarted: () => void;
   onDemoChat?: () => void | Promise<void>;
+  isCheckingAuth?: boolean;
 }
 
 // Google logo path from public/welcome page folder
@@ -59,7 +61,7 @@ const GoogleIcon: React.FC = () => {
   );
 };
 
-export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDemoChat }) => {
+export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDemoChat, isCheckingAuth = false }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [isDemoLoading, setIsDemoLoading] = useState(false);
   const { setUser, updateFormData, checkOnboardingStatus, isComplete, isDemoUser, setIsDemoUser, resetOnboarding, user } = useOnboarding();
@@ -69,6 +71,31 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
   
   // Calculate responsive button width
   const buttonWidth = responsiveWidth(90, 280, 320, 0);
+
+  // Spinning animation for logo when checking auth
+  const spinAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (isCheckingAuth) {
+      // Start spinning animation
+      Animated.loop(
+        Animated.timing(spinAnim, {
+          toValue: 1,
+          duration: 2000,
+          useNativeDriver: true,
+        })
+      ).start();
+    } else {
+      // Stop spinning animation
+      spinAnim.stopAnimation();
+      spinAnim.setValue(0);
+    }
+  }, [isCheckingAuth, spinAnim]);
+
+  const spin = spinAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  });
 
   useEffect(() => {
     // Load Montserrat font from Google Fonts for web
@@ -272,7 +299,12 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
           userEmail: user.email,
         });
         
-        onGetStarted();
+        // Check if user has finished onboarding before navigating
+        const hasFinishedOnboarding = await checkOnboardingStatus();
+        if (!hasFinishedOnboarding) {
+          onGetStarted(); // Only navigate to onboarding if not complete
+        }
+        // If complete, don't call onGetStarted() - AppContent will show ConversationsScreen
       } else {
         console.log('Using mobile Google OAuth flow');
         const user = await authService.signInWithGoogle();
@@ -285,7 +317,12 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
           userEmail: user.email,
         });
         
-        onGetStarted();
+        // Check if user has finished onboarding before navigating
+        const hasFinishedOnboarding = await checkOnboardingStatus();
+        if (!hasFinishedOnboarding) {
+          onGetStarted(); // Only navigate to onboarding if not complete
+        }
+        // If complete, don't call onGetStarted() - AppContent will show ConversationsScreen
       }
     } catch (error: any) {
       console.error('Google Sign-In Error:', error);
@@ -372,10 +409,11 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
         <View style={styles.content}>
           {/* Centered logo and tagline */}
           <View style={styles.topContent}>
-            {/* Logo (includes SWELLYO text) */}
-            <View style={styles.logoContainer}>
-              <Logo size={112} />
-            </View>
+            {/* Logo - only icon spins, text stays static */}
+            <Logo 
+              size={112} 
+              iconWrapperStyle={isCheckingAuth ? { transform: [{ rotate: spin }] } : undefined}
+            />
 
             {/* Tagline */}
             <RNText style={styles.tagline}>
@@ -387,19 +425,21 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
           <View style={styles.bottomContent}>
             {/* Call to Action */}
             <View style={styles.buttonContainer}>
-            <TouchableOpacity
-              onPress={handleGoogleSignIn}
-              disabled={isLoading}
-              style={[styles.getStartedButton, { width: buttonWidth }, isLoading && styles.buttonDisabled]}
-              activeOpacity={0.8}
-            >
-              <View style={styles.buttonContent}>
-                <GoogleIcon />
-                <RNText style={styles.getStartedButtonText} numberOfLines={1}>
-                  {isLoading ? "Signing in..." : "Continue with Google"}
-                </RNText>
-              </View>
-            </TouchableOpacity>
+            {!isCheckingAuth && (
+              <TouchableOpacity
+                onPress={handleGoogleSignIn}
+                disabled={isLoading}
+                style={[styles.getStartedButton, { width: buttonWidth }, isLoading && styles.buttonDisabled]}
+                activeOpacity={0.8}
+              >
+                <View style={styles.buttonContent}>
+                  <GoogleIcon />
+                  <RNText style={styles.getStartedButtonText} numberOfLines={1}>
+                    {isLoading ? "Signing in..." : "Continue with Google"}
+                  </RNText>
+                </View>
+              </TouchableOpacity>
+            )}
             
             {/* Demo Chat Button */}
             {/* {onDemoChat && (

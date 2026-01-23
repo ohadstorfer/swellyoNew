@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, StyleSheet, Image, Platform, Text } from 'react-native';
+import { View, StyleSheet, Image, Platform, Text, ViewStyle, Animated } from 'react-native';
 import { getImageUrl } from '../services/media/imageService';
 
 // Local logo assets from public/welcome page folder
@@ -8,9 +8,10 @@ const VECTOR_IMAGE_PATH = '/welcome page/Vector.svg';
 
 interface LogoProps {
   size?: number;
+  iconWrapperStyle?: ViewStyle | ViewStyle[] | any; // any to support Animated styles
 }
 
-export const Logo: React.FC<LogoProps> = ({ size = 112 }) => {
+export const Logo: React.FC<LogoProps> = ({ size = 112, iconWrapperStyle }) => {
   const [logoError, setLogoError] = React.useState(false);
   const [vectorError, setVectorError] = React.useState(false);
 
@@ -18,10 +19,13 @@ export const Logo: React.FC<LogoProps> = ({ size = 112 }) => {
   const logoUrl = React.useMemo(() => getImageUrl(LOGO_IMAGE_PATH), []);
   const vectorUrl = React.useMemo(() => getImageUrl(VECTOR_IMAGE_PATH), []);
 
+  // Use Animated.View if iconWrapperStyle is provided (it will contain animated transform)
+  const IconContainer = iconWrapperStyle ? Animated.View : View;
+
   return (
     <View style={styles.container}>
-      {/* Logo image - contains both logo and text */}
-      <View style={[styles.logoContainer, { width: size, height: size }]}>
+      {/* Logo image - icon only (text is in vector below) */}
+      <IconContainer style={[styles.logoContainer, { width: size, height: size }, iconWrapperStyle]}>
         {!logoError ? (
           <Image
             source={{ uri: logoUrl }}
@@ -37,9 +41,9 @@ export const Logo: React.FC<LogoProps> = ({ size = 112 }) => {
             <Text style={styles.fallbackLogoText}>S</Text>
           </View>
         )}
-      </View>
+      </IconContainer>
       
-      {/* Vector image below the logo */}
+      {/* Vector image below the logo - "SWELLYO" text */}
       <View style={styles.vectorContainer}>
         {!vectorError ? (
           <Image

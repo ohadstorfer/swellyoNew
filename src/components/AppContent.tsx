@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Alert } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { Alert, Platform } from 'react-native';
 import { WelcomeScreen } from '../screens/WelcomeScreen';
 import { OnboardingWelcomeScreen } from '../screens/OnboardingWelcomeScreen';
 import { OnboardingStep1Screen, OnboardingData } from '../screens/OnboardingStep1Screen';
@@ -19,16 +19,63 @@ import { useOnboarding } from '../context/OnboardingContext';
 import { analyticsService } from '../services/analytics/analyticsService';
 
 export const AppContent: React.FC = () => {
-  const { currentStep, formData, setCurrentStep, updateFormData, saveStepToSupabase, isComplete, markOnboardingComplete, isDemoUser, setIsDemoUser, setUser, resetOnboarding } = useOnboarding();
+  const { currentStep, formData, setCurrentStep, updateFormData, saveStepToSupabase, isComplete, markOnboardingComplete, isDemoUser, setIsDemoUser, setUser, resetOnboarding, user } = useOnboarding();
   const [showLoading, setShowLoading] = useState(false);
   const [isSavingStep1, setIsSavingStep1] = useState(false);
   const [isSavingStep2, setIsSavingStep2] = useState(false);
   const [isSavingStep3, setIsSavingStep3] = useState(false);
   const [isSavingStep4, setIsSavingStep4] = useState(false);
   const [showMVPThankYou, setShowMVPThankYou] = useState(false);
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   
   // Check if MVP mode is enabled
   const isMVPMode = process.env.EXPO_PUBLIC_MVP_MODE === 'true';
+
+  // Check for OAuth return indicators before rendering WelcomeScreen
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') {
+      // Not web, no OAuth return possible
+      setIsCheckingAuth(false);
+      return;
+    }
+
+    // Check for OAuth return indicators
+    const hashParams = new URLSearchParams(window.location.hash.substring(1));
+    const urlParams = new URLSearchParams(window.location.search);
+    const accessToken = hashParams.get('access_token');
+    const code = urlParams.get('code');
+
+    let timeout: ReturnType<typeof setTimeout>;
+
+    if (accessToken || code) {
+      // OAuth return detected - keep checking, let WelcomeScreen's checkAuthState handle it
+      // Wait a bit for WelcomeScreen's checkAuthState to complete
+      // The user effect below will stop checking when user is set
+      timeout = setTimeout(() => {
+        // If user is still null after delay, stop checking (auth might have failed)
+        setIsCheckingAuth(false);
+      }, 3000);
+    } else {
+      // No OAuth return - allow WelcomeScreen's checkAuthState to run briefly
+      // Then stop checking
+      timeout = setTimeout(() => {
+        setIsCheckingAuth(false);
+      }, 500);
+    }
+
+    return () => {
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+    };
+  }, []);
+
+  // Stop checking when user is set
+  useEffect(() => {
+    if (user !== null) {
+      setIsCheckingAuth(false);
+    }
+  }, [user]);
 
   const handleGetStarted = () => {
     setCurrentStep(0); // Go to onboarding welcome/explanation screen first
@@ -692,5 +739,15 @@ export const AppContent: React.FC = () => {
   // Show welcome screen by default (before onboarding starts, when currentStep is -1 or not 0-5)
   // Note: currentStep === 0 shows OnboardingWelcomeScreen (handled above)
   // This handles: initial load, or when user hasn't started onboarding yet
-  return <WelcomeScreen onGetStarted={handleGetStarted} onDemoChat={handleDemoChat} />;
+  // IMPORTANT: Don't show WelcomeScreen if user is logged in or we're checking auth
+  // This prevents WelcomeScreen from flashing after Google login
+  if (user !== null) {
+    // User is logged in - don't show WelcomeScreen
+    // If onboarding is complete, isComplete check above will show ConversationsScreen
+    // If onboarding is not complete, currentStep should be 0 or higher to show onboarding
+    // If we're in a weird state (user exists but currentStep is -1), wait for onboarding check to complete
+    return null; // Will re-render once onboarding status is checked and currentStep/isComplete is updated
+  }
+
+  return <WelcomeScreen onGetStarted={handleGetStarted} onDemoChat={handleDemoChat} isCheckingAuth={isCheckingAuth} />;
 };
