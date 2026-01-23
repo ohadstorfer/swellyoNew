@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Alert, Platform } from 'react-native';
 import { WelcomeScreen } from '../screens/WelcomeScreen';
 import { OnboardingWelcomeScreen } from '../screens/OnboardingWelcomeScreen';
@@ -27,15 +27,43 @@ export const AppContent: React.FC = () => {
   const [isSavingStep4, setIsSavingStep4] = useState(false);
   const [showMVPThankYou, setShowMVPThankYou] = useState(false);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+  const authCheckStartTime = useRef<number>(Date.now());
+  const stopTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const minLoadingDuration = 6000; // 3 seconds minimum
   
   // Check if MVP mode is enabled
   const isMVPMode = process.env.EXPO_PUBLIC_MVP_MODE === 'true';
 
+  // Helper function to stop checking auth after minimum duration
+  const stopCheckingAuth = useCallback(() => {
+    // If already scheduled, don't schedule again
+    if (stopTimeoutRef.current !== null) {
+      return;
+    }
+    
+    const elapsed = Date.now() - authCheckStartTime.current;
+    const remaining = Math.max(0, minLoadingDuration - elapsed);
+    
+    if (remaining > 0) {
+      // Wait for remaining time to meet minimum duration
+      stopTimeoutRef.current = setTimeout(() => {
+        setIsCheckingAuth(false);
+        stopTimeoutRef.current = null;
+      }, remaining);
+    } else {
+      // Minimum duration already met, stop immediately
+      setIsCheckingAuth(false);
+      stopTimeoutRef.current = null;
+    }
+  }, [minLoadingDuration]);
+
   // Check for OAuth return indicators before rendering WelcomeScreen
   useEffect(() => {
+    authCheckStartTime.current = Date.now();
+    
     if (Platform.OS !== 'web' || typeof window === 'undefined') {
       // Not web, no OAuth return possible
-      setIsCheckingAuth(false);
+      stopCheckingAuth();
       return;
     }
 
@@ -45,37 +73,41 @@ export const AppContent: React.FC = () => {
     const accessToken = hashParams.get('access_token');
     const code = urlParams.get('code');
 
-    let timeout: ReturnType<typeof setTimeout>;
-
     if (accessToken || code) {
       // OAuth return detected - keep checking, let WelcomeScreen's checkAuthState handle it
-      // Wait a bit for WelcomeScreen's checkAuthState to complete
-      // The user effect below will stop checking when user is set
-      timeout = setTimeout(() => {
-        // If user is still null after delay, stop checking (auth might have failed)
-        setIsCheckingAuth(false);
-      }, 3000);
+      // The user effect below will stop checking when user is set (with minimum duration)
+      // Also set a maximum timeout in case auth fails
+      const maxTimeout = setTimeout(() => {
+        // If user is still null after max delay, stop checking (auth might have failed)
+        stopCheckingAuth();
+      }, 5000); // 5 seconds max, but will respect minimum 3 seconds
+      
+      return () => {
+        clearTimeout(maxTimeout);
+      };
     } else {
       // No OAuth return - allow WelcomeScreen's checkAuthState to run briefly
-      // Then stop checking
-      timeout = setTimeout(() => {
-        setIsCheckingAuth(false);
-      }, 500);
+      // Then stop checking after minimum duration
+      stopCheckingAuth();
     }
+  }, [stopCheckingAuth]);
 
+  // Stop checking when user is set (but ensure minimum duration)
+  useEffect(() => {
+    if (user !== null) {
+      stopCheckingAuth();
+    }
+  }, [user, stopCheckingAuth]);
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
     return () => {
-      if (timeout) {
-        clearTimeout(timeout);
+      if (stopTimeoutRef.current !== null) {
+        clearTimeout(stopTimeoutRef.current);
+        stopTimeoutRef.current = null;
       }
     };
   }, []);
-
-  // Stop checking when user is set
-  useEffect(() => {
-    if (user !== null) {
-      setIsCheckingAuth(false);
-    }
-  }, [user]);
 
   const handleGetStarted = () => {
     setCurrentStep(0); // Go to onboarding welcome/explanation screen first
