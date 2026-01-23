@@ -20,7 +20,7 @@ import { Text as RNText } from 'react-native';
 import { colors, spacing, typography } from '../styles/theme';
 import { supabaseDatabaseService, SupabaseSurfer } from '../services/database/supabaseDatabaseService';
 import { supabase } from '../config/supabase';
-import { getImageUrl, getCountryImageFromStorage, getCountryImageFallback } from '../services/media/imageService';
+import { getImageUrl, getCountryImageFromStorage, getCountryImageFallback, getCountryImageFromPexels } from '../services/media/imageService';
 import { getSurfLevelVideoFromStorage } from '../services/media/videoService';
 import { getCountryFlag } from '../utils/countryFlags';
 import { uploadProfileImage } from '../services/storage/storageService';
@@ -507,6 +507,8 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
   const [loading, setLoading] = useState(true);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
+  // Track Pexels image URLs for countries that don't have bucket images
+  const [pexelsImages, setPexelsImages] = useState<{ [country: string]: string | null }>({});
   
   // Determine if we're viewing our own profile or another user's
   const isViewingOwnProfile = !userId;
@@ -514,6 +516,48 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
   useEffect(() => {
     loadProfileData();
   }, [userId]);
+
+  // Fetch Pexels images for countries without bucket images
+  useEffect(() => {
+    if (!profileData || !profileData.destinations_array) return;
+
+    const fetchPexelsImages = async () => {
+      const destinations = profileData.destinations_array || [];
+      const pexelsPromises: Promise<void>[] = [];
+
+      destinations.forEach((destination) => {
+        const country = destination.country || (destination as any).destination_name?.split(',')[0]?.trim() || '';
+        if (!country) return;
+
+        // Only fetch from Pexels if bucket image is not available
+        const bucketImageUrl = getCountryImageFromStorage(country);
+        if (!bucketImageUrl && !pexelsImages[country]) {
+          // Fetch Pexels image in the background
+          pexelsPromises.push(
+            getCountryImageFromPexels(country).then((pexelsUrl) => {
+              if (pexelsUrl) {
+                setPexelsImages((prev) => ({
+                  ...prev,
+                  [country]: pexelsUrl,
+                }));
+              } else {
+                // Mark as attempted (null) to avoid repeated failed requests
+                setPexelsImages((prev) => ({
+                  ...prev,
+                  [country]: null,
+                }));
+              }
+            })
+          );
+        }
+      });
+
+      // Fetch all Pexels images in parallel
+      await Promise.all(pexelsPromises);
+    };
+
+    fetchPexelsImages();
+  }, [profileData]);
 
   const loadProfileData = async () => {
     try {
@@ -1007,6 +1051,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
                   : country;
                 // Try to get country image from Supabase bucket first
                 const countryImageUrl = getCountryImageFromStorage(country);
+                const pexelsImageUrl = pexelsImages[country] || null;
                 const countryFlagUrl = getCountryFlag(country);
                 
                 return (
@@ -1018,14 +1063,27 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
                         style={styles.destinationImage}
                         resizeMode="cover"
                         onError={() => {
-                          // If bucket image fails to load, fallback to flag or Unsplash
+                          // If bucket image fails to load, fallback to Pexels, flag, or placeholder
                           if (__DEV__) {
                             console.warn(`[ProfileScreen] Country image failed to load: ${countryImageUrl}, falling back`);
                           }
                         }}
                       />
+                    ) : pexelsImageUrl ? (
+                      // Use Pexels image if bucket image not available but Pexels image is loaded
+                      <Image
+                        source={{ uri: pexelsImageUrl }}
+                        style={styles.destinationImage}
+                        resizeMode="cover"
+                        onError={() => {
+                          // If Pexels image fails to load, fallback to flag or placeholder
+                          if (__DEV__) {
+                            console.warn(`[ProfileScreen] Pexels image failed to load: ${pexelsImageUrl}, falling back`);
+                          }
+                        }}
+                      />
                     ) : countryFlagUrl ? (
-                      // Fallback to country flag if bucket image not available
+                      // Fallback to country flag if bucket and Pexels images not available
                       <Image
                         source={{ uri: countryFlagUrl }}
                         style={styles.destinationImage}

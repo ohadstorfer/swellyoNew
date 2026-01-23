@@ -69,14 +69,10 @@ const getCountryImageFileName = (countryName: string): string | null => {
   const baseFileName = countryMap[lowerCountry];
   
   if (!baseFileName) {
-    // If not in map, try to construct from country name
-    // Convert "New Zealand" -> "NewZealand", "Costa Rica" -> "CostaRica", etc.
-    const constructed = normalized
-      .split(/[\s-]+/)
-      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-      .join('');
-    
-    return `${constructed}.jpg`;
+    // Country not in the map - return null
+    // This means the image doesn't exist in the Supabase bucket
+    // The caller should use the fallback (flag or placeholder) instead
+    return null;
   }
   
   return `${baseFileName}.jpg`;
