@@ -724,41 +724,87 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
   };
 
   const uploadAndUpdateProfile = async (imageUri: string) => {
-    if (!currentUserId) return;
+    console.log('[ProfileScreen] uploadAndUpdateProfile called with URI:', imageUri);
+    console.log('[ProfileScreen] currentUserId:', currentUserId);
+    
+    if (!currentUserId) {
+      console.error('[ProfileScreen] uploadAndUpdateProfile: No currentUserId');
+      Alert.alert('Error', 'User not authenticated. Please try again.');
+      throw new Error('User not authenticated');
+    }
 
     setIsUploadingImage(true);
     try {
+      console.log('[ProfileScreen] Starting image upload...');
       // Upload image to storage
       const result = await uploadProfileImage(imageUri, currentUserId);
+      console.log('[ProfileScreen] Upload result:', result);
       
       if (result.success && result.url) {
+        console.log('[ProfileScreen] Upload successful, URL:', result.url);
+        console.log('[ProfileScreen] Updating profile with new image URL...');
+        
         // Update profile with new image URL
-        await supabaseDatabaseService.saveSurfer({
+        const updateResult = await supabaseDatabaseService.saveSurfer({
           profileImageUrl: result.url,
         });
+        console.log('[ProfileScreen] Profile update result:', updateResult);
 
         // Reload profile data to show new image
+        console.log('[ProfileScreen] Reloading profile data...');
         await loadProfileData();
         
+        console.log('[ProfileScreen] Profile picture updated successfully!');
         Alert.alert('Success', 'Profile picture updated successfully!');
       } else {
         const errorMessage = result.error || 'Failed to upload image';
-        console.error('Upload failed:', errorMessage);
+        console.error('[ProfileScreen] Upload failed:', errorMessage);
         Alert.alert('Upload Failed', errorMessage);
+        throw new Error(errorMessage);
       }
     } catch (error) {
-      console.error('Error uploading profile image:', error);
-      Alert.alert('Error', 'Failed to upload profile picture. Please try again.');
+      console.error('[ProfileScreen] Error uploading profile image:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error('[ProfileScreen] Error details:', errorMessage);
+      Alert.alert('Error', `Failed to upload profile picture: ${errorMessage}`);
+      throw error; // Re-throw so handleCroppedImage can catch it
     } finally {
       setIsUploadingImage(false);
+      console.log('[ProfileScreen] Upload process completed');
     }
   };
 
   // Handle cropped image from ImageCropper
   const handleCroppedImage = async (croppedImageUri: string) => {
-    setShowImageCropper(false);
-    setSelectedImageUri(null);
-    await uploadAndUpdateProfile(croppedImageUri);
+    console.log('[ProfileScreen] handleCroppedImage called with URI:', croppedImageUri);
+    console.log('[ProfileScreen] URI type:', {
+      isData: croppedImageUri.startsWith('data:'),
+      isBlob: croppedImageUri.startsWith('blob:'),
+      isFile: croppedImageUri.startsWith('file://'),
+      isHttp: croppedImageUri.startsWith('http'),
+      firstChars: croppedImageUri.substring(0, 50),
+    });
+    
+    if (!currentUserId) {
+      console.error('[ProfileScreen] No currentUserId available for upload');
+      Alert.alert('Error', 'User not authenticated. Please try again.');
+      setShowImageCropper(false);
+      setSelectedImageUri(null);
+      return;
+    }
+    
+    // Don't close the cropper immediately - let the upload process handle it
+    // This prevents the modal from closing before upload completes
+    try {
+      await uploadAndUpdateProfile(croppedImageUri);
+      // Only close after successful upload
+      setShowImageCropper(false);
+      setSelectedImageUri(null);
+    } catch (error) {
+      console.error('[ProfileScreen] Error in handleCroppedImage:', error);
+      Alert.alert('Error', 'Failed to process cropped image. Please try again.');
+      // Keep cropper open on error so user can try again
+    }
   };
 
   // Handle cancel from ImageCropper

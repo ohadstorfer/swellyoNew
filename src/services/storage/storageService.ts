@@ -55,21 +55,52 @@ export const uploadProfileImage = async (
     const fileExtension = 'jpg';
     const fileName = `${userId}/profile-${Date.now()}.${fileExtension}`;
 
+    console.log('[StorageService] Received image URI:', imageUri);
+    console.log('[StorageService] URI type check:', {
+      isData: imageUri.startsWith('data:'),
+      isBlob: imageUri.startsWith('blob:'),
+      isFile: imageUri.startsWith('file://'),
+      isContent: imageUri.startsWith('content://'),
+      isPh: imageUri.startsWith('ph://'),
+      isHttp: imageUri.startsWith('http://') || imageUri.startsWith('https://'),
+      firstChars: imageUri.substring(0, 50),
+    });
+
     let blob: Blob;
 
     // Handle different image formats
     if (imageUri.startsWith('data:')) {
       // Base64 data URL (web)
+      console.log('[StorageService] Handling data: URI');
       blob = dataURLtoBlob(imageUri);
+    } else if (imageUri.startsWith('blob:')) {
+      // Blob URL (web - from expo-image-manipulator)
+      console.log('[StorageService] Handling blob: URI');
+      blob = await uriToBlob(imageUri);
     } else if (imageUri.startsWith('file://') || imageUri.startsWith('content://') || imageUri.startsWith('ph://')) {
       // Local file URI (React Native)
+      console.log('[StorageService] Handling file:///content:///ph:// URI');
       blob = await uriToBlob(imageUri);
     } else if (imageUri.startsWith('http://') || imageUri.startsWith('https://')) {
       // Already a URL - might be updating from existing
       // Fetch and re-upload
+      console.log('[StorageService] Handling http:// URI');
       blob = await uriToBlob(imageUri);
     } else {
-      return { success: false, error: 'Unsupported image format' };
+      // Fallback: Try to fetch as blob (works for most formats)
+      // This handles cases where expo-image-manipulator returns unexpected formats
+      console.log('[StorageService] Unknown format, attempting to fetch as blob...');
+      try {
+        blob = await uriToBlob(imageUri);
+        console.log('[StorageService] Successfully converted unknown format to blob');
+      } catch (fetchError) {
+        console.error('[StorageService] Failed to fetch as blob:', fetchError);
+        console.error('[StorageService] Full URI (first 100 chars):', imageUri.substring(0, 100));
+        return { 
+          success: false, 
+          error: `Unsupported image format. URI starts with: ${imageUri.substring(0, 20)}...` 
+        };
+      }
     }
 
     // Try to upload directly - this is more reliable than checking buckets first
