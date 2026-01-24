@@ -67,6 +67,11 @@ export const ImageCropper: React.FC<ImageCropperProps> = ({
 
   const pinchRef = useRef(null);
   const panRef = useRef(null);
+  const imageRef = useRef<Animated.Image>(null);
+  
+  // Web-specific touch handlers for better compatibility
+  const lastTouchDistance = useRef<number | null>(null);
+  const lastTouchCenter = useRef<{ x: number; y: number } | null>(null);
 
   // Calculate crop area dimensions - make it as large as possible
   const [cropDimensions, setCropDimensions] = useState({ width: MAX_CROP_SIZE, height: MAX_CROP_SIZE });
@@ -97,15 +102,151 @@ export const ImageCropper: React.FC<ImageCropperProps> = ({
     return { width: cropW, height: cropH };
   };
 
+  // Web-specific zoom handlers
+  const handleWebTouchStart = (e: any) => {
+    if (Platform.OS !== 'web' || !visible) return;
+    
+    // Get touches from React Native Web event structure
+    const nativeEvent = e.nativeEvent || {};
+    const touches = nativeEvent.touches || (e.touches ? Array.from(e.touches) : []);
+    
+    if (touches && touches.length === 2) {
+      if (e.preventDefault) e.preventDefault();
+      const touch1 = touches[0];
+      const touch2 = touches[1];
+      const distance = Math.hypot(
+        (touch2.pageX || touch2.clientX) - (touch1.pageX || touch1.clientX),
+        (touch2.pageY || touch2.clientY) - (touch1.pageY || touch1.clientY)
+      );
+      lastTouchDistance.current = distance;
+      lastTouchCenter.current = {
+        x: ((touch1.pageX || touch1.clientX) + (touch2.pageX || touch2.clientX)) / 2,
+        y: ((touch1.pageY || touch1.clientY) + (touch2.pageY || touch2.clientY)) / 2,
+      };
+    } else if (touches && touches.length === 1) {
+      // Single touch - start pan
+      const touch = touches[0];
+      lastTouchCenter.current = {
+        x: touch.pageX || touch.clientX,
+        y: touch.pageY || touch.clientY,
+      };
+    }
+  };
+
+  const handleWebTouchMove = (e: any) => {
+    if (Platform.OS !== 'web' || !visible) return;
+    
+    const nativeEvent = e.nativeEvent || {};
+    const touches = nativeEvent.touches || (e.touches ? Array.from(e.touches) : []);
+    
+    if (touches && touches.length === 2 && lastTouchDistance.current !== null) {
+      if (e.preventDefault) e.preventDefault();
+      const touch1 = touches[0];
+      const touch2 = touches[1];
+      const distance = Math.hypot(
+        (touch2.pageX || touch2.clientX) - (touch1.pageX || touch1.clientX),
+        (touch2.pageY || touch2.clientY) - (touch1.pageY || touch1.clientY)
+      );
+      
+      const scaleChange = distance / lastTouchDistance.current;
+      const newScale = Math.max(
+        MIN_SCALE,
+        Math.min(MAX_SCALE, savedScale.value * scaleChange)
+      );
+      
+      scale.value = newScale;
+      lastTouchDistance.current = distance;
+    } else if (touches && touches.length === 1 && lastTouchCenter.current) {
+      // Single finger pan
+      if (e.preventDefault) e.preventDefault();
+      const touch = touches[0];
+      const currentX = touch.pageX || touch.clientX;
+      const currentY = touch.pageY || touch.clientY;
+      const deltaX = currentX - lastTouchCenter.current.x;
+      const deltaY = currentY - lastTouchCenter.current.y;
+      translateX.value = savedTranslateX.value + deltaX;
+      translateY.value = savedTranslateY.value + deltaY;
+      lastTouchCenter.current = { x: currentX, y: currentY };
+    }
+  };
+
+  const handleWebTouchEnd = () => {
+    if (Platform.OS !== 'web') return;
+    savedScale.value = scale.value;
+    savedTranslateX.value = translateX.value;
+    savedTranslateY.value = translateY.value;
+    lastTouchDistance.current = null;
+    lastTouchCenter.current = null;
+    constrainPosition();
+  };
+
+  // Mouse wheel zoom for desktop web
+  const handleWebWheel = (e: any) => {
+    if (Platform.OS !== 'web' || !visible) return;
+    
+    const wheelEvent = e.nativeEvent || e;
+    if (wheelEvent.ctrlKey || wheelEvent.metaKey) {
+      e.preventDefault();
+      const delta = wheelEvent.deltaY;
+      const scaleFactor = delta > 0 ? 0.9 : 1.1;
+      const newScale = Math.max(
+        MIN_SCALE,
+        Math.min(MAX_SCALE, savedScale.value * scaleFactor)
+      );
+      scale.value = newScale;
+      savedScale.value = newScale;
+      constrainPosition();
+    }
+  };
+
+  // Prevent browser zoom on web
+  React.useEffect(() => {
+    if (visible && Platform.OS === 'web') {
+      // Prevent default pinch zoom on the document
+      const preventZoom = (e: TouchEvent) => {
+        if (e.touches.length > 1) {
+          e.preventDefault();
+        }
+      };
+      
+      const preventWheelZoom = (e: WheelEvent) => {
+        if (e.ctrlKey || e.metaKey) {
+          e.preventDefault();
+        }
+      };
+
+      document.addEventListener('touchstart', preventZoom, { passive: false });
+      document.addEventListener('touchmove', preventZoom, { passive: false });
+      document.addEventListener('wheel', preventWheelZoom, { passive: false });
+      
+      // Set viewport meta to prevent zoom
+      const viewport = document.querySelector('meta[name=viewport]');
+      if (viewport) {
+        viewport.setAttribute('content', 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no');
+      }
+
+      return () => {
+        document.removeEventListener('touchstart', preventZoom);
+        document.removeEventListener('touchmove', preventZoom);
+        document.removeEventListener('wheel', preventWheelZoom);
+        if (viewport) {
+          viewport.setAttribute('content', 'width=device-width, initial-scale=1.0, user-scalable=yes');
+        }
+      };
+    }
+  }, [visible]);
+
   // Load image dimensions
   React.useEffect(() => {
     if (imageUri && visible) {
+      console.log('[ImageCropper] Loading image dimensions for:', imageUri);
       if (Platform.OS === 'web') {
         // For web, create an image element to get dimensions
         const img = new window.Image();
         img.onload = () => {
           const width = img.width;
           const height = img.height;
+          console.log('[ImageCropper] Image loaded (web), dimensions:', width, 'x', height);
           setImageSize({ width, height });
           imageWidth.value = width;
           imageHeight.value = height;
@@ -148,19 +289,20 @@ export const ImageCropper: React.FC<ImageCropperProps> = ({
           savedTranslateX.value = 0;
           savedTranslateY.value = 0;
         };
-        img.onerror = (error) => {
-          console.error('Error loading image:', error);
-          // Fallback size
-          setImageSize({ width: CROP_SIZE, height: CROP_SIZE });
-        };
+         img.onerror = (error) => {
+           console.error('Error loading image:', error);
+           // Fallback size
+           setImageSize({ width: MAX_CROP_SIZE, height: MAX_CROP_SIZE });
+         };
         img.src = imageUri;
-      } else {
-        Image.getSize(
-          imageUri,
-          (width, height) => {
-            setImageSize({ width, height });
-            imageWidth.value = width;
-            imageHeight.value = height;
+       } else {
+         Image.getSize(
+           imageUri,
+           (width, height) => {
+             console.log('[ImageCropper] Image loaded (native), dimensions:', width, 'x', height);
+             setImageSize({ width, height });
+             imageWidth.value = width;
+             imageHeight.value = height;
             
             // Calculate optimal crop size
             const optimalCrop = calculateOptimalCropSize(width, height);
@@ -200,11 +342,11 @@ export const ImageCropper: React.FC<ImageCropperProps> = ({
             savedTranslateX.value = 0;
             savedTranslateY.value = 0;
           },
-          (error) => {
-            console.error('Error getting image size:', error);
-            // Fallback size
-            setImageSize({ width: CROP_SIZE, height: CROP_SIZE });
-          }
+           (error) => {
+             console.error('Error getting image size:', error);
+             // Fallback size
+             setImageSize({ width: MAX_CROP_SIZE, height: MAX_CROP_SIZE });
+           }
         );
       }
     }
@@ -213,7 +355,9 @@ export const ImageCropper: React.FC<ImageCropperProps> = ({
   // Constrain image position within crop area
   const constrainPosition = () => {
     'worklet';
-    if (!imageWidth.value || !imageHeight.value) return;
+    if (!imageWidth.value || !imageHeight.value) {
+      return;
+    }
     
     const cropW = cropWidthShared.value;
     const cropH = cropHeightShared.value;
@@ -242,9 +386,11 @@ export const ImageCropper: React.FC<ImageCropperProps> = ({
   // Pinch gesture handler for zoom
   const pinchHandler = useAnimatedGestureHandler({
     onStart: (_, ctx: any) => {
+      'worklet';
       ctx.startScale = savedScale.value;
     },
     onActive: (event, ctx) => {
+      'worklet';
       const newScale = Math.max(
         MIN_SCALE,
         Math.min(MAX_SCALE, ctx.startScale * event.scale)
@@ -252,6 +398,7 @@ export const ImageCropper: React.FC<ImageCropperProps> = ({
       scale.value = newScale;
     },
     onEnd: () => {
+      'worklet';
       savedScale.value = scale.value;
       // Constrain position after zoom
       constrainPosition();
@@ -261,14 +408,17 @@ export const ImageCropper: React.FC<ImageCropperProps> = ({
   // Pan gesture handler for moving
   const panHandler = useAnimatedGestureHandler({
     onStart: (_, ctx: any) => {
+      'worklet';
       ctx.startX = savedTranslateX.value;
       ctx.startY = savedTranslateY.value;
     },
     onActive: (event, ctx) => {
+      'worklet';
       translateX.value = ctx.startX + event.translationX;
       translateY.value = ctx.startY + event.translationY;
     },
     onEnd: () => {
+      'worklet';
       savedTranslateX.value = translateX.value;
       savedTranslateY.value = translateY.value;
       constrainPosition();
@@ -418,36 +568,69 @@ export const ImageCropper: React.FC<ImageCropperProps> = ({
               <View style={styles.overlayRight} />
 
               {/* Image with gestures */}
-              <PinchGestureHandler
-                ref={pinchRef}
-                onGestureEvent={pinchHandler}
-                simultaneousHandlers={panRef}
-              >
-                <Animated.View style={styles.gestureContainer}>
-                  <PanGestureHandler
-                    ref={panRef}
-                    onGestureEvent={panHandler}
-                    simultaneousHandlers={pinchRef}
-                  >
-                    <Animated.View style={styles.gestureContainer}>
-                      {imageSize.width > 0 && imageSize.height > 0 && (
-                        <Animated.Image
-                          source={{ uri: imageUri }}
-                          style={[
-                            styles.image,
-                            {
-                              width: imageSize.width,
-                              height: imageSize.height,
-                            },
-                            imageAnimatedStyle,
-                          ]}
-                          resizeMode="contain"
-                        />
-                      )}
-                    </Animated.View>
-                  </PanGestureHandler>
+              {Platform.OS === 'web' ? (
+                // Web: Use native touch/mouse events (gesture handlers don't work well on web)
+                <Animated.View 
+                  style={styles.gestureContainer}
+                  onTouchStart={handleWebTouchStart}
+                  onTouchMove={handleWebTouchMove}
+                  onTouchEnd={handleWebTouchEnd}
+                  onWheel={handleWebWheel}
+                >
+                  {imageSize.width > 0 && imageSize.height > 0 && (
+                    <Animated.Image
+                      ref={imageRef}
+                      source={{ uri: imageUri }}
+                      style={[
+                        styles.image,
+                        {
+                          width: imageSize.width,
+                          height: imageSize.height,
+                        },
+                        imageAnimatedStyle,
+                      ]}
+                      resizeMode="contain"
+                    />
+                  )}
                 </Animated.View>
-              </PinchGestureHandler>
+              ) : (
+                // Native: Use gesture handlers
+                <PanGestureHandler
+                  ref={panRef}
+                  onGestureEvent={panHandler}
+                  simultaneousHandlers={pinchRef}
+                  minPointers={1}
+                  maxPointers={1}
+                >
+                  <Animated.View style={styles.gestureContainer}>
+                    <PinchGestureHandler
+                      ref={pinchRef}
+                      onGestureEvent={pinchHandler}
+                      simultaneousHandlers={panRef}
+                      minPointers={2}
+                      maxPointers={2}
+                    >
+                      <Animated.View style={styles.gestureContainer}>
+                        {imageSize.width > 0 && imageSize.height > 0 && (
+                          <Animated.Image
+                            ref={imageRef}
+                            source={{ uri: imageUri }}
+                            style={[
+                              styles.image,
+                              {
+                                width: imageSize.width,
+                                height: imageSize.height,
+                              },
+                              imageAnimatedStyle,
+                            ]}
+                            resizeMode="contain"
+                          />
+                        )}
+                      </Animated.View>
+                    </PinchGestureHandler>
+                  </Animated.View>
+                </PanGestureHandler>
+              )}
 
               {/* Crop frame border */}
               <View style={[styles.cropFrame, { width: cropDimensions.width, height: cropDimensions.height }]} />
@@ -522,17 +705,29 @@ const styles = StyleSheet.create({
   cropArea: {
     position: 'relative',
     alignSelf: 'center',
+    overflow: 'hidden',
+    ...(Platform.OS === 'web' && {
+      touchAction: 'none', // Prevent browser zoom/pan
+    }),
   },
   gestureContainer: {
     width: '100%',
     height: '100%',
     justifyContent: 'center',
     alignItems: 'center',
+    ...(Platform.OS === 'web' && {
+      touchAction: 'none', // Prevent browser zoom/pan
+    }),
   },
   image: {
     position: 'absolute',
     // Center the image - transforms will be applied from center
     alignSelf: 'center',
+    ...(Platform.OS === 'web' && {
+      touchAction: 'none', // Prevent browser zoom/pan
+      userSelect: 'none',
+      WebkitUserSelect: 'none',
+    }),
   },
   overlayTop: {
     position: 'absolute',

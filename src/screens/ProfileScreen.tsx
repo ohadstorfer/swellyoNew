@@ -31,6 +31,7 @@ import { analyticsService } from '../services/analytics/analyticsService';
 import { getSurfLevelMappingFromEnum } from '../utils/surfLevelMapping';
 import { useScreenDimensions } from '../utils/responsive';
 import { ImageCropper } from '../components/ImageCropper';
+import * as ImagePicker from 'expo-image-picker';
 
 interface ProfileScreenProps {
   onBack?: () => void;
@@ -687,7 +688,6 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
       } else {
         // For native, use expo-image-picker
         try {
-          const ImagePicker = require('expo-image-picker');
           const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
           if (status !== 'granted') {
             Alert.alert(
@@ -710,10 +710,10 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
             setShowImageCropper(true);
           }
         } catch (error) {
-          console.warn('expo-image-picker not available:', error);
+          console.error('Error picking image with expo-image-picker:', error);
           Alert.alert(
-            'Image Picker Not Available',
-            'Please install expo-image-picker for native platforms.'
+            'Error',
+            'Failed to pick image. Please try again.'
           );
         }
       }
