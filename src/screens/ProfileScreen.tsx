@@ -30,6 +30,7 @@ import { ProfileSkeleton } from '../components/skeletons';
 import { analyticsService } from '../services/analytics/analyticsService';
 import { getSurfLevelMappingFromEnum } from '../utils/surfLevelMapping';
 import { useScreenDimensions } from '../utils/responsive';
+import { ImageCropper } from '../components/ImageCropper';
 
 interface ProfileScreenProps {
   onBack?: () => void;
@@ -510,6 +511,9 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   // Track Pexels image URLs for countries that don't have bucket images
   const [pexelsImages, setPexelsImages] = useState<{ [country: string]: string | null }>({});
+  // Image cropper state
+  const [showImageCropper, setShowImageCropper] = useState(false);
+  const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
   
   // Determine if we're viewing our own profile or another user's
   const isViewingOwnProfile = !userId;
@@ -672,7 +676,9 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
             const reader = new FileReader();
             reader.onload = async (event: any) => {
               const imageUri = event.target.result;
-              await uploadAndUpdateProfile(imageUri);
+              // Show custom image cropper
+              setSelectedImageUri(imageUri);
+              setShowImageCropper(true);
             };
             reader.readAsDataURL(file);
           }
@@ -693,14 +699,15 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
 
           const result = await ImagePicker.launchImageLibraryAsync({
             mediaTypes: ImagePicker.MediaTypeOptions.Images,
-            allowsEditing: true,
-            aspect: [1, 1],
-            quality: 0.8,
+            allowsEditing: false, // We'll use our custom cropper
+            quality: 1.0, // Full quality for cropping
           });
 
           if (!result.canceled && result.assets[0]) {
             const imageUri = result.assets[0].uri;
-            await uploadAndUpdateProfile(imageUri);
+            // Show custom image cropper
+            setSelectedImageUri(imageUri);
+            setShowImageCropper(true);
           }
         } catch (error) {
           console.warn('expo-image-picker not available:', error);
@@ -745,6 +752,19 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
     } finally {
       setIsUploadingImage(false);
     }
+  };
+
+  // Handle cropped image from ImageCropper
+  const handleCroppedImage = async (croppedImageUri: string) => {
+    setShowImageCropper(false);
+    setSelectedImageUri(null);
+    await uploadAndUpdateProfile(croppedImageUri);
+  };
+
+  // Handle cancel from ImageCropper
+  const handleCancelCrop = () => {
+    setShowImageCropper(false);
+    setSelectedImageUri(null);
   };
 
   // Show skeleton while loading - show immediately to prevent "No profile data found" flash
@@ -1285,6 +1305,17 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
         </View>
       </ScrollView>
       </ImageBackground>
+
+      {/* Image Cropper Modal */}
+      {selectedImageUri && (
+        <ImageCropper
+          visible={showImageCropper}
+          imageUri={selectedImageUri}
+          onCancel={handleCancelCrop}
+          onSave={handleCroppedImage}
+          aspectRatio={[1, 1]} // Square for profile pictures
+        />
+      )}
     </SafeAreaView>
   );
 };
