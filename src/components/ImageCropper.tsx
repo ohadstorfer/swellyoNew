@@ -27,8 +27,10 @@ import {
 import * as ImageManipulator from 'expo-image-manipulator';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
-const CROP_SIZE = Math.min(SCREEN_WIDTH - 64, 320); // Max 320px, with padding
-const MIN_SCALE = 1;
+// Calculate available space for crop area (screen height minus header and instructions)
+const AVAILABLE_HEIGHT = SCREEN_HEIGHT - 200; // Reserve space for header and instructions
+const MAX_CROP_SIZE = Math.min(SCREEN_WIDTH - 64, AVAILABLE_HEIGHT - 40);
+const MIN_SCALE = 0.5; // Allow zooming out if needed
 const MAX_SCALE = 3;
 
 interface ImageCropperProps {
@@ -59,13 +61,41 @@ export const ImageCropper: React.FC<ImageCropperProps> = ({
   // Shared values for image size (worklets can access these)
   const imageWidth = useSharedValue(0);
   const imageHeight = useSharedValue(0);
+  // Shared values for crop dimensions
+  const cropWidthShared = useSharedValue(MAX_CROP_SIZE);
+  const cropHeightShared = useSharedValue(MAX_CROP_SIZE);
 
   const pinchRef = useRef(null);
   const panRef = useRef(null);
 
-  // Calculate crop area dimensions
-  const cropWidth = CROP_SIZE;
-  const cropHeight = CROP_SIZE * (aspectRatio[1] / aspectRatio[0]);
+  // Calculate crop area dimensions - make it as large as possible
+  const [cropDimensions, setCropDimensions] = useState({ width: MAX_CROP_SIZE, height: MAX_CROP_SIZE });
+  
+  // Calculate optimal crop size - make it as large as possible while fitting on screen
+  const calculateOptimalCropSize = (imgWidth: number, imgHeight: number) => {
+    if (!imgWidth || !imgHeight) return { width: MAX_CROP_SIZE, height: MAX_CROP_SIZE };
+    
+    const aspect = aspectRatio[0] / aspectRatio[1];
+    const availableWidth = SCREEN_WIDTH - 64;
+    const availableHeight = AVAILABLE_HEIGHT;
+    
+    // Calculate max size that fits both width and height constraints
+    // Start with width constraint
+    let cropW = availableWidth;
+    let cropH = cropW / aspect;
+    
+    // If height exceeds available space, use height constraint instead
+    if (cropH > availableHeight) {
+      cropH = availableHeight;
+      cropW = cropH * aspect;
+    }
+    
+    // Ensure minimum size
+    cropW = Math.max(200, cropW);
+    cropH = Math.max(200, cropH);
+    
+    return { width: cropW, height: cropH };
+  };
 
   // Load image dimensions
   React.useEffect(() => {
@@ -74,14 +104,47 @@ export const ImageCropper: React.FC<ImageCropperProps> = ({
         // For web, create an image element to get dimensions
         const img = new window.Image();
         img.onload = () => {
-          setImageSize({ width: img.width, height: img.height });
-          imageWidth.value = img.width;
-          imageHeight.value = img.height;
-          // Reset transforms when new image loads
+          const width = img.width;
+          const height = img.height;
+          setImageSize({ width, height });
+          imageWidth.value = width;
+          imageHeight.value = height;
+          
+          // Calculate optimal crop size
+          const optimalCrop = calculateOptimalCropSize(width, height);
+          setCropDimensions(optimalCrop);
+          cropWidthShared.value = optimalCrop.width;
+          cropHeightShared.value = optimalCrop.height;
+          
+          // Calculate initial scale to fit entire image within crop area
+          const cropW = optimalCrop.width;
+          const cropH = optimalCrop.height;
+          
+          // Calculate scale to fit the entire image within the crop area
+          // We want the image to be fully visible, so scale it down if needed
+          const scaleX = cropW / width;
+          const scaleY = cropH / height;
+          
+          // Use the smaller scale to ensure image fits in both dimensions
+          let initialScale = Math.min(scaleX, scaleY);
+          
+          // Never scale up beyond 1 (don't make image larger than original)
+          initialScale = Math.min(initialScale, 1);
+          
+          // Ensure the scaled image fully fits within crop area
+          const scaledWidth = width * initialScale;
+          const scaledHeight = height * initialScale;
+          
+          // If scaled image is still larger than crop, scale down more
+          if (scaledWidth > cropW || scaledHeight > cropH) {
+            initialScale = Math.min(cropW / width, cropH / height);
+          }
+          
+          // Reset transforms when new image loads - centered position
           translateX.value = 0;
           translateY.value = 0;
-          scale.value = 1;
-          savedScale.value = 1;
+          scale.value = initialScale;
+          savedScale.value = initialScale;
           savedTranslateX.value = 0;
           savedTranslateY.value = 0;
         };
@@ -98,11 +161,42 @@ export const ImageCropper: React.FC<ImageCropperProps> = ({
             setImageSize({ width, height });
             imageWidth.value = width;
             imageHeight.value = height;
-            // Reset transforms when new image loads
+            
+            // Calculate optimal crop size
+            const optimalCrop = calculateOptimalCropSize(width, height);
+            setCropDimensions(optimalCrop);
+            cropWidthShared.value = optimalCrop.width;
+            cropHeightShared.value = optimalCrop.height;
+            
+            // Calculate initial scale to fit entire image within crop area
+            const cropW = optimalCrop.width;
+            const cropH = optimalCrop.height;
+            
+            // Calculate scale to fit the entire image within the crop area
+            // We want the image to be fully visible, so scale it down if needed
+            const scaleX = cropW / width;
+            const scaleY = cropH / height;
+            
+            // Use the smaller scale to ensure image fits in both dimensions
+            let initialScale = Math.min(scaleX, scaleY);
+            
+            // Never scale up beyond 1 (don't make image larger than original)
+            initialScale = Math.min(initialScale, 1);
+            
+            // Ensure the scaled image fully fits within crop area
+            const scaledWidth = width * initialScale;
+            const scaledHeight = height * initialScale;
+            
+            // If scaled image is still larger than crop, scale down more
+            if (scaledWidth > cropW || scaledHeight > cropH) {
+              initialScale = Math.min(cropW / width, cropH / height);
+            }
+            
+            // Reset transforms when new image loads - centered position
             translateX.value = 0;
             translateY.value = 0;
-            scale.value = 1;
-            savedScale.value = 1;
+            scale.value = initialScale;
+            savedScale.value = initialScale;
             savedTranslateX.value = 0;
             savedTranslateY.value = 0;
           },
@@ -121,19 +215,21 @@ export const ImageCropper: React.FC<ImageCropperProps> = ({
     'worklet';
     if (!imageWidth.value || !imageHeight.value) return;
     
+    const cropW = cropWidthShared.value;
+    const cropH = cropHeightShared.value;
     const imageDisplayWidth = imageWidth.value * savedScale.value;
     const imageDisplayHeight = imageHeight.value * savedScale.value;
     
-    const maxX = (imageDisplayWidth - cropWidth) / 2;
-    const maxY = (imageDisplayHeight - cropHeight) / 2;
+    const maxX = (imageDisplayWidth - cropW) / 2;
+    const maxY = (imageDisplayHeight - cropH) / 2;
     
-    if (imageDisplayWidth <= cropWidth) {
+    if (imageDisplayWidth <= cropW) {
       savedTranslateX.value = 0;
     } else {
       savedTranslateX.value = Math.max(-maxX, Math.min(maxX, savedTranslateX.value));
     }
     
-    if (imageDisplayHeight <= cropHeight) {
+    if (imageDisplayHeight <= cropH) {
       savedTranslateY.value = 0;
     } else {
       savedTranslateY.value = Math.max(-maxY, Math.min(maxY, savedTranslateY.value));
@@ -188,7 +284,21 @@ export const ImageCropper: React.FC<ImageCropperProps> = ({
         { scale: scale.value },
       ],
     };
-  });
+  }, []);
+
+  // Calculate image display size based on initial scale
+  const getImageDisplaySize = () => {
+    if (!imageSize.width || !imageSize.height) {
+      return { width: cropDimensions.width, height: cropDimensions.height };
+    }
+    
+    // Use the saved scale to calculate display size
+    const currentScale = savedScale.value || 1;
+    return {
+      width: imageSize.width * currentScale,
+      height: imageSize.height * currentScale,
+    };
+  };
 
   // Handle crop and save
   const handleSave = async () => {
@@ -211,13 +321,16 @@ export const ImageCropper: React.FC<ImageCropperProps> = ({
       const cropCenterX = -currentTranslateX / scaleFactor;
       const cropCenterY = -currentTranslateY / scaleFactor;
 
+      const cropW = cropDimensions.width;
+      const cropH = cropDimensions.height;
+      
       // Calculate crop origin (top-left corner) in original image coordinates
-      const cropOriginX = (imageSize.width / 2) + cropCenterX - (cropWidth / 2 / scaleFactor);
-      const cropOriginY = (imageSize.height / 2) + cropCenterY - (cropHeight / 2 / scaleFactor);
+      const cropOriginX = (imageSize.width / 2) + cropCenterX - (cropW / 2 / scaleFactor);
+      const cropOriginY = (imageSize.height / 2) + cropCenterY - (cropH / 2 / scaleFactor);
       
       // Calculate crop dimensions in original image coordinates
-      const cropWidthOriginal = cropWidth / scaleFactor;
-      const cropHeightOriginal = cropHeight / scaleFactor;
+      const cropWidthOriginal = cropW / scaleFactor;
+      const cropHeightOriginal = cropH / scaleFactor;
 
       // Ensure crop region is within image bounds
       const finalOriginX = Math.max(0, Math.min(imageSize.width - cropWidthOriginal, cropOriginX));
@@ -297,7 +410,7 @@ export const ImageCropper: React.FC<ImageCropperProps> = ({
 
           {/* Crop Area */}
           <View style={styles.cropContainer}>
-            <View style={[styles.cropArea, { width: cropWidth, height: cropHeight }]}>
+            <View style={[styles.cropArea, { width: cropDimensions.width, height: cropDimensions.height }]}>
               {/* Overlay - darken outside crop area */}
               <View style={styles.overlayTop} />
               <View style={styles.overlayBottom} />
@@ -317,25 +430,27 @@ export const ImageCropper: React.FC<ImageCropperProps> = ({
                     simultaneousHandlers={pinchRef}
                   >
                     <Animated.View style={styles.gestureContainer}>
-                      <Animated.Image
-                        source={{ uri: imageUri }}
-                        style={[
-                          styles.image,
-                          {
-                            width: imageSize.width || CROP_SIZE,
-                            height: imageSize.height || CROP_SIZE,
-                          },
-                          imageAnimatedStyle,
-                        ]}
-                        resizeMode="contain"
-                      />
+                      {imageSize.width > 0 && imageSize.height > 0 && (
+                        <Animated.Image
+                          source={{ uri: imageUri }}
+                          style={[
+                            styles.image,
+                            {
+                              width: imageSize.width,
+                              height: imageSize.height,
+                            },
+                            imageAnimatedStyle,
+                          ]}
+                          resizeMode="contain"
+                        />
+                      )}
                     </Animated.View>
                   </PanGestureHandler>
                 </Animated.View>
               </PinchGestureHandler>
 
               {/* Crop frame border */}
-              <View style={[styles.cropFrame, { width: cropWidth, height: cropHeight }]} />
+              <View style={[styles.cropFrame, { width: cropDimensions.width, height: cropDimensions.height }]} />
             </View>
           </View>
 
@@ -411,9 +526,13 @@ const styles = StyleSheet.create({
   gestureContainer: {
     width: '100%',
     height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   image: {
     position: 'absolute',
+    // Center the image - transforms will be applied from center
+    alignSelf: 'center',
   },
   overlayTop: {
     position: 'absolute',
