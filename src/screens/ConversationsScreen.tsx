@@ -10,7 +10,6 @@ import {
   Modal,
   Alert,
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Path, G, ClipPath, Defs, Rect } from 'react-native-svg';
@@ -26,9 +25,7 @@ import { SwellyoTeamWelcome } from './SwellyoTeamWelcome';
 import { ProfileImage } from '../components/ProfileImage';
 import { ConversationListSkeleton, HeaderSkeleton } from '../components/skeletons';
 import { SKELETON_DELAY_MS } from '../constants/loading';
-
-const USER_PROFILE_CACHE_KEY = '@swellyo_user_profile';
-const CACHE_VALIDITY_MS = 24 * 60 * 60 * 1000; // 24 hours
+import { loadCachedUserProfile, saveCachedUserProfile } from '../utils/userProfileCache';
 
 interface ConversationsScreenProps {
   onConversationPress?: (conversationId: string) => void;
@@ -40,67 +37,7 @@ interface ConversationsScreenProps {
 
 type FilterType = 'all' | 'advisor' | 'seeker';
 
-// Cache helper functions
-const loadCachedUserProfile = async (): Promise<{ name: string; photo: string | null; userId: string } | null> => {
-  try {
-    // Check if AsyncStorage is available (handles Safari private mode and other edge cases)
-    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      try {
-        // Test localStorage availability (Safari private mode throws)
-        const testKey = '__storage_test__';
-        window.localStorage.setItem(testKey, 'test');
-        window.localStorage.removeItem(testKey);
-      } catch (e) {
-        // localStorage not available (e.g., Safari private mode)
-        console.warn('localStorage not available, skipping cache load');
-        return null;
-      }
-    }
-    
-    const cached = await AsyncStorage.getItem(USER_PROFILE_CACHE_KEY);
-    if (cached) {
-      const data = JSON.parse(cached);
-      // Check if cache is still valid (optional - can remove timestamp check for permanent cache)
-      const age = Date.now() - (data.timestamp || 0);
-      if (age < CACHE_VALIDITY_MS) {
-        return { name: data.name, photo: data.photo, userId: data.userId };
-      }
-    }
-  } catch (error) {
-    // Gracefully handle storage errors (Safari private mode, quota exceeded, etc.)
-    console.warn('Error loading cached user profile (will fetch from server):', error);
-  }
-  return null;
-};
-
-const saveCachedUserProfile = async (name: string, photo: string | null, userId: string) => {
-  try {
-    // Check if AsyncStorage is available (handles Safari private mode and other edge cases)
-    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      try {
-        // Test localStorage availability (Safari private mode throws)
-        const testKey = '__storage_test__';
-        window.localStorage.setItem(testKey, 'test');
-        window.localStorage.removeItem(testKey);
-      } catch (e) {
-        // localStorage not available (e.g., Safari private mode)
-        console.warn('localStorage not available, skipping cache save');
-        return;
-      }
-    }
-    
-    await AsyncStorage.setItem(USER_PROFILE_CACHE_KEY, JSON.stringify({
-      name,
-      photo,
-      userId,
-      timestamp: Date.now(),
-    }));
-  } catch (error) {
-    // Gracefully handle storage errors (Safari private mode, quota exceeded, etc.)
-    // Don't throw - caching is optional, app should work without it
-    console.warn('Error saving cached user profile (non-critical):', error);
-  }
-};
+// Cache helper functions are now imported from '../utils/userProfileCache'
 
 // Three Dots Menu Icon Component
 const ThreeDotsIcon: React.FC = () => {

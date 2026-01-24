@@ -30,8 +30,7 @@ import { ProfileSkeleton } from '../components/skeletons';
 import { analyticsService } from '../services/analytics/analyticsService';
 import { getSurfLevelMappingFromEnum } from '../utils/surfLevelMapping';
 import { useScreenDimensions } from '../utils/responsive';
-import { ImageCropper } from '../components/ImageCropper';
-import * as ImagePicker from 'expo-image-picker';
+import { updateCachedUserProfilePhoto } from '../utils/userProfileCache';
 
 interface ProfileScreenProps {
   onBack?: () => void;
@@ -512,9 +511,6 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   // Track Pexels image URLs for countries that don't have bucket images
   const [pexelsImages, setPexelsImages] = useState<{ [country: string]: string | null }>({});
-  // Image cropper state
-  const [showImageCropper, setShowImageCropper] = useState(false);
-  const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
   
   // Determine if we're viewing our own profile or another user's
   const isViewingOwnProfile = !userId;
@@ -677,9 +673,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
             const reader = new FileReader();
             reader.onload = async (event: any) => {
               const imageUri = event.target.result;
-              // Show custom image cropper
-              setSelectedImageUri(imageUri);
-              setShowImageCropper(true);
+              await uploadAndUpdateProfile(imageUri);
             };
             reader.readAsDataURL(file);
           }
@@ -688,6 +682,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
       } else {
         // For native, use expo-image-picker
         try {
+          const ImagePicker = require('expo-image-picker');
           const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
           if (status !== 'granted') {
             Alert.alert(
@@ -699,21 +694,20 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
 
           const result = await ImagePicker.launchImageLibraryAsync({
             mediaTypes: ImagePicker.MediaTypeOptions.Images,
-            allowsEditing: false, // We'll use our custom cropper
-            quality: 1.0, // Full quality for cropping
+            allowsEditing: true,
+            aspect: [1, 1],
+            quality: 0.8,
           });
 
           if (!result.canceled && result.assets[0]) {
             const imageUri = result.assets[0].uri;
-            // Show custom image cropper
-            setSelectedImageUri(imageUri);
-            setShowImageCropper(true);
+            await uploadAndUpdateProfile(imageUri);
           }
         } catch (error) {
-          console.error('Error picking image with expo-image-picker:', error);
+          console.warn('expo-image-picker not available:', error);
           Alert.alert(
-            'Error',
-            'Failed to pick image. Please try again.'
+            'Image Picker Not Available',
+            'Please install expo-image-picker for native platforms.'
           );
         }
       }
@@ -724,93 +718,39 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
   };
 
   const uploadAndUpdateProfile = async (imageUri: string) => {
-    console.log('[ProfileScreen] uploadAndUpdateProfile called with URI:', imageUri);
-    console.log('[ProfileScreen] currentUserId:', currentUserId);
-    
-    if (!currentUserId) {
-      console.error('[ProfileScreen] uploadAndUpdateProfile: No currentUserId');
-      Alert.alert('Error', 'User not authenticated. Please try again.');
-      throw new Error('User not authenticated');
-    }
+    if (!currentUserId) return;
 
     setIsUploadingImage(true);
     try {
-      console.log('[ProfileScreen] Starting image upload...');
       // Upload image to storage
       const result = await uploadProfileImage(imageUri, currentUserId);
-      console.log('[ProfileScreen] Upload result:', result);
       
       if (result.success && result.url) {
-        console.log('[ProfileScreen] Upload successful, URL:', result.url);
-        console.log('[ProfileScreen] Updating profile with new image URL...');
-        
         // Update profile with new image URL
-        const updateResult = await supabaseDatabaseService.saveSurfer({
+        await supabaseDatabaseService.saveSurfer({
           profileImageUrl: result.url,
         });
-        console.log('[ProfileScreen] Profile update result:', updateResult);
+
+        // Update cached profile image for conversation screen header
+        if (currentUserId) {
+          await updateCachedUserProfilePhoto(result.url, currentUserId);
+        }
 
         // Reload profile data to show new image
-        console.log('[ProfileScreen] Reloading profile data...');
         await loadProfileData();
         
-        console.log('[ProfileScreen] Profile picture updated successfully!');
         Alert.alert('Success', 'Profile picture updated successfully!');
       } else {
         const errorMessage = result.error || 'Failed to upload image';
-        console.error('[ProfileScreen] Upload failed:', errorMessage);
+        console.error('Upload failed:', errorMessage);
         Alert.alert('Upload Failed', errorMessage);
-        throw new Error(errorMessage);
       }
     } catch (error) {
-      console.error('[ProfileScreen] Error uploading profile image:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      console.error('[ProfileScreen] Error details:', errorMessage);
-      Alert.alert('Error', `Failed to upload profile picture: ${errorMessage}`);
-      throw error; // Re-throw so handleCroppedImage can catch it
+      console.error('Error uploading profile image:', error);
+      Alert.alert('Error', 'Failed to upload profile picture. Please try again.');
     } finally {
       setIsUploadingImage(false);
-      console.log('[ProfileScreen] Upload process completed');
     }
-  };
-
-  // Handle cropped image from ImageCropper
-  const handleCroppedImage = async (croppedImageUri: string) => {
-    console.log('[ProfileScreen] handleCroppedImage called with URI:', croppedImageUri);
-    console.log('[ProfileScreen] URI type:', {
-      isData: croppedImageUri.startsWith('data:'),
-      isBlob: croppedImageUri.startsWith('blob:'),
-      isFile: croppedImageUri.startsWith('file://'),
-      isHttp: croppedImageUri.startsWith('http'),
-      firstChars: croppedImageUri.substring(0, 50),
-    });
-    
-    if (!currentUserId) {
-      console.error('[ProfileScreen] No currentUserId available for upload');
-      Alert.alert('Error', 'User not authenticated. Please try again.');
-      setShowImageCropper(false);
-      setSelectedImageUri(null);
-      return;
-    }
-    
-    // Don't close the cropper immediately - let the upload process handle it
-    // This prevents the modal from closing before upload completes
-    try {
-      await uploadAndUpdateProfile(croppedImageUri);
-      // Only close after successful upload
-      setShowImageCropper(false);
-      setSelectedImageUri(null);
-    } catch (error) {
-      console.error('[ProfileScreen] Error in handleCroppedImage:', error);
-      Alert.alert('Error', 'Failed to process cropped image. Please try again.');
-      // Keep cropper open on error so user can try again
-    }
-  };
-
-  // Handle cancel from ImageCropper
-  const handleCancelCrop = () => {
-    setShowImageCropper(false);
-    setSelectedImageUri(null);
   };
 
   // Show skeleton while loading - show immediately to prevent "No profile data found" flash
@@ -1351,17 +1291,6 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
         </View>
       </ScrollView>
       </ImageBackground>
-
-      {/* Image Cropper Modal */}
-      {selectedImageUri && (
-        <ImageCropper
-          visible={showImageCropper}
-          imageUri={selectedImageUri}
-          onCancel={handleCancelCrop}
-          onSave={handleCroppedImage}
-          aspectRatio={[1, 1]} // Square for profile pictures
-        />
-      )}
     </SafeAreaView>
   );
 };
