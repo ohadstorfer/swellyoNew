@@ -181,16 +181,7 @@ CRITICAL RULES FOR DESTINATIONS:
   * For durations LESS than 1 year: Format as "X days" / "X weeks" / "X months" (preserve user's wording)
   * For durations 1 year or MORE: ALWAYS round to years or half-years (e.g., "1 year", "1.5 years", "2 years", "2.5 years", "3 years")
   * NEVER use "X years and Y months" format - always round to nearest year or half-year
-- CRITICAL RULES FOR COUNTRY NAMES (MUST FOLLOW STRICTLY):
-  * The "country" field MUST contain ONLY official country names - use standard ISO country names or widely recognized official names
-  * NEVER use states, provinces, regions, cities, towns, or nicknames in the "country" field
-  * If user mentions a state/province/region/city without a country, you MUST infer the correct country
-  * Cities, towns, regions, states, and specific areas go in the "area" array, NOT in the "country" field
-  * Examples of CORRECT country names: "United States" or "USA", "Australia", "Indonesia", "Costa Rica", "Brazil", "Portugal", "Morocco", "South Africa", "Mexico", "Peru", "Chile", "France", "Spain", "Japan", "Philippines", "Sri Lanka", "Maldives", "Fiji", "Nicaragua", "Panama", "El Salvador", "New Zealand"
-  * Examples of INCORRECT country names: "California" (use "United States" or "USA"), "Bali" (use "Indonesia"), "Oahu" (use "United States" or "USA"), "Tasmania" (use "Australia"), "Baja" (use "Mexico"), "Algarve" (use "Portugal"), "Hawaii" (use "United States" or "USA")
-  * When user says "Hawaii", "California", "Florida", etc. → country must be "United States" or "USA", with the state/city in the "area" array
-  * When user says "Bali", "Lombok", "Java" → country must be "Indonesia", with the island/region in the "area" array
-  * When user says "Oahu", "Maui", "Big Island" → country must be "United States" or "USA", with the island in the "area" array
+
 - Examples:
   * User says "3 weeks" → time_in_days: 21, time_in_text: "3 weeks"
   * User says "2 months" → time_in_days: 60, time_in_text: "2 months"

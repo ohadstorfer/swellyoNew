@@ -158,7 +158,7 @@ Examples:
 - "must be from Israel" → non_negotiable_criteria: { "country_from": ["Israel"] }
 - "prioritize surfers from Israel" → prioritize_filters: { "origin_country": "Israel" }
 - "I prefer longboarders" → prioritize_filters: { "board_type": "longboard" }
-- "would like advanced surfers" → If board type specified: queryFilters: { "surf_level_category": "advanced", "surfboard_type": ["shortboard"] }
+- "would like advanced surfers" → If board type specified: queryFilters: { "surf_level_category": ["advanced", "pro"], "surfboard_type": ["shortboard"] } (ALWAYS include "pro" with "advanced")
   If board type NOT specified: Ask user which board type, then set both fields
 
 IMPORTANT: If the user mentions criteria we don't have in our database (like physical appearance, personal details, languages, etc.), you should:
@@ -221,7 +221,8 @@ CRITICAL: You MUST extract non_negotiable_criteria from the user's response, eve
 - "must be shortboarders" → surfboard_type: ["shortboard"]
 - "similar age" → age_range: [min, max] (infer from context)
 - "surf level [X]" → surf_level_category: "beginner"/"intermediate"/"advanced"/"pro" (convert numeric to category)
-- "beginner" / "intermediate" / "advanced" / "pro" → surf_level_category: "beginner"/"intermediate"/"advanced"/"pro"
+- "beginner" / "intermediate" / "advanced" / "pro" → surf_level_category: "beginner"/"intermediate"/["advanced", "pro"]/"pro"
+- "intermediate-advanced" / "beginner to intermediate" → surf_level_category: ["intermediate", "advanced", "pro"] (ALWAYS include "pro" when "advanced" is mentioned)
 
 ⚠️ CRITICAL: DESTINATION NAMES/REGIONS MUST GO IN destination_country! ⚠️
 - If user mentions "Central America", "Southeast Asia", "Europe", or any region/continent → Expand to countries and put in destination_country (comma-separated)
@@ -307,7 +308,7 @@ DATA STRUCTURE (when is_finished: true):
     "country_from": ["country1"], // array or null
     "surfboard_type": ["type1"], // array or null
     "age_range": [min, max], // array or null
-    "surf_level_category": string, // 'beginner', 'intermediate', 'advanced', or 'pro' - PREFERRED
+    "surf_level_category": string | string[], // 'beginner', 'intermediate', 'advanced', or 'pro' - PREFERRED (can be array for multiple levels)
     "surf_level_min": number, // Legacy: number or null (only use if category not available)
     "surf_level_max": number, // Legacy: number or null (only use if category not available)
     "other": "text description" // string or null
@@ -488,22 +489,61 @@ async function extractQueryFilters(
     surfboard_type?: string[]; // Valid values: 'shortboard', 'mid_length', 'longboard', 'soft_top'
     surf_level_min?: number; // Legacy: numeric level (1-5) - prefer surf_level_category
     surf_level_max?: number; // Legacy: numeric level (1-5) - prefer surf_level_category
-    surf_level_category?: string; // Preferred: 'beginner', 'intermediate', 'advanced', 'pro'
+    surf_level_category?: string | string[]; // Preferred: 'beginner', 'intermediate', 'advanced', 'pro' - can be array for multiple levels
     destination_days_min?: { destination: string; min_days: number };
   };
   unmappableCriteria?: string[]; // Criteria that user mentioned but can't be mapped to database fields
   explanation: string;
 }> {
+  // Official country list from OnboardingStep4Screen.tsx - these are the EXACT names used in the database
+  const OFFICIAL_COUNTRIES = [
+    'Afghanistan', 'Albania', 'Algeria', 'Andorra', 'Angola', 'Antigua and Barbuda', 'Argentina', 'Armenia', 'Australia', 'Austria', 'Azerbaijan',
+    'Bahamas', 'Bahrain', 'Bangladesh', 'Barbados', 'Belarus', 'Belgium', 'Belize', 'Benin', 'Bhutan', 'Bolivia', 'Bosnia and Herzegovina', 'Botswana', 'Brazil', 'Brunei', 'Bulgaria', 'Burkina Faso', 'Burundi',
+    'Cambodia', 'Cameroon', 'Canada', 'Cape Verde', 'Central African Republic', 'Chad', 'Chile', 'China', 'Colombia', 'Comoros', 'Costa Rica', 'Croatia', 'Cuba', 'Cyprus', 'Czech Republic',
+    'Democratic Republic of the Congo', 'Denmark', 'Djibouti', 'Dominica', 'Dominican Republic',
+    'Ecuador', 'Egypt', 'El Salvador', 'Equatorial Guinea', 'Eritrea', 'Estonia', 'Eswatini', 'Ethiopia',
+    'Fiji', 'Finland', 'France',
+    'Gabon', 'Gambia', 'Georgia', 'Germany', 'Ghana', 'Greece', 'Grenada', 'Guatemala', 'Guinea', 'Guinea-Bissau', 'Guyana',
+    'Haiti', 'Honduras', 'Hong Kong', 'Hungary',
+    'Iceland', 'India', 'Indonesia', 'Ireland', 'Israel', 'Italy', 'Ivory Coast',
+    'Jamaica', 'Japan', 'Jordan',
+    'Kazakhstan', 'Kenya', 'Kiribati', 'Kuwait', 'Kyrgyzstan',
+    'Laos', 'Latvia', 'Lebanon', 'Lesotho', 'Liberia', 'Libya', 'Liechtenstein', 'Lithuania', 'Luxembourg',
+    'Madagascar', 'Malawi', 'Malaysia', 'Maldives', 'Mali', 'Malta', 'Marshall Islands', 'Mauritania', 'Mauritius', 'Mexico', 'Micronesia', 'Moldova', 'Monaco', 'Mongolia', 'Montenegro', 'Morocco', 'Mozambique', 'Myanmar',
+    'Namibia', 'Nauru', 'Nepal', 'Netherlands', 'New Zealand', 'Nicaragua', 'Niger', 'Nigeria', 'North Korea', 'North Macedonia', 'Norway',
+    'Oman',
+    'Pakistan', 'Palau', 'Panama', 'Papua New Guinea', 'Paraguay', 'Peru', 'Philippines', 'Poland', 'Portugal',
+    'Qatar',
+    'Romania', 'Russia', 'Rwanda',
+    'Saint Kitts and Nevis', 'Saint Lucia', 'Saint Vincent and the Grenadines', 'Samoa', 'San Marino', 'Sao Tome and Principe', 'Saudi Arabia', 'Senegal', 'Serbia', 'Seychelles', 'Sierra Leone', 'Singapore', 'Slovakia', 'Slovenia', 'Solomon Islands', 'Somalia', 'South Africa', 'South Korea', 'South Sudan', 'Spain', 'Sri Lanka', 'Sudan', 'Suriname', 'Sweden', 'Switzerland', 'Syria',
+    'Taiwan', 'Tajikistan', 'Tanzania', 'Thailand', 'Timor-Leste', 'Togo', 'Tonga', 'Trinidad and Tobago', 'Tunisia', 'Turkey', 'Turkmenistan', 'Tuvalu',
+    'Uganda', 'Ukraine', 'United Arab Emirates', 'United Kingdom', 'United States', 'Uruguay', 'Uzbekistan',
+    'Vanuatu', 'Vatican City', 'Venezuela', 'Vietnam',
+    'Yemen',
+    'Zambia', 'Zimbabwe'
+  ];
+
   const schemaPrompt = `You are a database query expert. Analyze the user's request and determine which Supabase filters to apply.
 
 AVAILABLE SURFERS TABLE FIELDS (ONLY THESE CAN BE FILTERED):
-- country_from (string): Country of origin (e.g., "Israel", "USA", "United States")
+- country_from (string): Country of origin
   ⚠️ CRITICAL: country_from means WHERE THE SURFER IS FROM (origin country), NOT where they want to go!
   ⚠️ ONLY set country_from if user explicitly says they want surfers FROM a specific country (e.g., "from USA", "must be from Israel")
-  ⚠️ DO NOT set country_from just because the destination is in that country (e.g., if user wants to go to California/USA, do NOT set country_from: ["USA"])
+  ⚠️ DO NOT set country_from just because the destination is in that country (e.g., if user wants to go to California/USA, do NOT set country_from)
+  ⚠️ CRITICAL: You MUST use EXACT country names from the official list below. Common mappings:
+    - "USA" / "US" / "U.S.A" / "United States of America" / "America" → "United States"
+    - "UK" / "United Kingdom" / "England" / "Great Britain" / "Britain" → "United Kingdom"
+    - "Isreal" (typo) → "Israel"
+    - "Brasil" → "Brazil"
+    - "Philippins" / "Phillipines" → "Philippines"
+    - "Holland" → "Netherlands"
+    - "UAE" / "United Arab Emirates" → "United Arab Emirates"
+    - "South Korea" / "Korea" → "South Korea"
+  ⚠️ OFFICIAL COUNTRY LIST (use EXACT names from this list - case-sensitive):
+${OFFICIAL_COUNTRIES.map(c => `    - "${c}"`).join('\n')}
   ⚠️ Examples:
-    - User says "I want to go to California" → destination_country: "USA", area: "California", country_from: NOT SET (user didn't say they want surfers FROM USA)
-    - User says "I want surfers from the USA" → country_from: ["USA"] (user explicitly wants surfers FROM USA)
+    - User says "I want to go to California" → destination_country: "United States", area: "California", country_from: NOT SET (user didn't say they want surfers FROM United States)
+    - User says "I want surfers from the USA" → country_from: ["United States"] (normalized from "USA" to "United States")
     - User says "I want to go to Costa Rica and connect with surfers from Israel" → destination_country: "Costa Rica", country_from: ["Israel"]
 - age (integer): Age in years (0+)
 - surfboard_type (enum): 'shortboard', 'mid_length', 'longboard', 'soft_top' (valid values in database)
@@ -512,33 +552,44 @@ AVAILABLE SURFERS TABLE FIELDS (ONLY THESE CAN BE FILTERED):
   * "shortboard" or "short board" → 'shortboard'
   * "soft top" or "softtop" → 'soft_top'
 - surf_level (integer): 1-5 (1=beginner, 5=expert) - LEGACY: Use surf_level_category instead
-- surf_level_category (text): 'beginner', 'intermediate', 'advanced', or 'pro' - PREFERRED for filtering
+- surf_level_category (text or array of text): 'beginner', 'intermediate', 'advanced', or 'pro' - PREFERRED for filtering
+  * Can be a single string: "advanced"
+  * Can be an array for multiple levels: ["intermediate", "advanced"]
+  * CRITICAL: When user asks for "advanced", ALWAYS include "pro": ["advanced", "pro"]
 - surf_level_description (text): Board-specific description (e.g., "Snapping", "Cross Stepping") - for display only
 - destinations_array (jsonb): Array of {country: string, area: string[], time_in_days: number, time_in_text?: string}
 
 ⚠️ CRITICAL: When user mentions surf level by category (e.g., "intermediate", "advanced", "beginner", "pro"):
 - ALWAYS use surf_level_category (NOT numeric surf_level_min/max)
+- surf_level_category can be a STRING (single level) or ARRAY (multiple levels)
+- If user mentions multiple levels (e.g., "intermediate-advanced", "beginner to intermediate"), use an ARRAY: ["intermediate", "advanced"]
+- CRITICAL RULE: When user asks for "advanced" surfers, ALWAYS include "pro" as well: ["advanced", "pro"]
 - If user says "intermediate surfer" WITHOUT specifying board type, you MUST ask which board type (shortboard, longboard, mid-length)
 - Category-based filtering REQUIRES surfboard_type to be specified
 - Examples:
   * "intermediate surfer" → surf_level_category: "intermediate", surfboard_type: ASK USER (required)
-  * "advanced shortboarder" → surf_level_category: "advanced", surfboard_type: ["shortboard"]
+  * "advanced shortboarder" → surf_level_category: ["advanced", "pro"], surfboard_type: ["shortboard"] (ALWAYS include "pro" with "advanced")
+  * "intermediate-advanced surfer" → surf_level_category: ["intermediate", "advanced", "pro"], surfboard_type: ASK USER (ALWAYS include "pro" when "advanced" is mentioned)
   * "beginner longboarder" → surf_level_category: "beginner", surfboard_type: ["longboard"]
 
 IMPORTANT: Handle typos, general terms, and variations intelligently:
 
-GENERAL CATEGORIES (expand to specific countries):
-- "European" / "uropean" / "european" / "any European country" / "from Europe" → Include ALL: ["France", "Spain", "Italy", "Germany", "United Kingdom", "Netherlands", "Sweden", "Norway", "Denmark", "Finland", "Ireland", "Portugal", "Greece", "Austria", "Belgium", "Switzerland", "Poland", "Czech Republic", "Hungary", "Romania", "Croatia", "Slovenia"]
-- "Asian" / "from Asia" / "any Asian country" → Include: ["Japan", "China", "South Korea", "Thailand", "Indonesia", "Philippines", "India", "Sri Lanka", "Malaysia", "Vietnam"]
-- "Latin American" / "from Latin America" / "South American" → Include: ["Mexico", "Brazil", "Costa Rica", "Nicaragua", "El Salvador", "Panama", "Peru", "Chile", "Argentina", "Ecuador"]
-- "Central American" / "from Central America" → Include: ["Costa Rica", "Nicaragua", "El Salvador", "Panama", "Guatemala", "Belize", "Honduras"]
+GENERAL CATEGORIES (expand to specific countries - use EXACT names from official list):
+- "European" / "uropean" / "european" / "any European country" / "from Europe" → Include ALL (use exact names): ["France", "Spain", "Italy", "Germany", "United Kingdom", "Netherlands", "Sweden", "Norway", "Denmark", "Finland", "Ireland", "Portugal", "Greece", "Austria", "Belgium", "Switzerland", "Poland", "Czech Republic", "Hungary", "Romania", "Croatia", "Slovenia"]
+- "Asian" / "from Asia" / "any Asian country" → Include (use exact names): ["Japan", "China", "South Korea", "Thailand", "Indonesia", "Philippines", "India", "Sri Lanka", "Malaysia", "Vietnam"]
+- "Latin American" / "from Latin America" / "South American" → Include (use exact names): ["Mexico", "Brazil", "Costa Rica", "Nicaragua", "El Salvador", "Panama", "Peru", "Chile", "Argentina", "Ecuador"]
+- "Central American" / "from Central America" → Include (use exact names): ["Costa Rica", "Nicaragua", "El Salvador", "Panama", "Guatemala", "Belize", "Honduras"]
 
-TYPO HANDLING (be smart about common mistakes):
+TYPO HANDLING (be smart about common mistakes - normalize to official country names):
 - "Philippins" / "Philippines" / "Phillipines" → "Philippines"
-- "uropean" / "european" / "European" → Expand to all European countries
-- "US" / "United States" / "U.S.A" / "USA" / "America" → "USA"
-- "Isreal" / "Israel" → "Israel"
-- "Brasil" / "Brazil" → "Brazil"
+- "uropean" / "european" / "European" → Expand to all European countries (use exact names from official list)
+- "US" / "United States" / "U.S.A" / "USA" / "America" / "United States of America" → "United States" (MUST use exact name from official list)
+- "Isreal" (typo) → "Israel"
+- "Brasil" → "Brazil"
+- "UK" / "United Kingdom" / "England" / "Great Britain" / "Britain" → "United Kingdom"
+- "Holland" → "Netherlands"
+- "UAE" / "United Arab Emirates" → "United Arab Emirates"
+- "Korea" / "South Korea" → "South Korea"
 
 LOGICAL INFERENCE:
 - If user says "similar age" and you know their age (e.g., 25), infer ±5 years → age_range: [20, 30]
@@ -551,11 +602,18 @@ LOGICAL INFERENCE:
 - If user mentions multiple board types (e.g., "longboard/midlength") → surfboard_type: ["longboard", "mid_length"]
 - If user says "intermediate" or "advanced" or "beginner" or "pro":
   * Use surf_level_category (NOT numeric ranges)
+  * surf_level_category can be a STRING (single level) or ARRAY (multiple levels)
+  * If user mentions multiple levels (e.g., "intermediate-advanced", "beginner to intermediate"), use an ARRAY
+  * CRITICAL RULE: When user asks for "advanced" surfers, ALWAYS include "pro" as well
+    - "advanced" → surf_level_category: ["advanced", "pro"]
+    - "intermediate-advanced" → surf_level_category: ["intermediate", "advanced", "pro"]
+    - "advanced-pro" → surf_level_category: ["advanced", "pro"]
   * If board type is NOT specified, you MUST ask the user which board type
   * Category-based filtering requires both surf_level_category AND surfboard_type
   * Examples:
     - "intermediate" → surf_level_category: "intermediate", surfboard_type: ASK USER
-    - "advanced shortboarder" → surf_level_category: "advanced", surfboard_type: ["shortboard"]
+    - "advanced shortboarder" → surf_level_category: ["advanced", "pro"], surfboard_type: ["shortboard"] (ALWAYS include "pro")
+    - "intermediate-advanced surfer" → surf_level_category: ["intermediate", "advanced", "pro"], surfboard_type: ASK USER (ALWAYS include "pro" when "advanced" is mentioned)
     - "beginner" → surf_level_category: "beginner", surfboard_type: ASK USER
 
 IMPORTANT: If the user mentions criteria that CANNOT be mapped to any of the above fields (e.g., physical appearance like "blond", "tall", "blue eyes", personal details like "married", "has kids", etc.), you MUST:
@@ -574,11 +632,11 @@ DESTINATION: "${destinationCountry}"
 Extract filters from the user's request. Return ONLY valid JSON in this format (NO COMMENTS - JSON.parse() cannot handle comments):
 {
   "supabaseFilters": {
-    "country_from": ["Israel", "USA"],
+    "country_from": ["Israel", "United States"],
     "age_min": 18,
     "age_max": 30,
     "surfboard_type": ["longboard"],
-    "surf_level_category": "advanced",
+    "surf_level_category": ["advanced", "pro"],
     "destination_days_min": {
       "destination": "Costa Rica",
       "min_days": 30
@@ -587,6 +645,11 @@ Extract filters from the user's request. Return ONLY valid JSON in this format (
   "unmappableCriteria": ["blond", "tall"],
   "explanation": "Brief explanation of what filters were extracted and what couldn't be mapped"
 }
+
+⚠️ CRITICAL: For country_from, ALWAYS use EXACT names from the official list above. Normalize common variations:
+- "USA" / "US" / "U.S.A" / "America" → "United States"
+- "UK" / "England" / "Britain" → "United Kingdom"
+- Any other variation → Find the matching exact name from the official list
 
 IMPORTANT: The JSON above is an example format. When you return your response:
 - DO NOT include any comments (no // or /* */)
@@ -603,19 +666,23 @@ CRITICAL RULES - BE SMART AND FLEXIBLE:
    - If user says "I want to go to Costa Rica and connect with surfers from Israel" → destination_country: "Costa Rica", country_from: ["Israel"]
    - NEVER automatically set country_from based on destination_country - they are completely different things!
 
-1. HANDLE GENERAL TERMS (expand to specific countries):
-   - "European" / "uropean" / "european" / "any European country" / "from Europe" → Expand to ALL: ["France", "Spain", "Italy", "Germany", "United Kingdom", "Netherlands", "Sweden", "Norway", "Denmark", "Finland", "Ireland", "Portugal", "Greece", "Austria", "Belgium", "Switzerland", "Poland", "Czech Republic", "Hungary", "Romania", "Croatia", "Slovenia"]
-   - "Asian" / "from Asia" / "any Asian country" → Expand to: ["Japan", "China", "South Korea", "Thailand", "Indonesia", "Philippines", "India", "Sri Lanka", "Malaysia", "Vietnam"]
-   - "Latin American" / "from Latin America" / "South American" → Expand to: ["Mexico", "Brazil", "Costa Rica", "Nicaragua", "El Salvador", "Panama", "Peru", "Chile", "Argentina", "Ecuador"]
-   - "Central American" / "from Central America" → Expand to: ["Costa Rica", "Nicaragua", "El Salvador", "Panama", "Guatemala", "Belize", "Honduras"]
+1. HANDLE GENERAL TERMS (expand to specific countries - use EXACT names from official list):
+   - "European" / "uropean" / "european" / "any European country" / "from Europe" → Expand to ALL (use exact names): ["France", "Spain", "Italy", "Germany", "United Kingdom", "Netherlands", "Sweden", "Norway", "Denmark", "Finland", "Ireland", "Portugal", "Greece", "Austria", "Belgium", "Switzerland", "Poland", "Czech Republic", "Hungary", "Romania", "Croatia", "Slovenia"]
+   - "Asian" / "from Asia" / "any Asian country" → Expand to (use exact names): ["Japan", "China", "South Korea", "Thailand", "Indonesia", "Philippines", "India", "Sri Lanka", "Malaysia", "Vietnam"]
+   - "Latin American" / "from Latin America" / "South American" → Expand to (use exact names): ["Mexico", "Brazil", "Costa Rica", "Nicaragua", "El Salvador", "Panama", "Peru", "Chile", "Argentina", "Ecuador"]
+   - "Central American" / "from Central America" → Expand to (use exact names): ["Costa Rica", "Nicaragua", "El Salvador", "Panama", "Guatemala", "Belize", "Honduras"]
 
-2. HANDLE TYPOS INTELLIGENTLY (be forgiving):
-   - "uropean" / "european" / "European" → All mean the same → expand to all European countries
-   - "Philippins" / "Philippines" / "Phillipines" → All mean "Philippines"
-   - "Isreal" / "Israel" → "Israel"
-   - "Brasil" / "Brazil" → "Brazil"
-   - "US" / "United States" / "U.S.A" / "USA" / "America" → "USA"
-   - If you see a typo but the intent is clear, correct it automatically
+2. HANDLE TYPOS INTELLIGENTLY (normalize to EXACT official country names):
+   - "uropean" / "european" / "European" → All mean the same → expand to all European countries (use exact names from official list)
+   - "Philippins" / "Philippines" / "Phillipines" → All mean "Philippines" (exact name from official list)
+   - "Isreal" (typo) → "Israel" (exact name from official list)
+   - "Brasil" → "Brazil" (exact name from official list)
+   - "US" / "United States" / "U.S.A" / "USA" / "America" / "United States of America" → "United States" (MUST use exact name from official list)
+   - "UK" / "United Kingdom" / "England" / "Great Britain" / "Britain" → "United Kingdom" (exact name from official list)
+   - "Holland" → "Netherlands" (exact name from official list)
+   - "UAE" / "United Arab Emirates" → "United Arab Emirates" (exact name from official list)
+   - "Korea" / "South Korea" → "South Korea" (exact name from official list)
+   - If you see a typo but the intent is clear, correct it to the EXACT name from the official list above
 
 3. INFER INTENT FROM CONTEXT:
    - "similar age" + user is 25 → age_min: 20, age_max: 30 (±5 years)
@@ -624,7 +691,8 @@ CRITICAL RULES - BE SMART AND FLEXIBLE:
    - "older" → infer age_min: 35
    - "must be shortboarders" / "they will use shortboard" → surfboard_type: ["shortboard"]
    - "intermediate" → surf_level_category: "intermediate" (REQUIRES surfboard_type to be specified)
-   - "advanced" → surf_level_category: "advanced" (REQUIRES surfboard_type to be specified)
+   - "advanced" → surf_level_category: ["advanced", "pro"] (ALWAYS include "pro" when "advanced" is mentioned, REQUIRES surfboard_type)
+   - "intermediate-advanced" → surf_level_category: ["intermediate", "advanced", "pro"] (ALWAYS include "pro" when "advanced" is mentioned)
    - "beginner" → surf_level_category: "beginner" (REQUIRES surfboard_type to be specified)
    - "pro" → surf_level_category: "pro" (REQUIRES surfboard_type to be specified)
 
@@ -685,6 +753,37 @@ CRITICAL RULES - BE SMART AND FLEXIBLE:
     }
     if (!extracted.unmappableCriteria) {
       extracted.unmappableCriteria = []
+    }
+    
+    // CRITICAL RULE: If "advanced" is in surf_level_category, ALWAYS include "pro"
+    if (extracted.supabaseFilters.surf_level_category) {
+      const categories = Array.isArray(extracted.supabaseFilters.surf_level_category)
+        ? extracted.supabaseFilters.surf_level_category
+        : [extracted.supabaseFilters.surf_level_category];
+      
+      // Check if "advanced" is in the array
+      const hasAdvanced = categories.some((cat: string) => 
+        cat && cat.toLowerCase() === 'advanced'
+      );
+      
+      // Check if "pro" is already in the array
+      const hasPro = categories.some((cat: string) => 
+        cat && cat.toLowerCase() === 'pro'
+      );
+      
+      // If "advanced" is present but "pro" is not, add "pro"
+      if (hasAdvanced && !hasPro) {
+        categories.push('pro');
+        extracted.supabaseFilters.surf_level_category = categories.length === 1 
+          ? categories[0] 
+          : categories;
+        console.log('✅ Added "pro" to surf_level_category because "advanced" was present');
+      } else if (hasAdvanced && hasPro) {
+        // Ensure it's an array if both are present
+        extracted.supabaseFilters.surf_level_category = categories.length === 1 
+          ? categories[0] 
+          : categories;
+      }
     }
     
     console.log('✅ Extracted query filters:', JSON.stringify(extracted, null, 2))

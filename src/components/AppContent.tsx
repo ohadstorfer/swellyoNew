@@ -109,6 +109,20 @@ export const AppContent: React.FC = () => {
     };
   }, []);
 
+  // Identify user with PostHog when user is set
+  useEffect(() => {
+    if (user && user.id) {
+      const userId = user.id.toString();
+      const userProperties = {
+        email: user.email,
+        name: user.nickname || user.email?.split('@')[0] || 'User',
+      };
+      
+      analyticsService.identify(userId, userProperties);
+      console.log('[AppContent] User identified with PostHog:', userId, userProperties);
+    }
+  }, [user]);
+
   const handleGetStarted = () => {
     setCurrentStep(0); // Go to onboarding welcome/explanation screen first
   };
@@ -277,6 +291,17 @@ export const AppContent: React.FC = () => {
         travelExperience: data.travelExperience,
         isDemoUser: isDemoUser, // Pass demo user flag
       });
+      
+      // Update PostHog with the new name if user exists
+      if (user && user.id) {
+        const userId = user.id.toString();
+        const userProperties = {
+          email: data.userEmail,
+          name: data.nickname || data.userEmail?.split('@')[0] || 'User',
+        };
+        analyticsService.identify(userId, userProperties);
+        console.log('[AppContent] User name updated in PostHog:', userId, userProperties);
+      }
       
       setShowLoading(true); // Show loading screen
     } catch (error) {

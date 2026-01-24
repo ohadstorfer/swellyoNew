@@ -24,7 +24,7 @@ class AnalyticsService {
   /**
    * Initialize PostHog
    */
-  async initialize(userId?: string) {
+  async initialize(userId?: string, userProperties?: Record<string, any>) {
     if (this.isInitialized || this.isInitializing) {
       return;
     }
@@ -54,8 +54,8 @@ class AnalyticsService {
       });
 
       if (userId) {
-        this.posthogInstance.identify(userId);
-        console.log('[Analytics] 👤 User identified:', userId);
+        this.posthogInstance.identify(userId, userProperties);
+        console.log('[Analytics] 👤 User identified:', userId, userProperties);
       }
 
       this.isInitialized = true;

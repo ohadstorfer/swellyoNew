@@ -803,9 +803,23 @@ export async function findMatchingUsers(
       }
       
       // Filter by surf_level_category (preferred method)
+      // Supports both single string and array of strings for multiple levels
       if (request.queryFilters.surf_level_category) {
-        query = query.eq('surf_level_category', request.queryFilters.surf_level_category);
-        console.log(`  - Filtering by surf_level_category: ${request.queryFilters.surf_level_category}`);
+        const surfLevelCategories = Array.isArray(request.queryFilters.surf_level_category)
+          ? request.queryFilters.surf_level_category
+          : [request.queryFilters.surf_level_category];
+        
+        if (surfLevelCategories.length > 0) {
+          if (surfLevelCategories.length === 1) {
+            // Single value - use eq for efficiency
+            query = query.eq('surf_level_category', surfLevelCategories[0]);
+            console.log(`  - Filtering by surf_level_category: ${surfLevelCategories[0]}`);
+          } else {
+            // Multiple values - use in
+            query = query.in('surf_level_category', surfLevelCategories);
+            console.log(`  - Filtering by surf_level_category (multiple): ${surfLevelCategories.join(', ')}`);
+          }
+        }
         
         // If board type is also specified, filter by both (required for category-based filtering)
         if (request.queryFilters.surfboard_type && request.queryFilters.surfboard_type.length > 0) {
