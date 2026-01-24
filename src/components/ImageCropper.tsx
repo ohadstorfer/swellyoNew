@@ -102,16 +102,35 @@ export const ImageCropper: React.FC<ImageCropperProps> = ({
     return { width: cropW, height: cropH };
   };
 
-  // Web-specific zoom handlers
+  // Web-specific zoom handlers - using React Native Web's event system
+  const gestureContainerRef = useRef<View>(null);
+
   const handleWebTouchStart = (e: any) => {
     if (Platform.OS !== 'web' || !visible) return;
     
-    // Get touches from React Native Web event structure
-    const nativeEvent = e.nativeEvent || {};
-    const touches = nativeEvent.touches || (e.touches ? Array.from(e.touches) : []);
+    console.log('[ImageCropper] Touch start event:', e);
     
-    if (touches && touches.length === 2) {
-      if (e.preventDefault) e.preventDefault();
+    // React Native Web passes native events differently
+    const nativeEvent = e.nativeEvent || e;
+    
+    // Try to get touches from various possible locations
+    let touches = nativeEvent.touches;
+    if (!touches && nativeEvent.changedTouches) {
+      touches = nativeEvent.changedTouches;
+    }
+    if (!touches && (e as any).touches) {
+      touches = (e as any).touches;
+    }
+    
+    if (!touches || touches.length === 0) {
+      console.log('[ImageCropper] No touches found in event');
+      return;
+    }
+    
+    console.log('[ImageCropper] Touch count:', touches.length);
+    
+    if (touches.length === 2) {
+      e.preventDefault?.();
       const touch1 = touches[0];
       const touch2 = touches[1];
       const distance = Math.hypot(
@@ -123,24 +142,35 @@ export const ImageCropper: React.FC<ImageCropperProps> = ({
         x: ((touch1.pageX || touch1.clientX) + (touch2.pageX || touch2.clientX)) / 2,
         y: ((touch1.pageY || touch1.clientY) + (touch2.pageY || touch2.clientY)) / 2,
       };
-    } else if (touches && touches.length === 1) {
-      // Single touch - start pan
+      console.log('[ImageCropper] Pinch started, distance:', distance);
+    } else if (touches.length === 1) {
       const touch = touches[0];
       lastTouchCenter.current = {
         x: touch.pageX || touch.clientX,
         y: touch.pageY || touch.clientY,
       };
+      console.log('[ImageCropper] Pan started at:', lastTouchCenter.current);
     }
   };
 
   const handleWebTouchMove = (e: any) => {
     if (Platform.OS !== 'web' || !visible) return;
     
-    const nativeEvent = e.nativeEvent || {};
-    const touches = nativeEvent.touches || (e.touches ? Array.from(e.touches) : []);
+    const nativeEvent = e.nativeEvent || e;
     
-    if (touches && touches.length === 2 && lastTouchDistance.current !== null) {
-      if (e.preventDefault) e.preventDefault();
+    // Try to get touches from various possible locations
+    let touches = nativeEvent.touches;
+    if (!touches && nativeEvent.changedTouches) {
+      touches = nativeEvent.changedTouches;
+    }
+    if (!touches && (e as any).touches) {
+      touches = (e as any).touches;
+    }
+    
+    if (!touches || touches.length === 0) return;
+    
+    if (touches.length === 2 && lastTouchDistance.current !== null) {
+      e.preventDefault?.();
       const touch1 = touches[0];
       const touch2 = touches[1];
       const distance = Math.hypot(
@@ -156,9 +186,8 @@ export const ImageCropper: React.FC<ImageCropperProps> = ({
       
       scale.value = newScale;
       lastTouchDistance.current = distance;
-    } else if (touches && touches.length === 1 && lastTouchCenter.current) {
-      // Single finger pan
-      if (e.preventDefault) e.preventDefault();
+    } else if (touches.length === 1 && lastTouchCenter.current) {
+      e.preventDefault?.();
       const touch = touches[0];
       const currentX = touch.pageX || touch.clientX;
       const currentY = touch.pageY || touch.clientY;
@@ -170,8 +199,8 @@ export const ImageCropper: React.FC<ImageCropperProps> = ({
     }
   };
 
-  const handleWebTouchEnd = () => {
-    if (Platform.OS !== 'web') return;
+  const handleWebTouchEnd = (e: any) => {
+    if (Platform.OS !== 'web' || !visible) return;
     savedScale.value = scale.value;
     savedTranslateX.value = translateX.value;
     savedTranslateY.value = translateY.value;
@@ -180,14 +209,13 @@ export const ImageCropper: React.FC<ImageCropperProps> = ({
     constrainPosition();
   };
 
-  // Mouse wheel zoom for desktop web
   const handleWebWheel = (e: any) => {
     if (Platform.OS !== 'web' || !visible) return;
     
-    const wheelEvent = e.nativeEvent || e;
-    if (wheelEvent.ctrlKey || wheelEvent.metaKey) {
-      e.preventDefault();
-      const delta = wheelEvent.deltaY;
+    const nativeEvent = e.nativeEvent || e;
+    if (nativeEvent.ctrlKey || nativeEvent.metaKey) {
+      e.preventDefault?.();
+      const delta = nativeEvent.deltaY;
       const scaleFactor = delta > 0 ? 0.9 : 1.1;
       const newScale = Math.max(
         MIN_SCALE,
@@ -198,6 +226,7 @@ export const ImageCropper: React.FC<ImageCropperProps> = ({
       constrainPosition();
     }
   };
+
 
   // Prevent browser zoom on web
   React.useEffect(() => {
@@ -560,7 +589,10 @@ export const ImageCropper: React.FC<ImageCropperProps> = ({
 
           {/* Crop Area */}
           <View style={styles.cropContainer}>
-            <View style={[styles.cropArea, { width: cropDimensions.width, height: cropDimensions.height }]}>
+            <View 
+              style={[styles.cropArea, { width: cropDimensions.width, height: cropDimensions.height }]}
+              {...(Platform.OS === 'web' && { 'data-testid': 'crop-area' })}
+            >
               {/* Overlay - darken outside crop area */}
               <View style={styles.overlayTop} />
               <View style={styles.overlayBottom} />
@@ -569,13 +601,17 @@ export const ImageCropper: React.FC<ImageCropperProps> = ({
 
               {/* Image with gestures */}
               {Platform.OS === 'web' ? (
-                // Web: Use native touch/mouse events (gesture handlers don't work well on web)
-                <Animated.View 
+                // Web: Use React Native Web touch events
+                <View 
+                  ref={gestureContainerRef}
                   style={styles.gestureContainer}
                   onTouchStart={handleWebTouchStart}
                   onTouchMove={handleWebTouchMove}
                   onTouchEnd={handleWebTouchEnd}
+                  onTouchCancel={handleWebTouchEnd}
                   onWheel={handleWebWheel}
+                  onStartShouldSetResponder={() => true}
+                  onMoveShouldSetResponder={() => true}
                 >
                   {imageSize.width > 0 && imageSize.height > 0 && (
                     <Animated.Image
@@ -592,7 +628,7 @@ export const ImageCropper: React.FC<ImageCropperProps> = ({
                       resizeMode="contain"
                     />
                   )}
-                </Animated.View>
+                </View>
               ) : (
                 // Native: Use gesture handlers
                 <PanGestureHandler
@@ -717,6 +753,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     ...(Platform.OS === 'web' && {
       touchAction: 'none', // Prevent browser zoom/pan
+      userSelect: 'none',
+      WebkitUserSelect: 'none',
+      WebkitTouchCallout: 'none',
     }),
   },
   image: {
