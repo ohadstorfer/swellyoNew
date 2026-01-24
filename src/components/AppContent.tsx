@@ -114,6 +114,8 @@ export const AppContent: React.FC = () => {
     if (user && user.id) {
       const userId = user.id.toString();
       const userProperties = {
+        $email: user.email,
+        $name: user.nickname || user.email?.split('@')[0] || 'User',
         email: user.email,
         name: user.nickname || user.email?.split('@')[0] || 'User',
       };
@@ -296,6 +298,8 @@ export const AppContent: React.FC = () => {
       if (user && user.id) {
         const userId = user.id.toString();
         const userProperties = {
+          $email: data.userEmail,
+          $name: data.nickname || data.userEmail?.split('@')[0] || 'User',
           email: data.userEmail,
           name: data.nickname || data.userEmail?.split('@')[0] || 'User',
         };

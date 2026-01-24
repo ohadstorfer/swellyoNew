@@ -11,7 +11,8 @@
     "build:netlify": "npm run build:netlify:pre && expo export --platform web && npm run build:netlify:post",
     "build:netlify:pre": "([ -f next.config.js ] && mv next.config.js next.config.js.bak || true) && ([ -d pages ] && mv pages pages.bak || true)",
     "build:netlify:post": "node update-bundle.js && node create-netlify-redirects.js",
-    "compress-videos": "node scripts/compress-videos.js"
+    "compress-videos": "node scripts/compress-videos.js",
+    "backfill-posthog": "node scripts/backfillPostHogUsers.js"
   },
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",
