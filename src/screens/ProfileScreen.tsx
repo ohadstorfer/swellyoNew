@@ -204,7 +204,7 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
   const defaultVideoUrl = getSurfLevelVideoUrl(boardType, surfLevel);
   const videoUrl = customVideoUrl || defaultVideoUrl;
   
-  // Create video player
+  // Create video player - same pattern as OnboardingStep2Screen
   const videoPlayer = useVideoPlayer(
     videoUrl || '',
     (player: any) => {
@@ -212,14 +212,7 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
         try {
           player.loop = true;
           player.muted = true;
-          const playPromise = player.play();
-          if (playPromise !== undefined) {
-            playPromise.catch((error: any) => {
-              if (__DEV__ && error.name !== 'NotAllowedError') {
-                console.warn('[SurfSkillCard] Initial play attempt:', error.message);
-              }
-            });
-          }
+          player.play();
         } catch (error) {
           console.error('Error initializing video player:', error);
         }
@@ -232,7 +225,6 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
     if (!videoPlayer || !videoUrl) return;
 
     let isMounted = true;
-    let hasPlayed = false;
 
     // For web, ensure playsInline is set and hide all controls
     if (Platform.OS === 'web' && typeof document !== 'undefined') {
@@ -310,94 +302,44 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
       };
     }
 
-    const attemptPlay = async () => {
-      if (!isMounted || !videoPlayer || hasPlayed) return;
-
+    // Direct play attempt - same pattern as OnboardingStep2Screen
+    if (videoPlayer) {
       try {
         videoPlayer.loop = true;
         videoPlayer.muted = true;
-        const playPromise = videoPlayer.play();
-        if (playPromise !== undefined) {
-          await playPromise;
-          hasPlayed = true;
-        }
+        videoPlayer.play();
       } catch (error: any) {
-        if (__DEV__ && error.name !== 'NotAllowedError') {
-          console.warn('[SurfSkillCard] Play attempt failed:', error.message);
-        }
-        hasPlayed = false;
+        console.error('Error playing video:', error);
       }
-    };
-
-    attemptPlay();
-    const retryTimeout = setTimeout(() => {
-      if (!hasPlayed) {
-        attemptPlay();
-      }
-    }, 100);
+    }
 
     return () => {
       isMounted = false;
-      clearTimeout(retryTimeout);
     };
   }, [videoPlayer, videoUrl]);
 
-  // Update player source when video URL changes
-  // This is critical for playing the new video after upload
+  // Update player source when video changes - same pattern as OnboardingStep2Screen
   useEffect(() => {
     if (videoUrl && videoPlayer) {
-      const replacePromise = videoPlayer.replaceAsync(videoUrl);
-      if (replacePromise && typeof replacePromise.then === 'function') {
-        replacePromise.then(() => {
-          if (videoPlayer) {
-            // Ensure video is set to loop and muted
-            videoPlayer.loop = true;
-            videoPlayer.muted = true;
-            
-            // Attempt to play immediately after replace
-            const playPromise = videoPlayer.play();
-            if (playPromise !== undefined && typeof (playPromise as any).catch === 'function') {
-              (playPromise as any).catch((playError: any) => {
-                if (__DEV__ && playError.name !== 'NotAllowedError') {
-                  console.warn('[SurfSkillCard] Play after replace failed:', playError.message);
-                }
-              });
-            }
-            
-            // Retry play after a short delay if needed
-            setTimeout(() => {
-              if (videoPlayer) {
-                try {
-                  const retryPlayPromise = videoPlayer.play();
-                  if (retryPlayPromise !== undefined && typeof (retryPlayPromise as any).catch === 'function') {
-                    (retryPlayPromise as any).catch(() => {
-                      // Silently fail - user interaction may be required
-                    });
-                  }
-                } catch (error) {
-                  // Silently fail
-                }
-              }
-            }, 300);
-          }
-        }).catch((error: any) => {
-          console.error('Error replacing video:', error, 'URL:', videoUrl);
-        });
-      } else {
-        // If replaceAsync doesn't return a promise, try direct play
-        try {
+      const videoUrlToPlay = videoUrl;
+      if (!videoUrlToPlay) {
+        console.warn('No video URL provided for surf skill video');
+        return;
+      }
+      
+      videoPlayer.replaceAsync(videoUrlToPlay).then(() => {
+        if (videoPlayer) {
           videoPlayer.loop = true;
           videoPlayer.muted = true;
-          const playPromise = videoPlayer.play();
-          if (playPromise !== undefined && typeof (playPromise as any).catch === 'function') {
-            (playPromise as any).catch(() => {
-              // Silently fail
-            });
+          try {
+            videoPlayer.play();
+          } catch (playError: any) {
+            console.error('Error playing surf skill video:', playError);
           }
-        } catch (error) {
-          console.error('Error playing video:', error);
         }
-      }
+      }).catch((error: any) => {
+        console.error('Error replacing surf skill video:', error, 'URL:', videoUrlToPlay);
+      });
     }
   }, [videoUrl, videoPlayer]);
 
