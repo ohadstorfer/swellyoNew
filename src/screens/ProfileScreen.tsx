@@ -24,7 +24,8 @@ import { supabase } from '../config/supabase';
 import { getImageUrl, getCountryImageFromStorage, getCountryImageFallback, getCountryImageFromPexels } from '../services/media/imageService';
 import { getSurfLevelVideoFromStorage } from '../services/media/videoService';
 import { getCountryFlag } from '../utils/countryFlags';
-import { uploadProfileImage } from '../services/storage/storageService';
+import { uploadProfileImage, uploadProfileVideo } from '../services/storage/storageService';
+import { validateVideoComplete } from '../utils/videoValidation';
 import { ProfileImage } from '../components/ProfileImage';
 import { ProfileSkeleton } from '../components/skeletons';
 import { analyticsService } from '../services/analytics/analyticsService';
@@ -184,6 +185,9 @@ interface SurfSkillCardProps {
   surfLevelDescription: string | null;
   surfLevelCategory: string;
   surfLevelProgress: number;
+  customVideoUrl?: string; // User-uploaded custom video URL
+  onUploadVideo?: () => void; // Callback when upload icon is clicked
+  isViewingOwnProfile?: boolean; // Whether viewing own profile
 }
 
 const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
@@ -192,8 +196,13 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
   surfLevelDescription,
   surfLevelCategory,
   surfLevelProgress,
+  customVideoUrl,
+  onUploadVideo,
+  isViewingOwnProfile = false,
 }) => {
-  const videoUrl = getSurfLevelVideoUrl(boardType, surfLevel);
+  // Use custom video if available, otherwise use default surf level video
+  const defaultVideoUrl = getSurfLevelVideoUrl(boardType, surfLevel);
+  const videoUrl = customVideoUrl || defaultVideoUrl;
   
   // Create video player
   const videoPlayer = useVideoPlayer(
@@ -398,18 +407,18 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
               <Text style={styles.surfSkillTitleOverlayText}>Surf Skill</Text>
             </View>
             
-            {/* Expand Icon - Overlaid on video, top right */}
-            <View style={styles.surfSkillExpandIcon}>
-              <Svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-                <Path
-                  d="M14 10L21 3M21 3H15M21 3V9M10 14L3 21M3 21H9M3 21L3 15"
-                  stroke="white"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </Svg>
-            </View>
+            {/* Upload Icon - Overlaid on video, top right (only when viewing own profile) */}
+            {isViewingOwnProfile && onUploadVideo && (
+              <View style={[styles.surfSkillUploadIcon, { pointerEvents: 'auto' }]}>
+                <TouchableOpacity 
+                  style={{ width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center' }}
+                  onPress={onUploadVideo}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="cloud-upload-outline" size={20} color="#FFFFFF" />
+                </TouchableOpacity>
+              </View>
+            )}
             
             {/* Level Name and Subtitle - Overlaid on video, bottom left */}
             <View style={styles.surfSkillContentOverlay}>
@@ -509,6 +518,8 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
   const [loading, setLoading] = useState(true);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [isUploadingVideo, setIsUploadingVideo] = useState(false);
+  const [showVideoUploadModal, setShowVideoUploadModal] = useState(false);
   // Track Pexels image URLs for countries that don't have bucket images
   const [pexelsImages, setPexelsImages] = useState<{ [country: string]: string | null }>({});
   
@@ -519,6 +530,10 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const glowAnim = useRef(new Animated.Value(0)).current;
   const [showSurveyBubble, setShowSurveyBubble] = useState(false);
+  
+  // Animation for upload spinner
+  const uploadSpinnerAnim = useRef(new Animated.Value(0)).current;
+  const uploadPulseAnim = useRef(new Animated.Value(1)).current;
 
   // Show survey bubble after 4 seconds
   useEffect(() => {
@@ -530,6 +545,47 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
       return () => clearTimeout(timer);
     }
   }, [isMVPMode, isViewingOwnProfile]);
+
+  // Upload spinner animation
+  useEffect(() => {
+    if (isUploadingVideo) {
+      // Rotation animation
+      const spinAnimation = Animated.loop(
+        Animated.timing(uploadSpinnerAnim, {
+          toValue: 1,
+          duration: 2000,
+          useNativeDriver: true,
+        })
+      );
+      
+      // Pulsing animation for visual appeal
+      const pulseAnimation = Animated.loop(
+        Animated.sequence([
+          Animated.timing(uploadPulseAnim, {
+            toValue: 1.15,
+            duration: 1000,
+            useNativeDriver: true,
+          }),
+          Animated.timing(uploadPulseAnim, {
+            toValue: 1,
+            duration: 1000,
+            useNativeDriver: true,
+          }),
+        ])
+      );
+      
+      spinAnimation.start();
+      pulseAnimation.start();
+      
+      return () => {
+        spinAnimation.stop();
+        pulseAnimation.stop();
+      };
+    } else {
+      uploadSpinnerAnim.setValue(0);
+      uploadPulseAnim.setValue(1);
+    }
+  }, [isUploadingVideo]);
 
   // Pulse animation effect
   useEffect(() => {
@@ -753,6 +809,210 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
     }
   };
 
+  const handleVideoUpload = () => {
+    // Show the pre-upload modal instead of immediately picking a file
+    setShowVideoUploadModal(true);
+  };
+
+  const handleVideoFileSelect = async () => {
+    if (!currentUserId) {
+      Alert.alert('Error', 'User not authenticated. Please try again.');
+      setShowVideoUploadModal(false);
+      return;
+    }
+
+    if (isUploadingVideo) {
+      return; // Prevent multiple uploads
+    }
+
+    // Keep modal open, it will show loading state AFTER video is selected
+    // Don't set loading state yet - wait until user actually selects a file
+
+    try {
+      if (Platform.OS === 'web') {
+        // For web, use file input
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'video/mp4,video/quicktime,video/webm,video/x-msvideo';
+        input.style.display = 'none';
+        
+        input.onchange = async (event: any) => {
+          const file = event.target.files?.[0];
+          if (!file) {
+            // User canceled or no file selected - don't show loading
+            return;
+          }
+
+          // NOW set loading state - user has selected a file
+          setIsUploadingVideo(true);
+
+          // Create object URL for the file
+          const videoUri = URL.createObjectURL(file);
+          // Get MIME type from file
+          const mimeType = file.type || undefined;
+          
+          try {
+            // Validate video before uploading
+            const validation = await validateVideoComplete(videoUri, mimeType);
+            
+            if (!validation.valid) {
+              Alert.alert('Invalid Video', validation.error || 'Please select a valid video file.');
+              setIsUploadingVideo(false);
+              setShowVideoUploadModal(false); // Close modal on error
+              return;
+            }
+            
+            await uploadAndUpdateVideo(videoUri, mimeType);
+          } catch (error) {
+            console.error('Error uploading video:', error);
+            Alert.alert('Upload Error', 'Failed to upload video. Please try again.');
+            setIsUploadingVideo(false);
+            setShowVideoUploadModal(false); // Close modal on error
+          } finally {
+            URL.revokeObjectURL(videoUri);
+          }
+          
+          document.body.removeChild(input);
+        };
+        
+        document.body.appendChild(input);
+        input.click();
+      } else {
+        // For mobile, use expo-image-picker
+        try {
+          const ImagePicker = require('expo-image-picker');
+          const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+          if (status !== 'granted') {
+            Alert.alert(
+              'Permission Required',
+              'Sorry, we need media library permissions to upload your video!'
+            );
+            setShowVideoUploadModal(false); // Close modal on permission denial
+            return;
+          }
+
+          const result = await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+            allowsEditing: false,
+            quality: 1.0,
+          });
+
+          if (!result.canceled && result.assets[0]) {
+            // NOW set loading state - user has selected a file
+            setIsUploadingVideo(true);
+
+            const videoAsset = result.assets[0];
+            const videoUri = videoAsset.uri;
+            // Get MIME type from asset if available (helps with validation)
+            const mimeType = videoAsset.mimeType || undefined;
+            
+            // Validate video before uploading
+            const validation = await validateVideoComplete(videoUri, mimeType);
+            
+            if (!validation.valid) {
+              Alert.alert('Invalid Video', validation.error || 'Please select a valid video file.');
+              setIsUploadingVideo(false);
+              setShowVideoUploadModal(false); // Close modal on error
+              return;
+            }
+            
+            await uploadAndUpdateVideo(videoUri, mimeType);
+          } else {
+            // User canceled - don't show loading, just close modal
+            setShowVideoUploadModal(false);
+          }
+        } catch (error) {
+          console.warn('expo-image-picker not available:', error);
+          Alert.alert(
+            'Video Picker Not Available',
+            'Please install expo-image-picker for native platforms.'
+          );
+          setShowVideoUploadModal(false); // Close modal on error
+        }
+      }
+    } catch (error) {
+      console.error('Error picking video:', error);
+      Alert.alert('Error', 'Failed to pick video. Please try again.');
+      setShowVideoUploadModal(false); // Close modal on error
+    }
+  };
+
+  const uploadAndUpdateVideo = async (videoUri: string, mimeType?: string) => {
+    if (!currentUserId) return;
+
+    setIsUploadingVideo(true);
+    try {
+      // Upload video to storage (now uploads to temp and triggers processing)
+      const result = await uploadProfileVideo(videoUri, currentUserId, mimeType);
+      
+      if (result.success) {
+        if (result.processing) {
+          // Video is being processed server-side - start polling immediately
+          // Don't show alert, just poll in background and show success when done
+          pollForVideoUpdate(currentUserId);
+        } else if (result.url) {
+          // Immediate success (shouldn't happen with new flow, but handle it)
+          await supabaseDatabaseService.saveSurfer({
+            profileVideoUrl: result.url,
+          });
+          await loadProfileData();
+          setIsUploadingVideo(false);
+          setShowVideoUploadModal(false); // Close modal on immediate success
+          Alert.alert('Success', 'Surf skill video updated successfully!');
+        }
+      } else {
+        const errorMessage = result.error || 'Failed to upload video';
+        console.error('Upload failed:', errorMessage);
+        setIsUploadingVideo(false);
+        setShowVideoUploadModal(false); // Close modal on error
+        Alert.alert('Upload Failed', errorMessage);
+      }
+    } catch (error) {
+      console.error('Error uploading profile video:', error);
+      setIsUploadingVideo(false);
+      setShowVideoUploadModal(false); // Close modal on error
+      Alert.alert('Error', 'Failed to upload video. Please try again.');
+    }
+  };
+
+  const pollForVideoUpdate = async (userId: string, maxAttempts = 60, intervalMs = 2000) => {
+    // Poll the database to check if video URL has been updated
+    let attempts = 0;
+    
+    const pollInterval = setInterval(async () => {
+      attempts++;
+      
+      try {
+        const surferData = await supabaseDatabaseService.getSurferByUserId(userId);
+        
+        if (surferData?.profile_video_url) {
+          // Video URL has been updated - processing complete
+          clearInterval(pollInterval);
+          setIsUploadingVideo(false);
+          setShowVideoUploadModal(false); // Close modal on success
+          await loadProfileData();
+          Alert.alert('Success', 'Your video has been processed and optimized! It\'s now live on your profile.');
+        } else if (attempts >= maxAttempts) {
+          // Timeout - stop polling
+          clearInterval(pollInterval);
+          setIsUploadingVideo(false);
+          setShowVideoUploadModal(false); // Close modal on timeout
+          Alert.alert(
+            'Processing',
+            'Video processing is taking longer than expected. Please refresh your profile in a few moments to see your video.'
+          );
+        }
+      } catch (error) {
+        console.error('Error polling for video update:', error);
+        if (attempts >= maxAttempts) {
+          clearInterval(pollInterval);
+          setIsUploadingVideo(false);
+          setShowVideoUploadModal(false); // Close modal on error
+        }
+      }
+    }, intervalMs);
+  };
+
   // Show skeleton while loading - show immediately to prevent "No profile data found" flash
   // The showSkeleton delay is handled internally by the skeleton components
   if (loading) {
@@ -953,6 +1213,126 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
           </TouchableOpacity>
         )}
 
+        {/* Video Upload Modal - Shows different content based on state */}
+        {showVideoUploadModal && (
+          <View style={styles.uploadLoadingOverlay}>
+            <View style={styles.uploadLoadingContainer}>
+              {!isUploadingVideo ? (
+                // Pre-upload content
+                <>
+                  <Ionicons name="videocam-outline" size={64} color="#4A90E2" style={{ marginBottom: 20 }} />
+                  <Text style={styles.uploadLoadingText}>Select a video</Text>
+                  <Text style={styles.uploadLoadingSubtext}>
+                    You can upload a video up to 20 seconds long
+                  </Text>
+                  <View style={styles.uploadModalButtons}>
+                    <TouchableOpacity
+                      style={styles.uploadModalCancelButton}
+                      onPress={() => setShowVideoUploadModal(false)}
+                    >
+                      <Text style={styles.uploadModalCancelText}>Cancel</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.uploadModalUploadButton}
+                      onPress={handleVideoFileSelect}
+                    >
+                      <Text style={styles.uploadModalUploadText} numberOfLines={1}>Upload</Text>
+                    </TouchableOpacity>
+                  </View>
+                </>
+              ) : (
+                // Loading content
+                <>
+                  {/* Container for icon and pulse circle - centered together */}
+                  <View style={styles.uploadIconContainer}>
+                    {/* Outer pulsing circle - centered with icon */}
+                    <Animated.View
+                      style={[
+                        styles.uploadLoadingPulseCircle,
+                        {
+                          transform: [{ scale: uploadPulseAnim }],
+                          opacity: uploadPulseAnim.interpolate({
+                            inputRange: [1, 1.15],
+                            outputRange: [0.3, 0.1],
+                          }),
+                        },
+                      ]}
+                    />
+                    {/* Spinning icon */}
+                    <Animated.View 
+                      style={[
+                        styles.uploadLoadingSpinner,
+                        {
+                          transform: [
+                            { rotate: uploadSpinnerAnim.interpolate({
+                              inputRange: [0, 1],
+                              outputRange: ['0deg', '360deg'],
+                            }) },
+                            { scale: uploadPulseAnim },
+                          ],
+                        },
+                      ]}
+                    >
+                      <LinearGradient
+                        colors={['#4A90E2', '#357ABD', '#2E6DA4']}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={styles.uploadIconGradient}
+                      >
+                        <Ionicons name="cloud-upload-outline" size={48} color="#FFFFFF" />
+                      </LinearGradient>
+                    </Animated.View>
+                  </View>
+                  <Text style={styles.uploadLoadingText}>Uploading your video...</Text>
+                  <Text style={styles.uploadLoadingSubtext}>Please wait while we process and optimize your video</Text>
+                  {/* Progress dots */}
+                  <View style={styles.uploadLoadingDots}>
+                    <Animated.View 
+                      style={[
+                        styles.uploadLoadingDot,
+                        {
+                          opacity: uploadPulseAnim.interpolate({
+                            inputRange: [1, 1.15],
+                            outputRange: [0.4, 1],
+                          }),
+                        },
+                      ]} 
+                    />
+                    <Animated.View 
+                      style={[
+                        styles.uploadLoadingDot,
+                        {
+                          opacity: uploadPulseAnim.interpolate({
+                            inputRange: [1, 1.15],
+                            outputRange: [0.4, 1],
+                          }),
+                          transform: [{
+                            translateX: uploadPulseAnim.interpolate({
+                              inputRange: [1, 1.15],
+                              outputRange: [0, 4],
+                            }),
+                          }],
+                        },
+                      ]} 
+                    />
+                    <Animated.View 
+                      style={[
+                        styles.uploadLoadingDot,
+                        {
+                          opacity: uploadPulseAnim.interpolate({
+                            inputRange: [1, 1.15],
+                            outputRange: [0.4, 1],
+                          }),
+                        },
+                      ]} 
+                    />
+                  </View>
+                </>
+              )}
+            </View>
+          </View>
+        )}
+
         <ScrollView 
           style={styles.scrollView}
           contentContainerStyle={styles.scrollContent}
@@ -1134,6 +1514,9 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
             surfLevelDescription={profileData.surf_level_description || null}
             surfLevelCategory={profileData.surf_level_category || 'beginner'}
             surfLevelProgress={surfLevelInfo.progress}
+            customVideoUrl={profileData.profile_video_url}
+            onUploadVideo={handleVideoUpload}
+            isViewingOwnProfile={isViewingOwnProfile}
           />
 
           {/* Top Destinations Section */}
@@ -1881,14 +2264,22 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     color: colors.white,
   },
-  surfSkillExpandIcon: {
+  surfSkillUploadIcon: {
     position: 'absolute',
-    top: 16,
-    right: 16,
+    top: 12,
+    right: 12,
     zIndex: 20,
-    width: 24,
-    height: 24,
-    pointerEvents: 'none',
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 4,
   },
   surfSkillContentOverlay: {
     position: 'absolute',
@@ -2087,5 +2478,141 @@ const styles = StyleSheet.create({
     lineHeight: 18.018,
     color: '#333333',
     textAlign: 'center',
+  },
+  uploadLoadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10000,
+    elevation: 10000,
+  },
+  uploadLoadingContainer: {
+    backgroundColor: colors.white,
+    borderRadius: 20,
+    padding: 40,
+    alignItems: 'center',
+    minWidth: 300,
+    maxWidth: '85%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    elevation: 12,
+    position: 'relative',
+    overflow: 'visible' as any,
+  },
+  uploadIconContainer: {
+    width: 100,
+    height: 100,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 24,
+    position: 'relative',
+  },
+  uploadLoadingPulseCircle: {
+    position: 'absolute',
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: '#4A90E2',
+    top: 0,
+    left: 0,
+  },
+  uploadLoadingSpinner: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'relative',
+    zIndex: 1,
+  },
+  uploadModalButtons: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 8,
+    width: '100%',
+  },
+  uploadModalCancelButton: {
+    flex: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+    backgroundColor: colors.backgroundGray,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  uploadModalCancelText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.textSecondary,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+  },
+  uploadModalUploadButton: {
+    flex: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+    backgroundColor: '#4A90E2',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#4A90E2',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+    minWidth: 120, // Ensure button has minimum width
+  },
+  uploadModalUploadText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    flexShrink: 0, // Prevent text from shrinking
+  },
+  uploadIconGradient: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#4A90E2',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  uploadLoadingText: {
+    fontSize: 20,
+    fontWeight: '700',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    color: colors.textPrimary,
+    marginBottom: 8,
+    textAlign: 'center',
+    letterSpacing: 0.3,
+  },
+  uploadLoadingSubtext: {
+    fontSize: 14,
+    fontWeight: '400',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    marginBottom: 20,
+    lineHeight: 20,
+  },
+  uploadLoadingDots: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 8,
+  },
+  uploadLoadingDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#4A90E2',
   },
 });
