@@ -343,14 +343,18 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
   }, [videoPlayer, videoUrl]);
 
   // Update player source when video URL changes
+  // This is critical for playing the new video after upload
   useEffect(() => {
     if (videoUrl && videoPlayer) {
       const replacePromise = videoPlayer.replaceAsync(videoUrl);
       if (replacePromise && typeof replacePromise.then === 'function') {
         replacePromise.then(() => {
           if (videoPlayer) {
+            // Ensure video is set to loop and muted
             videoPlayer.loop = true;
             videoPlayer.muted = true;
+            
+            // Attempt to play immediately after replace
             const playPromise = videoPlayer.play();
             if (playPromise !== undefined && typeof (playPromise as any).catch === 'function') {
               (playPromise as any).catch((playError: any) => {
@@ -359,13 +363,168 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
                 }
               });
             }
+            
+            // Retry play after a short delay if needed
+            setTimeout(() => {
+              if (videoPlayer) {
+                try {
+                  const retryPlayPromise = videoPlayer.play();
+                  if (retryPlayPromise !== undefined && typeof (retryPlayPromise as any).catch === 'function') {
+                    (retryPlayPromise as any).catch(() => {
+                      // Silently fail - user interaction may be required
+                    });
+                  }
+                } catch (error) {
+                  // Silently fail
+                }
+              }
+            }, 300);
           }
         }).catch((error: any) => {
           console.error('Error replacing video:', error, 'URL:', videoUrl);
         });
+      } else {
+        // If replaceAsync doesn't return a promise, try direct play
+        try {
+          videoPlayer.loop = true;
+          videoPlayer.muted = true;
+          const playPromise = videoPlayer.play();
+          if (playPromise !== undefined && typeof (playPromise as any).catch === 'function') {
+            (playPromise as any).catch(() => {
+              // Silently fail
+            });
+          }
+        } catch (error) {
+          console.error('Error playing video:', error);
+        }
       }
     }
-  }, [videoUrl, videoPlayer, boardType, surfLevel]);
+  }, [videoUrl, videoPlayer]);
+
+  // Continuous playback monitoring - ensures video never stops
+  useEffect(() => {
+    if (!videoPlayer || !videoUrl) return;
+
+    let isMounted = true;
+    let statusCheckInterval: ReturnType<typeof setInterval> | null = null;
+    let subscriptions: any[] = [];
+
+    // Function to force play the video
+    const forcePlay = async () => {
+      if (!isMounted || !videoPlayer) return;
+      
+      try {
+        // Ensure properties are set
+        videoPlayer.loop = true;
+        videoPlayer.muted = true;
+        
+        // Check if video is not playing
+        const isPlaying = videoPlayer.playing;
+        
+        if (!isPlaying) {
+          if (__DEV__) {
+            console.log('[SurfSkillCard] Video stopped/paused, restarting playback');
+          }
+          const playPromise = videoPlayer.play();
+          if (playPromise !== undefined && typeof (playPromise as any).catch === 'function') {
+            (playPromise as any).catch((error: any) => {
+              if (__DEV__ && error.name !== 'NotAllowedError') {
+                console.warn('[SurfSkillCard] Force play failed:', error.message);
+              }
+            });
+          }
+        }
+      } catch (error) {
+        if (__DEV__) {
+          console.warn('[SurfSkillCard] Error in forcePlay:', error);
+        }
+      }
+    };
+
+    // Set up event listeners for video status changes
+    try {
+      // Listen for status changes (paused, ended, etc.)
+      if (videoPlayer.addListener) {
+        const statusSubscription = videoPlayer.addListener('statusChange', (status: any) => {
+          if (!isMounted) return;
+          
+          // If video is paused or ended, restart it
+          if (status?.isPaused || status?.didJustFinish) {
+            if (__DEV__) {
+              console.log('[SurfSkillCard] Video status changed - paused or ended, restarting');
+            }
+            setTimeout(() => forcePlay(), 100);
+          }
+        });
+        subscriptions.push(statusSubscription);
+      }
+
+      // Listen for playToEnd event (when video finishes)
+      if (videoPlayer.addListener) {
+        const endSubscription = videoPlayer.addListener('playToEnd', () => {
+          if (!isMounted) return;
+          if (__DEV__) {
+            console.log('[SurfSkillCard] Video ended, restarting');
+          }
+          setTimeout(() => forcePlay(), 100);
+        });
+        subscriptions.push(endSubscription);
+      }
+    } catch (error) {
+      if (__DEV__) {
+        console.warn('[SurfSkillCard] Could not set up video listeners:', error);
+      }
+    }
+
+    // Polling mechanism to check video status periodically
+    // This ensures the video restarts even if events don't fire
+    statusCheckInterval = setInterval(() => {
+      if (!isMounted || !videoPlayer) return;
+      forcePlay();
+    }, 2000); // Check every 2 seconds
+
+    // Handle visibility changes (when user navigates away and comes back)
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      const handleVisibilityChange = () => {
+        if (!isMounted || !videoPlayer) return;
+        
+        if (document.visibilityState === 'visible') {
+          // Page became visible - ensure video is playing
+          if (__DEV__) {
+            console.log('[SurfSkillCard] Page became visible, ensuring video plays');
+          }
+          setTimeout(() => forcePlay(), 300);
+        }
+      };
+
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+
+      return () => {
+        isMounted = false;
+        if (statusCheckInterval) {
+          clearInterval(statusCheckInterval);
+        }
+        subscriptions.forEach(sub => {
+          if (sub && typeof sub.remove === 'function') {
+            sub.remove();
+          }
+        });
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+      };
+    }
+
+    return () => {
+      isMounted = false;
+      if (statusCheckInterval) {
+        clearInterval(statusCheckInterval);
+      }
+      subscriptions.forEach(sub => {
+        if (sub && typeof sub.remove === 'function') {
+          sub.remove();
+        }
+      });
+    };
+  }, [videoPlayer, videoUrl]);
 
   // Get category subtitle
   const getCategorySubtitle = (category: string): string => {
@@ -521,6 +680,8 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
   const [isUploadingVideo, setIsUploadingVideo] = useState(false);
   const [showVideoUploadModal, setShowVideoUploadModal] = useState(false);
   const [videoUploadError, setVideoUploadError] = useState<string | null>(null);
+  const [uploadFailureError, setUploadFailureError] = useState<string | null>(null);
+  const [retryVideoData, setRetryVideoData] = useState<{ uri: string; mimeType?: string } | null>(null);
   // Track Pexels image URLs for countries that don't have bucket images
   const [pexelsImages, setPexelsImages] = useState<{ [country: string]: string | null }>({});
   
@@ -813,6 +974,8 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
   const handleVideoUpload = () => {
     // Show the pre-upload modal instead of immediately picking a file
     setVideoUploadError(null); // Clear any previous errors
+    setUploadFailureError(null); // Clear any previous upload failures
+    setRetryVideoData(null); // Clear retry data
     setShowVideoUploadModal(true);
   };
 
@@ -847,11 +1010,16 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
 
           // NOW set loading state - user has selected a file
           setIsUploadingVideo(true);
+          setUploadFailureError(null); // Clear previous failures
+          setVideoUploadError(null); // Clear validation errors
 
           // Create object URL for the file
           const videoUri = URL.createObjectURL(file);
           // Get MIME type from file
           const mimeType = file.type || undefined;
+          
+          // Store video data for potential retry
+          setRetryVideoData({ uri: videoUri, mimeType });
           
           try {
             // Validate video before uploading
@@ -861,6 +1029,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
               // Show error in modal instead of closing it
               setIsUploadingVideo(false);
               setVideoUploadError(validation.error || 'Please select a valid video file.');
+              setRetryVideoData(null); // Clear retry data on validation error
               return;
             }
             
@@ -869,9 +1038,10 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
             await uploadAndUpdateVideo(videoUri, mimeType);
           } catch (error) {
             console.error('Error uploading video:', error);
-            Alert.alert('Upload Error', 'Failed to upload video. Please try again.');
             setIsUploadingVideo(false);
-            setShowVideoUploadModal(false); // Close modal on error
+            const errorMessage = error instanceof Error ? error.message : 'Failed to upload video. Please try again.';
+            setUploadFailureError(errorMessage);
+            // Keep modal open to show error and allow retry
           } finally {
             URL.revokeObjectURL(videoUri);
           }
@@ -904,11 +1074,16 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
           if (!result.canceled && result.assets[0]) {
             // NOW set loading state - user has selected a file
             setIsUploadingVideo(true);
+            setUploadFailureError(null); // Clear previous failures
+            setVideoUploadError(null); // Clear validation errors
 
             const videoAsset = result.assets[0];
             const videoUri = videoAsset.uri;
             // Get MIME type from asset if available (helps with validation)
             const mimeType = videoAsset.mimeType || undefined;
+            
+            // Store video data for potential retry
+            setRetryVideoData({ uri: videoUri, mimeType });
             
             // Validate video before uploading
             const validation = await validateVideoComplete(videoUri, mimeType);
@@ -917,6 +1092,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
               // Show error in modal instead of closing it
               setIsUploadingVideo(false);
               setVideoUploadError(validation.error || 'Please select a valid video file.');
+              setRetryVideoData(null); // Clear retry data on validation error
               return;
             }
             
@@ -964,20 +1140,24 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
           await loadProfileData();
           setIsUploadingVideo(false);
           setShowVideoUploadModal(false); // Close modal on immediate success
+          setRetryVideoData(null); // Clear retry data
+          // Force video to play by triggering a re-render
+          // The video URL change will trigger the useEffect in SurfSkillCard
           Alert.alert('Success', 'Surf skill video updated successfully!');
         }
       } else {
         const errorMessage = result.error || 'Failed to upload video';
         console.error('Upload failed:', errorMessage);
         setIsUploadingVideo(false);
-        setShowVideoUploadModal(false); // Close modal on error
-        Alert.alert('Upload Failed', errorMessage);
+        setUploadFailureError(errorMessage);
+        // Keep modal open to show error and allow retry
       }
     } catch (error) {
       console.error('Error uploading profile video:', error);
       setIsUploadingVideo(false);
-      setShowVideoUploadModal(false); // Close modal on error
-      Alert.alert('Error', 'Failed to upload video. Please try again.');
+      const errorMessage = error instanceof Error ? error.message : 'Failed to upload video. Please try again.';
+      setUploadFailureError(errorMessage);
+      // Keep modal open to show error and allow retry
     }
   };
 
@@ -996,13 +1176,17 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
           clearInterval(pollInterval);
           setIsUploadingVideo(false);
           setShowVideoUploadModal(false); // Close modal on success
+          setRetryVideoData(null); // Clear retry data
           await loadProfileData();
+          // Force video to play by triggering a re-render
+          // The video URL change will trigger the useEffect in SurfSkillCard
           Alert.alert('Success', 'Your video has been processed and optimized! It\'s now live on your profile.');
         } else if (attempts >= maxAttempts) {
           // Timeout - stop polling
           clearInterval(pollInterval);
           setIsUploadingVideo(false);
           setShowVideoUploadModal(false); // Close modal on timeout
+          setRetryVideoData(null); // Clear retry data
           Alert.alert(
             'Processing',
             'Video processing is taking longer than expected. Please refresh your profile in a few moments to see your video.'
@@ -1014,6 +1198,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
           clearInterval(pollInterval);
           setIsUploadingVideo(false);
           setShowVideoUploadModal(false); // Close modal on error
+          setRetryVideoData(null); // Clear retry data
         }
       }
     }, intervalMs);
@@ -1226,8 +1411,55 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
               {!isUploadingVideo ? (
                 // Pre-upload content or error state
                 <>
-                  {videoUploadError ? (
-                    // Error state
+                  {uploadFailureError ? (
+                    // Upload failure state
+                    <>
+                      <Ionicons name="close-circle-outline" size={64} color="#FF6B6B" style={{ marginBottom: 20 }} />
+                      <Text style={styles.uploadLoadingText}>Upload Failed</Text>
+                      <Text style={[styles.uploadLoadingSubtext, styles.uploadErrorText]}>
+                        {uploadFailureError}
+                      </Text>
+                      <Text style={styles.uploadLoadingSubtext}>
+                        Please try again or select a different video
+                      </Text>
+                      <View style={styles.uploadModalButtons}>
+                        <TouchableOpacity
+                          style={styles.uploadModalCancelButton}
+                          onPress={() => {
+                            setShowVideoUploadModal(false);
+                            setUploadFailureError(null);
+                            setRetryVideoData(null);
+                          }}
+                        >
+                          <Text style={styles.uploadModalCancelText}>Cancel</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.uploadModalUploadButton}
+                          onPress={async () => {
+                            if (retryVideoData) {
+                              // Retry with the same video
+                              setUploadFailureError(null);
+                              setIsUploadingVideo(true);
+                              try {
+                                await uploadAndUpdateVideo(retryVideoData.uri, retryVideoData.mimeType);
+                              } catch (error) {
+                                // Error handling is done in uploadAndUpdateVideo
+                              }
+                            } else {
+                              // No retry data, select new video
+                              setUploadFailureError(null);
+                              handleVideoFileSelect();
+                            }
+                          }}
+                        >
+                          <Text style={styles.uploadModalUploadText} numberOfLines={1}>
+                            {retryVideoData ? 'Retry' : 'Try Again'}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    </>
+                  ) : videoUploadError ? (
+                    // Validation error state (video too long, wrong format, etc.)
                     <>
                       <Ionicons name="alert-circle-outline" size={64} color="#FF6B6B" style={{ marginBottom: 20 }} />
                       <Text style={styles.uploadLoadingText}>Video Too Long</Text>
@@ -1555,6 +1787,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
 
           {/* Surf Skill Card with Video */}
           <SurfSkillCard
+            key={`surf-skill-${profileData.profile_video_url || 'default'}`}
             boardType={profileData.surfboard_type || 'shortboard'}
             surfLevel={profileData.surf_level || 1}
             surfLevelDescription={profileData.surf_level_description || null}
