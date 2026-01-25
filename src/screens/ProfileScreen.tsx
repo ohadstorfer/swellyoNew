@@ -1348,8 +1348,23 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
 
         {/* Video Upload Modal - Shows different content based on state */}
         {showVideoUploadModal && (
-          <View style={styles.uploadLoadingOverlay}>
-            <View style={styles.uploadLoadingContainer}>
+          <TouchableOpacity 
+            style={styles.uploadLoadingOverlay}
+            activeOpacity={1}
+            onPress={() => {
+              // Close modal when clicking outside (only if not uploading)
+              if (!isUploadingVideo) {
+                setShowVideoUploadModal(false);
+                setVideoUploadError(null);
+                setUploadFailureError(null);
+                setRetryVideoData(null);
+              }
+            }}
+          >
+            <View 
+              style={styles.uploadLoadingContainer}
+              onStartShouldSetResponder={() => true}
+            >
               {!isUploadingVideo ? (
                 // Pre-upload content or error state
                 <>
@@ -1550,7 +1565,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
                 </>
               )}
             </View>
-          </View>
+          </TouchableOpacity>
         )}
 
         <ScrollView 
