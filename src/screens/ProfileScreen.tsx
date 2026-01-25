@@ -520,6 +520,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [isUploadingVideo, setIsUploadingVideo] = useState(false);
   const [showVideoUploadModal, setShowVideoUploadModal] = useState(false);
+  const [videoUploadError, setVideoUploadError] = useState<string | null>(null);
   // Track Pexels image URLs for countries that don't have bucket images
   const [pexelsImages, setPexelsImages] = useState<{ [country: string]: string | null }>({});
   
@@ -811,6 +812,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
 
   const handleVideoUpload = () => {
     // Show the pre-upload modal instead of immediately picking a file
+    setVideoUploadError(null); // Clear any previous errors
     setShowVideoUploadModal(true);
   };
 
@@ -856,12 +858,14 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
             const validation = await validateVideoComplete(videoUri, mimeType);
             
             if (!validation.valid) {
-              Alert.alert('Invalid Video', validation.error || 'Please select a valid video file.');
+              // Show error in modal instead of closing it
               setIsUploadingVideo(false);
-              setShowVideoUploadModal(false); // Close modal on error
+              setVideoUploadError(validation.error || 'Please select a valid video file.');
               return;
             }
             
+            // Clear any previous errors and proceed with upload
+            setVideoUploadError(null);
             await uploadAndUpdateVideo(videoUri, mimeType);
           } catch (error) {
             console.error('Error uploading video:', error);
@@ -910,12 +914,14 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
             const validation = await validateVideoComplete(videoUri, mimeType);
             
             if (!validation.valid) {
-              Alert.alert('Invalid Video', validation.error || 'Please select a valid video file.');
+              // Show error in modal instead of closing it
               setIsUploadingVideo(false);
-              setShowVideoUploadModal(false); // Close modal on error
+              setVideoUploadError(validation.error || 'Please select a valid video file.');
               return;
             }
             
+            // Clear any previous errors and proceed with upload
+            setVideoUploadError(null);
             await uploadAndUpdateVideo(videoUri, mimeType);
           } else {
             // User canceled - don't show loading, just close modal
@@ -1218,27 +1224,67 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
           <View style={styles.uploadLoadingOverlay}>
             <View style={styles.uploadLoadingContainer}>
               {!isUploadingVideo ? (
-                // Pre-upload content
+                // Pre-upload content or error state
                 <>
-                  <Ionicons name="videocam-outline" size={64} color="#4A90E2" style={{ marginBottom: 20 }} />
-                  <Text style={styles.uploadLoadingText}>Select a video</Text>
-                  <Text style={styles.uploadLoadingSubtext}>
-                    You can upload a video up to 20 seconds long
-                  </Text>
-                  <View style={styles.uploadModalButtons}>
-                    <TouchableOpacity
-                      style={styles.uploadModalCancelButton}
-                      onPress={() => setShowVideoUploadModal(false)}
-                    >
-                      <Text style={styles.uploadModalCancelText}>Cancel</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.uploadModalUploadButton}
-                      onPress={handleVideoFileSelect}
-                    >
-                      <Text style={styles.uploadModalUploadText} numberOfLines={1}>Upload</Text>
-                    </TouchableOpacity>
-                  </View>
+                  {videoUploadError ? (
+                    // Error state
+                    <>
+                      <Ionicons name="alert-circle-outline" size={64} color="#FF6B6B" style={{ marginBottom: 20 }} />
+                      <Text style={styles.uploadLoadingText}>Video Too Long</Text>
+                      <Text style={[styles.uploadLoadingSubtext, styles.uploadErrorText]}>
+                        {videoUploadError}
+                      </Text>
+                      <Text style={styles.uploadLoadingSubtext}>
+                        Please select a shorter video (up to 20 seconds)
+                      </Text>
+                      <View style={styles.uploadModalButtons}>
+                        <TouchableOpacity
+                          style={styles.uploadModalCancelButton}
+                          onPress={() => {
+                            setShowVideoUploadModal(false);
+                            setVideoUploadError(null);
+                          }}
+                        >
+                          <Text style={styles.uploadModalCancelText}>Cancel</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.uploadModalUploadButton}
+                          onPress={() => {
+                            setVideoUploadError(null);
+                            handleVideoFileSelect();
+                          }}
+                        >
+                          <Text style={styles.uploadModalUploadText} numberOfLines={1}>Try Again</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </>
+                  ) : (
+                    // Normal pre-upload content
+                    <>
+                      <Ionicons name="videocam-outline" size={64} color="#4A90E2" style={{ marginBottom: 20 }} />
+                      <Text style={styles.uploadLoadingText}>Select a video</Text>
+                      <Text style={styles.uploadLoadingSubtext}>
+                        You can upload a video up to 20 seconds long
+                      </Text>
+                      <View style={styles.uploadModalButtons}>
+                        <TouchableOpacity
+                          style={styles.uploadModalCancelButton}
+                          onPress={() => {
+                            setShowVideoUploadModal(false);
+                            setVideoUploadError(null);
+                          }}
+                        >
+                          <Text style={styles.uploadModalCancelText}>Cancel</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.uploadModalUploadButton}
+                          onPress={handleVideoFileSelect}
+                        >
+                          <Text style={styles.uploadModalUploadText} numberOfLines={1}>Upload</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </>
+                  )}
                 </>
               ) : (
                 // Loading content
@@ -2601,6 +2647,11 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 20,
     lineHeight: 20,
+  },
+  uploadErrorText: {
+    color: '#FF6B6B',
+    fontWeight: '600',
+    marginBottom: 8,
   },
   uploadLoadingDots: {
     flexDirection: 'row',
