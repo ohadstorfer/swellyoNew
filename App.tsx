@@ -24,6 +24,7 @@ export default function App() {
           enableSessionReplay: true,
           captureAppLifecycleEvents: true,
           captureDeepLinks: true,
+          enableNativeNavigationTracking: false, // Disable navigation tracking to prevent useNavigationState errors
           debug: __DEV__, // Enable debug mode in development
         }}
       >

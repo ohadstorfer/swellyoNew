@@ -617,6 +617,9 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
   
   const [profileData, setProfileData] = useState<SupabaseSurfer | null>(null);
   const [loading, setLoading] = useState(true);
+  const [authChecking, setAuthChecking] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [profileNotFound, setProfileNotFound] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [isUploadingVideo, setIsUploadingVideo] = useState(false);
@@ -728,6 +731,40 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
     }
   }, [showSurveyBubble]);
 
+  // Auth state listener to handle session expiration
+  useEffect(() => {
+    if (!isViewingOwnProfile) {
+      // No need to listen to auth changes when viewing another user's profile
+      return;
+    }
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      console.log('[ProfileScreen] Auth state changed:', event, session ? 'session exists' : 'no session');
+      
+      if (event === 'SIGNED_OUT' || (event === 'TOKEN_REFRESHED' && !session)) {
+        // Session expired or user signed out
+        setAuthError('Your session has expired. Please sign in again.');
+        setLoading(false);
+        setProfileData(null);
+        
+        // Redirect to welcome screen after a short delay
+        if (onBack) {
+          setTimeout(() => {
+            onBack();
+          }, 2000);
+        }
+      } else if (event === 'SIGNED_IN' && session) {
+        // User signed in, reload profile data
+        setAuthError(null);
+        loadProfileData();
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [isViewingOwnProfile, onBack]);
+
   useEffect(() => {
     loadProfileData();
   }, [userId]);
@@ -785,32 +822,77 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
 
   const loadProfileData = async () => {
     try {
+      setAuthError(null);
+      setProfileNotFound(false);
       let targetUserId: string;
       
       if (userId) {
-        // View specific user's profile
+        // View specific user's profile - no auth check needed
         targetUserId = userId;
       } else {
-        // Get current authenticated user
-        const { data: { user }, error: authError } = await supabase.auth.getUser();
+        // Viewing own profile - check auth session first
+        setAuthChecking(true);
         
-        if (authError || !user) {
-          console.error('Error getting user:', authError);
+        // Check session first (more reliable than getUser for session validation)
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        
+        if (sessionError || !session) {
+          console.error('No auth session found:', sessionError);
+          setAuthError('Please sign in to view your profile.');
+          setAuthChecking(false);
           setLoading(false);
+          
+          // Redirect to welcome screen if onBack callback is available
+          if (onBack) {
+            setTimeout(() => {
+              onBack();
+            }, 1500);
+          }
+          return;
+        }
+        
+        // Session exists, get user details
+        const { data: { user }, error: userError } = await supabase.auth.getUser();
+        
+        if (userError || !user) {
+          console.error('Error getting user:', userError);
+          setAuthError('Unable to verify your account. Please sign in again.');
+          setAuthChecking(false);
+          setLoading(false);
+          
+          if (onBack) {
+            setTimeout(() => {
+              onBack();
+            }, 1500);
+          }
           return;
         }
         
         targetUserId = user.id;
         setCurrentUserId(user.id);
+        setAuthChecking(false);
       }
 
       // Fetch surfer data
       const surferData = await supabaseDatabaseService.getSurferByUserId(targetUserId);
       
+      if (!surferData) {
+        if (userId) {
+          // Viewing another user's profile that doesn't exist
+          setProfileNotFound(true);
+        } else {
+          // Own profile not found (shouldn't happen if user is authenticated)
+          setAuthError('Profile not found. Please complete your onboarding.');
+        }
+        setLoading(false);
+        return;
+      }
+      
       setProfileData(surferData);
       setLoading(false);
     } catch (error) {
       console.error('Error loading profile data:', error);
+      setAuthError('Failed to load profile. Please try again.');
       setLoading(false);
     }
   };
@@ -1148,7 +1230,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
 
   // Show skeleton while loading - show immediately to prevent "No profile data found" flash
   // The showSkeleton delay is handled internally by the skeleton components
-  if (loading) {
+  if (loading || authChecking) {
     return (
       <SafeAreaView style={styles.container}>
         <ScrollView 
@@ -1185,13 +1267,63 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
     );
   }
 
-  // Only show "No profile data found" when not loading and no data
+  // Show error states when not loading and no profile data
   if (!profileData) {
     return (
       <SafeAreaView style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <Text>No profile data found</Text>
+        <View style={styles.errorContainer}>
+          {authError ? (
+            <>
+              <Ionicons name="lock-closed-outline" size={64} color="#FF6B6B" style={{ marginBottom: 20 }} />
+              <Text style={styles.errorTitle}>Authentication Required</Text>
+              <Text style={styles.errorMessage}>{authError}</Text>
+              {onBack && (
+                <TouchableOpacity 
+                  style={styles.errorButton}
+                  onPress={onBack}
+                >
+                  <Text style={styles.errorButtonText}>Go Back</Text>
+                </TouchableOpacity>
+              )}
+            </>
+          ) : profileNotFound ? (
+            <>
+              <Ionicons name="person-outline" size={64} color="#FF6B6B" style={{ marginBottom: 20 }} />
+              <Text style={styles.errorTitle}>Profile Not Found</Text>
+              <Text style={styles.errorMessage}>This user's profile could not be found.</Text>
+              {onBack && (
+                <TouchableOpacity 
+                  style={styles.errorButton}
+                  onPress={onBack}
+                >
+                  <Text style={styles.errorButtonText}>Go Back</Text>
+                </TouchableOpacity>
+              )}
+            </>
+          ) : (
+            <>
+              <Ionicons name="alert-circle-outline" size={64} color="#FF6B6B" style={{ marginBottom: 20 }} />
+              <Text style={styles.errorTitle}>Unable to Load Profile</Text>
+              <Text style={styles.errorMessage}>Please try again later.</Text>
+              {onBack && (
+                <TouchableOpacity 
+                  style={styles.errorButton}
+                  onPress={onBack}
+                >
+                  <Text style={styles.errorButtonText}>Go Back</Text>
+                </TouchableOpacity>
+              )}
+            </>
+          )}
         </View>
+        {/* Back button always visible */}
+        {onBack && (
+          <TouchableOpacity style={styles.backButton} onPress={onBack}>
+            <View style={styles.backButtonContainer}>
+              <BackButtonIcon />
+            </View>
+          </TouchableOpacity>
+        )}
       </SafeAreaView>
     );
   }
@@ -1934,6 +2066,39 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 32,
+    backgroundColor: '#FFFFFF',
+  },
+  errorTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#222B30',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  errorMessage: {
+    fontSize: 16,
+    color: '#666666',
+    textAlign: 'center',
+    marginBottom: 24,
+    lineHeight: 22,
+  },
+  errorButton: {
+    backgroundColor: '#00A2B6',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+    marginTop: 8,
+  },
+  errorButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
   },
   coverContainer: {
     height: 180,
