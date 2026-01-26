@@ -47,7 +47,7 @@ class AnalyticsService {
       this.posthogInstance = new PostHog(POSTHOG_API_KEY, {
         host: POSTHOG_HOST,
         enableSessionReplay: true,
-        captureApplicationLifecycleEvents: true,
+        captureAppLifecycleEvents: true, // Fixed: should be captureAppLifecycleEvents, not captureApplicationLifecycleEvents
         captureDeepLinks: true,
         flushAt: 20, // Flush after 20 events
         flushInterval: 30000, // Or flush every 30 seconds

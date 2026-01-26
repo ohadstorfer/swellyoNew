@@ -366,6 +366,9 @@ export const AppContent: React.FC = () => {
     console.log('[AppContent] handleProfileBack called');
     console.log('[AppContent] profileFromTripPlanningChat:', profileFromTripPlanningChat);
     
+    // Clear any selected conversation to prevent it from showing when profile closes
+    setSelectedConversation(null);
+    
     // If profile was opened from trip planning chat, return to chat
     if (profileFromTripPlanningChat) {
       console.log('[AppContent] Returning to trip planning chat');
@@ -467,7 +470,7 @@ export const AppContent: React.FC = () => {
           otherUserId: userId,
           otherUserName: existingConv.other_user.name || 'User',
           otherUserAvatar: existingConv.other_user.profile_image_url || null,
-          fromTripPlanning: true, // This conversation is from trip planning recommendations
+          fromTripPlanning: profileFromTripPlanningChat || true, // Preserve trip planning flag if coming from there
         });
       } else {
         // No conversation exists yet - create pending conversation
@@ -480,10 +483,18 @@ export const AppContent: React.FC = () => {
           otherUserId: userId,
           otherUserName: surferData?.name || 'User',
           otherUserAvatar: surferData?.profile_image_url || null,
-          fromTripPlanning: true, // This conversation is from trip planning recommendations
+          fromTripPlanning: profileFromTripPlanningChat || true, // Preserve trip planning flag if coming from there
         });
       }
-      setShowTripPlanningChat(false); // Close chat to show conversation
+      
+      // Close profile screen to show conversation
+      setShowProfile(false);
+      setViewingUserId(null);
+      
+      // Close trip planning chat if it was open (only if not preserving the flag)
+      // Actually, we should keep trip planning chat state so back button works correctly
+      // Don't close it here - let the conversation's back button handle navigation
+      // setShowTripPlanningChat(false); // Removed - preserve trip planning chat state
     } catch (error) {
       console.error('Error starting conversation:', error);
       Alert.alert('Error', 'Failed to start conversation');
@@ -495,6 +506,8 @@ export const AppContent: React.FC = () => {
     if (selectedConversation?.fromTripPlanning) {
       setSelectedConversation(null);
       setShowTripPlanningChat(true);
+      // Reset profile flag since we're going back to trip planning
+      setProfileFromTripPlanningChat(false);
     } else {
       setSelectedConversation(null);
     }
