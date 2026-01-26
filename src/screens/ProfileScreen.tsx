@@ -32,6 +32,7 @@ import { analyticsService } from '../services/analytics/analyticsService';
 import { getSurfLevelMappingFromEnum } from '../utils/surfLevelMapping';
 import { useScreenDimensions } from '../utils/responsive';
 import { updateCachedUserProfilePhoto } from '../utils/userProfileCache';
+import { useOnboarding } from '../context/OnboardingContext';
 
 interface ProfileScreenProps {
   onBack?: () => void;
@@ -592,6 +593,9 @@ const PlusIcon: React.FC<{ size?: number }> = ({ size = 40 }) => {
 };
 
 export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, onMessage, onContinueEdit, onEdit }) => {
+  // Get onboarding context for logout
+  const { resetOnboarding, setUser, setCurrentStep, setIsDemoUser } = useOnboarding();
+  
   // Load Inter font from Google Fonts for web
   useEffect(() => {
     if (Platform.OS === 'web' && typeof document !== 'undefined') {
@@ -742,17 +746,45 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
       console.log('[ProfileScreen] Auth state changed:', event, session ? 'session exists' : 'no session');
       
       if (event === 'SIGNED_OUT' || (event === 'TOKEN_REFRESHED' && !session)) {
-        // Session expired or user signed out
+        // Session expired or user signed out - perform proper logout
         setAuthError('Your session has expired. Please sign in again.');
         setLoading(false);
         setProfileData(null);
         
-        // Redirect to welcome screen after a short delay
-        if (onBack) {
-          setTimeout(() => {
-            onBack();
-          }, 2000);
-        }
+        // Perform proper logout to clear all state
+        (async () => {
+          try {
+            const { performLogout } = await import('../utils/logout');
+            const result = await performLogout({
+              resetOnboarding,
+              setUser,
+              setCurrentStep,
+              setIsDemoUser,
+            });
+            
+            if (result.success) {
+              console.log('[ProfileScreen] Logout successful after session expiration');
+            } else {
+              console.error('[ProfileScreen] Logout failed:', result.error);
+            }
+            
+            // Redirect to welcome screen if onBack callback is available
+            // Note: performLogout already navigates, but onBack ensures proper cleanup
+            if (onBack) {
+              setTimeout(() => {
+                onBack();
+              }, 500);
+            }
+          } catch (logoutError) {
+            console.error('[ProfileScreen] Error during logout:', logoutError);
+            // Still redirect even if logout fails
+            if (onBack) {
+              setTimeout(() => {
+                onBack();
+              }, 2000);
+            }
+          }
+        })();
       } else if (event === 'SIGNED_IN' && session) {
         // User signed in, reload profile data
         setAuthError(null);
@@ -842,11 +874,37 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
           setAuthChecking(false);
           setLoading(false);
           
-          // Redirect to welcome screen if onBack callback is available
-          if (onBack) {
-            setTimeout(() => {
-              onBack();
-            }, 1500);
+          // Perform proper logout to clear all state
+          try {
+            const { performLogout } = await import('../utils/logout');
+            const result = await performLogout({
+              resetOnboarding,
+              setUser,
+              setCurrentStep,
+              setIsDemoUser,
+            });
+            
+            if (result.success) {
+              console.log('[ProfileScreen] Logout successful after auth failure');
+            } else {
+              console.error('[ProfileScreen] Logout failed:', result.error);
+            }
+            
+            // Redirect to welcome screen if onBack callback is available
+            // Note: performLogout already navigates, but onBack ensures proper cleanup
+            if (onBack) {
+              setTimeout(() => {
+                onBack();
+              }, 500);
+            }
+          } catch (logoutError) {
+            console.error('[ProfileScreen] Error during logout:', logoutError);
+            // Still redirect even if logout fails
+            if (onBack) {
+              setTimeout(() => {
+                onBack();
+              }, 1500);
+            }
           }
           return;
         }
@@ -860,10 +918,37 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
           setAuthChecking(false);
           setLoading(false);
           
-          if (onBack) {
-            setTimeout(() => {
-              onBack();
-            }, 1500);
+          // Perform proper logout to clear all state
+          try {
+            const { performLogout } = await import('../utils/logout');
+            const result = await performLogout({
+              resetOnboarding,
+              setUser,
+              setCurrentStep,
+              setIsDemoUser,
+            });
+            
+            if (result.success) {
+              console.log('[ProfileScreen] Logout successful after user verification failure');
+            } else {
+              console.error('[ProfileScreen] Logout failed:', result.error);
+            }
+            
+            // Redirect to welcome screen if onBack callback is available
+            // Note: performLogout already navigates, but onBack ensures proper cleanup
+            if (onBack) {
+              setTimeout(() => {
+                onBack();
+              }, 500);
+            }
+          } catch (logoutError) {
+            console.error('[ProfileScreen] Error during logout:', logoutError);
+            // Still redirect even if logout fails
+            if (onBack) {
+              setTimeout(() => {
+                onBack();
+              }, 1500);
+            }
           }
           return;
         }

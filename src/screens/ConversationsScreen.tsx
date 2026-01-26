@@ -89,7 +89,7 @@ export default function ConversationsScreen({
   onViewUserProfile,
   onSwellyShaperViewProfile,
 }: ConversationsScreenProps) {
-  const { resetOnboarding, setCurrentStep, user: contextUser } = useOnboarding();
+  const { resetOnboarding, setCurrentStep, setUser, setIsDemoUser, user: contextUser } = useOnboarding();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(false); // Start as false to show conversations immediately
   const [conversationsLoaded, setConversationsLoaded] = useState(false); // Track if conversations have been loaded
@@ -397,27 +397,21 @@ export default function ConversationsScreen({
     try {
       setShowMenu(false);
       
-      // Perform logout directly (for testing - can add confirmation back later)
+      // Perform logout using centralized logout function
       console.log('Starting logout process...');
-      try {
-        // Sign out from auth service
-        console.log('Calling authService.signOut()...');
-        await authService.signOut();
-        console.log('Auth service sign out successful');
-        
-        // Reset onboarding state
-        console.log('Calling resetOnboarding()...');
-        await resetOnboarding();
-        console.log('Reset onboarding successful');
-        
-        // Explicitly set step to -1 to go to WelcomeScreen (not OnboardingWelcomeScreen)
-        setCurrentStep(-1);
-        console.log('Navigated to WelcomeScreen');
-        
+      const { performLogout } = await import('../utils/logout');
+      const result = await performLogout({
+        resetOnboarding,
+        setUser,
+        setCurrentStep,
+        setIsDemoUser,
+      });
+      
+      if (result.success) {
         console.log('User logged out successfully');
-      } catch (error) {
-        console.error('Error during logout:', error);
-        Alert.alert('Error', `Failed to logout: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      } else {
+        console.error('Error during logout:', result.error);
+        Alert.alert('Error', `Failed to logout: ${result.error || 'Unknown error'}`);
       }
       
       // Uncomment below to add confirmation dialog back:

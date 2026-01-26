@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   Image,
   ImageBackground,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -59,6 +60,9 @@ export const MatchedUserCard: React.FC<MatchedUserCardProps> = ({
   onSendMessage,
   onViewProfile,
 }) => {
+  const [isLoading, setIsLoading] = useState(false);
+  const [loadingAction, setLoadingAction] = useState<'message' | 'profile' | null>(null);
+  
   // Get days in destination (from matching service)
   const daysInDestination = user.days_in_destination || 0;
   
@@ -166,27 +170,54 @@ export const MatchedUserCard: React.FC<MatchedUserCardProps> = ({
         {/* Action Buttons */}
         <View style={styles.actionsContainer}>
           <TouchableOpacity
-            style={[styles.actionButton, styles.actionButtonWithBorder]}
+            style={[
+              styles.actionButton, 
+              styles.actionButtonWithBorder,
+              isLoading && styles.actionButtonDisabled
+            ]}
             onPress={() => {
+              if (isLoading) return;
+              
+              setIsLoading(true);
+              setLoadingAction('message');
+              
               // Track connect clicked
               analyticsService.trackConnectClicked();
               onSendMessage(user.user_id);
             }}
-            activeOpacity={0.7}
+            activeOpacity={isLoading ? 1 : 0.7}
+            disabled={isLoading}
           >
-            <Text style={styles.sendMessageText}>Send Message</Text>
+            {isLoading && loadingAction === 'message' ? (
+              <ActivityIndicator size="small" color="#0788B0" />
+            ) : (
+              <Text style={styles.sendMessageText}>Send Message</Text>
+            )}
           </TouchableOpacity>
           
           <TouchableOpacity
-            style={styles.actionButton}
+            style={[
+              styles.actionButton,
+              isLoading && styles.actionButtonDisabled
+            ]}
             onPress={() => {
+              if (isLoading) return;
+              
+              setIsLoading(true);
+              setLoadingAction('profile');
+              
               // Track profile_view_clicked from swelly_list
               analyticsService.trackProfileViewClicked('swelly_list');
               onViewProfile(user.user_id);
             }}
-            activeOpacity={0.7}
+            activeOpacity={isLoading ? 1 : 0.7}
+            disabled={isLoading}
           >
-            <Text style={styles.viewProfileText}>View Profile</Text>
+            {isLoading && loadingAction === 'profile' ? (
+              <ActivityIndicator size="small" color="#333" />
+            ) : (
+              <Text style={styles.viewProfileText}>View Profile</Text>
+            )}
           </TouchableOpacity>
         </View>
       </View>
@@ -341,6 +372,9 @@ const styles = StyleSheet.create({
   actionButtonWithBorder: {
     borderRightWidth: 0.5,
     borderRightColor: '#CFCFCF',
+  },
+  actionButtonDisabled: {
+    opacity: 0.6,
   },
   sendMessageText: {
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,

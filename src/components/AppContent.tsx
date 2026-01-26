@@ -675,51 +675,20 @@ export const AppContent: React.FC = () => {
         }}
         onBack={async () => {
           // Log out user (both regular Google auth users and demo users) before going back to welcome screen
-          try {
-            console.log('Logging out user before going back to welcome screen...');
-            
-            // Clear user from context first to prevent WelcomeScreen from auto-signing in
-            setUser(null);
-            setIsDemoUser(false);
-            
-            // Sign out from auth service
-            const { authService } = await import('../services/auth/authService');
-            const { isSupabaseConfigured } = await import('../config/supabase');
-            
-            if (isSupabaseConfigured()) {
-              const { supabaseAuthService } = await import('../services/auth/supabaseAuthService');
-              const { supabase } = await import('../config/supabase');
-              
-              await supabaseAuthService.signOut();
-              
-              // Verify session is cleared
-              const { data: { session } } = await supabase.auth.getSession();
-              if (session) {
-                console.warn('Session still exists after signOut, forcing clear...');
-                // Force clear by calling signOut again
-                await supabaseAuthService.signOut();
-                // Wait a bit and check again
-                await new Promise(resolve => setTimeout(resolve, 100));
-                const { data: { session: sessionAfterRetry } } = await supabase.auth.getSession();
-                if (sessionAfterRetry) {
-                  console.error('Session still exists after retry, this may indicate a problem');
-                }
-              }
-              console.log('Supabase session cleared');
-            } else {
-              await authService.signOut();
-            }
-            console.log('User signed out successfully');
-            
-            // Reset onboarding state (this also clears formData and local storage)
-            await resetOnboarding();
-            console.log('Onboarding state reset');
-            
-            // Set step to -1 to go back to welcome screen
-            setCurrentStep(-1);
-          } catch (error) {
-            console.error('Error logging out user:', error);
-            // Even if logout fails, clear user and reset state
+          console.log('Logging out user before going back to welcome screen...');
+          
+          // Use centralized logout function
+          const { performLogout } = await import('../utils/logout');
+          const result = await performLogout({
+            resetOnboarding,
+            setUser,
+            setCurrentStep,
+            setIsDemoUser,
+          });
+          
+          if (!result.success) {
+            console.error('Error during logout:', result.error);
+            // Even if logout fails, ensure we clear state and navigate
             setUser(null);
             setIsDemoUser(false);
             try {

@@ -64,7 +64,7 @@ const GoogleIcon: React.FC = () => {
 export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDemoChat, isCheckingAuth = false }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [isDemoLoading, setIsDemoLoading] = useState(false);
-  const { setUser, updateFormData, checkOnboardingStatus, isComplete, isDemoUser, setIsDemoUser, resetOnboarding, user } = useOnboarding();
+  const { setUser, updateFormData, checkOnboardingStatus, isComplete, isDemoUser, setIsDemoUser, resetOnboarding, setCurrentStep, user } = useOnboarding();
   
   // Use responsive hook for accurate mobile detection
   const isMobile = useIsMobile();
@@ -138,6 +138,18 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
               userEmail: supabaseUser.email,
             });
             
+            // Identify user with PostHog when session is restored
+            const { analyticsService } = await import('../services/analytics/analyticsService');
+            const userId = legacyUser.id.toString();
+            const userProperties = {
+              $email: supabaseUser.email,
+              $name: supabaseUser.nickname || supabaseUser.email?.split('@')[0] || 'User',
+              email: supabaseUser.email,
+              name: supabaseUser.nickname || supabaseUser.email?.split('@')[0] || 'User',
+            };
+            analyticsService.identify(userId, userProperties);
+            console.log('[WelcomeScreen] User identified with PostHog after session restoration:', userId);
+            
             // Check if user has finished onboarding before navigating
             const hasFinishedOnboarding = await checkOnboardingStatus();
             if (!hasFinishedOnboarding) {
@@ -180,6 +192,18 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
                 userEmail: supabaseUser.email,
               });
               
+              // Identify user with PostHog after OAuth return
+              const { analyticsService } = await import('../services/analytics/analyticsService');
+              const userId = legacyUser.id.toString();
+              const userProperties = {
+                $email: supabaseUser.email,
+                $name: supabaseUser.nickname || supabaseUser.email?.split('@')[0] || 'User',
+                email: supabaseUser.email,
+                name: supabaseUser.nickname || supabaseUser.email?.split('@')[0] || 'User',
+              };
+              analyticsService.identify(userId, userProperties);
+              console.log('[WelcomeScreen] User identified with PostHog after OAuth return:', userId);
+              
               // Clean up the URL hash
               window.history.replaceState({}, document.title, window.location.pathname);
               
@@ -217,6 +241,18 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
               nickname: user.nickname,
               userEmail: user.email,
             });
+            
+            // Identify user with PostHog after legacy OAuth return
+            const { analyticsService } = await import('../services/analytics/analyticsService');
+            const userId = user.id.toString();
+            const userProperties = {
+              $email: user.email,
+              $name: user.nickname || user.email?.split('@')[0] || 'User',
+              email: user.email,
+              name: user.nickname || user.email?.split('@')[0] || 'User',
+            };
+            analyticsService.identify(userId, userProperties);
+            console.log('[WelcomeScreen] User identified with PostHog after legacy OAuth return:', userId);
             
             onGetStarted();
           } catch (error: any) {
@@ -261,24 +297,27 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
       if (hasExistingSession) {
         console.log('Existing user session detected, logging out before Google sign-in...');
         try {
-          // Check if there's an active Supabase session
-          if (isSupabaseConfigured()) {
-            const { supabaseAuthService } = await import('../services/auth/supabaseAuthService');
-            const isSignedIn = await supabaseAuthService.isSignedIn();
-            if (isSignedIn) {
-              // Sign out from auth service (Supabase)
-              await authService.signOut();
-              console.log('User logged out successfully');
-            }
-          } else {
-            // For non-Supabase auth, still try to sign out
-            await authService.signOut();
-            console.log('User logged out successfully');
-          }
+          // Use centralized logout function to ensure all state is cleared
+          const { performLogout } = await import('../utils/logout');
+          const logoutResult = await performLogout({
+            resetOnboarding,
+            setUser,
+            setCurrentStep: (step: number) => {
+              // Don't navigate yet, we'll navigate after sign-in
+              // But still update the step internally if needed
+              if (step === -1) {
+                // WelcomeScreen is already showing, no need to navigate
+              }
+            },
+            setIsDemoUser,
+          });
           
-          // Reset onboarding state (this also resets the demo user flag)
-          await resetOnboarding();
-          console.log('Onboarding state reset');
+          if (logoutResult.success) {
+            console.log('User logged out successfully before new sign-in');
+          } else {
+            console.error('Error during logout before sign-in:', logoutResult.error);
+            // Continue with sign-in even if logout fails
+          }
         } catch (logoutError) {
           console.error('Error logging out user:', logoutError);
           // Continue with Google sign-in even if logout fails
@@ -299,6 +338,18 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
           userEmail: user.email,
         });
         
+        // Identify user with PostHog after Google sign-in (web)
+        const { analyticsService } = await import('../services/analytics/analyticsService');
+        const userId = user.id.toString();
+        const userProperties = {
+          $email: user.email,
+          $name: user.nickname || user.email?.split('@')[0] || 'User',
+          email: user.email,
+          name: user.nickname || user.email?.split('@')[0] || 'User',
+        };
+        analyticsService.identify(userId, userProperties);
+        console.log('[WelcomeScreen] User identified with PostHog after Google sign-in (web):', userId);
+        
         // Check if user has finished onboarding before navigating
         const hasFinishedOnboarding = await checkOnboardingStatus();
         if (!hasFinishedOnboarding) {
@@ -316,6 +367,18 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
           nickname: user.nickname,
           userEmail: user.email,
         });
+        
+        // Identify user with PostHog after Google sign-in (mobile)
+        const { analyticsService } = await import('../services/analytics/analyticsService');
+        const userId = user.id.toString();
+        const userProperties = {
+          $email: user.email,
+          $name: user.nickname || user.email?.split('@')[0] || 'User',
+          email: user.email,
+          name: user.nickname || user.email?.split('@')[0] || 'User',
+        };
+        analyticsService.identify(userId, userProperties);
+        console.log('[WelcomeScreen] User identified with PostHog after Google sign-in (mobile):', userId);
         
         // Check if user has finished onboarding before navigating
         const hasFinishedOnboarding = await checkOnboardingStatus();

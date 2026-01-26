@@ -95,14 +95,26 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     getCurrentUser();
 
     // Delay skeleton display to prevent flicker for fast loads
-    const skeletonTimer = setTimeout(() => {
-      if (isFetchingMessages) {
-        setShowSkeletons(true);
-      }
-    }, SKELETON_DELAY_MS);
+    // Only show skeletons if we're fetching AND we don't have any messages yet
+    if (isFetchingMessages && messages.length === 0) {
+      // Show skeletons immediately if fetching and no messages (don't wait for timer)
+      // This prevents showing empty message while loading
+      setShowSkeletons(true);
+      
+      // But also set up timer to handle fast loads (though we show immediately)
+      const skeletonTimer = setTimeout(() => {
+        // Keep skeletons visible if still fetching
+        if (isFetchingMessages && messages.length === 0) {
+          setShowSkeletons(true);
+        }
+      }, SKELETON_DELAY_MS);
 
-    return () => clearTimeout(skeletonTimer);
-  }, [isFetchingMessages]);
+      return () => clearTimeout(skeletonTimer);
+    } else {
+      // If we have messages or not fetching, don't show skeletons
+      setShowSkeletons(false);
+    }
+  }, [isFetchingMessages, messages.length]);
 
   useEffect(() => {
     // Only load messages and subscribe if conversation exists
@@ -184,9 +196,19 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       return;
     }
     
+    // If we already have messages (e.g., optimistic message after first send),
+    // don't show skeletons - just load in the background
+    const hasExistingMessages = messages.length > 0;
+    
     try {
       setIsFetchingMessages(true);
-      setShowSkeletons(false); // Reset skeleton state
+      // Only show skeletons if we don't have existing messages
+      if (!hasExistingMessages) {
+        setShowSkeletons(false); // Reset skeleton state - timer will set it if needed
+      } else {
+        // We have messages, so don't show skeletons at all
+        setShowSkeletons(false);
+      }
       const msgs = await messagingService.getMessages(currentConversationId);
       setMessages(msgs);
       // Load other user's adv_role
@@ -542,7 +564,9 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             contentContainerStyle={styles.messagesContent}
             showsVerticalScrollIndicator={false}
           >
-          {isFetchingMessages && currentConversationId && showSkeletons ? (
+          {!isFetchingMessages && currentConversationId && messages.length === 0 ? (
+            // Show skeletons if fetching and no messages
+            // If showSkeletons is false (timer hasn't fired), show skeletons anyway to avoid showing empty message
             <MessageListSkeleton count={5} />
           ) : messages.length === 0 && !isFetchingMessages ? (
             <View style={styles.emptyContainer}>
@@ -557,7 +581,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
               .map(renderMessage)
               .filter(msg => msg !== null) // Filter out null messages (when variables not ready)
           )}
-          {isLoading && (
+          {/* {isLoading && (
             <View style={[styles.messageContainer, styles.botMessageContainer]}>
               <View style={[styles.messageBubble, styles.botMessageBubble]}>
                 <Text style={styles.botMessageText}>
@@ -565,7 +589,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                 </Text>
               </View>
             </View>
-          )}
+          )} */}
           </ScrollView>
         </ImageBackground>
 
