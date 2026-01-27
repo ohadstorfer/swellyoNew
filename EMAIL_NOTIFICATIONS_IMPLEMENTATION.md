@@ -97,38 +97,58 @@ In Supabase Dashboard → Project Settings → Edge Functions → Secrets:
 - `APP_URL` (optional): Your app URL (default: https://swellyo.com)
 - `EMAIL_FROM` (optional): Sender email (default: noreply@swellyo.com)
 
-### 4. Set Up Email Sending
+### 4. Set Up Email Sending with Resend
 
-**Important**: Supabase doesn't have built-in email sending. You need to configure one of these options:
+**The edge function is now integrated with Resend for email sending.**
 
-#### Option A: Supabase Database Webhooks (Recommended)
-1. Go to Supabase Dashboard → Database → Webhooks
-2. Create new webhook:
-   - **Table**: `messages`
-   - **Events**: `INSERT`
-   - **Type**: HTTP Request
-   - **URL**: `https://YOUR_PROJECT.supabase.co/functions/v1/send-message-notification`
-   - **HTTP Method**: `POST`
-   - **HTTP Headers**:
-     - `Authorization: Bearer YOUR_SERVICE_ROLE_KEY`
-     - `Content-Type: application/json`
-   - **HTTP Body**:
-     ```json
-     {
-       "message_id": "{{ $1.id }}",
-       "conversation_id": "{{ $1.conversation_id }}",
-       "sender_id": "{{ $1.sender_id }}"
-     }
-     ```
+**Steps to configure Resend:**
 
-#### Option B: Enable pg_net Extension
-1. Enable pg_net extension in Supabase Dashboard → Database → Extensions
-2. The trigger will automatically call the edge function
+1. **Sign up for Resend** (if you haven't already):
+   - Go to https://resend.com
+   - Create a free account (free tier includes 3,000 emails/month)
 
-#### Option C: External Email Service (Resend, SendGrid, etc.)
-1. Modify `send_email` function in `create_email_sending_function.sql`
-2. Integrate with your email service API
-3. Update edge function to use the external service
+2. **Get your API key**:
+   - Go to https://resend.com/api-keys
+   - Click "Create API Key"
+   - Give it a name (e.g., "Swellyo Email Notifications")
+   - Copy the API key
+
+3. **Add API key to Supabase**:
+   - Go to Supabase Dashboard → Project Settings → Edge Functions → Secrets
+   - Click "Add new secret"
+   - Name: `RESEND_API_KEY`
+   - Value: Your Resend API key
+   - Click "Save"
+
+4. **Verify your domain** (for production):
+   - In Resend dashboard, go to Domains
+   - Add your domain (e.g., swellyo.com)
+   - Add the DNS records provided by Resend to your domain
+   - Update `EMAIL_FROM` secret to use your verified domain (e.g., `Swellyo <noreply@swellyo.com>`)
+
+5. **Set up Database Trigger or Webhook**:
+   - **Option A: Use Supabase Database Webhooks** (Recommended)
+     - Go to Supabase Dashboard → Database → Webhooks
+     - Create new webhook:
+       - **Table**: `messages`
+       - **Events**: `INSERT`
+       - **Type**: HTTP Request
+       - **URL**: `https://YOUR_PROJECT.supabase.co/functions/v1/send-message-notification`
+       - **HTTP Method**: `POST`
+       - **HTTP Headers**:
+         - `Authorization: Bearer YOUR_SERVICE_ROLE_KEY`
+         - `Content-Type: application/json`
+       - **HTTP Body**:
+         ```json
+         {
+           "message_id": "{{ $1.id }}",
+           "conversation_id": "{{ $1.conversation_id }}",
+           "sender_id": "{{ $1.sender_id }}"
+         }
+         ```
+   - **Option B: Enable pg_net Extension**
+     - Enable pg_net extension in Supabase Dashboard → Database → Extensions
+     - The trigger will automatically call the edge function
 
 ### 5. Update User Activity Tracking
 
@@ -211,11 +231,12 @@ const ONLINE_THRESHOLD_MINUTES = 5 // Change to desired minutes
 
 ## Next Steps
 
-1. **Configure Email Service**: Set up actual email sending (Resend, SendGrid, or Supabase email)
+1. ✅ **Email Service Configured**: Resend is now integrated
 2. **Test End-to-End**: Send a test message and verify email is received
 3. **Monitor Performance**: Check edge function logs and database queries
 4. **Update User Activity**: Add code to track when users are online
 5. **Customize Email Template**: Adjust colors, branding, or layout as needed
+6. **Verify Domain** (for production): Set up domain verification in Resend for better deliverability
 
 ## Troubleshooting
 

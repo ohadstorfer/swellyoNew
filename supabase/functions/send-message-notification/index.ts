@@ -170,6 +170,10 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const APP_URL = Deno.env.get('APP_URL') || 'https://swellyo.com'
 
+// Resend email service configuration
+const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY')
+const EMAIL_FROM = Deno.env.get('EMAIL_FROM') || 'Swellyo <noreply@swellyo.com>'
+
 // Configuration constants
 const BATCH_WINDOW_MINUTES = 5 // Wait up to 5 minutes to batch messages
 const MAX_BATCH_SIZE = 5 // Maximum messages per batch
@@ -399,46 +403,40 @@ async function sendBatchedEmail(
     recipientName
   }, APP_URL);
 
-  // Send email using Supabase's email function
+  // Send email using Resend API
   const messageCount = messages.length;
   const emailSubject = `${senderName} ${messageCount > 1 ? `sent you ${messageCount} new messages` : 'sent you a message'} on Swellyo`;
   const emailTextContent = `You received ${messageCount > 1 ? `${messageCount} new messages` : 'a new message'} from ${senderName} on Swellyo.\n\n${messages.map(m => `${m.body}\n\n`).join('')}\n\nView conversation: ${APP_URL}/messages/${conversationId}`;
   
   try {
-    // Try using Supabase's RPC function first
-    const { data: emailResult, error: emailError } = await supabase.rpc('send_email', {
-      to_email: recipientUser.user.email,
-      subject: emailSubject,
-      html_content: emailHtml,
-      text_content: emailTextContent
-    });
-
-    if (emailError) {
-      // Fallback: Use direct API call if RPC is not available
-      console.log('[Email Notification] RPC method failed, trying REST API...');
-      
-      const emailResponse = await fetch(`${SUPABASE_URL}/rest/v1/rpc/send_email`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'apikey': SUPABASE_SERVICE_ROLE_KEY,
-          'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`
-        },
-        body: JSON.stringify({
-          to_email: recipientUser.user.email,
-          subject: emailSubject,
-          html_content: emailHtml,
-          text_content: emailTextContent
-        })
-      });
-
-      if (!emailResponse.ok) {
-        const errorText = await emailResponse.text();
-        throw new Error(`Email API returned status ${emailResponse.status}: ${errorText}`);
-      }
+    // Check if Resend API key is configured
+    if (!RESEND_API_KEY) {
+      throw new Error('RESEND_API_KEY is not configured. Please set it in Supabase Edge Functions secrets.');
     }
 
-    console.log(`[Email Notification] Email sent successfully to ${recipientUser.user.email} for ${messages.length} message(s) from ${senderName}`);
+    // Send email via Resend API
+    const resendResponse = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${RESEND_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from: EMAIL_FROM,
+        to: [recipientUser.user.email],
+        subject: emailSubject,
+        html: emailHtml,
+        text: emailTextContent,
+      }),
+    });
+
+    if (!resendResponse.ok) {
+      const errorData = await resendResponse.json().catch(() => ({ message: 'Unknown error' }));
+      throw new Error(`Resend API error (${resendResponse.status}): ${JSON.stringify(errorData)}`);
+    }
+
+    const resendResult = await resendResponse.json();
+    console.log(`[Email Notification] Email sent successfully via Resend to ${recipientUser.user.email} for ${messages.length} message(s) from ${senderName}. Email ID: ${resendResult.id || 'N/A'}`);
     
     // Mark notifications as sent
     const now = new Date().toISOString();
