@@ -505,7 +505,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
             )}
             
             {/* Demo Chat Button */}
-            {onDemoChat && (
+            {/* {onDemoChat && (
               <TouchableOpacity
                 onPress={handleDemoChat}
                 disabled={isDemoLoading || isLoading}
@@ -521,7 +521,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
                   {isDemoLoading ? "Loading..." : "Demo"}
                 </RNText>
               </TouchableOpacity>
-            )}
+            )} */}
             </View>
 
             {/* Login Prompt */}
