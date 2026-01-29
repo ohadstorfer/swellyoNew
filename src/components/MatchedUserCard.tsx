@@ -191,7 +191,7 @@ export const MatchedUserCard: React.FC<MatchedUserCardProps> = ({
             {isLoading && loadingAction === 'message' ? (
               <ActivityIndicator size="small" color="#0788B0" />
             ) : (
-              <Text style={styles.sendMessageText}>Send Message</Text>
+            <Text style={styles.sendMessageText}>Send Message</Text>
             )}
           </TouchableOpacity>
           
@@ -216,7 +216,7 @@ export const MatchedUserCard: React.FC<MatchedUserCardProps> = ({
             {isLoading && loadingAction === 'profile' ? (
               <ActivityIndicator size="small" color="#333" />
             ) : (
-              <Text style={styles.viewProfileText}>View Profile</Text>
+            <Text style={styles.viewProfileText}>View Profile</Text>
             )}
           </TouchableOpacity>
         </View>

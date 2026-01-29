@@ -637,25 +637,9 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
   // Determine if we're viewing our own profile or another user's
   const isViewingOwnProfile = !userId;
 
-  // Animation for survey bubble
-  const pulseAnim = useRef(new Animated.Value(1)).current;
-  const glowAnim = useRef(new Animated.Value(0)).current;
-  const [showSurveyBubble, setShowSurveyBubble] = useState(false);
-  
   // Animation for upload spinner
   const uploadSpinnerAnim = useRef(new Animated.Value(0)).current;
   const uploadPulseAnim = useRef(new Animated.Value(1)).current;
-
-  // Show survey bubble after 4 seconds
-  useEffect(() => {
-    if (isMVPMode && isViewingOwnProfile) {
-      const timer = setTimeout(() => {
-        setShowSurveyBubble(true);
-      }, 4000);
-
-      return () => clearTimeout(timer);
-    }
-  }, [isMVPMode, isViewingOwnProfile]);
 
   // Upload spinner animation
   useEffect(() => {
@@ -698,42 +682,6 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
     }
   }, [isUploadingVideo]);
 
-  // Pulse animation effect
-  useEffect(() => {
-    if (showSurveyBubble) {
-      // Create a pulsing scale animation
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(pulseAnim, {
-            toValue: 1.05,
-            duration: 1000,
-            useNativeDriver: true,
-          }),
-          Animated.timing(pulseAnim, {
-            toValue: 1,
-            duration: 1000,
-            useNativeDriver: true,
-          }),
-        ])
-      ).start();
-
-      // Create a glowing animation
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(glowAnim, {
-            toValue: 1,
-            duration: 1500,
-            useNativeDriver: false,
-          }),
-          Animated.timing(glowAnim, {
-            toValue: 0,
-            duration: 1500,
-            useNativeDriver: false,
-          }),
-        ])
-      ).start();
-    }
-  }, [showSurveyBubble]);
 
   // Auth state listener to handle session expiration
   useEffect(() => {
@@ -1331,13 +1279,13 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
             <BackButtonIcon />
           </View>
         </TouchableOpacity>
-        {isViewingOwnProfile && onEdit && !isMVPMode ? (
+        {isViewingOwnProfile && onEdit ? (
           <TouchableOpacity style={styles.editButton} onPress={onEdit}>
             <View style={styles.editButtonContainer}>
               <EditButtonIcon />
             </View>
           </TouchableOpacity>
-        ) : userId && onMessage && !isMVPMode ? (
+        ) : userId && onMessage ? (
           <TouchableOpacity 
             style={styles.messageButton}
             onPress={() => onMessage(userId)}
@@ -1530,39 +1478,6 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
         style={styles.backgroundImage}
         resizeMode="cover"
       >
-        {/* Survey Bubble - Fixed position, outside ScrollView, above everything */}
-        {showSurveyBubble && isMVPMode && isViewingOwnProfile && (
-          <TouchableOpacity 
-            onPress={onBack}
-            activeOpacity={0.8}
-            style={[
-              styles.surveyBubble, 
-              { 
-                width: contentWidth,
-              }
-            ]}
-          >
-            <Animated.View 
-              style={{
-                transform: [{ scale: pulseAnim }],
-              }}
-            >
-              <LinearGradient
-                colors={['#4A90E2', '#357ABD']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                style={styles.surveyBubbleGradient}
-              >
-                <View style={styles.surveyBubbleContent}>
-                  <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
-                  <Text style={styles.surveyBubbleText}> Start a short survey</Text>
-                  <Ionicons name="chatbubble-ellipses" size={20} color="#FFFFFF" />
-                </View>
-              </LinearGradient>
-            </Animated.View>
-          </TouchableOpacity>
-        )}
-
         {/* Video Upload Modal - Shows different content based on state */}
         {showVideoUploadModal && (
           <TouchableOpacity 
@@ -1817,13 +1732,13 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
         </TouchableOpacity>
 
         {/* Edit Button - Only visible when viewing own profile */}
-        {isViewingOwnProfile && onEdit && !isMVPMode ? (
+        {isViewingOwnProfile && onEdit ? (
           <TouchableOpacity style={styles.editButton} onPress={onEdit}>
             <View style={styles.editButtonContainer}>
               <EditButtonIcon />
             </View>
           </TouchableOpacity>
-        ) : userId && onMessage && !isMVPMode ? (
+        ) : userId && onMessage ? (
           // Message Button - Visible when viewing other user's profile
           <TouchableOpacity 
             style={styles.messageButton}
@@ -2231,43 +2146,6 @@ const styles = StyleSheet.create({
     ...(Platform.OS === 'web' && {
       boxShadow: '0px 2px 4px rgba(0, 0, 0, 0.1)',
     }),
-  },
-  surveyBubble: {
-    position: 'absolute',
-    top: 120,
-    left: 16,
-    zIndex: 9999, // Very high z-index to be above everything
-    borderRadius: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-    elevation: 999, // Very high elevation for Android
-    ...(Platform.OS === 'web' && {
-      boxShadow: '0px 8px 24px rgba(0, 0, 0, 0.25)',
-      // @ts-ignore - fixed position is valid CSS for web
-      position: 'fixed',
-    }),
-  },
-  surveyBubbleGradient: {
-    borderRadius: 16,
-    overflow: 'hidden',
-  },
-  surveyBubbleContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 16,
-    paddingHorizontal: 20,
-    gap: 12,
-  },
-  surveyBubbleText: {
-    flex: 1,
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif' : undefined,
-    textAlign: 'center',
   },
   surveyTextContainer: {
     position: 'absolute',

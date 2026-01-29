@@ -172,28 +172,14 @@ const APP_URL = Deno.env.get('APP_URL') || 'https://swellyo.com'
 
 // Resend email service configuration
 const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY')
-const EMAIL_FROM = Deno.env.get('EMAIL_FROM') || 'Swellyo <noreply@swellyo.com>'
+// Use Resend's default domain for testing, or set EMAIL_FROM secret to your verified domain
+// Default: onboarding@resend.dev (works without domain verification)
+// Production: Set EMAIL_FROM secret to 'Swellyo <noreply@swellyo.com>' after verifying domain
+const EMAIL_FROM = Deno.env.get('EMAIL_FROM') || 'Swellyo <onboarding@resend.dev>'
 
 // Configuration constants
-const BATCH_WINDOW_MINUTES = 5 // Wait up to 5 minutes to batch messages
-const MAX_BATCH_SIZE = 5 // Maximum messages per batch
-const RATE_LIMIT_MINUTES = 10 // Max 1 email per user per 10 minutes
+const RATE_LIMIT_MINUTES = 30 // 30-minute cooldown between emails per sender→recipient
 const ONLINE_THRESHOLD_MINUTES = 5 // Skip if user was online in last 5 minutes
-
-interface NotificationRequest {
-  message_id: string;
-  conversation_id: string;
-  sender_id: string;
-}
-
-interface BatchedNotification {
-  batch_id: string;
-  recipient_id: string;
-  sender_id: string;
-  conversation_id: string;
-  message_ids: string[];
-  created_at: string;
-}
 
 /**
  * Check if user should receive email notification
@@ -252,117 +238,26 @@ async function shouldSendEmail(
 }
 
 /**
- * Get or create batch ID for pending notifications
+ * Send single email notification immediately
  */
-async function getOrCreateBatch(
+async function sendSingleEmail(
   supabase: any,
   recipientId: string,
   senderId: string,
+  messageId: string,
   conversationId: string
-): Promise<string | null> {
-  // Check for existing pending batch
-  const { data: existingBatch } = await supabase
-    .from('message_email_notifications')
-    .select('batch_id, created_at')
-    .eq('recipient_id', recipientId)
-    .eq('sender_id', senderId)
-    .eq('conversation_id', conversationId)
-    .is('email_sent_at', null)
-    .order('created_at', { ascending: false })
-    .limit(1)
+): Promise<void> {
+  console.log(`[sendSingleEmail] Sending email - recipient: ${recipientId}, sender: ${senderId}, message: ${messageId}`);
+
+  // Get the message
+  const { data: msg, error: msgError } = await supabase
+    .from('messages')
+    .select('id, body, created_at')
+    .eq('id', messageId)
     .single();
 
-  if (existingBatch?.batch_id) {
-    // Check if batch is still within time window
-    const batchCreated = new Date(existingBatch.created_at);
-    const now = new Date();
-    const diffMinutes = (now.getTime() - batchCreated.getTime()) / 60000;
-
-    if (diffMinutes < BATCH_WINDOW_MINUTES) {
-      // Check batch size
-      const { count } = await supabase
-        .from('message_email_notifications')
-        .select('*', { count: 'exact', head: true })
-        .eq('batch_id', existingBatch.batch_id)
-        .is('email_sent_at', null);
-
-      if (count && count < MAX_BATCH_SIZE) {
-        return existingBatch.batch_id;
-      }
-    }
-  }
-
-  // Create new batch ID
-  return crypto.randomUUID();
-}
-
-/**
- * Check if batch is ready to send
- */
-async function isBatchReady(
-  supabase: any,
-  batchId: string
-): Promise<boolean> {
-  const { data: batchNotifications } = await supabase
-    .from('message_email_notifications')
-    .select('created_at')
-    .eq('batch_id', batchId)
-    .is('email_sent_at', null)
-    .order('created_at', { ascending: true });
-
-  if (!batchNotifications || batchNotifications.length === 0) {
-    return false;
-  }
-
-  // Check if max batch size reached
-  if (batchNotifications.length >= MAX_BATCH_SIZE) {
-    return true;
-  }
-
-  // Check if batch window has passed
-  const oldestNotification = new Date(batchNotifications[0].created_at);
-  const now = new Date();
-  const diffMinutes = (now.getTime() - oldestNotification.getTime()) / 60000;
-
-  return diffMinutes >= BATCH_WINDOW_MINUTES;
-}
-
-/**
- * Send email notification for batched messages
- */
-async function sendBatchedEmail(
-  supabase: any,
-  batchId: string
-): Promise<void> {
-  // Get all messages in batch
-  const { data: notifications, error: notifError } = await supabase
-    .from('message_email_notifications')
-    .select(`
-      message_id,
-      recipient_id,
-      sender_id,
-      conversation_id,
-      messages!inner(id, body, created_at),
-      conversations!inner(id)
-    `)
-    .eq('batch_id', batchId)
-    .is('email_sent_at', null)
-    .order('created_at', { ascending: true });
-
-  if (notifError || !notifications || notifications.length === 0) {
-    console.error('[Email Notification] Error fetching batch notifications:', notifError);
-    return;
-  }
-
-  const firstNotif = notifications[0];
-  const recipientId = firstNotif.recipient_id;
-  const senderId = firstNotif.sender_id;
-  const conversationId = firstNotif.conversation_id;
-
-  // Get recipient email
-  const { data: recipientUser, error: recipientError } = await supabase.auth.admin.getUserById(recipientId);
-  if (recipientError || !recipientUser?.user?.email) {
-    console.error('[Email Notification] Error fetching recipient:', recipientError);
+  if (msgError || !msg) {
+    console.error('[Email Notification] Error loading message:', msgError);
     return;
   }
 
@@ -376,6 +271,15 @@ async function sendBatchedEmail(
   const senderName = senderSurfer?.name || 'Someone';
   const senderAvatar = senderSurfer?.profile_image_url || null;
 
+  // Get recipient email
+  const { data: recipientUser, error: recipientError } = await supabase.auth.admin.getUserById(recipientId);
+  if (recipientError || !recipientUser?.user?.email) {
+    console.error('[Email Notification] Error loading recipient user:', recipientError);
+    return;
+  }
+
+  const recipientEmail = recipientUser.user.email as string;
+
   // Get recipient name
   const { data: recipientSurfer } = await supabase
     .from('surfers')
@@ -385,36 +289,33 @@ async function sendBatchedEmail(
 
   const recipientName = recipientSurfer?.name;
 
-  // Prepare message data
-  const messages: MessageData[] = notifications.map((notif: any) => ({
-    id: notif.messages.id,
-    body: notif.messages.body || '',
-    created_at: notif.messages.created_at
-  }));
+  // Build email content (single message)
+  const messageData: MessageData = {
+    id: msg.id,
+    body: msg.body || '',
+    created_at: msg.created_at
+  };
 
-  // Generate email HTML
   const emailHtml = generateEmailTemplate({
     sender: {
       name: senderName,
       avatar: senderAvatar
     },
-    messages,
+    messages: [messageData],
     conversationId,
     recipientName
   }, APP_URL);
 
-  // Send email using Resend API
-  const messageCount = messages.length;
-  const emailSubject = `${senderName} ${messageCount > 1 ? `sent you ${messageCount} new messages` : 'sent you a message'} on Swellyo`;
-  const emailTextContent = `You received ${messageCount > 1 ? `${messageCount} new messages` : 'a new message'} from ${senderName} on Swellyo.\n\n${messages.map(m => `${m.body}\n\n`).join('')}\n\nView conversation: ${APP_URL}/messages/${conversationId}`;
-  
-  try {
-    // Check if Resend API key is configured
-    if (!RESEND_API_KEY) {
-      throw new Error('RESEND_API_KEY is not configured. Please set it in Supabase Edge Functions secrets.');
-    }
+  // Send via Resend
+  if (!RESEND_API_KEY) {
+    console.error('[Email Notification] RESEND_API_KEY not set');
+    return;
+  }
 
-    // Send email via Resend API
+  const emailSubject = `${senderName} sent you a message on Swellyo`;
+  const emailTextContent = `You received a new message from ${senderName} on Swellyo.\n\n${messageData.body}\n\nView conversation: ${APP_URL}/messages/${conversationId}`;
+
+  try {
     const resendResponse = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: {
@@ -423,7 +324,7 @@ async function sendBatchedEmail(
       },
       body: JSON.stringify({
         from: EMAIL_FROM,
-        to: [recipientUser.user.email],
+        to: [recipientEmail],
         subject: emailSubject,
         html: emailHtml,
         text: emailTextContent,
@@ -436,24 +337,29 @@ async function sendBatchedEmail(
     }
 
     const resendResult = await resendResponse.json();
-    console.log(`[Email Notification] Email sent successfully via Resend to ${recipientUser.user.email} for ${messages.length} message(s) from ${senderName}. Email ID: ${resendResult.id || 'N/A'}`);
+    console.log(`[Email Notification] Email sent successfully via Resend to ${recipientEmail} from ${senderName}. Email ID: ${resendResult.id || 'N/A'}`);
     
-    // Mark notifications as sent
+    // Record email as sent
     const now = new Date().toISOString();
-    const { error: updateError } = await supabase
+    const { error: recordError } = await supabase
       .from('message_email_notifications')
-      .update({ email_sent_at: now })
-      .eq('batch_id', batchId)
-      .is('email_sent_at', null);
+      .upsert({
+        message_id: messageId,
+        recipient_id: recipientId,
+        sender_id: senderId,
+        conversation_id: conversationId,
+        email_sent_at: now,
+      }, {
+        onConflict: 'message_id,recipient_id'
+      });
 
-    if (updateError) {
-      console.error('[Email Notification] Error updating notification status:', updateError);
+    if (recordError) {
+      console.error('[Email Notification] Error recording email_sent_at:', recordError);
     } else {
-      console.log(`[Email Notification] Marked ${notifications.length} notifications as sent`);
+      console.log(`[Email Notification] Recorded email sent for message ${messageId} to recipient ${recipientId}`);
     }
   } catch (emailSendError) {
     console.error('[Email Notification] Error sending email:', emailSendError);
-    // Don't mark as sent if email failed - will retry on next batch check
     throw emailSendError;
   }
 }
@@ -462,31 +368,60 @@ async function sendBatchedEmail(
  * Main handler
  */
 serve(async (req) => {
+  let requestId = crypto.randomUUID().substring(0, 8);
+  console.log(`[Email Notification] [${requestId}] Request received - Method: ${req.method}`);
+  
   try {
     // Only allow POST requests
     if (req.method !== 'POST') {
+      console.log(`[Email Notification] [${requestId}] Method not allowed: ${req.method}`);
       return new Response(
         JSON.stringify({ error: 'Method not allowed' }),
         { status: 405, headers: { 'Content-Type': 'application/json' } }
       );
     }
 
-    const { message_id, conversation_id, sender_id }: NotificationRequest = await req.json();
-
-    if (!message_id || !conversation_id || !sender_id) {
-      return new Response(
-        JSON.stringify({ error: 'Missing required fields: message_id, conversation_id, sender_id' }),
-        { status: 400, headers: { 'Content-Type': 'application/json' } }
-      );
-    }
-
-    // Create Supabase client with service role
+    // Create Supabase client with service role (available as env vars)
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
       auth: {
         autoRefreshToken: false,
         persistSession: false
       }
     });
+
+    const body = await req.json().catch(() => ({}));
+    console.log(`[Email Notification] [${requestId}] Request body:`, JSON.stringify(body));
+    
+    // Handle Supabase Database Webhook format
+    // Webhook sends: { type, table, record: { id, conversation_id, sender_id, ... }, schema, old_record }
+    // Or direct format: { message_id, conversation_id, sender_id }
+    let message_id: string | undefined;
+    let conversation_id: string | undefined;
+    let sender_id: string | undefined;
+
+    if (body.record) {
+      // Supabase Database Webhook format
+      message_id = body.record.id;
+      conversation_id = body.record.conversation_id;
+      sender_id = body.record.sender_id;
+    } else {
+      // Direct format (for manual calls or other webhooks)
+      message_id = body.message_id || body.id;
+      conversation_id = body.conversation_id;
+      sender_id = body.sender_id;
+    }
+
+    // Validate required fields
+    if (!message_id || !conversation_id || !sender_id) {
+      console.error(`[Email Notification] [${requestId}] Missing required fields - message_id: ${message_id}, conversation_id: ${conversation_id}, sender_id: ${sender_id}`);
+      console.error(`[Email Notification] [${requestId}] Body structure:`, JSON.stringify(body, null, 2));
+      return new Response(
+        JSON.stringify({ error: 'Missing required fields: message_id, conversation_id, sender_id' }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    console.log(`[Email Notification] [${requestId}] Processing notification - message_id: ${message_id}, conversation_id: ${conversation_id}, sender_id: ${sender_id}`);
 
     // Get conversation members (recipients)
     const { data: members, error: membersError } = await supabase
@@ -496,7 +431,7 @@ serve(async (req) => {
       .neq('user_id', sender_id); // Exclude sender
 
     if (membersError) {
-      console.error('[Email Notification] Error fetching conversation members:', membersError);
+      console.error(`[Email Notification] [${requestId}] Error fetching conversation members:`, membersError);
       return new Response(
         JSON.stringify({ error: 'Failed to fetch conversation members' }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
@@ -504,67 +439,48 @@ serve(async (req) => {
     }
 
     if (!members || members.length === 0) {
-      console.log('[Email Notification] No recipients found');
+      console.log(`[Email Notification] [${requestId}] No recipients found`);
       return new Response(
         JSON.stringify({ message: 'No recipients to notify' }),
         { status: 200, headers: { 'Content-Type': 'application/json' } }
       );
     }
 
-    // Process each recipient
+    // Process each recipient - send email immediately if rate limit allows
     for (const member of members) {
       const recipientId = member.user_id;
 
-      // Check if should send email
+      // Check if should send email (30-minute cooldown + online detection)
       const shouldSend = await shouldSendEmail(supabase, recipientId, sender_id);
       if (!shouldSend) {
+        console.log(`[Email Notification] [${requestId}] Skipping email for recipient ${recipientId} (rate limit or online)`);
         continue;
       }
 
-      // Get or create batch ID
-      const batchId = await getOrCreateBatch(supabase, recipientId, sender_id, conversation_id);
-      if (!batchId) {
-        console.error('[Email Notification] Failed to get/create batch ID');
-        continue;
-      }
-
-      // Create notification record
-      const { error: insertError } = await supabase
-        .from('message_email_notifications')
-        .insert({
-          message_id,
-          recipient_id: recipientId,
-          sender_id,
-          conversation_id,
-          batch_id: batchId
-        });
-
-      if (insertError) {
-        console.error('[Email Notification] Error inserting notification:', insertError);
-        continue;
-      }
-
-      console.log(`[Email Notification] Added message ${message_id} to batch ${batchId} for recipient ${recipientId}`);
-
-      // Check if batch is ready to send
-      const batchReady = await isBatchReady(supabase, batchId);
-      if (batchReady) {
-        console.log(`[Email Notification] Batch ${batchId} is ready, sending email...`);
-        await sendBatchedEmail(supabase, batchId);
-      } else {
-        console.log(`[Email Notification] Batch ${batchId} is not ready yet, waiting...`);
+      // Send email immediately
+      try {
+        await sendSingleEmail(supabase, recipientId, sender_id, message_id, conversation_id);
+        console.log(`[Email Notification] [${requestId}] Email sent to recipient ${recipientId}`);
+      } catch (error) {
+        console.error(`[Email Notification] [${requestId}] Error sending email to recipient ${recipientId}:`, error);
+        // Continue processing other recipients even if one fails
       }
     }
 
     return new Response(
-      JSON.stringify({ message: 'Notification processed' }),
+      JSON.stringify({ message: 'Notification processed', request_id: requestId }),
       { status: 200, headers: { 'Content-Type': 'application/json' } }
     );
 
   } catch (error) {
-    console.error('[Email Notification] Unexpected error:', error);
+    console.error(`[Email Notification] [${requestId}] ❌ Unexpected error:`, error);
+    console.error(`[Email Notification] [${requestId}] Error stack:`, error instanceof Error ? error.stack : 'No stack trace');
     return new Response(
-      JSON.stringify({ error: 'Internal server error', details: error instanceof Error ? error.message : 'Unknown error' }),
+      JSON.stringify({ 
+        error: 'Internal server error', 
+        details: error instanceof Error ? error.message : 'Unknown error',
+        request_id: requestId
+      }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }
     );
   }

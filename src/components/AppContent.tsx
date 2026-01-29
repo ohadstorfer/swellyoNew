@@ -13,7 +13,6 @@ import ConversationsScreen from '../screens/ConversationsScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
 import { DirectMessageScreen } from '../screens/DirectMessageScreen';
 import { SwellyShaperScreen } from '../screens/SwellyShaperScreen';
-import { MVPThankYouScreen } from '../screens/MVPThankYouScreen';
 import { messagingService } from '../services/messaging/messagingService';
 import { useOnboarding } from '../context/OnboardingContext';
 import { analyticsService } from '../services/analytics/analyticsService';
@@ -25,7 +24,6 @@ export const AppContent: React.FC = () => {
   const [isSavingStep2, setIsSavingStep2] = useState(false);
   const [isSavingStep3, setIsSavingStep3] = useState(false);
   const [isSavingStep4, setIsSavingStep4] = useState(false);
-  const [showMVPThankYou, setShowMVPThankYou] = useState(false);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const authCheckStartTime = useRef<number>(Date.now());
   const stopTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -347,9 +345,8 @@ export const AppContent: React.FC = () => {
   const handleChatComplete = async () => {
     console.log('[AppContent] handleChatComplete called');
     
-    // Set showProfile FIRST to prevent race condition with blocking logic
-    // In MVP mode, still show profile after onboarding (user can navigate to thank you via back button)
-    // Normal mode: Navigate to profile
+    // Set showProfile FIRST to prevent race condition
+    // Navigate to profile
     setShowProfile(true);
     console.log('[AppContent] Navigating to profile screen');
     
@@ -540,27 +537,6 @@ export const AppContent: React.FC = () => {
     setCurrentStep(3); // Go back to step 3
   };
 
-  const handleBackToHomepage = () => {
-    console.log('[AppContent] handleBackToHomepage called');
-    setShowMVPThankYou(false);
-    // Reset to welcome screen
-    resetOnboarding();
-    setCurrentStep(-1);
-  };
-
-  // Check if MVP mode thank you screen should be shown
-  if (showMVPThankYou) {
-    return <MVPThankYouScreen onBackToHomepage={handleBackToHomepage} />;
-  }
-
-  // MVP MODE: Block access to conversations and other features (but allow profile)
-  // In MVP mode, users can access their profile after onboarding
-  // The profile screen will handle MVP-specific behavior (no edit button, back goes to thank you)
-  if (isMVPMode && isComplete && !showProfile && !showSwellyShaper && !selectedConversation && !showTripPlanningChat) {
-    // If user tries to access conversations or other features, redirect to profile
-    console.log('[AppContent] MVP mode: Redirecting to profile');
-    setShowProfile(true);
-  }
 
   // If onboarding is complete, show conversations screen as home page (regardless of currentStep)
   // This check must come FIRST before any step checks
@@ -586,18 +562,12 @@ export const AppContent: React.FC = () => {
       console.log('[AppContent] Rendering ProfileScreen for userId:', viewingUserId);
       console.log('[AppContent] profileFromSwellyShaper flag:', profileFromSwellyShaper);
       
-      // In MVP mode, back button goes to thank you page, and edit button is hidden
-      const handleMVPProfileBack = () => {
-        setShowProfile(false);
-        setShowMVPThankYou(true);
-      };
-      
       return (
         <ProfileScreen 
-          onBack={isMVPMode ? handleMVPProfileBack : handleProfileBack}
+          onBack={handleProfileBack}
           userId={viewingUserId ?? undefined}
           onMessage={handleStartConversation}
-          onEdit={isMVPMode ? undefined : () => {
+          onEdit={() => {
             // When clicking edit, preserve the flag if it was already set
             // (user came from Swelly Shaper), so they can navigate back
             setShowProfile(false);

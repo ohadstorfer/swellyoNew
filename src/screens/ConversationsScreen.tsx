@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -9,10 +9,13 @@ import {
   Platform,
   Modal,
   Alert,
+  Animated,
 } from 'react-native';
+import { supabase } from '../config/supabase';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Path, G, ClipPath, Defs, Rect } from 'react-native-svg';
+import { usePostHog } from 'posthog-react-native';
 import { messagingService, Conversation } from '../services/messaging/messagingService';
 import { supabaseAuthService } from '../services/auth/supabaseAuthService';
 import { authService } from '../services/auth/authService';
@@ -90,6 +93,16 @@ export default function ConversationsScreen({
   onSwellyShaperViewProfile,
 }: ConversationsScreenProps) {
   const { resetOnboarding, setCurrentStep, setUser, setIsDemoUser, user: contextUser } = useOnboarding();
+  const posthog = usePostHog();
+  
+  // Check if MVP mode is enabled
+  const isMVPMode = process.env.EXPO_PUBLIC_MVP_MODE === 'true';
+  
+  // Survey bubble state and animations
+  const [showSurveyBubble, setShowSurveyBubble] = useState(false);
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+  const glowAnim = useRef(new Animated.Value(0)).current;
+  
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(false); // Start as false to show conversations immediately
   const [conversationsLoaded, setConversationsLoaded] = useState(false); // Track if conversations have been loaded
@@ -161,6 +174,87 @@ export default function ConversationsScreen({
       unsubscribe();
     };
   }, []);
+
+  // Check if user has sent any direct messages to show survey bubble (MVP mode only)
+  // This runs when component mounts, when user ID changes, or when returning from a conversation
+  useEffect(() => {
+    if (!isMVPMode || !currentUserId) return;
+    
+    // Don't check if we're currently viewing a conversation
+    if (selectedConversation) return;
+    
+    const checkIfUserHasSentMessages = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+        
+        // Check if user has sent any messages (non-system, non-deleted)
+        const { data: messages, error } = await supabase
+          .from('messages')
+          .select('id')
+          .eq('sender_id', user.id)
+          .eq('is_system', false)
+          .eq('deleted', false)
+          .limit(1);
+        
+        if (error) {
+          console.error('Error checking if user has sent messages:', error);
+          return;
+        }
+        
+        // If user has sent at least one message, show bubble after a short delay
+        if (messages && messages.length > 0) {
+          setTimeout(() => {
+            setShowSurveyBubble(true);
+          }, 1000);
+        } else {
+          // Hide bubble if user hasn't sent messages
+          setShowSurveyBubble(false);
+        }
+      } catch (error) {
+        console.error('Error checking if user has sent messages:', error);
+      }
+    };
+    
+    checkIfUserHasSentMessages();
+  }, [isMVPMode, currentUserId, selectedConversation]);
+
+  // Pulse animation effect for survey bubble
+  useEffect(() => {
+    if (showSurveyBubble) {
+      // Create a pulsing scale animation
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseAnim, {
+            toValue: 1.05,
+            duration: 1000,
+            useNativeDriver: true,
+          }),
+          Animated.timing(pulseAnim, {
+            toValue: 1,
+            duration: 1000,
+            useNativeDriver: true,
+          }),
+        ])
+      ).start();
+
+      // Create a glowing animation
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(glowAnim, {
+            toValue: 1,
+            duration: 1500,
+            useNativeDriver: false,
+          }),
+          Animated.timing(glowAnim, {
+            toValue: 0,
+            duration: 1500,
+            useNativeDriver: false,
+          }),
+        ])
+      ).start();
+    }
+  }, [showSurveyBubble]);
 
   const loadUserInfo = async () => {
     // Only show skeleton if we don't have cached data
@@ -851,6 +945,42 @@ export default function ConversationsScreen({
 
   return (
     <View style={styles.container}>
+      {/* Survey Bubble - Fixed position, above everything (MVP mode only) */}
+      {showSurveyBubble && isMVPMode && (
+        <TouchableOpacity 
+          onPress={() => {
+            // Trigger PostHog survey
+            if (posthog) {
+              posthog.capture('mvp_full_product_survey_cohort_a_viewed', {
+                // This event triggers the "MVP Full Product Survey - Cohort A" survey
+              });
+            }
+            setShowSurveyBubble(false);
+          }}
+          activeOpacity={0.8}
+          style={styles.surveyBubble}
+        >
+          <Animated.View 
+            style={{
+              transform: [{ scale: pulseAnim }],
+            }}
+          >
+            <LinearGradient
+              colors={['#4A90E2', '#357ABD']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.surveyBubbleGradient}
+            >
+              <View style={styles.surveyBubbleContent}>
+                <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
+                <Text style={styles.surveyBubbleText}> Ready to start final survey?</Text>
+                <Ionicons name="chatbubble-ellipses" size={20} color="#FFFFFF" />
+              </View>
+            </LinearGradient>
+          </Animated.View>
+        </TouchableOpacity>
+      )}
+      
       {/* Header - Dark background */}
       <View style={styles.header}>
         <TouchableOpacity 
@@ -1621,6 +1751,45 @@ const styles = StyleSheet.create({
   welcomeArrowContainer: {
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  surveyBubble: {
+    position: 'absolute',
+    top: 120,
+    // left: 16,
+    width: '90%',
+    alignSelf: 'center',
+    zIndex: 9999, // Very high z-index to be above everything
+    borderRadius: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    elevation: 999, // Very high elevation for Android
+    ...(Platform.OS === 'web' && {
+      boxShadow: '0px 8px 24px rgba(0, 0, 0, 0.25)',
+      // @ts-ignore - fixed position is valid CSS for web
+      position: 'fixed' as any,
+    }),
+  },
+  surveyBubbleGradient: {
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  surveyBubbleContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    gap: 12,
+  },
+  surveyBubbleText: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif' : undefined,
+    textAlign: 'center',
   },
 });
 
