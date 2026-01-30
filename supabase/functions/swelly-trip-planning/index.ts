@@ -475,6 +475,237 @@ async function callOpenAI(messages: Array<{ role: string; content: string }>): P
 }
 
 /**
+ * Official country list - these are the EXACT names used in the database
+ */
+const OFFICIAL_COUNTRIES = [
+  'Afghanistan', 'Albania', 'Algeria', 'Andorra', 'Angola', 'Antigua and Barbuda', 'Argentina', 'Armenia', 'Australia', 'Austria', 'Azerbaijan',
+  'Bahamas', 'Bahrain', 'Bangladesh', 'Barbados', 'Belarus', 'Belgium', 'Belize', 'Benin', 'Bhutan', 'Bolivia', 'Bosnia and Herzegovina', 'Botswana', 'Brazil', 'Brunei', 'Bulgaria', 'Burkina Faso', 'Burundi',
+  'Cambodia', 'Cameroon', 'Canada', 'Cape Verde', 'Central African Republic', 'Chad', 'Chile', 'China', 'Colombia', 'Comoros', 'Costa Rica', 'Croatia', 'Cuba', 'Cyprus', 'Czech Republic',
+  'Democratic Republic of the Congo', 'Denmark', 'Djibouti', 'Dominica', 'Dominican Republic',
+  'Ecuador', 'Egypt', 'El Salvador', 'Equatorial Guinea', 'Eritrea', 'Estonia', 'Eswatini', 'Ethiopia',
+  'Fiji', 'Finland', 'France',
+  'Gabon', 'Gambia', 'Georgia', 'Germany', 'Ghana', 'Greece', 'Grenada', 'Guatemala', 'Guinea', 'Guinea-Bissau', 'Guyana',
+  'Haiti', 'Honduras', 'Hong Kong', 'Hungary',
+  'Iceland', 'India', 'Indonesia', 'Ireland', 'Israel', 'Italy', 'Ivory Coast',
+  'Jamaica', 'Japan', 'Jordan',
+  'Kazakhstan', 'Kenya', 'Kiribati', 'Kuwait', 'Kyrgyzstan',
+  'Laos', 'Latvia', 'Lebanon', 'Lesotho', 'Liberia', 'Libya', 'Liechtenstein', 'Lithuania', 'Luxembourg',
+  'Madagascar', 'Malawi', 'Malaysia', 'Maldives', 'Mali', 'Malta', 'Marshall Islands', 'Mauritania', 'Mauritius', 'Mexico', 'Micronesia', 'Moldova', 'Monaco', 'Mongolia', 'Montenegro', 'Morocco', 'Mozambique', 'Myanmar',
+  'Namibia', 'Nauru', 'Nepal', 'Netherlands', 'New Zealand', 'Nicaragua', 'Niger', 'Nigeria', 'North Korea', 'North Macedonia', 'Norway',
+  'Oman',
+  'Pakistan', 'Palau', 'Panama', 'Papua New Guinea', 'Paraguay', 'Peru', 'Philippines', 'Poland', 'Portugal',
+  'Qatar',
+  'Romania', 'Russia', 'Rwanda',
+  'Saint Kitts and Nevis', 'Saint Lucia', 'Saint Vincent and the Grenadines', 'Samoa', 'San Marino', 'Sao Tome and Principe', 'Saudi Arabia', 'Senegal', 'Serbia', 'Seychelles', 'Sierra Leone', 'Singapore', 'Slovakia', 'Slovenia', 'Solomon Islands', 'Somalia', 'South Africa', 'South Korea', 'South Sudan', 'Spain', 'Sri Lanka', 'Sudan', 'Suriname', 'Sweden', 'Switzerland', 'Syria',
+  'Taiwan', 'Tajikistan', 'Tanzania', 'Thailand', 'Timor-Leste', 'Togo', 'Tonga', 'Trinidad and Tobago', 'Tunisia', 'Turkey', 'Turkmenistan', 'Tuvalu',
+  'Uganda', 'Ukraine', 'United Arab Emirates', 'United Kingdom', 'United States', 'Uruguay', 'Uzbekistan',
+  'Vanuatu', 'Vatican City', 'Venezuela', 'Vietnam',
+  'Yemen',
+  'Zambia', 'Zimbabwe'
+];
+
+/**
+ * Normalize a country name by checking if it exists in the official list
+ * @param countryName - The country name to check
+ * @returns The official country name if found (case-insensitive match), or null if not found
+ */
+function normalizeCountryName(countryName: string): string | null {
+  if (!countryName || typeof countryName !== 'string') {
+    return null;
+  }
+
+  const trimmed = countryName.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  // Check exact match (case-insensitive) in OFFICIAL_COUNTRIES
+  const exactMatch = OFFICIAL_COUNTRIES.find(
+    country => country.toLowerCase() === trimmed.toLowerCase()
+  );
+  
+  if (exactMatch) {
+    return exactMatch;
+  }
+
+  // No match found
+  return null;
+}
+
+/**
+ * Validate that a country name exists in the official list
+ * @param countryName - The country name to validate
+ * @returns true if the country exists in OFFICIAL_COUNTRIES, false otherwise
+ */
+function validateCountryName(countryName: string): boolean {
+  if (!countryName || typeof countryName !== 'string') {
+    return false;
+  }
+  return OFFICIAL_COUNTRIES.includes(countryName);
+}
+
+/**
+ * Use AI to correct an invalid country name by matching it to the official list
+ * @param invalidCountry - The invalid country name that couldn't be normalized
+ * @returns The corrected country name from OFFICIAL_COUNTRIES, or null if correction fails
+ */
+async function correctCountryNameWithAI(invalidCountry: string): Promise<string | null> {
+  try {
+    const correctionPrompt = `You are a country name correction expert. Given an invalid country name and a list of official country names, find the correct match.
+
+Invalid country name: "${invalidCountry}"
+Official country list: ${JSON.stringify(OFFICIAL_COUNTRIES)}
+
+Return ONLY the exact country name from the official list that matches the invalid name, or "null" if no match exists.
+Handle typos, abbreviations, and common variations.
+
+Response format (JSON): Return a JSON object with a single field "country" containing just the country name (e.g., {"country": "United States"}) or {"country": "null"} if no match exists.
+Do not include any explanation, just the JSON object.`;
+
+    const messages = [
+      { role: 'system', content: 'You are a country name correction expert. Return a JSON object with the corrected country name from the official list, or "null" if no match exists.' },
+      { role: 'user', content: correctionPrompt }
+    ];
+
+    const aiResponse = await callOpenAI(messages);
+    
+    // Parse JSON response
+    let corrected: string;
+    try {
+      const parsed = JSON.parse(aiResponse);
+      corrected = parsed.country || aiResponse.trim();
+    } catch {
+      // Fallback if not JSON
+      corrected = aiResponse.trim().replace(/^"|"$/g, ''); // Remove quotes if present
+    }
+
+    // Validate the corrected name
+    if (corrected && corrected.toLowerCase() !== 'null' && validateCountryName(corrected)) {
+      console.log(`✅ AI corrected "${invalidCountry}" → "${corrected}"`);
+      return corrected;
+    } else {
+      console.warn(`⚠️ AI correction failed for "${invalidCountry}": got "${corrected}"`);
+      return null;
+    }
+  } catch (error) {
+    console.error(`❌ Error in AI country correction for "${invalidCountry}":`, error);
+    return null;
+  }
+}
+
+/**
+ * Normalize non_negotiable_criteria.country_from to ensure all country names match the official list
+ */
+async function normalizeNonNegotiableCriteria(nonNegotiableCriteria: any): Promise<any> {
+  if (!nonNegotiableCriteria || typeof nonNegotiableCriteria !== 'object') {
+    return nonNegotiableCriteria || {};
+  }
+
+  const normalized = { ...nonNegotiableCriteria };
+
+  // Normalize country_from if present
+  if (normalized.country_from && Array.isArray(normalized.country_from)) {
+    const normalizedCountries = await Promise.all(
+      normalized.country_from.map(async (country: string) => {
+        if (!country || typeof country !== 'string') {
+          return null;
+        }
+
+        // First validate directly against official list
+        if (validateCountryName(country)) {
+          // Country is valid, use it as-is
+          return country;
+        }
+        
+        // Country not in list, ask AI to correct it
+        console.log(`⚠️ Country "${country}" in non_negotiable_criteria not found in official list, asking AI to correct...`);
+        const corrected = await correctCountryNameWithAI(country);
+        
+        // Validate the AI-corrected result
+        if (corrected && validateCountryName(corrected)) {
+          return corrected;
+        } else {
+          console.warn(`❌ Country "${country}" in non_negotiable_criteria couldn't be corrected by AI, removing from filters`);
+          return null;
+        }
+      })
+    );
+    
+    const validCountries = normalizedCountries.filter(
+      (country): country is string => country !== null
+    );
+    const uniqueCountries = Array.from(new Set(validCountries));
+    
+    if (uniqueCountries.length > 0) {
+      normalized.country_from = uniqueCountries;
+      console.log(`✅ Normalized non_negotiable_criteria.country_from: ${JSON.stringify(uniqueCountries)}`);
+    } else {
+      normalized.country_from = [];
+      console.warn(`⚠️ All countries in non_negotiable_criteria.country_from were invalid, cleared array`);
+    }
+  }
+
+  return normalized;
+}
+
+/**
+ * Normalize queryFilters to ensure all country names match the official list
+ * This is a safety net to catch any country names that bypassed extractQueryFilters normalization
+ */
+async function normalizeQueryFilters(queryFilters: any): Promise<any> {
+  if (!queryFilters || typeof queryFilters !== 'object') {
+    return queryFilters;
+  }
+
+  const normalized = { ...queryFilters };
+
+  // Normalize country_from if present
+  if (normalized.country_from && Array.isArray(normalized.country_from)) {
+    const normalizedCountries = await Promise.all(
+      normalized.country_from.map(async (country: string) => {
+        if (!country || typeof country !== 'string') {
+          return null;
+        }
+
+        // First validate directly against official list
+        if (validateCountryName(country)) {
+          // Country is valid, use it as-is
+          console.log(`✅ Country "${country}" is valid, using as-is`);
+          return country;
+        }
+        
+        // Country not in list, ask AI to correct it
+        console.log(`⚠️ Country "${country}" not found in official list, asking AI to correct...`);
+        const corrected = await correctCountryNameWithAI(country);
+        
+        // Validate the AI-corrected result
+        if (corrected && validateCountryName(corrected)) {
+          return corrected;
+        } else {
+          console.warn(`❌ Country "${country}" couldn't be corrected by AI, removing from filters`);
+          return null;
+        }
+      })
+    );
+    
+    const validCountries = normalizedCountries.filter(
+      (country): country is string => country !== null
+    );
+    const uniqueCountries = Array.from(new Set(validCountries));
+    
+    if (uniqueCountries.length > 0) {
+      normalized.country_from = uniqueCountries;
+      console.log(`✅ Normalized queryFilters.country_from: ${JSON.stringify(uniqueCountries)}`);
+    } else {
+      delete normalized.country_from;
+      console.warn(`⚠️ All countries in queryFilters.country_from were invalid, removed filter`);
+    }
+  }
+
+  return normalized;
+}
+
+/**
  * Use LLM to convert user's natural language request into Supabase query filters
  */
 async function extractQueryFilters(
@@ -495,33 +726,6 @@ async function extractQueryFilters(
   unmappableCriteria?: string[]; // Criteria that user mentioned but can't be mapped to database fields
   explanation: string;
 }> {
-  // Official country list from OnboardingStep4Screen.tsx - these are the EXACT names used in the database
-  const OFFICIAL_COUNTRIES = [
-    'Afghanistan', 'Albania', 'Algeria', 'Andorra', 'Angola', 'Antigua and Barbuda', 'Argentina', 'Armenia', 'Australia', 'Austria', 'Azerbaijan',
-    'Bahamas', 'Bahrain', 'Bangladesh', 'Barbados', 'Belarus', 'Belgium', 'Belize', 'Benin', 'Bhutan', 'Bolivia', 'Bosnia and Herzegovina', 'Botswana', 'Brazil', 'Brunei', 'Bulgaria', 'Burkina Faso', 'Burundi',
-    'Cambodia', 'Cameroon', 'Canada', 'Cape Verde', 'Central African Republic', 'Chad', 'Chile', 'China', 'Colombia', 'Comoros', 'Costa Rica', 'Croatia', 'Cuba', 'Cyprus', 'Czech Republic',
-    'Democratic Republic of the Congo', 'Denmark', 'Djibouti', 'Dominica', 'Dominican Republic',
-    'Ecuador', 'Egypt', 'El Salvador', 'Equatorial Guinea', 'Eritrea', 'Estonia', 'Eswatini', 'Ethiopia',
-    'Fiji', 'Finland', 'France',
-    'Gabon', 'Gambia', 'Georgia', 'Germany', 'Ghana', 'Greece', 'Grenada', 'Guatemala', 'Guinea', 'Guinea-Bissau', 'Guyana',
-    'Haiti', 'Honduras', 'Hong Kong', 'Hungary',
-    'Iceland', 'India', 'Indonesia', 'Ireland', 'Israel', 'Italy', 'Ivory Coast',
-    'Jamaica', 'Japan', 'Jordan',
-    'Kazakhstan', 'Kenya', 'Kiribati', 'Kuwait', 'Kyrgyzstan',
-    'Laos', 'Latvia', 'Lebanon', 'Lesotho', 'Liberia', 'Libya', 'Liechtenstein', 'Lithuania', 'Luxembourg',
-    'Madagascar', 'Malawi', 'Malaysia', 'Maldives', 'Mali', 'Malta', 'Marshall Islands', 'Mauritania', 'Mauritius', 'Mexico', 'Micronesia', 'Moldova', 'Monaco', 'Mongolia', 'Montenegro', 'Morocco', 'Mozambique', 'Myanmar',
-    'Namibia', 'Nauru', 'Nepal', 'Netherlands', 'New Zealand', 'Nicaragua', 'Niger', 'Nigeria', 'North Korea', 'North Macedonia', 'Norway',
-    'Oman',
-    'Pakistan', 'Palau', 'Panama', 'Papua New Guinea', 'Paraguay', 'Peru', 'Philippines', 'Poland', 'Portugal',
-    'Qatar',
-    'Romania', 'Russia', 'Rwanda',
-    'Saint Kitts and Nevis', 'Saint Lucia', 'Saint Vincent and the Grenadines', 'Samoa', 'San Marino', 'Sao Tome and Principe', 'Saudi Arabia', 'Senegal', 'Serbia', 'Seychelles', 'Sierra Leone', 'Singapore', 'Slovakia', 'Slovenia', 'Solomon Islands', 'Somalia', 'South Africa', 'South Korea', 'South Sudan', 'Spain', 'Sri Lanka', 'Sudan', 'Suriname', 'Sweden', 'Switzerland', 'Syria',
-    'Taiwan', 'Tajikistan', 'Tanzania', 'Thailand', 'Timor-Leste', 'Togo', 'Tonga', 'Trinidad and Tobago', 'Tunisia', 'Turkey', 'Turkmenistan', 'Tuvalu',
-    'Uganda', 'Ukraine', 'United Arab Emirates', 'United Kingdom', 'United States', 'Uruguay', 'Uzbekistan',
-    'Vanuatu', 'Vatican City', 'Venezuela', 'Vietnam',
-    'Yemen',
-    'Zambia', 'Zimbabwe'
-  ];
 
   const schemaPrompt = `You are a database query expert. Analyze the user's request and determine which Supabase filters to apply.
 
@@ -786,6 +990,51 @@ CRITICAL RULES - BE SMART AND FLEXIBLE:
       }
     }
     
+    // Normalize country_from array to ensure all country names match official list
+    if (extracted.supabaseFilters.country_from && Array.isArray(extracted.supabaseFilters.country_from)) {
+      const normalizedCountries = await Promise.all(
+        extracted.supabaseFilters.country_from.map(async (country: string) => {
+          if (!country || typeof country !== 'string') {
+            return null;
+          }
+
+          // First validate directly against official list
+          if (validateCountryName(country)) {
+            // Country is valid, use it as-is
+            console.log(`✅ Country "${country}" is valid, using as-is`);
+            return country;
+          }
+          
+          // Country not in list, ask AI to correct it
+          console.log(`⚠️ Country "${country}" not found in official list, asking AI to correct...`);
+          const corrected = await correctCountryNameWithAI(country);
+          
+          // Validate the AI-corrected result
+          if (corrected && validateCountryName(corrected)) {
+            return corrected;
+          } else {
+            console.warn(`❌ Country "${country}" couldn't be corrected by AI, removing from filters`);
+            return null;
+          }
+        })
+      );
+      
+      // Filter out null values and remove duplicates
+      const validCountries = normalizedCountries.filter(
+        (country): country is string => country !== null
+      );
+      const uniqueCountries = Array.from(new Set(validCountries));
+      
+      if (uniqueCountries.length > 0) {
+        extracted.supabaseFilters.country_from = uniqueCountries;
+        console.log(`✅ Final normalized country_from: ${JSON.stringify(uniqueCountries)}`);
+      } else {
+        // Remove country_from if all countries were invalid
+        delete extracted.supabaseFilters.country_from;
+        console.warn(`⚠️ All countries in country_from were invalid, removed filter`);
+      }
+    }
+    
     console.log('✅ Extracted query filters:', JSON.stringify(extracted, null, 2))
     if (extracted.unmappableCriteria && extracted.unmappableCriteria.length > 0) {
       console.log('⚠️ Unmappable criteria detected:', extracted.unmappableCriteria)
@@ -1027,15 +1276,25 @@ ${getPronounInstructions(userProfile.pronoun)}`
         
         // Extract data from parsed response
         let tripPlanningData = parsed.data
+        // Normalize non_negotiable_criteria.country_from if present in parsed.data
+        if (tripPlanningData && tripPlanningData.non_negotiable_criteria) {
+          tripPlanningData = {
+            ...tripPlanningData,
+            non_negotiable_criteria: await normalizeNonNegotiableCriteria(tripPlanningData.non_negotiable_criteria)
+          };
+        }
         if (!tripPlanningData && parsed.is_finished) {
           // If data is not in a nested "data" field, extract from root level
+          // Normalize non_negotiable_criteria.country_from if present
+          const normalizedNonNegotiableCriteria = await normalizeNonNegotiableCriteria(parsed.non_negotiable_criteria);
+          
           tripPlanningData = {
             destination_country: parsed.destination_country,
             area: parsed.area,
             budget: parsed.budget,
             destination_known: parsed.destination_known,
             purpose: parsed.purpose,
-            non_negotiable_criteria: parsed.non_negotiable_criteria,
+            non_negotiable_criteria: normalizedNonNegotiableCriteria,
             user_context: parsed.user_context,
             queryFilters: null, // Initialize queryFilters field
             filtersFromNonNegotiableStep: false, // Initialize flag
@@ -1412,15 +1671,25 @@ ${getPronounInstructions(userProfile.pronoun)}`
         
         // Extract data from parsed response
         let tripPlanningData = parsed.data
+        // Normalize non_negotiable_criteria.country_from if present in parsed.data
+        if (tripPlanningData && tripPlanningData.non_negotiable_criteria) {
+          tripPlanningData = {
+            ...tripPlanningData,
+            non_negotiable_criteria: await normalizeNonNegotiableCriteria(tripPlanningData.non_negotiable_criteria)
+          };
+        }
         if (!tripPlanningData && parsed.is_finished) {
           // If data is not in a nested "data" field, extract from root level
+          // Normalize non_negotiable_criteria.country_from if present
+          const normalizedNonNegotiableCriteria = await normalizeNonNegotiableCriteria(parsed.non_negotiable_criteria);
+          
           tripPlanningData = {
             destination_country: parsed.destination_country,
             area: parsed.area,
             budget: parsed.budget,
             destination_known: parsed.destination_known,
             purpose: parsed.purpose,
-            non_negotiable_criteria: parsed.non_negotiable_criteria,
+            non_negotiable_criteria: normalizedNonNegotiableCriteria,
             user_context: parsed.user_context,
             queryFilters: null,
             filtersFromNonNegotiableStep: false,
@@ -1479,12 +1748,19 @@ ${getPronounInstructions(userProfile.pronoun)}`
                                                userMsgLower.includes('must be from') || 
                                                userMsgLower.includes('have to be from') ||
                                                userMsgLower.includes('only from') ||
-                                               userMsgLower.includes('be only from')
+                                               userMsgLower.includes('be only from') ||
+                                               userMsgLower.includes('send me') ||
+                                               userMsgLower.includes('i want') ||
+                                               userMsgLower.includes('connect me') ||
+                                               userMsgLower.includes('find me') ||
+                                               userMsgLower.includes('american') ||
+                                               userMsgLower.includes('americans')
                 
                 const mentionsUSA = userMsgLower.includes('usa') || 
                                    userMsgLower.includes('united states') || 
                                    userMsgLower.includes('u.s.a') || 
                                    userMsgLower.includes('u.s.') || 
+                                   userMsgLower.includes('american') ||
                                    (userMsgLower.includes('us') && !userMsgLower.includes('israel'))
                 
                 const mentionsIsrael = userMsgLower.includes('israel')
@@ -1495,14 +1771,42 @@ ${getPronounInstructions(userProfile.pronoun)}`
                     tripPlanningData.non_negotiable_criteria.country_from = []
                   }
                   
-                  if (mentionsUSA && !tripPlanningData.non_negotiable_criteria.country_from.includes('USA')) {
-                    tripPlanningData.non_negotiable_criteria.country_from.push('USA')
-                    console.log(`✅ Extracted USA from user message: "${userMsg}"`)
+                  if (mentionsUSA) {
+                    // Validate "USA" against official list, use AI correction if needed
+                    let countryName: string | null = 'USA';
+                    if (!validateCountryName(countryName)) {
+                      console.log(`⚠️ "USA" not found in official list, asking AI to correct...`);
+                      const corrected = await correctCountryNameWithAI(countryName);
+                      if (corrected && validateCountryName(corrected)) {
+                        countryName = corrected;
+                      } else {
+                        console.warn(`❌ Could not correct "USA", skipping`);
+                        countryName = null;
+                      }
+                    }
+                    if (countryName && !tripPlanningData.non_negotiable_criteria.country_from.includes(countryName)) {
+                      tripPlanningData.non_negotiable_criteria.country_from.push(countryName);
+                      console.log(`✅ Extracted and validated "${countryName}" from user message: "${userMsg}"`);
+                    }
                   }
                   
-                  if (mentionsIsrael && !tripPlanningData.non_negotiable_criteria.country_from.includes('Israel')) {
-                    tripPlanningData.non_negotiable_criteria.country_from.push('Israel')
-                    console.log(`✅ Extracted Israel from user message: "${userMsg}"`)
+                  if (mentionsIsrael) {
+                    // Validate "Israel" against official list
+                    let countryName: string | null = 'Israel';
+                    if (!validateCountryName(countryName)) {
+                      console.log(`⚠️ "Israel" not found in official list, asking AI to correct...`);
+                      const corrected = await correctCountryNameWithAI(countryName);
+                      if (corrected && validateCountryName(corrected)) {
+                        countryName = corrected;
+                      } else {
+                        console.warn(`❌ Could not correct "Israel", skipping`);
+                        countryName = null;
+                      }
+                    }
+                    if (countryName && !tripPlanningData.non_negotiable_criteria.country_from.includes(countryName)) {
+                      tripPlanningData.non_negotiable_criteria.country_from.push(countryName);
+                      console.log(`✅ Extracted and validated "${countryName}" from user message: "${userMsg}"`);
+                    }
                   }
                   
                   if (tripPlanningData.non_negotiable_criteria.country_from.length > 0) {
@@ -1593,9 +1897,9 @@ ${getPronounInstructions(userProfile.pronoun)}`
                           purpose_type: 'connect_traveler',
                           specific_topics: []
                         },
-                        non_negotiable_criteria: prevParsed.non_negotiable_criteria || prevParsed.data?.non_negotiable_criteria || {},
+                        non_negotiable_criteria: await normalizeNonNegotiableCriteria(prevParsed.non_negotiable_criteria || prevParsed.data?.non_negotiable_criteria || {}),
                         user_context: prevParsed.user_context || prevParsed.data?.user_context || {},
-                        queryFilters: prevParsed.data?.queryFilters || null, // Preserve existing queryFilters
+                        queryFilters: prevParsed.data?.queryFilters ? await normalizeQueryFilters(prevParsed.data.queryFilters) : null, // Preserve and normalize existing queryFilters
                         filtersFromNonNegotiableStep: prevParsed.data?.filtersFromNonNegotiableStep || false, // Preserve flag
                       }
                       console.log('✅ Extracted data from previous message:', tripPlanningData)
@@ -1743,6 +2047,8 @@ ${getPronounInstructions(userProfile.pronoun)}`
             }
             
             // Create tripPlanningData if it doesn't exist
+            // Normalize queryFilters before assigning to ensure country names are correct
+            const normalizedQueryFilters = await normalizeQueryFilters(extractedQueryFilters);
             tripPlanningData = {
               destination_country: fallbackDestination || null,
               area: null,
@@ -1754,19 +2060,21 @@ ${getPronounInstructions(userProfile.pronoun)}`
               },
               non_negotiable_criteria: {},
               user_context: {},
-              queryFilters: extractedQueryFilters,
+              queryFilters: normalizedQueryFilters,
               filtersFromNonNegotiableStep: isCriteriaStep, // Mark if filters came from non-negotiable step
             }
             console.log('✅ Created tripPlanningData with query filters (from non-negotiable step:', isCriteriaStep, ')')
           } else {
             // Merge filters: if tripPlanningData already has filters, merge them (current takes precedence)
+            // Normalize queryFilters before assigning to ensure country names are correct
+            const normalizedQueryFilters = await normalizeQueryFilters(extractedQueryFilters);
             if (tripPlanningData.queryFilters) {
               tripPlanningData.queryFilters = {
                 ...tripPlanningData.queryFilters,
-                ...extractedQueryFilters, // Current filters override accumulated ones
+                ...normalizedQueryFilters, // Current filters override accumulated ones
               }
             } else {
-              tripPlanningData.queryFilters = extractedQueryFilters
+              tripPlanningData.queryFilters = normalizedQueryFilters
             }
             // Update flag: if current step is non-negotiable, mark it
             if (isCriteriaStep) {
@@ -1799,8 +2107,40 @@ ${getPronounInstructions(userProfile.pronoun)}`
             }
             
             if (tripPlanningData.non_negotiable_criteria.country_from && tripPlanningData.non_negotiable_criteria.country_from.length > 0) {
-              tripPlanningData.queryFilters.country_from = tripPlanningData.non_negotiable_criteria.country_from
-              console.log('  - Added country_from:', tripPlanningData.queryFilters.country_from)
+              // Normalize country_from before adding to queryFilters using validation-first + AI correction
+              const normalizedCountries = await Promise.all(
+                (tripPlanningData.non_negotiable_criteria.country_from as string[]).map(async (country: string) => {
+                  // First validate directly against official list
+                  if (validateCountryName(country)) {
+                    // Country is valid, use it as-is
+                    return country;
+                  }
+                  
+                  // Country not in list, ask AI to correct it
+                  console.log(`⚠️ Country "${country}" in non_negotiable_criteria not found in official list, asking AI to correct...`);
+                  const corrected = await correctCountryNameWithAI(country);
+                  
+                  // Validate the AI-corrected result
+                  if (corrected && validateCountryName(corrected)) {
+                    return corrected;
+                  } else {
+                    console.warn(`❌ Country "${country}" couldn't be corrected by AI, removing from filters`);
+                    return null;
+                  }
+                })
+              );
+              
+              const validCountries = normalizedCountries.filter(
+                (country): country is string => country !== null
+              );
+              const uniqueCountries = Array.from(new Set(validCountries));
+              
+              if (uniqueCountries.length > 0) {
+                tripPlanningData.queryFilters.country_from = uniqueCountries;
+                console.log('  - Added normalized country_from:', tripPlanningData.queryFilters.country_from);
+              } else {
+                console.warn('  - ⚠️ All countries in non_negotiable_criteria.country_from were invalid, skipping');
+              }
             }
             
             if (tripPlanningData.non_negotiable_criteria.surf_level_min !== undefined && tripPlanningData.non_negotiable_criteria.surf_level_min !== null) {
@@ -1899,14 +2239,38 @@ ${getPronounInstructions(userProfile.pronoun)}`
               }
               
               // Extract country_from criteria
-              if (userMsg.includes('from') && (userMsg.includes('usa') || userMsg.includes('israel') || userMsg.includes('united states'))) {
+              if (userMsg.includes('from') && (userMsg.includes('usa') || userMsg.includes('israel') || userMsg.includes('united states') || userMsg.includes('american'))) {
                 extractedData.non_negotiable_criteria = extractedData.non_negotiable_criteria || {}
                 extractedData.non_negotiable_criteria.country_from = []
-                if (userMsg.includes('usa') || userMsg.includes('united states')) {
-                  extractedData.non_negotiable_criteria.country_from.push('USA')
+                if (userMsg.includes('usa') || userMsg.includes('united states') || userMsg.includes('american')) {
+                  // Validate "USA" against official list, use AI correction if needed
+                  let countryName: string | null = 'USA';
+                  if (!validateCountryName(countryName)) {
+                    const corrected = await correctCountryNameWithAI(countryName);
+                    if (corrected && validateCountryName(corrected)) {
+                      countryName = corrected;
+                    } else {
+                      countryName = null;
+                    }
+                  }
+                  if (countryName && !extractedData.non_negotiable_criteria.country_from.includes(countryName)) {
+                    extractedData.non_negotiable_criteria.country_from.push(countryName);
+                  }
                 }
                 if (userMsg.includes('israel')) {
-                  extractedData.non_negotiable_criteria.country_from.push('Israel')
+                  // Validate "Israel" against official list
+                  let countryName: string | null = 'Israel';
+                  if (!validateCountryName(countryName)) {
+                    const corrected = await correctCountryNameWithAI(countryName);
+                    if (corrected && validateCountryName(corrected)) {
+                      countryName = corrected;
+                    } else {
+                      countryName = null;
+                    }
+                  }
+                  if (countryName && !extractedData.non_negotiable_criteria.country_from.includes(countryName)) {
+                    extractedData.non_negotiable_criteria.country_from.push(countryName);
+                  }
                 }
               }
             }

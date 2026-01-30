@@ -329,9 +329,9 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
       }
       
       videoPlayer.replaceAsync(videoUrlToPlay).then(() => {
-        if (videoPlayer) {
-          videoPlayer.loop = true;
-          videoPlayer.muted = true;
+          if (videoPlayer) {
+            videoPlayer.loop = true;
+            videoPlayer.muted = true;
           try {
             videoPlayer.play();
           } catch (playError: any) {
@@ -368,15 +368,15 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
           if (__DEV__) {
             console.log('[SurfSkillCard] Video stopped/paused, restarting playback');
           }
-          const playPromise = videoPlayer.play();
-          if (playPromise !== undefined && typeof (playPromise as any).catch === 'function') {
+            const playPromise = videoPlayer.play();
+            if (playPromise !== undefined && typeof (playPromise as any).catch === 'function') {
             (playPromise as any).catch((error: any) => {
               if (__DEV__ && error.name !== 'NotAllowedError') {
                 console.warn('[SurfSkillCard] Force play failed:', error.message);
-              }
-            });
+                }
+              });
+            }
           }
-        }
       } catch (error) {
         if (__DEV__) {
           console.warn('[SurfSkillCard] Error in forcePlay:', error);
@@ -519,7 +519,7 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
                 >
                   <Ionicons name="cloud-upload-outline" size={20} color="#FFFFFF" />
                 </TouchableOpacity>
-              </View>
+            </View>
             )}
             
             {/* Level Name and Subtitle - Overlaid on video, bottom left */}

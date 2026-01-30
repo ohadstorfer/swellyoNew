@@ -133,9 +133,14 @@ export function analyzeMatchQuality(
   }
   
   // Check country_from
-  const requestedCountries = request.non_negotiable_criteria?.country_from || 
-                             request.queryFilters?.country_from || null;
-  if (requestedCountries) {
+  // Prioritize queryFilters, but check if non_negotiable has actual values (not empty array)
+  const requestedCountries = (request.queryFilters?.country_from && request.queryFilters.country_from.length > 0) ||
+                             (request.non_negotiable_criteria?.country_from && request.non_negotiable_criteria.country_from.length > 0)
+                               ? (request.queryFilters?.country_from && request.queryFilters.country_from.length > 0
+                                   ? request.queryFilters.country_from
+                                   : request.non_negotiable_criteria?.country_from)
+                               : null;
+  if (requestedCountries && requestedCountries.length > 0) {
     const countryMatch = compareCountryFrom(requestedCountries, surfer.country_from);
     matchedCriteria.country_from = countryMatch;
     if (countryMatch === false) {

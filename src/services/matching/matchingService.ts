@@ -1243,15 +1243,15 @@ export async function findMatchingUsers(
       request.queryFilters?.surf_level_max
     );
     
-    // Filter by matchCount > 1 only if criteria were requested
+    // Filter by matchCount >= 1 only if criteria were requested
     // If no criteria (e.g., "random user"), return all users regardless of matchCount
     const validMatches = hasCriteria
-      ? matchedUsersWithQuality.filter(u => u.matchQuality && u.matchQuality.matchCount > 1)
+      ? matchedUsersWithQuality.filter(u => u.matchQuality && u.matchQuality.matchCount >= 1)
       : matchedUsersWithQuality; // No criteria = return all (will be sorted by score)
     
     // Store rejected matches for analysis (if no valid matches found)
     const rejectedMatches = hasCriteria && validMatches.length === 0
-      ? matchedUsersWithQuality.filter(u => u.matchQuality && u.matchQuality.matchCount <= 1)
+      ? matchedUsersWithQuality.filter(u => u.matchQuality && u.matchQuality.matchCount < 1)
       : [];
     
     // Sort by match count (desc), then by score (desc), then by data completeness
@@ -1271,7 +1271,7 @@ export async function findMatchingUsers(
     // Return top 3
     const topMatches: MatchedUser[] = validMatches.slice(0, 3);
     
-    console.log(`After match quality filter (matchCount > 1): ${validMatches.length} valid matches`);
+    console.log(`After match quality filter (matchCount >= 1): ${validMatches.length} valid matches`);
     console.log(`Returning top ${topMatches.length} matches`);
     
     // Create a result object to store metadata (even if topMatches is empty)
@@ -1320,15 +1320,124 @@ export async function findMatchingUsers(
 }
 
 /**
+ * Extract all requested criteria from request in a unified way
+ */
+function extractRequestedCriteria(request: TripPlanningRequest): {
+  country_from?: string[];
+  surfboard_type?: string[];
+  age_range?: [number, number];
+  surf_level?: number | [number, number];
+  destination_country?: string;
+  area?: string;
+} {
+  return {
+    // Check queryFilters first, but also check if non_negotiable has actual values (not empty array)
+    country_from: (request.queryFilters?.country_from && request.queryFilters.country_from.length > 0) || 
+                  (request.non_negotiable_criteria?.country_from && request.non_negotiable_criteria.country_from.length > 0)
+                    ? (request.queryFilters?.country_from && request.queryFilters.country_from.length > 0
+                        ? request.queryFilters.country_from
+                        : request.non_negotiable_criteria?.country_from)
+                    : undefined,
+    surfboard_type: (request.queryFilters?.surfboard_type && request.queryFilters.surfboard_type.length > 0) ||
+                    (request.non_negotiable_criteria?.surfboard_type && request.non_negotiable_criteria.surfboard_type.length > 0)
+                      ? (request.queryFilters?.surfboard_type && request.queryFilters.surfboard_type.length > 0
+                          ? request.queryFilters.surfboard_type
+                          : request.non_negotiable_criteria?.surfboard_type)
+                      : undefined,
+    age_range: request.non_negotiable_criteria?.age_range || 
+               (request.queryFilters?.age_min !== undefined && request.queryFilters?.age_max !== undefined
+                 ? [request.queryFilters.age_min, request.queryFilters.age_max]
+                 : undefined),
+    surf_level: request.non_negotiable_criteria?.surf_level_min !== undefined && 
+                request.non_negotiable_criteria?.surf_level_max !== undefined
+                  ? [request.non_negotiable_criteria.surf_level_min, request.non_negotiable_criteria.surf_level_max]
+                  : request.queryFilters?.surf_level_min !== undefined && 
+                    request.queryFilters?.surf_level_max !== undefined
+                    ? [request.queryFilters.surf_level_min, request.queryFilters.surf_level_max]
+                    : undefined,
+    destination_country: request.destination_country || undefined,
+    area: request.area || undefined,
+  };
+}
+
+/**
+ * Identify which criteria failed across all rejected matches
+ */
+function identifyFailedCriteria(
+  rejectedMatches: MatchedUser[],
+  requestedCriteria: ReturnType<typeof extractRequestedCriteria>
+): { [key: string]: { count: number; details: any } } {
+  const failedCriteria: { [key: string]: { count: number; details: any } } = {};
+  
+  rejectedMatches.forEach(match => {
+    if (!match.matchQuality) return;
+    
+    const { matchedCriteria, differences } = match.matchQuality;
+    
+    // Check destination_country
+    if (requestedCriteria.destination_country && matchedCriteria.destination_country === false) {
+      if (!failedCriteria.destination_country) {
+        failedCriteria.destination_country = { count: 0, details: null };
+      }
+      failedCriteria.destination_country.count++;
+    }
+    
+    // Check area (if requested)
+    if (requestedCriteria.area && requestedCriteria.destination_country && matchedCriteria.area === false) {
+      if (!failedCriteria.area) {
+        failedCriteria.area = { count: 0, details: differences.area };
+      }
+      failedCriteria.area.count++;
+    }
+    
+    // Check country_from
+    if (requestedCriteria.country_from && matchedCriteria.country_from === false) {
+      if (!failedCriteria.country_from) {
+        failedCriteria.country_from = { count: 0, details: differences.country_from };
+      }
+      failedCriteria.country_from.count++;
+    }
+    
+    // Check age
+    if (requestedCriteria.age_range && matchedCriteria.age === false) {
+      if (!failedCriteria.age) {
+        failedCriteria.age = { count: 0, details: differences.age };
+      }
+      failedCriteria.age.count++;
+    }
+    
+    // Check surfboard_type
+    if (requestedCriteria.surfboard_type && matchedCriteria.surfboard_type === false) {
+      if (!failedCriteria.surfboard_type) {
+        failedCriteria.surfboard_type = { count: 0, details: differences.surfboard_type };
+      }
+      failedCriteria.surfboard_type.count++;
+    }
+    
+    // Check surf_level
+    if (requestedCriteria.surf_level && matchedCriteria.surf_level === false) {
+      if (!failedCriteria.surf_level) {
+        failedCriteria.surf_level = { count: 0, details: differences.surf_level };
+      }
+      failedCriteria.surf_level.count++;
+    }
+  });
+  
+  return failedCriteria;
+}
+
+/**
  * Analyze why no matches were found and generate a helpful explanation
  * Uses the existing match quality analysis from the matching process
  * This is more efficient and accurate than querying the database again
  */
 export function analyzeNoMatchesReason(
   request: TripPlanningRequest,
-  rejectedMatches: MatchedUser[], // Matches that were found but filtered out (matchCount <= 1)
+  rejectedMatches: MatchedUser[], // Matches that were found but filtered out (matchCount < 1)
   destinationFilteredSurfers?: SupabaseSurfer[], // Surfers that passed other filters but don't have the destination
-  passedOtherFiltersCount?: number // Count of surfers that passed other filters
+  passedOtherFiltersCount?: number, // Count of surfers that passed other filters
+  mustHaveKeywordsFilteredOut?: boolean, // Whether matches were filtered out by must-have keywords
+  mustHaveKeywords?: string[] // The must-have keywords that filtered out matches
 ): string {
   try {
     // Case 2: Surfers passed other filters but were filtered out by destination
@@ -1367,104 +1476,122 @@ export function analyzeNoMatchesReason(
     }
     
     // Case 2: No rejected matches to analyze
+    // If we have query filters but no rejected matches, it means the database query returned 0 results
     if (!rejectedMatches || rejectedMatches.length === 0) {
+      const requestedCriteria = extractRequestedCriteria(request);
+      const criteriaParts: string[] = [];
+      
+      if (requestedCriteria.country_from && requestedCriteria.country_from.length > 0) {
+        const countriesStr = requestedCriteria.country_from.length === 1 
+          ? requestedCriteria.country_from[0]
+          : requestedCriteria.country_from.join(' or ');
+        criteriaParts.push(`from ${countriesStr}`);
+      }
+      
+      if (requestedCriteria.surfboard_type && requestedCriteria.surfboard_type.length > 0) {
+        const boardTypeNames: { [key: string]: string } = {
+          'shortboard': 'shortboard',
+          'mid_length': 'midlength',
+          'longboard': 'longboard',
+          'soft_top': 'soft top',
+        };
+        const boardStr = requestedCriteria.surfboard_type.length === 1
+          ? (boardTypeNames[requestedCriteria.surfboard_type[0]] || requestedCriteria.surfboard_type[0])
+          : requestedCriteria.surfboard_type.map(b => boardTypeNames[b] || b).join(' or ');
+        criteriaParts.push(`using ${boardStr}`);
+      }
+      
+      if (criteriaParts.length > 0) {
+        return `Hey, I couldn't find any surfers ${criteriaParts.join(' and ')} right now. Try relaxing some of your requirements or check back later as more surfers join!`;
+      }
+      
       return "Couldn't find any matches right now, but more surfers are joining every day. Check back soon!";
     }
     
     const reasons: string[] = [];
     const suggestions: string[] = [];
     
-    // Analyze which criteria failed across all rejected matches
-    // Count how many matches failed each criterion
-    const failedCriteria: { [key: string]: { count: number; details: any } } = {};
+    // Extract requested criteria in a unified way
+    const requestedCriteria = extractRequestedCriteria(request);
     
-    rejectedMatches.forEach(match => {
-      if (!match.matchQuality) return;
-      
-      const { matchedCriteria, differences, missingData } = match.matchQuality;
-      
-      // Check destination_country
-      if (request.destination_country && matchedCriteria.destination_country === false) {
-        if (!failedCriteria.destination_country) {
-          failedCriteria.destination_country = { count: 0, details: null };
-        }
-        failedCriteria.destination_country.count++;
-      }
-      
-      // Check area (if requested)
-      if (request.area && request.destination_country && matchedCriteria.area === false) {
-        if (!failedCriteria.area) {
-          failedCriteria.area = { count: 0, details: differences.area };
-        }
-        failedCriteria.area.count++;
-      }
-      
-      // Check country_from
-      if (matchedCriteria.country_from === false) {
-        if (!failedCriteria.country_from) {
-          failedCriteria.country_from = { count: 0, details: differences.country_from };
-        }
-        failedCriteria.country_from.count++;
-      }
-      
-      // Check age
-      if (matchedCriteria.age === false) {
-        if (!failedCriteria.age) {
-          failedCriteria.age = { count: 0, details: differences.age };
-        }
-        failedCriteria.age.count++;
-      }
-      
-      // Check surfboard_type
-      if (matchedCriteria.surfboard_type === false) {
-        if (!failedCriteria.surfboard_type) {
-          failedCriteria.surfboard_type = { count: 0, details: differences.surfboard_type };
-        }
-        failedCriteria.surfboard_type.count++;
-      }
-      
-      // Check surf_level
-      if (matchedCriteria.surf_level === false) {
-        if (!failedCriteria.surf_level) {
-          failedCriteria.surf_level = { count: 0, details: differences.surf_level };
-        }
-        failedCriteria.surf_level.count++;
-      }
-    });
+    // Identify which criteria failed across all rejected matches
+    const failedCriteria = identifyFailedCriteria(rejectedMatches, requestedCriteria);
     
     // Build reasons based on failed criteria (prioritize by importance)
     // 1. Destination (most important)
     if (failedCriteria.destination_country && failedCriteria.destination_country.count === rejectedMatches.length) {
-      const requestedCountries = request.destination_country
-        .split(',')
-        .map(c => c.trim())
-        .filter(c => c.length > 0);
+      const requestedCountries = requestedCriteria.destination_country
+        ? requestedCriteria.destination_country.split(',')
+            .map(c => c.trim())
+            .filter(c => c.length > 0)
+        : [];
       if (requestedCountries.length === 1) {
         reasons.push(`no surfers who have surfed in ${requestedCountries[0]}`);
-      } else {
+      } else if (requestedCountries.length > 0) {
         reasons.push(`no surfers who have surfed in any of those countries`);
+      } else {
+        reasons.push(`no surfers who have surfed in the requested destination`);
       }
     }
     
     // 2. Area (if destination was requested)
-    if (request.area && request.destination_country && failedCriteria.area && failedCriteria.area.count === rejectedMatches.length) {
-      reasons.push(`no surfers who have surfed in ${request.area}`);
+    if (requestedCriteria.area && requestedCriteria.destination_country && 
+        failedCriteria.area && failedCriteria.area.count === rejectedMatches.length) {
+      reasons.push(`no surfers who have surfed in ${requestedCriteria.area}`);
     }
     
     // 3. Country_from
     if (failedCriteria.country_from && failedCriteria.country_from.count === rejectedMatches.length) {
-      const requestedCountries = failedCriteria.country_from.details?.requested || [];
-      const countriesStr = requestedCountries.length === 1 
-        ? requestedCountries[0] 
-        : requestedCountries.join(' or ');
-      reasons.push(`no surfers from ${countriesStr}`);
+      const requestedCountries = requestedCriteria.country_from || 
+                                 failedCriteria.country_from.details?.requested || 
+                                 request.queryFilters?.country_from ||  // Add fallback to queryFilters
+                                 request.non_negotiable_criteria?.country_from ||
+                                 [];
+      
+      // Check if rejected matches actually have the requested country (they matched country but failed other criteria)
+      const hasCountryMatches = rejectedMatches.some(m => 
+        m.country_from && requestedCountries.length > 0 && requestedCountries.some((c: string) => 
+          c.toLowerCase() === m.country_from?.toLowerCase()
+        )
+      );
+      
+      if (hasCountryMatches && requestedCountries.length > 0) {
+        // Matches were found but filtered out - explain better
+        const countriesStr = requestedCountries.length === 1 
+          ? requestedCountries[0] 
+          : requestedCountries.join(' or ');
+        reasons.push(`no surfers from ${countriesStr} that meet all your criteria`);
+        // Add suggestion about the matches that were found
+        suggestions.push(`we found ${rejectedMatches.length} surfer${rejectedMatches.length !== 1 ? 's' : ''} from ${countriesStr}, but they didn't meet all your criteria - try relaxing other requirements`);
+      } else {
+        // No matches at all for this country
+        const countriesStr = requestedCountries.length === 1 
+          ? requestedCountries[0] 
+          : requestedCountries.length > 0
+          ? requestedCountries.join(' or ')
+          : 'the requested countries';
+        reasons.push(`no surfers from ${countriesStr}`);
+        
+        // Generate suggestion based on available countries from rejected matches
+        const availableCountries = [...new Set(rejectedMatches
+          .map(m => m.country_from)
+          .filter(c => c !== null && c !== undefined))] as string[];
+        if (availableCountries.length > 0 && availableCountries.length <= 5) {
+          suggestions.push(`we have surfers from ${availableCountries.join(', ')} - try one of those countries instead`);
+        } else if (availableCountries.length > 5) {
+          suggestions.push(`we have surfers from ${availableCountries.slice(0, 3).join(', ')} and more - try a different country`);
+        }
+      }
     }
     
     // 4. Age
     if (failedCriteria.age && failedCriteria.age.count === rejectedMatches.length) {
-      const ageDetails = failedCriteria.age.details;
-      if (ageDetails && Array.isArray(ageDetails.requested) && ageDetails.requested.length === 2) {
-        const [minAge, maxAge] = ageDetails.requested;
+      const requestedAgeRange = requestedCriteria.age_range || 
+                                (failedCriteria.age.details?.requested && Array.isArray(failedCriteria.age.details.requested) 
+                                  ? failedCriteria.age.details.requested 
+                                  : undefined);
+      if (requestedAgeRange && requestedAgeRange.length === 2) {
+        const [minAge, maxAge] = requestedAgeRange;
         reasons.push(`no surfers between ${minAge} and ${maxAge} years old`);
         // Find closest age from rejected matches
         const ages = rejectedMatches
@@ -1486,17 +1613,19 @@ export function analyzeNoMatchesReason(
     
     // 5. Surfboard_type
     if (failedCriteria.surfboard_type && failedCriteria.surfboard_type.count === rejectedMatches.length) {
-      const boardDetails = failedCriteria.surfboard_type.details;
-      if (boardDetails) {
-        const requestedBoards = Array.isArray(boardDetails.requested) 
-          ? boardDetails.requested 
-          : [boardDetails.requested];
-        const boardTypeNames: { [key: string]: string } = {
-          'shortboard': 'shortboard',
-          'mid_length': 'midlength',
-          'longboard': 'longboard',
-          'soft_top': 'soft top',
-        };
+      const requestedBoards = requestedCriteria.surfboard_type || 
+                               (failedCriteria.surfboard_type.details?.requested
+                                 ? (Array.isArray(failedCriteria.surfboard_type.details.requested)
+                                     ? failedCriteria.surfboard_type.details.requested
+                                     : [failedCriteria.surfboard_type.details.requested])
+                                 : []);
+      const boardTypeNames: { [key: string]: string } = {
+        'shortboard': 'shortboard',
+        'mid_length': 'midlength',
+        'longboard': 'longboard',
+        'soft_top': 'soft top',
+      };
+      if (requestedBoards.length > 0) {
         const boardStr = requestedBoards.length === 1 
           ? (boardTypeNames[requestedBoards[0]] || requestedBoards[0])
           : requestedBoards.map((b: string) => boardTypeNames[b] || b).join(' or ');
@@ -1514,9 +1643,9 @@ export function analyzeNoMatchesReason(
     
     // 6. Surf_level
     if (failedCriteria.surf_level && failedCriteria.surf_level.count === rejectedMatches.length) {
-      const levelDetails = failedCriteria.surf_level.details;
-      if (levelDetails) {
-        const requestedLevel = levelDetails.requested;
+      const requestedLevel = requestedCriteria.surf_level || 
+                             failedCriteria.surf_level.details?.requested;
+      if (requestedLevel !== undefined) {
         const levelRange = Array.isArray(requestedLevel) 
           ? requestedLevel 
           : [requestedLevel, requestedLevel];
@@ -1546,9 +1675,35 @@ export function analyzeNoMatchesReason(
     
     // Build the message
     if (reasons.length === 0) {
+      // If we have rejected matches but no specific reasons, explain quality threshold
+      if (rejectedMatches.length > 0) {
+        // Check what was actually requested
+        const requestedParts: string[] = [];
+        if (requestedCriteria.country_from && requestedCriteria.country_from.length > 0) {
+          requestedParts.push(requestedCriteria.country_from.length === 1 
+            ? `from ${requestedCriteria.country_from[0]}`
+            : `from ${requestedCriteria.country_from.join(' or ')}`);
+        }
+        if (requestedCriteria.surfboard_type && requestedCriteria.surfboard_type.length > 0) {
+          const boardTypeNames: { [key: string]: string } = {
+            'shortboard': 'shortboard',
+            'mid_length': 'midlength',
+            'longboard': 'longboard',
+            'soft_top': 'soft top',
+          };
+          const boardStr = requestedCriteria.surfboard_type.length === 1
+            ? (boardTypeNames[requestedCriteria.surfboard_type[0]] || requestedCriteria.surfboard_type[0])
+            : requestedCriteria.surfboard_type.map(b => boardTypeNames[b] || b).join(' or ');
+          requestedParts.push(`using ${boardStr}`);
+        }
+        
+        const criteriaStr = requestedParts.length > 0 ? requestedParts.join(' and ') : 'your criteria';
+        return `Hey, I found ${rejectedMatches.length} surfer${rejectedMatches.length !== 1 ? 's' : ''} ${criteriaStr}, but they didn't meet the quality threshold. Try relaxing some requirements or check back later as more surfers join!`;
+      }
       return "Couldn't find any matches right now, but more surfers are joining every day. Check back soon!";
     }
     
+    // Build the main message explaining what wasn't found
     let message = "Hey, I couldn't find anyone that matches your criteria because ";
     
     if (reasons.length === 1) {
@@ -1559,10 +1714,45 @@ export function analyzeNoMatchesReason(
       message += `there's ${reasons.slice(0, -1).join(', ')}, and ${reasons[reasons.length - 1]}`;
     }
     
+    // Add helpful suggestions if available
     if (suggestions.length > 0) {
-      message += `. ${suggestions[0]}`;
+      // Prioritize the first suggestion, but if we have multiple, combine them intelligently
+      if (suggestions.length === 1) {
+        message += `. ${suggestions[0]}`;
+      } else {
+        message += `. ${suggestions[0]}`;
+        if (suggestions.length > 1) {
+          message += ` Also, ${suggestions[1]}`;
+        }
+      }
     } else {
-      message += `. Try relaxing some of your requirements or check back later as more surfers join!`;
+      // If we have rejected matches but no specific suggestions, mention that matches were found but filtered
+      if (rejectedMatches.length > 0) {
+        // Build a description of what was requested
+        const requestedParts: string[] = [];
+        if (requestedCriteria.country_from && requestedCriteria.country_from.length > 0) {
+          requestedParts.push(requestedCriteria.country_from.length === 1 
+            ? `from ${requestedCriteria.country_from[0]}`
+            : `from ${requestedCriteria.country_from.join(' or ')}`);
+        }
+        if (requestedCriteria.surfboard_type && requestedCriteria.surfboard_type.length > 0) {
+          const boardTypeNames: { [key: string]: string } = {
+            'shortboard': 'shortboard',
+            'mid_length': 'midlength',
+            'longboard': 'longboard',
+            'soft_top': 'soft top',
+          };
+          const boardStr = requestedCriteria.surfboard_type.length === 1
+            ? (boardTypeNames[requestedCriteria.surfboard_type[0]] || requestedCriteria.surfboard_type[0])
+            : requestedCriteria.surfboard_type.map(b => boardTypeNames[b] || b).join(' or ');
+          requestedParts.push(`using ${boardStr}`);
+        }
+        
+        const criteriaStr = requestedParts.length > 0 ? requestedParts.join(' and ') : 'your criteria';
+        message += `. We did find ${rejectedMatches.length} surfer${rejectedMatches.length !== 1 ? 's' : ''} ${criteriaStr}, but they didn't meet the quality threshold. Try relaxing some requirements or check back later!`;
+      } else {
+        message += `. Try relaxing some of your requirements or check back later as more surfers join!`;
+      }
     }
     
     return message;

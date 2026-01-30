@@ -106,7 +106,28 @@ export const ProfileImage: React.FC<ProfileImageProps> = ({
       ]}
     >
       {/* Always render Image if we have a valid URL (so onLoad can fire) */}
-      {hasValidImage && (
+      {hasValidImage && Platform.OS === 'web' && imageUrl?.includes('googleusercontent.com') ? (
+        // Use native img tag for Google images on web to handle CORS properly
+        // eslint-disable-next-line jsx-a11y/alt-text
+        <img
+          src={imageUrl!}
+          alt={name}
+          style={{
+            width: '100%',
+            height: '100%',
+            borderRadius,
+            objectFit: 'cover',
+            opacity: isLoading ? 0 : 1,
+            display: 'block',
+            transition: 'opacity 0.2s ease-in-out',
+          }}
+          crossOrigin="anonymous"
+          referrerPolicy="no-referrer"
+          onError={handleError}
+          onLoad={handleLoad}
+          loading="lazy"
+        />
+      ) : hasValidImage ? (
         <Image
           source={{ uri: imageUrl! }}
           style={[
@@ -129,9 +150,12 @@ export const ProfileImage: React.FC<ProfileImageProps> = ({
             // Use proper width/height for better browser optimization
             width: containerSize,
             height: containerSize,
+            // Add CORS and referrer policy for external images (especially Google profile images)
+            crossOrigin: 'anonymous' as any,
+            referrerPolicy: 'no-referrer' as any,
           })}
         />
-      )}
+      ) : null}
       
       {/* Show avatar icon while loading with shimmer animation */}
       {isLoading && (

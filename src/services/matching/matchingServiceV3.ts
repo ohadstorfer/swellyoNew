@@ -1118,7 +1118,7 @@ export async function findMatchingUsersV3(
     // Step 7: Filter to only users who passed both Layer 1 and Layer 2
     const passedUsers = matchingResults.filter(r => r.passedLayer1 && r.passedLayer2);
 
-    // Step 7.5: Analyze match quality and filter by matchCount > 1
+    // Step 7.5: Analyze match quality and filter by matchCount >= 1
     const usersWithQuality = passedUsers.map(result => {
       const destinationMatch = result.bestMatch || {
         countryMatch: false,
@@ -1135,8 +1135,8 @@ export async function findMatchingUsersV3(
       };
     });
 
-    // Filter by minimum match count (must match more than 1 criteria)
-    const validMatches = usersWithQuality.filter(u => u.matchQuality.matchCount > 1);
+    // Filter by minimum match count (must match at least 1 criteria)
+    const validMatches = usersWithQuality.filter(u => u.matchQuality.matchCount >= 1);
 
     // If no valid matches, check for area fallback (country-only matches)
     let finalMatches = validMatches;
@@ -1145,7 +1145,7 @@ export async function findMatchingUsersV3(
       const countryOnlyMatches = usersWithQuality.filter(u => 
         u.matchQuality.matchedCriteria.destination_country && 
         !u.matchQuality.matchedCriteria.area &&
-        u.matchQuality.matchCount > 1
+        u.matchQuality.matchCount >= 1
       );
       if (countryOnlyMatches.length > 0) {
         finalMatches = countryOnlyMatches;
@@ -1172,7 +1172,7 @@ export async function findMatchingUsersV3(
     const topUsers = finalMatches.slice(0, 3);
 
     console.log(`Found ${passedUsers.length} users who passed filters`);
-    console.log(`After match quality filter (matchCount > 1): ${validMatches.length} valid matches`);
+    console.log(`After match quality filter (matchCount >= 1): ${validMatches.length} valid matches`);
     console.log(`Returning top ${topUsers.length} users`);
     console.log(`Area priority: ${topUsers.filter(u => u.totalScore >= 1000).length} users with area match boost`);
     console.log('Top users:', topUsers.map(u => ({

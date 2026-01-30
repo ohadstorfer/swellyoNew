@@ -28,12 +28,98 @@ import { supabaseAuthService } from '../services/auth/supabaseAuthService';
 import { MatchedUser, TripPlanningRequest } from '../types/tripPlanning';
 import { analyticsService } from '../services/analytics/analyticsService';
 
+/**
+ * Count how many criteria are requested (helper function for UI)
+ */
+function countRequestedCriteria(request: TripPlanningRequest): number {
+  let count = 0;
+  
+  if ((request.queryFilters?.country_from && request.queryFilters.country_from.length > 0) || 
+      (request.non_negotiable_criteria?.country_from && request.non_negotiable_criteria.country_from.length > 0)) {
+    count++;
+  }
+  if ((request.queryFilters?.surfboard_type && request.queryFilters.surfboard_type.length > 0) || 
+      (request.non_negotiable_criteria?.surfboard_type && request.non_negotiable_criteria.surfboard_type.length > 0)) {
+    count++;
+  }
+  if (request.non_negotiable_criteria?.age_range || 
+      (request.queryFilters?.age_min !== undefined && request.queryFilters?.age_max !== undefined)) {
+    count++;
+  }
+  if (request.non_negotiable_criteria?.surf_level_min !== undefined || 
+      request.queryFilters?.surf_level_min !== undefined) {
+    count++;
+  }
+  if (request.destination_country) {
+    count++;
+  }
+  if (request.area) {
+    count++;
+  }
+  
+  return count;
+}
+
 interface Message {
   id: string;
   text: string;
   isUser: boolean;
   timestamp: string;
   isMatchedUsers?: boolean; // Flag to indicate this message should render matched user cards
+}
+
+/**
+ * Generate confirmation message for single criterion matches
+ */
+function generateSingleCriterionConfirmationMessage(criterionType: string, matchCount: number): string {
+  const criterionNames: { [key: string]: string } = {
+    'age': 'age requirement',
+    'country': 'country requirement',
+    'surfboard_type': 'board type requirement',
+    'surf_level': 'surf level requirement',
+    'destination_country': 'destination requirement',
+    'area': 'area requirement',
+  };
+  
+  const criterionName = criterionNames[criterionType] || 'requirement';
+  const suggestions = criterionType === 'age' 
+    ? 'country, board type, or surf level'
+    : criterionType === 'country'
+    ? 'board type, surf level, or age'
+    : criterionType === 'surfboard_type'
+    ? 'country, surf level, or age'
+    : 'country, board type, or age';
+  
+  return `I found ${matchCount} surfer${matchCount !== 1 ? 's' : ''} matching your ${criterionName}. Would you like to add more criteria (like ${suggestions}) to get better matches, or should I show you these results now?`;
+}
+
+/**
+ * Determine which criterion type was requested from the request data
+ */
+function getSingleCriterionType(request: TripPlanningRequest): string | null {
+  if ((request.queryFilters?.country_from && request.queryFilters.country_from.length > 0) || 
+      (request.non_negotiable_criteria?.country_from && request.non_negotiable_criteria.country_from.length > 0)) {
+    return 'country';
+  }
+  if ((request.queryFilters?.surfboard_type && request.queryFilters.surfboard_type.length > 0) || 
+      (request.non_negotiable_criteria?.surfboard_type && request.non_negotiable_criteria.surfboard_type.length > 0)) {
+    return 'surfboard_type';
+  }
+  if (request.non_negotiable_criteria?.age_range || 
+      (request.queryFilters?.age_min !== undefined && request.queryFilters?.age_max !== undefined)) {
+    return 'age';
+  }
+  if (request.non_negotiable_criteria?.surf_level_min !== undefined || 
+      request.queryFilters?.surf_level_min !== undefined) {
+    return 'surf_level';
+  }
+  if (request.destination_country) {
+    return 'destination_country';
+  }
+  if (request.area) {
+    return 'area';
+  }
+  return null;
 }
 
 /**
@@ -131,6 +217,8 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   const [matchedUsers, setMatchedUsers] = useState<any[]>(persistedMatchedUsers || []);
   const [destinationCountry, setDestinationCountry] = useState<string>(persistedDestination || '');
   const [pendingPartialMatches, setPendingPartialMatches] = useState<MatchedUser[] | null>(null);
+  const [pendingSingleCriterionMatches, setPendingSingleCriterionMatches] = useState<MatchedUser[] | null>(null);
+  const [singleCriterionType, setSingleCriterionType] = useState<string | null>(null);
   const [inputHeight, setInputHeight] = useState(25);
   const scrollViewRef = useRef<ScrollView>(null);
   const textInputRef = useRef<any>(null);
@@ -438,6 +526,42 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
           console.log('Matched users found:', matchedUsers.length, matchedUsers);
           console.log('Filters from non-negotiable step:', response.data.filtersFromNonNegotiableStep);
           
+          // Check if this is a single criterion request that needs confirmation
+          const needsConfirmation = (matchedUsers as any).__needsConfirmation === true;
+          const isSingleCriterion = (matchedUsers as any).__singleCriterion === true;
+          
+          if (needsConfirmation && isSingleCriterion && matchedUsers.length > 0) {
+            // Single criterion request - ask user if they want to add more criteria
+            const criterionType = getSingleCriterionType(requestData);
+            const confirmationMessage = generateSingleCriterionConfirmationMessage(
+              criterionType || 'requirement',
+              matchedUsers.length
+            );
+            
+            const askMessage: Message = {
+              id: (Date.now() + 3).toString(),
+              text: confirmationMessage,
+              isUser: false,
+              timestamp: new Date().toLocaleTimeString('en-US', { 
+                hour: '2-digit', 
+                minute: '2-digit',
+                hour12: false 
+              }),
+              isMatchedUsers: false,
+            };
+            setMessages(prev => [...prev, askMessage]);
+            
+            // Store matches temporarily (will show if user confirms)
+            setPendingSingleCriterionMatches(matchedUsers);
+            setSingleCriterionType(criterionType);
+            setDestinationCountry(response.data.destination_country);
+            
+            // Don't finish the chat - allow user to respond
+            setIsFinished(false);
+            setIsLoading(false);
+            return;
+          }
+          
           // Check if matches are exact or partial
           const hasMatchQuality = matchedUsers.some(u => u.matchQuality);
           const hasExactMatches = hasMatchQuality 
@@ -449,18 +573,23 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
           if (matchedUsers.length > 0) {
             if (hasExactMatches || !hasMatchQuality) {
               // Exact matches - show immediately
-              const matchesMessage: Message = {
-                id: (Date.now() + 3).toString(),
-                text: `Found ${matchedUsers.length} awesome match${matchedUsers.length > 1 ? 'es' : ''} for you!`,
-                isUser: false,
-                timestamp: new Date().toLocaleTimeString('en-US', { 
-                  hour: '2-digit', 
-                  minute: '2-digit',
-                  hour12: false 
-                }),
-                isMatchedUsers: true,
-              };
-              setMessages(prev => [...prev, matchesMessage]);
+              // Remove the "Finding..." message and add the results message
+              setMessages(prev => {
+                // Filter out the "Finding the perfect surfers..." message
+                const filtered = prev.filter(msg => msg.text !== 'Finding the perfect surfers for you...');
+                const matchesMessage: Message = {
+                  id: (Date.now() + 3).toString(),
+                  text: `Found ${matchedUsers.length} awesome match${matchedUsers.length > 1 ? 'es' : ''} for you!`,
+                  isUser: false,
+                  timestamp: new Date().toLocaleTimeString('en-US', { 
+                    hour: '2-digit', 
+                    minute: '2-digit',
+                    hour12: false 
+                  }),
+                  isMatchedUsers: true,
+                };
+                return [...filtered, matchesMessage];
+              });
               
               // Store matched users and destination for rendering cards
               setMatchedUsers(matchedUsers);
@@ -480,18 +609,22 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
               const quality = firstMatch.matchQuality;
               if (quality) {
                 const partialMessage = generatePartialMatchQuestion(matchedUsers, requestData, quality);
-                const askMessage: Message = {
-                  id: (Date.now() + 3).toString(),
-                  text: partialMessage,
-                  isUser: false,
-                  timestamp: new Date().toLocaleTimeString('en-US', { 
-                    hour: '2-digit', 
-                    minute: '2-digit',
-                    hour12: false 
-                  }),
-                  isMatchedUsers: false,
-                };
-                setMessages(prev => [...prev, askMessage]);
+                // Remove the "Finding..." message and add the partial match question
+                setMessages(prev => {
+                  const filtered = prev.filter(msg => msg.text !== 'Finding the perfect surfers for you...');
+                  const askMessage: Message = {
+                    id: (Date.now() + 3).toString(),
+                    text: partialMessage,
+                    isUser: false,
+                    timestamp: new Date().toLocaleTimeString('en-US', { 
+                      hour: '2-digit', 
+                      minute: '2-digit',
+                      hour12: false 
+                    }),
+                    isMatchedUsers: false,
+                  };
+                  return [...filtered, askMessage];
+                });
                 
                 // Store partial matches temporarily (will show if user confirms)
                 setPendingPartialMatches(matchedUsers);
@@ -512,6 +645,9 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             const mustHaveKeywordsFilteredOut = (matchedUsers as any).__mustHaveKeywordsFilteredOut || false;
             const mustHaveKeywords = (matchedUsers as any).__mustHaveKeywords || [];
             
+            // Count criteria to provide better error messages
+            const criteriaCount = countRequestedCriteria(requestData);
+            
             console.log('[TripPlanningChatScreen] No matches found. Analyzing reason...', {
               rejectedMatchesCount: rejectedMatches.length,
               destinationFilteredSurfersCount: destinationFilteredSurfers.length,
@@ -519,6 +655,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
               hasDestinationFiltered: !!destinationFilteredSurfers.length,
               mustHaveKeywordsFilteredOut,
               mustHaveKeywords,
+              criteriaCount,
             });
             
             const explanation = analyzeNoMatchesReason(
@@ -532,17 +669,21 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             
             console.log('[TripPlanningChatScreen] Generated explanation:', explanation);
             
-            const noMatchesMessage: Message = {
-              id: (Date.now() + 3).toString(),
-              text: explanation,
-              isUser: false,
-              timestamp: new Date().toLocaleTimeString('en-US', { 
-                hour: '2-digit', 
-                minute: '2-digit',
-                hour12: false 
-              }),
-            };
-            setMessages(prev => [...prev, noMatchesMessage]);
+            // Remove the "Finding..." message and add the error explanation
+            setMessages(prev => {
+              const filtered = prev.filter(msg => msg.text !== 'Finding the perfect surfers for you...');
+              const noMatchesMessage: Message = {
+                id: (Date.now() + 3).toString(),
+                text: explanation,
+                isUser: false,
+                timestamp: new Date().toLocaleTimeString('en-US', { 
+                  hour: '2-digit', 
+                  minute: '2-digit',
+                  hour12: false 
+                }),
+              };
+              return [...filtered, noMatchesMessage];
+            });
           }
         } catch (error) {
           console.error('Error finding matching users:', error);
@@ -674,20 +815,24 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     // If this message has matched users, render cards instead
     if (message.isMatchedUsers && matchedUsers.length > 0) {
       return (
-        <View key={message.id} style={styles.matchedUsersContainer}>
-          <View style={styles.messageContainer}>
-            <View style={styles.botMessageContainer}>
-              <View style={styles.botMessageBubble}>
-                <View style={styles.messageTextContainer}>
-                  <Text style={styles.botMessageText}>
-                    {message.text}
-                  </Text>
-                </View>
-                <View style={styles.timestampContainer}>
-                  <Text style={styles.botTimestamp}>
-                    {message.timestamp}
-                  </Text>
-                </View>
+        <View key={message.id}>
+          <View style={[
+            styles.messageContainer,
+            styles.botMessageContainer,
+          ]}>
+            <View style={[
+              styles.messageBubble,
+              styles.botMessageBubble,
+            ]}>
+              <View style={styles.messageTextContainer}>
+                <Text style={styles.botMessageText}>
+                  {message.text}
+                </Text>
+              </View>
+              <View style={styles.timestampContainer}>
+                <Text style={styles.botTimestamp}>
+                  {message.timestamp}
+                </Text>
               </View>
             </View>
           </View>
@@ -1037,10 +1182,12 @@ const styles = StyleSheet.create({
   },
   matchedUsersContainer: {
     marginBottom: 16,
-    paddingHorizontal: spacing.md,
+    // Padding removed - let botMessageContainer handle padding
   },
   matchedUsersCards: {
     marginTop: 12,
+    marginLeft: 16, // Match botMessageContainer paddingLeft
+    marginRight: 48, // Match botMessageContainer paddingRight
     gap: 16,
   },
   messageContainer: {
