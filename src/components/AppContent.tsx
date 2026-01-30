@@ -27,7 +27,7 @@ export const AppContent: React.FC = () => {
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const authCheckStartTime = useRef<number>(Date.now());
   const stopTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const minLoadingDuration = 6000; // 3 seconds minimum
+  const minLoadingDuration = 3000; // 3 seconds minimum
   
   // Check if MVP mode is enabled
   const isMVPMode = process.env.EXPO_PUBLIC_MVP_MODE === 'true';
