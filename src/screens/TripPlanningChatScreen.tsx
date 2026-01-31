@@ -66,6 +66,8 @@ interface Message {
   isUser: boolean;
   timestamp: string;
   isMatchedUsers?: boolean; // Flag to indicate this message should render matched user cards
+  matchedUsers?: MatchedUser[]; // Store matched users with the message
+  destinationCountry?: string; // Store destination country with the message
 }
 
 /**
@@ -273,7 +275,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
                 });
               }
               
-              // If we have persisted matched users, add the matched users message
+              // If we have persisted matched users, add the matched users message (backward compatibility)
               if (persistedMatchedUsers && persistedMatchedUsers.length > 0) {
                 restoredMessages.push({
                   id: String(messageId++),
@@ -285,6 +287,8 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
                     hour12: false 
                   }),
                   isMatchedUsers: true,
+                  matchedUsers: persistedMatchedUsers, // Store persisted matches in the message
+                  destinationCountry: persistedDestination || '', // Store persisted destination
                 });
                 setIsFinished(true);
               }
@@ -398,30 +402,75 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
       
       if (wantsToSee) {
         // User confirmed - show the partial matches
-        setMessages(prev => [...prev, userMessage]);
-        setInputText('');
-        const matchesMessage: Message = {
-          id: (Date.now() + 1).toString(),
-          text: `Here are ${pendingPartialMatches.length} option${pendingPartialMatches.length > 1 ? 's' : ''} that best match what you're looking for:`,
-          isUser: false,
-          timestamp: new Date().toLocaleTimeString('en-US', { 
-            hour: '2-digit', 
-            minute: '2-digit',
-            hour12: false 
-          }),
-          isMatchedUsers: true,
-        };
-        setMessages(prev => [...prev, matchesMessage]);
+        setMessages(prev => {
+          const withUserMessage = [...prev, userMessage];
+          
+          // Find the message that contains the partial matches and update it
+          const updated = withUserMessage.map(msg => {
+            // Find the message that has the pending partial matches stored
+            if (msg.matchedUsers && 
+                msg.matchedUsers.length === pendingPartialMatches.length &&
+                msg.matchedUsers[0]?.user_id === pendingPartialMatches[0]?.user_id) {
+              // Update this message to show the matches
+              return {
+                ...msg,
+                text: `Here are ${pendingPartialMatches.length} option${pendingPartialMatches.length > 1 ? 's' : ''} that best match what you're looking for:`,
+                isMatchedUsers: true,
+                matchedUsers: pendingPartialMatches,
+                destinationCountry: msg.destinationCountry || destinationCountry,
+              };
+            }
+            return msg;
+          });
+          
+          // If we couldn't find the message, create a new one (fallback)
+          const foundMessage = updated.some(msg => msg.isMatchedUsers && msg.matchedUsers && msg.matchedUsers.length === pendingPartialMatches.length);
+          if (!foundMessage) {
+            updated.push({
+              id: (Date.now() + 1).toString(),
+              text: `Here are ${pendingPartialMatches.length} option${pendingPartialMatches.length > 1 ? 's' : ''} that best match what you're looking for:`,
+              isUser: false,
+              timestamp: new Date().toLocaleTimeString('en-US', { 
+                hour: '2-digit', 
+                minute: '2-digit',
+                hour12: false 
+              }),
+              isMatchedUsers: true,
+              matchedUsers: pendingPartialMatches,
+              destinationCountry: destinationCountry,
+            });
+          }
+          
+          // Aggregate all matched users for onChatStateChange
+          const allMatchedUsers: MatchedUser[] = [];
+          let latestDestination = destinationCountry;
+          
+          updated.forEach(msg => {
+            if (msg.matchedUsers && msg.matchedUsers.length > 0) {
+              allMatchedUsers.push(...msg.matchedUsers);
+              if (msg.destinationCountry) {
+                latestDestination = msg.destinationCountry;
+              }
+            }
+          });
+          
+          // Notify parent with all matched users (use setTimeout to avoid state update issues)
+          if (onChatStateChange) {
+            setTimeout(() => {
+              onChatStateChange(chatId, allMatchedUsers, latestDestination);
+            }, 0);
+          }
+          
+          return updated;
+        });
+        
+        // Keep global state for backward compatibility
         setMatchedUsers(pendingPartialMatches);
         
         // Track Swelly list created for partial matches
         analyticsService.trackSwellyListCreated(pendingPartialMatches.length, 'partial_match');
         
         setPendingPartialMatches(null);
-        
-        if (onChatStateChange) {
-          onChatStateChange(chatId, pendingPartialMatches, destinationCountry);
-        }
         return; // Don't process this as a normal message
       } else if (userText.includes('no') || userText.includes('change') || userText.includes('different')) {
         // User wants to change request - clear pending matches and continue normal flow
@@ -587,22 +636,41 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
                     hour12: false 
                   }),
                   isMatchedUsers: true,
+                  matchedUsers: matchedUsers, // Store matched users with the message
+                  destinationCountry: response.data.destination_country || '', // Store destination with the message
                 };
-                return [...filtered, matchesMessage];
+                const updated = [...filtered, matchesMessage];
+                
+                // Aggregate all matched users from all messages (including the new one)
+                const allMatchedUsers: MatchedUser[] = [];
+                let latestDestination = response.data.destination_country || '';
+                
+                updated.forEach(msg => {
+                  if (msg.matchedUsers && msg.matchedUsers.length > 0) {
+                    allMatchedUsers.push(...msg.matchedUsers);
+                    if (msg.destinationCountry) {
+                      latestDestination = msg.destinationCountry;
+                    }
+                  }
+                });
+                
+                // Notify parent with all matched users (call after state update)
+                if (onChatStateChange) {
+                  setTimeout(() => {
+                    onChatStateChange(chatId, allMatchedUsers, latestDestination);
+                  }, 0);
+                }
+                
+                return updated;
               });
               
-              // Store matched users and destination for rendering cards
+              // Keep global state for backward compatibility (can be removed later)
               setMatchedUsers(matchedUsers);
-              setDestinationCountry(response.data.destination_country);
+              setDestinationCountry(response.data.destination_country || '');
               
               // Track Swelly list created
               const intentType = requestData.purpose?.purpose_type || 'general_guidance';
               analyticsService.trackSwellyListCreated(matchedUsers.length, intentType);
-              
-              // Notify parent to persist state for when user returns
-              if (onChatStateChange) {
-                onChatStateChange(chatId, matchedUsers, response.data.destination_country);
-              }
             } else if (hasPartialMatches) {
               // Partial matches - ask user first
               const firstMatch = matchedUsers[0];
@@ -622,13 +690,16 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
                       hour12: false 
                     }),
                     isMatchedUsers: false,
+                    // Store matched users in the message for when user confirms
+                    matchedUsers: matchedUsers,
+                    destinationCountry: response.data.destination_country || '',
                   };
                   return [...filtered, askMessage];
                 });
                 
                 // Store partial matches temporarily (will show if user confirms)
                 setPendingPartialMatches(matchedUsers);
-                setDestinationCountry(response.data.destination_country);
+                setDestinationCountry(response.data.destination_country || '');
               }
             }
           } else {
@@ -813,7 +884,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
 
   const renderMessage = (message: Message) => {
     // If this message has matched users, render cards instead
-    if (message.isMatchedUsers && matchedUsers.length > 0) {
+    if (message.isMatchedUsers && message.matchedUsers && message.matchedUsers.length > 0) {
       return (
         <View key={message.id}>
           <View style={[
@@ -839,11 +910,11 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
           
           {/* Render matched user cards */}
           <View style={styles.matchedUsersCards}>
-            {matchedUsers.map((user) => (
+            {message.matchedUsers.map((user) => (
               <MatchedUserCard
                 key={user.user_id}
                 user={user}
-                destinationCountry={destinationCountry}
+                destinationCountry={message.destinationCountry || destinationCountry}
                 onSendMessage={handleSendMessage}
                 onViewProfile={handleViewProfile}
               />

@@ -102,14 +102,14 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       setShowSkeletons(true);
       
       // But also set up timer to handle fast loads (though we show immediately)
-      const skeletonTimer = setTimeout(() => {
+    const skeletonTimer = setTimeout(() => {
         // Keep skeletons visible if still fetching
         if (isFetchingMessages && messages.length === 0) {
-          setShowSkeletons(true);
-        }
-      }, SKELETON_DELAY_MS);
+        setShowSkeletons(true);
+      }
+    }, SKELETON_DELAY_MS);
 
-      return () => clearTimeout(skeletonTimer);
+    return () => clearTimeout(skeletonTimer);
     } else {
       // If we have messages or not fetching, don't show skeletons
       setShowSkeletons(false);
