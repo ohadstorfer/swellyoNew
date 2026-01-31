@@ -674,13 +674,13 @@ export async function findMatchingUsersV2(
       userEntry.points = points;
     }
 
-    // Step 14: Sort and return top 3
-    console.log('Step 14: Sorting and selecting top 3 matches...');
+    // Step 14: Sort and return all valid matches
+    console.log('Step 14: Sorting and selecting all valid matches...');
     const sortedUsers = Array.from(userPoints.values())
-      .sort((a, b) => b.points - a.points)
-      .slice(0, 3);
+      .sort((a, b) => b.points - a.points);
+    // Removed .slice(0, 3) to return all matches, not just top 3
 
-    console.log('Top 3 matches:', sortedUsers.map(u => ({
+    console.log(`Top ${sortedUsers.length} matches:`, sortedUsers.map(u => ({
       name: u.surfer.name,
       points: u.points,
       days: u.daysInDestination
@@ -1268,11 +1268,12 @@ export async function findMatchingUsers(
       return bCompleteness - aCompleteness;
     });
     
-    // Return top 3
-    const topMatches: MatchedUser[] = validMatches.slice(0, 3);
+    // Return all valid matches (no limit)
+    const topMatches: MatchedUser[] = validMatches;
+    // Removed .slice(0, 3) to return all matches, not just top 3
     
     console.log(`After match quality filter (matchCount >= 1): ${validMatches.length} valid matches`);
-    console.log(`Returning top ${topMatches.length} matches`);
+    console.log(`Returning all ${topMatches.length} matches`);
     
     // Create a result object to store metadata (even if topMatches is empty)
     const result = topMatches as any;

@@ -22,6 +22,7 @@ import { authService } from '../services/auth/authService';
 import { useOnboarding } from '../context/OnboardingContext';
 import { getImageUrl } from '../services/media/imageService';
 import { UserSearchModal } from '../components/UserSearchModal';
+import { analyticsService } from '../services/analytics/analyticsService';
 import { DirectMessageScreen } from './DirectMessageScreen';
 import { SwellyShaperScreen } from './SwellyShaperScreen';
 import { SwellyoTeamWelcome } from './SwellyoTeamWelcome';
@@ -948,7 +949,38 @@ export default function ConversationsScreen({
       {/* Survey Bubble - Fixed position, above everything (MVP mode only) */}
       {showSurveyBubble && isMVPMode && (
         <TouchableOpacity 
-          onPress={() => {
+          onPress={async () => {
+            // Ensure user is identified with their name before triggering survey
+            if (currentUserId) {
+              let userEmail = contextUser?.email;
+              let displayName = contextUser?.nickname || userName || 'User';
+              
+              // If we don't have email, try to fetch user data
+              if (!userEmail && currentUserId) {
+                try {
+                  const user = await supabaseAuthService.getCurrentUser();
+                  if (user) {
+                    userEmail = user.email;
+                    displayName = user.nickname || user.email?.split('@')[0] || 'User';
+                  }
+                } catch (error) {
+                  console.error('[ConversationsScreen] Error fetching user data for PostHog identification:', error);
+                }
+              }
+              
+              const userId = currentUserId;
+              const userProperties = {
+                $email: userEmail,
+                $name: displayName,
+                email: userEmail,
+                name: displayName,
+              };
+              
+              // Identify user with PostHog to ensure name is shown in survey
+              analyticsService.identify(userId, userProperties);
+              console.log('[ConversationsScreen] User identified with PostHog before survey:', userId, userProperties);
+            }
+            
             // Trigger PostHog survey
             if (posthog) {
               posthog.capture('mvp_full_product_survey_cohort_a_viewed', {

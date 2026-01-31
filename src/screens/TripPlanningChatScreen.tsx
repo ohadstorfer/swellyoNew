@@ -27,6 +27,7 @@ import { findMatchingUsersV3 } from '../services/matching/matchingServiceV3';
 import { supabaseAuthService } from '../services/auth/supabaseAuthService';
 import { MatchedUser, TripPlanningRequest } from '../types/tripPlanning';
 import { analyticsService } from '../services/analytics/analyticsService';
+import { saveMatchedUsers, loadMatchedUsers, clearMatchedUsers } from '../utils/tripPlanningStorage';
 
 /**
  * Count how many criteria are requested (helper function for UI)
@@ -244,6 +245,9 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             console.log('Restored history:', history);
             
             if (history && history.messages && history.messages.length > 0) {
+              // Load matched users data from storage
+              const storedMatchedUsers = await loadMatchedUsers(persistedChatId);
+              
               // Convert backend messages to UI format
               const restoredMessages: Message[] = [];
               let messageId = 1;
@@ -263,8 +267,10 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
                   }
                 }
                 
-                restoredMessages.push({
-                  id: String(messageId++),
+                const messageIdStr = String(messageId++);
+                const messageIndex = restoredMessages.length; // Current position in conversation
+                const restoredMessage: Message = {
+                  id: messageIdStr,
                   text: messageText,
                   isUser: msg.role === 'user',
                   timestamp: new Date().toLocaleTimeString('en-US', { 
@@ -272,24 +278,26 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
                     minute: '2-digit',
                     hour12: false 
                   }),
-                });
+                };
+                
+                // Match stored matched users by message index (position)
+                const matchedData = storedMatchedUsers.find(
+                  stored => stored.messageIndex === messageIndex
+                );
+                
+                if (matchedData) {
+                  // Found match by position
+                  restoredMessage.isMatchedUsers = true;
+                  restoredMessage.matchedUsers = matchedData.matchedUsers;
+                  restoredMessage.destinationCountry = matchedData.destinationCountry;
+                }
+                
+                restoredMessages.push(restoredMessage);
               }
               
-              // If we have persisted matched users, add the matched users message (backward compatibility)
-              if (persistedMatchedUsers && persistedMatchedUsers.length > 0) {
-                restoredMessages.push({
-                  id: String(messageId++),
-                  text: `Found ${persistedMatchedUsers.length} awesome match${persistedMatchedUsers.length > 1 ? 'es' : ''} for you!`,
-                  isUser: false,
-                  timestamp: new Date().toLocaleTimeString('en-US', { 
-                    hour: '2-digit', 
-                    minute: '2-digit',
-                    hour12: false 
-                  }),
-                  isMatchedUsers: true,
-                  matchedUsers: persistedMatchedUsers, // Store persisted matches in the message
-                  destinationCountry: persistedDestination || '', // Store persisted destination
-                });
+              // Check if any messages have matched users to determine if finished
+              const hasMatchedUsers = restoredMessages.some(msg => msg.isMatchedUsers && msg.matchedUsers && msg.matchedUsers.length > 0);
+              if (hasMatchedUsers) {
                 setIsFinished(true);
               }
               
@@ -373,6 +381,21 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     initializeChat();
   }, [formData]); // Re-run if formData changes
 
+  // Clean up matched users storage when chatId changes (new conversation starts)
+  useEffect(() => {
+    const cleanupOldStorage = async () => {
+      // If we have a new chatId and it's different from persistedChatId, clear old data
+      if (chatId && chatId !== persistedChatId) {
+        // Clear old chatId's data if it exists
+        if (persistedChatId) {
+          await clearMatchedUsers(persistedChatId);
+        }
+      }
+    };
+    
+    cleanupOldStorage();
+  }, [chatId, persistedChatId]);
+
   const sendMessage = async () => {
     if (!inputText.trim() || isLoading) return;
 
@@ -389,6 +412,85 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
 
     console.log('Sending message:', userMessage.text);
     
+    // Check if user wants to see pending single criterion matches
+    if (pendingSingleCriterionMatches && pendingSingleCriterionMatches.length > 0) {
+      const userText = userMessage.text.toLowerCase();
+      const wantsToSee = userText.includes('yes') || 
+                        userText.includes('show') || 
+                        userText.includes('send') ||
+                        userText.includes('sure') ||
+                        userText.includes('ok') ||
+                        userText.includes('okay') ||
+                        userText.includes('yeah') ||
+                        userText.includes('now');
+      
+      if (wantsToSee) {
+        // User confirmed - show the single criterion matches
+        const singleCriterionMessageText = `Found ${pendingSingleCriterionMatches.length} awesome match${pendingSingleCriterionMatches.length > 1 ? 'es' : ''} for you!`;
+        
+        setMessages(prev => {
+          const withUserMessage = [...prev, userMessage];
+          const messageIndex = withUserMessage.length; // Position where this message will be inserted
+          const matchesMessage: Message = {
+            id: (Date.now() + 1).toString(),
+            text: singleCriterionMessageText,
+            isUser: false,
+            timestamp: new Date().toLocaleTimeString('en-US', { 
+              hour: '2-digit', 
+              minute: '2-digit',
+              hour12: false 
+            }),
+            isMatchedUsers: true,
+            matchedUsers: pendingSingleCriterionMatches,
+            destinationCountry: destinationCountry,
+          };
+          const updated = [...withUserMessage, matchesMessage];
+          
+          // Aggregate all matched users for onChatStateChange
+          const allMatchedUsers: MatchedUser[] = [];
+          let latestDestination = destinationCountry;
+          
+          updated.forEach(msg => {
+            if (msg.matchedUsers && msg.matchedUsers.length > 0) {
+              allMatchedUsers.push(...msg.matchedUsers);
+              if (msg.destinationCountry) {
+                latestDestination = msg.destinationCountry;
+              }
+            }
+          });
+          
+          // Notify parent with all matched users
+          if (onChatStateChange) {
+            setTimeout(() => {
+              onChatStateChange(chatId, allMatchedUsers, latestDestination);
+            }, 0);
+          }
+          
+          // Save matched users to storage with message index
+          if (chatId) {
+            saveMatchedUsers(chatId, messageIndex, pendingSingleCriterionMatches, destinationCountry);
+          }
+          
+          return updated;
+        });
+        
+        // Keep global state for backward compatibility
+        setMatchedUsers(pendingSingleCriterionMatches);
+        
+        // Track Swelly list created for single criterion matches
+        analyticsService.trackSwellyListCreated(pendingSingleCriterionMatches.length, 'single_criterion');
+        
+        setPendingSingleCriterionMatches(null);
+        setSingleCriterionType(null);
+        return; // Don't process this as a normal message
+      } else if (userText.includes('no') || userText.includes('add') || userText.includes('more')) {
+        // User wants to add more criteria - clear pending matches and continue normal flow
+        setPendingSingleCriterionMatches(null);
+        setSingleCriterionType(null);
+        setMatchedUsers([]);
+      }
+    }
+    
     // Check if user wants to see pending partial matches
     if (pendingPartialMatches && pendingPartialMatches.length > 0) {
       const userText = userMessage.text.toLowerCase();
@@ -402,19 +504,23 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
       
       if (wantsToSee) {
         // User confirmed - show the partial matches
+        const partialMatchesMessageText = `Here are ${pendingPartialMatches.length} option${pendingPartialMatches.length > 1 ? 's' : ''} that best match what you're looking for:`;
+        
         setMessages(prev => {
           const withUserMessage = [...prev, userMessage];
+          let messageIndex: number | null = null;
           
           // Find the message that contains the partial matches and update it
-          const updated = withUserMessage.map(msg => {
+          const updated = withUserMessage.map((msg, index) => {
             // Find the message that has the pending partial matches stored
             if (msg.matchedUsers && 
                 msg.matchedUsers.length === pendingPartialMatches.length &&
                 msg.matchedUsers[0]?.user_id === pendingPartialMatches[0]?.user_id) {
               // Update this message to show the matches
+              messageIndex = index;
               return {
                 ...msg,
-                text: `Here are ${pendingPartialMatches.length} option${pendingPartialMatches.length > 1 ? 's' : ''} that best match what you're looking for:`,
+                text: partialMatchesMessageText,
                 isMatchedUsers: true,
                 matchedUsers: pendingPartialMatches,
                 destinationCountry: msg.destinationCountry || destinationCountry,
@@ -426,9 +532,10 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
           // If we couldn't find the message, create a new one (fallback)
           const foundMessage = updated.some(msg => msg.isMatchedUsers && msg.matchedUsers && msg.matchedUsers.length === pendingPartialMatches.length);
           if (!foundMessage) {
+            messageIndex = updated.length; // Position where new message will be added
             updated.push({
               id: (Date.now() + 1).toString(),
-              text: `Here are ${pendingPartialMatches.length} option${pendingPartialMatches.length > 1 ? 's' : ''} that best match what you're looking for:`,
+              text: partialMatchesMessageText,
               isUser: false,
               timestamp: new Date().toLocaleTimeString('en-US', { 
                 hour: '2-digit', 
@@ -459,6 +566,11 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             setTimeout(() => {
               onChatStateChange(chatId, allMatchedUsers, latestDestination);
             }, 0);
+          }
+          
+          // Save matched users to storage with message index
+          if (chatId && messageIndex !== null) {
+            saveMatchedUsers(chatId, messageIndex, pendingPartialMatches, destinationCountry);
           }
           
           return updated;
@@ -623,12 +735,16 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             if (hasExactMatches || !hasMatchQuality) {
               // Exact matches - show immediately
               // Remove the "Finding..." message and add the results message
+              const matchesMessageText = `Found ${matchedUsers.length} awesome match${matchedUsers.length > 1 ? 'es' : ''} for you!`;
+              const matchesDestination = response.data.destination_country || '';
+              
               setMessages(prev => {
                 // Filter out the "Finding the perfect surfers..." message
                 const filtered = prev.filter(msg => msg.text !== 'Finding the perfect surfers for you...');
+                const messageIndex = filtered.length; // Position where this message will be inserted
                 const matchesMessage: Message = {
                   id: (Date.now() + 3).toString(),
-                  text: `Found ${matchedUsers.length} awesome match${matchedUsers.length > 1 ? 'es' : ''} for you!`,
+                  text: matchesMessageText,
                   isUser: false,
                   timestamp: new Date().toLocaleTimeString('en-US', { 
                     hour: '2-digit', 
@@ -637,13 +753,13 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
                   }),
                   isMatchedUsers: true,
                   matchedUsers: matchedUsers, // Store matched users with the message
-                  destinationCountry: response.data.destination_country || '', // Store destination with the message
+                  destinationCountry: matchesDestination, // Store destination with the message
                 };
                 const updated = [...filtered, matchesMessage];
                 
                 // Aggregate all matched users from all messages (including the new one)
                 const allMatchedUsers: MatchedUser[] = [];
-                let latestDestination = response.data.destination_country || '';
+                let latestDestination = matchesDestination;
                 
                 updated.forEach(msg => {
                   if (msg.matchedUsers && msg.matchedUsers.length > 0) {
@@ -661,12 +777,17 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
                   }, 0);
                 }
                 
+                // Save matched users to storage with message index
+                if (chatId) {
+                  saveMatchedUsers(chatId, messageIndex, matchedUsers, matchesDestination);
+                }
+                
                 return updated;
               });
               
               // Keep global state for backward compatibility (can be removed later)
               setMatchedUsers(matchedUsers);
-              setDestinationCountry(response.data.destination_country || '');
+              setDestinationCountry(matchesDestination);
               
               // Track Swelly list created
               const intentType = requestData.purpose?.purpose_type || 'general_guidance';

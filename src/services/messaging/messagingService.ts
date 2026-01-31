@@ -199,6 +199,7 @@ class MessagingService {
           .select('id', { count: 'exact', head: true })
           .eq('conversation_id', conv.id)
           .eq('deleted', false)
+          .neq('sender_id', user.id) // Exclude messages sent by the current user
           .gt('created_at', lastReadAt)
           .then(result => result.count || 0);
       });

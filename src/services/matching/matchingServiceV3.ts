@@ -1167,13 +1167,14 @@ export async function findMatchingUsersV3(
       return b.dataCompleteness - a.dataCompleteness;
     });
 
-    // Step 9: Return top 3 users (area matches prioritized via score boost)
+    // Step 9: Return all valid matches (no limit)
     // The +1000 boost ensures area matches appear first, then sorted by other scores
-    const topUsers = finalMatches.slice(0, 3);
+    const topUsers = finalMatches;
+    // Removed .slice(0, 3) to return all matches, not just top 3
 
     console.log(`Found ${passedUsers.length} users who passed filters`);
     console.log(`After match quality filter (matchCount >= 1): ${validMatches.length} valid matches`);
-    console.log(`Returning top ${topUsers.length} users`);
+    console.log(`Returning all ${topUsers.length} users`);
     console.log(`Area priority: ${topUsers.filter(u => u.totalScore >= 1000).length} users with area match boost`);
     console.log('Top users:', topUsers.map(u => ({
       user_id: u.user_id,
