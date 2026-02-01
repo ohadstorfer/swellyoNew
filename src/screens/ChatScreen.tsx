@@ -421,12 +421,12 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
           
           <View style={styles.profileInfo}>
             <Text style={styles.profileName}>Swelly</Text>
-            <Text style={styles.profileTagline}>Join the global surf travel community!</Text>
+            <Text style={styles.profileTagline}>Let’s grow your surf travel community! </Text>
           </View>
           
-          <TouchableOpacity style={styles.menuButton}>
+          {/* <TouchableOpacity style={styles.menuButton}>
             <Ionicons name="ellipsis-vertical" size={24} color="#222B30" />
-          </TouchableOpacity>
+          </TouchableOpacity> */}
         </View>
         
         <View style={styles.progressBar}>

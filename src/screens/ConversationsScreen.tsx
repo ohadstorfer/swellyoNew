@@ -853,7 +853,7 @@ export default function ConversationsScreen({
               styles.swellyLastMessage,
               Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
             ]} numberOfLines={1}>
-              Yo! Let's connect!
+              Yo! Lets get you connected!
             </Text>
           </View>
         </View>
@@ -1648,7 +1648,7 @@ const styles = StyleSheet.create({
   },
   swellyLastMessage: {
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
-    fontSize: 12,
+    fontSize: 15,
     fontWeight: '400',
     lineHeight: 15,
     color: '#333333',

@@ -841,18 +841,18 @@ const styles = StyleSheet.create({
   },
   userMessageContainer: {
     flexDirection: 'row',
-    justifyContent: 'flex-start', // Outbound messages on LEFT side
+    justifyContent: 'flex-end', // Received messages on RIGHT side
     alignItems: 'flex-end',
-    paddingLeft: 0,
-    paddingRight: 60,
+    paddingLeft: 48,
+    paddingRight: 16, 
     marginBottom: 16,
   },
   botMessageContainer: {
     flexDirection: 'row',
-    justifyContent: 'flex-end', // Received messages on RIGHT side
+    justifyContent: 'flex-start', 
     alignItems: 'flex-end',
-    paddingLeft: 48,
-    paddingRight: 16, // Default padding for group chats (with avatar)
+    paddingLeft: 0,
+    paddingRight: 60,
     marginBottom: 16,
   },
   botMessageContainerDirect: {
@@ -892,9 +892,10 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
     alignItems: 'flex-start',
     backgroundColor: '#FFFFFF', // White background for outbound messages
-    borderTopLeftRadius: 16, // 16px 16px 2px 16px (pointy corner at bottom left)
-    borderTopRightRadius: 16,
-    borderBottomLeftRadius: 2, // Pointy corner at bottom left
+    
+    borderTopLeftRadius: 16, // 16px 2px 16px 16px
+    borderTopRightRadius: 2,
+    borderBottomLeftRadius: 16,
     borderBottomRightRadius: 16,
     ...(Platform.OS === 'web' && {
       boxShadow: '0px 0px 20px rgba(0, 0, 0, 0.08)',
@@ -913,9 +914,9 @@ const styles = StyleSheet.create({
     flexDirection: 'column',
     justifyContent: 'flex-end',
     alignItems: 'flex-end', // Align to right for received messages
-    borderTopLeftRadius: 16, // 16px 2px 16px 16px
-    borderTopRightRadius: 2,
-    borderBottomLeftRadius: 16,
+    borderTopLeftRadius: 16, // 16px 16px 2px 16px (pointy corner at bottom left)
+    borderTopRightRadius: 16,
+    borderBottomLeftRadius: 2, // Pointy corner at bottom left
     borderBottomRightRadius: 16,
     ...(Platform.OS === 'web' && {
       boxShadow: '0px 0px 20px rgba(0, 0, 0, 0.08)',
