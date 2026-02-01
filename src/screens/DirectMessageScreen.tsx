@@ -952,7 +952,7 @@ const styles = StyleSheet.create({
     lineHeight: 16, // Figma: leading-[normal]
   },
   botMessageTextGiveAdv: {
-    color: '#FFFFFF', // Dark text on #DBCDBC (beige) background for adv_giver
+    color: '#333333', // Dark text on #DBCDBC (beige) background for adv_giver
   },
   botMessageTextGetAdv: {
     color: '#FFFFFF', // White text on #05BCD3 (teal) background for adv_seeker

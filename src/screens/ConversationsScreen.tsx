@@ -1650,7 +1650,7 @@ const styles = StyleSheet.create({
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     fontSize: 15,
     fontWeight: '400',
-    lineHeight: 15,
+    lineHeight: 18,
     color: '#333333',
     // CSS variable applied via inline style on web
   },
