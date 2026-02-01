@@ -142,6 +142,52 @@ export default function ConversationsScreen({
     }
   }, [contextUser]);
 
+  // Identify user with PostHog early (especially important for MVP mode surveys)
+  // This ensures the user's name is available before they interact with surveys
+  useEffect(() => {
+    if (currentUserId && isMVPMode) {
+      // Get user properties for identification
+      let userEmail = contextUser?.email;
+      let displayName = contextUser?.nickname || userName || 'User';
+      
+      // If we don't have email, try to fetch user data
+      if (!userEmail && currentUserId) {
+        supabaseAuthService.getCurrentUser()
+          .then(user => {
+            if (user) {
+              userEmail = user.email;
+              displayName = user.nickname || user.email?.split('@')[0] || 'User';
+              
+              // Identify with fetched data
+              const userProperties = {
+                $email: userEmail,
+                $name: displayName,
+                email: userEmail,
+                name: displayName,
+              };
+              
+              analyticsService.identify(currentUserId, userProperties);
+              console.log('[ConversationsScreen] User identified with PostHog on mount:', currentUserId, userProperties);
+            }
+          })
+          .catch(error => {
+            console.error('[ConversationsScreen] Error fetching user data for PostHog identification:', error);
+          });
+      } else {
+        // We have the data, identify immediately
+        const userProperties = {
+          $email: userEmail,
+          $name: displayName,
+          email: userEmail,
+          name: displayName,
+        };
+        
+        analyticsService.identify(currentUserId, userProperties);
+        console.log('[ConversationsScreen] User identified with PostHog on mount:', currentUserId, userProperties);
+      }
+    }
+  }, [currentUserId, isMVPMode, contextUser, userName]);
+
   useEffect(() => {
     loadConversations();
     
