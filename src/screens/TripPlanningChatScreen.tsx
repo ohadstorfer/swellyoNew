@@ -27,7 +27,6 @@ import { findMatchingUsersV3 } from '../services/matching/matchingServiceV3';
 import { supabaseAuthService } from '../services/auth/supabaseAuthService';
 import { MatchedUser, TripPlanningRequest } from '../types/tripPlanning';
 import { analyticsService } from '../services/analytics/analyticsService';
-import { saveMatchedUsers, loadMatchedUsers, clearMatchedUsers } from '../utils/tripPlanningStorage';
 
 /**
  * Count how many criteria are requested (helper function for UI)
@@ -240,21 +239,58 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         // If we have a persisted chatId, restore the conversation
         if (persistedChatId) {
           console.log('Restoring trip planning conversation from chatId:', persistedChatId);
+          
+          // Optional: Migrate existing AsyncStorage data to backend (one-time migration)
+          try {
+            const { loadMatchedUsers } = await import('../utils/tripPlanningStorage');
+            const storedMatchedUsers = await loadMatchedUsers(persistedChatId);
+            if (storedMatchedUsers && storedMatchedUsers.length > 0) {
+              console.log('[TripPlanningChatScreen] Found AsyncStorage data to migrate:', storedMatchedUsers.length, 'entries');
+              // Migrate each stored match group to backend
+              for (const stored of storedMatchedUsers) {
+                if (stored.matchedUsers && stored.matchedUsers.length > 0) {
+                  await swellyService.attachMatchedUsersToMessage(
+                    persistedChatId,
+                    stored.matchedUsers,
+                    stored.destinationCountry
+                  ).catch(err => {
+                    console.warn('[TripPlanningChatScreen] Failed to migrate match group to backend:', err);
+                  });
+                }
+              }
+              // Clear AsyncStorage after successful migration
+              const { clearMatchedUsers } = await import('../utils/tripPlanningStorage');
+              await clearMatchedUsers(persistedChatId);
+              console.log('[TripPlanningChatScreen] Migration complete, AsyncStorage cleared');
+            }
+          } catch (migrationError) {
+            // Migration is optional - don't block if it fails
+            console.warn('[TripPlanningChatScreen] Migration check failed (non-critical):', migrationError);
+          }
+          
           try {
             const history = await swellyService.getTripPlanningHistory(persistedChatId);
             console.log('Restored history:', history);
             
             if (history && history.messages && history.messages.length > 0) {
-              // Load matched users data from storage
-              const storedMatchedUsers = await loadMatchedUsers(persistedChatId);
-              
               // Convert backend messages to UI format
               const restoredMessages: Message[] = [];
               let messageId = 1;
+              let skippedInitialContext = false;
               
               for (const msg of history.messages) {
                 // Skip system messages
                 if (msg.role === 'system') continue;
+                
+                // Skip initial context message (it's just for backend context, not for display)
+                if (msg.role === 'user' && (
+                  msg.content.includes("I'm looking to connect with surfers") ||
+                  (msg.content.toLowerCase().startsWith("hi!") && msg.content.includes("surfing"))
+                )) {
+                  skippedInitialContext = true;
+                  console.log('[TripPlanningChatScreen] Skipping initial context message:', msg.content.substring(0, 50));
+                  continue;
+                }
                 
                 // Parse assistant messages that might be JSON
                 let messageText = msg.content;
@@ -268,7 +304,6 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
                 }
                 
                 const messageIdStr = String(messageId++);
-                const messageIndex = restoredMessages.length; // Current position in conversation
                 const restoredMessage: Message = {
                   id: messageIdStr,
                   text: messageText,
@@ -280,20 +315,34 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
                   }),
                 };
                 
-                // Match stored matched users by message index (position)
-                const matchedData = storedMatchedUsers.find(
-                  stored => stored.messageIndex === messageIndex
-                );
-                
-                if (matchedData) {
-                  // Found match by position
-                  restoredMessage.isMatchedUsers = true;
-                  restoredMessage.matchedUsers = matchedData.matchedUsers;
-                  restoredMessage.destinationCountry = matchedData.destinationCountry;
+                // Extract matched users from message metadata (if present)
+                if (msg.role === 'assistant') {
+                  // Debug: Check if message has any metadata
+                  if ((msg as any).metadata) {
+                    console.log('[TripPlanningChatScreen] Assistant message has metadata:', {
+                      hasMatchedUsers: !!(msg as any).metadata.matchedUsers,
+                      matchedUsersCount: (msg as any).metadata.matchedUsers?.length || 0,
+                      destinationCountry: (msg as any).metadata.destinationCountry,
+                      messageTextPreview: messageText.substring(0, 50)
+                    });
+                  } else {
+                    console.log('[TripPlanningChatScreen] Assistant message has no metadata, messageTextPreview:', messageText.substring(0, 50));
+                  }
+                  
+                  if ((msg as any).metadata?.matchedUsers) {
+                    const metadata = (msg as any).metadata;
+                    console.log('[TripPlanningChatScreen] Found matched users in message metadata - count:', metadata.matchedUsers.length);
+                    console.log('[TripPlanningChatScreen] Message text preview:', messageText.substring(0, 50));
+                    restoredMessage.isMatchedUsers = true;
+                    restoredMessage.matchedUsers = metadata.matchedUsers;
+                    restoredMessage.destinationCountry = metadata.destinationCountry;
+                  }
                 }
                 
                 restoredMessages.push(restoredMessage);
               }
+              
+              console.log('[TripPlanningChatScreen] Restored', restoredMessages.length, 'messages, skippedInitialContext:', skippedInitialContext);
               
               // Check if any messages have matched users to determine if finished
               const hasMatchedUsers = restoredMessages.some(msg => msg.isMatchedUsers && msg.matchedUsers && msg.matchedUsers.length > 0);
@@ -381,20 +430,6 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     initializeChat();
   }, [formData]); // Re-run if formData changes
 
-  // Clean up matched users storage when chatId changes (new conversation starts)
-  useEffect(() => {
-    const cleanupOldStorage = async () => {
-      // If we have a new chatId and it's different from persistedChatId, clear old data
-      if (chatId && chatId !== persistedChatId) {
-        // Clear old chatId's data if it exists
-        if (persistedChatId) {
-          await clearMatchedUsers(persistedChatId);
-        }
-      }
-    };
-    
-    cleanupOldStorage();
-  }, [chatId, persistedChatId]);
 
   const sendMessage = async () => {
     if (!inputText.trim() || isLoading) return;
@@ -430,7 +465,6 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         
         setMessages(prev => {
           const withUserMessage = [...prev, userMessage];
-          const messageIndex = withUserMessage.length; // Position where this message will be inserted
           const matchesMessage: Message = {
             id: (Date.now() + 1).toString(),
             text: singleCriterionMessageText,
@@ -466,9 +500,12 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             }, 0);
           }
           
-          // Save matched users to storage with message index
+          // Save matched users to backend
           if (chatId) {
-            saveMatchedUsers(chatId, messageIndex, pendingSingleCriterionMatches, destinationCountry);
+            console.log('[TripPlanningChatScreen] Saving single criterion matches - matchedUsersCount:', pendingSingleCriterionMatches.length);
+            swellyService.attachMatchedUsersToMessage(chatId, pendingSingleCriterionMatches, destinationCountry).catch(err => {
+              console.error('[TripPlanningChatScreen] Failed to save single criterion matches to backend:', err);
+            });
           }
           
           return updated;
@@ -508,16 +545,14 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         
         setMessages(prev => {
           const withUserMessage = [...prev, userMessage];
-          let messageIndex: number | null = null;
           
           // Find the message that contains the partial matches and update it
-          const updated = withUserMessage.map((msg, index) => {
+          const updated = withUserMessage.map((msg) => {
             // Find the message that has the pending partial matches stored
             if (msg.matchedUsers && 
                 msg.matchedUsers.length === pendingPartialMatches.length &&
                 msg.matchedUsers[0]?.user_id === pendingPartialMatches[0]?.user_id) {
               // Update this message to show the matches
-              messageIndex = index;
               return {
                 ...msg,
                 text: partialMatchesMessageText,
@@ -532,7 +567,6 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
           // If we couldn't find the message, create a new one (fallback)
           const foundMessage = updated.some(msg => msg.isMatchedUsers && msg.matchedUsers && msg.matchedUsers.length === pendingPartialMatches.length);
           if (!foundMessage) {
-            messageIndex = updated.length; // Position where new message will be added
             updated.push({
               id: (Date.now() + 1).toString(),
               text: partialMatchesMessageText,
@@ -568,9 +602,12 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             }, 0);
           }
           
-          // Save matched users to storage with message index
-          if (chatId && messageIndex !== null) {
-            saveMatchedUsers(chatId, messageIndex, pendingPartialMatches, destinationCountry);
+          // Save matched users to backend
+          if (chatId) {
+            console.log('[TripPlanningChatScreen] Saving partial matches - matchedUsersCount:', pendingPartialMatches.length);
+            swellyService.attachMatchedUsersToMessage(chatId, pendingPartialMatches, destinationCountry).catch(err => {
+              console.error('[TripPlanningChatScreen] Failed to save partial matches to backend:', err);
+            });
           }
           
           return updated;
@@ -741,7 +778,6 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
               setMessages(prev => {
                 // Filter out the "Finding the perfect surfers..." message
                 const filtered = prev.filter(msg => msg.text !== 'Finding the perfect surfers for you...');
-                const messageIndex = filtered.length; // Position where this message will be inserted
                 const matchesMessage: Message = {
                   id: (Date.now() + 3).toString(),
                   text: matchesMessageText,
@@ -777,9 +813,12 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
                   }, 0);
                 }
                 
-                // Save matched users to storage with message index
+                // Save matched users to backend
                 if (chatId) {
-                  saveMatchedUsers(chatId, messageIndex, matchedUsers, matchesDestination);
+                  console.log('[TripPlanningChatScreen] Saving exact matches - matchedUsersCount:', matchedUsers.length);
+                  swellyService.attachMatchedUsersToMessage(chatId, matchedUsers, matchesDestination).catch(err => {
+                    console.error('[TripPlanningChatScreen] Failed to save exact matches to backend:', err);
+                  });
                 }
                 
                 return updated;

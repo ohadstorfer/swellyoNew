@@ -386,6 +386,51 @@ class SwellyService {
       throw error;
     }
   }
+
+  /**
+   * Attach matched users to the last assistant message in a trip planning conversation
+   * @param chatId - The chat ID for the conversation
+   * @param matchedUsers - Array of matched users to attach
+   * @param destinationCountry - Destination country for the matched users
+   */
+  async attachMatchedUsersToMessage(
+    chatId: string,
+    matchedUsers: any[],
+    destinationCountry: string
+  ): Promise<void> {
+    try {
+      const url = this.getFunctionUrl(`/attach-matches/${chatId}`, 'trip-planning');
+      const headers = await this.getAuthHeaders();
+      
+      console.log('[SwellyService] Attaching matched users to message:', url);
+      console.log('[SwellyService] Matched users count:', matchedUsers.length);
+      console.log('[SwellyService] Destination country:', destinationCountry);
+      
+      const response = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          matchedUsers,
+          destinationCountry,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[SwellyService] Error attaching matched users:', errorText);
+        // Don't throw - log error but don't block UI
+        console.warn('[SwellyService] Failed to save matched users to backend, but matches are still displayed in UI');
+        return;
+      }
+
+      const result = await response.json();
+      console.log('[SwellyService] Matched users attached successfully:', result);
+    } catch (error) {
+      console.error('[SwellyService] Error attaching matched users to message:', error);
+      // Don't throw - log error but don't block UI
+      console.warn('[SwellyService] Failed to save matched users to backend, but matches are still displayed in UI');
+    }
+  }
 }
 
 export const swellyService = new SwellyService();

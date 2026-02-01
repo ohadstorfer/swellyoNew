@@ -18,6 +18,37 @@ interface ChatResponse {
   data?: any
 }
 
+interface MatchedUser {
+  user_id: string
+  email?: string
+  name: string
+  profile_image_url?: string | null
+  match_score: number
+  matched_areas?: string[]
+  common_lifestyle_keywords?: string[]
+  common_wave_keywords?: string[]
+  surfboard_type?: string
+  surf_level?: number
+  travel_experience?: string
+  country_from?: string
+  age?: number
+  days_in_destination?: number
+  destinations_array?: Array<{ country: string; area: string[]; time_in_days: number; time_in_text?: string }>
+  matchQuality?: any
+}
+
+interface MessageMetadata {
+  matchedUsers?: MatchedUser[]
+  destinationCountry?: string
+  matchTimestamp?: string
+}
+
+interface Message {
+  role: 'system' | 'user' | 'assistant'
+  content: string
+  metadata?: MessageMetadata
+}
+
 const TRIP_PLANNING_PROMPT: string = `
 You are Swelly, a smart, laid-back surfer who's the ultimate go-to buddy for all things surfing and beach lifestyle. You're a cool local friend, full of knowledge about surfing destinations, techniques, and ocean safety, with insights about waves, travel tips, and coastal culture. Your tone is relaxed, friendly, and cheerful, with just the right touch of warm, uplifting energy. A sharper edge of surf-related sarcasm keeps the vibe lively and fun, like quipping about rookies wiping out or "perfect" conditions for no-shows. You're smart, resourceful, and genuinely supportive, with responses no longer than 120 words. When offering options, you keep it short with 2-3 clear choices. Responses avoid overusing words like "chill," staying vibrant and fresh, and occasionally use casual text-style abbreviations like "ngl" or "imo". Use the words dude, bro, shredder, gnarly, stoke.
 
@@ -445,7 +476,7 @@ The user prefers not to be addressed with gender-specific terms. Avoid calling t
   return ''
 }
 
-async function callOpenAI(messages: Array<{ role: string; content: string }>): Promise<string> {
+async function callOpenAI(messages: Message[]): Promise<string> {
   if (!OPENAI_API_KEY) {
     throw new Error('OPENAI_API_KEY is not set')
   }
@@ -562,7 +593,7 @@ Handle typos, abbreviations, and common variations.
 Response format (JSON): Return a JSON object with a single field "country" containing just the country name (e.g., {"country": "United States"}) or {"country": "null"} if no match exists.
 Do not include any explanation, just the JSON object.`;
 
-    const messages = [
+    const messages: Message[] = [
       { role: 'system', content: 'You are a country name correction expert. Return a JSON object with the corrected country name from the official list, or "null" if no match exists.' },
       { role: 'user', content: correctionPrompt }
     ];
@@ -711,7 +742,7 @@ async function normalizeQueryFilters(queryFilters: any): Promise<any> {
 async function extractQueryFilters(
   userMessage: string,
   destinationCountry: string,
-  conversationHistory: Array<{ role: string; content: string }>
+  conversationHistory: Message[]
 ): Promise<{
   supabaseFilters: {
     country_from?: string[];
@@ -924,7 +955,7 @@ CRITICAL RULES - BE SMART AND FLEXIBLE:
     { role: 'system', content: schemaPrompt },
     ...conversationHistory.slice(-5), // Last 5 messages for context
     { role: 'user', content: userMessage }
-  ]
+  ] as Message[]
 
   let llmResponse = ''
   try {
@@ -1057,7 +1088,7 @@ CRITICAL RULES - BE SMART AND FLEXIBLE:
  */
 async function saveChatHistory(
   chatId: string,
-  messages: Array<{ role: string; content: string }>,
+  messages: Message[],
   userId: string,
   conversationId: string | null,
   supabaseAdmin: any
@@ -1084,7 +1115,7 @@ async function saveChatHistory(
 /**
  * Get chat history from database
  */
-async function getChatHistory(chatId: string, supabaseAdmin: any): Promise<Array<{ role: string; content: string }>> {
+async function getChatHistory(chatId: string, supabaseAdmin: any): Promise<Message[]> {
   const { data, error } = await supabaseAdmin
     .from('swelly_chat_history')
     .select('messages')
@@ -1096,7 +1127,20 @@ async function getChatHistory(chatId: string, supabaseAdmin: any): Promise<Array
     return []
   }
 
-  return data?.messages || []
+  const messages = data?.messages || []
+  
+  // Debug: Check if any messages have metadata
+  const messagesWithMetadata = messages.filter((msg: any) => msg.metadata?.matchedUsers)
+  if (messagesWithMetadata.length > 0) {
+    console.log('[getChatHistory] Found', messagesWithMetadata.length, 'messages with matched users metadata')
+    messagesWithMetadata.forEach((msg: any, idx: number) => {
+      console.log('[getChatHistory] Message', idx, 'has', msg.metadata.matchedUsers.length, 'matched users')
+    })
+  } else {
+    console.log('[getChatHistory] No messages with matched users metadata found')
+  }
+  
+  return messages
 }
 
 serve(async (req: Request) => {
@@ -1206,7 +1250,7 @@ ${getPronounInstructions(userProfile.pronoun)}`
       }
 
       // Initialize chat history
-      const messages = [
+      const messages: Message[] = [
         { role: 'system', content: systemPrompt },
         // Add explicit instruction for first response - MUST ask STEP 1 question
         { role: 'system', content: 'CRITICAL: This is the FIRST message in a NEW conversation. The user has just introduced themselves or started the conversation. You MUST respond with STEP 1\'s question: "Hey 🤙 I can connect you with surfers like you, or match you with someone who\'s surfed a destination you\'re curious about. Tell me what you\'re looking for" Do NOT skip to STEP 2. Wait for the user to answer STEP 1 first. Treat their initial message as context/introduction only.' },
@@ -2323,6 +2367,184 @@ ${getPronounInstructions(userProfile.pronoun)}`
           },
         }
       )
+    }
+
+    // Route: POST /swelly-trip-planning/attach-matches/:chat_id
+    if (path.includes('/attach-matches/') && req.method === 'POST') {
+      const chatId = path.split('/attach-matches/')[1]
+      const body: { matchedUsers: MatchedUser[]; destinationCountry: string } = await req.json()
+
+      if (!chatId) {
+        return new Response(
+          JSON.stringify({ error: 'Missing chat_id' }),
+          { 
+            status: 400, 
+            headers: { 
+              'Content-Type': 'application/json',
+              'Access-Control-Allow-Origin': '*',
+            } 
+          }
+        )
+      }
+
+      if (!body.matchedUsers || !Array.isArray(body.matchedUsers)) {
+        return new Response(
+          JSON.stringify({ error: 'Invalid matchedUsers data' }),
+          { 
+            status: 400, 
+            headers: { 
+              'Content-Type': 'application/json',
+              'Access-Control-Allow-Origin': '*',
+            } 
+          }
+        )
+      }
+
+      // Allow empty string for destinationCountry (it's optional and used for display)
+      if (body.destinationCountry !== undefined && typeof body.destinationCountry !== 'string') {
+        return new Response(
+          JSON.stringify({ error: 'Invalid destinationCountry - must be a string' }),
+          { 
+            status: 400, 
+            headers: { 
+              'Content-Type': 'application/json',
+              'Access-Control-Allow-Origin': '*',
+            } 
+          }
+        )
+      }
+
+      try {
+        // Load chat history from database
+        const messages = await getChatHistory(chatId, supabaseAdmin)
+        
+        if (messages.length === 0) {
+          return new Response(
+            JSON.stringify({ error: 'Chat not found' }),
+            { 
+              status: 404, 
+              headers: { 
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*',
+              } 
+            }
+          )
+        }
+
+        // Find the most recent assistant message that doesn't already have matched users metadata
+        // This ensures we attach to the message that just finished and triggered the matching
+        // If a message already has metadata, it means matches were already attached, so skip it
+        let targetAssistantIndex = -1
+        for (let i = messages.length - 1; i >= 0; i--) {
+          if (messages[i].role === 'assistant') {
+            // Skip if this message already has matched users metadata
+            if (messages[i].metadata?.matchedUsers) {
+              console.log('[attach-matches] Skipping assistant message at index', i, '- already has matched users metadata')
+              continue
+            }
+            // Check if this assistant message has is_finished: true in its content
+            try {
+              const parsed = JSON.parse(messages[i].content)
+              if (parsed.is_finished === true) {
+                targetAssistantIndex = i
+                console.log('[attach-matches] Found target assistant message with is_finished: true at index:', i)
+                break
+              }
+            } catch {
+              // Not JSON or parse error - continue searching
+            }
+          }
+        }
+
+        // Fallback: If no message with is_finished: true found, use the last assistant message without metadata
+        // This handles edge cases where the message format might be different
+        if (targetAssistantIndex === -1) {
+          for (let i = messages.length - 1; i >= 0; i--) {
+            if (messages[i].role === 'assistant' && !messages[i].metadata?.matchedUsers) {
+              targetAssistantIndex = i
+              console.log('[attach-matches] Using fallback - last assistant message without metadata at index:', i)
+              break
+            }
+          }
+        }
+
+        if (targetAssistantIndex === -1) {
+          return new Response(
+            JSON.stringify({ error: 'No assistant message found to attach matches to' }),
+            { 
+              status: 404, 
+              headers: { 
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*',
+              } 
+            }
+          )
+        }
+
+        // Attach metadata to the target assistant message
+        const targetAssistantMessage = messages[targetAssistantIndex]
+        console.log('[attach-matches] Found target assistant message at index:', targetAssistantIndex)
+        console.log('[attach-matches] Message content preview:', targetAssistantMessage.content.substring(0, 100))
+        if (targetAssistantMessage.metadata) {
+          console.log('[attach-matches] Message already has metadata:', !!targetAssistantMessage.metadata.matchedUsers)
+        }
+        
+        targetAssistantMessage.metadata = {
+          matchedUsers: body.matchedUsers,
+          destinationCountry: body.destinationCountry,
+          matchTimestamp: new Date().toISOString()
+        }
+        
+        console.log('[attach-matches] Attached metadata to message:', {
+          index: targetAssistantIndex,
+          matchedUsersCount: body.matchedUsers.length,
+          destinationCountry: body.destinationCountry,
+          messageHasMetadata: !!targetAssistantMessage.metadata,
+          metadataObject: JSON.stringify(targetAssistantMessage.metadata).substring(0, 200)
+        })
+        
+        // Verify metadata is in the messages array before saving
+        const messageBeforeSave = messages[targetAssistantIndex]
+        console.log('[attach-matches] Message before save has metadata:', !!messageBeforeSave.metadata?.matchedUsers)
+        console.log('[attach-matches] Full message object before save:', JSON.stringify(messageBeforeSave).substring(0, 300))
+
+        // Save updated messages array back to database
+        console.log('[attach-matches] Saving', messages.length, 'messages to database')
+        await saveChatHistory(chatId, messages, user.id, null, supabaseAdmin)
+        console.log('[attach-matches] Save completed successfully')
+        
+        // Verify the save by reading back
+        const verifyMessages = await getChatHistory(chatId, supabaseAdmin)
+        const verifyMessage = verifyMessages[targetAssistantIndex]
+        if (verifyMessage?.metadata?.matchedUsers) {
+          console.log('[attach-matches] ✅ Verified: Metadata saved successfully,', verifyMessage.metadata.matchedUsers.length, 'matched users')
+        } else {
+          console.error('[attach-matches] ❌ ERROR: Metadata was not saved! Message at index', targetAssistantIndex, 'has no metadata after save')
+        }
+
+        return new Response(
+          JSON.stringify({ success: true, message: 'Matched users attached successfully' }),
+          {
+            status: 200,
+            headers: {
+              'Content-Type': 'application/json',
+              'Access-Control-Allow-Origin': '*',
+            },
+          }
+        )
+      } catch (error) {
+        console.error('Error attaching matched users:', error)
+        return new Response(
+          JSON.stringify({ error: 'Failed to attach matched users', details: error instanceof Error ? error.message : String(error) }),
+          { 
+            status: 500, 
+            headers: { 
+              'Content-Type': 'application/json',
+              'Access-Control-Allow-Origin': '*',
+            } 
+          }
+        )
+      }
     }
 
     // Route: GET /swelly-trip-planning/:chat_id
