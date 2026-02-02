@@ -60,6 +60,30 @@ function countRequestedCriteria(request: TripPlanningRequest): number {
   return count;
 }
 
+/**
+ * Extract previously matched user IDs from conversation messages
+ * @param messages - Array of messages in the conversation
+ * @returns Array of unique user IDs that have already been matched
+ */
+function getPreviouslyMatchedUserIds(messages: Message[]): string[] {
+  const matchedUserIds = new Set<string>();
+  
+  for (const message of messages) {
+    // Check if this message has matched users
+    if (message.isMatchedUsers && message.matchedUsers && Array.isArray(message.matchedUsers)) {
+      for (const matchedUser of message.matchedUsers) {
+        if (matchedUser.user_id) {
+          matchedUserIds.add(matchedUser.user_id);
+        }
+      }
+    }
+  }
+  
+  const result = Array.from(matchedUserIds);
+  console.log('[getPreviouslyMatchedUserIds] Found', result.length, 'previously matched user IDs');
+  return result;
+}
+
 interface Message {
   id: string;
   text: string;
@@ -514,12 +538,27 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         // Keep global state for backward compatibility
         setMatchedUsers(pendingSingleCriterionMatches);
         
-        // Track Swelly list created for single criterion matches
-        analyticsService.trackSwellyListCreated(pendingSingleCriterionMatches.length, 'single_criterion');
-        
-        setPendingSingleCriterionMatches(null);
-        setSingleCriterionType(null);
-        return; // Don't process this as a normal message
+          // Track Swelly list created for single criterion matches
+          analyticsService.trackSwellyListCreated(pendingSingleCriterionMatches.length, 'single_criterion');
+          
+          // Add filter decision message after matches are displayed
+          setMessages(prev => {
+            const filterDecisionMessage: Message = {
+              id: (Date.now() + 2).toString(),
+              text: "Would you like to keep your current filters or clear them and start fresh?",
+              isUser: false,
+              timestamp: new Date().toLocaleTimeString('en-US', { 
+                hour: '2-digit', 
+                minute: '2-digit',
+                hour12: false 
+              }),
+            };
+            return [...prev, filterDecisionMessage];
+          });
+          
+          setPendingSingleCriterionMatches(null);
+          setSingleCriterionType(null);
+          return; // Don't process this as a normal message
       } else if (userText.includes('no') || userText.includes('add') || userText.includes('more')) {
         // User wants to add more criteria - clear pending matches and continue normal flow
         setPendingSingleCriterionMatches(null);
@@ -616,11 +655,26 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         // Keep global state for backward compatibility
         setMatchedUsers(pendingPartialMatches);
         
-        // Track Swelly list created for partial matches
-        analyticsService.trackSwellyListCreated(pendingPartialMatches.length, 'partial_match');
-        
-        setPendingPartialMatches(null);
-        return; // Don't process this as a normal message
+          // Track Swelly list created for partial matches
+          analyticsService.trackSwellyListCreated(pendingPartialMatches.length, 'partial_match');
+          
+          // Add filter decision message after matches are displayed
+          setMessages(prev => {
+            const filterDecisionMessage: Message = {
+              id: (Date.now() + 2).toString(),
+              text: "Would you like to keep your current filters or clear them and start fresh?",
+              isUser: false,
+              timestamp: new Date().toLocaleTimeString('en-US', { 
+                hour: '2-digit', 
+                minute: '2-digit',
+                hour12: false 
+              }),
+            };
+            return [...prev, filterDecisionMessage];
+          });
+          
+          setPendingPartialMatches(null);
+          return; // Don't process this as a normal message
       } else if (userText.includes('no') || userText.includes('change') || userText.includes('different')) {
         // User wants to change request - clear pending matches and continue normal flow
         setPendingPartialMatches(null);
@@ -715,11 +769,15 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
           console.log('Request data being passed to findMatchingUsers:', JSON.stringify(requestData, null, 2));
           console.log('queryFilters in request:', requestData.queryFilters);
           
+          // Extract previously matched user IDs to exclude from new matches
+          const excludedUserIds = getPreviouslyMatchedUserIds(messages);
+          console.log('Excluding', excludedUserIds.length, 'previously matched users from new search');
+          
           // Use V3 matching algorithm (can be toggled via environment variable or feature flag)
           const useV3Matching = process.env.EXPO_PUBLIC_USE_V3_MATCHING === 'true';
           const matchedUsers = useV3Matching
-            ? await findMatchingUsersV3(requestData, currentUser.id)
-            : await findMatchingUsers(requestData, currentUser.id);
+            ? await findMatchingUsersV3(requestData, currentUser.id, excludedUserIds)
+            : await findMatchingUsers(requestData, currentUser.id, excludedUserIds);
           
           console.log('Matched users found:', matchedUsers.length, matchedUsers);
           console.log('Filters from non-negotiable step:', response.data.filtersFromNonNegotiableStep);
@@ -831,6 +889,21 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
               // Track Swelly list created
               const intentType = requestData.purpose?.purpose_type || 'general_guidance';
               analyticsService.trackSwellyListCreated(matchedUsers.length, intentType);
+              
+              // Add filter decision message after matches are displayed
+              setMessages(prev => {
+                const filterDecisionMessage: Message = {
+                  id: (Date.now() + 4).toString(),
+                  text: "Would you like to keep your current filters or clear them and start fresh?",
+                  isUser: false,
+                  timestamp: new Date().toLocaleTimeString('en-US', { 
+                    hour: '2-digit', 
+                    minute: '2-digit',
+                    hour12: false 
+                  }),
+                };
+                return [...prev, filterDecisionMessage];
+              });
             } else if (hasPartialMatches) {
               // Partial matches - ask user first
               const firstMatch = matchedUsers[0];

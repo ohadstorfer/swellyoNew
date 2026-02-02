@@ -721,12 +721,14 @@ export async function findMatchingUsersV2(
  */
 export async function findMatchingUsers(
   request: TripPlanningRequest,
-  requestingUserId: string
+  requestingUserId: string,
+  excludedUserIds?: string[]
 ): Promise<MatchedUser[]> {
   console.log('=== FINDING MATCHING USERS ===');
   console.log('Request:', JSON.stringify(request, null, 2));
   console.log('Requesting User ID:', requestingUserId);
   console.log('Query Filters Present:', !!request.queryFilters);
+  console.log('Excluded User IDs:', excludedUserIds?.length || 0, excludedUserIds || []);
   if (request.queryFilters) {
     console.log('Query Filters Content:', JSON.stringify(request.queryFilters, null, 2));
   }
@@ -770,6 +772,12 @@ export async function findMatchingUsers(
       .from('surfers')
       .select('*')
       .neq('user_id', requestingUserId); // Always exclude current user
+    
+    // Exclude previously matched users if provided
+    // Note: Supabase doesn't support .not('user_id', 'in', array) directly
+    // We'll filter in-memory as the primary method, but also try to exclude in query
+    // For now, we rely on the in-memory filter below as the safety net
+    // TODO: If Supabase adds support for .not().in() with arrays, use that here
     
     // Apply AI-extracted query filters if available
     if (request.queryFilters) {
@@ -935,10 +943,15 @@ export async function findMatchingUsers(
     // If no surfers but filters NOT from non-negotiable step, query again without filters to get closest matches
     if (filteredSurfers.length === 0 && request.queryFilters && !request.filtersFromNonNegotiableStep) {
       console.log('ℹ️ No exact matches, but filters not non-negotiable - querying all surfers for closest matches')
-      const { data: allSurfersRelaxed, error: relaxedError } = await supabase
+      let relaxedQuery = supabase
         .from('surfers')
         .select('*')
         .neq('user_id', requestingUserId)
+      
+      // Exclude previously matched users in relaxed query too
+      // Note: We'll filter in-memory below as the primary exclusion method
+      
+      const { data: allSurfersRelaxed, error: relaxedError } = await relaxedQuery
       
       if (relaxedError) {
         console.error('Error querying all surfers for closest matches:', relaxedError)
@@ -961,6 +974,16 @@ export async function findMatchingUsers(
       }
       return !shouldFilter; // Keep users who pass filters
     });
+
+    // Safety net: Filter out excluded users in-memory (in case query exclusion didn't work)
+    if (excludedUserIds && excludedUserIds.length > 0) {
+      const beforeCount = filteredSurfers.length
+      filteredSurfers = filteredSurfers.filter((surfer: any) => !excludedUserIds.includes(surfer.user_id))
+      const afterCount = filteredSurfers.length
+      if (beforeCount !== afterCount) {
+        console.log(`⚠️ In-memory filter removed ${beforeCount - afterCount} excluded users (safety net)`)
+      }
+    }
 
     console.log(`Final filtered count: ${filteredSurfers.length} surfers after all filters`);
     console.log('Surfers that passed filters:', filteredSurfers.map(s => ({ 

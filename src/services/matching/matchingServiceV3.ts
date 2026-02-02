@@ -901,11 +901,13 @@ function calculateLayer4GeneralScore(
  */
 export async function findMatchingUsersV3(
   request: TripPlanningRequest,
-  requestingUserId: string
+  requestingUserId: string,
+  excludedUserIds?: string[]
 ): Promise<MatchedUser[]> {
   console.log('=== FINDING MATCHING USERS V3 ===');
   console.log('Request:', JSON.stringify(request, null, 2));
   console.log('Requesting User ID:', requestingUserId);
+  console.log('Excluded User IDs:', excludedUserIds?.length || 0, excludedUserIds || []);
 
   if (!isSupabaseConfigured()) {
     throw new Error('Supabase is not configured');
@@ -930,11 +932,20 @@ export async function findMatchingUsersV3(
       throw new Error('Current user profile not found');
     }
 
-    // Step 4: Query all users (excluding current user)
-    const { data: allSurfers, error: queryError } = await supabase
+    // Step 4: Query all users (excluding current user and previously matched users)
+    let query = supabase
       .from('surfers')
       .select('*')
       .neq('user_id', requestingUserId);
+    
+    // Exclude previously matched users if provided
+    // Note: Supabase doesn't support .not('user_id', 'in', array) directly
+    // We'll filter in-memory below as the primary exclusion method
+    if (excludedUserIds && excludedUserIds.length > 0) {
+      console.log(`  - Will exclude ${excludedUserIds.length} previously matched users (in-memory filter)`);
+    }
+    
+    const { data: allSurfers, error: queryError } = await query;
 
     if (queryError) {
       throw new Error(`Error querying surfers: ${queryError.message}`);
@@ -946,6 +957,17 @@ export async function findMatchingUsersV3(
     }
 
     console.log(`Found ${allSurfers.length} total surfers`);
+    
+    // Safety net: Filter out excluded users in-memory (in case query exclusion didn't work)
+    let filteredSurfers = allSurfers;
+    if (excludedUserIds && excludedUserIds.length > 0) {
+      const beforeCount = filteredSurfers.length;
+      filteredSurfers = filteredSurfers.filter((surfer: any) => !excludedUserIds.includes(surfer.user_id));
+      const afterCount = filteredSurfers.length;
+      if (beforeCount !== afterCount) {
+        console.log(`⚠️ In-memory filter removed ${beforeCount - afterCount} excluded users (safety net)`);
+      }
+    }
 
     // Step 5: Filter surfers by country match first (destination-based querying)
     console.log('Step 5: Filtering surfers by destination country...');
@@ -965,7 +987,7 @@ export async function findMatchingUsersV3(
     // Get requested area from request (raw area name, not normalized)
     const requestedArea = request.area || null;
 
-    for (const userSurfer of allSurfers) {
+    for (const userSurfer of filteredSurfers) {
       // Find matching destinations and calculate days
       let daysInDestination = 0;
       let bestMatch: {
