@@ -34,6 +34,7 @@ import { loadCachedUserProfile, saveCachedUserProfile } from '../utils/userProfi
 interface ConversationsScreenProps {
   onConversationPress?: (conversationId: string) => void;
   onSwellyPress?: () => void;
+  onSwellyPressCopy?: () => void; // Dev mode: Navigate to TripPlanningChatScreenCopy
   onProfilePress?: () => void;
   onViewUserProfile?: (userId: string) => void;
   onSwellyShaperViewProfile?: () => void; // Callback for viewing profile from Swelly Shaper
@@ -89,6 +90,7 @@ const ShaperIcon: React.FC = () => {
 export default function ConversationsScreen({
   onConversationPress,
   onSwellyPress,
+  onSwellyPressCopy,
   onProfilePress,
   onViewUserProfile,
   onSwellyShaperViewProfile,
@@ -98,6 +100,8 @@ export default function ConversationsScreen({
   
   // Check if MVP mode is enabled
   const isMVPMode = process.env.EXPO_PUBLIC_MVP_MODE === 'true';
+  // Check if dev mode is enabled
+  const isDevMode = process.env.EXPO_PUBLIC_DEV_MODE === 'true';
   
   // Survey bubble state and animations
   const [showSurveyBubble, setShowSurveyBubble] = useState(false);
@@ -1162,6 +1166,44 @@ export default function ConversationsScreen({
       {/* Swelly conversation card - positioned at bottom */}
       <View style={styles.swellyCardWrapper}>
         {renderSwellyConversation()}
+        {/* Dev mode: Second Swelly button for TripPlanningChatScreenCopy */}
+        {isDevMode && onSwellyPressCopy && (
+          <TouchableOpacity
+            style={[styles.swellyContainer, styles.swellyContainerDev]}
+            onPress={onSwellyPressCopy}
+          >
+            <View style={styles.conversationContent}>
+              {/* Swelly avatar with ellipse design - matching ChatScreen */}
+              <View style={styles.swellyAvatarContainer}>
+                <View style={styles.swellyAvatarRing}>
+                  <Image
+                    source={{ uri: getImageUrl('/Ellipse 11.svg') }}
+                    style={styles.swellyEllipseBackground}
+                    resizeMode="contain"
+                  />
+                  <View style={styles.swellyAvatarImageContainer}>
+                    <Image
+                      source={{ uri: getImageUrl('/Swelly avatar onboarding.png') }}
+                      style={styles.swellyAvatarImage}
+                      resizeMode="cover"
+                    />
+                  </View>
+                </View>
+              </View>
+
+              {/* Text content */}
+              <View style={styles.swellyTextContainer}>
+                <Text style={styles.swellyName}>Swelly (Dev)</Text>
+                <Text style={[
+                  styles.swellyLastMessage,
+                  Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
+                ]} numberOfLines={1}>
+                  Server-side matching test
+                </Text>
+              </View>
+            </View>
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* Menu Modal */}
@@ -1625,6 +1667,11 @@ const styles = StyleSheet.create({
       backdropFilter: 'blur(20px) saturate(195%)',
       WebkitBackdropFilter: 'blur(20px) saturate(195%)',
     } as any),
+  },
+  swellyContainerDev: {
+    marginTop: 8,
+    opacity: 0.8,
+    borderColor: '#FFA500',
   },
   swellyAvatarContainer: {
     width: 62,

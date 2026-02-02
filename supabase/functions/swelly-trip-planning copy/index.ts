@@ -43,8 +43,6 @@ interface MessageMetadata {
   matchTimestamp?: string
   awaitingFilterDecision?: boolean
   isFilterDecisionPrompt?: boolean
-  awaitingFilterClarification?: boolean
-  pendingFilters?: any // Store extracted filters waiting for clarification
 }
 
 interface Message {
@@ -1088,37 +1086,28 @@ CRITICAL RULES - BE SMART AND FLEXIBLE:
 }
 
 /**
- * Detect user intent regarding filter management
- * Returns: 'more' | 'replace' | 'add' | 'unclear'
+ * Detect user intent regarding filter management (keep or clear filters)
  */
 async function detectFilterIntent(
   userMessage: string,
   conversationHistory: Message[]
-): Promise<'more' | 'replace' | 'add' | 'unclear'> {
+): Promise<'keep' | 'clear' | 'unclear'> {
   if (!OPENAI_API_KEY) {
     throw new Error('OPENAI_API_KEY is not set')
   }
 
   const prompt = `You are analyzing a user's message to determine their intent regarding search filters in a trip planning conversation.
 
-The user was just asked: "Yo! How do these matches look? You can: (1) Get more users with the same filters, (2) Add new filters to your current ones, or (3) Replace all filters and start fresh. What would you like to do?"
+The user was just asked: "Yo! How do these matches look? If you want to find more surfers, I can keep your current filters and add to them, or we can start fresh with new ones. What do you think?"
 
 Analyze the user's response and classify it as one of:
-- "more": User wants more users with the same filters (e.g., "send me more", "more users", "more surfers", "other options", "other users", "other surfers", "give me more", "show me more", "different users", "another batch")
-- "replace": User wants to replace all filters with new ones (e.g., "Find me an American", "Send me only advanced surfers", "Shortboarder", "I want surfers from USA", "Find me someone who...", "Clear and find...")
-- "add": User wants to add filters to existing ones (e.g., "also from USA", "and make them advanced", "add American", "keep current and add...", "in addition to...", "plus...")
+- "keep": User wants to keep current filters and possibly add more (e.g., "keep", "yes", "add more", "refine", "keep them", "yes keep", "keep filters", "add to them", "refine them")
+- "clear": User wants to clear all filters and start over (e.g., "clear", "start over", "new search", "reset", "clear them", "start fresh", "new", "clear filters", "remove filters")
 - "unclear": Cannot determine intent or user is asking a question
-
-IMPORTANT RULES:
-- If user says "more", "other", "another" WITHOUT providing new filter criteria → "more"
-- If user provides new filter criteria (e.g., "American", "advanced", "shortboarder") WITHOUT additive language (also, and, plus) → "replace"
-- If user provides new filter criteria WITH additive language (also, and, in addition, plus, keep) → "add"
-- If user says "more" BUT also provides new criteria → "unclear" (needs clarification)
-- If intent cannot be determined → "unclear"
 
 User's message: "${userMessage}"
 
-Respond with ONLY one word: "more", "replace", "add", or "unclear".`
+Respond with ONLY one word: "keep", "clear", or "unclear".`
 
   try {
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -1130,7 +1119,7 @@ Respond with ONLY one word: "more", "replace", "add", or "unclear".`
       body: JSON.stringify({
         model: 'gpt-4o-mini',
         messages: [
-          { role: 'system', content: 'You are a classifier that analyzes user intent. Respond with only one word: more, replace, add, or unclear.' },
+          { role: 'system', content: 'You are a classifier that analyzes user intent. Respond with only one word: keep, clear, or unclear.' },
           { role: 'user', content: prompt }
         ],
         temperature: 0.1,
@@ -1147,7 +1136,7 @@ Respond with ONLY one word: "more", "replace", "add", or "unclear".`
     const data = await response.json()
     const intent = data.choices[0]?.message?.content?.trim().toLowerCase()
 
-    if (intent === 'more' || intent === 'replace' || intent === 'add') {
+    if (intent === 'keep' || intent === 'clear') {
       console.log(`[detectFilterIntent] Detected intent: ${intent}`)
       return intent
     }
@@ -1566,12 +1555,10 @@ ${getPronounInstructions(userProfile.pronoun)}`
 
       // Check if we're waiting for a filter decision (matches were just sent)
       let awaitingFilterDecision = false
-      let awaitingFilterClarification = false
       let existingQueryFilters: any = null
-      let pendingFilters: any = null
-      let filterIntent: 'more' | 'replace' | 'add' | 'unclear' | null = null
+      let filterIntent: 'keep' | 'clear' | 'unclear' | null = null
       
-      // Check the most recent assistant message for the awaitingFilterDecision or awaitingFilterClarification flag
+      // Check the most recent assistant message for the awaitingFilterDecision flag
       for (let i = messages.length - 1; i >= 0; i--) {
         if (messages[i].role === 'assistant') {
           if (messages[i].metadata?.awaitingFilterDecision === true) {
@@ -1590,75 +1577,52 @@ ${getPronounInstructions(userProfile.pronoun)}`
             }
             break
           }
-          if (messages[i].metadata?.awaitingFilterClarification === true) {
-            awaitingFilterClarification = true
-            console.log('[continue] Found awaitingFilterClarification flag - user is responding to clarification question')
-            
-            // Extract pending filters from metadata
-            if (messages[i].metadata?.pendingFilters) {
-              pendingFilters = messages[i].metadata!.pendingFilters
-              console.log('[continue] Found pendingFilters:', JSON.stringify(pendingFilters, null, 2))
-            }
-            
-            // Extract existing queryFilters from previous assistant messages
-            try {
-              const prevParsed = JSON.parse(messages[i].content)
-              if (prevParsed.data?.queryFilters) {
-                existingQueryFilters = prevParsed.data.queryFilters
-                console.log('[continue] Found existing queryFilters:', JSON.stringify(existingQueryFilters, null, 2))
-              }
-            } catch (e) {
-              // Not JSON, continue
-            }
-            break
-          }
         }
       }
       
-      // If awaiting filter clarification, detect user intent (replace vs add)
-      if (awaitingFilterClarification) {
-        console.log('[continue] Detecting clarification intent from user message:', body.message)
-        const clarificationIntent = await detectFilterIntent(body.message, messages)
-        console.log('[continue] Detected clarification intent:', clarificationIntent)
+      // If awaiting filter decision, detect user intent
+      if (awaitingFilterDecision) {
+        console.log('[continue] Detecting filter intent from user message:', body.message)
+        filterIntent = await detectFilterIntent(body.message, messages)
+        console.log('[continue] Detected filter intent:', filterIntent)
         
-        // Remove the clarification flag from metadata
-        for (let i = messages.length - 1; i >= 0; i--) {
-          if (messages[i].role === 'assistant' && messages[i].metadata?.awaitingFilterClarification) {
-            const metadata = messages[i].metadata
-            if (metadata) {
-              delete metadata.awaitingFilterClarification
-              delete metadata.pendingFilters
+        if (filterIntent === 'clear') {
+          // Clear all filters - reset queryFilters to null
+          console.log('[continue] User wants to clear filters - will reset queryFilters')
+          // Remove the flag from metadata
+          for (let i = messages.length - 1; i >= 0; i--) {
+            if (messages[i].role === 'assistant' && messages[i].metadata?.awaitingFilterDecision) {
+              const metadata = messages[i].metadata
+              if (metadata) {
+                delete metadata.awaitingFilterDecision
+              }
             }
           }
-        }
-        
-        if (clarificationIntent === 'replace' || clarificationIntent === 'add') {
-          filterIntent = clarificationIntent
-          // Use pending filters as extracted filters
-          if (pendingFilters) {
-            // We'll use pendingFilters as extractedQueryFilters later
-            console.log('[continue] Using pending filters with intent:', filterIntent)
+        } else if (filterIntent === 'keep') {
+          // Keep filters - will merge with existing filters later
+          console.log('[continue] User wants to keep filters - will merge with existing filters')
+          // Remove the flag from metadata
+          for (let i = messages.length - 1; i >= 0; i--) {
+            if (messages[i].role === 'assistant' && messages[i].metadata?.awaitingFilterDecision) {
+              const metadata = messages[i].metadata
+              if (metadata) {
+                delete metadata.awaitingFilterDecision
+              }
+            }
           }
         } else {
-          // Still unclear - ask again
-          const clarificationMessage = "I didn't quite catch that. Would you like to replace your current filters with these new ones, or add them to your existing filters?"
+          // Unclear intent - ask for clarification
+          console.log('[continue] Filter intent unclear - asking for clarification')
+          const clarificationMessage = "I didn't quite catch that. Would you like to keep your current filters or clear them and start fresh?"
           
-          // Re-add clarification flag
-          for (let i = messages.length - 1; i >= 0; i--) {
-            if (messages[i].role === 'assistant' && messages[i].metadata) {
-              const metadata = messages[i].metadata!
-              metadata.awaitingFilterClarification = true
-              metadata.pendingFilters = pendingFilters
-              break
-            }
-          }
-          
+          // Add clarification as assistant message
           messages.push({ role: 'assistant', content: JSON.stringify({
             return_message: clarificationMessage,
             is_finished: false,
             data: null
           })})
           
+          // Save and return early
           await saveChatHistory(chatId, messages, user.id, body.conversation_id || null, supabaseAdmin)
           
           return new Response(
@@ -1676,54 +1640,6 @@ ${getPronounInstructions(userProfile.pronoun)}`
               },
             }
           )
-        }
-      }
-      
-      // If awaiting filter decision, detect user intent
-      if (awaitingFilterDecision) {
-        console.log('[continue] Detecting filter intent from user message:', body.message)
-        filterIntent = await detectFilterIntent(body.message, messages)
-        console.log('[continue] Detected filter intent:', filterIntent)
-        
-        if (filterIntent === 'more') {
-          // User wants more users with same filters - keep filters unchanged
-          console.log('[continue] User wants more users with same filters - will keep existing filters')
-          // Remove the flag from metadata
-          for (let i = messages.length - 1; i >= 0; i--) {
-            if (messages[i].role === 'assistant' && messages[i].metadata?.awaitingFilterDecision) {
-              const metadata = messages[i].metadata
-              if (metadata) {
-                delete metadata.awaitingFilterDecision
-              }
-            }
-          }
-        } else if (filterIntent === 'replace') {
-          // User wants to replace all filters - will use only new filters
-          console.log('[continue] User wants to replace filters - will use only new filters')
-          // Remove the flag from metadata
-          for (let i = messages.length - 1; i >= 0; i--) {
-            if (messages[i].role === 'assistant' && messages[i].metadata?.awaitingFilterDecision) {
-              const metadata = messages[i].metadata
-              if (metadata) {
-                delete metadata.awaitingFilterDecision
-              }
-            }
-          }
-        } else if (filterIntent === 'add') {
-          // User wants to add filters - will merge with existing filters later
-          console.log('[continue] User wants to add filters - will merge with existing filters')
-          // Remove the flag from metadata
-          for (let i = messages.length - 1; i >= 0; i--) {
-            if (messages[i].role === 'assistant' && messages[i].metadata?.awaitingFilterDecision) {
-              const metadata = messages[i].metadata
-              if (metadata) {
-                delete metadata.awaitingFilterDecision
-              }
-            }
-          }
-        } else {
-          // Unclear intent - we'll check for extracted filters after extraction and ask for clarification if needed
-          console.log('[continue] Filter intent unclear - will check for extracted filters after extraction')
         }
       }
       
@@ -1847,108 +1763,16 @@ ${getPronounInstructions(userProfile.pronoun)}`
         console.error('Error checking for accumulated filters:', error)
       }
       
-      // Check if intent is unclear but new filters were extracted - ask for clarification
-      if (awaitingFilterDecision && filterIntent === 'unclear' && extractedQueryFilters && Object.keys(extractedQueryFilters).length > 0) {
-        console.log('[continue] Intent unclear but new filters extracted - asking for clarification')
-        
-        // Build description of new filters
-        const filterDescriptions: string[] = []
-        if (extractedQueryFilters.country_from) {
-          filterDescriptions.push(`from ${Array.isArray(extractedQueryFilters.country_from) ? extractedQueryFilters.country_from.join(' or ') : extractedQueryFilters.country_from}`)
-        }
-        if (extractedQueryFilters.surf_level_category) {
-          filterDescriptions.push(`${Array.isArray(extractedQueryFilters.surf_level_category) ? extractedQueryFilters.surf_level_category.join(' or ') : extractedQueryFilters.surf_level_category} level`)
-        }
-        if (extractedQueryFilters.surfboard_type) {
-          filterDescriptions.push(`${Array.isArray(extractedQueryFilters.surfboard_type) ? extractedQueryFilters.surfboard_type.join(' or ') : extractedQueryFilters.surfboard_type} surfers`)
-        }
-        if (extractedQueryFilters.age_min || extractedQueryFilters.age_max) {
-          const ageRange = extractedQueryFilters.age_min && extractedQueryFilters.age_max 
-            ? `${extractedQueryFilters.age_min}-${extractedQueryFilters.age_max} years old`
-            : extractedQueryFilters.age_min 
-            ? `at least ${extractedQueryFilters.age_min} years old`
-            : `at most ${extractedQueryFilters.age_max} years old`
-          filterDescriptions.push(ageRange)
-        }
-        
-        const newCriteriaText = filterDescriptions.length > 0 
-          ? filterDescriptions.join(', ')
-          : 'these new criteria'
-        
-        const clarificationMessage = `I see you mentioned ${newCriteriaText}. Would you like to replace your current filters with these new ones, or add them to your existing filters?`
-        
-        // Store pending filters in metadata
-        for (let i = messages.length - 1; i >= 0; i--) {
-          if (messages[i].role === 'assistant' && messages[i].metadata?.awaitingFilterDecision) {
-            const metadata = messages[i].metadata
-            if (metadata) {
-              metadata.awaitingFilterClarification = true
-              metadata.pendingFilters = extractedQueryFilters
-              delete metadata.awaitingFilterDecision
-            }
-            break
-          }
-        }
-        
-        // Also store in the filter decision prompt message if it exists
-        for (let i = messages.length - 1; i >= 0; i--) {
-          if (messages[i].role === 'assistant' && messages[i].metadata?.isFilterDecisionPrompt) {
-            if (!messages[i].metadata) {
-              messages[i].metadata = {}
-            }
-            const metadata = messages[i].metadata!
-            metadata.awaitingFilterClarification = true
-            metadata.pendingFilters = extractedQueryFilters
-            break
-          }
-        }
-        
-        // Add clarification as assistant message
-        messages.push({ role: 'assistant', content: JSON.stringify({
-          return_message: clarificationMessage,
-          is_finished: false,
-          data: null
-        })})
-        
-        // Save and return early
-        await saveChatHistory(chatId, messages, user.id, body.conversation_id || null, supabaseAdmin)
-        
-        return new Response(
-          JSON.stringify({
-            chat_id: chatId,
-            return_message: clarificationMessage,
-            is_finished: false,
-            data: null
-          }),
-          {
-            status: 200,
-            headers: {
-              'Content-Type': 'application/json',
-              'Access-Control-Allow-Origin': '*',
-            },
-          }
-        )
-      }
-      
       // Handle filter management based on user intent
       if (awaitingFilterDecision && filterIntent) {
         // User just responded to filter decision question
-        if (filterIntent === 'more') {
-          // User wants more users with same filters - keep existing filters, don't extract new ones
-          console.log('🔄 User wants more users - keeping existing filters:', JSON.stringify(existingQueryFilters || accumulatedFilters, null, 2))
-          if (existingQueryFilters) {
-            extractedQueryFilters = existingQueryFilters
-          } else if (accumulatedFilters) {
-            extractedQueryFilters = accumulatedFilters
-          }
-          // Don't extract new filters from the message
-        } else if (filterIntent === 'replace') {
-          // Replace all filters - use only new filters (don't merge with existing)
-          console.log('🗑️ User wants to replace filters - using only new filters:', JSON.stringify(extractedQueryFilters, null, 2))
+        if (filterIntent === 'clear') {
+          // Clear all filters - use only new filters (don't merge with existing)
+          console.log('🗑️ User cleared filters - using only new filters:', JSON.stringify(extractedQueryFilters, null, 2))
           // extractedQueryFilters will contain only new filters extracted from current message
           // Don't merge with existingQueryFilters or accumulatedFilters
-        } else if (filterIntent === 'add') {
-          // Add filters - merge with existing filters
+        } else if (filterIntent === 'keep') {
+          // Keep filters - merge with existing filters
           if (existingQueryFilters) {
             if (extractedQueryFilters) {
               extractedQueryFilters = {
@@ -1972,31 +1796,6 @@ ${getPronounInstructions(userProfile.pronoun)}`
               extractedQueryFilters = accumulatedFilters
               console.log('📦 Using accumulated filters only:', JSON.stringify(extractedQueryFilters, null, 2))
             }
-          }
-        }
-      } else if (awaitingFilterClarification && filterIntent && pendingFilters) {
-        // User responded to clarification question
-        if (filterIntent === 'replace') {
-          // Use only pending filters
-          extractedQueryFilters = pendingFilters
-          console.log('🗑️ User wants to replace - using pending filters:', JSON.stringify(extractedQueryFilters, null, 2))
-        } else if (filterIntent === 'add') {
-          // Merge pending filters with existing
-          if (existingQueryFilters) {
-            extractedQueryFilters = {
-              ...existingQueryFilters,
-              ...pendingFilters,
-            }
-            console.log('🔄 User wants to add - merged pending with existing:', JSON.stringify(extractedQueryFilters, null, 2))
-          } else if (accumulatedFilters) {
-            extractedQueryFilters = {
-              ...accumulatedFilters,
-              ...pendingFilters,
-            }
-            console.log('🔄 User wants to add - merged pending with accumulated:', JSON.stringify(extractedQueryFilters, null, 2))
-          } else {
-            extractedQueryFilters = pendingFilters
-            console.log('📦 User wants to add - using pending filters only:', JSON.stringify(extractedQueryFilters, null, 2))
           }
         }
       } else {
@@ -2330,17 +2129,6 @@ ${getPronounInstructions(userProfile.pronoun)}`
         // FALLBACK: If return message contains completion text but is_finished is false, 
         // try to extract data from conversation history or parsed response
         let shouldBeFinished = parsed.is_finished || false
-        
-        // If user wants more users with same filters, trigger matching immediately
-        if (awaitingFilterDecision && filterIntent === 'more' && tripPlanningData) {
-          shouldBeFinished = true
-          console.log('[continue] User wants more users - setting is_finished: true to trigger matching')
-          // Update return message to indicate we're finding more matches
-          if (returnMessage && !returnMessage.includes('Copy! Here are a few advisor options')) {
-            returnMessage = "Copy! Here are a few advisor options that best match what you're looking for."
-          }
-        }
-        
         if (!shouldBeFinished && returnMessage.toLowerCase().includes('copy! here are a few advisor options')) {
           console.log('⚠️ DETECTED COMPLETION MESSAGE BUT is_finished IS FALSE - Attempting to extract data')
           shouldBeFinished = true
@@ -2554,39 +2342,17 @@ ${getPronounInstructions(userProfile.pronoun)}`
             const normalizedQueryFilters = await normalizeQueryFilters(extractedQueryFilters);
             
             // Handle filter management based on user intent
-            if (awaitingFilterDecision && filterIntent === 'more') {
-              // User wants more users with same filters - keep existing filters unchanged
-              console.log('🔄 User wants more users - keeping existing filters:', JSON.stringify(tripPlanningData.queryFilters, null, 2))
-              // Don't change queryFilters - keep existing ones
-            } else if (awaitingFilterDecision && filterIntent === 'replace') {
-              // User wants to replace filters - use only new filters
+            if (awaitingFilterDecision && filterIntent === 'clear') {
+              // User wants to clear filters - use only new filters
               tripPlanningData.queryFilters = normalizedQueryFilters
-              console.log('🗑️ User wants to replace filters - using only new filters')
-            } else if (awaitingFilterDecision && filterIntent === 'add' && tripPlanningData.queryFilters) {
-              // User wants to add filters - merge with existing
+              console.log('🗑️ User cleared filters - using only new filters')
+            } else if (awaitingFilterDecision && filterIntent === 'keep' && tripPlanningData.queryFilters) {
+              // User wants to keep filters - merge with existing
               tripPlanningData.queryFilters = {
                 ...tripPlanningData.queryFilters,
                 ...normalizedQueryFilters, // Current filters override existing ones
               }
               console.log('🔄 Merged filters (existing + current)')
-            } else if (awaitingFilterClarification && filterIntent === 'replace' && pendingFilters) {
-              // User clarified they want to replace - use pending filters
-              const normalizedPendingFilters = await normalizeQueryFilters(pendingFilters)
-              tripPlanningData.queryFilters = normalizedPendingFilters
-              console.log('🗑️ User wants to replace - using pending filters')
-            } else if (awaitingFilterClarification && filterIntent === 'add' && pendingFilters) {
-              // User clarified they want to add - merge pending with existing
-              const normalizedPendingFilters = await normalizeQueryFilters(pendingFilters)
-              if (tripPlanningData.queryFilters) {
-                tripPlanningData.queryFilters = {
-                  ...tripPlanningData.queryFilters,
-                  ...normalizedPendingFilters,
-                }
-                console.log('🔄 User wants to add - merged pending with existing')
-              } else {
-                tripPlanningData.queryFilters = normalizedPendingFilters
-                console.log('📦 User wants to add - using pending filters only')
-              }
             } else if (tripPlanningData.queryFilters) {
               // Normal merge (no filter decision context)
               tripPlanningData.queryFilters = {
@@ -2989,7 +2755,7 @@ ${getPronounInstructions(userProfile.pronoun)}`
         const filterDecisionMessage: Message = {
           role: 'assistant',
           content: JSON.stringify({
-            return_message: "Yo! How do these matches look? You can: (1) Get more users with the same filters, (2) Add new filters to your current ones, or (3) Replace all filters and start fresh. What would you like to do?",
+            return_message: "Yo! How do these matches look? If you want to find more surfers, I can keep your current filters and add to them, or we can start fresh with new ones. What do you think?",
             is_finished: false,
             data: null
           }),
@@ -3098,6 +2864,94 @@ ${getPronounInstructions(userProfile.pronoun)}`
       )
     }
 
+    // Route: POST /swelly-trip-planning/find-matches
+    if (path.endsWith('/find-matches') && req.method === 'POST') {
+      try {
+        const body: { chatId: string; tripPlanningData: any } = await req.json()
+
+        if (!body.chatId) {
+          return new Response(
+            JSON.stringify({ error: 'Missing chatId' }),
+            { 
+              status: 400, 
+              headers: { 
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*',
+              } 
+            }
+          )
+        }
+
+        if (!body.tripPlanningData) {
+          return new Response(
+            JSON.stringify({ error: 'Missing tripPlanningData' }),
+            { 
+              status: 400, 
+              headers: { 
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*',
+              } 
+            }
+          )
+        }
+
+        // Import matching service
+        const { findMatchingUsersV3Server } = await import('./services/matchingService')
+        const { saveMatches } = await import('./services/databaseService')
+
+        // Run server-side matching
+        console.log('[find-matches] Starting server-side matching for chat:', body.chatId)
+        const matches = await findMatchingUsersV3Server(
+          body.tripPlanningData,
+          user.id,
+          body.chatId,
+          supabaseAdmin
+        )
+
+        // Save matches to database
+        await saveMatches(
+          body.chatId,
+          user.id,
+          matches,
+          body.tripPlanningData.queryFilters || null,
+          body.tripPlanningData.destination_country,
+          body.tripPlanningData.area || null,
+          supabaseAdmin
+        )
+
+        console.log(`[find-matches] Successfully found and saved ${matches.length} matches`)
+
+        return new Response(
+          JSON.stringify({
+            matches,
+            totalCount: matches.length,
+            chatId: body.chatId,
+          }),
+          {
+            status: 200,
+            headers: {
+              'Content-Type': 'application/json',
+              'Access-Control-Allow-Origin': '*',
+            },
+          }
+        )
+      } catch (error) {
+        console.error('[find-matches] Error:', error)
+        const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred'
+        return new Response(
+          JSON.stringify({ error: errorMessage }),
+          {
+            status: 500,
+            headers: {
+              'Content-Type': 'application/json',
+              'Access-Control-Allow-Origin': '*',
+            },
+          }
+        )
+      }
+    }
+
+    // If no route matched, return 404
     return new Response(
       JSON.stringify({ error: 'Not found' }),
       { 
@@ -3110,7 +2964,6 @@ ${getPronounInstructions(userProfile.pronoun)}`
     )
 
   } catch (error: unknown) {
-    console.error('Error:', error)
     const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred'
     return new Response(
       JSON.stringify({ error: errorMessage }),

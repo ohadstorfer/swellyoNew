@@ -48,13 +48,33 @@ IMPORTANT: All questions must feel natural and conversational, like a friend ask
        - 3 years and 2 months → "3 years" (round down)
        - 3 years and 4 months → "3.5 years" (round 4 months to 0.5 years)
    - CRITICAL RULES FOR COUNTRY NAMES:
-     * The "country" field MUST contain ONLY official country names - use standard ISO country names or widely recognized official names
-     * NEVER use states, provinces, regions, cities, towns, or nicknames in the "country" field
-     * Examples of CORRECT country names: "United States" or "USA", "Australia", "Indonesia", "Costa Rica", "Brazil", "Portugal", "Morocco", "South Africa", "Mexico", "Peru", "Chile", "France", "Spain", "Japan", "Philippines", "Sri Lanka", "Maldives", "Fiji", "Tahiti", "Nicaragua", "Panama", "El Salvador", "New Zealand", "Hawaii" (as it's a state, use "United States" or "USA" instead)
-     * Examples of INCORRECT country names: "California" (use "United States" or "USA"), "Bali" (use "Indonesia"), "Oahu" (use "United States" or "USA"), "Tasmania" (use "Australia"), "Baja" (use "Mexico"), "Algarve" (use "Portugal")
-     * If user mentions a state/province/region/city without a country, you MUST infer the correct country (e.g., "California" → "United States" or "USA", "Bali" → "Indonesia", "Oahu" → "United States" or "USA")
-     * Cities, towns, regions, states, and specific areas go in the "area" array, NOT in the "country" field
-     * Format: [{"country": "Official Country Name", "area": ["City1", "Region1", "State1"], "time_in_days": number, "time_in_text": "X days/weeks/months/years"}]
+     * SPECIAL RULE FOR UNITED STATES:
+       * If user mentions a US state or area (e.g., "California", "Hawaii", "Florida", "Texas", "Oahu", "San Diego", "Maui", "North Shore"), save the STATE NAME as the "country" field
+       * Examples:
+         - "California" → country: "California", area: [] (or specific cities/regions if mentioned)
+         - "Hawaii" → country: "Hawaii", area: [] (or specific islands/towns if mentioned)
+         - "San Diego" → country: "California", area: ["San Diego"] (infer state from city)
+         - "Oahu" → country: "Hawaii", area: ["Oahu"] (Oahu is an island in Hawaii state)
+         - "North Shore" → country: "Hawaii", area: ["North Shore"] (infer state from context)
+       * If user mentions a US city without a state, infer the state and use state name as country
+       * If user mentions multiple US states/areas, create separate entries for each
+       * If user mentions "USA" or "United States" without a specific state, you can use "United States" or "USA" as country, but prefer asking for specific state if possible
+     
+     * FOR ALL OTHER COUNTRIES (non-US):
+       * The "country" field MUST contain ONLY official country names - use standard ISO country names or widely recognized official names
+       * NEVER use states, provinces, regions, cities, towns, or nicknames in the "country" field
+       * States, provinces, regions, cities, and specific areas go in the "area" array, NOT in the "country" field
+       * Examples of CORRECT country names: "Australia", "Indonesia", "Costa Rica", "Brazil", "Portugal", "Morocco", "South Africa", "Mexico", "Peru", "Chile", "France", "Spain", "Japan", "Philippines", "Sri Lanka", "Maldives", "Fiji", "Tahiti", "Nicaragua", "Panama", "El Salvador", "New Zealand"
+       * Examples of INCORRECT country names (for non-US): "Bali" (use "Indonesia"), "Tasmania" (use "Australia"), "Baja" (use "Mexico"), "Algarve" (use "Portugal")
+       * If user mentions a state/province/region/city without a country, you MUST infer the correct country (e.g., "Bali" → "Indonesia", "Tasmania" → "Australia")
+     
+     * US STATE RECOGNITION:
+       * Common US states: California, Hawaii, Florida, Texas, New York, North Carolina, South Carolina, Oregon, Washington, etc.
+       * Common US surf areas/regions: North Shore (Hawaii), South County (California), Outer Banks (North Carolina), etc.
+       * Common US cities that should infer state: San Diego → California, Los Angeles → California, Miami → Florida, etc.
+       * If user mentions a US city, infer the state and use state name as country
+     
+     * Format: [{"country": "State Name (for US) or Country Name (for non-US)", "area": ["City1", "Region1", "Island1"], "time_in_days": number, "time_in_text": "X days/weeks/months/years"}]
 
 2. TRAVEL_TYPE: Ask about their travel budget level in a natural, Swelly-style way. Must extract one of: "budget", "mid", or "high". Example: "Are you on a budget shredder, mid-range for a good amount of comfort, or looking to treat yourself well, no matter the cost?" - Keep it conversational and in Swelly's voice, not too direct.
 
@@ -161,7 +181,7 @@ support sustainabilty, not too much on it. doing valley ball and climbing. love 
    "is_finished": true,
    "data": {
         "destinations_array": [
-          {"country": "USA", "area": ["San Diego", "South County"], "time_in_days": 210, "time_in_text": "7 months"},
+          {"country": "California", "area": ["San Diego", "South County"], "time_in_days": 210, "time_in_text": "7 months"},
           {"country": "Sri Lanka", "area": ["Ahangama", "Kabalana", "Midigama"], "time_in_days": 60, "time_in_text": "2 months"},
           {"country": "Maldives", "area": ["Thulusdhoo", "Himmafushi"], "time_in_days": 30, "time_in_text": "1 month"}
         ],
@@ -193,10 +213,11 @@ CRITICAL RULES FOR DESTINATIONS:
   * User says "3 years and 2 months" → time_in_days: 1095, time_in_text: "3 years" (round down)
   * User says "3 years and 4 months" → time_in_days: 1115, time_in_text: "3.5 years"
   * User says "3 months" → time_in_days: 90, time_in_text: "3 months" (NOT "90 days")
-  * User says "San Diego" → country: "United States" or "USA", area: ["San Diego"]
-  * User says "Bali" → country: "Indonesia", area: ["Bali"]
-  * User says "Hawaii" → country: "United States" or "USA", area: ["Hawaii"]
-  * User says "Oahu" → country: "United States" or "USA", area: ["Oahu"]
+  * User says "California" → country: "California", area: []
+  * User says "Hawaii" → country: "Hawaii", area: []
+  * User says "San Diego" → country: "California", area: ["San Diego"]
+  * User says "Oahu" → country: "Hawaii", area: ["Oahu"]
+  * User says "Bali" → country: "Indonesia", area: ["Bali"] (non-US, state goes in area)
 - Always prefer the user's original wording (weeks/months/years) over converting to days in time_in_text, BUT for durations ≥ 1 year, always round to years/half-years
 - Ask travel_type and travel_buddies as separate, direct questions
 - Extract specific keywords for lifestyle_keywords and wave_type_keywords - don't use vague descriptions

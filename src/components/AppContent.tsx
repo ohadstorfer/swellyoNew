@@ -9,6 +9,7 @@ import { OnboardingStep4Screen } from '../screens/OnboardingStep4Screen';
 import { LoadingScreen } from '../screens/LoadingScreen';
 import { OnboardingChatScreen } from '../screens/ChatScreen';
 import { TripPlanningChatScreen } from '../screens/TripPlanningChatScreen';
+import { TripPlanningChatScreen as TripPlanningChatScreenCopy } from '../screens/TripPlanningChatScreenCopy';
 import ConversationsScreen from '../screens/ConversationsScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
 import { DirectMessageScreen } from '../screens/DirectMessageScreen';
@@ -324,6 +325,7 @@ export const AppContent: React.FC = () => {
 
   const [showProfile, setShowProfile] = useState(false);
   const [showTripPlanningChat, setShowTripPlanningChat] = useState(false);
+  const [showTripPlanningChatCopy, setShowTripPlanningChatCopy] = useState(false);
   const [showSwellyShaper, setShowSwellyShaper] = useState(false);
   const [viewingUserId, setViewingUserId] = useState<string | null>(null);
   const [profileFromSwellyShaper, setProfileFromSwellyShaper] = useState(false); // Track if profile was opened from Swelly Shaper
@@ -411,6 +413,11 @@ export const AppContent: React.FC = () => {
   const handleSwellyPress = () => {
     // Navigate to Swelly trip planning chat from conversations page
     setShowTripPlanningChat(true);
+  };
+
+  const handleSwellyPressCopy = () => {
+    // Navigate to Swelly trip planning chat copy (dev mode) from conversations page
+    setShowTripPlanningChatCopy(true);
   };
 
   const handleTripPlanningChatBack = () => {
@@ -606,6 +613,25 @@ export const AppContent: React.FC = () => {
       );
     }
     
+    // Show trip planning chat copy (dev mode) if requested
+    if (showTripPlanningChatCopy) {
+      return (
+        <TripPlanningChatScreenCopy 
+          onChatComplete={() => setShowTripPlanningChatCopy(false)} 
+          onViewUserProfile={handleViewUserProfile}
+          onStartConversation={handleStartConversation}
+          persistedChatId={tripPlanningChatId}
+          persistedMatchedUsers={tripPlanningMatchedUsers}
+          persistedDestination={tripPlanningDestination}
+          onChatStateChange={(chatId: string | null, matchedUsers: any[], destination: string) => {
+            setTripPlanningChatId(chatId);
+            setTripPlanningMatchedUsers(matchedUsers);
+            setTripPlanningDestination(destination);
+          }}
+        />
+      );
+    }
+    
     // Show trip planning chat if requested
     if (showTripPlanningChat) {
       return (
@@ -629,6 +655,7 @@ export const AppContent: React.FC = () => {
       <ConversationsScreen
         onConversationPress={handleConversationPress}
         onSwellyPress={handleSwellyPress}
+        onSwellyPressCopy={handleSwellyPressCopy}
         onProfilePress={handleProfilePress}
         onViewUserProfile={handleViewUserProfile}
         onSwellyShaperViewProfile={handleSwellyShaperViewProfile}
