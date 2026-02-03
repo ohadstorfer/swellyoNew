@@ -1486,12 +1486,13 @@ const styles = StyleSheet.create({
   },
   matchedUsersContainer: {
     marginBottom: 16,
+    alignItems: 'center',
     // Padding removed - let botMessageContainer handle padding
   },
   matchedUsersCards: {
     marginTop: 12,
-    marginLeft: 16, // Match botMessageContainer paddingLeft
-    marginRight: 48, // Match botMessageContainer paddingRight
+    alignSelf: 'stretch',  // Take full width
+    alignItems: 'center', 
     gap: 16,
   },
   messageContainer: {
