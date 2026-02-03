@@ -38,7 +38,9 @@ PROFILE FIELDS YOU CAN UPDATE:
 6. surf_level - Surf skill level from 1-5 (1 = beginner, 5 = expert)
 7. travel_experience - Number of surf trips (integer, 0-20+). Examples: 0, 5, 10, 17, 20
 8. bio - Biography/description about the user
-9. destinations_array - Array of past trips with format: [{"country": "Country Name", "area": ["Area1", "Area2", "Area3"], "time_in_days": number, "time_in_text": "X days/weeks/months/years"}]
+9. destinations_array - Array of past trips with format: 
+   - For USA: [{"country": "USA", "state": "StateName", "area": ["City1", "City2"], "time_in_days": number, "time_in_text": "X days/weeks/months/years"}]
+   - For other countries: [{"country": "Country Name", "area": ["Area1", "Area2"], "time_in_days": number, "time_in_text": "X days/weeks/months/years"}]
 10. travel_type - Travel budget: "budget", "mid", or "high"
 11. travel_buddies - Travel companions: "solo", "2" (one friend/partner), or "crew" (group)
 12. lifestyle_keywords - Array of lifestyle interests (e.g., ["yoga", "party", "nature", "culture"])
@@ -148,9 +150,20 @@ For multiple updates in one message, you can return multiple fields:
 SPECIAL HANDLING:
 - For destinations_array: 
   - When user says "add trip to [destination] for [duration]", extract and format as:
-    {"field": "destinations_array", "value": [{"country": "Country Name", "area": ["Area1", "Area2"], "time_in_days": number, "time_in_text": "X days/weeks/months/years"}]}
+    {"field": "destinations_array", "value": [{"country": "Country Name", "state": "StateName (USA only)", "area": ["Area1", "Area2"], "time_in_days": number, "time_in_text": "X days/weeks/months/years"}]}
   - Extract country name and area(s)/town(s) separately. The "area" field is an array that can contain multiple town/area names.
-  - Examples:
+  - SPECIAL RULE FOR USA DESTINATIONS:
+    * For USA destinations, ALWAYS use: country: "USA", state: "StateName", area: ["City/Region"]
+    * Common US states: California, Hawaii, Florida, Texas, New York, North Carolina, Oregon, Washington, etc.
+    * If user mentions a US state (California, Hawaii, etc.), set country="USA" and capture state separately
+    * If user mentions a US city (San Diego, Miami, etc.), infer the state and use country="USA" + state field
+    * Examples:
+      - "California" → {"country": "USA", "state": "California", "area": []}
+      - "San Diego" → {"country": "USA", "state": "California", "area": ["San Diego"]}
+      - "San Diego, California" → {"country": "USA", "state": "California", "area": ["San Diego"]}
+      - "Hawaii" → {"country": "USA", "state": "Hawaii", "area": []}
+      - "Oahu, Hawaii" → {"country": "USA", "state": "Hawaii", "area": ["Oahu"]}
+  - Examples for non-USA countries:
     * "Australia, Gold Coast" → {"country": "Australia", "area": ["Gold Coast"]}
     * "Australia, Gold Coast, Byron Bay, Noosa" → {"country": "Australia", "area": ["Gold Coast", "Byron Bay", "Noosa"]}
     * "Costa Rica, Tamarindo" → {"country": "Costa Rica", "area": ["Tamarindo"]}
@@ -325,7 +338,7 @@ Response: {
 
 User: "I'm from Brazil originally, but I've been living in California for the past 3 years. I ride a midlength now and I'm probably intermediate level."
 Response: {
-  "return_message": "Perfect! I've updated your country to Brazil, surfboard type to midlength, and surf level to intermediate. ✅",
+  "return_message": "Perfect! I've updated your country to Brazil, surfboard type to midlength, surf level to intermediate, and added your California trip. ✅",
   "is_finished": true,
   "data": {
     "updates": [
@@ -380,6 +393,26 @@ Response: {
   "data": {
     "field": "travel_experience",
     "value": "add"
+  }
+}
+
+User: "Add a trip to California for 3 months"
+Response: {
+  "return_message": "Great! I've added your 3 month trip to California. ✅",
+  "is_finished": true,
+  "data": {
+    "field": "destinations_array",
+    "value": [{"country": "USA", "state": "California", "area": [], "time_in_days": 90, "time_in_text": "3 months"}]
+  }
+}
+
+User: "I spent 2 weeks in San Diego last summer"
+Response: {
+  "return_message": "Awesome! I've added your 2 week trip to San Diego. ✅",
+  "is_finished": true,
+  "data": {
+    "field": "destinations_array",
+    "value": [{"country": "USA", "state": "California", "area": ["San Diego"], "time_in_days": 14, "time_in_text": "2 weeks"}]
   }
 }
 
@@ -521,6 +554,7 @@ async function callOpenAI(messages: any[]): Promise<string> {
 /**
  * Extract country name from destination string
  * Handles formats like "Australia, Gold Coast" or "Australia" or "Gold Coast, Australia"
+ * For USA destinations, recognizes state names and returns "USA"
  */
 function extractCountryFromDestination(destination: string): string {
   if (!destination) return ''
@@ -528,15 +562,35 @@ function extractCountryFromDestination(destination: string): string {
   // Split by comma and get the first part (usually country)
   const parts = destination.split(',').map(p => p.trim())
   
+  // US states (lowercase for matching)
+  const usStates = [
+    'alabama', 'alaska', 'arizona', 'arkansas', 'california', 'colorado', 'connecticut',
+    'delaware', 'florida', 'georgia', 'hawaii', 'idaho', 'illinois', 'indiana', 'iowa',
+    'kansas', 'kentucky', 'louisiana', 'maine', 'maryland', 'massachusetts', 'michigan',
+    'minnesota', 'mississippi', 'missouri', 'montana', 'nebraska', 'nevada', 'new hampshire',
+    'new jersey', 'new mexico', 'new york', 'north carolina', 'north dakota', 'ohio',
+    'oklahoma', 'oregon', 'pennsylvania', 'rhode island', 'south carolina', 'south dakota',
+    'tennessee', 'texas', 'utah', 'vermont', 'virginia', 'washington', 'west virginia',
+    'wisconsin', 'wyoming'
+  ]
+  
   // If destination contains common country names, extract it
   const commonCountries = [
     'australia', 'usa', 'united states', 'sri lanka', 'costa rica', 'el salvador',
     'indonesia', 'portugal', 'spain', 'france', 'brazil', 'nicaragua', 'panama',
     'mexico', 'peru', 'chile', 'philippines', 'maldives', 'south africa',
-    'morocco', 'japan', 'new zealand', 'fiji', 'tahiti', 'hawaii'
+    'morocco', 'japan', 'new zealand', 'fiji', 'tahiti'
   ]
   
   const destLower = destination.toLowerCase()
+  
+  // Check if any part is a US state - if so, return "USA"
+  for (const part of parts) {
+    const partLower = part.toLowerCase()
+    if (usStates.includes(partLower)) {
+      return 'USA'
+    }
+  }
   
   // Check if any part matches a common country
   for (const part of parts) {
@@ -620,18 +674,24 @@ async function updateUserProfile(userId: string, field: string, value: any, supa
       const existingTrips = surferData.destinations_array || []
       const updatedTrips = [...existingTrips]
       
-      // For each new trip, check if it matches an existing one by country
+      // For each new trip, check if it matches an existing one by country (and state for USA)
       for (const newTrip of value) {
-        // Support both new structure (country, area) and legacy (destination_name)
+        // Support both new structure (country, state?, area) and legacy (destination_name)
         const newCountry = newTrip.country || extractCountryFromDestination(newTrip.destination_name || '')
+        const newState = newTrip.state
         let foundMatch = false
         
-        // Try to find matching existing trip by country
+        // Try to find matching existing trip by country (and state for USA)
         for (let i = 0; i < updatedTrips.length; i++) {
           const existingTrip = updatedTrips[i]
           const existingCountry = existingTrip.country || extractCountryFromDestination(existingTrip.destination_name || '')
+          const existingState = existingTrip.state
           
-          if (newCountry.toLowerCase() === existingCountry.toLowerCase()) {
+          // For USA destinations, must match both country AND state
+          const isMatch = newCountry.toLowerCase() === existingCountry.toLowerCase() &&
+            (newCountry.toLowerCase() !== 'usa' || newState?.toLowerCase() === existingState?.toLowerCase())
+          
+          if (isMatch) {
             // Update existing trip with new data
             // Merge areas if both have them
             const mergedAreas = newTrip.area || []
@@ -640,7 +700,8 @@ async function updateUserProfile(userId: string, field: string, value: any, supa
             
             updatedTrips[i] = {
               ...existingTrip,
-              country: existingCountry, // Keep existing country
+              country: newCountry || existingCountry, // Use new country if provided
+              state: newState || existingState, // Use new state if provided (for USA)
               area: allAreas, // Merge areas
               time_in_days: newTrip.time_in_days ?? existingTrip.time_in_days,
               time_in_text: newTrip.time_in_text || existingTrip.time_in_text

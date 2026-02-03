@@ -35,10 +35,42 @@ function getTravelExperienceLevel(travelExp: number | string | undefined | null)
 
 const OPENAI_API_KEY = process.env.EXPO_PUBLIC_OPENAI_API_KEY;
 
+// All 50 US states (lowercase for matching)
+const US_STATES = [
+  'alabama', 'alaska', 'arizona', 'arkansas', 'california', 'colorado', 'connecticut',
+  'delaware', 'florida', 'georgia', 'hawaii', 'idaho', 'illinois', 'indiana', 'iowa',
+  'kansas', 'kentucky', 'louisiana', 'maine', 'maryland', 'massachusetts', 'michigan',
+  'minnesota', 'mississippi', 'missouri', 'montana', 'nebraska', 'nevada', 'new hampshire',
+  'new jersey', 'new mexico', 'new york', 'north carolina', 'north dakota', 'ohio',
+  'oklahoma', 'oregon', 'pennsylvania', 'rhode island', 'south carolina', 'south dakota',
+  'tennessee', 'texas', 'utah', 'vermont', 'virginia', 'washington', 'west virginia',
+  'wisconsin', 'wyoming'
+];
+
+// Common US surf regions mapped to states
+const US_SURF_REGIONS: Record<string, string> = {
+  'north shore': 'hawaii',
+  'outer banks': 'north carolina',
+  'south county': 'california',
+  'ob': 'california', // Ocean Beach
+  'pb': 'california', // Pacific Beach
+  'la jolla': 'california',
+  'blacks': 'california', // Blacks Beach
+  'trestles': 'california',
+  'rincon': 'california',
+  'mavericks': 'california',
+  'pipeline': 'hawaii',
+  'waimea': 'hawaii',
+  'sunset beach': 'hawaii',
+  'rockaway': 'new york',
+  'montauk': 'new york',
+};
+
 /**
  * Generate array of related areas using LLM
+ * For USA destinations, pass state parameter for better context
  */
-async function generateAreaArray(country: string, area: string): Promise<string[]> {
+async function generateAreaArray(country: string, area: string, state?: string): Promise<string[]> {
   if (!OPENAI_API_KEY) {
     console.warn('OpenAI API key not configured, using fallback area array');
     // Fallback: return the input area and a few common variations
@@ -46,7 +78,12 @@ async function generateAreaArray(country: string, area: string): Promise<string[
   }
 
   try {
-    const prompt = `Given the country "${country}" and area "${area}", generate a comprehensive list of related surf areas/regions/towns in that country. Include the original area and related locations. Return ONLY a JSON array of strings, no other text. Example format: ["South", "Weligama", "Hirekatiya", "Ahangama", "Midigama"]`;
+    // Build location string based on whether it's USA or not
+    const locationStr = country === 'USA' && state 
+      ? `${state}, USA`
+      : country;
+    
+    const prompt = `Given the location "${locationStr}" and area "${area}", generate a comprehensive list of related surf areas/regions/towns in that location. Include the original area and related locations. Return ONLY a JSON array of strings, no other text. Example format: ["South", "Weligama", "Hirekatiya", "Ahangama", "Midigama"]`;
 
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -105,7 +142,7 @@ async function generateAreaArray(country: string, area: string): Promise<string[
  * Extract country from destination (supports both new and legacy formats)
  */
 function extractCountryFromDestination(
-  dest: { country: string; area: string[] } | { destination_name: string } | string
+  dest: { country: string; state?: string; area: string[] } | { destination_name: string } | string
 ): string {
   // New structure: {country, area[]}
   if (typeof dest === 'object' && 'country' in dest) {
@@ -127,11 +164,40 @@ function extractCountry(destination: string): string {
 }
 
 /**
+ * Check if destination matches a USA state
+ * Handles both new format (country="USA", state="California") and old format (country="California")
+ */
+function destinationMatchesUSAState(
+  destination: { country: string; state?: string; area: string[] } | { destination_name: string } | string,
+  requestedState: string
+): boolean {
+  const requestedStateLower = requestedState.toLowerCase().trim();
+  
+  // New format: country="USA" + state field
+  if (typeof destination === 'object' && 'country' in destination) {
+    // Check if it's USA with a state field
+    if (destination.country === 'USA' || destination.country.toLowerCase() === 'united states') {
+      if (destination.state) {
+        return destination.state.toLowerCase() === requestedStateLower;
+      }
+    }
+    // Old format: state name in country field (e.g., country="California")
+    if (destination.country.toLowerCase() === requestedStateLower) {
+      return true;
+    }
+  }
+  
+  // Legacy format: check if state is in destination_name
+  const country = extractCountryFromDestination(destination);
+  return country.toLowerCase() === requestedStateLower;
+}
+
+/**
  * Check if destination contains the requested country
  * Handles new structure: {country, area[]} and legacy: destination_name string
  */
 function destinationContainsCountry(
-  destination: { country: string; area: string[] } | { destination_name: string } | string | null | undefined,
+  destination: { country: string; state?: string; area: string[] } | { destination_name: string } | string | null | undefined,
   requestedCountry: string | null | undefined
 ): boolean {
   // Handle null/undefined cases
@@ -139,8 +205,37 @@ function destinationContainsCountry(
     return false;
   }
   
-  const country = extractCountryFromDestination(destination);
   const requestedLower = requestedCountry.toLowerCase().trim();
+  
+  // Check if requested is a US state name
+  const isUSState = US_STATES.includes(requestedLower);
+  
+  if (isUSState) {
+    // Match by state field (new format) OR country field (old format)
+    return destinationMatchesUSAState(destination, requestedCountry);
+  }
+  
+  // For "USA" or "United States", match country="USA" destinations
+  if (requestedLower === 'usa' || requestedLower === 'united states') {
+    const country = extractCountryFromDestination(destination);
+    const countryLower = country.toLowerCase();
+    
+    // New format: country="USA"
+    if (countryLower === 'usa' || countryLower === 'united states') {
+      return true;
+    }
+    
+    // Old format: Check if it's a US state name in country field
+    const isOldFormatUSA = US_STATES.includes(countryLower);
+    if (isOldFormatUSA) {
+      return true; // Treat state names as USA
+    }
+    
+    return false;
+  }
+  
+  // For non-USA countries, use standard matching logic
+  const country = extractCountryFromDestination(destination);
   const countryLower = country.toLowerCase().trim();
   
   // Exact match
@@ -153,13 +248,6 @@ function destinationContainsCountry(
   const regex = new RegExp(`\\b${escapedRequested}\\b`, 'i');
   if (regex.test(countryLower)) {
     return true;
-  }
-  
-  // Special case: if requested is "USA" and destination contains "United States" or vice versa
-  if (requestedLower === 'usa' || requestedLower === 'united states') {
-    if (countryLower.includes('united states') || countryLower.includes('usa')) {
-      return true;
-    }
   }
   
   // Special case: if requested is "UK" and destination contains "United Kingdom" or vice versa
@@ -177,7 +265,7 @@ function destinationContainsCountry(
  * This is a convenience function that splits comma-separated country strings and checks each one
  */
 function destinationMatchesAnyCountry(
-  destination: { country: string; area: string[] } | { destination_name: string } | string | null | undefined,
+  destination: { country: string; state?: string; area: string[] } | { destination_name: string } | string | null | undefined,
   requestedCountries: string | null | undefined
 ): boolean {
   if (!destination || !requestedCountries) {
@@ -201,7 +289,7 @@ function destinationMatchesAnyCountry(
  * Works with new structure: {country, area[]} and legacy: destination_name string
  */
 function destinationMatchesAreas(
-  destination: { country: string; area: string[] } | { destination_name: string } | string,
+  destination: { country: string; state?: string; area: string[] } | { destination_name: string } | string,
   generatedAreas: string[]
 ): boolean {
   // New structure: {country, area[]}
@@ -436,7 +524,7 @@ function calculateV2SimilarityScore(requested: number, user: number): number {
  * Check if area matches any of the generated areas
  */
 function areaMatches(
-  destination: { country: string; area: string[] } | { destination_name: string } | string,
+  destination: { country: string; state?: string; area: string[] } | { destination_name: string } | string,
   generatedAreas: string[]
 ): boolean {
   return destinationMatchesAreas(destination, generatedAreas);

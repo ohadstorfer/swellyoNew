@@ -37,7 +37,7 @@ export interface SupabaseSurfer {
   profile_video_url?: string; // varchar(2048), nullable - URL to user-uploaded custom surf level video
   // Swelly conversation results
   onboarding_summary_text?: string; // text, nullable
-  destinations_array?: Array<{ country: string; area: string[]; time_in_days: number; time_in_text?: string }>; // jsonb, nullable
+  destinations_array?: Array<{ country: string; state?: string; area: string[]; time_in_days: number; time_in_text?: string }>; // jsonb, nullable
   travel_type?: 'budget' | 'mid' | 'high'; // text, nullable
   travel_buddies?: 'solo' | '2' | 'crew'; // text, nullable
   lifestyle_keywords?: string[]; // text[], nullable

@@ -1931,15 +1931,25 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
                 const progressWidth = getDestinationProgressWidth(destination.time_in_days);
                 // Support both new structure (country, area) and legacy (destination_name)
                 const country = destination.country || (destination as any).destination_name?.split(',')[0]?.trim() || '';
+                const state = (destination as any).state || '';
                 const areas = destination.area || [];
-                const displayName = areas.length > 0 
-                  ? `${country}, ${areas.join(', ')}`
-                  : country;
+                
+                // For USA destinations: show state if exists, otherwise show country
+                const isUSA = ['USA', 'United States', 'US', 'U.S.', 'U.S.A.'].includes(country);
+                const primaryLocation = isUSA && state ? state : country;
+                
+                // Add first area to display name ONLY for USA destinations
+                const firstArea = isUSA && areas.length > 0 ? areas[0] : '';
+                const displayName = firstArea ? `${primaryLocation}, ${firstArea}` : primaryLocation;
+                
+                // Use state for image/flag lookup if USA, otherwise use country
+                const locationForAssets = isUSA && state ? state : country;
+                
                 // Always try bucket first (getCountryImageFromStorage now always returns a URL)
-                const countryImageUrl = getCountryImageFromStorage(country);
-                const pexelsImageUrl = pexelsImages[country] || null;
-                const countryFlagUrl = getCountryFlag(country);
-                const hasFailedBucket = failedBucketCountries.has(country);
+                const countryImageUrl = getCountryImageFromStorage(locationForAssets);
+                const pexelsImageUrl = pexelsImages[locationForAssets] || null;
+                const countryFlagUrl = getCountryFlag(locationForAssets);
+                const hasFailedBucket = failedBucketCountries.has(locationForAssets);
                 
                 // Handler for when bucket image fails to load (404)
                 const handleBucketImageError = async () => {
@@ -1947,16 +1957,16 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
                     console.warn(`[ProfileScreen] Bucket image failed to load: ${countryImageUrl}, trying Pexels`);
                   }
                   
-                  // Mark this country as having failed bucket load
-                  setFailedBucketCountries((prev) => new Set(prev).add(country));
+                  // Mark this location as having failed bucket load
+                  setFailedBucketCountries((prev) => new Set(prev).add(locationForAssets));
                   
                   // If we don't have Pexels image yet, fetch it
                   if (!pexelsImageUrl) {
-                    const pexelsUrl = await getCountryImageFromPexels(country);
+                    const pexelsUrl = await getCountryImageFromPexels(locationForAssets);
                     if (pexelsUrl) {
                       setPexelsImages((prev) => ({
                         ...prev,
-                        [country]: pexelsUrl,
+                        [locationForAssets]: pexelsUrl,
                       }));
                     }
                   }
@@ -2016,7 +2026,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
                     )}
                     <View style={styles.destinationContent}>
                       <View style={styles.destinationTitleRow}>
-                        <Text style={styles.destinationName}>{country}</Text>
+                        <Text style={styles.destinationName}>{displayName}</Text>
                         <View style={styles.destinationDaysContainer}>
                           <Text style={styles.destinationDays}>
                             {destination.time_in_text || `${destination.time_in_days} days`}

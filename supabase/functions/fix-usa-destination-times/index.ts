@@ -492,11 +492,38 @@ serve(async (req: Request) => {
         }
 
         // Step 4: Find the destination in the array
-        const currentDestinations = (surferData.destinations_array || []) as Destination[]
+        // Handle both old format (state in country field) and new format (state field with country: "USA")
+        const currentDestinations = (surferData.destinations_array || []) as (Destination & { state?: string })[]
         
-        const destinationIndex = currentDestinations.findIndex(
-          d => d.country.toLowerCase() === location.toLowerCase()
-        )
+        const locationLower = location.toLowerCase()
+        const isUSALocation = location === 'United States' || location === 'USA'
+        
+        const destinationIndex = currentDestinations.findIndex(d => {
+          const countryLower = d.country.toLowerCase()
+          const stateLower = (d as any).state?.toLowerCase() || ''
+          
+          // Direct country match
+          if (countryLower === locationLower) {
+            return true
+          }
+          
+          // If looking for a US state, check if it's in the state field
+          if (stateLower && stateLower === locationLower) {
+            return true
+          }
+          
+          // If looking for "United States" or "USA", match any USA destination
+          if (isUSALocation && (
+            countryLower === 'usa' || 
+            countryLower === 'united states' ||
+            countryLower === 'us' ||
+            US_STATES.some(state => state.toLowerCase() === countryLower)
+          )) {
+            return true
+          }
+          
+          return false
+        })
 
         if (destinationIndex === -1) {
           console.log(`ℹ️ User ${chat.user_id} doesn't have ${location} in destinations_array`)

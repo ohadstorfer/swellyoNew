@@ -21,6 +21,18 @@ import { analyzeMatchQuality, hasMinimumMatches, calculateDataCompleteness } fro
 
 const OPENAI_API_KEY = process.env.EXPO_PUBLIC_OPENAI_API_KEY;
 
+// All 50 US states (lowercase for matching)
+const US_STATES = [
+  'alabama', 'alaska', 'arizona', 'arkansas', 'california', 'colorado', 'connecticut',
+  'delaware', 'florida', 'georgia', 'hawaii', 'idaho', 'illinois', 'indiana', 'iowa',
+  'kansas', 'kentucky', 'louisiana', 'maine', 'maryland', 'massachusetts', 'michigan',
+  'minnesota', 'mississippi', 'missouri', 'montana', 'nebraska', 'nevada', 'new hampshire',
+  'new jersey', 'new mexico', 'new york', 'north carolina', 'north dakota', 'ohio',
+  'oklahoma', 'oregon', 'pennsylvania', 'rhode island', 'south carolina', 'south dakota',
+  'tennessee', 'texas', 'utah', 'vermont', 'virginia', 'washington', 'west virginia',
+  'wisconsin', 'wyoming'
+];
+
 // Helper function to convert travel_experience (integer or legacy enum string) to comparable numeric level
 // Returns: 1 (new_nomad/0-3), 2 (rising_voyager/4-9), 3 (wave_hunter/10-19), 4 (chicken_joe/20+)
 function getTravelExperienceLevel(travelExp: number | string | undefined | null): number {
@@ -382,15 +394,17 @@ async function normalizeDestination(
  * Works with new structure: {country, area[]} or legacy: destination_name string
  */
 function parseUserDestination(
-  destination: { country: string; area: string[] } | { destination_name: string } | string
+  destination: { country: string; state?: string; area: string[] } | { destination_name: string } | string
 ): {
   country: string;
+  state?: string;
   area?: AreaOption[];
   towns?: string[];
 } {
-  // Handle new structure: {country, area[]}
+  // Handle new structure: {country, state?, area[]}
   if (typeof destination === 'object' && 'country' in destination) {
     const country = destination.country;
+    const state = destination.state;
     const areas = destination.area || [];
     
     // Try to identify which areas match AREA_OPTIONS and which are towns
@@ -414,6 +428,7 @@ function parseUserDestination(
 
     return {
       country,
+      state,
       area: areaParts.length > 0 ? areaParts : undefined,
       towns: townParts.length > 0 ? townParts : undefined,
     };
@@ -510,7 +525,7 @@ function hasRequestedAreaInArray(
  * Works with new structure: {country, area[]} or legacy: destination_name string
  */
 function destinationMatches(
-  userDestination: { country: string; area: string[] } | { destination_name: string } | string,
+  userDestination: { country: string; state?: string; area: string[] } | { destination_name: string } | string,
   normalizedDest: NormalizedDestination
 ): {
   countryMatch: boolean;
@@ -529,9 +544,41 @@ function destinationMatches(
     .filter(c => c.length > 0);
   
   const userCountryLower = userDest.country.toLowerCase().trim();
+  const userState = userDest.state?.toLowerCase().trim();
   
   // Check if user's country matches any of the requested countries
   const countryMatch = requestedCountries.some(reqCountry => {
+    // Check if requested is a US state name
+    const isUSState = US_STATES.includes(reqCountry);
+    
+    if (isUSState) {
+      // Match USA state: check state field (new format) OR country field (old format)
+      if (userDest.country === 'USA' || userCountryLower === 'united states') {
+        // New format: check state field
+        if (userState === reqCountry) {
+          return true;
+        }
+      }
+      // Old format: state name in country field
+      if (userCountryLower === reqCountry) {
+        return true;
+      }
+      return false;
+    }
+    
+    // For "USA" or "United States", match country="USA" or any US state
+    if (reqCountry === 'usa' || reqCountry === 'united states') {
+      // New format: country="USA"
+      if (userCountryLower === 'usa' || userCountryLower === 'united states') {
+        return true;
+      }
+      // Old format: any US state name in country field
+      if (US_STATES.includes(userCountryLower)) {
+        return true;
+      }
+      return false;
+    }
+    
     // Exact match
     if (userCountryLower === reqCountry) {
       return true;
@@ -544,11 +591,7 @@ function destinationMatches(
       return true;
     }
     
-    // Special cases for USA/UK
-    if ((reqCountry === 'usa' || reqCountry === 'united states') && 
-        (userCountryLower.includes('united states') || userCountryLower.includes('usa'))) {
-      return true;
-    }
+    // Special case for UK
     if ((reqCountry === 'uk' || reqCountry === 'united kingdom') && 
         (userCountryLower.includes('united kingdom') || /\buk\b/.test(userCountryLower))) {
       return true;

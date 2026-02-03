@@ -49,32 +49,43 @@ IMPORTANT: All questions must feel natural and conversational, like a friend ask
        - 3 years and 4 months → "3.5 years" (round 4 months to 0.5 years)
    - CRITICAL RULES FOR COUNTRY NAMES:
      * SPECIAL RULE FOR UNITED STATES:
-       * If user mentions a US state or area (e.g., "California", "Hawaii", "Florida", "Texas", "Oahu", "San Diego", "Maui", "North Shore"), save the STATE NAME as the "country" field
+       * For US destinations, ALWAYS use this structure: country: "USA", state: "StateName", area: ["City/Region"]
        * Examples:
-         - "California" → country: "California", area: [] (or specific cities/regions if mentioned)
-         - "Hawaii" → country: "Hawaii", area: [] (or specific islands/towns if mentioned)
-         - "San Diego" → country: "California", area: ["San Diego"] (infer state from city)
-         - "Oahu" → country: "Hawaii", area: ["Oahu"] (Oahu is an island in Hawaii state)
-         - "North Shore" → country: "Hawaii", area: ["North Shore"] (infer state from context)
-       * If user mentions a US city without a state, infer the state and use state name as country
-       * If user mentions multiple US states/areas, create separate entries for each
-       * If user mentions "USA" or "United States" without a specific state, you can use "United States" or "USA" as country, but prefer asking for specific state if possible
+         - User says "California" → country: "USA", state: "California", area: []
+         - User says "Hawaii" → country: "USA", state: "Hawaii", area: []
+         - User says "San Diego" → country: "USA", state: "California", area: ["San Diego"]
+         - User says "Oahu" → country: "USA", state: "Hawaii", area: ["Oahu"]
+         - User says "North Shore" → country: "USA", state: "Hawaii", area: ["North Shore"]
+         - User says "Miami" → country: "USA", state: "Florida", area: ["Miami"]
+       * If user mentions a US city without a state, you MUST infer the state
+       * If user mentions multiple US states/areas, create separate entries for each state
+       * If user says "USA" or "United States" without specifics, ask for specific state
+       * The "state" field is REQUIRED for all USA destinations
      
      * FOR ALL OTHER COUNTRIES (non-US):
        * The "country" field MUST contain ONLY official country names - use standard ISO country names or widely recognized official names
        * NEVER use states, provinces, regions, cities, towns, or nicknames in the "country" field
        * States, provinces, regions, cities, and specific areas go in the "area" array, NOT in the "country" field
+       * For non-US countries, DO NOT include a "state" field
        * Examples of CORRECT country names: "Australia", "Indonesia", "Costa Rica", "Brazil", "Portugal", "Morocco", "South Africa", "Mexico", "Peru", "Chile", "France", "Spain", "Japan", "Philippines", "Sri Lanka", "Maldives", "Fiji", "Tahiti", "Nicaragua", "Panama", "El Salvador", "New Zealand"
-       * Examples of INCORRECT country names (for non-US): "Bali" (use "Indonesia"), "Tasmania" (use "Australia"), "Baja" (use "Mexico"), "Algarve" (use "Portugal")
-       * If user mentions a state/province/region/city without a country, you MUST infer the correct country (e.g., "Bali" → "Indonesia", "Tasmania" → "Australia")
+       * Examples of INCORRECT country names: "Bali" (use "Indonesia"), "Tasmania" (use "Australia"), "Baja" (use "Mexico"), "Algarve" (use "Portugal")
+       * If user mentions a state/province/region/city without a country, you MUST infer the correct country (e.g., "Bali" → country: "Indonesia", area: ["Bali"])
      
-     * US STATE RECOGNITION:
-       * Common US states: California, Hawaii, Florida, Texas, New York, North Carolina, South Carolina, Oregon, Washington, etc.
-       * Common US surf areas/regions: North Shore (Hawaii), South County (California), Outer Banks (North Carolina), etc.
-       * Common US cities that should infer state: San Diego → California, Los Angeles → California, Miami → Florida, etc.
-       * If user mentions a US city, infer the state and use state name as country
+     * US STATE RECOGNITION (must know these to set state field):
+       * Common US states: California, Hawaii, Florida, Texas, New York, North Carolina, South Carolina, Oregon, Washington, New Jersey, Virginia, Rhode Island, Massachusetts, Connecticut, Maine, Alaska
+       * Common US surf cities and their states:
+         - San Diego, Los Angeles, Santa Barbara, Santa Cruz, San Francisco → California
+         - Oahu, Maui, Big Island, Kauai, North Shore → Hawaii
+         - Miami, Jacksonville, Cocoa Beach → Florida
+         - Montauk → New York
+         - Outer Banks → North Carolina
+         - Myrtle Beach → South Carolina
+         - Cannon Beach, Lincoln City → Oregon
+         - Seattle, Westport → Washington
      
-     * Format: [{"country": "State Name (for US) or Country Name (for non-US)", "area": ["City1", "Region1", "Island1"], "time_in_days": number, "time_in_text": "X days/weeks/months/years"}]
+     * Format: 
+       - USA: [{"country": "USA", "state": "StateName", "area": ["City/Region"], "time_in_days": number, "time_in_text": "X days/weeks/months/years"}]
+       - Other: [{"country": "CountryName", "area": ["Region/City"], "time_in_days": number, "time_in_text": "X days/weeks/months/years"}]
 
 2. TRAVEL_TYPE: Ask about their travel budget level in a natural, Swelly-style way. Must extract one of: "budget", "mid", or "high". Example: "Are you on a budget shredder, mid-range for a good amount of comfort, or looking to treat yourself well, no matter the cost?" - Keep it conversational and in Swelly's voice, not too direct.
 
@@ -105,7 +116,8 @@ Response format: Always return JSON with this structure:
 When is_finished is true, the data object MUST have this exact structure:
 {
   "destinations_array": [
-    {"country": "Country Name", "area": ["Area1", "Area2"], "time_in_days": number, "time_in_text": "X days/weeks/months/years"},
+    {"country": "USA", "state": "StateName", "area": ["Area1"], "time_in_days": number, "time_in_text": "X days/weeks/months/years"},
+    {"country": "CountryName", "area": ["Area1", "Area2"], "time_in_days": number, "time_in_text": "X days/weeks/months/years"},
     ...
   ],
   "travel_type": "budget" | "mid" | "high",
@@ -114,6 +126,7 @@ When is_finished is true, the data object MUST have this exact structure:
   "wave_type_keywords": ["keyword1", "keyword2", ...],
   "onboarding_summary_text": "A brief 2-3 sentence summary of the user's travel preferences and lifestyle"
 }
+NOTE: For USA destinations, the "state" field is REQUIRED. For non-USA destinations, DO NOT include a "state" field.
 
 Example conversation flow:
 Given context - 23 years old, Israeli, 8-10 surf trips, Charging surfer
@@ -181,7 +194,7 @@ support sustainabilty, not too much on it. doing valley ball and climbing. love 
    "is_finished": true,
    "data": {
         "destinations_array": [
-          {"country": "California", "area": ["San Diego", "South County"], "time_in_days": 210, "time_in_text": "7 months"},
+          {"country": "USA", "state": "California", "area": ["San Diego", "South County"], "time_in_days": 210, "time_in_text": "7 months"},
           {"country": "Sri Lanka", "area": ["Ahangama", "Kabalana", "Midigama"], "time_in_days": 60, "time_in_text": "2 months"},
           {"country": "Maldives", "area": ["Thulusdhoo", "Himmafushi"], "time_in_days": 30, "time_in_text": "1 month"}
         ],
@@ -213,11 +226,11 @@ CRITICAL RULES FOR DESTINATIONS:
   * User says "3 years and 2 months" → time_in_days: 1095, time_in_text: "3 years" (round down)
   * User says "3 years and 4 months" → time_in_days: 1115, time_in_text: "3.5 years"
   * User says "3 months" → time_in_days: 90, time_in_text: "3 months" (NOT "90 days")
-  * User says "California" → country: "California", area: []
-  * User says "Hawaii" → country: "Hawaii", area: []
-  * User says "San Diego" → country: "California", area: ["San Diego"]
-  * User says "Oahu" → country: "Hawaii", area: ["Oahu"]
-  * User says "Bali" → country: "Indonesia", area: ["Bali"] (non-US, state goes in area)
+  * User says "California" → country: "USA", state: "California", area: []
+  * User says "Hawaii" → country: "USA", state: "Hawaii", area: []
+  * User says "San Diego" → country: "USA", state: "California", area: ["San Diego"]
+  * User says "Oahu" → country: "USA", state: "Hawaii", area: ["Oahu"]
+  * User says "Bali" → country: "Indonesia", area: ["Bali"] (non-US, no state field)
 - Always prefer the user's original wording (weeks/months/years) over converting to days in time_in_text, BUT for durations ≥ 1 year, always round to years/half-years
 - Ask travel_type and travel_buddies as separate, direct questions
 - Extract specific keywords for lifestyle_keywords and wave_type_keywords - don't use vague descriptions
@@ -572,11 +585,12 @@ async function callOpenAI(messages: any[]): Promise<string> {
 
 /**
  * Enrich area with related names, nicknames, and nearby towns using GPT API
- * @param country - Country name
+ * @param country - Country name (e.g., "USA", "Indonesia", "Costa Rica")
  * @param area - The primary area/town name mentioned by user
+ * @param state - State name (only for USA destinations)
  * @returns Array of related area names (with the original area first)
  */
-async function enrichAreaWithRelatedNames(country: string, area: string): Promise<string[]> {
+async function enrichAreaWithRelatedNames(country: string, area: string, state?: string): Promise<string[]> {
   if (!OPENAI_API_KEY) {
     console.warn('OpenAI API key not configured, returning original area only')
     return [area]
@@ -587,7 +601,12 @@ async function enrichAreaWithRelatedNames(country: string, area: string): Promis
   }
 
   try {
-    const prompt = `Given a surf destination area: "${area}" in "${country}"
+    // Build location string based on whether it's USA or not
+    const locationStr = country === 'USA' && state 
+      ? `"${area}" in ${state}, USA`
+      : `"${area}" in "${country}"`
+
+    const prompt = `Given a surf destination area: ${locationStr}
 
 Your task: Research and find related names, nicknames, and nearby small towns/areas that surfers might use to refer to this location.
 
@@ -604,16 +623,19 @@ Rules:
 - Keep names concise (town/area names, not full descriptions)
 - Return 3-8 related names total (including the original)
 - Only include names that are actually related to this specific area
-- Do NOT include the country name in the areas
+- Do NOT include the country or state name in the areas (only city/region/beach names)
 
 Examples:
-- Input: country="Australia", area="Gold Coast" → {
+- Input: area="San Diego" in California, USA → {
+  "related_areas": ["San Diego", "SD", "Pacific Beach", "Ocean Beach", "La Jolla", "Blacks Beach", "Windansea"]
+}
+- Input: area="Gold Coast" in "Australia" → {
   "related_areas": ["Gold Coast", "GC", "Surfers Paradise", "Burleigh Heads", "Coolangatta", "Tweed Heads"]
 }
-- Input: country="Costa Rica", area="Tamarindo" → {
+- Input: area="Tamarindo" in "Costa Rica" → {
   "related_areas": ["Tamarindo", "Tama", "Playa Tamarindo", "Langosta", "Playa Grande", "Avellanas"]
 }
-- Input: country="Sri Lanka", area="Weligama" → {
+- Input: area="Weligama" in "Sri Lanka" → {
   "related_areas": ["Weligama", "Weli", "Midigama", "Mirissa", "Polhena"]
 }
 
@@ -686,19 +708,22 @@ async function processDestinationsArray(destinations: any[]): Promise<any[]> {
   const processed: any[] = []
 
   for (const dest of destinations) {
-    // Support both new format (country, area) and legacy (destination_name)
+    // Support both new format (country, area, optionally state) and legacy (destination_name)
     let country: string
+    let state: string | undefined
     let areas: string[] = []
 
     if (dest.country) {
       // New format
       country = dest.country
+      state = dest.state // For USA destinations
       areas = dest.area || []
     } else if (dest.destination_name) {
       // Legacy format - parse it
       const parts = dest.destination_name.split(',').map((p: string) => p.trim())
       country = parts[0] || ''
       areas = parts.length > 1 ? parts.slice(1) : []
+      // Legacy format doesn't have state field, leave it undefined
     } else {
       // Skip invalid destinations
       console.warn('Skipping invalid destination:', dest)
@@ -707,12 +732,17 @@ async function processDestinationsArray(destinations: any[]): Promise<any[]> {
 
     // If no areas mentioned, save with empty array
     if (areas.length === 0) {
-      processed.push({
+      const processedDest: any = {
         country,
         area: [],
         time_in_days: dest.time_in_days || 0,
         time_in_text: dest.time_in_text,
-      })
+      }
+      // Add state field only for USA destinations
+      if (country === 'USA' && state) {
+        processedDest.state = state
+      }
+      processed.push(processedDest)
       continue
     }
 
@@ -720,8 +750,9 @@ async function processDestinationsArray(destinations: any[]): Promise<any[]> {
     const allEnrichedNames: string[] = []
     
     // Enrich each area sequentially
+    // For USA, pass state as well for better enrichment
     for (const area of areas) {
-      const enrichedNames = await enrichAreaWithRelatedNames(country, area)
+      const enrichedNames = await enrichAreaWithRelatedNames(country, area, state)
       // enrichedNames includes the original area as first item, so skip it
       // Add all related names (excluding the original which is already in areas)
       for (let i = 1; i < enrichedNames.length; i++) {
@@ -756,12 +787,17 @@ async function processDestinationsArray(destinations: any[]): Promise<any[]> {
       }
     }
 
-    processed.push({
+    const processedDest: any = {
       country,
       area: uniqueAreas,
       time_in_days: dest.time_in_days || 0,
       time_in_text: dest.time_in_text,
-    })
+    }
+    // Add state field only for USA destinations
+    if (country === 'USA' && state) {
+      processedDest.state = state
+    }
+    processed.push(processedDest)
   }
 
   return processed

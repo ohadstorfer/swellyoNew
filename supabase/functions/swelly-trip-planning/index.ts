@@ -143,25 +143,54 @@ CRITICAL RULES FOR DESTINATION EXTRACTION:
 5. If you see a typo but understand the intent, correct it and extract properly
 6. The area is usually the first part before the comma, the country is after
 
+SPECIAL RULE FOR USA DESTINATIONS:
+- For USA destinations, ALWAYS use this structure: destination_country: "USA", state: "StateName", area: "City/Region"
+- If user mentions a US state (California, Hawaii, Florida, Texas, etc.), set destination_country="USA" and capture state separately
+- If user mentions a US city, infer the state and use destination_country="USA" + state field
+- The "state" field is REQUIRED for all USA destinations
+- Common US states: California, Hawaii, Florida, Texas, New York, North Carolina, South Carolina, Oregon, Washington, New Jersey, Virginia, etc.
+- Common US surf cities and their states:
+  * San Diego, Los Angeles, Santa Barbara, Santa Cruz → California
+  * Oahu, Maui, Kauai, North Shore → Hawaii
+  * Miami, Cocoa Beach, Jacksonville → Florida
+  * Montauk → New York
+  * Outer Banks → North Carolina
+- Examples:
+  * User: "California" → destination_country: "USA", state: "California", area: null
+  * User: "Hawaii" → destination_country: "USA", state: "Hawaii", area: null
+  * User: "San Diego" → destination_country: "USA", state: "California", area: "San Diego"
+  * User: "North Shore" → destination_country: "USA", state: "Hawaii", area: "North Shore"
+  * User: "San Diego, California" → destination_country: "USA", state: "California", area: "San Diego"
+  * User: "Oahu, Hawaii" → destination_country: "USA", state: "Hawaii", area: "Oahu"
+
 EXAMPLES OF CORRECT EXTRACTION:
-- User: "Siargao, filipins" → destination_country: "Philippines", area: "Siargao" ✅
-- User: "Costa Rica, Pavones" → destination_country: "Costa Rica", area: "Pavones" ✅
-- User: "El Salvador" → destination_country: "El Salvador", area: null ✅
-- User: "Sri Lanka" → destination_country: "Sri Lanka", area: null ✅
-- User: "Bali, Indonesia" → destination_country: "Indonesia", area: "Bali" ✅
-- User: "Tamarindo, Costa Rica" → destination_country: "Costa Rica", area: "Tamarindo" ✅
+- User: "Siargao, filipins" → destination_country: "Philippines", area: "Siargao", state: null ✅
+- User: "Costa Rica, Pavones" → destination_country: "Costa Rica", area: "Pavones", state: null ✅
+- User: "El Salvador" → destination_country: "El Salvador", area: null, state: null ✅
+- User: "Sri Lanka" → destination_country: "Sri Lanka", area: null, state: null ✅
+- User: "Bali, Indonesia" → destination_country: "Indonesia", area: "Bali", state: null ✅
+- User: "Tamarindo, Costa Rica" → destination_country: "Costa Rica", area: "Tamarindo", state: null ✅
+- User: "California" → destination_country: "USA", state: "California", area: null ✅
+- User: "San Diego" → destination_country: "USA", state: "California", area: "San Diego" ✅
+- User: "North Shore, Hawaii" → destination_country: "USA", state: "Hawaii", area: "North Shore" ✅
 
 WRONG (DON'T DO THIS):
 - User: "Siargao, filipins" → destination_country: null, area: null ❌ (You must extract!)
 - User: "Siargao, filipins" → destination_country: "filipins", area: "Siargao" ❌ (Correct the typo!)
+- User: "California" → destination_country: "California", area: null ❌ (Use USA + state field!)
+- User: "San Diego" → destination_country: "California", area: "San Diego" ❌ (Use USA + state field!)
 
 Examples:
-- User: "Sri Lanka" → Extract: destination_country: "Sri Lanka", area: null
-- User: "Costa Rica, Pavones" → Extract: destination_country: "Costa Rica", area: "Pavones"
-- User: "I'm thinking Costa Rica, maybe Tamarindo" → Extract: destination_country: "Costa Rica", area: "Tamarindo"
-- User: "Want to go to Indonesia, Bali" → Extract: destination_country: "Indonesia", area: "Bali"
-- User: "Siargao, in the Philippines" → Extract: destination_country: "Philippines", area: "Siargao"
-- User: "Siargao, Philippins" → Extract: destination_country: "Philippines", area: "Siargao" (fix typo!)
+- User: "Sri Lanka" → Extract: destination_country: "Sri Lanka", state: null, area: null
+- User: "Costa Rica, Pavones" → Extract: destination_country: "Costa Rica", state: null, area: "Pavones"
+- User: "I'm thinking Costa Rica, maybe Tamarindo" → Extract: destination_country: "Costa Rica", state: null, area: "Tamarindo"
+- User: "Want to go to Indonesia, Bali" → Extract: destination_country: "Indonesia", state: null, area: "Bali"
+- User: "Siargao, in the Philippines" → Extract: destination_country: "Philippines", state: null, area: "Siargao"
+- User: "Siargao, Philippins" → Extract: destination_country: "Philippines", state: null, area: "Siargao" (fix typo!)
+- User: "California" → Extract: destination_country: "USA", state: "California", area: null
+- User: "San Diego" → Extract: destination_country: "USA", state: "California", area: "San Diego" (infer state!)
+- User: "Oahu" → Extract: destination_country: "USA", state: "Hawaii", area: "Oahu" (infer state!)
+- User: "San Diego, California" → Extract: destination_country: "USA", state: "California", area: "San Diego"
 
 If user mentions both country and area/region in the same message, extract BOTH immediately. Don't ask for area if they already provided it.
 
@@ -331,7 +360,8 @@ IMPORTANT:
 
 DATA STRUCTURE (when is_finished: true):
 {
-  "destination_country": "Country name", // REQUIRED if location mentioned - NEVER null! Correct typos: "filipins" → "Philippines"
+  "destination_country": "Country name", // REQUIRED if location mentioned - NEVER null! Correct typos: "filipins" → "Philippines". For USA: always use "USA"
+  "state": "State name for USA destinations only", // REQUIRED for USA destinations (e.g., "California", "Hawaii"). null for non-USA destinations
   "area": "Area/region name or null if not specified", // Extract if mentioned: "Siargao, filipins" → area: "Siargao"
   "budget": 1 | 2 | 3 | null, // null if not specified
   "destination_known": true | false, // whether user knew destination from start
@@ -376,7 +406,8 @@ You MUST always return a JSON object with this structure (NO EXCEPTIONS):
   "return_message": "The conversational text Swelly says to the user (NO JSON, NO code blocks, NO markdown formatting - use plain text only, no asterisks for bold)",
   "is_finished": true or false,
   "data": {
-    "destination_country": "...", // REQUIRED if location mentioned - NEVER null!
+    "destination_country": "...", // REQUIRED if location mentioned - NEVER null! For USA: "USA"
+    "state": "...", // REQUIRED for USA destinations (e.g., "California", "Hawaii"), null for non-USA
     "area": "...", // or null if not specified
     "budget": 1 | 2 | 3 | null,
     "destination_known": true | false,
@@ -402,8 +433,10 @@ CRITICAL RULES:
   - purpose: { purpose_type: "connect_traveler", specific_topics: [] }
   - non_negotiable_criteria: {} (empty object)
 - EXTRACTION IS YOUR JOB: You MUST extract all information from user messages:
-  * If user says "Costa Rica, Pavones" → destination_country: "Costa Rica", area: "Pavones"
-  * If user says "Siargao, filipins" → destination_country: "Philippines", area: "Siargao" (CORRECT THE TYPO!)
+  * If user says "Costa Rica, Pavones" → destination_country: "Costa Rica", state: null, area: "Pavones"
+  * If user says "Siargao, filipins" → destination_country: "Philippines", state: null, area: "Siargao" (CORRECT THE TYPO!)
+  * If user says "California" → destination_country: "USA", state: "California", area: null
+  * If user says "San Diego" → destination_country: "USA", state: "California", area: "San Diego" (infer state!)
   * If user says "must be from USA or Israel" → non_negotiable_criteria: { "country_from": ["USA", "Israel"] }
   * If user says "must have similar age as me +- 5 years" (and user is 25) → non_negotiable_criteria: { "age_range": [20, 30] }
   * If user says "on a budget" → budget: 1
@@ -418,11 +451,15 @@ CRITICAL RULES:
   - If you see "Costa Rica, Pavones" → Extract: destination_country: "Costa Rica", area: "Pavones"
   - Be smart about typos - if intent is clear, correct it and extract properly
   - Examples of CORRECT extraction:
-    * User: "Siargao, filipins" → { destination_country: "Philippines", area: "Siargao" } ✅
-    * User: "El Salvador" → { destination_country: "El Salvador", area: null } ✅
+    * User: "Siargao, filipins" → { destination_country: "Philippines", state: null, area: "Siargao" } ✅
+    * User: "El Salvador" → { destination_country: "El Salvador", state: null, area: null } ✅
+    * User: "California" → { destination_country: "USA", state: "California", area: null } ✅
+    * User: "San Diego" → { destination_country: "USA", state: "California", area: "San Diego" } ✅ (inferred state!)
   - Examples of WRONG extraction (DON'T DO THIS):
     * User: "Siargao, filipins" → { destination_country: null, area: null } ❌ CRITICAL ERROR!
     * User: "Siargao, filipins" → { destination_country: "filipins", area: "Siargao" } ❌ (Didn't correct typo!)
+    * User: "California" → { destination_country: "California", state: null, area: null } ❌ (Should be USA + state!)
+    * User: "San Diego" → { destination_country: "California", area: "San Diego" } ❌ (Should be USA + state!)
   
   CRITICAL: When extracting age criteria, you MUST populate BOTH:
     - queryFilters: { age_min: X, age_max: Y } (for database filtering)
@@ -781,9 +818,9 @@ AVAILABLE SURFERS TABLE FIELDS (ONLY THESE CAN BE FILTERED):
   ⚠️ OFFICIAL COUNTRY LIST (use EXACT names from this list - case-sensitive):
 ${OFFICIAL_COUNTRIES.map(c => `    - "${c}"`).join('\n')}
   ⚠️ Examples:
-    - User says "I want to go to California" → destination_country: "United States", area: "California", country_from: NOT SET (user didn't say they want surfers FROM United States)
+    - User says "I want to go to California" → destination_country: "United States" (or "USA"), state: "California", area: null, country_from: NOT SET (user didn't say they want surfers FROM United States)
     - User says "I want surfers from the USA" → country_from: ["United States"] (normalized from "USA" to "United States")
-    - User says "I want to go to Costa Rica and connect with surfers from Israel" → destination_country: "Costa Rica", country_from: ["Israel"]
+    - User says "I want to go to Costa Rica and connect with surfers from Israel" → destination_country: "Costa Rica", state: null, country_from: ["Israel"]
 - age (integer): Age in years (0+)
 - surfboard_type (enum): 'shortboard', 'mid_length', 'longboard', 'soft_top' (valid values in database)
   * "midlength" or "mid length" → 'mid_length'
@@ -796,7 +833,10 @@ ${OFFICIAL_COUNTRIES.map(c => `    - "${c}"`).join('\n')}
   * Can be an array for multiple levels: ["intermediate", "advanced"]
   * CRITICAL: When user asks for "advanced", ALWAYS include "pro": ["advanced", "pro"]
 - surf_level_description (text): Board-specific description (e.g., "Snapping", "Cross Stepping") - for display only
-- destinations_array (jsonb): Array of {country: string, area: string[], time_in_days: number, time_in_text?: string}
+- destinations_array (jsonb): Array of {country: string, state?: string, area: string[], time_in_days: number, time_in_text?: string}
+  * Note: For USA destinations, the structure includes an optional "state" field:
+    - New format: {country: "USA", state: "California", area: ["San Diego"], ...}
+    - Old format: {country: "California", area: ["San Diego"], ...} (still supported for backwards compatibility)
 
 ⚠️ CRITICAL: When user mentions surf level by category (e.g., "intermediate", "advanced", "beginner", "pro"):
 - ALWAYS use surf_level_category (NOT numeric surf_level_min/max)
@@ -898,8 +938,9 @@ IMPORTANT: The JSON above is an example format. When you return your response:
 CRITICAL RULES - BE SMART AND FLEXIBLE:
 
 0. ⚠️ CRITICAL: DO NOT CONFUSE destination_country WITH country_from ⚠️
-   - destination_country = WHERE THE USER WANTS TO GO (e.g., "California" → destination_country: "USA")
+   - destination_country = WHERE THE USER WANTS TO GO (e.g., "California" → destination_country: "USA", state: "California")
    - country_from = WHERE THE SURFER IS FROM (origin country) - ONLY set if user explicitly requests it
+   - Note: When searching for USA destinations, the matching system will find surfers who have either old format (country="California") or new format (country="USA", state="California")
    - If user says "I want to go to California" → destination_country: "USA", country_from: NOT SET
    - If user says "I want surfers from the USA" → country_from: ["USA"]
    - If user says "I want to go to Costa Rica and connect with surfers from Israel" → destination_country: "Costa Rica", country_from: ["Israel"]
