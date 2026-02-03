@@ -483,6 +483,7 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
   const displayName = surfLevelDescription || 'Dipping My Toes';
   const subtitle = getCategorySubtitle(surfLevelCategory);
 
+  
   return (
     <View style={styles.surfSkillCard}>
       {/* Video Container with Overlaid Text */}
