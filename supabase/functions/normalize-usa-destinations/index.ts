@@ -167,6 +167,7 @@ function getStateFromCity(cityName: string): string | null {
     return cleanedName
   }
   
+  
   // Try exact match on cleaned name in cities
   const cityKey = Object.keys(US_SURF_CITIES).find(
     key => key.toLowerCase() === lowerName
