@@ -153,9 +153,16 @@ export const BackgroundVideo: React.FC<BackgroundVideoProps> = ({
           videoEl.setAttribute('playsinline', 'true');
           videoEl.setAttribute('webkit-playsinline', 'true');
           videoEl.setAttribute('x5-playsinline', 'true'); // For some Android browsers
+          videoEl.setAttribute('autoplay', 'true');
           
           // Prevent fullscreen
           videoEl.setAttribute('disablePictureInPicture', 'true');
+          
+          // Set properties for Safari
+          videoEl.loop = true;
+          videoEl.muted = true;
+          videoEl.volume = 0;
+          videoEl.playsInline = true;
           
           // Prevent video interactions via event listeners
           const preventInteraction = (e: Event) => {
@@ -190,11 +197,13 @@ export const BackgroundVideo: React.FC<BackgroundVideoProps> = ({
       videoElement.setAttribute('playsinline', 'true');
       videoElement.setAttribute('webkit-playsinline', 'true');
       videoElement.setAttribute('x5-playsinline', 'true');
+      videoElement.setAttribute('autoplay', 'true');
       videoElement.removeAttribute('controls');
       videoElement.controls = false;
       videoElement.setAttribute('disablePictureInPicture', 'true');
       videoElement.loop = true;
       videoElement.muted = true;
+      videoElement.volume = 0;
       videoElement.preload = 'auto';
       videoElement.playsInline = true;
       
@@ -212,9 +221,14 @@ export const BackgroundVideo: React.FC<BackgroundVideoProps> = ({
         if (!isMounted || hasPlayed) return;
         
         try {
-          // Ensure properties are set before playing
+          // CRITICAL: Set ALL attributes BEFORE playing (Safari requirement)
+          videoElement.setAttribute('playsinline', 'true');
+          videoElement.setAttribute('webkit-playsinline', 'true');
+          videoElement.setAttribute('autoplay', 'true');
           videoElement.loop = true;
           videoElement.muted = true;
+          videoElement.volume = 0;
+          videoElement.playsInline = true;
           
           const playPromise = videoElement.play();
           if (playPromise !== undefined) {
@@ -373,6 +387,8 @@ export const BackgroundVideo: React.FC<BackgroundVideoProps> = ({
               loop
               muted
               playsInline
+              playsinline="true"
+              webkit-playsinline="true"
               {...(isMobileWeb() && { 'webkit-playsinline': true } as any)}
               preload="auto"
               style={{
@@ -391,6 +407,17 @@ export const BackgroundVideo: React.FC<BackgroundVideoProps> = ({
                 WebkitAppearance: 'none',
                 appearance: 'none',
               } as any}
+              onLoadedMetadata={(e: any) => {
+                // Explicitly set volume when metadata loads (Safari requirement)
+                const video = e.target;
+                if (video) {
+                  video.volume = 0;
+                  video.muted = true;
+                  video.setAttribute('playsinline', 'true');
+                  video.setAttribute('webkit-playsinline', 'true');
+                  video.setAttribute('autoplay', 'true');
+                }
+              }}
               onError={(e: any) => {
                 if (__DEV__) {
                   console.error('[BackgroundVideo] HTML5 video onError:', e);

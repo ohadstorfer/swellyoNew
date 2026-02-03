@@ -261,7 +261,14 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
           videoElement.setAttribute('playsinline', 'true');
           videoElement.setAttribute('webkit-playsinline', 'true');
           videoElement.setAttribute('x5-playsinline', 'true');
+          videoElement.setAttribute('autoplay', 'true');
           videoElement.setAttribute('disablePictureInPicture', 'true');
+          
+          // Set properties for Safari
+          videoElement.playsInline = true;
+          videoElement.loop = true;
+          videoElement.muted = true;
+          videoElement.volume = 0;
           
           const preventInteraction = (e: Event) => {
             e.preventDefault();
@@ -308,6 +315,17 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
       try {
         videoPlayer.loop = true;
         videoPlayer.muted = true;
+        // Ensure playsinline is set on underlying video element for Safari
+        if (Platform.OS === 'web' && typeof document !== 'undefined') {
+          const videoElements = document.querySelectorAll('video');
+          videoElements.forEach((videoElement) => {
+            videoElement.setAttribute('playsinline', 'true');
+            videoElement.setAttribute('webkit-playsinline', 'true');
+            videoElement.setAttribute('autoplay', 'true');
+            videoElement.volume = 0;
+            videoElement.playsInline = true;
+          });
+        }
         videoPlayer.play();
       } catch (error: any) {
         console.error('Error playing video:', error);
@@ -332,6 +350,17 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
           if (videoPlayer) {
             videoPlayer.loop = true;
             videoPlayer.muted = true;
+            // Ensure playsinline is set on underlying video element for Safari
+            if (Platform.OS === 'web' && typeof document !== 'undefined') {
+              const videoElements = document.querySelectorAll('video');
+              videoElements.forEach((videoElement) => {
+                videoElement.setAttribute('playsinline', 'true');
+                videoElement.setAttribute('webkit-playsinline', 'true');
+                videoElement.setAttribute('autoplay', 'true');
+                videoElement.volume = 0;
+                videoElement.playsInline = true;
+              });
+            }
           try {
             videoPlayer.play();
           } catch (playError: any) {
@@ -500,6 +529,9 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
               {...(Platform.OS === 'web' && {
                 controls: false,
                 disablePictureInPicture: true,
+                playsinline: true,
+                'webkit-playsinline': true,
+                playsInline: true,
               } as any)}
             />
             {/* Transparent overlay to prevent interactions */}
