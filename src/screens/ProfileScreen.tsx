@@ -205,11 +205,23 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
   const defaultVideoUrl = getSurfLevelVideoUrl(boardType, surfLevel);
   const videoUrl = customVideoUrl || defaultVideoUrl;
   
+  // Track when video URL is ready (not null/undefined/empty)
+  const [isVideoUrlReady, setIsVideoUrlReady] = useState(false);
+  
+  // Effect to set readiness when we have a valid URL
+  useEffect(() => {
+    if (videoUrl && videoUrl.trim() !== '') {
+      setIsVideoUrlReady(true);
+    } else {
+      setIsVideoUrlReady(false);
+    }
+  }, [videoUrl]);
+  
   // Create video player - same pattern as OnboardingStep2Screen
   const videoPlayer = useVideoPlayer(
-    videoUrl || '',
+    isVideoUrlReady ? (videoUrl || null) : null,
     (player: any) => {
-      if (player && videoUrl) {
+      if (player && videoUrl && isVideoUrlReady) {
         try {
           player.loop = true;
           player.muted = true;
@@ -223,7 +235,7 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
 
   // Robust autoplay implementation
   useEffect(() => {
-    if (!videoPlayer || !videoUrl) return;
+    if (!videoPlayer || !videoUrl || !isVideoUrlReady) return;
 
     let isMounted = true;
 
@@ -335,11 +347,11 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [videoPlayer, videoUrl]);
+  }, [videoPlayer, videoUrl, isVideoUrlReady]);
 
   // Update player source when video changes - same pattern as OnboardingStep2Screen
   useEffect(() => {
-    if (videoUrl && videoPlayer) {
+    if (videoUrl && videoPlayer && isVideoUrlReady) {
       const videoUrlToPlay = videoUrl;
       if (!videoUrlToPlay) {
         console.warn('No video URL provided for surf skill video');
@@ -347,7 +359,7 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
       }
       
       videoPlayer.replaceAsync(videoUrlToPlay).then(() => {
-          if (videoPlayer) {
+          if (videoPlayer && isVideoUrlReady) {
             videoPlayer.loop = true;
             videoPlayer.muted = true;
             // Ensure playsinline is set on underlying video element for Safari
@@ -371,11 +383,11 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
         console.error('Error replacing surf skill video:', error, 'URL:', videoUrlToPlay);
       });
     }
-  }, [videoUrl, videoPlayer]);
+  }, [videoUrl, videoPlayer, isVideoUrlReady]);
 
   // Continuous playback monitoring - ensures video never stops
   useEffect(() => {
-    if (!videoPlayer || !videoUrl) return;
+    if (!videoPlayer || !videoUrl || !isVideoUrlReady) return;
 
     let isMounted = true;
     let statusCheckInterval: ReturnType<typeof setInterval> | null = null;
@@ -496,7 +508,7 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
         }
       });
     };
-  }, [videoPlayer, videoUrl]);
+  }, [videoPlayer, videoUrl, isVideoUrlReady]);
 
   // Get category subtitle
   const getCategorySubtitle = (category: string): string => {
@@ -517,7 +529,7 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
     <View style={styles.surfSkillCard}>
       {/* Video Container with Overlaid Text */}
       <View style={styles.surfSkillVideoContainer}>
-        {videoUrl ? (
+        {isVideoUrlReady && videoUrl ? (
           <View style={styles.surfSkillVideoWrapper} pointerEvents="none">
             <VideoView
               player={videoPlayer}
@@ -565,7 +577,9 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
           </View>
         ) : (
           <View style={styles.surfSkillVideoPlaceholder}>
-            <Text style={styles.surfSkillVideoPlaceholderText}>No video available</Text>
+            <Text style={styles.surfSkillVideoPlaceholderText}>
+              {videoUrl === null || videoUrl === undefined ? 'Loading video...' : 'No video available'}
+            </Text>
           </View>
         )}
       </View>
@@ -1909,7 +1923,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
 
           {/* Surf Skill Card with Video */}
           <SurfSkillCard
-            key={`surf-skill-${profileData.profile_video_url || 'default'}`}
+            key={`surf-skill-${profileData.user_id || 'default'}`}
             boardType={profileData.surfboard_type || 'shortboard'}
             surfLevel={profileData.surf_level || 1}
             surfLevelDescription={profileData.surf_level_description || null}
