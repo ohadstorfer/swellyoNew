@@ -2278,13 +2278,13 @@ const styles = StyleSheet.create({
   },
   nameContainer: {
     position: 'absolute',
-    left: '50%',
-    marginLeft: -100, // Center it (half of typical width ~200px)
+    left: '5%', // 5% padding on left
+    right: '5%', // 5% padding on right (centers it with 90% width)
     alignItems: 'center',
     justifyContent: 'flex-end',
     paddingBottom: 8,
     gap: 8,
-    width: 200,
+    width: '90%', // Allow full width expansion (90% to leave some padding)
   },
   fullNameContainer: {
     width: '100%',
