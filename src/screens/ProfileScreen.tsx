@@ -205,27 +205,39 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
   const defaultVideoUrl = getSurfLevelVideoUrl(boardType, surfLevel);
   const videoUrl = customVideoUrl || defaultVideoUrl;
   
-  // Track when video URL is ready (not null/undefined/empty)
-  const [isVideoUrlReady, setIsVideoUrlReady] = useState(false);
+  // Calculate readiness synchronously (not in useEffect) - Safari needs immediate URL
+  const isVideoUrlReady = !!(videoUrl && videoUrl.trim() !== '');
   
-  // Effect to set readiness when we have a valid URL
-  useEffect(() => {
-    if (videoUrl && videoUrl.trim() !== '') {
-      setIsVideoUrlReady(true);
-    } else {
-      setIsVideoUrlReady(false);
-    }
-  }, [videoUrl]);
-  
-  // Create video player - same pattern as OnboardingStep2Screen
+  // Create video player - use empty string fallback like working examples (BackgroundVideo, VideoCarousel)
   const videoPlayer = useVideoPlayer(
-    isVideoUrlReady ? (videoUrl || null) : null,
+    videoUrl || '',
     (player: any) => {
-      if (player && videoUrl && isVideoUrlReady) {
+      if (player && videoUrl) {
         try {
           player.loop = true;
           player.muted = true;
-          player.play();
+          // Add small delay for Safari to ensure video element is ready
+          if (Platform.OS === 'web') {
+            setTimeout(() => {
+              const playPromise = player.play();
+              if (playPromise !== undefined && typeof (playPromise as any).catch === 'function') {
+                (playPromise as any).catch((error: any) => {
+                  if (__DEV__ && error.name !== 'NotAllowedError') {
+                    console.warn('[SurfSkillCard] Initial play attempt failed:', error.message);
+                  }
+                });
+              }
+            }, 100);
+          } else {
+            const playPromise = player.play();
+            if (playPromise !== undefined && typeof (playPromise as any).catch === 'function') {
+              (playPromise as any).catch((error: any) => {
+                if (__DEV__ && error.name !== 'NotAllowedError') {
+                  console.warn('[SurfSkillCard] Initial play attempt failed:', error.message);
+                }
+              });
+            }
+          }
         } catch (error) {
           console.error('Error initializing video player:', error);
         }
@@ -235,7 +247,7 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
 
   // Robust autoplay implementation
   useEffect(() => {
-    if (!videoPlayer || !videoUrl || !isVideoUrlReady) return;
+    if (!videoPlayer || !videoUrl) return;
 
     let isMounted = true;
 
@@ -347,11 +359,11 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [videoPlayer, videoUrl, isVideoUrlReady]);
+  }, [videoPlayer, videoUrl]);
 
   // Update player source when video changes - same pattern as OnboardingStep2Screen
   useEffect(() => {
-    if (videoUrl && videoPlayer && isVideoUrlReady) {
+    if (videoUrl && videoPlayer) {
       const videoUrlToPlay = videoUrl;
       if (!videoUrlToPlay) {
         console.warn('No video URL provided for surf skill video');
@@ -359,7 +371,7 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
       }
       
       videoPlayer.replaceAsync(videoUrlToPlay).then(() => {
-          if (videoPlayer && isVideoUrlReady) {
+          if (videoPlayer) {
             videoPlayer.loop = true;
             videoPlayer.muted = true;
             // Ensure playsinline is set on underlying video element for Safari
@@ -373,21 +385,31 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
                 videoElement.playsInline = true;
               });
             }
-          try {
-            videoPlayer.play();
-          } catch (playError: any) {
-            console.error('Error playing surf skill video:', playError);
+            // Add small delay for Safari to ensure video element is ready
+            setTimeout(() => {
+              try {
+                const playPromise = videoPlayer.play();
+                if (playPromise !== undefined && typeof (playPromise as any).catch === 'function') {
+                  (playPromise as any).catch((playError: any) => {
+                    if (__DEV__ && playError.name !== 'NotAllowedError') {
+                      console.error('Error playing surf skill video:', playError);
+                    }
+                  });
+                }
+              } catch (playError: any) {
+                console.error('Error playing surf skill video:', playError);
+              }
+            }, Platform.OS === 'web' ? 100 : 0);
           }
-        }
       }).catch((error: any) => {
         console.error('Error replacing surf skill video:', error, 'URL:', videoUrlToPlay);
       });
     }
-  }, [videoUrl, videoPlayer, isVideoUrlReady]);
+  }, [videoUrl, videoPlayer]);
 
   // Continuous playback monitoring - ensures video never stops
   useEffect(() => {
-    if (!videoPlayer || !videoUrl || !isVideoUrlReady) return;
+    if (!videoPlayer || !videoUrl) return;
 
     let isMounted = true;
     let statusCheckInterval: ReturnType<typeof setInterval> | null = null;
@@ -508,7 +530,7 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
         }
       });
     };
-  }, [videoPlayer, videoUrl, isVideoUrlReady]);
+  }, [videoPlayer, videoUrl]);
 
   // Get category subtitle
   const getCategorySubtitle = (category: string): string => {
@@ -669,7 +691,6 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
   const [profileData, setProfileData] = useState<SupabaseSurfer | null>(null);
   const [loading, setLoading] = useState(true);
   const [authChecking, setAuthChecking] = useState(false);
-  const [authError, setAuthError] = useState<string | null>(null);
   const [profileNotFound, setProfileNotFound] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
@@ -730,7 +751,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
   }, [isUploadingVideo]);
 
 
-  // Auth state listener to handle session expiration
+  // Auth state listener - auth guard handles redirects, we just reload data on sign in
   useEffect(() => {
     if (!isViewingOwnProfile) {
       // No need to listen to auth changes when viewing another user's profile
@@ -740,49 +761,10 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       console.log('[ProfileScreen] Auth state changed:', event, session ? 'session exists' : 'no session');
       
-      if (event === 'SIGNED_OUT' || (event === 'TOKEN_REFRESHED' && !session)) {
-        // Session expired or user signed out - perform proper logout
-        setAuthError('Your session has expired. Please sign in again.');
-        setLoading(false);
-        setProfileData(null);
-        
-        // Perform proper logout to clear all state
-        (async () => {
-          try {
-            const { performLogout } = await import('../utils/logout');
-            const result = await performLogout({
-              resetOnboarding,
-              setUser,
-              setCurrentStep,
-              setIsDemoUser,
-            });
-            
-            if (result.success) {
-              console.log('[ProfileScreen] Logout successful after session expiration');
-            } else {
-              console.error('[ProfileScreen] Logout failed:', result.error);
-            }
-            
-            // Redirect to welcome screen if onBack callback is available
-            // Note: performLogout already navigates, but onBack ensures proper cleanup
-            if (onBack) {
-              setTimeout(() => {
-                onBack();
-              }, 500);
-            }
-          } catch (logoutError) {
-            console.error('[ProfileScreen] Error during logout:', logoutError);
-            // Still redirect even if logout fails
-            if (onBack) {
-              setTimeout(() => {
-                onBack();
-              }, 2000);
-            }
-          }
-        })();
-      } else if (event === 'SIGNED_IN' && session) {
-        // User signed in, reload profile data
-        setAuthError(null);
+      // Auth guard will handle SIGNED_OUT and session expiration
+      // We just reload profile data when user signs in
+      if (event === 'SIGNED_IN' && session) {
+        console.log('[ProfileScreen] User signed in, reloading profile data');
         loadProfileData();
       }
     });
@@ -790,7 +772,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
     return () => {
       subscription.unsubscribe();
     };
-  }, [isViewingOwnProfile, onBack]);
+  }, [isViewingOwnProfile]);
 
   useEffect(() => {
     loadProfileData();
@@ -849,7 +831,6 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
 
   const loadProfileData = async () => {
     try {
-      setAuthError(null);
       setProfileNotFound(false);
       let targetUserId: string;
       
@@ -857,94 +838,17 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
         // View specific user's profile - no auth check needed
         targetUserId = userId;
       } else {
-        // Viewing own profile - check auth session first
+        // Viewing own profile - auth guard ensures user is authenticated
+        // Just get user ID for API calls
         setAuthChecking(true);
         
-        // Check session first (more reliable than getUser for session validation)
-        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-        
-        if (sessionError || !session) {
-          console.error('No auth session found:', sessionError);
-          setAuthError('Please sign in to view your profile.');
-          setAuthChecking(false);
-          setLoading(false);
-          
-          // Perform proper logout to clear all state
-          try {
-            const { performLogout } = await import('../utils/logout');
-            const result = await performLogout({
-              resetOnboarding,
-              setUser,
-              setCurrentStep,
-              setIsDemoUser,
-            });
-            
-            if (result.success) {
-              console.log('[ProfileScreen] Logout successful after auth failure');
-            } else {
-              console.error('[ProfileScreen] Logout failed:', result.error);
-            }
-            
-            // Redirect to welcome screen if onBack callback is available
-            // Note: performLogout already navigates, but onBack ensures proper cleanup
-            if (onBack) {
-              setTimeout(() => {
-                onBack();
-              }, 500);
-            }
-          } catch (logoutError) {
-            console.error('[ProfileScreen] Error during logout:', logoutError);
-            // Still redirect even if logout fails
-            if (onBack) {
-              setTimeout(() => {
-                onBack();
-              }, 1500);
-            }
-          }
-          return;
-        }
-        
-        // Session exists, get user details
         const { data: { user }, error: userError } = await supabase.auth.getUser();
         
         if (userError || !user) {
-          console.error('Error getting user:', userError);
-          setAuthError('Unable to verify your account. Please sign in again.');
+          // Auth guard will handle redirect, just stop loading
+          console.error('[ProfileScreen] Error getting user:', userError);
           setAuthChecking(false);
           setLoading(false);
-          
-          // Perform proper logout to clear all state
-          try {
-            const { performLogout } = await import('../utils/logout');
-            const result = await performLogout({
-              resetOnboarding,
-              setUser,
-              setCurrentStep,
-              setIsDemoUser,
-            });
-            
-            if (result.success) {
-              console.log('[ProfileScreen] Logout successful after user verification failure');
-            } else {
-              console.error('[ProfileScreen] Logout failed:', result.error);
-            }
-            
-            // Redirect to welcome screen if onBack callback is available
-            // Note: performLogout already navigates, but onBack ensures proper cleanup
-            if (onBack) {
-              setTimeout(() => {
-                onBack();
-              }, 500);
-            }
-          } catch (logoutError) {
-            console.error('[ProfileScreen] Error during logout:', logoutError);
-            // Still redirect even if logout fails
-            if (onBack) {
-              setTimeout(() => {
-                onBack();
-              }, 1500);
-            }
-          }
           return;
         }
         
@@ -961,8 +865,8 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
           // Viewing another user's profile that doesn't exist
           setProfileNotFound(true);
         } else {
-          // Own profile not found (shouldn't happen if user is authenticated)
-          setAuthError('Profile not found. Please complete your onboarding.');
+          // Own profile not found - this shouldn't happen, but show generic error
+          console.error('[ProfileScreen] Own profile not found');
         }
         setLoading(false);
         return;
@@ -971,9 +875,9 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
       setProfileData(surferData);
       setLoading(false);
     } catch (error) {
-      console.error('Error loading profile data:', error);
-      setAuthError('Failed to load profile. Please try again.');
+      console.error('[ProfileScreen] Error loading profile data:', error);
       setLoading(false);
+      // Don't set authError - auth guard will handle if it's an auth issue
     }
   };
 
@@ -1348,25 +1252,12 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
   }
 
   // Show error states when not loading and no profile data
+  // Note: Auth errors are handled by auth guard - no "Authentication Required" screen
   if (!profileData) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.errorContainer}>
-          {authError ? (
-            <>
-              <Ionicons name="lock-closed-outline" size={64} color="#FF6B6B" style={{ marginBottom: 20 }} />
-              <Text style={styles.errorTitle}>Authentication Required</Text>
-              <Text style={styles.errorMessage}>{authError}</Text>
-              {onBack && (
-                <TouchableOpacity 
-                  style={styles.errorButton}
-                  onPress={onBack}
-                >
-                  <Text style={styles.errorButtonText}>Go Back</Text>
-                </TouchableOpacity>
-              )}
-            </>
-          ) : profileNotFound ? (
+          {profileNotFound ? (
             <>
               <Ionicons name="person-outline" size={64} color="#FF6B6B" style={{ marginBottom: 20 }} />
               <Text style={styles.errorTitle}>Profile Not Found</Text>

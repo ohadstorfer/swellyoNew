@@ -1,10 +1,10 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { OnboardingData } from '../screens/OnboardingStep1Screen';
 import { User, databaseService } from '../services/database/databaseService';
 import { onboardingService } from '../services/onboarding/onboardingService';
 import { supabaseDatabaseService } from '../services/database/supabaseDatabaseService';
-import { isSupabaseConfigured } from '../config/supabase';
+import { isSupabaseConfigured, supabase } from '../config/supabase';
 import { Platform } from 'react-native';
 
 interface OnboardingContextType {
@@ -78,6 +78,89 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       setFormData(prev => ({ ...prev, boardType: -1 }));
     }
   }, [currentStep, formData.boardType, isDemoUser]);
+
+  // Define resetOnboarding function early so it can be used in useEffect
+  // Use useCallback to ensure stable reference for useEffect dependencies
+  // State setters from useState are stable, so they don't need to be in dependencies
+  const resetOnboarding = useCallback(async () => {
+    setCurrentStep(-1); // Go back to welcome screen (-1 = WelcomeScreen)
+    setFormData({});
+    setUser(null);
+    setIsComplete(false);
+    setIsDemoUser(false); // Reset demo user flag
+    try {
+      await AsyncStorage.removeItem(STORAGE_KEY);
+    } catch (error) {
+      console.log('Error resetting onboarding data:', error);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // State setters are stable, no dependencies needed
+
+  // Auth state listener - handle session expiration during onboarding
+  useEffect(() => {
+    if (!isSupabaseConfigured()) {
+      return;
+    }
+
+    // Don't interfere with demo users
+    if (isDemoUser) {
+      return;
+    }
+
+    console.log('[OnboardingContext] Setting up auth state listener');
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log('[OnboardingContext] Auth state changed:', event, session ? 'session exists' : 'no session');
+
+      // Handle sign out events
+      if (event === 'SIGNED_OUT') {
+        console.log('[OnboardingContext] SIGNED_OUT event detected during onboarding');
+        // Clear user state and reset to WelcomeScreen
+        setUser(null);
+        setIsDemoUser(false);
+        setCurrentStep(-1);
+        try {
+          await resetOnboarding();
+        } catch (error) {
+          console.error('[OnboardingContext] Error resetting onboarding on sign out:', error);
+        }
+        return;
+      }
+
+      // Handle token refresh failures
+      if (event === 'TOKEN_REFRESHED' && !session) {
+        console.log('[OnboardingContext] Token refresh failed during onboarding');
+        // Clear user state and reset to WelcomeScreen
+        setUser(null);
+        setIsDemoUser(false);
+        setCurrentStep(-1);
+        try {
+          await resetOnboarding();
+        } catch (error) {
+          console.error('[OnboardingContext] Error resetting onboarding on token refresh failure:', error);
+        }
+        return;
+      }
+
+      // If user exists in context but session is lost, clear state
+      if (user !== null && !session && (event === 'USER_UPDATED' || event === 'TOKEN_REFRESHED')) {
+        console.log('[OnboardingContext] Session lost during onboarding');
+        setUser(null);
+        setIsDemoUser(false);
+        setCurrentStep(-1);
+        try {
+          await resetOnboarding();
+        } catch (error) {
+          console.error('[OnboardingContext] Error resetting onboarding on session loss:', error);
+        }
+      }
+    });
+
+    return () => {
+      console.log('[OnboardingContext] Cleaning up auth state listener');
+      subscription.unsubscribe();
+    };
+  }, [user, isDemoUser, resetOnboarding, setUser, setIsDemoUser, setCurrentStep]);
 
   const initializeDatabase = async () => {
     try {
@@ -232,20 +315,6 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       const updated = { ...prev, ...newData };
       return updated;
     });
-  };
-
-
-  const resetOnboarding = async () => {
-    setCurrentStep(0); // Go back to welcome screen
-    setFormData({});
-    setUser(null);
-    setIsComplete(false);
-    setIsDemoUser(false); // Reset demo user flag
-    try {
-      await AsyncStorage.removeItem(STORAGE_KEY);
-    } catch (error) {
-      console.log('Error resetting onboarding data:', error);
-    }
   };
 
   const markOnboardingComplete = async () => {

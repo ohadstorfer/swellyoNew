@@ -48,13 +48,49 @@ class SupabaseAuthService {
     try {
       console.log('Starting Supabase Google OAuth for web...');
       
+      // Set flag IMMEDIATELY at the start to prevent useAuthGuard from interfering
+      // during getSession() and the entire OAuth flow
+      try {
+        sessionStorage.setItem('oauth_redirecting', 'true');
+        console.log('Set oauth_redirecting flag early to prevent auth guard interference');
+      } catch (e) {
+        console.warn('Could not set oauth_redirecting flag:', e);
+      }
+      
       // First, check if we already have a valid session
-      const { data: existingSession, error: sessionCheckError } = await supabase.auth.getSession();
+      // Add timeout to prevent hanging
+      console.log('Checking for existing session...');
+      let existingSession: any = null;
+      let sessionCheckError: any = null;
+      
+      try {
+        const sessionPromise = supabase.auth.getSession();
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error('getSession() timeout after 3 seconds')), 3000);
+        });
+        
+        const result = await Promise.race([sessionPromise, timeoutPromise]);
+        existingSession = result;
+        sessionCheckError = result.error;
+        console.log('getSession() completed, session exists:', !!result?.session);
+      } catch (timeoutError: any) {
+        console.warn('getSession() timed out or failed:', timeoutError?.message || timeoutError);
+        // Continue with OAuth flow if getSession() fails or times out
+        sessionCheckError = timeoutError;
+      }
       
       if (!sessionCheckError && existingSession?.session?.user) {
+        // Clear flag since we found existing session - no redirect needed
+        try {
+          sessionStorage.removeItem('oauth_redirecting');
+        } catch (e) {
+          // Ignore
+        }
         console.log('Found existing Supabase session, using it');
         return this.convertSupabaseUserToAppUser(existingSession.session.user);
       }
+      
+      console.log('No existing session found, proceeding with OAuth flow');
       
       // Check if we're returning from OAuth redirect
       const hashParams = new URLSearchParams(window.location.hash.substring(1));
@@ -64,6 +100,13 @@ class SupabaseAuthService {
       const errorDescription = hashParams.get('error_description');
 
       if (errorParam) {
+        // Clear the oauth_redirecting flag since OAuth failed
+        try {
+          sessionStorage.removeItem('oauth_redirecting');
+        } catch (e) {
+          // Ignore if sessionStorage not available
+        }
+        
         // Clean up the error from URL
         if (window.history && window.location) {
           window.history.replaceState({}, document.title, window.location.pathname);
@@ -107,6 +150,13 @@ class SupabaseAuthService {
         // We're returning from OAuth, get the session
         console.log('Detected OAuth redirect, processing session...');
         
+        // Clear the oauth_redirecting flag since we're processing the return
+        try {
+          sessionStorage.removeItem('oauth_redirecting');
+        } catch (e) {
+          // Ignore if sessionStorage not available
+        }
+        
         // Wait a bit for Supabase to process the session
         await new Promise(resolve => setTimeout(resolve, 100));
         
@@ -149,12 +199,50 @@ class SupabaseAuthService {
       }
 
       if (!data?.url) {
+        console.error('No OAuth URL in response. Data:', JSON.stringify(data, null, 2));
         throw new Error('OAuth URL not returned from Supabase. Please check your Supabase configuration.');
       }
 
-      // Supabase will redirect, so this promise never resolves
+      console.log('OAuth URL received:', data.url.substring(0, 100) + '...');
+      
+      // Set flag to prevent useAuthGuard from interfering (redundant but ensures it's set)
+      // Flag was already set at the start, but set it again here as specified in plan
+      try {
+        sessionStorage.setItem('oauth_redirecting', 'true');
+      } catch (e) {
+        console.warn('Could not set oauth_redirecting flag:', e);
+      }
+
+      // Actually perform the redirect to Google OAuth
+      console.log('Redirecting to Google OAuth...', data.url.substring(0, 100) + '...');
+      
+      if (!window.location) {
+        // Clear flag if redirect fails
+        try {
+          sessionStorage.removeItem('oauth_redirecting');
+        } catch (e) {
+          // Ignore
+        }
+        throw new Error('window.location is not available');
+      }
+      
+      // Perform redirect immediately
+      try {
+        window.location.href = data.url;
+        console.log('Redirect initiated successfully');
+      } catch (redirectError) {
+        // Clear flag if redirect fails
+        try {
+          sessionStorage.removeItem('oauth_redirecting');
+        } catch (e) {
+          // Ignore
+        }
+        console.error('Failed to redirect:', redirectError);
+        throw new Error(`Failed to redirect to OAuth URL: ${redirectError instanceof Error ? redirectError.message : String(redirectError)}`);
+      }
+      
+      // This promise never resolves because we're redirecting
       // The function will be called again when the user returns from OAuth
-      console.log('Redirecting to Google OAuth...');
       return new Promise(() => {}); // Never resolves, redirect happens
     } catch (error: any) {
       console.error('Error in web Google OAuth:', error);

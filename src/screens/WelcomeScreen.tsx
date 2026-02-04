@@ -288,6 +288,8 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
 
   const handleGoogleSignIn = async () => {
     console.log('Google Sign-In button pressed');
+    let redirectTimeout: ReturnType<typeof setTimeout> | null = null;
+    
     try {
       setIsLoading(true);
       
@@ -326,9 +328,24 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
       
       console.log('Starting Google Sign-In process...');
       
+      // Set a timeout to clear loading state if redirect doesn't happen (e.g., popup blocker)
+      // This prevents the UI from being stuck in loading state
+      // Increased timeout to allow for getSession() call and OAuth initiation
+      if (Platform.OS === 'web') {
+        redirectTimeout = setTimeout(() => {
+          console.warn('OAuth redirect timeout - clearing loading state. If redirect was blocked, please check popup blockers.');
+          setIsLoading(false);
+        }, 10000); // 10 second timeout to allow for getSession() and OAuth flow
+      }
+      
       if (Platform.OS === 'web') {
         console.log('Using Simple Auth Service for web');
         const user = await simpleAuthService.signInWithGoogle();
+        
+        // Clear timeout if sign-in completes (shouldn't happen if redirect works)
+        if (redirectTimeout) {
+          clearTimeout(redirectTimeout);
+        }
         console.log('Google Sign-In successful, setting user:', user);
         setUser(user);
         
@@ -357,6 +374,11 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
         }
         // If complete, don't call onGetStarted() - AppContent will show ConversationsScreen
       } else {
+        // Clear timeout for mobile (not needed)
+        if (redirectTimeout) {
+          clearTimeout(redirectTimeout);
+        }
+        
         console.log('Using mobile Google OAuth flow');
         const user = await authService.signInWithGoogle();
         console.log('Google Sign-In successful, setting user:', user);
@@ -388,6 +410,20 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
         // If complete, don't call onGetStarted() - AppContent will show ConversationsScreen
       }
     } catch (error: any) {
+      // Clear timeout on error
+      if (redirectTimeout) {
+        clearTimeout(redirectTimeout);
+      }
+      
+      // Clear oauth_redirecting flag on error
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        try {
+          sessionStorage.removeItem('oauth_redirecting');
+        } catch (e) {
+          // Ignore if sessionStorage not available
+        }
+      }
+      
       console.error('Google Sign-In Error:', error);
       const errorMessage = error?.message || 'An error occurred during sign in. Please try again.';
       
@@ -428,6 +464,11 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
         );
       }
     } finally {
+      // Only clear loading if timeout hasn't already cleared it
+      // (timeout will clear it if redirect doesn't happen)
+      if (redirectTimeout) {
+        clearTimeout(redirectTimeout);
+      }
       setIsLoading(false);
     }
   };
@@ -505,7 +546,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
             )}
             
             {/* Demo Chat Button */}
-            {/* {onDemoChat && (
+            {onDemoChat && (
               <TouchableOpacity
                 onPress={handleDemoChat}
                 disabled={isDemoLoading || isLoading}
@@ -521,7 +562,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
                   {isDemoLoading ? "Loading..." : "Demo"}
                 </RNText>
               </TouchableOpacity>
-            )} */}
+            )}
             </View>
 
             {/* Login Prompt */}

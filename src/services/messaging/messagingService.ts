@@ -81,12 +81,15 @@ class MessagingService {
       // Ensure we have a valid session
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
       if (sessionError || !session) {
-        console.error('Session error in getConversations:', sessionError);
-        throw new Error('Not authenticated. Please sign in again.');
+        console.log('[messagingService] No session in getConversations - auth guard will handle redirect');
+        return []; // Return empty array, auth guard will redirect
       }
 
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not authenticated');
+      if (!user) {
+        console.log('[messagingService] No user in getConversations - auth guard will handle redirect');
+        return []; // Return empty array, auth guard will redirect
+      }
 
       // Get all conversations where user is a member
       const { data: membershipData, error: membershipError } = await supabase
@@ -343,7 +346,10 @@ class MessagingService {
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not authenticated');
+      if (!user) {
+        console.log('[messagingService] No user - auth guard will handle redirect');
+        throw new Error('Not authenticated'); // Still throw for type safety, but auth guard will catch
+      }
 
       const { data, error } = await supabase
         .from('messages')
@@ -392,11 +398,15 @@ class MessagingService {
         throw new Error('Failed to get authentication session');
       }
       if (!session) {
-        throw new Error('Not authenticated. Please sign in again.');
+        console.log('[messagingService] No session - auth guard will handle redirect');
+        throw new Error('Not authenticated'); // Still throw for type safety, but auth guard will catch
       }
 
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not authenticated');
+      if (!user) {
+        console.log('[messagingService] No user - auth guard will handle redirect');
+        throw new Error('Not authenticated'); // Still throw for type safety, but auth guard will catch
+      }
       
       console.log('Creating conversation with user:', otherUserId, 'Current user:', user.id);
       console.log('Session exists:', !!session, 'Access token present:', !!session.access_token);
@@ -498,7 +508,10 @@ class MessagingService {
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not authenticated');
+      if (!user) {
+        console.log('[messagingService] No user - auth guard will handle redirect');
+        throw new Error('Not authenticated'); // Still throw for type safety, but auth guard will catch
+      }
 
       // If no messageId provided, get the latest message
       let targetMessageId = messageId;

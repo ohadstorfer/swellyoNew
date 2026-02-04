@@ -475,7 +475,7 @@ const CountryField: React.FC<CountryFieldProps> = ({
         {/* Web Modal */}
         {isPickerVisible && (
           <TouchableOpacity
-            style={styles.webModalOverlay}
+            style={styles.countryPickerOverlay}
             activeOpacity={1}
             onPress={() => {
               setIsPickerVisible(false);
@@ -483,7 +483,7 @@ const CountryField: React.FC<CountryFieldProps> = ({
             }}
           >
             <TouchableOpacity
-              style={styles.webModalContent}
+              style={styles.countryPickerContent}
               activeOpacity={1}
               onPress={(e) => {
                 // Prevent closing when clicking inside the modal
@@ -685,7 +685,7 @@ const PronounField: React.FC<PronounFieldProps> = ({
       {/* Modal for pronoun selection */}
       {isPickerVisible && (
         <TouchableOpacity
-          style={styles.webModalOverlay}
+          style={styles.pronounModalOverlay}
           activeOpacity={1}
           onPress={() => setIsPickerVisible(false)}
         >
@@ -1337,6 +1337,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  countryPickerOverlay: {
+    position: 'fixed' as any,
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    zIndex: 9000,  // Higher z-index to appear above pronoun modal
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   webModalContent: {
     backgroundColor: colors.white || '#FFFFFF',
     borderRadius: 12,
@@ -1344,6 +1355,18 @@ const styles = StyleSheet.create({
     maxWidth: 500,
     maxHeight: '80%',
     overflow: 'hidden',
+    ...(Platform.OS === 'web' && {
+      boxShadow: '0 4px 20px rgba(0, 0, 0, 0.15)',
+    }),
+  },
+  countryPickerContent: {
+    backgroundColor: colors.white || '#FFFFFF',
+    borderRadius: 12,
+    width: '90%',
+    maxWidth: 500,
+    maxHeight: '80%',
+    overflow: 'hidden',
+    zIndex: 9001,  // Explicitly set z-index for content
     ...(Platform.OS === 'web' && {
       boxShadow: '0 4px 20px rgba(0, 0, 0, 0.15)',
     }),
@@ -1409,11 +1432,23 @@ const styles = StyleSheet.create({
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     color: colors.textSecondary || '#666666',
   },
+  pronounModalOverlay: {
+    position: 'fixed' as any,
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    zIndex: 100,  // Much lower than country picker (9000) to ensure proper stacking
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   pronounModalContent: {
     backgroundColor: colors.white || '#FFFFFF',
     borderRadius: 12,
     width: '90%',
     maxWidth: 400,
+    zIndex: 101,  // Slightly higher than overlay (100) but still lower than country picker (9000)
     overflow: 'hidden',
     ...(Platform.OS === 'web' && {
       boxShadow: '0 4px 20px rgba(0, 0, 0, 0.15)',

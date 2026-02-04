@@ -222,8 +222,12 @@ export const TravelExperienceSlider: React.FC<TravelExperienceSliderProps> = ({
       <Text style={[styles.title, { 
         fontSize: dynamicSizes.titleFontSize, 
         lineHeight: dynamicSizes.titleFontSize * 1.2,
-        marginBottom: dynamicSizes.titleMarginBottom 
+        marginBottom: 8 
       }]}>What is your Travel Experience?</Text>
+
+      <Text style={[styles.subtitle, {
+        marginBottom: dynamicSizes.titleMarginBottom 
+      }]}>How many surf trips have you been on?</Text>
 
       {/* Images Container */}
       <View style={[styles.imagesContainer, {
@@ -332,6 +336,15 @@ const styles = StyleSheet.create({
     ...typography.titleLarge,
     fontWeight: '700',
     color: '#00040A',
+    textAlign: 'center',
+    maxWidth: 350,
+    width: '100%',
+  },
+  subtitle: {
+    fontSize: 16,
+    fontFamily: Platform.OS === 'web' ? 'Poppins, sans-serif' : 'Poppins',
+    fontWeight: '400',
+    color: colors.textSecondary || '#666666',
     textAlign: 'center',
     maxWidth: 350,
     width: '100%',

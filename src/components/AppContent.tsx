@@ -17,9 +17,13 @@ import { SwellyShaperScreen } from '../screens/SwellyShaperScreen';
 import { messagingService } from '../services/messaging/messagingService';
 import { useOnboarding } from '../context/OnboardingContext';
 import { analyticsService } from '../services/analytics/analyticsService';
+import { useAuthGuard } from '../hooks/useAuthGuard';
 
 export const AppContent: React.FC = () => {
   const { currentStep, formData, setCurrentStep, updateFormData, saveStepToSupabase, isComplete, markOnboardingComplete, isDemoUser, setIsDemoUser, setUser, resetOnboarding, user } = useOnboarding();
+  
+  // Initialize auth guard - this will automatically redirect unauthenticated users
+  useAuthGuard();
   const [showLoading, setShowLoading] = useState(false);
   const [isSavingStep1, setIsSavingStep1] = useState(false);
   const [isSavingStep2, setIsSavingStep2] = useState(false);
@@ -545,6 +549,14 @@ export const AppContent: React.FC = () => {
   };
 
 
+  // Auth guard: If user is not authenticated (and not demo user), show WelcomeScreen immediately
+  // This check must come FIRST before any other rendering logic
+  if (user === null && !isDemoUser && currentStep !== -1) {
+    // Force redirect to WelcomeScreen if user becomes unauthenticated
+    // The auth guard will handle the actual logout, but we ensure UI shows WelcomeScreen
+    return <WelcomeScreen onGetStarted={handleGetStarted} onDemoChat={handleDemoChat} isCheckingAuth={false} />;
+  }
+
   // If onboarding is complete, show conversations screen as home page (regardless of currentStep)
   // This check must come FIRST before any step checks
   if (isComplete) {
@@ -779,15 +791,6 @@ export const AppContent: React.FC = () => {
   // Show welcome screen by default (before onboarding starts, when currentStep is -1 or not 0-5)
   // Note: currentStep === 0 shows OnboardingWelcomeScreen (handled above)
   // This handles: initial load, or when user hasn't started onboarding yet
-  // IMPORTANT: Don't show WelcomeScreen if user is logged in or we're checking auth
-  // This prevents WelcomeScreen from flashing after Google login
-  if (user !== null) {
-    // User is logged in - don't show WelcomeScreen
-    // If onboarding is complete, isComplete check above will show ConversationsScreen
-    // If onboarding is not complete, currentStep should be 0 or higher to show onboarding
-    // If we're in a weird state (user exists but currentStep is -1), wait for onboarding check to complete
-    return null; // Will re-render once onboarding status is checked and currentStep/isComplete is updated
-  }
-
+  // Auth guard ensures unauthenticated users are redirected here
   return <WelcomeScreen onGetStarted={handleGetStarted} onDemoChat={handleDemoChat} isCheckingAuth={isCheckingAuth} />;
 };

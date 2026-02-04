@@ -23,7 +23,11 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
   onComplete,
   onBack,
 }) => {
-  const { setCurrentStep } = useOnboarding();
+  const { setCurrentStep, formData } = useOnboarding();
+
+  // Check if we should display the name
+  const userName = formData.nickname || '';
+  const shouldShowName = userName && userName.trim() !== '' && userName.toLowerCase() !== 'user';
 
   // Get video URL using the utility function
   const videoUrl = getVideoUrl('/Loading 4 to 5.mp4');
@@ -407,6 +411,15 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
             />
           </View>
         </View>
+
+        {/* Text Container - 28px below video */}
+        <View style={styles.textContainer}>
+          {shouldShowName && (
+            <Text style={styles.greeting}>Alright, {userName}!</Text>
+          )}
+          <Text style={styles.subtitle}>Community powered travel{'\n'}starts with you!</Text>
+        </View>
+        
       </View>
     </SafeAreaView>
   );
@@ -465,9 +478,36 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     backgroundColor: colors.backgroundGray,
   },
-  titleContainer: {
-    marginBottom: 36,
+  textContainer: {
+    width: 393,
+    height: 72,
+    paddingLeft: 15,
+    justifyContent: 'flex-end',
     alignItems: 'center',
+    marginTop: 28,
+  },
+  titleContainer: {
+    marginTop: 36,
+    alignItems: 'center',
+    gap: 4,
+  },
+  greeting: {
+    fontSize: 22,
+    fontWeight: '700',
+    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat',
+    color: colors.textPrimary,
+    textAlign: 'center',
+    lineHeight: 32,
+    width: 350,
+  },
+  subtitle: {
+    fontSize: 20,
+    fontWeight: '400',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    color: colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 24,
+    width: 351,
   },
   title: {
     fontSize: 24,
@@ -485,6 +525,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     backgroundColor: colors.backgroundGray, // Match container background to prevent flash
     position: 'relative',
+    zIndex: 1,
   },
   videoWrapper: {
     width: '100%',

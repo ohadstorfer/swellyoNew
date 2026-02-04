@@ -53,7 +53,8 @@ class SwellyShaperService {
     const { data: { session }, error } = await supabase.auth.getSession();
     
     if (error || !session) {
-      throw new Error('Not authenticated. Please sign in again.');
+      console.log('[swellyShaperService] No session - auth guard will handle redirect');
+      throw new Error('Not authenticated'); // Still throw for type safety, but auth guard will catch
     }
 
     const anonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
