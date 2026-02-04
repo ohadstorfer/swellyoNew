@@ -33,6 +33,22 @@ function getTravelExperienceLevel(travelExp: number | string | undefined | null)
   return 2; // Default fallback
 }
 
+/**
+ * Normalize board type enum to database format
+ * Converts any variations (midlength, mid-length, etc.) to correct enum (mid_length)
+ */
+function normalizeBoardTypeEnum(boardType: string): string {
+  const normalized = boardType.toLowerCase().trim();
+  if (normalized === 'midlength' || normalized === 'mid-length' || normalized === 'mid length') {
+    return 'mid_length';
+  }
+  // Ensure other valid enums are returned as-is
+  if (normalized === 'shortboard' || normalized === 'longboard' || normalized === 'soft_top' || normalized === 'soft top') {
+    return normalized === 'soft top' ? 'soft_top' : normalized;
+  }
+  return normalized; // Return as-is if already correct or unknown
+}
+
 const OPENAI_API_KEY = process.env.EXPO_PUBLIC_OPENAI_API_KEY;
 
 // All 50 US states (lowercase for matching)
@@ -893,8 +909,10 @@ export async function findMatchingUsers(
           ? request.queryFilters.surfboard_type 
           : [request.queryFilters.surfboard_type];
         if (surfboardTypes.length > 0) {
-          query = query.in('surfboard_type', surfboardTypes);
-          console.log(`  - Filtering by surfboard_type: ${surfboardTypes.join(', ')}`);
+          // Normalize board types to correct enum format
+          const normalizedTypes = surfboardTypes.map(normalizeBoardTypeEnum);
+          query = query.in('surfboard_type', normalizedTypes);
+          console.log(`  - Filtering by surfboard_type: ${normalizedTypes.join(', ')}`);
         }
       }
       
@@ -919,8 +937,10 @@ export async function findMatchingUsers(
         
         // If board type is also specified, filter by both (required for category-based filtering)
         if (request.queryFilters.surfboard_type && request.queryFilters.surfboard_type.length > 0) {
-          query = query.in('surfboard_type', request.queryFilters.surfboard_type);
-          console.log(`  - Also filtering by surfboard_type: ${request.queryFilters.surfboard_type.join(', ')}`);
+          // Normalize board types to correct enum format
+          const normalizedTypes = request.queryFilters.surfboard_type.map(normalizeBoardTypeEnum);
+          query = query.in('surfboard_type', normalizedTypes);
+          console.log(`  - Also filtering by surfboard_type: ${normalizedTypes.join(', ')}`);
         }
       }
       // Legacy: Filter by numeric surf_level (for backward compatibility)
@@ -1453,8 +1473,8 @@ function extractRequestedCriteria(request: TripPlanningRequest): {
     surfboard_type: (request.queryFilters?.surfboard_type && request.queryFilters.surfboard_type.length > 0) ||
                     (request.non_negotiable_criteria?.surfboard_type && request.non_negotiable_criteria.surfboard_type.length > 0)
                       ? (request.queryFilters?.surfboard_type && request.queryFilters.surfboard_type.length > 0
-                          ? request.queryFilters.surfboard_type
-                          : request.non_negotiable_criteria?.surfboard_type)
+                          ? request.queryFilters.surfboard_type.map(normalizeBoardTypeEnum)
+                          : (request.non_negotiable_criteria?.surfboard_type || []).map(normalizeBoardTypeEnum))
                       : undefined,
     age_range: request.non_negotiable_criteria?.age_range || 
                (request.queryFilters?.age_min !== undefined && request.queryFilters?.age_max !== undefined

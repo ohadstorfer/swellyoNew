@@ -64,6 +64,9 @@ const getBoardFolder = (boardType: number): string => {
   return folderMap[boardType] || 'shortboard';
 };
 
+// Cache video URLs to avoid re-computation
+const videoUrlCache = new Map<string, string>();
+
 // Function to get videos with resolved URLs for a specific board type
 const getSurfLevelVideos = (boardType: number): VideoLevel[] => {
   const boardVideos = BOARD_VIDEO_DEFINITIONS[boardType];
@@ -84,7 +87,15 @@ const getSurfLevelVideos = (boardType: number): VideoLevel[] => {
       // Videos are served from Supabase storage bucket
       const storagePath = `${boardFolder}/${video.videoFileName}`;
       const thumbnailPath = `/surf level/${boardFolder}/${video.thumbnailFileName}`;
-      const videoUrl = getSurfLevelVideoFromStorage(storagePath);
+      
+      // Use cached URL if available
+      let videoUrl: string;
+      if (videoUrlCache.has(storagePath)) {
+        videoUrl = videoUrlCache.get(storagePath)!;
+      } else {
+        videoUrl = getSurfLevelVideoFromStorage(storagePath);
+        videoUrlCache.set(storagePath, videoUrl);
+      }
       
       if (__DEV__) {
         console.log(`[OnboardingStep2] Video ${index} (${video.name}):`, {
@@ -92,6 +103,7 @@ const getSurfLevelVideos = (boardType: number): VideoLevel[] => {
           videoUrl,
           boardFolder,
           videoFileName: video.videoFileName,
+          cached: videoUrlCache.has(storagePath),
         });
       }
       
@@ -240,6 +252,47 @@ export const OnboardingStep2Screen: React.FC<OnboardingStep2ScreenProps> = ({
     return 0; // Default to first video if invalid
   });
 
+  // Loading states for video optimization
+  const [isMainVideoLoading, setIsMainVideoLoading] = useState(true);
+  const [isBackgroundVideoLoading, setIsBackgroundVideoLoading] = useState(true);
+
+  // Preload adjacent videos for smoother transitions
+  React.useEffect(() => {
+    if (Platform.OS !== 'web' || surfLevelVideos.length === 0) return;
+    
+    const currentIndex = surfLevelVideos.findIndex(v => v.id === selectedVideoId);
+    if (currentIndex === -1) return;
+    
+    const nextIndex = (currentIndex + 1) % surfLevelVideos.length;
+    const prevIndex = (currentIndex - 1 + surfLevelVideos.length) % surfLevelVideos.length;
+    
+    const nextVideo = surfLevelVideos[nextIndex];
+    const prevVideo = surfLevelVideos[prevIndex];
+    
+    // Preload next and previous videos (metadata only to save bandwidth)
+    const preloadVideo = (video: VideoLevel) => {
+      if (!video?.videoUrl || typeof document === 'undefined') return;
+      
+      // Use link preload for metadata only
+      const link = document.createElement('link');
+      link.rel = 'preload';
+      link.as = 'video';
+      link.href = video.videoUrl;
+      link.setAttribute('type', 'video/mp4');
+      document.head.appendChild(link);
+      
+      // Clean up after a delay to prevent memory issues
+      setTimeout(() => {
+        if (document.head.contains(link)) {
+          document.head.removeChild(link);
+        }
+      }, 30000); // Remove after 30 seconds
+    };
+    
+    if (nextVideo) preloadVideo(nextVideo);
+    if (prevVideo) preloadVideo(prevVideo);
+  }, [selectedVideoId, surfLevelVideos]);
+
   // Reset selectedVideoId when board type changes to ensure it's valid for the new board's videos
   React.useEffect(() => {
     if (surfLevelVideos.length > 0) {
@@ -279,46 +332,65 @@ export const OnboardingStep2Screen: React.FC<OnboardingStep2ScreenProps> = ({
 
   const selectedVideo = surfLevelVideos.find((v: VideoLevel) => v.id === selectedVideoId) || surfLevelVideos[0];
 
-  // Create video player for background video
+  // Create video player for background video (delayed loading)
   const backgroundPlayer = useVideoPlayer(
-    selectedVideo.videoUrl || '',
+    '', // Start with empty URL
     (player: any) => {
-      if (player && selectedVideo.videoUrl) {
-        try {
-          player.loop = true;
-          player.muted = true;
-          player.play();
-        } catch (error) {
-          console.error('Error initializing background video player:', error);
-        }
+      // Background video will be loaded after main video starts
+      if (player) {
+        player.loop = true;
+        player.muted = true;
       }
     }
   );
 
-  // Update player source when video changes
+  // Delay background video loading to prioritize main video
   React.useEffect(() => {
-    if (selectedVideo.videoUrl && backgroundPlayer) {
-      const videoUrl = selectedVideo.videoUrl;
-      if (!videoUrl) {
-        console.warn('No video URL provided for background video:', selectedVideo.name);
-        return;
-      }
-      
-      backgroundPlayer.replaceAsync(videoUrl).then(() => {
-        if (backgroundPlayer) {
-          backgroundPlayer.loop = true;
-          backgroundPlayer.muted = true;
-          try {
-            backgroundPlayer.play();
-          } catch (playError: any) {
-            console.error('Error playing background video:', playError);
+    if (!selectedVideo.videoUrl || !backgroundPlayer) return;
+    
+    // Wait for main video to start loading before loading background
+    const timer = setTimeout(() => {
+      if (backgroundPlayer && selectedVideo.videoUrl) {
+        setIsBackgroundVideoLoading(true);
+        backgroundPlayer.replaceAsync(selectedVideo.videoUrl).then(() => {
+          if (backgroundPlayer) {
+            backgroundPlayer.loop = true;
+            backgroundPlayer.muted = true;
+            
+            // Safari-specific: Set playsInline attributes on the video element
+            if (Platform.OS === 'web' && typeof document !== 'undefined') {
+              const setPlaysInline = () => {
+                const videoElements = document.querySelectorAll('video');
+                videoElements.forEach((videoElement: HTMLVideoElement) => {
+                  videoElement.setAttribute('playsinline', 'true');
+                  videoElement.setAttribute('webkit-playsinline', 'true');
+                  videoElement.setAttribute('x5-playsinline', 'true');
+                  videoElement.playsInline = true;
+                });
+              };
+              
+              // Set attributes before playing
+              setPlaysInline();
+              setTimeout(setPlaysInline, 100);
+            }
+            
+            const playPromise = backgroundPlayer.play();
+            if (playPromise !== undefined && typeof (playPromise as any).catch === 'function') {
+              (playPromise as any).catch(() => {
+                // Autoplay may be blocked, that's OK for background
+              });
+            }
+            setIsBackgroundVideoLoading(false);
           }
-        }
-      }).catch((error: any) => {
-        console.error('Error replacing background video:', error, 'URL:', videoUrl);
-      });
-    }
-  }, [selectedVideo.videoUrl, selectedVideo.name, backgroundPlayer]);
+        }).catch((error: any) => {
+          console.error('Error loading background video:', error);
+          setIsBackgroundVideoLoading(false);
+        });
+      }
+    }, 1000); // Delay by 1 second to prioritize main video
+    
+    return () => clearTimeout(timer);
+  }, [selectedVideo.videoUrl, backgroundPlayer]);
 
   return (
     <SafeAreaView style={styles.container}>

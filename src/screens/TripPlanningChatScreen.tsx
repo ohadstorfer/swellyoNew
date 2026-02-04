@@ -998,7 +998,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
           
           const errorMessage: Message = {
             id: (Date.now() + 2).toString(),
-            text: `Sorry, there was an error finding matches: ${error instanceof Error ? error.message : String(error)}. Please try again later.`,
+            text: `Sorry, I couldn't find any matches for your search. Try adjusting your destination or preferences and search again.`,
             isUser: false,
             timestamp: new Date().toLocaleTimeString('en-US', { 
               hour: '2-digit', 

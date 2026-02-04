@@ -146,11 +146,13 @@ const AnimatedThumbnail: React.FC<AnimatedThumbnailProps> = ({
         ]}
       >
         {/* Use image for thumbnails - thumbnailUrl should point to actual image files */}
-        <Image
-          source={{ uri: item.thumbnailUrl }}
-          style={imageStyle}
-          resizeMode="cover"
-        />
+        {item.thumbnailUrl ? (
+          <Image
+            source={{ uri: item.thumbnailUrl }}
+            style={imageStyle}
+            resizeMode="cover"
+          />
+        ) : null}
       </Animated.View>
     </TouchableOpacity>
   );
@@ -173,6 +175,7 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
   const [containerWidth, setContainerWidth] = useState(0);
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const thumbnailFadeAnim = useRef(new Animated.Value(1)).current;
+  const [isVideoLoading, setIsVideoLoading] = useState(true);
   
   // Calculate video dimensions based on available height
   // Maintain aspect ratio while fitting available space
@@ -317,6 +320,38 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
       }
     }
   );
+
+  // Track video loading state
+  useEffect(() => {
+    if (!mainVideoPlayer || !selectedVideo.videoUrl) {
+      setIsVideoLoading(true);
+      return;
+    }
+    
+    // Reset loading state when video changes
+    setIsVideoLoading(true);
+    
+    // For web, listen to video element events
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      const handleCanPlay = () => {
+        setIsVideoLoading(false);
+      };
+      
+      const videoElements = document.querySelectorAll('video');
+      videoElements.forEach((video: HTMLVideoElement) => {
+        video.addEventListener('canplay', handleCanPlay, { once: true });
+      });
+      
+      return () => {
+        videoElements.forEach((video: HTMLVideoElement) => {
+          video.removeEventListener('canplay', handleCanPlay);
+        });
+      };
+    }
+    
+    // For native, assume loaded after replaceAsync completes
+    // This is handled in the replaceAsync promise
+  }, [mainVideoPlayer, selectedVideo.videoUrl]);
 
   // Robust autoplay implementation - tries multiple times and handles all cases
   // Also sets playsInline for iOS Safari to prevent fullscreen
@@ -552,9 +587,11 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
       }
       if (!videoUrl) {
         console.warn('No video URL provided for:', selectedVideo.name);
+        setIsVideoLoading(false);
         return;
       }
       
+      setIsVideoLoading(true);
       const replacePromise = mainVideoPlayer.replaceAsync(videoUrl);
       if (replacePromise && typeof replacePromise.then === 'function') {
         replacePromise.then(() => {
@@ -566,16 +603,22 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
             // Try to play after source is replaced
             const playPromise = mainVideoPlayer.play();
             if (playPromise !== undefined && typeof (playPromise as any).catch === 'function') {
-              (playPromise as any).catch((playError: any) => {
-                // Autoplay may be blocked, but the useEffect above will retry
+              (playPromise as any).then(() => {
+                setIsVideoLoading(false);
+              }).catch((playError: any) => {
+                // Autoplay may be blocked, but video is loaded
+                setIsVideoLoading(false);
                 if (__DEV__ && playError.name !== 'NotAllowedError') {
                   console.warn('[VideoCarousel] Play after replace failed:', playError.message);
                 }
               });
+            } else {
+              setIsVideoLoading(false);
             }
           }
         }).catch((error: any) => {
           console.error('Error replacing video:', error, 'URL:', videoUrl);
+          setIsVideoLoading(false);
         });
       }
     }
@@ -743,7 +786,7 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
             ]}
             pointerEvents="none"
           >
-            {selectedVideo.videoUrl ? (
+            {selectedVideo.videoUrl && !isVideoLoading ? (
               <View style={styles.videoPlayerContainer} pointerEvents="none">
                 <VideoView
                   player={mainVideoPlayer}
@@ -764,11 +807,13 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
                 />
               </View>
             ) : (
-              <Image
-                source={{ uri: selectedVideo.thumbnailUrl }}
-                style={styles.videoPlayer}
-                resizeMode="cover"
-              />
+              selectedVideo.thumbnailUrl ? (
+                <Image
+                  source={{ uri: selectedVideo.thumbnailUrl }}
+                  style={styles.videoPlayer}
+                  resizeMode="cover"
+                />
+              ) : null
             )}
           </Animated.View>
           
