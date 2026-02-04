@@ -12,7 +12,7 @@ import { performLogout } from '../utils/logout';
  * token refresh failures, and OAuth callback flows.
  */
 export function useAuthGuard() {
-  const { user, setUser, setCurrentStep, resetOnboarding, setIsDemoUser, isDemoUser } = useOnboarding();
+  const { user, setUser, setCurrentStep, resetOnboarding, setIsDemoUser, isDemoUser, isRestoringSession } = useOnboarding();
   const isProcessingLogoutRef = useRef(false);
   const lastAuthCheckRef = useRef<number>(0);
   const debounceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -103,6 +103,12 @@ export function useAuthGuard() {
    * Check authentication state
    */
   const checkAuthState = useCallback(async () => {
+    // Wait for session restoration to complete
+    if (isRestoringSession) {
+      console.log('[useAuthGuard] Waiting for session restoration...');
+      return;
+    }
+    
     // Don't check if we're in OAuth callback flow
     if (isOAuthCallback()) {
       console.log('[useAuthGuard] Skipping auth check during OAuth callback');
@@ -140,11 +146,33 @@ export function useAuthGuard() {
         return;
       }
 
-      // Verify user exists
+      // Session exists - check if user needs to be restored to context
+      if (user === null) {
+        console.log('[useAuthGuard] Session exists but user not in context - restoring user');
+        
+        // Get user from session and restore to context
+        const { data: { user: authUser }, error: userError } = await supabase.auth.getUser();
+        
+        if (userError || !authUser) {
+          console.log('[useAuthGuard] Failed to get user from session:', userError?.message || 'No user');
+          // Session exists but can't get user - something is wrong, redirect
+          await handleUnauthenticated();
+          return;
+        }
+        
+        // Convert and set user in context
+        const { convertSupabaseUserToAppUser } = await import('../utils/userConversion');
+        const appUser = convertSupabaseUserToAppUser(authUser);
+        console.log('[useAuthGuard] Restoring user to context:', appUser.id);
+        setUser(appUser);
+        return; // Don't redirect - user is now restored
+      }
+
+      // User exists and session is valid - verify user can still be fetched
       const { data: { user: authUser }, error: userError } = await supabase.auth.getUser();
       
       if (userError || !authUser) {
-        console.log('[useAuthGuard] Failed to get user:', userError?.message || 'No user');
+        console.log('[useAuthGuard] Failed to verify user:', userError?.message || 'No user');
         
         // If user exists in context but can't be verified, they're unauthenticated
         if (user !== null) {
@@ -164,7 +192,7 @@ export function useAuthGuard() {
         await handleUnauthenticated();
       }
     }
-  }, [user, isDemoUser, isOAuthCallback, handleUnauthenticated]);
+  }, [user, isDemoUser, isRestoringSession, isOAuthCallback, handleUnauthenticated, setUser]);
 
   /**
    * Listen to auth state changes from Supabase
@@ -213,14 +241,14 @@ export function useAuthGuard() {
         return;
       }
 
-      // If we have a session, verify user is in context
-      if (session && user === null && !isDemoUser) {
+      // If we have a session, verify user is in context (but wait for restoration to complete)
+      if (session && user === null && !isDemoUser && !isRestoringSession) {
         console.log('[useAuthGuard] Session exists but user not in context - checking auth state');
         await checkAuthState();
       }
     });
 
-    // Initial auth check
+    // Initial auth check (will wait for restoration if in progress)
     checkAuthState();
 
     // Cleanup
@@ -235,9 +263,14 @@ export function useAuthGuard() {
   }, []); // Only run on mount - handleUnauthenticated and checkAuthState use latest context values
 
   /**
-   * Re-check auth state when user changes
+   * Re-check auth state when user changes or session restoration completes
    */
   useEffect(() => {
+    // Wait for session restoration to complete
+    if (isRestoringSession) {
+      return;
+    }
+    
     // If user becomes null and we're not a demo user, ensure we're on WelcomeScreen
     if (user === null && !isDemoUser) {
       // Don't redirect if we're already on WelcomeScreen (currentStep === -1)
@@ -249,7 +282,7 @@ export function useAuthGuard() {
     if (user !== null && !isDemoUser) {
       checkAuthState();
     }
-  }, [user, isDemoUser, checkAuthState]);
+  }, [user, isDemoUser, isRestoringSession, checkAuthState]);
 
   /**
    * Handle app foregrounding (mobile) or focus (web)

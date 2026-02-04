@@ -109,60 +109,8 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
       }
     }
 
-    // Check for existing session and OAuth return
+    // Check for OAuth return only - OnboardingContext now handles general session restoration
     const checkAuthState = async () => {
-      // Don't auto-sign-in if user is explicitly null (e.g., after logout)
-      if (user === null && !isDemoUser) {
-        console.log('User is null, skipping auto-sign-in (likely after logout)');
-        return;
-      }
-      
-      // First, check if we have an existing Supabase session
-      if (isSupabaseConfigured()) {
-        try {
-          const supabaseUser = await supabaseAuthService.getCurrentUser();
-          if (supabaseUser) {
-            console.log('Found existing Supabase session, user:', supabaseUser);
-            // Convert Supabase user (id: string) to legacy format (id: number)
-            const legacyUser = {
-              id: parseInt(supabaseUser.id.replace(/-/g, '').substring(0, 15), 16) || Date.now(),
-              email: supabaseUser.email,
-              nickname: supabaseUser.nickname,
-              googleId: supabaseUser.googleId || supabaseUser.id,
-              createdAt: supabaseUser.createdAt,
-              updatedAt: supabaseUser.updatedAt,
-            };
-            setUser(legacyUser);
-            updateFormData({
-              nickname: supabaseUser.nickname,
-              userEmail: supabaseUser.email,
-            });
-            
-            // Identify user with PostHog when session is restored
-            const { analyticsService } = await import('../services/analytics/analyticsService');
-            const userId = legacyUser.id.toString();
-            const userProperties = {
-              $email: supabaseUser.email,
-              $name: supabaseUser.nickname || supabaseUser.email?.split('@')[0] || 'User',
-              email: supabaseUser.email,
-              name: supabaseUser.nickname || supabaseUser.email?.split('@')[0] || 'User',
-            };
-            analyticsService.identify(userId, userProperties);
-            console.log('[WelcomeScreen] User identified with PostHog after session restoration:', userId);
-            
-            // Check if user has finished onboarding before navigating
-            const hasFinishedOnboarding = await checkOnboardingStatus();
-            if (!hasFinishedOnboarding) {
-              onGetStarted();
-            }
-            // If hasFinishedOnboarding is true, isComplete will be set and AppContent will show homepage
-            return; // Don't proceed with OAuth flow if we already have a session
-          }
-        } catch (error) {
-          console.log('No existing Supabase session:', error);
-        }
-      }
-
       // Check if we're returning from OAuth (for Supabase web flow)
       if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location) {
         // Check for Supabase OAuth return (access_token in hash)
@@ -173,48 +121,49 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
           console.log('Detected Supabase OAuth return, processing session...');
           try {
             setIsLoading(true);
-            // The session should already be set by Supabase, just get the user
-            const supabaseUser = await supabaseAuthService.getCurrentUser();
-            if (supabaseUser) {
-              console.log('Supabase OAuth return successful, setting user:', supabaseUser);
-              // Convert Supabase user (id: string) to legacy format (id: number)
-              const legacyUser = {
-                id: parseInt(supabaseUser.id.replace(/-/g, '').substring(0, 15), 16) || Date.now(),
-                email: supabaseUser.email,
-                nickname: supabaseUser.nickname,
-                googleId: supabaseUser.googleId || supabaseUser.id,
-                createdAt: supabaseUser.createdAt,
-                updatedAt: supabaseUser.updatedAt,
-              };
-              setUser(legacyUser);
-              updateFormData({
-                nickname: supabaseUser.nickname,
-                userEmail: supabaseUser.email,
-              });
-              
-              // Identify user with PostHog after OAuth return
-              const { analyticsService } = await import('../services/analytics/analyticsService');
-              const userId = legacyUser.id.toString();
-              const userProperties = {
-                $email: supabaseUser.email,
-                $name: supabaseUser.nickname || supabaseUser.email?.split('@')[0] || 'User',
-                email: supabaseUser.email,
-                name: supabaseUser.nickname || supabaseUser.email?.split('@')[0] || 'User',
-              };
-              analyticsService.identify(userId, userProperties);
-              console.log('[WelcomeScreen] User identified with PostHog after OAuth return:', userId);
-              
-              // Clean up the URL hash
-              window.history.replaceState({}, document.title, window.location.pathname);
-              
-              // Check if user has finished onboarding before navigating
-              const hasFinishedOnboarding = await checkOnboardingStatus();
-              if (!hasFinishedOnboarding) {
-                onGetStarted();
-              }
-              // If hasFinishedOnboarding is true, isComplete will be set and AppContent will show homepage
-              return;
+            // Get the raw Supabase user from session
+            const { supabase } = await import('../config/supabase');
+            const { data: { user: rawSupabaseUser }, error } = await supabase.auth.getUser();
+            
+            if (error || !rawSupabaseUser) {
+              console.error('Failed to get user from OAuth session:', error);
+              throw new Error('Failed to get user from session');
             }
+            
+            console.log('Supabase OAuth return successful, converting user:', rawSupabaseUser.id);
+            
+            // Convert Supabase user to app user format using utility
+            const { convertSupabaseUserToAppUser } = await import('../utils/userConversion');
+            const legacyUser = convertSupabaseUserToAppUser(rawSupabaseUser);
+            
+            setUser(legacyUser);
+            updateFormData({
+              nickname: legacyUser.nickname,
+              userEmail: legacyUser.email,
+            });
+            
+            // Identify user with PostHog after OAuth return
+            const { analyticsService } = await import('../services/analytics/analyticsService');
+            const userId = legacyUser.id.toString();
+            const userProperties = {
+              $email: legacyUser.email,
+              $name: legacyUser.nickname || legacyUser.email?.split('@')[0] || 'User',
+              email: legacyUser.email,
+              name: legacyUser.nickname || legacyUser.email?.split('@')[0] || 'User',
+            };
+            analyticsService.identify(userId, userProperties);
+            console.log('[WelcomeScreen] User identified with PostHog after OAuth return:', userId);
+            
+            // Clean up the URL hash
+            window.history.replaceState({}, document.title, window.location.pathname);
+            
+            // Check if user has finished onboarding before navigating
+            const hasFinishedOnboarding = await checkOnboardingStatus();
+            if (!hasFinishedOnboarding) {
+              onGetStarted();
+            }
+            // If hasFinishedOnboarding is true, isComplete will be set and AppContent will show homepage
+            return;
           } catch (error: any) {
             console.error('Supabase OAuth return error:', error);
             // Clean up the URL even on error

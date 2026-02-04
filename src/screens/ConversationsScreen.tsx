@@ -1215,20 +1215,20 @@ export default function ConversationsScreen({
                             },
                           ],
                           shadowColor: '#9D4EDD',
-                          shadowOffset: { width: 0, height: 0 },
+                          shadowOffset: { width: 5, height: 5 },
                           shadowOpacity: arrowAnim.interpolate({
-                            inputRange: [0, 0.5, 1],
-                            outputRange: [0.3, 0.6, 0.3],
+                            inputRange: [0, 0.8, 1],
+                            outputRange: [0.5, 0.8, 0.5],
                           }),
-                          shadowRadius: 8,
+                          shadowRadius: 18,
                           ...(Platform.OS === 'web' && {
                             // Web-specific shadow for better glow effect
                             boxShadow: arrowAnim.interpolate({
                               inputRange: [0, 0.5, 1],
                               outputRange: [
-                                '0 0 8px rgba(157, 78, 221, 0.3)',
-                                '0 0 16px rgba(157, 78, 221, 0.6)',
-                                '0 0 8px rgba(157, 78, 221, 0.3)',
+                                '0 0 20px rgba(157, 78, 221, 0.3)',
+                                '0 0 40px rgba(157, 78, 221, 0.6)',
+                                '0 0 20px rgba(157, 78, 221, 0.3)',
                               ],
                             }) as any,
                           }),

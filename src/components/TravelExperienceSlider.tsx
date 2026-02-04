@@ -225,9 +225,9 @@ export const TravelExperienceSlider: React.FC<TravelExperienceSliderProps> = ({
         marginBottom: 8 
       }]}>What is your Travel Experience?</Text>
 
-      <Text style={[styles.subtitle, {
+      {/* <Text style={[styles.subtitle, {
         marginBottom: dynamicSizes.titleMarginBottom 
-      }]}>How many surf trips have you been on?</Text>
+      }]}>How many surf trips have you been on?</Text> */}
 
       {/* Images Container */}
       <View style={[styles.imagesContainer, {

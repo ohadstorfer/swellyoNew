@@ -21,6 +21,7 @@ interface OnboardingContextType {
   checkOnboardingStatus: () => Promise<boolean>;
   isDemoUser: boolean;
   setIsDemoUser: (isDemo: boolean) => void;
+  isRestoringSession: boolean;
 }
 
 const OnboardingContext = createContext<OnboardingContextType | undefined>(undefined);
@@ -46,12 +47,20 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const [isLoaded, setIsLoaded] = useState(false);
   const [isComplete, setIsComplete] = useState(false);
   const [isDemoUser, setIsDemoUser] = useState(false);
+  const [isRestoringSession, setIsRestoringSession] = useState(true);
 
-  // Load saved data on mount
+  // Restore session on mount - this runs FIRST before any other logic
   useEffect(() => {
-    loadOnboardingData();
-    initializeDatabase();
+    restoreSession();
   }, []);
+
+  // Load saved data on mount - runs after session restoration
+  useEffect(() => {
+    if (!isRestoringSession) {
+      loadOnboardingData();
+      initializeDatabase();
+    }
+  }, [isRestoringSession]);
 
   // Reset formData if it has invalid boardType when starting demo
   useEffect(() => {
@@ -78,6 +87,53 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       setFormData(prev => ({ ...prev, boardType: -1 }));
     }
   }, [currentStep, formData.boardType, isDemoUser]);
+
+  // Restore session from Supabase on mount
+  // This runs FIRST to check if user has a valid session before any other logic
+  const restoreSession = async () => {
+    console.log('[OnboardingContext] Starting session restoration...');
+    
+    if (!isSupabaseConfigured()) {
+      console.log('[OnboardingContext] Supabase not configured, skipping session restoration');
+      setIsRestoringSession(false);
+      return;
+    }
+    
+    try {
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      
+      if (sessionError) {
+        console.log('[OnboardingContext] Error getting session:', sessionError.message);
+        setIsRestoringSession(false);
+        return;
+      }
+      
+      if (session?.user) {
+        console.log('[OnboardingContext] Session found, restoring user:', session.user.id);
+        
+        // Convert Supabase user to app user format
+        const { convertSupabaseUserToAppUser } = await import('../utils/userConversion');
+        const appUser = convertSupabaseUserToAppUser(session.user);
+        
+        setUser(appUser);
+        console.log('[OnboardingContext] User restored from session:', appUser.id);
+        
+        // Also update form data with user info
+        setFormData(prev => ({
+          ...prev,
+          nickname: appUser.nickname,
+          userEmail: appUser.email,
+        }));
+      } else {
+        console.log('[OnboardingContext] No session found');
+      }
+    } catch (error) {
+      console.error('[OnboardingContext] Error restoring session:', error);
+    } finally {
+      console.log('[OnboardingContext] Session restoration complete');
+      setIsRestoringSession(false);
+    }
+  };
 
   // Define resetOnboarding function early so it can be used in useEffect
   // Use useCallback to ensure stable reference for useEffect dependencies
@@ -387,6 +443,7 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     checkOnboardingStatus,
     isDemoUser,
     setIsDemoUser,
+    isRestoringSession,
   };
 
   return (

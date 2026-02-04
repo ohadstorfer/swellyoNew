@@ -20,7 +20,7 @@ import { analyticsService } from '../services/analytics/analyticsService';
 import { useAuthGuard } from '../hooks/useAuthGuard';
 
 export const AppContent: React.FC = () => {
-  const { currentStep, formData, setCurrentStep, updateFormData, saveStepToSupabase, isComplete, markOnboardingComplete, isDemoUser, setIsDemoUser, setUser, resetOnboarding, user } = useOnboarding();
+  const { currentStep, formData, setCurrentStep, updateFormData, saveStepToSupabase, isComplete, markOnboardingComplete, isDemoUser, setIsDemoUser, setUser, resetOnboarding, user, isRestoringSession } = useOnboarding();
   
   // Initialize auth guard - this will automatically redirect unauthenticated users
   useAuthGuard();
@@ -549,13 +549,15 @@ export const AppContent: React.FC = () => {
   };
 
 
-  // Auth guard: If user is not authenticated (and not demo user), show WelcomeScreen immediately
-  // This check must come FIRST before any other rendering logic
-  if (user === null && !isDemoUser && currentStep !== -1) {
-    // Force redirect to WelcomeScreen if user becomes unauthenticated
-    // The auth guard will handle the actual logout, but we ensure UI shows WelcomeScreen
-    return <WelcomeScreen onGetStarted={handleGetStarted} onDemoChat={handleDemoChat} isCheckingAuth={false} />;
+  // Wait for session restoration to complete before rendering
+  // This prevents premature redirects before we know if user has a valid session
+  if (isRestoringSession) {
+    console.log('[AppContent] Waiting for session restoration...');
+    return null; // Show nothing while restoring session (very brief, typically < 100ms)
   }
+
+  // Note: Removed premature WelcomeScreen redirect check
+  // The auth guard now handles all authentication redirects after session restoration completes
 
   // If onboarding is complete, show conversations screen as home page (regardless of currentStep)
   // This check must come FIRST before any step checks
