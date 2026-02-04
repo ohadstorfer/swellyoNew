@@ -108,6 +108,9 @@ export default function ConversationsScreen({
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const glowAnim = useRef(new Animated.Value(0)).current;
   
+  // Arrow animation for welcome instruction
+  const arrowAnim = useRef(new Animated.Value(0)).current;
+  
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(false); // Start as false to show conversations immediately
   const [conversationsLoaded, setConversationsLoaded] = useState(false); // Track if conversations have been loaded
@@ -269,6 +272,32 @@ export default function ConversationsScreen({
     
     checkIfUserHasSentMessages();
   }, [isMVPMode, currentUserId, selectedConversation]);
+
+  // Arrow animation effect for welcome instruction
+  useEffect(() => {
+    // Create a smooth up and down animation with glow effect
+    // Note: useNativeDriver: false is required for shadow effects
+    const arrowAnimation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(arrowAnim, {
+          toValue: 1,
+          duration: 1500,
+          useNativeDriver: false, // Required for shadow effects
+        }),
+        Animated.timing(arrowAnim, {
+          toValue: 0,
+          duration: 1500,
+          useNativeDriver: false, // Required for shadow effects
+        }),
+      ])
+    );
+    
+    arrowAnimation.start();
+    
+    return () => {
+      arrowAnimation.stop();
+    };
+  }, [arrowAnim]);
 
   // Pulse animation effect for survey bubble
   useEffect(() => {
@@ -1136,13 +1165,35 @@ export default function ConversationsScreen({
               <>
                 {filteredConversations.map(renderConversationItem)}
                 
-                {/* Welcome message instructional text - only show when welcome conversation is displayed */}
-                {conversationsLoaded && conversations.length === 0 && filter === 'all' && (
+                {/* Welcome message instructional text - only show when welcome conversation is displayed, or in dev mode for testing */}
+                {conversationsLoaded && (conversations.length === 0 || isDevMode) && filter === 'all' && (
                   <View style={styles.welcomeInstructionContainer}>
-                    <Text style={[
-                      styles.welcomeInstructionText,
-                      Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
-                    ]}>
+                    <Animated.Text 
+                      style={[
+                        styles.welcomeInstructionText,
+                        Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any,
+                        {
+                          shadowColor: '#9D4EDD',
+                          shadowOffset: { width: 0, height: 0 },
+                          shadowOpacity: arrowAnim.interpolate({
+                            inputRange: [0, 0.5, 1],
+                            outputRange: [0.2, 0.4, 0.2],
+                          }),
+                          shadowRadius: 6,
+                          ...(Platform.OS === 'web' && {
+                            // Web-specific shadow for better glow effect
+                            textShadow: arrowAnim.interpolate({
+                              inputRange: [0, 0.5, 1],
+                              outputRange: [
+                                '0 0 6px rgba(157, 78, 221, 0.2)',
+                                '0 0 12px rgba(157, 78, 221, 0.4)',
+                                '0 0 6px rgba(157, 78, 221, 0.2)',
+                              ],
+                            }) as any,
+                          }),
+                        },
+                      ]}
+                    >
                       Let Swelly know where you are headed{'\n'}
                       for the next surf adventure!{'\n'}
                       {'\n'}
@@ -1150,10 +1201,42 @@ export default function ConversationsScreen({
                       deeper knowledge about the destination.{'\n'}
                       {'\n'}
                       Give and receive advice!
-                    </Text>
-                    <View style={styles.welcomeArrowContainer}>
-                      <Ionicons name="arrow-down" size={24} color="#7B7B7B" />
-                    </View>
+                    </Animated.Text>
+                    <Animated.View 
+                      style={[
+                        styles.welcomeArrowContainer,
+                        {
+                          transform: [
+                            {
+                              translateY: arrowAnim.interpolate({
+                                inputRange: [0, 1],
+                                outputRange: [0, 8],
+                              }),
+                            },
+                          ],
+                          shadowColor: '#9D4EDD',
+                          shadowOffset: { width: 0, height: 0 },
+                          shadowOpacity: arrowAnim.interpolate({
+                            inputRange: [0, 0.5, 1],
+                            outputRange: [0.3, 0.6, 0.3],
+                          }),
+                          shadowRadius: 8,
+                          ...(Platform.OS === 'web' && {
+                            // Web-specific shadow for better glow effect
+                            boxShadow: arrowAnim.interpolate({
+                              inputRange: [0, 0.5, 1],
+                              outputRange: [
+                                '0 0 8px rgba(157, 78, 221, 0.3)',
+                                '0 0 16px rgba(157, 78, 221, 0.6)',
+                                '0 0 8px rgba(157, 78, 221, 0.3)',
+                              ],
+                            }) as any,
+                          }),
+                        },
+                      ]}
+                    >
+                      <Ionicons name="arrow-down" size={40} color="#333333" />
+                    </Animated.View>
                   </View>
                 )}
               </>
@@ -1167,43 +1250,7 @@ export default function ConversationsScreen({
       <View style={styles.swellyCardWrapper}>
         {renderSwellyConversation()}
         {/* Dev mode: Second Swelly button for TripPlanningChatScreenCopy */}
-        {isDevMode && onSwellyPressCopy && (
-          <TouchableOpacity
-            style={[styles.swellyContainer, styles.swellyContainerDev]}
-            onPress={onSwellyPressCopy}
-          >
-            <View style={styles.conversationContent}>
-              {/* Swelly avatar with ellipse design - matching ChatScreen */}
-              <View style={styles.swellyAvatarContainer}>
-                <View style={styles.swellyAvatarRing}>
-                  <Image
-                    source={{ uri: getImageUrl('/Ellipse 11.svg') }}
-                    style={styles.swellyEllipseBackground}
-                    resizeMode="contain"
-                  />
-                  <View style={styles.swellyAvatarImageContainer}>
-                    <Image
-                      source={{ uri: getImageUrl('/Swelly avatar onboarding.png') }}
-                      style={styles.swellyAvatarImage}
-                      resizeMode="cover"
-                    />
-                  </View>
-                </View>
-              </View>
-
-              {/* Text content */}
-              <View style={styles.swellyTextContainer}>
-                <Text style={styles.swellyName}>Swelly (Dev)</Text>
-                <Text style={[
-                  styles.swellyLastMessage,
-                  Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
-                ]} numberOfLines={1}>
-                  Server-side matching test
-                </Text>
-              </View>
-            </View>
-          </TouchableOpacity>
-        )}
+       
       </View>
 
       {/* Menu Modal */}
@@ -1867,15 +1914,17 @@ const styles = StyleSheet.create({
   },
   welcomeInstructionText: {
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '400',
-    lineHeight: 18,
-    color: '#7B7B7B',
+    lineHeight: 19,
+    color: '#333333',
     textAlign: 'center',
   },
   welcomeArrowContainer: {
     alignItems: 'center',
     justifyContent: 'center',
+    paddingVertical: 8,
+    // Purple glow will be applied via shadowColor in animated style
   },
   surveyBubble: {
     position: 'absolute',
