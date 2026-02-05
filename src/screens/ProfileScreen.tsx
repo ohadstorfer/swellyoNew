@@ -370,40 +370,233 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
         return;
       }
       
-      videoPlayer.replaceAsync(videoUrlToPlay).then(() => {
-          if (videoPlayer) {
-            videoPlayer.loop = true;
-            videoPlayer.muted = true;
-            // Ensure playsinline is set on underlying video element for Safari
-            if (Platform.OS === 'web' && typeof document !== 'undefined') {
-              const videoElements = document.querySelectorAll('video');
-              videoElements.forEach((videoElement) => {
-                videoElement.setAttribute('playsinline', 'true');
-                videoElement.setAttribute('webkit-playsinline', 'true');
-                videoElement.setAttribute('autoplay', 'true');
-                videoElement.volume = 0;
-                videoElement.playsInline = true;
-              });
-            }
-            // Add small delay for Safari to ensure video element is ready
-            setTimeout(() => {
-              try {
-                const playPromise = videoPlayer.play();
-                if (playPromise !== undefined && typeof (playPromise as any).catch === 'function') {
-                  (playPromise as any).catch((playError: any) => {
-                    if (__DEV__ && playError.name !== 'NotAllowedError') {
-                      console.error('Error playing surf skill video:', playError);
-                    }
-                  });
-                }
-              } catch (playError: any) {
+      let isMounted = true;
+      let hasAttemptedPlay = false;
+      let eventListenersAttached = false;
+      let mutationObserver: MutationObserver | null = null;
+      let fallbackTimeout: ReturnType<typeof setTimeout> | null = null;
+      let eventHandlers: { element: HTMLVideoElement; handlers: Array<{ event: string; handler: () => void }> } | null = null;
+      
+      // Function to attempt playing the video
+      const attemptPlay = async () => {
+        if (!isMounted || !videoPlayer || hasAttemptedPlay) return;
+        
+        try {
+          hasAttemptedPlay = true;
+          const playPromise = videoPlayer.play();
+          if (playPromise !== undefined && typeof (playPromise as any).catch === 'function') {
+            (playPromise as any).catch((playError: any) => {
+              if (__DEV__ && playError.name !== 'NotAllowedError') {
                 console.error('Error playing surf skill video:', playError);
               }
-            }, Platform.OS === 'web' ? 100 : 0);
+              // Reset flag to allow retry
+              hasAttemptedPlay = false;
+            });
+          }
+        } catch (playError: any) {
+          console.error('Error playing surf skill video:', playError);
+          // Reset flag to allow retry
+          hasAttemptedPlay = false;
+        }
+      };
+      
+      // Function to find and setup the video element with event listeners
+      const findAndSetupVideoElement = () => {
+        if (Platform.OS !== 'web' || typeof document === 'undefined') {
+          // For non-web platforms, just attempt play after replaceAsync
+          attemptPlay();
+          return;
+        }
+        
+        // Function to check if video element is ready and attach listeners
+        const setupVideoElement = (videoElement: HTMLVideoElement) => {
+          if (eventListenersAttached) return;
+          
+          // Set Safari attributes
+          videoElement.setAttribute('playsinline', 'true');
+          videoElement.setAttribute('webkit-playsinline', 'true');
+          videoElement.setAttribute('autoplay', 'true');
+          videoElement.volume = 0;
+          videoElement.playsInline = true;
+          
+          // Create event handlers
+          const handleCanPlay = () => {
+            if (isMounted && !hasAttemptedPlay) {
+              if (__DEV__) {
+                console.log('[SurfSkillCard] canplay event fired, attempting play');
+              }
+              attemptPlay();
+            }
+          };
+          
+          const handleLoadedMetadata = () => {
+            if (isMounted && !hasAttemptedPlay) {
+              if (__DEV__) {
+                console.log('[SurfSkillCard] loadedmetadata event fired, attempting play');
+              }
+              attemptPlay();
+            }
+          };
+          
+          const handleLoadedData = () => {
+            if (isMounted && !hasAttemptedPlay) {
+              if (__DEV__) {
+                console.log('[SurfSkillCard] loadeddata event fired, attempting play');
+              }
+              attemptPlay();
+            }
+          };
+          
+          // Attach event listeners with { once: true } to prevent duplicate calls
+          videoElement.addEventListener('canplay', handleCanPlay, { once: true });
+          videoElement.addEventListener('loadedmetadata', handleLoadedMetadata, { once: true });
+          videoElement.addEventListener('loadeddata', handleLoadedData, { once: true });
+          
+          eventListenersAttached = true;
+          
+          // Check if video is already ready (event might have fired before listener attached)
+          if (videoElement.readyState >= 2) { // HAVE_CURRENT_DATA or higher
+            if (__DEV__) {
+              console.log('[SurfSkillCard] Video already ready, attempting play immediately');
+            }
+            attemptPlay();
+          }
+          
+          // Store handlers for cleanup
+          eventHandlers = {
+            element: videoElement,
+            handlers: [
+              { event: 'canplay', handler: handleCanPlay },
+              { event: 'loadedmetadata', handler: handleLoadedMetadata },
+              { event: 'loadeddata', handler: handleLoadedData },
+            ],
+          };
+        };
+        
+        // Try to find video element immediately
+        const videoElements = document.querySelectorAll('video');
+        if (videoElements.length > 0) {
+          // Find the most recently added video element (likely the one for this component)
+          // Or find video element that's a descendant of our component's container
+          const surfSkillVideoContainer = document.querySelector('[data-surf-skill-video]');
+          let targetVideo: HTMLVideoElement | null = null;
+          
+          if (surfSkillVideoContainer) {
+            // Find video element within our container
+            targetVideo = surfSkillVideoContainer.querySelector('video') as HTMLVideoElement;
+          } else {
+            // Fallback: use the last video element (most recently added)
+            targetVideo = videoElements[videoElements.length - 1] as HTMLVideoElement;
+          }
+          
+          if (targetVideo) {
+            setupVideoElement(targetVideo);
+            return;
+          }
+        }
+        
+        // If video element not found, use MutationObserver to watch for it
+        mutationObserver = new MutationObserver(() => {
+          if (!isMounted || eventListenersAttached) {
+            if (mutationObserver) {
+              mutationObserver.disconnect();
+            }
+            return;
+          }
+          
+          const videoElements = document.querySelectorAll('video');
+          if (videoElements.length > 0) {
+            const surfSkillVideoContainer = document.querySelector('[data-surf-skill-video]');
+            let targetVideo: HTMLVideoElement | null = null;
+            
+            if (surfSkillVideoContainer) {
+              targetVideo = surfSkillVideoContainer.querySelector('video') as HTMLVideoElement;
+            } else {
+              // Use the most recently added video
+              targetVideo = videoElements[videoElements.length - 1] as HTMLVideoElement;
+            }
+            
+            if (targetVideo) {
+              setupVideoElement(targetVideo);
+              if (mutationObserver) {
+                mutationObserver.disconnect();
+              }
+            }
+          }
+        });
+        
+        mutationObserver.observe(document.body, {
+          childList: true,
+          subtree: true,
+        });
+        
+        // Fallback timeout: if events don't fire or element isn't found, try playing anyway
+        fallbackTimeout = setTimeout(() => {
+          if (isMounted && !hasAttemptedPlay) {
+            if (__DEV__) {
+              console.log('[SurfSkillCard] Fallback timeout reached, attempting play');
+            }
+            // Set attributes on all video elements as fallback
+            const allVideos = document.querySelectorAll('video');
+            allVideos.forEach((videoElement) => {
+              videoElement.setAttribute('playsinline', 'true');
+              videoElement.setAttribute('webkit-playsinline', 'true');
+              videoElement.setAttribute('autoplay', 'true');
+              videoElement.volume = 0;
+              videoElement.playsInline = true;
+            });
+            attemptPlay();
+          }
+        }, Platform.OS === 'web' ? 500 : 100);
+      };
+      
+      videoPlayer.replaceAsync(videoUrlToPlay).then(() => {
+          if (videoPlayer && isMounted) {
+            videoPlayer.loop = true;
+            videoPlayer.muted = true;
+            
+            // For web, find and setup video element with event listeners
+            if (Platform.OS === 'web' && typeof document !== 'undefined') {
+              // Small delay to allow VideoView to create the video element
+              setTimeout(() => {
+                if (isMounted) {
+                  findAndSetupVideoElement();
+                }
+              }, 50);
+            } else {
+              // For native platforms, just attempt play
+              attemptPlay();
+            }
           }
       }).catch((error: any) => {
         console.error('Error replacing surf skill video:', error, 'URL:', videoUrlToPlay);
       });
+      
+      // Cleanup function
+      return () => {
+        isMounted = false;
+        
+        // Remove event listeners
+        if (eventHandlers && eventHandlers.element) {
+          const handlers = eventHandlers.handlers;
+          const element = eventHandlers.element;
+          handlers.forEach(({ event, handler }) => {
+            element.removeEventListener(event, handler);
+          });
+        }
+        
+        // Disconnect mutation observer
+        if (mutationObserver) {
+          mutationObserver.disconnect();
+          mutationObserver = null;
+        }
+        
+        // Clear fallback timeout
+        if (fallbackTimeout) {
+          clearTimeout(fallbackTimeout);
+          fallbackTimeout = null;
+        }
+      };
     }
   }, [videoUrl, videoPlayer]);
 
@@ -552,7 +745,13 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
       {/* Video Container with Overlaid Text */}
       <View style={styles.surfSkillVideoContainer}>
         {isVideoUrlReady && videoUrl ? (
-          <View style={styles.surfSkillVideoWrapper} pointerEvents="none">
+          <View 
+            style={styles.surfSkillVideoWrapper} 
+            pointerEvents="none"
+            {...(Platform.OS === 'web' && {
+              'data-surf-skill-video': 'true',
+            } as any)}
+          >
             <VideoView
               player={videoPlayer}
               style={styles.surfSkillVideo}
