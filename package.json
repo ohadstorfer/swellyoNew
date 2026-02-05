@@ -12,7 +12,8 @@
     "build:netlify:pre": "([ -f next.config.js ] && mv next.config.js next.config.js.bak || true) && ([ -d pages ] && mv pages pages.bak || true)",
     "build:netlify:post": "node update-bundle.js && node create-netlify-redirects.js",
     "compress-videos": "node scripts/compress-videos.js",
-    "backfill-posthog": "node scripts/backfillPostHogUsers.js"
+    "backfill-posthog": "node scripts/backfillPostHogUsers.js",
+    "convert-surf-videos": "node scripts/convert-surf-videos-to-h264.js"
   },
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",
@@ -41,6 +42,7 @@
     "react-dom": "19.1.0",
     "react-native": "0.81.5",
     "react-native-country-picker-modal": "^2.0.0",
+    "react-native-emoji-selector": "^0.2.0",
     "react-native-gesture-handler": "~2.28.0",
     "react-native-keyboard-aware-scroll-view": "^0.9.5",
     "react-native-paper": "^5.14.5",

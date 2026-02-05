@@ -214,9 +214,9 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
     (player: any) => {
       if (player) {
         player.staysActiveInBackground = true;
-        player.loop = true;
+          player.loop = true;
         player.muted = true; // Critical for Safari autoplay
-      }
+                  }
     }
   );
 
@@ -267,15 +267,15 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
       if (videoPlayer.addListener) {
         const statusSubscription = videoPlayer.addListener('statusChange', handleStatusChange);
         const sourceSubscription = videoPlayer.addListener('sourceChange', handleSourceChange);
-
-        return () => {
+      
+      return () => {
           isMounted = false;
           if (statusSubscription && typeof statusSubscription.remove === 'function') {
             statusSubscription.remove();
           }
           if (sourceSubscription && typeof sourceSubscription.remove === 'function') {
             sourceSubscription.remove();
-          }
+        }
         };
       }
     } catch (error) {
@@ -299,9 +299,9 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
       }
       
       videoPlayer.replaceAsync(videoUrlToPlay).then(() => {
-        if (videoPlayer) {
-          videoPlayer.loop = true;
-          videoPlayer.muted = true;
+          if (videoPlayer) {
+            videoPlayer.loop = true;
+            videoPlayer.muted = true;
         }
       }).catch((error: any) => {
         console.error('Error replacing surf skill video:', error, 'URL:', videoUrlToPlay);
@@ -319,15 +319,15 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
         videoPlayer.muted = true;
         videoPlayer.loop = true;
         
-        const playPromise = videoPlayer.play();
-        if (playPromise !== undefined && typeof (playPromise as any).catch === 'function') {
+                const playPromise = videoPlayer.play();
+                if (playPromise !== undefined && typeof (playPromise as any).catch === 'function') {
           (playPromise as any).catch((error: any) => {
             if (__DEV__ && error.name !== 'NotAllowedError') {
               console.warn('[SurfSkillCard] AutoPlay workaround failed:', error);
-            }
-          });
-        }
-      }
+                    }
+                  });
+                }
+              }
     }, Platform.OS === 'web' ? 200 : 100);
 
     return () => clearTimeout(timeoutId);

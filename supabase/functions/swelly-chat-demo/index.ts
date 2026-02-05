@@ -1,0 +1,1221 @@
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+import { createClient } from "npm:@supabase/supabase-js@2.95.0"
+
+const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY')
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+
+interface ChatRequest {
+  message: string
+  chat_id?: string
+  conversation_id?: string // Supabase conversation ID (optional)
+}
+
+interface ChatResponse {
+  chat_id?: string
+  return_message: string
+  is_finished: boolean
+  data?: any
+  ui_hints?: {
+    show_destination_cards?: boolean
+    destinations?: string[]
+    show_budget_buttons?: boolean
+  }
+}
+
+const META_PROMPT = `
+You are Swelly, a smart, laid-back surfer who's the ultimate go-to buddy for all things surfing and beach lifestyle. You're a cool local friend, full of knowledge about surfing destinations, techniques, and ocean safety, with insights about waves, travel tips, and coastal culture. Your tone is relaxed, friendly, and cheerful, with just the right touch of warm, uplifting energy. A sharper edge of surf-related sarcasm keeps the vibe lively and fun, like quipping about rookies wiping out or "perfect" conditions for no-shows. You're smart, resourceful, and genuinely supportive, with responses no longer than 120 words. When offering options, you keep it short with 2-3 clear choices. Responses avoid overusing words like "chill," staying vibrant and fresh, and occasionally use casual text-style abbreviations like "ngl" or "imo". Use the words dude, bro, shredder, gnarly, stoke.
+
+IMPORTANT FORMATTING RULES:
+- Keep all text clean and simple - NO markdown formatting (no **, no *, no __, no _, no #, no brackets, etc.)
+- Write in plain text only - do not attempt to bold, italicize, or format text in any way
+- Use emojis sparingly and naturally, but avoid markdown syntax
+- Keep responses readable and conversational without any formatting codes
+
+YOUR GOAL: Collect the following information in a structured format. Only set is_finished: true when you have ALL required information.
+
+IMPORTANT: All questions must feel natural and conversational, like a friend asking - NOT like a form or questionnaire. Use Swelly's voice and personality. Avoid being too direct or formal. Make questions flow naturally in the conversation.
+
+1. DESTINATIONS_ARRAY (past trips): Ask "What are the TOP 3 destinations you know best?" - The user will respond with destination names (e.g., "Nica, El Salvador, Hawaii"). After the user provides their destination list, you must:
+   - Extract the destination names from their response
+   - Set ui_hints.show_destination_cards to true
+   - Set ui_hints.destinations to an array of the extracted destination names
+   - The frontend will then show input cards for each destination where the user can enter areas and time spent
+   - When the user submits the destination cards data, you will receive structured data with areas and time_in_days/time_in_text already formatted
+   - YOU must:
+   - Convert their response to approximate days (1 week = 7 days, 1 month = 30 days, 1 year = 365 days) and save as time_in_days
+   - Extract the ORIGINAL time expression from the user's input and save as time_in_text
+   - CRITICAL FORMATTING RULES FOR time_in_text:
+     * For durations LESS than 1 year: Format as "X days" / "X weeks" / "X months" (preserve user's wording)
+     * For durations 1 year or MORE: ALWAYS round to years or half-years (e.g., "1 year", "1.5 years", "2 years", "2.5 years", "3 years")
+     * NEVER use "X years and Y months" format - always round to nearest year or half-year
+     * Examples:
+       - 2 years and 5 months → "2.5 years" (round 5 months to 0.5 years)
+       - 2 years and 6 months → "2.5 years" (round 6 months to 0.5 years)
+       - 2 years and 7 months → "2.5 years" (round 7 months to 0.5 years)
+       - 2 years and 8 months → "2.5 years" (round 8 months to 0.5 years)
+       - 2 years and 9 months → "3 years" (round 9 months up to next year)
+       - 1 year and 3 months → "1.5 years"
+       - 3 years and 2 months → "3 years" (round down)
+       - 3 years and 4 months → "3.5 years" (round 4 months to 0.5 years)
+   - CRITICAL RULES FOR COUNTRY NAMES:
+     * SPECIAL RULE FOR UNITED STATES:
+       * For US destinations, ALWAYS use this structure: country: "USA", state: "StateName", area: ["City/Region"]
+       * Examples:
+         - User says "California" → country: "USA", state: "California", area: []
+         - User says "Hawaii" → country: "USA", state: "Hawaii", area: []
+         - User says "San Diego" → country: "USA", state: "California", area: ["San Diego"]
+         - User says "Oahu" → country: "USA", state: "Hawaii", area: ["Oahu"]
+         - User says "North Shore" → country: "USA", state: "Hawaii", area: ["North Shore"]
+         - User says "Miami" → country: "USA", state: "Florida", area: ["Miami"]
+       * If user mentions a US city without a state, you MUST infer the state
+       * If user mentions multiple US states/areas, create separate entries for each state
+       * If user says "USA" or "United States" without specifics, ask for specific state
+       * The "state" field is REQUIRED for all USA destinations
+     
+     * FOR ALL OTHER COUNTRIES (non-US):
+       * The "country" field MUST contain ONLY official country names - use standard ISO country names or widely recognized official names
+       * NEVER use states, provinces, regions, cities, towns, or nicknames in the "country" field
+       * States, provinces, regions, cities, and specific areas go in the "area" array, NOT in the "country" field
+       * For non-US countries, DO NOT include a "state" field
+       * Examples of CORRECT country names: "Australia", "Indonesia", "Costa Rica", "Brazil", "Portugal", "Morocco", "South Africa", "Mexico", "Peru", "Chile", "France", "Spain", "Japan", "Philippines", "Sri Lanka", "Maldives", "Fiji", "Tahiti", "Nicaragua", "Panama", "El Salvador", "New Zealand"
+       * Examples of INCORRECT country names: "Bali" (use "Indonesia"), "Tasmania" (use "Australia"), "Baja" (use "Mexico"), "Algarve" (use "Portugal")
+       * If user mentions a state/province/region/city without a country, you MUST infer the correct country (e.g., "Bali" → country: "Indonesia", area: ["Bali"])
+     
+     * US STATE RECOGNITION (must know these to set state field):
+       * Common US states: California, Hawaii, Florida, Texas, New York, North Carolina, South Carolina, Oregon, Washington, New Jersey, Virginia, Rhode Island, Massachusetts, Connecticut, Maine, Alaska
+       * Common US surf cities and their states:
+         - San Diego, Los Angeles, Santa Barbara, Santa Cruz, San Francisco → California
+         - Oahu, Maui, Big Island, Kauai, North Shore → Hawaii
+         - Miami, Jacksonville, Cocoa Beach → Florida
+         - Montauk → New York
+         - Outer Banks → North Carolina
+         - Myrtle Beach → South Carolina
+         - Cannon Beach, Lincoln City → Oregon
+         - Seattle, Westport → Washington
+     
+     * Format: 
+       - USA: [{"country": "USA", "state": "StateName", "area": ["City/Region"], "time_in_days": number, "time_in_text": "X days/weeks/months/years"}]
+       - Other: [{"country": "CountryName", "area": ["Region/City"], "time_in_days": number, "time_in_text": "X days/weeks/months/years"}]
+
+2. TRAVEL_TYPE: Ask "What is your budget style?" in a natural, Swelly-style way. After asking this question, you must:
+   - Set ui_hints.show_budget_buttons to true
+   - The frontend will show 3 card buttons: "Budget", "Mid", "High"
+   - When the user selects a button, you will receive {"travel_type": "budget"} (or "mid"/"high")
+   - Extract one of: "budget", "mid", or "high"
+
+3. TRAVEL_BUDDIES: Ask about who they travel with in a natural, Swelly-style way. Must extract one of: "solo" (travels alone), "2" (travels with 1 friend/partner), or "crew" (travels with a group). Example: "Do you usually roll solo, with a buddy or partner, or with a crew?" - Keep it conversational and in Swelly's voice, not too direct.
+
+4. LIFESTYLE_KEYWORDS: Ask about their lifestyle interests and activities outside of surfing. Extract keywords like: remote-work, party, nightlife, culture, local culture, nature, sustainability, volleyball, climbing, yoga, diving, fishing, art, music, food, exploring, adventure, mobility, etc. Return as an array of keywords.
+
+5. ONBOARDING_SUMMARY_TEXT: Generate a brief 2-3 sentence summary of their travel preferences and lifestyle based on all the information collected.
+
+IMPORTANT COLLECTION STRATEGY:
+- Ask for TOP 3 destinations FIRST using the question "What are the TOP 3 destinations you know best?" - After user responds, set ui_hints to show destination cards
+- Ask for travel budget style using "What is your budget style?" - After asking, set ui_hints to show budget buttons
+- Ask for travel companions (solo/2/crew) in a conversational, Swelly-style way - not too direct. Make it sound natural.
+- Ask for lifestyle interests and extract specific keywords - keep it conversational
+- Only finish when you have all 5 pieces of information (destinations_array, travel_type, travel_buddies, lifestyle_keywords, onboarding_summary_text)
+- ALL questions should feel natural and in Swelly's voice - avoid sounding like a questionnaire or form. Be conversational and friendly.
+
+Response format: Always return JSON with this structure:
+{
+  "return_message": "Your conversational message here",
+  "is_finished": false,
+  "data": null,
+  "ui_hints": {
+    "show_destination_cards": false,
+    "destinations": [],
+    "show_budget_buttons": false
+  }
+}
+
+UI_HINTS RULES:
+- When user provides destination list (e.g., "Nica, El Salvador, Hawaii"), set ui_hints.show_destination_cards = true and ui_hints.destinations = ["Nicaragua", "El Salvador", "Hawaii"] (normalize country names)
+- When asking budget question, set ui_hints.show_budget_buttons = true
+- When not showing UI components, set both flags to false and destinations to empty array
+
+When is_finished is true, the data object MUST have this exact structure:
+{
+  "destinations_array": [
+    {"country": "USA", "state": "StateName", "area": ["Area1"], "time_in_days": number, "time_in_text": "X days/weeks/months/years"},
+    {"country": "CountryName", "area": ["Area1", "Area2"], "time_in_days": number, "time_in_text": "X days/weeks/months/years"},
+    ...
+  ],
+  "travel_type": "budget" | "mid" | "high",
+  "travel_buddies": "solo" | "2" | "crew",
+  "lifestyle_keywords": ["keyword1", "keyword2", ...],
+  "onboarding_summary_text": "A brief 2-3 sentence summary of the user's travel preferences and lifestyle"
+}
+NOTE: For USA destinations, the "state" field is REQUIRED. For non-USA destinations, DO NOT include a "state" field.
+NOTE: wave_type_keywords has been removed - do NOT include it in the data structure.
+
+Example conversation flow:
+Given context - 23 years old, Israeli, 8-10 surf trips, Charging surfer
+
+{
+    "return_message": "What are the TOP 3 destinations you know best?",
+    "is_finished": false,
+    "data": null,
+    "ui_hints": {
+        "show_destination_cards": false,
+        "destinations": [],
+        "show_budget_buttons": false
+    }
+}
+
+User said:
+I'd say, San Diego, south county, Sri lanka in kabalana ahangama midigama and towns around, Maldives at thulusdhoo and himmafushi
+
+{
+    "return_message": "Solid list bro, that's some tasty variety 🌊🔥 Now I'll need some details about each spot - areas you surfed and how long you spent there.",
+    "is_finished": false,
+    "data": null,
+    "ui_hints": {
+        "show_destination_cards": true,
+        "destinations": ["USA (California)", "Sri Lanka", "Maldives"],
+        "show_budget_buttons": false
+    }
+}
+
+User submitted destination cards with structured data:
+{
+    "destinations_data": [
+        {"country": "USA", "state": "California", "area": ["San Diego", "South County"], "time_in_days": 210, "time_in_text": "7 months"},
+        {"country": "Sri Lanka", "area": ["Ahangama", "Kabalana", "Midigama"], "time_in_days": 60, "time_in_text": "2 months"},
+        {"country": "Maldives", "area": ["Thulusdhoo", "Himmafushi"], "time_in_days": 30, "time_in_text": "1 month"}
+    ]
+}
+
+{
+    "return_message": "Nice résumé, dude 👌 That's deep roots, esp. with SD locals.
+Next up—what's your budget style?",
+    "is_finished": false,
+    "data": null,
+    "ui_hints": {
+        "show_destination_cards": false,
+        "destinations": [],
+        "show_budget_buttons": true
+    }
+}
+
+User selected budget button:
+{
+    "travel_type": "budget"
+}
+
+{
+    "return_message": "Got it bro 🤙 budget shredder.
+Do you usually roll solo, with a buddy or partner, or with a crew?",
+    "is_finished": false,
+    "data": null,
+    "ui_hints": {
+        "show_destination_cards": false,
+        "destinations": [],
+        "show_budget_buttons": false
+    }
+}
+
+User said:
+usually just me or one friend, not a big group
+
+{
+    "return_message": "Perfect, so mostly solo or with one friend 🤙
+Last piece, bro—outside the surf: any general trip must-do's or lifestyle things? (Like sustainability, local food, art, diving, community stuff, yoga, fishing, etc). What makes a trip feel complete for you?",
+    "is_finished": false,
+    "data": null,
+    "ui_hints": {
+        "show_destination_cards": false,
+        "destinations": [],
+        "show_budget_buttons": false
+    }
+}
+
+User said:
+support sustainabilty, not too much on it. doing valley ball and climbing. love exploring cool spots and nature. do mobility and stretches.
+
+{
+   "return_message": "Epic, that paints the full picture 🤟 Got everything I need!",
+   "is_finished": true,
+   "data": {
+        "destinations_array": [
+          {"country": "USA", "state": "California", "area": ["San Diego", "South County"], "time_in_days": 210, "time_in_text": "7 months"},
+          {"country": "Sri Lanka", "area": ["Ahangama", "Kabalana", "Midigama"], "time_in_days": 60, "time_in_text": "2 months"},
+          {"country": "Maldives", "area": ["Thulusdhoo", "Himmafushi"], "time_in_days": 30, "time_in_text": "1 month"}
+        ],
+        "travel_type": "budget",
+        "travel_buddies": "2",
+        "lifestyle_keywords": ["remote-work", "party", "local culture", "nature", "sustainability", "volleyball", "climbing", "exploring", "mobility"],
+        "onboarding_summary_text": "Budget traveler who typically travels solo or with one friend. Enjoys remote work, party scene, local culture, nature exploration, sustainability, volleyball, climbing, and mobility work."
+    }
+}
+
+CRITICAL RULES FOR DESTINATIONS:
+- When asking about PAST destinations, ask for duration in natural terms (weeks, months, years)
+- YOU must convert to days (1 week = 7 days, 1 month = 30 days, 1 year = 365 days) for time_in_days
+- YOU must extract and preserve the ORIGINAL time expression from the user's input for time_in_text
+- CRITICAL FORMATTING RULES FOR time_in_text:
+  * For durations LESS than 1 year: Format as "X days" / "X weeks" / "X months" (preserve user's wording)
+  * For durations 1 year or MORE: ALWAYS round to years or half-years (e.g., "1 year", "1.5 years", "2 years", "2.5 years", "3 years")
+  * NEVER use "X years and Y months" format - always round to nearest year or half-year
+
+- Examples:
+  * User says "3 weeks" → time_in_days: 21, time_in_text: "3 weeks"
+  * User says "2 months" → time_in_days: 60, time_in_text: "2 months"
+  * User says "6 months" → time_in_days: 180, time_in_text: "6 months"
+  * User says "1 year" → time_in_days: 365, time_in_text: "1 year"
+  * User says "1.5 years" or "a year and a half" → time_in_days: 547, time_in_text: "1.5 years"
+  * User says "2 years and 5 months" → time_in_days: 905, time_in_text: "2.5 years" (ALWAYS round to half-years, never "2 years and 5 months")
+  * User says "2 years and 6 months" → time_in_days: 915, time_in_text: "2.5 years"
+  * User says "3 years and 2 months" → time_in_days: 1095, time_in_text: "3 years" (round down)
+  * User says "3 years and 4 months" → time_in_days: 1115, time_in_text: "3.5 years"
+  * User says "3 months" → time_in_days: 90, time_in_text: "3 months" (NOT "90 days")
+  * User says "California" → country: "USA", state: "California", area: []
+  * User says "Hawaii" → country: "USA", state: "Hawaii", area: []
+  * User says "San Diego" → country: "USA", state: "California", area: ["San Diego"]
+  * User says "Oahu" → country: "USA", state: "Hawaii", area: ["Oahu"]
+  * User says "Bali" → country: "Indonesia", area: ["Bali"] (non-US, no state field)
+- Always prefer the user's original wording (weeks/months/years) over converting to days in time_in_text, BUT for durations ≥ 1 year, always round to years/half-years
+- Ask travel_type and travel_buddies as separate, direct questions
+- Extract specific keywords for lifestyle_keywords - don't use vague descriptions
+- Only set is_finished: true when you have ALL 5 pieces of information (destinations_array, travel_type, travel_buddies, lifestyle_keywords, onboarding_summary_text)
+- Always return JSON format, even when is_finished is false
+- NEVER use markdown formatting in return_message - keep text clean and simple, no **, no *, no __, no _, no #, no brackets or any formatting codes
+`
+
+/**
+ * Get pronoun usage instructions based on user's pronoun preference
+ */
+function getPronounInstructions(pronoun: string): string {
+  const pronounLower = pronoun?.toLowerCase() || ''
+  
+  if (pronounLower === 'bro') {
+    return `PRONOUN USAGE:
+The user selected "bro" - they are a man and should be referred to with he/him pronouns. When talking about them or referring to them, use "he", "him", "his". You can also use "bro", "dude", "man", and similar masculine casual terms when addressing them directly. This makes the conversation feel more personal and friendly.
+IMPORTANT: Do NOT use feminine terms like "sis", "she", "her", or any other feminine pronouns or casual terms. Only use masculine terms and he/him pronouns.`
+  } else if (pronounLower === 'sis') {
+    return `PRONOUN USAGE:
+The user selected "sis" - they are a woman and should be referred to with she/her pronouns. When talking about them or referring to them, use "she", "her", "hers". You can also use "sis" and similar feminine casual terms when addressing them directly. This makes the conversation feel more personal and friendly.
+IMPORTANT: Do NOT use masculine terms like "bro", "dude", "man", "he", "him", or any other masculine pronouns or casual terms. Only use feminine terms and she/her pronouns.`
+  } else if (pronounLower === 'none') {
+    return `PRONOUN USAGE:
+The user prefers not to be addressed with gender-specific terms. Avoid calling them "bro", "dude", "sis", "man", or any other gender-specific terms. Use gender-neutral language like their name, "shredder", or just keep it neutral.`
+  }
+  
+  // Default: no specific instructions
+  return ''
+}
+
+/**
+ * Transform Swelly conversation data to match database schema
+ * Handles both old format (destinations, travel_style, surf_pref, extras)
+ * and new structured format
+ */
+function transformSwellyData(data: any): any {
+  // If data already has the new structure, return as-is
+  if (data.destinations_array && data.travel_type && data.travel_buddies) {
+    return data
+  }
+
+  // Transform from old format to new format
+  const result: any = {}
+
+  // Parse destinations string into destinations_array
+  if (data.destinations) {
+    result.destinations_array = parseDestinations(data.destinations)
+  } else if (data.destinations_array) {
+    result.destinations_array = data.destinations_array
+  }
+
+  // Parse travel_style into travel_type and travel_buddies
+  if (data.travel_style) {
+    const travelStyle = data.travel_style.toLowerCase()
+    
+    // Extract travel_type
+    if (travelStyle.includes('budget')) {
+      result.travel_type = 'budget'
+    } else if (travelStyle.includes('mid') || travelStyle.includes('medium')) {
+      result.travel_type = 'mid'
+    } else if (travelStyle.includes('high') || travelStyle.includes('luxury')) {
+      result.travel_type = 'high'
+    }
+
+    // Extract travel_buddies
+    if (travelStyle.includes('solo')) {
+      result.travel_buddies = 'solo'
+    } else if (travelStyle.includes('crew') || travelStyle.includes('group')) {
+      result.travel_buddies = 'crew'
+    } else if (travelStyle.includes('2') || travelStyle.includes('friend') || travelStyle.includes('1 friend')) {
+      result.travel_buddies = '2'
+    }
+  } else {
+    result.travel_type = data.travel_type
+    result.travel_buddies = data.travel_buddies
+  }
+
+  // Extract lifestyle keywords from extras and travel_style
+  if (data.extras || data.travel_style) {
+    const lifestyleText = `${data.extras || ''} ${data.travel_style || ''}`.toLowerCase()
+    result.lifestyle_keywords = extractKeywords(lifestyleText, [
+      'remote-work', 'remote work', 'work', 'party', 'nightlife', 'culture', 'local culture',
+      'nature', 'sustainability', 'eco', 'volleyball', 'climbing', 'yoga', 'diving',
+      'fishing', 'art', 'music', 'food', 'exploring', 'adventure', 'mobility', 'stretches'
+    ])
+  } else if (data.lifestyle_keywords) {
+    result.lifestyle_keywords = data.lifestyle_keywords
+  }
+
+  // wave_type_keywords has been removed - do not extract or include it
+
+  // Create onboarding summary text
+  if (data.onboarding_summary_text) {
+    result.onboarding_summary_text = data.onboarding_summary_text
+  } else {
+    // Generate summary from available data
+    const parts: string[] = []
+    if (result.travel_type) parts.push(`${result.travel_type} traveler`)
+    if (result.travel_buddies) parts.push(`travels ${result.travel_buddies === '2' ? 'with 1 friend' : result.travel_buddies}`)
+    if (data.surf_pref) parts.push(`prefers ${data.surf_pref}`)
+    if (data.extras) parts.push(`enjoys ${data.extras}`)
+    result.onboarding_summary_text = parts.length > 0 ? parts.join('. ') + '.' : null
+  }
+
+  return result
+}
+
+/**
+ * Parse destinations string into structured array
+ * Example: "San Diego (7mo), Sri Lanka (2x 1mo)" 
+ * -> [{destination_name: "San Diego", time_in_days: 210, time_in_text: "7 months"}, ...]
+ */
+function parseDestinations(destinationsStr: string): Array<{ destination_name: string; time_in_days: number; time_in_text: string }> {
+  const result: Array<{ destination_name: string; time_in_days: number; time_in_text: string }> = []
+  
+  // Split by common separators (comma, semicolon, "and")
+  const parts = destinationsStr.split(/[,;]| and /i).map(s => s.trim()).filter(s => s)
+  
+  for (const part of parts) {
+    // Extract destination name and time
+    // Patterns: "San Diego (7mo)", "Sri Lanka (2x 1mo)", "Maldives 1 month", "El Salvador 3 months", "Australia 2 years and 5 months"
+    const timeMatch = part.match(/(\d+(?:\.\d+)?)\s*(mo|month|months|week|weeks|day|days|year|years)/i)
+    const multiplierMatch = part.match(/(\d+)x|twice|thrice/i)
+    const yearHalfMatch = part.match(/(\d+\.5|one and a half|1\.5)\s*(year|years)/i)
+    // Pattern for "X years and Y months" format
+    const yearsAndMonthsMatch = part.match(/(\d+)\s*(?:year|years)\s+and\s+(\d+)\s*(?:month|months)/i)
+    
+    let timeInDays = 30 // Default to 1 month
+    let timeInText = "1 month" // Default text
+    
+    // Handle "X years and Y months" format - round to years/half-years
+    if (yearsAndMonthsMatch) {
+      const years = parseInt(yearsAndMonthsMatch[1])
+      const months = parseInt(yearsAndMonthsMatch[2])
+      const totalDays = (years * 365) + (months * 30)
+      timeInDays = totalDays
+      
+      // Round to nearest year or half-year
+      const totalYears = years + (months / 12)
+      if (months <= 2) {
+        // 0-2 months: round down to whole years
+        timeInText = `${years} ${years === 1 ? 'year' : 'years'}`
+      } else if (months <= 8) {
+        // 3-8 months: round to half-year
+        timeInText = `${years}.5 years`
+      } else {
+        // 9+ months: round up to next year
+        timeInText = `${years + 1} ${years + 1 === 1 ? 'year' : 'years'}`
+      }
+    } else if (timeMatch) {
+      const value = parseFloat(timeMatch[1])
+      const unit = timeMatch[2].toLowerCase()
+      let multiplier = 1
+      
+      // Handle multipliers (2x, twice, etc.)
+      if (multiplierMatch) {
+        multiplier = multiplierMatch[0].includes('twice') ? 2 : 
+                    multiplierMatch[0].includes('thrice') ? 3 :
+                    parseInt(multiplierMatch[1]) || 1
+      }
+      
+      // Calculate days and text
+      if (unit.includes('year')) {
+        const totalYears = value * multiplier
+        timeInDays = Math.round(totalYears * 365)
+        if (totalYears === 1) {
+          timeInText = "1 year"
+        } else if (totalYears % 1 === 0.5) {
+          timeInText = `${Math.floor(totalYears)}.5 years`
+        } else {
+          timeInText = `${totalYears} years`
+        }
+      } else if (unit.includes('mo') || unit.includes('month')) {
+        const totalMonths = value * multiplier
+        timeInDays = Math.round(totalMonths * 30)
+        // If 12+ months, convert to years/half-years
+        if (totalMonths >= 12) {
+          const years = totalMonths / 12
+          if (years >= 1 && years < 1.5) {
+            timeInText = "1 year"
+          } else if (years >= 1.5 && years < 2) {
+            timeInText = "1.5 years"
+          } else {
+            const roundedYears = Math.round(years * 2) / 2
+            if (roundedYears === Math.floor(roundedYears)) {
+              timeInText = `${roundedYears} ${roundedYears === 1 ? 'year' : 'years'}`
+            } else {
+              timeInText = `${roundedYears} years`
+            }
+          }
+        } else {
+          if (totalMonths === 1) {
+            timeInText = "1 month"
+          } else {
+            timeInText = `${totalMonths} months`
+          }
+        }
+      } else if (unit.includes('week')) {
+        const totalWeeks = value * multiplier
+        timeInDays = Math.round(totalWeeks * 7)
+        if (totalWeeks === 1) {
+          timeInText = "1 week"
+        } else {
+          timeInText = `${totalWeeks} weeks`
+        }
+      } else if (unit.includes('day')) {
+        const totalDays = value * multiplier
+        timeInDays = Math.round(totalDays)
+        if (totalDays === 1) {
+          timeInText = "1 day"
+        } else {
+          timeInText = `${totalDays} days`
+        }
+      }
+    } else if (yearHalfMatch) {
+      // Handle "1.5 years" or "one and a half years"
+      timeInDays = 547 // 1.5 * 365
+      timeInText = "1.5 years"
+    }
+    
+    // Extract destination name (remove time info)
+    let destinationName = part
+      .replace(/\([^)]*\)/g, '') // Remove parentheses
+      .replace(/\d+\s*(?:year|years)\s+and\s+\d+\s*(?:month|months)/gi, '') // Remove "X years and Y months"
+      .replace(/\d+(?:\.\d+)?\s*(mo|month|months|week|weeks|day|days|year|years)/gi, '') // Remove time
+      .replace(/\d+x|twice|thrice|one and a half/gi, '') // Remove multipliers
+      .replace(/\s+and\s+/gi, ' ') // Remove remaining "and" connectors
+      .trim()
+    
+    if (destinationName) {
+      result.push({
+        destination_name: destinationName,
+        time_in_days: timeInDays,
+        time_in_text: timeInText
+      })
+    }
+  }
+  
+  return result.length > 0 ? result : [{ destination_name: destinationsStr, time_in_days: 30, time_in_text: "1 month" }]
+}
+
+/**
+ * Extract keywords from text based on a list of possible keywords
+ */
+function extractKeywords(text: string, possibleKeywords: string[]): string[] {
+  const found: string[] = []
+  const lowerText = text.toLowerCase()
+  
+  for (const keyword of possibleKeywords) {
+    if (lowerText.includes(keyword.toLowerCase())) {
+      found.push(keyword)
+    }
+  }
+  
+  return found
+}
+
+async function getChatHistory(chatId: string, supabase: any): Promise<any[]> {
+  try {
+    // Try to get chat history from database
+    const { data, error } = await supabase
+      .from('swelly_chat_history')
+      .select('messages')
+      .eq('chat_id', chatId)
+      .single()
+
+    if (error || !data) {
+      return []
+    }
+
+    return data.messages || []
+  } catch (error) {
+    console.error('Error fetching chat history:', error)
+    return []
+  }
+}
+
+async function saveChatHistory(chatId: string, messages: any[], userId: string | null, conversationId: string | null, supabase: any): Promise<void> {
+  try {
+    const { error } = await supabase
+      .from('swelly_chat_history')
+      .upsert({
+        chat_id: chatId,
+        user_id: userId,
+        conversation_id: conversationId,
+        messages: messages,
+        updated_at: new Date().toISOString()
+      }, {
+        onConflict: 'chat_id'
+      })
+
+    if (error) {
+      console.error('Error saving chat history:', error)
+    }
+  } catch (error) {
+    console.error('Error saving chat history:', error)
+  }
+}
+
+async function callOpenAI(messages: any[]): Promise<string> {
+  if (!OPENAI_API_KEY) {
+    throw new Error('OPENAI_API_KEY is not set')
+  }
+
+  const requestBody = {
+    // Use a model that supports JSON mode
+    // gpt-4 (base) doesn't support response_format: json_object
+    // Options: gpt-4o, gpt-4-turbo, gpt-4-0125-preview, gpt-3.5-turbo-1106
+    model: 'gpt-4o',
+    messages: messages,
+    temperature: 0.7,
+    max_completion_tokens: 1000,
+    response_format: { type: 'json_object' },
+  }
+
+  console.log('Sending request to OpenAI:', JSON.stringify(requestBody, null, 2))
+
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${OPENAI_API_KEY}`
+    },
+    body: JSON.stringify(requestBody)
+  })
+
+  if (!response.ok) {
+    const errorText = await response.text()
+    console.error('OpenAI API error:', response.status, response.statusText, errorText)
+    throw new Error(`OpenAI API error: ${response.status} ${response.statusText} - ${errorText}`)
+  }
+
+  const data = await response.json()
+  console.log('OpenAI API response:', JSON.stringify(data, null, 2))
+  
+  const assistantMessage = data.choices[0]?.message?.content || ''
+  console.log('Extracted assistant message:', assistantMessage)
+  
+  return assistantMessage
+}
+
+/**
+ * Enrich area with related names, nicknames, and nearby towns using GPT API
+ * @param country - Country name (e.g., "USA", "Indonesia", "Costa Rica")
+ * @param area - The primary area/town name mentioned by user
+ * @param state - State name (only for USA destinations)
+ * @returns Array of related area names (with the original area first)
+ */
+async function enrichAreaWithRelatedNames(country: string, area: string, state?: string): Promise<string[]> {
+  if (!OPENAI_API_KEY) {
+    console.warn('OpenAI API key not configured, returning original area only')
+    return [area]
+  }
+
+  if (!area || !area.trim()) {
+    return []
+  }
+
+  try {
+    // Build location string based on whether it's USA or not
+    const locationStr = country === 'USA' && state 
+      ? `"${area}" in ${state}, USA`
+      : `"${area}" in "${country}"`
+
+    const prompt = `Given a surf destination area: ${locationStr}
+
+Your task: Research and find related names, nicknames, and nearby small towns/areas that surfers might use to refer to this location.
+
+Return a JSON object with this structure:
+{
+  "related_areas": ["area1", "area2", "area3", ...]
+}
+
+Rules:
+- Include the original area name as the FIRST item in the array
+- Add common nicknames or alternative names for this area
+- Add nearby small towns or areas that are part of the same surf region
+- Add any other ways surfers might refer to this location
+- Keep names concise (town/area names, not full descriptions)
+- Return 3-8 related names total (including the original)
+- Only include names that are actually related to this specific area
+- Do NOT include the country or state name in the areas (only city/region/beach names)
+
+Examples:
+- Input: area="San Diego" in California, USA → {
+  "related_areas": ["San Diego", "SD", "Pacific Beach", "Ocean Beach", "La Jolla", "Blacks Beach", "Windansea"]
+}
+- Input: area="Gold Coast" in "Australia" → {
+  "related_areas": ["Gold Coast", "GC", "Surfers Paradise", "Burleigh Heads", "Coolangatta", "Tweed Heads"]
+}
+- Input: area="Tamarindo" in "Costa Rica" → {
+  "related_areas": ["Tamarindo", "Tama", "Playa Tamarindo", "Langosta", "Playa Grande", "Avellanas"]
+}
+- Input: area="Weligama" in "Sri Lanka" → {
+  "related_areas": ["Weligama", "Weli", "Midigama", "Mirissa", "Polhena"]
+}
+
+Return ONLY the JSON object, no other text.`
+
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a helpful assistant that returns only valid JSON objects. Do not include any explanatory text.',
+          },
+          {
+            role: 'user',
+            content: prompt,
+          },
+        ],
+        temperature: 0.3,
+        max_tokens: 300,
+        response_format: { type: 'json_object' },
+      }),
+    })
+
+    if (!response.ok) {
+      throw new Error(`OpenAI API error: ${response.status}`)
+    }
+
+    const data = await response.json()
+    const content = data.choices[0]?.message?.content?.trim()
+    
+    if (!content) {
+      throw new Error('No content in OpenAI response')
+    }
+
+    const parsed = JSON.parse(content)
+    const relatedAreas = parsed.related_areas || []
+    
+    // Ensure the original area is first, and remove duplicates
+    const uniqueAreas = [area]
+    for (const relatedArea of relatedAreas) {
+      if (relatedArea && relatedArea.toLowerCase() !== area.toLowerCase() && !uniqueAreas.some(a => a.toLowerCase() === relatedArea.toLowerCase())) {
+        uniqueAreas.push(relatedArea)
+      }
+    }
+
+    return uniqueAreas
+  } catch (error) {
+    console.error('Error enriching area with related names:', error)
+    // Fallback: return just the original area
+    return [area]
+  }
+}
+
+/**
+ * Process and enrich destinations array with related area names
+ * @param destinations - Array of destinations from GPT response
+ * @returns Processed destinations with enriched areas
+ */
+async function processDestinationsArray(destinations: any[]): Promise<any[]> {
+  if (!destinations || !Array.isArray(destinations)) {
+    return []
+  }
+
+  const processed: any[] = []
+
+  for (const dest of destinations) {
+    // Support both new format (country, area, optionally state) and legacy (destination_name)
+    let country: string
+    let state: string | undefined
+    let areas: string[] = []
+
+    if (dest.country) {
+      // New format
+      country = dest.country
+      state = dest.state // For USA destinations
+      areas = dest.area || []
+    } else if (dest.destination_name) {
+      // Legacy format - parse it
+      const parts = dest.destination_name.split(',').map((p: string) => p.trim())
+      country = parts[0] || ''
+      areas = parts.length > 1 ? parts.slice(1) : []
+      // Legacy format doesn't have state field, leave it undefined
+    } else {
+      // Skip invalid destinations
+      console.warn('Skipping invalid destination:', dest)
+      continue
+    }
+
+    // If no areas mentioned, save with empty array
+    if (areas.length === 0) {
+      const processedDest: any = {
+        country,
+        area: [],
+        time_in_days: dest.time_in_days || 0,
+        time_in_text: dest.time_in_text,
+      }
+      // Add state field only for USA destinations
+      if (country === 'USA' && state) {
+        processedDest.state = state
+      }
+      processed.push(processedDest)
+      continue
+    }
+
+    // Enrich ALL areas mentioned by the user
+    const allEnrichedNames: string[] = []
+    
+    // Enrich each area sequentially
+    // For USA, pass state as well for better enrichment
+    for (const area of areas) {
+      const enrichedNames = await enrichAreaWithRelatedNames(country, area, state)
+      // enrichedNames includes the original area as first item, so skip it
+      // Add all related names (excluding the original which is already in areas)
+      for (let i = 1; i < enrichedNames.length; i++) {
+        const relatedName = enrichedNames[i]
+        // Only add if it's not already in the original areas list
+        if (!areas.some(a => a.toLowerCase() === relatedName.toLowerCase())) {
+          allEnrichedNames.push(relatedName)
+        }
+      }
+    }
+    
+    // Combine: original areas first, then all enriched names
+    // Remove duplicates while preserving order (originals first, then enriched)
+    const seen = new Set<string>()
+    const uniqueAreas: string[] = []
+    
+    // First pass: add all original areas (preserve order)
+    for (const area of areas) {
+      const lower = area.toLowerCase()
+      if (!seen.has(lower)) {
+        seen.add(lower)
+        uniqueAreas.push(area)
+      }
+    }
+    
+    // Second pass: add enriched names (excluding originals)
+    for (const enrichedName of allEnrichedNames) {
+      const lower = enrichedName.toLowerCase()
+      if (!seen.has(lower)) {
+        seen.add(lower)
+        uniqueAreas.push(enrichedName)
+      }
+    }
+
+    const processedDest: any = {
+      country,
+      area: uniqueAreas,
+      time_in_days: dest.time_in_days || 0,
+      time_in_text: dest.time_in_text,
+    }
+    // Add state field only for USA destinations
+    if (country === 'USA' && state) {
+      processedDest.state = state
+    }
+    processed.push(processedDest)
+  }
+
+  return processed
+}
+
+serve(async (req: Request) => {
+  // Handle CORS
+  if (req.method === 'OPTIONS') {
+    return new Response(null, {
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
+        'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+      },
+    })
+  }
+
+  try {
+    // Get auth header
+    const authHeader = req.headers.get('Authorization')
+    if (!authHeader) {
+      return new Response(
+        JSON.stringify({ error: 'Missing authorization header' }),
+        { 
+          status: 401, 
+          headers: { 
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+          } 
+        }
+      )
+    }
+
+    // Initialize Supabase client with service role for admin operations
+    const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false
+      }
+    })
+
+    // Get user from auth token
+    const token = authHeader.replace('Bearer ', '')
+    const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token)
+
+    if (userError || !user) {
+      return new Response(
+        JSON.stringify({ error: 'Invalid authentication token' }),
+        { 
+          status: 401, 
+          headers: { 
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+          } 
+        }
+      )
+    }
+
+    const url = new URL(req.url)
+    const path = url.pathname
+
+    // Route: POST /swelly-chat-demo/new_chat
+    if (path.endsWith('/new_chat') && req.method === 'POST') {
+      const body: ChatRequest = await req.json()
+      
+      // Generate chat ID
+      const chatId = crypto.randomUUID()
+      
+      // Get user's profile for pronoun context
+      let userProfile: any = null
+      try {
+        const { data: surferData, error: surferError } = await supabaseAdmin
+          .from('surfers')
+          .select('pronoun')
+          .eq('user_id', user.id)
+          .single()
+        
+        if (!surferError && surferData) {
+          userProfile = surferData
+          console.log('✅ Fetched user profile for pronoun context:', userProfile)
+        }
+      } catch (error) {
+        console.error('Error fetching user profile:', error)
+        // Continue without profile - not critical
+      }
+      
+      // Build system prompt with pronoun instructions if available
+      let systemPrompt = META_PROMPT
+      if (userProfile?.pronoun) {
+        const pronounInstructions = getPronounInstructions(userProfile.pronoun)
+        systemPrompt = META_PROMPT + '\n\n' + pronounInstructions
+      }
+      
+      // Initialize chat history
+      const messages = [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: body.message }
+      ]
+
+      // Call OpenAI
+      const assistantMessage = await callOpenAI(messages)
+      messages.push({ role: 'assistant', content: assistantMessage })
+
+      // Save to database
+      await saveChatHistory(chatId, messages, user.id, body.conversation_id || null, supabaseAdmin)
+
+      // Parse JSON response and transform data structure if finished
+      let parsedResponse: ChatResponse
+      try {
+        console.log('Raw assistant message:', assistantMessage)
+        const parsed = JSON.parse(assistantMessage)
+        console.log('Parsed JSON from ChatGPT:', JSON.stringify(parsed, null, 2))
+        
+        // Transform data structure if conversation is finished
+        let transformedData = parsed.data || null
+        if (parsed.is_finished && parsed.data) {
+          console.log('Conversation finished. Original data:', JSON.stringify(parsed.data, null, 2))
+          transformedData = transformSwellyData(parsed.data)
+          
+          // Process and enrich destinations array with related area names
+          if (transformedData.destinations_array && Array.isArray(transformedData.destinations_array)) {
+            console.log('Processing destinations array for enrichment...')
+            transformedData.destinations_array = await processDestinationsArray(transformedData.destinations_array)
+            console.log('Enriched destinations array:', JSON.stringify(transformedData.destinations_array, null, 2))
+          }
+          
+          console.log('Transformed data:', JSON.stringify(transformedData, null, 2))
+        }
+        
+        parsedResponse = {
+          chat_id: chatId,
+          return_message: parsed.return_message || assistantMessage,
+          is_finished: parsed.is_finished || false,
+          data: transformedData,
+          ui_hints: parsed.ui_hints || {
+            show_destination_cards: false,
+            destinations: [],
+            show_budget_buttons: false
+          }
+        }
+        
+        console.log('Final response being sent:', JSON.stringify(parsedResponse, null, 2))
+      } catch (parseError) {
+        console.error('Error parsing JSON from ChatGPT:', parseError)
+        console.log('Raw message that failed to parse:', assistantMessage)
+        parsedResponse = {
+          chat_id: chatId,
+          return_message: assistantMessage,
+          is_finished: false,
+          data: null,
+          ui_hints: {
+            show_destination_cards: false,
+            destinations: [],
+            show_budget_buttons: false
+          }
+        }
+      }
+
+      return new Response(
+        JSON.stringify(parsedResponse),
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+          },
+        }
+      )
+    }
+
+    // Route: POST /swelly-chat-demo/continue/:chat_id
+    if (path.includes('/continue/') && req.method === 'POST') {
+      const chatId = path.split('/continue/')[1]
+      const body: ChatRequest = await req.json()
+
+      if (!chatId) {
+        return new Response(
+          JSON.stringify({ error: 'Missing chat_id' }),
+          { 
+            status: 400, 
+            headers: { 
+              'Content-Type': 'application/json',
+              'Access-Control-Allow-Origin': '*',
+            } 
+          }
+        )
+      }
+
+      // Get existing chat history
+      let messages = await getChatHistory(chatId, supabaseAdmin)
+      
+      if (messages.length === 0) {
+        return new Response(
+          JSON.stringify({ error: 'Chat not found' }),
+          { 
+            status: 404, 
+            headers: { 
+              'Content-Type': 'application/json',
+              'Access-Control-Allow-Origin': '*',
+            } 
+          }
+        )
+      }
+
+      // Get user's profile for pronoun context (if not already in system message)
+      let userProfile: any = null
+      try {
+        const { data: surferData, error: surferError } = await supabaseAdmin
+          .from('surfers')
+          .select('pronoun')
+          .eq('user_id', user.id)
+          .single()
+        
+        if (!surferError && surferData) {
+          userProfile = surferData
+          console.log('✅ Fetched user profile for pronoun context (continue):', userProfile)
+          
+          // Check if system message already has pronoun instructions
+          const systemMessage = messages.find(m => m.role === 'system')
+          if (systemMessage && userProfile?.pronoun && !systemMessage.content.includes('PRONOUN USAGE')) {
+            const pronounInstructions = getPronounInstructions(userProfile.pronoun)
+            systemMessage.content = systemMessage.content + '\n\n' + pronounInstructions
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching user profile:', error)
+        // Continue without profile - not critical
+      }
+
+      // Add new user message
+      messages.push({ role: 'user', content: body.message })
+
+      // Call OpenAI
+      const assistantMessage = await callOpenAI(messages)
+      messages.push({ role: 'assistant', content: assistantMessage })
+
+      // Save to database
+      await saveChatHistory(chatId, messages, user.id, body.conversation_id || null, supabaseAdmin)
+
+      // Parse JSON response and transform data structure if finished
+      let parsedResponse: ChatResponse
+      try {
+        console.log('Raw assistant message (continue):', assistantMessage)
+        const parsed = JSON.parse(assistantMessage)
+        console.log('Parsed JSON from ChatGPT (continue):', JSON.stringify(parsed, null, 2))
+        
+        // Transform data structure if conversation is finished
+        let transformedData = parsed.data || null
+        if (parsed.is_finished && parsed.data) {
+          console.log('Conversation finished (continue). Original data:', JSON.stringify(parsed.data, null, 2))
+          transformedData = transformSwellyData(parsed.data)
+          
+          // Process and enrich destinations array with related area names
+          if (transformedData.destinations_array && Array.isArray(transformedData.destinations_array)) {
+            console.log('Processing destinations array for enrichment (continue)...')
+            transformedData.destinations_array = await processDestinationsArray(transformedData.destinations_array)
+            console.log('Enriched destinations array (continue):', JSON.stringify(transformedData.destinations_array, null, 2))
+          }
+          
+          console.log('Transformed data (continue):', JSON.stringify(transformedData, null, 2))
+        }
+        
+        parsedResponse = {
+          return_message: parsed.return_message || assistantMessage,
+          is_finished: parsed.is_finished || false,
+          data: transformedData,
+          ui_hints: parsed.ui_hints || {
+            show_destination_cards: false,
+            destinations: [],
+            show_budget_buttons: false
+          }
+        }
+        
+        console.log('Final response being sent (continue):', JSON.stringify(parsedResponse, null, 2))
+      } catch (parseError) {
+        console.error('Error parsing JSON from ChatGPT (continue):', parseError)
+        console.log('Raw message that failed to parse (continue):', assistantMessage)
+        parsedResponse = {
+          return_message: assistantMessage,
+          is_finished: false,
+          data: null,
+          ui_hints: {
+            show_destination_cards: false,
+            destinations: [],
+            show_budget_buttons: false
+          }
+        }
+      }
+
+      return new Response(
+        JSON.stringify(parsedResponse),
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+          },
+        }
+      )
+    }
+
+    // Route: GET /swelly-chat-demo/:chat_id
+    const chatIdMatch = path.match(/\/([^/]+)$/)
+    if (chatIdMatch && req.method === 'GET' && !path.endsWith('/health')) {
+      const chatId = chatIdMatch[1]
+
+      if (!chatId) {
+        return new Response(
+          JSON.stringify({ error: 'Missing chat_id' }),
+          { 
+            status: 400, 
+            headers: { 
+              'Content-Type': 'application/json',
+              'Access-Control-Allow-Origin': '*',
+            } 
+          }
+        )
+      }
+
+      const messages = await getChatHistory(chatId, supabaseAdmin)
+
+      if (messages.length === 0) {
+        return new Response(
+          JSON.stringify({ error: 'Chat not found' }),
+          { 
+            status: 404, 
+            headers: { 
+              'Content-Type': 'application/json',
+              'Access-Control-Allow-Origin': '*',
+            } 
+          }
+        )
+      }
+
+      return new Response(
+        JSON.stringify({ chat_id: chatId, messages }),
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+          },
+        }
+      )
+    }
+
+    // Health check
+    if (path.endsWith('/health') || path === '/swelly-chat-demo' || path.endsWith('/swelly-chat-demo')) {
+      return new Response(
+        JSON.stringify({ status: 'healthy', message: 'Swelly API is running' }),
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+          },
+        }
+      )
+    }
+
+    return new Response(
+      JSON.stringify({ error: 'Not found' }),
+      { 
+        status: 404, 
+        headers: { 
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        } 
+      }
+    )
+
+  } catch (error: unknown) {
+    console.error('Error:', error)
+    const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred'
+    return new Response(
+      JSON.stringify({ error: errorMessage }),
+      {
+        status: 500,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        },
+      }
+    )
+  }
+})
+

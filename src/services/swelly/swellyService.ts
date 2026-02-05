@@ -22,6 +22,11 @@ export interface SwellyChatResponse {
   return_message: string;
   is_finished: boolean;
   data?: any;
+  ui_hints?: {
+    show_destination_cards?: boolean;
+    destinations?: string[];
+    show_budget_buttons?: boolean;
+  };
 }
 
 export interface SwellyContinueChatRequest {
@@ -32,6 +37,11 @@ export interface SwellyContinueChatResponse {
   return_message: string;
   is_finished: boolean;
   data?: any;
+  ui_hints?: {
+    show_destination_cards?: boolean;
+    destinations?: string[];
+    show_budget_buttons?: boolean;
+  };
 }
 
 class SwellyService {
@@ -48,7 +58,10 @@ class SwellyService {
       throw new Error('EXPO_PUBLIC_SUPABASE_URL is not set');
     }
     
-    const functionName = conversationType === 'trip-planning' ? 'swelly-trip-planning' : 'swelly-chat';
+    // Use swelly-chat-demo if in dev mode, otherwise use swelly-chat
+    const isDevMode = process.env.EXPO_PUBLIC_DEV_MODE === 'true';
+    const chatFunctionName = isDevMode ? 'swelly-chat-demo' : 'swelly-chat';
+    const functionName = conversationType === 'trip-planning' ? 'swelly-trip-planning' : chatFunctionName;
     return `${supabaseUrl}/functions/v1/${functionName}${endpoint}`;
   }
 

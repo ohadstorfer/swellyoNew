@@ -23,6 +23,8 @@ import { getImageUrl } from '../services/media/imageService';
 import { supabaseDatabaseService } from '../services/database/supabaseDatabaseService';
 import { messagingService } from '../services/messaging/messagingService';
 import { analyticsService } from '../services/analytics/analyticsService';
+import { DestinationCardsCarousel } from '../components/DestinationCardsCarousel';
+import { BudgetButtonSelector } from '../components/BudgetButtonSelector';
 
 interface Message {
   id: string;
@@ -30,6 +32,11 @@ interface Message {
   isUser: boolean;
   timestamp: string;
   isMatchedUsers?: boolean; // Flag to indicate this message should render matched user cards
+  ui_hints?: {
+    show_destination_cards?: boolean;
+    destinations?: string[];
+    show_budget_buttons?: boolean;
+  };
 }
 
 
@@ -51,6 +58,14 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
   const [onboardingStartTime] = useState<number>(Date.now()); // Track when onboarding chat started
   const scrollViewRef = useRef<ScrollView>(null);
   const textInputRef = useRef<any>(null);
+  
+  // State for destination cards
+  const [showDestinationCards, setShowDestinationCards] = useState(false);
+  const [destinationList, setDestinationList] = useState<string[]>([]);
+  
+  // State for budget buttons
+  const [showBudgetButtons, setShowBudgetButtons] = useState(false);
+  const [selectedBudget, setSelectedBudget] = useState<'budget' | 'mid' | 'high' | null>(null);
 
   // Calculate progress based on conversation length
   // Estimate: typical conversation is 6-10 message pairs (12-20 messages total)
@@ -99,18 +114,30 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
         setChatId(newChatId);
         
         // Set the first message from Swelly's response
-        setMessages([
-          {
-            id: '1',
-            text: response.return_message,
-            isUser: false,
-            timestamp: new Date().toLocaleTimeString('en-US', { 
-              hour: '2-digit', 
-              minute: '2-digit',
-              hour12: false 
-            }),
+        const firstMessage: Message = {
+          id: '1',
+          text: response.return_message,
+          isUser: false,
+          timestamp: new Date().toLocaleTimeString('en-US', { 
+            hour: '2-digit', 
+            minute: '2-digit',
+            hour12: false 
+          }),
+        };
+        
+        // Handle UI hints from initial response
+        if (response.ui_hints) {
+          firstMessage.ui_hints = response.ui_hints;
+          if (response.ui_hints.show_destination_cards && response.ui_hints.destinations) {
+            setShowDestinationCards(true);
+            setDestinationList(response.ui_hints.destinations);
           }
-        ]);
+          if (response.ui_hints.show_budget_buttons) {
+            setShowBudgetButtons(true);
+          }
+        }
+        
+        setMessages([firstMessage]);
         
       } catch (error) {
         console.error('API health check or chat initialization failed:', error);
@@ -176,6 +203,30 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
         }),
       };
 
+      // Handle UI hints from response
+      if (response.ui_hints) {
+        botMessage.ui_hints = response.ui_hints;
+        
+        // Handle destination cards
+        if (response.ui_hints.show_destination_cards && response.ui_hints.destinations) {
+          setShowDestinationCards(true);
+          setDestinationList(response.ui_hints.destinations);
+        } else {
+          setShowDestinationCards(false);
+        }
+        
+        // Handle budget buttons
+        if (response.ui_hints.show_budget_buttons) {
+          setShowBudgetButtons(true);
+        } else {
+          setShowBudgetButtons(false);
+        }
+      } else {
+        // Reset UI hints if not present
+        setShowDestinationCards(false);
+        setShowBudgetButtons(false);
+      }
+
       setMessages(prev => [...prev, botMessage]);
 
       // If chat is finished, handle completion (onboarding only)
@@ -211,7 +262,6 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
             travelType: response.data.travel_type,
             travelBuddies: response.data.travel_buddies,
             lifestyleKeywords: response.data.lifestyle_keywords,
-            waveTypeKeywords: response.data.wave_type_keywords,
             isDemoUser: isDemoUser, // Pass demo user flag from context
           });
           console.log('Swelly conversation results saved successfully');
@@ -230,7 +280,6 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
               travelType: response.data.travel_type,
               travelBuddies: response.data.travel_buddies,
               lifestyleKeywords: response.data.lifestyle_keywords,
-              waveTypeKeywords: response.data.wave_type_keywords,
               summaryText: response.data.surf_trip_plan.summary_text,
             });
             console.log('Surf trip plan saved successfully');
@@ -350,38 +399,208 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
     );
   };
 
+  // Handler for destination card submission
+  const handleDestinationSubmit = async (allDestinationsData: Array<{
+    destination: string;
+    areas: string[];
+    timeInDays: number;
+    timeInText: string;
+  }>) => {
+    // Send all destination data to backend
+    const destinationsData = allDestinationsData.map(dest => {
+      // Parse destination to extract country/state
+      // For now, we'll send the destination name and let the backend parse it
+      // The backend will need to handle parsing "USA (California)" format
+      return {
+        destination_name: dest.destination,
+        area: dest.areas,
+        time_in_days: dest.timeInDays,
+        time_in_text: dest.timeInText,
+      };
+    });
+    
+    // Send structured data to backend
+    const messageToSend = JSON.stringify({
+      destinations_data: destinationsData,
+    });
+    
+    // Hide destination cards
+    setShowDestinationCards(false);
+    
+    // Send message to backend
+    if (chatId) {
+      setIsLoading(true);
+      try {
+        const response = await swellyService.continueConversation(chatId, {
+          message: messageToSend,
+        });
+        
+        const botMessage: Message = {
+          id: (Date.now() + 1).toString(),
+          text: response.return_message,
+          isUser: false,
+          timestamp: new Date().toLocaleTimeString('en-US', { 
+            hour: '2-digit', 
+            minute: '2-digit',
+            hour12: false 
+          }),
+        };
+        
+        if (response.ui_hints) {
+          botMessage.ui_hints = response.ui_hints;
+          if (response.ui_hints.show_budget_buttons) {
+            setShowBudgetButtons(true);
+          }
+        }
+        
+        setMessages(prev => [...prev, botMessage]);
+      } catch (error) {
+        console.error('Error sending destination data:', error);
+        Alert.alert('Error', 'Failed to send destination data. Please try again.');
+      } finally {
+        setIsLoading(false);
+      }
+    }
+  };
+
+  // Handler for budget selection
+  const handleBudgetSelect = async (budget: 'budget' | 'mid' | 'high') => {
+    setSelectedBudget(budget);
+    setShowBudgetButtons(false);
+    
+    // Send budget selection to backend
+    const messageToSend = JSON.stringify({
+      travel_type: budget,
+    });
+    
+    if (chatId) {
+      setIsLoading(true);
+      try {
+        const response = await swellyService.continueConversation(chatId, {
+          message: messageToSend,
+        });
+        
+        const botMessage: Message = {
+          id: (Date.now() + 1).toString(),
+          text: response.return_message,
+          isUser: false,
+          timestamp: new Date().toLocaleTimeString('en-US', { 
+            hour: '2-digit', 
+            minute: '2-digit',
+            hour12: false 
+          }),
+        };
+        
+        if (response.ui_hints) {
+          botMessage.ui_hints = response.ui_hints;
+        }
+        
+        setMessages(prev => [...prev, botMessage]);
+        
+        // Handle completion if finished
+        if (response.is_finished && response.data) {
+          setIsFinished(true);
+          
+          // Show "creating profile..." message
+          const creatingProfileMessage: Message = {
+            id: (Date.now() + 2).toString(),
+            text: 'Creating your profile...',
+            isUser: false,
+            timestamp: new Date().toLocaleTimeString('en-US', { 
+              hour: '2-digit', 
+              minute: '2-digit',
+              hour12: false 
+            }),
+          };
+          setMessages(prev => [...prev, creatingProfileMessage]);
+          
+          // Save Swelly conversation results to surfers table
+          try {
+            console.log('Saving Swelly conversation results to database:', response.data);
+            await supabaseDatabaseService.saveSurfer({
+              onboardingSummaryText: response.data.onboarding_summary_text,
+              destinationsArray: response.data.destinations_array,
+              travelType: response.data.travel_type,
+              travelBuddies: response.data.travel_buddies,
+              lifestyleKeywords: response.data.lifestyle_keywords,
+              isDemoUser: isDemoUser,
+            });
+            console.log('Swelly conversation results saved successfully');
+          } catch (error) {
+            console.error('Error saving Swelly conversation results:', error);
+          }
+          
+          // Navigate to profile screen after a short delay
+          setTimeout(() => {
+            const durationSeconds = (Date.now() - onboardingStartTime) / 1000;
+            analyticsService.trackOnboardingStep2Completed(durationSeconds);
+            onChatComplete?.();
+          }, 1500);
+        }
+      } catch (error) {
+        console.error('Error sending budget selection:', error);
+        Alert.alert('Error', 'Failed to send budget selection. Please try again.');
+      } finally {
+        setIsLoading(false);
+      }
+    }
+  };
+
   const renderMessage = (message: Message) => {
     // Regular message rendering
     return (
-    <View
-      key={message.id}
-      style={[
-        styles.messageContainer,
-        message.isUser ? styles.userMessageContainer : styles.botMessageContainer,
-      ]}
-    >
-      <View
-        style={[
-          styles.messageBubble,
-          message.isUser ? styles.userMessageBubble : styles.botMessageBubble,
-        ]}
-      >
-        <View style={styles.messageTextContainer}>
-          <Text style={message.isUser ? styles.userMessageText : styles.botMessageText}>
-            {message.text}
-          </Text>
+      <View key={message.id}>
+        <View
+          style={[
+            styles.messageContainer,
+            message.isUser ? styles.userMessageContainer : styles.botMessageContainer,
+          ]}
+        >
+          <View
+            style={[
+              styles.messageBubble,
+              message.isUser ? styles.userMessageBubble : styles.botMessageBubble,
+            ]}
+          >
+            <View style={styles.messageTextContainer}>
+              <Text style={message.isUser ? styles.userMessageText : styles.botMessageText}>
+                {message.text}
+              </Text>
+            </View>
+            <View style={styles.timestampContainer}>
+              <Text style={[
+                styles.timestamp,
+                message.isUser ? styles.userTimestamp : styles.botTimestamp,
+              ]}>
+                {message.timestamp}
+              </Text>
+            </View>
+          </View>
         </View>
-        <View style={styles.timestampContainer}>
-          <Text style={[
-            styles.timestamp,
-            message.isUser ? styles.userTimestamp : styles.botTimestamp,
-          ]}>
-            {message.timestamp}
-          </Text>
-        </View>
+        
+        {/* Render destination cards carousel if this message has show_destination_cards hint */}
+        {!message.isUser && 
+         message.ui_hints?.show_destination_cards && 
+         message.id === messages[messages.length - 1]?.id && 
+         destinationList.length > 0 && (
+          <View style={styles.uiComponentContainer}>
+            <DestinationCardsCarousel
+              destinations={destinationList}
+              onSubmit={handleDestinationSubmit}
+            />
+          </View>
+        )}
+        
+        {/* Render budget buttons if this message has show_budget_buttons hint */}
+        {!message.isUser && 
+         message.ui_hints?.show_budget_buttons && 
+         message.id === messages[messages.length - 1]?.id && (
+          <View style={styles.uiComponentContainer}>
+            <BudgetButtonSelector onSelect={handleBudgetSelect} />
+          </View>
+        )}
       </View>
-    </View>
-  );
+    );
   };
 
   return (
@@ -917,6 +1136,11 @@ const styles = StyleSheet.create({
     height: 8,
     borderRadius: 4,
     backgroundColor: '#333333',
+  },
+  uiComponentContainer: {
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.md,
   },
 });
 
