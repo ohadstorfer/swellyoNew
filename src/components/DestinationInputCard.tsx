@@ -7,8 +7,8 @@ import {
   Platform,
   Dimensions,
   Image,
+  Modal,
 } from 'react-native';
-import { Portal } from 'react-native-paper';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Text } from './Text';
@@ -26,6 +26,10 @@ interface DestinationInputCardProps {
   totalCount?: number;
   onPrevious?: () => void;
   onNext?: () => void;
+  isReadOnly?: boolean;
+  initialAreas?: string;
+  initialTimeValue?: string;
+  initialTimeUnit?: TimeUnit;
 }
 
 type TimeUnit = 'days' | 'weeks' | 'months' | 'years';
@@ -37,10 +41,14 @@ export const DestinationInputCard: React.FC<DestinationInputCardProps> = ({
   totalCount = 1,
   onPrevious,
   onNext,
+  isReadOnly = false,
+  initialAreas,
+  initialTimeValue,
+  initialTimeUnit,
 }) => {
-  const [areas, setAreas] = useState('');
-  const [timeValue, setTimeValue] = useState('2');
-  const [timeUnit, setTimeUnit] = useState<TimeUnit>('weeks');
+  const [areas, setAreas] = useState(initialAreas || '');
+  const [timeValue, setTimeValue] = useState(initialTimeValue || '2');
+  const [timeUnit, setTimeUnit] = useState<TimeUnit>(initialTimeUnit || 'weeks');
   const [isUnitPickerVisible, setIsUnitPickerVisible] = useState(false);
   const [unitButtonLayout, setUnitButtonLayout] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
   const unitButtonRef = useRef<View>(null);
@@ -94,12 +102,15 @@ export const DestinationInputCard: React.FC<DestinationInputCardProps> = ({
       .map(area => area.trim())
       .filter(area => area.length > 0);
 
-    onDataChangeRef.current({
-      areas: areasArray,
-      timeInDays,
-      timeInText,
-    });
-  }, [areas, timeValue, timeUnit]);
+    // Don't call onDataChange in read-only mode
+    if (!isReadOnly) {
+      onDataChangeRef.current({
+        areas: areasArray,
+        timeInDays,
+        timeInText,
+      });
+    }
+  }, [areas, timeValue, timeUnit, isReadOnly]);
 
   const handleTimeValueChange = (text: string) => {
     // Allow only numbers and a single decimal point
@@ -194,18 +205,20 @@ export const DestinationInputCard: React.FC<DestinationInputCardProps> = ({
           {/* Input Fields */}
           <View style={styles.content}>
             {/* Areas Input */}
-            <TouchableOpacity style={styles.inputContainer} activeOpacity={1}>
+            <TouchableOpacity style={styles.inputContainer} activeOpacity={1} disabled={isReadOnly}>
               <TextInput
-                style={styles.textInput}
+                style={[styles.textInput, isReadOnly && styles.inputReadOnly]}
                 value={areas}
                 onChangeText={setAreas}
                 placeholder="🎯 City/town/surf spots..."
                 placeholderTextColor="#A0A0A0"
                 multiline={false}
+                editable={!isReadOnly}
                 {...(Platform.OS === 'web' && {
                   // @ts-ignore
                   style: [
                     styles.textInput,
+                    isReadOnly && styles.inputReadOnly,
                     {
                       outline: 'none',
                       outlineWidth: 0,
@@ -224,16 +237,18 @@ export const DestinationInputCard: React.FC<DestinationInputCardProps> = ({
               <View style={styles.timeInputRow}>
                 <View style={styles.timeInputBox}>
                   <TextInput
-                    style={styles.timeInput}
+                    style={[styles.timeInput, isReadOnly && styles.inputReadOnly]}
                     value={timeValue}
                     onChangeText={handleTimeValueChange}
                     placeholder="🕝 Time spent"
                     placeholderTextColor="#A0A0A0"
                     keyboardType="numeric"
+                    editable={!isReadOnly}
                     {...(Platform.OS === 'web' && {
                       // @ts-ignore
                       style: [
                         styles.timeInput,
+                        isReadOnly && styles.inputReadOnly,
                         {
                           outline: 'none',
                           outlineWidth: 0,
@@ -249,14 +264,15 @@ export const DestinationInputCard: React.FC<DestinationInputCardProps> = ({
                 <View style={styles.unitSelectorContainer}>
                   <TouchableOpacity
                     ref={unitButtonRef}
-                    style={styles.unitButton}
+                    style={[styles.unitButton, isReadOnly && styles.unitButtonReadOnly]}
                     onPress={handleUnitButtonPress}
                     activeOpacity={0.7}
+                    disabled={isReadOnly}
                   >
-                    <Text style={styles.unitText}>
+                    <Text style={[styles.unitText, isReadOnly && styles.unitTextReadOnly]}>
                       {timeUnit.charAt(0).toUpperCase() + timeUnit.slice(1)}
                     </Text>
-                    <Ionicons name="chevron-down" size={16} color={colors.textPrimary} />
+                    {!isReadOnly && <Ionicons name="chevron-down" size={16} color={colors.textPrimary} />}
                   </TouchableOpacity>
                 </View>
               </View>
@@ -267,11 +283,11 @@ export const DestinationInputCard: React.FC<DestinationInputCardProps> = ({
           <View style={styles.navigationContainer}>
             {currentIndex > 0 && onPrevious ? (
               <TouchableOpacity
-                style={styles.navArrow}
+                style={[styles.navArrow, isReadOnly && styles.navArrowReadOnly]}
                 onPress={onPrevious}
                 activeOpacity={0.7}
               >
-                <Ionicons name="chevron-back" size={24} color={colors.textPrimary} />
+                <Ionicons name="chevron-back" size={24} color={isReadOnly ? '#CCCCCC' : colors.textPrimary} />
               </TouchableOpacity>
             ) : (
               <View style={styles.navArrowPlaceholder} />
@@ -291,11 +307,11 @@ export const DestinationInputCard: React.FC<DestinationInputCardProps> = ({
 
             {currentIndex < totalCount - 1 && onNext ? (
               <TouchableOpacity
-                style={styles.navArrow}
+                style={[styles.navArrow, isReadOnly && styles.navArrowReadOnly]}
                 onPress={onNext}
                 activeOpacity={0.7}
               >
-                <Ionicons name="chevron-forward" size={24} color={colors.textPrimary} />
+                <Ionicons name="chevron-forward" size={24} color={isReadOnly ? '#CCCCCC' : colors.textPrimary} />
               </TouchableOpacity>
             ) : (
               <View style={styles.navArrowPlaceholder} />
@@ -304,26 +320,33 @@ export const DestinationInputCard: React.FC<DestinationInputCardProps> = ({
         </View>
       </LinearGradient>
 
-      {/* Unit Picker Portal - Rendered outside card hierarchy */}
-      {isUnitPickerVisible && (
-        <Portal>
-          <View style={styles.portalOverlay}>
+      {/* Unit Picker Modal - Rendered outside card hierarchy */}
+      <Modal
+        visible={isUnitPickerVisible}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setIsUnitPickerVisible(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setIsUnitPickerVisible(false)}
+        >
+          <View
+            style={[
+              styles.unitOptionsContainerPortal,
+              unitButtonLayout && {
+                position: 'absolute',
+                top: unitButtonLayout.y + unitButtonLayout.height + 8,
+                left: unitButtonLayout.x,
+                width: unitButtonLayout.width,
+              },
+            ]}
+            onStartShouldSetResponder={() => true}
+          >
             <TouchableOpacity
-              style={StyleSheet.absoluteFill}
               activeOpacity={1}
-              onPress={() => setIsUnitPickerVisible(false)}
-            />
-            <View
-              style={[
-                styles.unitOptionsContainerPortal,
-                unitButtonLayout && {
-                  position: 'absolute',
-                  top: unitButtonLayout.y + unitButtonLayout.height + 8,
-                  left: unitButtonLayout.x,
-                  width: unitButtonLayout.width,
-                },
-              ]}
-              onStartShouldSetResponder={() => true}
+              onPress={(e) => e.stopPropagation()}
             >
               <View style={styles.unitOptionsGrid}>
                 <TouchableOpacity
@@ -391,10 +414,10 @@ export const DestinationInputCard: React.FC<DestinationInputCardProps> = ({
                   </Text>
                 </TouchableOpacity>
               </View>
-            </View>
+            </TouchableOpacity>
           </View>
-        </Portal>
-      )}
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 };
@@ -579,16 +602,11 @@ const styles = StyleSheet.create({
       },
     } as any),
   },
-  portalOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    zIndex: 9000,
-    ...(Platform.OS === 'web' && {
-      position: 'fixed' as any,
-    }),
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0)',
+    justifyContent: 'flex-start',
+    alignItems: 'flex-start',
   },
   unitOptionsContainerPortal: {
     backgroundColor: colors.white,
@@ -678,5 +696,19 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     backgroundColor: '#CFCFCF',
+  },
+  inputReadOnly: {
+    opacity: 0.6,
+    backgroundColor: '#F5F5F5',
+  },
+  unitButtonReadOnly: {
+    opacity: 0.6,
+    backgroundColor: '#F5F5F5',
+  },
+  unitTextReadOnly: {
+    color: '#999999',
+  },
+  navArrowReadOnly: {
+    opacity: 0.5,
   },
 });

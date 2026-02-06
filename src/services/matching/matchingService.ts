@@ -439,9 +439,23 @@ function applyMustHaveFilters(
   if (criteria.country_from && criteria.country_from.length > 0) {
     if (!userSurfer.country_from) return true;
     const userCountry = userSurfer.country_from.toLowerCase();
-    const matches = criteria.country_from.some(
-      c => userCountry.includes(c.toLowerCase()) || c.toLowerCase().includes(userCountry)
-    );
+    const matches = criteria.country_from.some(c => {
+      const cLower = c.toLowerCase();
+      // Exact match
+      if (userCountry === cLower) return true;
+      // Handle "United States - [State]" format
+      if (cLower.startsWith('united states - ')) {
+        return userCountry === cLower;
+      }
+      // Handle state name only matching "United States - [State]"
+      if (userCountry === `united states - ${cLower}`) return true;
+      // Handle "United States" or "USA" matching any "United States - [State]"
+      if ((cLower === 'united states' || cLower === 'usa') && userCountry.startsWith('united states - ')) {
+        return true;
+      }
+      // Backward compatibility
+      return userCountry.includes(cLower) || cLower.includes(userCountry);
+    });
     if (!matches) return true;
   }
 
@@ -559,8 +573,47 @@ function checkPrioritizedFilterMatch(
     case 'origin_country':
     case 'country_from':
       if (!userSurfer.country_from || !filterValue) return false;
-      return userSurfer.country_from.toLowerCase().includes(filterValue.toLowerCase()) ||
-             filterValue.toLowerCase().includes(userSurfer.country_from.toLowerCase());
+      
+      // Handle array of filter values (from queryFilters)
+      if (Array.isArray(filterValue)) {
+        const userCountry = userSurfer.country_from.toLowerCase();
+        return filterValue.some(filterCountry => {
+          const filterLower = filterCountry.toLowerCase();
+          // Exact match
+          if (userCountry === filterLower) return true;
+          // Handle "United States - [State]" format
+          if (filterLower.startsWith('united states - ')) {
+            return userCountry === filterLower;
+          }
+          // Handle state name only (e.g., "California") matching "United States - California"
+          if (userCountry === `united states - ${filterLower}`) return true;
+          // Handle "United States" or "USA" matching any "United States - [State]"
+          if ((filterLower === 'united states' || filterLower === 'usa') && userCountry.startsWith('united states - ')) {
+            return true;
+          }
+          // Backward compatibility: simple includes check
+          return userCountry.includes(filterLower) || filterLower.includes(userCountry);
+        });
+      }
+      
+      // Handle single string filter value (from prioritize_filters)
+      const userCountry = userSurfer.country_from.toLowerCase();
+      const filterLower = String(filterValue).toLowerCase();
+      
+      // Exact match
+      if (userCountry === filterLower) return true;
+      // Handle "United States - [State]" format
+      if (filterLower.startsWith('united states - ')) {
+        return userCountry === filterLower;
+      }
+      // Handle state name only matching "United States - [State]"
+      if (userCountry === `united states - ${filterLower}`) return true;
+      // Handle "United States" or "USA" matching any "United States - [State]"
+      if ((filterLower === 'united states' || filterLower === 'usa') && userCountry.startsWith('united states - ')) {
+        return true;
+      }
+      // Backward compatibility
+      return userCountry.includes(filterLower) || filterLower.includes(userCountry);
     
     case 'board_type':
     case 'surfboard_type':

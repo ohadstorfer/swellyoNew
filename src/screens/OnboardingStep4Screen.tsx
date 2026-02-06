@@ -49,6 +49,7 @@ interface CountryFieldProps {
   placeholder?: string;
   width?: number;
   style?: any;
+  onOpen?: () => void;
 }
 
 // Check Icon Component
@@ -369,6 +370,56 @@ const COUNTRIES = [
   'United Arab Emirates',
   'United Kingdom',
   'United States',
+  'United States - Alabama',
+  'United States - Alaska',
+  'United States - Arizona',
+  'United States - Arkansas',
+  'United States - California',
+  'United States - Colorado',
+  'United States - Connecticut',
+  'United States - Delaware',
+  'United States - Florida',
+  'United States - Georgia',
+  'United States - Hawaii',
+  'United States - Idaho',
+  'United States - Illinois',
+  'United States - Indiana',
+  'United States - Iowa',
+  'United States - Kansas',
+  'United States - Kentucky',
+  'United States - Louisiana',
+  'United States - Maine',
+  'United States - Maryland',
+  'United States - Massachusetts',
+  'United States - Michigan',
+  'United States - Minnesota',
+  'United States - Mississippi',
+  'United States - Missouri',
+  'United States - Montana',
+  'United States - Nebraska',
+  'United States - Nevada',
+  'United States - New Hampshire',
+  'United States - New Jersey',
+  'United States - New Mexico',
+  'United States - New York',
+  'United States - North Carolina',
+  'United States - North Dakota',
+  'United States - Ohio',
+  'United States - Oklahoma',
+  'United States - Oregon',
+  'United States - Pennsylvania',
+  'United States - Rhode Island',
+  'United States - South Carolina',
+  'United States - South Dakota',
+  'United States - Tennessee',
+  'United States - Texas',
+  'United States - Utah',
+  'United States - Vermont',
+  'United States - Virginia',
+  'United States - Washington',
+  'United States - West Virginia',
+  'United States - Wisconsin',
+  'United States - Wyoming',
   'Uruguay',
   'Uzbekistan',
   'Vanuatu',
@@ -388,9 +439,8 @@ const CountryField: React.FC<CountryFieldProps> = ({
   placeholder,
   width,
   style,
+  onOpen,
 }) => {
-  const [isPickerVisible, setIsPickerVisible] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
   const [countryCode, setCountryCode] = useState<any>('US');
   const hasValue = value.trim().length > 0;
   const showCheck = hasValue;
@@ -421,17 +471,6 @@ const CountryField: React.FC<CountryFieldProps> = ({
     }
   }, [value]);
 
-  // Web-specific handlers
-  const filteredCountries = COUNTRIES.filter(country =>
-    country.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
-  const handleWebSelect = (countryName: string) => {
-    onSelect(countryName);
-    setIsPickerVisible(false);
-    setSearchQuery('');
-  };
-
   // Native-specific handler
   const handleNativeSelect = (country: any) => {
     setCountryCode(country.cca2);
@@ -439,7 +478,10 @@ const CountryField: React.FC<CountryFieldProps> = ({
       ? country.name 
       : country.name?.common || 'Unknown';
     onSelect(countryName);
-    setIsPickerVisible(false);
+    if (onOpen) {
+      // For native, we still need to handle closing if there's a modal
+      // But for now, native CountryPicker handles its own modal
+    }
   };
 
   // Determine text style based on state
@@ -454,7 +496,7 @@ const CountryField: React.FC<CountryFieldProps> = ({
         <TouchableOpacity
           style={[styles.fieldContainer, width && { width }, style]}
           activeOpacity={0.7}
-          onPress={() => setIsPickerVisible(true)}
+          onPress={() => onOpen?.()}
         >
           <PencilIcon size={24} />
           <View style={styles.inputContainer}>
@@ -471,73 +513,6 @@ const CountryField: React.FC<CountryFieldProps> = ({
             </View>
           )}
         </TouchableOpacity>
-
-        {/* Web Modal */}
-        {isPickerVisible && (
-          <TouchableOpacity
-            style={styles.countryPickerOverlay}
-            activeOpacity={1}
-            onPress={() => {
-              setIsPickerVisible(false);
-              setSearchQuery('');
-            }}
-          >
-            <TouchableOpacity
-              style={styles.countryPickerContent}
-              activeOpacity={1}
-              onPress={(e) => {
-                // Prevent closing when clicking inside the modal
-                e.stopPropagation();
-              }}
-            >
-              <View style={styles.webModalHeader}>
-                <Text style={styles.webModalTitle}>Select Country</Text>
-                <TouchableOpacity
-                  onPress={() => {
-                    setIsPickerVisible(false);
-                    setSearchQuery('');
-                  }}
-                  style={styles.webModalCloseButton}
-                >
-                  <Ionicons name="close" size={24} color="#333" />
-                </TouchableOpacity>
-              </View>
-              
-              <TextInput
-                style={styles.webSearchInput}
-                placeholder="Search countries..."
-                value={searchQuery}
-                onChangeText={setSearchQuery}
-                autoFocus
-              />
-
-              <View style={styles.webCountryList}>
-                {filteredCountries.map((country) => (
-                  <TouchableOpacity
-                    key={country}
-                    style={[
-                      styles.webCountryItem,
-                      value === country && styles.webCountryItemSelected,
-                    ]}
-                    onPress={() => handleWebSelect(country)}
-                  >
-                    <Text
-                      style={[
-                        styles.webCountryText,
-                        value === country && styles.webCountryTextSelected,
-                      ]}
-                    >
-                      {country}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-                {filteredCountries.length === 0 && (
-                  <Text style={styles.webNoResults}>No countries found</Text>
-                )}
-              </View>
-            </TouchableOpacity>
-          </TouchableOpacity>
-        )}
       </>
     );
   }
@@ -573,7 +548,7 @@ const CountryField: React.FC<CountryFieldProps> = ({
       <TouchableOpacity
         style={[styles.fieldContainer, width && { width }, style]}
         activeOpacity={0.7}
-        onPress={() => setIsPickerVisible(true)}
+        onPress={() => onOpen?.()}
       >
         <PencilIcon size={24} />
         <View style={styles.inputContainer}>
@@ -590,29 +565,6 @@ const CountryField: React.FC<CountryFieldProps> = ({
           </View>
         )}
       </TouchableOpacity>
-
-      {CountryPicker && (
-        <CountryPicker
-          visible={isPickerVisible}
-          withFilter
-          withFlag
-          withCountryNameButton={false}
-          withAlphaFilter
-          withCallingCode={false}
-          withEmoji
-          countryCode={countryCode}
-          onSelect={handleNativeSelect}
-          onClose={() => setIsPickerVisible(false)}
-          theme={{
-            primaryColor: '#00A2B6',
-            primaryColorVariant: '#0788B0',
-            backgroundColor: colors.white || '#FFFFFF',
-            onBackgroundTextColor: colors.textPrimary || '#333333',
-            fontSize: 16,
-            fontFamily: 'Inter',
-          }}
-        />
-      )}
     </>
   );
 };
@@ -625,6 +577,7 @@ interface PronounFieldProps {
   placeholder?: string;
   width?: number;
   style?: any;
+  onOpen?: () => void;
 }
 
 const PRONOUN_OPTIONS = ['Bro', 'Sis', 'Neither'];
@@ -636,8 +589,8 @@ const PronounField: React.FC<PronounFieldProps> = ({
   placeholder,
   width,
   style,
+  onOpen,
 }) => {
-  const [isPickerVisible, setIsPickerVisible] = useState(false);
   const hasValue = value.trim().length > 0;
   const showCheck = hasValue;
 
@@ -646,12 +599,6 @@ const PronounField: React.FC<PronounFieldProps> = ({
     if (!val) return placeholder || label;
     const option = PRONOUN_OPTIONS.find(opt => opt.toLowerCase() === val.toLowerCase());
     return option || val;
-  };
-
-  const handleSelect = (option: string) => {
-    const optionValue = option.toLowerCase();
-    onSelect(optionValue);
-    setIsPickerVisible(false);
   };
 
   // Determine text style based on state
@@ -664,7 +611,7 @@ const PronounField: React.FC<PronounFieldProps> = ({
       <TouchableOpacity
         style={[styles.fieldContainer, width && { width }, style]}
         activeOpacity={0.7}
-        onPress={() => setIsPickerVisible(true)}
+        onPress={() => onOpen?.()}
       >
         <PencilIcon size={24} />
         <View style={styles.inputContainer}>
@@ -681,64 +628,6 @@ const PronounField: React.FC<PronounFieldProps> = ({
           </View>
         )}
       </TouchableOpacity>
-
-      {/* Modal for pronoun selection */}
-      {isPickerVisible && (
-        <TouchableOpacity
-          style={styles.pronounModalOverlay}
-          activeOpacity={1}
-          onPress={() => setIsPickerVisible(false)}
-        >
-          <TouchableOpacity
-            style={styles.pronounModalContent}
-            activeOpacity={1}
-            onPress={(e) => {
-              // Prevent closing when clicking inside the modal
-              e.stopPropagation();
-            }}
-          >
-            <View style={styles.webModalHeader}>
-              <Text style={styles.webModalTitle}>How can we call you?</Text>
-              <TouchableOpacity
-                onPress={() => setIsPickerVisible(false)}
-                style={styles.webModalCloseButton}
-              >
-                <Ionicons name="close" size={24} color="#333" />
-              </TouchableOpacity>
-            </View>
-            
-            <View style={styles.pronounModalList}>
-              {PRONOUN_OPTIONS.map((option) => {
-                const isSelected = value.toLowerCase() === option.toLowerCase();
-                return (
-                  <TouchableOpacity
-                    key={option}
-                    style={[
-                      styles.pronounModalItem,
-                      isSelected && styles.pronounModalItemSelected,
-                    ]}
-                    onPress={() => handleSelect(option)}
-                  >
-                    <Text
-                      style={[
-                        styles.pronounModalText,
-                        isSelected && styles.pronounModalTextSelected,
-                      ]}
-                    >
-                      {option}
-                    </Text>
-                    {isSelected && (
-                      <View style={styles.pronounModalCheck}>
-                        <CheckIcon size={16} />
-                      </View>
-                    )}
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          </TouchableOpacity>
-        </TouchableOpacity>
-      )}
     </>
   );
 };
@@ -785,6 +674,10 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
   );
   const [pronoun, setPronoun] = useState<string>(initialData.pronouns || '');
   const [isUploading, setIsUploading] = useState(false);
+  
+  // Modal state management - lifted to screen level for proper stacking
+  const [activeModal, setActiveModal] = useState<'country' | 'pronoun' | null>(null);
+  const [countrySearchQuery, setCountrySearchQuery] = useState('');
 
   const pickImage = async () => {
     if (Platform.OS === 'web') {
@@ -893,6 +786,7 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
   };
 
   return (
+    <>
     <SafeAreaView style={styles.container}>
       <View style={styles.contentWrapper}>
           {/* Sticky Header with Gradient */}
@@ -991,9 +885,11 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
                 onSelect={(countryName) => {
                   setLocation(countryName);
                   updateFormData({ location: countryName });
+                  setActiveModal(null);
                 }}
                 placeholder="Where are you from?*"
                 width={212}
+                onOpen={() => setActiveModal('country')}
               />
               <Field
                 label="Age"
@@ -1018,9 +914,11 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
               onSelect={(selectedPronoun) => {
                 setPronoun(selectedPronoun);
                 updateFormData({ pronouns: selectedPronoun });
+                setActiveModal(null);
               }}
               placeholder="How should we address you?*"
               width={357}
+              onOpen={() => setActiveModal('pronoun')}
             />
             </View>
           </View>
@@ -1049,6 +947,192 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
         </View>
         </View>
     </SafeAreaView>
+
+    {/* Modals rendered at screen level for proper stacking */}
+    {Platform.OS === 'web' && activeModal === 'country' && (
+      <TouchableOpacity
+        style={styles.countryPickerOverlay}
+        activeOpacity={1}
+        onPress={() => {
+          setActiveModal(null);
+          setCountrySearchQuery('');
+        }}
+      >
+        <TouchableOpacity
+          style={styles.countryPickerContent}
+          activeOpacity={1}
+          onPress={(e) => {
+            // Prevent closing when clicking inside the modal
+            e.stopPropagation();
+          }}
+        >
+          <View style={styles.webModalHeader}>
+            <Text style={styles.webModalTitle}>Select Country</Text>
+            <TouchableOpacity
+              onPress={() => {
+                setActiveModal(null);
+                setCountrySearchQuery('');
+              }}
+              style={styles.webModalCloseButton}
+            >
+              <Ionicons name="close" size={24} color="#333" />
+            </TouchableOpacity>
+          </View>
+          
+          <TextInput
+            style={styles.webSearchInput}
+            placeholder="Search countries..."
+            value={countrySearchQuery}
+            onChangeText={setCountrySearchQuery}
+            autoFocus
+          />
+
+          <View style={styles.webCountryList}>
+            {COUNTRIES.filter(country =>
+              country.toLowerCase().includes(countrySearchQuery.toLowerCase())
+            ).map((country) => (
+              <TouchableOpacity
+                key={country}
+                style={[
+                  styles.webCountryItem,
+                  location === country && styles.webCountryItemSelected,
+                ]}
+                onPress={() => {
+                  setLocation(country);
+                  updateFormData({ location: country });
+                  setActiveModal(null);
+                  setCountrySearchQuery('');
+                }}
+              >
+                <Text
+                  style={[
+                    styles.webCountryText,
+                    location === country && styles.webCountryTextSelected,
+                  ]}
+                >
+                  {country}
+                </Text>
+              </TouchableOpacity>
+            ))}
+            {COUNTRIES.filter(country =>
+              country.toLowerCase().includes(countrySearchQuery.toLowerCase())
+            ).length === 0 && (
+              <Text style={styles.webNoResults}>No countries found</Text>
+            )}
+          </View>
+        </TouchableOpacity>
+      </TouchableOpacity>
+    )}
+
+    {activeModal === 'pronoun' && (
+      <TouchableOpacity
+        style={styles.pronounModalOverlay}
+        activeOpacity={1}
+        onPress={() => setActiveModal(null)}
+      >
+        <TouchableOpacity
+          style={styles.pronounModalContent}
+          activeOpacity={1}
+          onPress={(e) => {
+            // Prevent closing when clicking inside the modal
+            e.stopPropagation();
+          }}
+        >
+          <View style={styles.webModalHeader}>
+            <Text style={styles.webModalTitle}>How can we call you?</Text>
+            <TouchableOpacity
+              onPress={() => setActiveModal(null)}
+              style={styles.webModalCloseButton}
+            >
+              <Ionicons name="close" size={24} color="#333" />
+            </TouchableOpacity>
+          </View>
+          
+          <View style={styles.pronounModalList}>
+            {PRONOUN_OPTIONS.map((option) => {
+              const isSelected = pronoun.toLowerCase() === option.toLowerCase();
+              return (
+                <TouchableOpacity
+                  key={option}
+                  style={[
+                    styles.pronounModalItem,
+                    isSelected && styles.pronounModalItemSelected,
+                  ]}
+                  onPress={() => {
+                    const optionValue = option.toLowerCase();
+                    setPronoun(optionValue);
+                    updateFormData({ pronouns: optionValue });
+                    setActiveModal(null);
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.pronounModalText,
+                      isSelected && styles.pronounModalTextSelected,
+                    ]}
+                  >
+                    {option}
+                  </Text>
+                  {isSelected && (
+                    <View style={styles.pronounModalCheck}>
+                      <CheckIcon size={16} />
+                    </View>
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </TouchableOpacity>
+      </TouchableOpacity>
+    )}
+
+    {/* Native CountryPicker - rendered at screen level */}
+    {Platform.OS !== 'web' && CountryPicker && (
+      <CountryPicker
+        visible={activeModal === 'country'}
+        withFilter
+        withFlag
+        withCountryNameButton={false}
+        withAlphaFilter
+        withCallingCode={false}
+        withEmoji
+        countryCode={(() => {
+          // Get country code from location value
+          const nameToCode: Record<string, string> = {
+            'United States': 'US', 'United Kingdom': 'GB', 'Canada': 'CA',
+            'Australia': 'AU', 'Germany': 'DE', 'France': 'FR', 'Spain': 'ES',
+            'Italy': 'IT', 'Japan': 'JP', 'China': 'CN', 'India': 'IN',
+            'Brazil': 'BR', 'Mexico': 'MX', 'Netherlands': 'NL', 'Sweden': 'SE',
+            'Norway': 'NO', 'Denmark': 'DK', 'Finland': 'FI', 'Poland': 'PL',
+            'Portugal': 'PT', 'Greece': 'GR', 'Ireland': 'IE', 'Switzerland': 'CH',
+            'Austria': 'AT', 'Belgium': 'BE', 'New Zealand': 'NZ', 'South Africa': 'ZA',
+            'Argentina': 'AR', 'Chile': 'CL', 'Colombia': 'CO', 'Peru': 'PE',
+            'Israel': 'IL', 'Turkey': 'TR', 'Russia': 'RU', 'South Korea': 'KR',
+            'Thailand': 'TH', 'Indonesia': 'ID', 'Philippines': 'PH', 'Vietnam': 'VN',
+            'Singapore': 'SG', 'Malaysia': 'MY',
+          };
+          return (location && nameToCode[location]) || 'US';
+        })()}
+        onSelect={(country: any) => {
+          const countryName = typeof country.name === 'string' 
+            ? country.name 
+            : country.name?.common || 'Unknown';
+          setLocation(countryName);
+          updateFormData({ location: countryName });
+          setActiveModal(null);
+        }}
+        onClose={() => setActiveModal(null)}
+        theme={{
+          primaryColor: '#00A2B6',
+          primaryColorVariant: '#0788B0',
+          backgroundColor: colors.white || '#FFFFFF',
+          onBackgroundTextColor: colors.textPrimary || '#333333',
+          fontSize: 16,
+          fontFamily: 'Inter',
+        }}
+      />
+    )}
+  </>
   );
 };
 
@@ -1344,7 +1428,7 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    zIndex: 9000,  // Higher z-index to appear above pronoun modal
+    zIndex: 10000,  // Higher z-index to appear above pronoun modal and cover all buttons
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -1366,7 +1450,7 @@ const styles = StyleSheet.create({
     maxWidth: 500,
     maxHeight: '80%',
     overflow: 'hidden',
-    zIndex: 9001,  // Explicitly set z-index for content
+    zIndex: 10001,  // Explicitly set z-index for content, higher than pronoun modal
     ...(Platform.OS === 'web' && {
       boxShadow: '0 4px 20px rgba(0, 0, 0, 0.15)',
     }),
@@ -1439,7 +1523,7 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    zIndex: 100,  // Much lower than country picker (9000) to ensure proper stacking
+    zIndex: 9000,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -1448,7 +1532,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     width: '90%',
     maxWidth: 400,
-    zIndex: 101,  // Slightly higher than overlay (100) but still lower than country picker (9000)
+    zIndex: 9001,
     overflow: 'hidden',
     ...(Platform.OS === 'web' && {
       boxShadow: '0 4px 20px rgba(0, 0, 0, 0.15)',

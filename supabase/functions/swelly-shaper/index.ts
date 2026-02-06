@@ -34,6 +34,13 @@ PROFILE FIELDS YOU CAN UPDATE:
 2. age - User's age (number)
 3. pronoun - Preferred pronouns (e.g., "he/him", "she/her", "they/them")
 4. country_from - Country of origin
+   ⚠️ CRITICAL: For US states, use format "United States - [StateName]"
+   - Examples:
+     * User: "I'm from California" → country_from: "United States - California"
+     * User: "I'm from Texas" → country_from: "United States - Texas"
+     * User: "I'm from New York" → country_from: "United States - New York"
+     * User: "I'm from the USA" → Ask which state, or if they don't specify, you can use "United States" (but prefer asking for state)
+   - For non-US countries, use the standard country name (e.g., "Israel", "Brazil", "Australia")
 5. surfboard_type - Type of surfboard: "shortboard", "midlength", "longboard", or "soft_top"
 6. surf_level - Surf skill level from 1-5 (1 = beginner, 5 = expert)
 7. travel_experience - Number of surf trips (integer, 0-20+). Examples: 0, 5, 10, 17, 20

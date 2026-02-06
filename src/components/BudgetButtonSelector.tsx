@@ -10,15 +10,20 @@ import { colors, spacing, typography, borderRadius } from '../styles/theme';
 
 interface BudgetButtonSelectorProps {
   onSelect: (budget: 'budget' | 'mid' | 'high') => void;
+  isReadOnly?: boolean;
+  initialSelection?: 'budget' | 'mid' | 'high';
 }
 
 export const BudgetButtonSelector: React.FC<BudgetButtonSelectorProps> = ({
   onSelect,
+  isReadOnly = false,
+  initialSelection,
 }) => {
-  const [selectedBudget, setSelectedBudget] = useState<'budget' | 'mid' | 'high' | null>(null);
+  const [selectedBudget, setSelectedBudget] = useState<'budget' | 'mid' | 'high' | null>(initialSelection || null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleSelect = (budget: 'budget' | 'mid' | 'high') => {
+    if (isReadOnly) return; // Don't allow selection in read-only mode
     setSelectedBudget(budget);
   };
 
@@ -41,13 +46,16 @@ export const BudgetButtonSelector: React.FC<BudgetButtonSelectorProps> = ({
           style={[
             styles.budgetButton,
             selectedBudget === 'budget' && styles.budgetButtonSelected,
+            isReadOnly && styles.budgetButtonReadOnly,
           ]}
           onPress={() => handleSelect('budget')}
+          disabled={isReadOnly}
         >
           <Text
             style={[
               styles.budgetButtonText,
               selectedBudget === 'budget' && styles.budgetButtonTextSelected,
+              isReadOnly && styles.budgetButtonTextReadOnly,
             ]}
           >
             Budget
@@ -58,13 +66,16 @@ export const BudgetButtonSelector: React.FC<BudgetButtonSelectorProps> = ({
           style={[
             styles.budgetButton,
             selectedBudget === 'mid' && styles.budgetButtonSelected,
+            isReadOnly && styles.budgetButtonReadOnly,
           ]}
           onPress={() => handleSelect('mid')}
+          disabled={isReadOnly}
         >
           <Text
             style={[
               styles.budgetButtonText,
               selectedBudget === 'mid' && styles.budgetButtonTextSelected,
+              isReadOnly && styles.budgetButtonTextReadOnly,
             ]}
           >
             Mid
@@ -75,13 +86,16 @@ export const BudgetButtonSelector: React.FC<BudgetButtonSelectorProps> = ({
           style={[
             styles.budgetButton,
             selectedBudget === 'high' && styles.budgetButtonSelected,
+            isReadOnly && styles.budgetButtonReadOnly,
           ]}
           onPress={() => handleSelect('high')}
+          disabled={isReadOnly}
         >
           <Text
             style={[
               styles.budgetButtonText,
               selectedBudget === 'high' && styles.budgetButtonTextSelected,
+              isReadOnly && styles.budgetButtonTextReadOnly,
             ]}
           >
             High
@@ -89,18 +103,21 @@ export const BudgetButtonSelector: React.FC<BudgetButtonSelectorProps> = ({
         </TouchableOpacity>
       </View>
 
-      <TouchableOpacity
-        style={[
-          styles.submitButton,
-          (!selectedBudget || isSubmitting) && styles.submitButtonDisabled,
-        ]}
-        onPress={handleSubmit}
-        disabled={!selectedBudget || isSubmitting}
-      >
-        <Text style={styles.submitButtonText}>
-          {isSubmitting ? 'Submitting...' : 'Submit'}
-        </Text>
-      </TouchableOpacity>
+      {/* Submit Button - Hidden in read-only mode */}
+      {!isReadOnly && (
+        <TouchableOpacity
+          style={[
+            styles.submitButton,
+            (!selectedBudget || isSubmitting) && styles.submitButtonDisabled,
+          ]}
+          onPress={handleSubmit}
+          disabled={!selectedBudget || isSubmitting}
+        >
+          <Text style={styles.submitButtonText}>
+            {isSubmitting ? 'Submitting...' : 'Submit'}
+          </Text>
+        </TouchableOpacity>
+      )}
     </View>
   );
 };
@@ -163,6 +180,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+  },
+  budgetButtonReadOnly: {
+    opacity: 0.6,
+  },
+  budgetButtonTextReadOnly: {
+    color: '#999999',
   },
 });
 

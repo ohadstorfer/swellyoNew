@@ -62,10 +62,20 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
   // State for destination cards
   const [showDestinationCards, setShowDestinationCards] = useState(false);
   const [destinationList, setDestinationList] = useState<string[]>([]);
+  const [destinationsSubmitted, setDestinationsSubmitted] = useState(false);
+  const [submittedDestinationData, setSubmittedDestinationData] = useState<Array<{
+    destination: string;
+    areas: string[];
+    timeInDays: number;
+    timeInText: string;
+  }>>([]);
+  const [destinationCardsMessageId, setDestinationCardsMessageId] = useState<string | null>(null);
   
   // State for budget buttons
   const [showBudgetButtons, setShowBudgetButtons] = useState(false);
   const [selectedBudget, setSelectedBudget] = useState<'budget' | 'mid' | 'high' | null>(null);
+  const [budgetSubmitted, setBudgetSubmitted] = useState(false);
+  const [budgetButtonsMessageId, setBudgetButtonsMessageId] = useState<string | null>(null);
 
   // Calculate progress based on conversation length
   // Estimate: typical conversation is 6-10 message pairs (12-20 messages total)
@@ -131,9 +141,11 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
           if (response.ui_hints.show_destination_cards && response.ui_hints.destinations) {
             setShowDestinationCards(true);
             setDestinationList(response.ui_hints.destinations);
+            setDestinationCardsMessageId(firstMessage.id);
           }
           if (response.ui_hints.show_budget_buttons) {
             setShowBudgetButtons(true);
+            setBudgetButtonsMessageId(firstMessage.id);
           }
         }
         
@@ -211,6 +223,7 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
         if (response.ui_hints.show_destination_cards && response.ui_hints.destinations) {
           setShowDestinationCards(true);
           setDestinationList(response.ui_hints.destinations);
+          setDestinationCardsMessageId(botMessage.id);
         } else {
           setShowDestinationCards(false);
         }
@@ -218,6 +231,7 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
         // Handle budget buttons
         if (response.ui_hints.show_budget_buttons) {
           setShowBudgetButtons(true);
+          setBudgetButtonsMessageId(botMessage.id);
         } else {
           setShowBudgetButtons(false);
         }
@@ -424,8 +438,9 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
       destinations_data: destinationsData,
     });
     
-    // Hide destination cards
-    setShowDestinationCards(false);
+    // Mark destinations as submitted and store data for read-only display
+    setDestinationsSubmitted(true);
+    setSubmittedDestinationData(allDestinationsData);
     
     // Send message to backend
     if (chatId) {
@@ -450,6 +465,7 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
           botMessage.ui_hints = response.ui_hints;
           if (response.ui_hints.show_budget_buttons) {
             setShowBudgetButtons(true);
+            setBudgetButtonsMessageId(botMessage.id);
           }
         }
         
@@ -466,7 +482,7 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
   // Handler for budget selection
   const handleBudgetSelect = async (budget: 'budget' | 'mid' | 'high') => {
     setSelectedBudget(budget);
-    setShowBudgetButtons(false);
+    setBudgetSubmitted(true);
     
     // Send budget selection to backend
     const messageToSend = JSON.stringify({
@@ -578,25 +594,29 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
           </View>
         </View>
         
-        {/* Render destination cards carousel if this message has show_destination_cards hint */}
+        {/* Render destination cards carousel if this is the message that originally requested them */}
         {!message.isUser && 
-         message.ui_hints?.show_destination_cards && 
-         message.id === messages[messages.length - 1]?.id && 
+         message.id === destinationCardsMessageId && 
          destinationList.length > 0 && (
           <View style={styles.uiComponentContainer}>
             <DestinationCardsCarousel
-              destinations={destinationList}
+              destinations={destinationsSubmitted ? submittedDestinationData.map(d => d.destination) : destinationList}
               onSubmit={handleDestinationSubmit}
+              isReadOnly={destinationsSubmitted}
+              initialData={destinationsSubmitted ? submittedDestinationData : undefined}
             />
           </View>
         )}
         
-        {/* Render budget buttons if this message has show_budget_buttons hint */}
+        {/* Render budget buttons if this is the message that originally requested them */}
         {!message.isUser && 
-         message.ui_hints?.show_budget_buttons && 
-         message.id === messages[messages.length - 1]?.id && (
+         message.id === budgetButtonsMessageId && (
           <View style={styles.uiComponentContainer}>
-            <BudgetButtonSelector onSelect={handleBudgetSelect} />
+            <BudgetButtonSelector 
+              onSelect={handleBudgetSelect}
+              isReadOnly={budgetSubmitted}
+              initialSelection={budgetSubmitted && selectedBudget ? selectedBudget : undefined}
+            />
           </View>
         )}
       </View>

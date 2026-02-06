@@ -12,6 +12,8 @@ import { Text } from './Text';
 import { DestinationInputCard } from './DestinationInputCard';
 import { colors, spacing, borderRadius } from '../styles/theme';
 
+type TimeUnit = 'days' | 'weeks' | 'months' | 'years';
+
 interface DestinationData {
   destination: string;
   areas: string[];
@@ -22,24 +24,43 @@ interface DestinationData {
 interface DestinationCardsCarouselProps {
   destinations: string[];
   onSubmit: (data: DestinationData[]) => void;
+  isReadOnly?: boolean;
+  initialData?: DestinationData[];
 }
 
 export const DestinationCardsCarousel: React.FC<DestinationCardsCarouselProps> = ({
   destinations,
   onSubmit,
+  isReadOnly = false,
+  initialData,
 }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [destinationData, setDestinationData] = useState<Record<string, DestinationData>>({});
+  
+  // Initialize destination data from initialData if provided (read-only mode)
+  const initializeDestinationData = (): Record<string, DestinationData> => {
+    if (initialData && initialData.length > 0) {
+      const dataMap: Record<string, DestinationData> = {};
+      initialData.forEach(dest => {
+        dataMap[dest.destination] = dest;
+      });
+      return dataMap;
+    }
+    return {};
+  };
+  
+  const [destinationData, setDestinationData] = useState<Record<string, DestinationData>>(initializeDestinationData);
   const flatListRef = useRef<FlatList>(null);
   const screenWidth = Dimensions.get('window').width;
   const cardWidth = Math.min(328, screenWidth - 62); // 328px from Figma, with padding
 
-  // Update destination data when individual card data changes
+  // Update destination data when individual card data changes (only if not read-only)
   const handleCardDataChange = useCallback((destination: string, data: {
     areas: string[];
     timeInDays: number;
     timeInText: string;
   }) => {
+    if (isReadOnly) return; // Don't update data in read-only mode
+    
     setDestinationData(prev => ({
       ...prev,
       [destination]: {
@@ -47,7 +68,7 @@ export const DestinationCardsCarousel: React.FC<DestinationCardsCarouselProps> =
         ...data,
       },
     }));
-  }, []);
+  }, [isReadOnly]);
 
   // Check if all cards have valid data
   const isAllDataValid = () => {
@@ -105,18 +126,40 @@ export const DestinationCardsCarousel: React.FC<DestinationCardsCarouselProps> =
         <FlatList
           ref={flatListRef}
           data={destinations}
-          renderItem={({ item, index }) => (
-            <View style={[styles.cardWrapper, { width: cardWidth }]}>
-              <DestinationInputCard
-                destination={item}
-                onDataChange={(data) => handleCardDataChange(item, data)}
-                currentIndex={index}
-                totalCount={destinations.length}
-                onPrevious={scrollToPrevious}
-                onNext={scrollToNext}
-              />
-            </View>
-          )}
+          renderItem={({ item, index }) => {
+            const cardData = destinationData[item];
+            // Parse timeInText to extract value and unit
+            let initialTimeValue: string | undefined;
+            let initialTimeUnit: TimeUnit | undefined;
+            if (cardData?.timeInText) {
+              const timeText = cardData.timeInText.toLowerCase();
+              const match = timeText.match(/([\d.]+)\s*(day|week|month|year)s?/);
+              if (match) {
+                initialTimeValue = match[1];
+                const unit = match[2];
+                if (unit.startsWith('day')) initialTimeUnit = 'days';
+                else if (unit.startsWith('week')) initialTimeUnit = 'weeks';
+                else if (unit.startsWith('month')) initialTimeUnit = 'months';
+                else if (unit.startsWith('year')) initialTimeUnit = 'years';
+              }
+            }
+            return (
+              <View style={[styles.cardWrapper, { width: cardWidth }]}>
+                <DestinationInputCard
+                  destination={item}
+                  onDataChange={(data) => handleCardDataChange(item, data)}
+                  currentIndex={index}
+                  totalCount={destinations.length}
+                  onPrevious={scrollToPrevious}
+                  onNext={scrollToNext}
+                  isReadOnly={isReadOnly}
+                  initialAreas={cardData?.areas.join(', ')}
+                  initialTimeValue={initialTimeValue}
+                  initialTimeUnit={initialTimeUnit}
+                />
+              </View>
+            );
+          }}
           keyExtractor={(item, index) => `destination-${item}-${index}`}
           horizontal
           pagingEnabled
@@ -142,17 +185,19 @@ export const DestinationCardsCarousel: React.FC<DestinationCardsCarouselProps> =
         />
       </View>
 
-      {/* Submit Button */}
-      <TouchableOpacity
-        style={[
-          styles.submitButton,
-          !isAllDataValid() && styles.submitButtonDisabled,
-        ]}
-        onPress={handleSubmit}
-        disabled={!isAllDataValid()}
-      >
-        <Text style={styles.submitButtonText}>Save All</Text>
-      </TouchableOpacity>
+      {/* Submit Button - Hidden in read-only mode */}
+      {!isReadOnly && (
+        <TouchableOpacity
+          style={[
+            styles.submitButton,
+            !isAllDataValid() && styles.submitButtonDisabled,
+          ]}
+          onPress={handleSubmit}
+          disabled={!isAllDataValid()}
+        >
+          <Text style={styles.submitButtonText}>Save All</Text>
+        </TouchableOpacity>
+      )}
     </View>
   );
 };

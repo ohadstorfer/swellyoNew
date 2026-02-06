@@ -815,11 +815,22 @@ AVAILABLE SURFERS TABLE FIELDS (ONLY THESE CAN BE FILTERED):
     - "Holland" → "Netherlands"
     - "UAE" / "United Arab Emirates" → "United Arab Emirates"
     - "South Korea" / "Korea" → "South Korea"
+  ⚠️ CRITICAL: US STATES FORMAT FOR country_from
+  - The database stores US states in country_from as "United States - [StateName]" (e.g., "United States - California", "United States - Texas")
+  - This is DIFFERENT from destination_country which uses "USA" + state field
+  - When user says "from USA" / "American" / "from the United States" → You MUST expand to ALL 50 states:
+    ["United States - Alabama", "United States - Alaska", "United States - Arizona", "United States - Arkansas", "United States - California", "United States - Colorado", "United States - Connecticut", "United States - Delaware", "United States - Florida", "United States - Georgia", "United States - Hawaii", "United States - Idaho", "United States - Illinois", "United States - Indiana", "United States - Iowa", "United States - Kansas", "United States - Kentucky", "United States - Louisiana", "United States - Maine", "United States - Maryland", "United States - Massachusetts", "United States - Michigan", "United States - Minnesota", "United States - Mississippi", "United States - Missouri", "United States - Montana", "United States - Nebraska", "United States - Nevada", "United States - New Hampshire", "United States - New Jersey", "United States - New Mexico", "United States - New York", "United States - North Carolina", "United States - North Dakota", "United States - Ohio", "United States - Oklahoma", "United States - Oregon", "United States - Pennsylvania", "United States - Rhode Island", "United States - South Carolina", "United States - South Dakota", "United States - Tennessee", "United States - Texas", "United States - Utah", "United States - Vermont", "United States - Virginia", "United States - Washington", "United States - West Virginia", "United States - Wisconsin", "United States - Wyoming"]
+  - When user says "from California" / "a dude from california" → Convert to: ["United States - California"]
+  - When user says "from Texas or Florida" → Convert to: ["United States - Texas", "United States - Florida"]
+  - When user says "from New York" → Convert to: ["United States - New York"]
+  - Always use the exact format "United States - [StateName]" for US states in country_from
+  - NEVER use just "United States" as a single value for country_from - always expand to states
   ⚠️ OFFICIAL COUNTRY LIST (use EXACT names from this list - case-sensitive):
 ${OFFICIAL_COUNTRIES.map(c => `    - "${c}"`).join('\n')}
   ⚠️ Examples:
     - User says "I want to go to California" → destination_country: "United States" (or "USA"), state: "California", area: null, country_from: NOT SET (user didn't say they want surfers FROM United States)
-    - User says "I want surfers from the USA" → country_from: ["United States"] (normalized from "USA" to "United States")
+    - User says "I want surfers from the USA" → country_from: ["United States - Alabama", "United States - Alaska", ..., "United States - Wyoming"] (expand to all 50 states)
+    - User says "I want a dude from california" → country_from: ["United States - California"]
     - User says "I want to go to Costa Rica and connect with surfers from Israel" → destination_country: "Costa Rica", state: null, country_from: ["Israel"]
 - age (integer): Age in years (0+)
 - surfboard_type (enum): 'shortboard', 'mid_length', 'longboard', 'soft_top' (valid values in database)
@@ -926,7 +937,7 @@ Extract filters from the user's request. Return ONLY valid JSON in this format (
 }
 
 ⚠️ CRITICAL: For country_from, ALWAYS use EXACT names from the official list above. Normalize common variations:
-- "USA" / "US" / "U.S.A" / "America" → "United States"
+- "USA" / "US" / "U.S.A" / "America" / "United States" → For country_from: Expand to all 50 states in "United States - [State]" format. NEVER use just "United States" as a single value for country_from.
 - "UK" / "England" / "Britain" → "United Kingdom"
 - Any other variation → Find the matching exact name from the official list
 
@@ -942,7 +953,8 @@ CRITICAL RULES - BE SMART AND FLEXIBLE:
    - country_from = WHERE THE SURFER IS FROM (origin country) - ONLY set if user explicitly requests it
    - Note: When searching for USA destinations, the matching system will find surfers who have either old format (country="California") or new format (country="USA", state="California")
    - If user says "I want to go to California" → destination_country: "USA", country_from: NOT SET
-   - If user says "I want surfers from the USA" → country_from: ["USA"]
+   - If user says "I want surfers from the USA" → country_from: ["United States - Alabama", "United States - Alaska", ..., "United States - Wyoming"] (all 50 states)
+   - If user says "I want a dude from california" → country_from: ["United States - California"]
    - If user says "I want to go to Costa Rica and connect with surfers from Israel" → destination_country: "Costa Rica", country_from: ["Israel"]
    - NEVER automatically set country_from based on destination_country - they are completely different things!
 
@@ -957,7 +969,7 @@ CRITICAL RULES - BE SMART AND FLEXIBLE:
    - "Philippins" / "Philippines" / "Phillipines" → All mean "Philippines" (exact name from official list)
    - "Isreal" (typo) → "Israel" (exact name from official list)
    - "Brasil" → "Brazil" (exact name from official list)
-   - "US" / "United States" / "U.S.A" / "USA" / "America" / "United States of America" → "United States" (MUST use exact name from official list)
+   - "US" / "United States" / "U.S.A" / "USA" / "America" / "United States of America" → For country_from: Expand to all 50 states in "United States - [State]" format. For destination_country: Use "United States" (MUST use exact name from official list)
    - "UK" / "United Kingdom" / "England" / "Great Britain" / "Britain" → "United Kingdom" (exact name from official list)
    - "Holland" → "Netherlands" (exact name from official list)
    - "UAE" / "United Arab Emirates" → "United Arab Emirates" (exact name from official list)
