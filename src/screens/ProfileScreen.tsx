@@ -33,6 +33,7 @@ import { getSurfLevelMappingFromEnum } from '../utils/surfLevelMapping';
 import { useScreenDimensions } from '../utils/responsive';
 import { updateCachedUserProfilePhoto } from '../utils/userProfileCache';
 import { useOnboarding } from '../context/OnboardingContext';
+import { calculateAgeFromDOB } from '../utils/ageCalculation';
 
 interface ProfileScreenProps {
   onBack?: () => void;
@@ -1678,9 +1679,20 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
               </View>
               <View style={styles.profileDetailsContainer}>
                 <Text style={styles.profileDetails}>
-                  {profileData.age ? `${profileData.age} yo` : ''}
-                  {profileData.age && profileData.country_from ? ' | ' : ''}
-                  {profileData.country_from || ''}
+                  {(() => {
+                    // Priority 1: Calculate age from date_of_birth if available
+                    // Priority 2: Fall back to age column if DOB is missing
+                    // Priority 3: Show nothing if neither exists
+                    let displayAge: number | null = null;
+                    if (profileData.date_of_birth) {
+                      displayAge = calculateAgeFromDOB(profileData.date_of_birth);
+                    } else if (profileData.age !== null && profileData.age !== undefined) {
+                      displayAge = profileData.age;
+                    }
+                    const ageText = displayAge !== null ? `${displayAge} yo` : '';
+                    const separator = ageText && profileData.country_from ? ' | ' : '';
+                    return `${ageText}${separator}${profileData.country_from || ''}`;
+                  })()}
                   {/* NOTE: Board name removed from profile details */}
                   {/* {profileData.country_from && boardTypeInfo.name ? ' | ' : ''}
                   {boardTypeInfo.name} */}

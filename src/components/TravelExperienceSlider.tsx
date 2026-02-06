@@ -61,10 +61,10 @@ const getCategoryFromTrips = (trips: number): number => {
 
 // Helper function to format trips display
 const formatTrips = (trips: number): string => {
-  if (trips === 0) return '0 trips';
-  if (trips === 1) return '1 trip';
-  if (trips >= 20) return '20+ trips';
-  return `${trips} trips`;
+  if (trips === 0) return '0 surf trips';
+  if (trips === 1) return '1 surf trip';
+  if (trips >= 20) return '20+ surf trips';
+  return `${trips} surf trips`;
 };
 
 interface TravelExperienceSliderProps {

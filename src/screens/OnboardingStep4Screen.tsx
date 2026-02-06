@@ -7,6 +7,8 @@ import {
   Platform,
   TextInput,
   Image,
+  Modal,
+  ScrollView,
 } from 'react-native';
 import { TextInput as PaperTextInput } from 'react-native-paper';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -22,6 +24,7 @@ import { colors, spacing, typography } from '../styles/theme';
 import { OnboardingData } from './OnboardingStep1Screen';
 import { uploadProfileImage } from '../services/storage/storageService';
 import { supabase } from '../config/supabase';
+import { formatDateOfBirth, isValidDateOfBirth, dateToISOString } from '../utils/ageCalculation';
 
 interface OnboardingStep4ScreenProps {
   onNext: (data: OnboardingData) => void;
@@ -632,6 +635,577 @@ const PronounField: React.FC<PronounFieldProps> = ({
   );
 };
 
+// Date of Birth Field Component
+interface DateOfBirthFieldProps {
+  label: string;
+  value: string; // ISO date string (YYYY-MM-DD)
+  onChange: (date: string) => void; // Callback with ISO date string
+  placeholder?: string;
+  width?: number;
+  style?: any;
+  error?: string;
+}
+
+const DateOfBirthField: React.FC<DateOfBirthFieldProps> = ({
+  label,
+  value,
+  onChange,
+  placeholder,
+  width,
+  style,
+  error,
+}) => {
+  const [isFocused, setIsFocused] = useState(false);
+  const [showPicker, setShowPicker] = useState(false);
+  const [tempDate, setTempDate] = useState<Date | null>(null);
+  const inputRef = useRef<any>(null);
+  const hasValue = value.trim().length > 0;
+  const showCheck = hasValue && !isFocused && !error;
+
+  // Get today's date for max date validation
+  const today = new Date();
+  const maxDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const minDate = new Date(today.getFullYear() - 120, today.getMonth(), today.getDate());
+
+  // Convert ISO string to Date object for picker
+  const dateValue = value ? new Date(value + 'T00:00:00Z') : new Date(2000, 0, 1);
+
+  // Format date for display
+  const displayValue = hasValue ? formatDateOfBirth(value) : (placeholder || label);
+
+  const handleContainerPress = () => {
+    setTempDate(dateValue);
+    setShowPicker(true);
+  };
+
+  const handleDateChange = (event: any, selectedDate?: Date) => {
+    if (Platform.OS === 'android') {
+      // Android shows native dialog, so handle immediately
+      if (selectedDate) {
+        const isoDate = dateToISOString(selectedDate);
+        onChange(isoDate);
+      }
+      setShowPicker(false);
+      return;
+    }
+
+    // For iOS, update temp date as user scrolls
+    if (selectedDate) {
+      setTempDate(selectedDate);
+    }
+  };
+
+  const handleConfirm = () => {
+    if (tempDate) {
+      const isoDate = dateToISOString(tempDate);
+      onChange(isoDate);
+    }
+    setShowPicker(false);
+  };
+
+  const handleCancel = () => {
+    setTempDate(null);
+    setShowPicker(false);
+  };
+
+  // Determine text style based on state
+  const textStyle = hasValue && !isFocused 
+    ? styles.fieldInputFilled 
+    : styles.fieldInput;
+
+  // Web implementation with custom calendar modal
+  if (Platform.OS === 'web') {
+    const [webTempDate, setWebTempDate] = useState<Date>(dateValue);
+    const webMonthScrollRef = useRef<ScrollView>(null);
+    const webDayScrollRef = useRef<ScrollView>(null);
+    const webYearScrollRef = useRef<ScrollView>(null);
+    
+    // Helper function to snap scroll to center an item at a given index
+    const snapToItem = (scrollViewRef: React.RefObject<ScrollView | null>, index: number) => {
+      if (scrollViewRef.current) {
+        const itemHeight = 40;
+        const scrollY = index * itemHeight;
+        scrollViewRef.current.scrollTo({ y: scrollY, animated: true });
+      }
+    };
+
+    // Helper function to find the nearest item index based on scroll position
+    const getNearestItemIndex = (scrollY: number, totalItems: number): number => {
+      const itemHeight = 40;
+      const nearestIndex = Math.round(scrollY / itemHeight);
+      return Math.max(0, Math.min(nearestIndex, totalItems - 1));
+    };
+
+    // Helper function to find the nearest item index based on scroll position and snap to it
+    const snapToNearestItem = (scrollViewRef: React.RefObject<ScrollView | null>, scrollY: number, totalItems: number) => {
+      if (scrollViewRef.current) {
+        const clampedIndex = getNearestItemIndex(scrollY, totalItems);
+        snapToItem(scrollViewRef, clampedIndex);
+        return clampedIndex;
+      }
+      return -1;
+    };
+
+    // Initialize temp date when modal opens and scroll to selected values
+    React.useEffect(() => {
+      if (showPicker) {
+        const initialDate = value ? new Date(value + 'T00:00:00Z') : new Date(2000, 0, 1);
+        setWebTempDate(initialDate);
+        
+        // Scroll to selected values after a short delay to ensure DOM is ready
+        setTimeout(() => {
+          const monthIndex = initialDate.getMonth();
+          const dayIndex = initialDate.getDate() - 1;
+          const currentYear = new Date().getFullYear();
+          const yearIndex = currentYear - initialDate.getFullYear();
+          
+          snapToItem(webMonthScrollRef, monthIndex);
+          snapToItem(webDayScrollRef, dayIndex);
+          snapToItem(webYearScrollRef, yearIndex);
+        }, 100);
+      }
+    }, [showPicker, value]);
+
+    const handleWebDateChange = (newDate: Date) => {
+      setWebTempDate(newDate);
+    };
+
+    const handleWebConfirm = () => {
+      const isoDate = dateToISOString(webTempDate);
+      onChange(isoDate);
+      setShowPicker(false);
+    };
+
+    const handleWebCancel = () => {
+      setShowPicker(false);
+    };
+
+    // Generate month, day, year arrays
+    const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    const currentYear = new Date().getFullYear();
+    const years = Array.from({ length: 121 }, (_, i) => currentYear - i); // Last 120 years
+    const daysInMonth = new Date(webTempDate.getFullYear(), webTempDate.getMonth() + 1, 0).getDate();
+    const days = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+
+    return (
+      <>
+        <TouchableOpacity
+          style={[styles.fieldContainer, width && { width }, style, error && styles.fieldError]}
+          activeOpacity={1}
+          onPress={handleContainerPress}
+        >
+          <PencilIcon size={24} />
+          <View style={styles.inputContainer}>
+            <Text
+              style={[textStyle, error && { color: '#FF0000' }]}
+              numberOfLines={1}
+            >
+              {displayValue}
+            </Text>
+          </View>
+          {showCheck && (
+            <View style={styles.checkIconContainer}>
+              <CheckIcon size={16} />
+            </View>
+          )}
+        </TouchableOpacity>
+        {error && (
+          <Text style={styles.errorText}>{error}</Text>
+        )}
+        {showPicker && (
+          <Modal
+            visible={showPicker}
+            transparent={true}
+            animationType="fade"
+            onRequestClose={handleWebCancel}
+          >
+            <TouchableOpacity
+              style={styles.datePickerOverlay as any}
+              activeOpacity={1}
+              onPress={handleWebCancel}
+            >
+              <TouchableOpacity
+                style={styles.datePickerModal as any}
+                activeOpacity={1}
+                onPress={(e) => e.stopPropagation()}
+              >
+                {/* Modal header */}
+                <View style={styles.datePickerHeader as any}>
+                  <Text style={styles.datePickerTitle as any}>Select date of birth</Text>
+                </View>
+
+                {/* Custom calendar picker with scrollable columns */}
+                <View style={styles.webDatePickerContainer as any}>
+                  {/* Selection indicator overlay */}
+                  <View style={styles.webDatePickerSelectionIndicator as any} pointerEvents="none" />
+                  
+                  {/* Month selector */}
+                  <View style={styles.webDatePickerColumn as any}>
+                    <ScrollView
+                      ref={webMonthScrollRef}
+                      style={styles.webDatePickerScroll as any}
+                      contentContainerStyle={styles.webDatePickerScrollContent as any}
+                      showsVerticalScrollIndicator={false}
+                      onScroll={(e) => {
+                        const scrollY = e.nativeEvent.contentOffset.y;
+                        const selectedIndex = getNearestItemIndex(scrollY, months.length);
+                        if (selectedIndex >= 0 && selectedIndex < months.length && webTempDate.getMonth() !== selectedIndex) {
+                          const newDate = new Date(webTempDate);
+                          newDate.setMonth(selectedIndex);
+                          const maxDay = new Date(newDate.getFullYear(), newDate.getMonth() + 1, 0).getDate();
+                          if (newDate.getDate() > maxDay) {
+                            newDate.setDate(maxDay);
+                          }
+                          setWebTempDate(newDate);
+                          // Update day scroll if needed
+                          snapToItem(webDayScrollRef, newDate.getDate() - 1);
+                        }
+                      }}
+                      onScrollEndDrag={(e) => {
+                        const scrollY = e.nativeEvent.contentOffset.y;
+                        const selectedIndex = snapToNearestItem(webMonthScrollRef, scrollY, months.length);
+                        if (selectedIndex >= 0 && selectedIndex < months.length) {
+                          const newDate = new Date(webTempDate);
+                          newDate.setMonth(selectedIndex);
+                          const maxDay = new Date(newDate.getFullYear(), newDate.getMonth() + 1, 0).getDate();
+                          if (newDate.getDate() > maxDay) {
+                            newDate.setDate(maxDay);
+                          }
+                          setWebTempDate(newDate);
+                          // Update day scroll if needed
+                          snapToItem(webDayScrollRef, newDate.getDate() - 1);
+                        }
+                      }}
+                      onMomentumScrollEnd={(e) => {
+                        const scrollY = e.nativeEvent.contentOffset.y;
+                        const selectedIndex = snapToNearestItem(webMonthScrollRef, scrollY, months.length);
+                        if (selectedIndex >= 0 && selectedIndex < months.length) {
+                          const newDate = new Date(webTempDate);
+                          newDate.setMonth(selectedIndex);
+                          const maxDay = new Date(newDate.getFullYear(), newDate.getMonth() + 1, 0).getDate();
+                          if (newDate.getDate() > maxDay) {
+                            newDate.setDate(maxDay);
+                          }
+                          setWebTempDate(newDate);
+                          // Update day scroll if needed
+                          snapToItem(webDayScrollRef, newDate.getDate() - 1);
+                        }
+                      }}
+                      scrollEventThrottle={16}
+                    >
+                      {months.map((month, index) => (
+                        <TouchableOpacity
+                          key={index}
+                          style={[
+                            styles.webDatePickerItem as any,
+                            webTempDate.getMonth() === index && styles.webDatePickerItemSelected as any,
+                          ]}
+                          onPress={() => {
+                            const newDate = new Date(webTempDate);
+                            newDate.setMonth(index);
+                            const maxDay = new Date(newDate.getFullYear(), newDate.getMonth() + 1, 0).getDate();
+                            if (newDate.getDate() > maxDay) {
+                              newDate.setDate(maxDay);
+                            }
+                            setWebTempDate(newDate);
+                            // Snap to exact position
+                            snapToItem(webMonthScrollRef, index);
+                            snapToItem(webDayScrollRef, newDate.getDate() - 1);
+                          }}
+                        >
+                          <Text
+                            style={[
+                              styles.webDatePickerItemText as any,
+                              webTempDate.getMonth() === index && styles.webDatePickerItemTextSelected as any,
+                            ]}
+                          >
+                            {month}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  </View>
+
+                  {/* Day selector */}
+                  <View style={styles.webDatePickerColumn as any}>
+                    <ScrollView
+                      ref={webDayScrollRef}
+                      style={styles.webDatePickerScroll as any}
+                      contentContainerStyle={styles.webDatePickerScrollContent as any}
+                      showsVerticalScrollIndicator={false}
+                      onScroll={(e) => {
+                        const scrollY = e.nativeEvent.contentOffset.y;
+                        const selectedIndex = getNearestItemIndex(scrollY, days.length);
+                        if (selectedIndex >= 0 && selectedIndex < days.length && webTempDate.getDate() !== days[selectedIndex]) {
+                          const newDate = new Date(webTempDate);
+                          newDate.setDate(days[selectedIndex]);
+                          setWebTempDate(newDate);
+                        }
+                      }}
+                      onScrollEndDrag={(e) => {
+                        const scrollY = e.nativeEvent.contentOffset.y;
+                        const selectedIndex = snapToNearestItem(webDayScrollRef, scrollY, days.length);
+                        if (selectedIndex >= 0 && selectedIndex < days.length) {
+                          const newDate = new Date(webTempDate);
+                          newDate.setDate(days[selectedIndex]);
+                          setWebTempDate(newDate);
+                        }
+                      }}
+                      onMomentumScrollEnd={(e) => {
+                        const scrollY = e.nativeEvent.contentOffset.y;
+                        const selectedIndex = snapToNearestItem(webDayScrollRef, scrollY, days.length);
+                        if (selectedIndex >= 0 && selectedIndex < days.length) {
+                          const newDate = new Date(webTempDate);
+                          newDate.setDate(days[selectedIndex]);
+                          setWebTempDate(newDate);
+                        }
+                      }}
+                      scrollEventThrottle={16}
+                    >
+                      {days.map((day) => (
+                        <TouchableOpacity
+                          key={day}
+                          style={[
+                            styles.webDatePickerItem as any,
+                            webTempDate.getDate() === day && styles.webDatePickerItemSelected as any,
+                          ]}
+                          onPress={() => {
+                            const newDate = new Date(webTempDate);
+                            newDate.setDate(day);
+                            setWebTempDate(newDate);
+                            // Snap to exact position
+                            snapToItem(webDayScrollRef, day - 1);
+                          }}
+                        >
+                          <Text
+                            style={[
+                              styles.webDatePickerItemText as any,
+                              webTempDate.getDate() === day && styles.webDatePickerItemTextSelected as any,
+                            ]}
+                          >
+                            {day}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  </View>
+
+                  {/* Year selector */}
+                  <View style={styles.webDatePickerColumn as any}>
+                    <ScrollView
+                      ref={webYearScrollRef}
+                      style={styles.webDatePickerScroll as any}
+                      contentContainerStyle={styles.webDatePickerScrollContent as any}
+                      showsVerticalScrollIndicator={false}
+                      onScroll={(e) => {
+                        const scrollY = e.nativeEvent.contentOffset.y;
+                        const selectedIndex = getNearestItemIndex(scrollY, years.length);
+                        if (selectedIndex >= 0 && selectedIndex < years.length && webTempDate.getFullYear() !== years[selectedIndex]) {
+                          const newDate = new Date(webTempDate);
+                          newDate.setFullYear(years[selectedIndex]);
+                          // Adjust day if needed (e.g., Feb 29 in non-leap year)
+                          const maxDay = new Date(newDate.getFullYear(), newDate.getMonth() + 1, 0).getDate();
+                          if (newDate.getDate() > maxDay) {
+                            newDate.setDate(maxDay);
+                          }
+                          setWebTempDate(newDate);
+                          // Update day scroll if needed
+                          snapToItem(webDayScrollRef, newDate.getDate() - 1);
+                        }
+                      }}
+                      onScrollEndDrag={(e) => {
+                        const scrollY = e.nativeEvent.contentOffset.y;
+                        const selectedIndex = snapToNearestItem(webYearScrollRef, scrollY, years.length);
+                        if (selectedIndex >= 0 && selectedIndex < years.length) {
+                          const newDate = new Date(webTempDate);
+                          newDate.setFullYear(years[selectedIndex]);
+                          // Adjust day if needed (e.g., Feb 29 in non-leap year)
+                          const maxDay = new Date(newDate.getFullYear(), newDate.getMonth() + 1, 0).getDate();
+                          if (newDate.getDate() > maxDay) {
+                            newDate.setDate(maxDay);
+                          }
+                          setWebTempDate(newDate);
+                          // Update day scroll if needed
+                          snapToItem(webDayScrollRef, newDate.getDate() - 1);
+                        }
+                      }}
+                      onMomentumScrollEnd={(e) => {
+                        const scrollY = e.nativeEvent.contentOffset.y;
+                        const selectedIndex = snapToNearestItem(webYearScrollRef, scrollY, years.length);
+                        if (selectedIndex >= 0 && selectedIndex < years.length) {
+                          const newDate = new Date(webTempDate);
+                          newDate.setFullYear(years[selectedIndex]);
+                          // Adjust day if needed (e.g., Feb 29 in non-leap year)
+                          const maxDay = new Date(newDate.getFullYear(), newDate.getMonth() + 1, 0).getDate();
+                          if (newDate.getDate() > maxDay) {
+                            newDate.setDate(maxDay);
+                          }
+                          setWebTempDate(newDate);
+                          // Update day scroll if needed
+                          snapToItem(webDayScrollRef, newDate.getDate() - 1);
+                        }
+                      }}
+                      scrollEventThrottle={16}
+                    >
+                      {years.map((year) => (
+                        <TouchableOpacity
+                          key={year}
+                          style={[
+                            styles.webDatePickerItem as any,
+                            webTempDate.getFullYear() === year && styles.webDatePickerItemSelected as any,
+                          ]}
+                          onPress={() => {
+                            const newDate = new Date(webTempDate);
+                            newDate.setFullYear(year);
+                            const maxDay = new Date(newDate.getFullYear(), newDate.getMonth() + 1, 0).getDate();
+                            if (newDate.getDate() > maxDay) {
+                              newDate.setDate(maxDay);
+                            }
+                            setWebTempDate(newDate);
+                            // Snap to exact position
+                            const currentYear = new Date().getFullYear();
+                            const yearIndex = currentYear - year;
+                            snapToItem(webYearScrollRef, yearIndex);
+                            snapToItem(webDayScrollRef, newDate.getDate() - 1);
+                          }}
+                        >
+                          <Text
+                            style={[
+                              styles.webDatePickerItemText as any,
+                              webTempDate.getFullYear() === year && styles.webDatePickerItemTextSelected as any,
+                            ]}
+                          >
+                            {year}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  </View>
+                </View>
+
+                {/* Action buttons */}
+                <View style={styles.datePickerActions as any}>
+                  <TouchableOpacity
+                    style={styles.datePickerButton as any}
+                    onPress={handleWebCancel}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.datePickerCancelText as any}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.datePickerButton as any}
+                    onPress={handleWebConfirm}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.datePickerConfirmText as any}>Confirm</Text>
+                  </TouchableOpacity>
+                </View>
+              </TouchableOpacity>
+            </TouchableOpacity>
+          </Modal>
+        )}
+      </>
+    );
+  }
+
+  // Native implementation with DateTimePicker in modal
+  // Dynamically require DateTimePicker only for native platforms to avoid web bundling errors
+  let DateTimePicker: any = null;
+  // Check if we're on web by checking for window/document (more reliable than Platform.OS for web detection)
+  const isWebPlatform = typeof window !== 'undefined' && typeof document !== 'undefined';
+  if (!isWebPlatform) {
+    try {
+      DateTimePicker = require('@react-native-community/datetimepicker').default;
+    } catch (e) {
+      console.warn('DateTimePicker not available:', e);
+    }
+  }
+
+  return (
+    <>
+      <TouchableOpacity
+        style={[styles.fieldContainer, width && { width }, style, error && styles.fieldError]}
+        activeOpacity={1}
+        onPress={handleContainerPress}
+      >
+        <PencilIcon size={24} />
+        <View style={styles.inputContainer}>
+          <Text
+            style={[textStyle, error && { color: '#FF0000' }]}
+            numberOfLines={1}
+          >
+            {displayValue}
+          </Text>
+        </View>
+        {showCheck && (
+          <View style={styles.checkIconContainer}>
+            <CheckIcon size={16} />
+          </View>
+        )}
+      </TouchableOpacity>
+      {error && (
+        <Text style={styles.errorText}>{error}</Text>
+      )}
+      {showPicker && DateTimePicker && (
+        <Modal
+          visible={showPicker}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={handleCancel}
+        >
+          <TouchableOpacity
+            style={styles.datePickerOverlay as any}
+            activeOpacity={1}
+            onPress={handleCancel}
+          >
+            <TouchableOpacity
+              style={styles.datePickerModal as any}
+              activeOpacity={1}
+              onPress={(e) => e.stopPropagation()}
+            >
+              {/* Modal header */}
+              <View style={styles.datePickerHeader as any}>
+                <Text style={styles.datePickerTitle as any}>Select date</Text>
+              </View>
+
+              {/* Date picker */}
+              <View style={styles.datePickerContainer as any}>
+                <DateTimePicker
+                  value={tempDate || dateValue}
+                  mode="date"
+                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                  onChange={handleDateChange}
+                  maximumDate={maxDate}
+                  minimumDate={minDate}
+                  style={styles.datePicker as any}
+                />
+              </View>
+
+              {/* Action buttons */}
+              <View style={styles.datePickerActions as any}>
+                <TouchableOpacity
+                  style={styles.datePickerButton as any}
+                  onPress={handleCancel}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.datePickerCancelText as any}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.datePickerButton as any}
+                  onPress={handleConfirm}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.datePickerConfirmText as any}>Confirm</Text>
+                </TouchableOpacity>
+              </View>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </Modal>
+      )}
+    </>
+  );
+};
+
 // Plus Icon SVG Component
 const PlusIcon: React.FC<{ size?: number }> = ({ size = 40 }) => {
   const scale = size / 40;
@@ -669,9 +1243,10 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
   );
   const [name, setName] = useState<string>(initialData.nickname || '');
   const [location, setLocation] = useState<string>(initialData.location || '');
-  const [age, setAge] = useState<string>(
-    initialData.age ? initialData.age.toString() : ''
+  const [dateOfBirth, setDateOfBirth] = useState<string>(
+    initialData.dateOfBirth || ''
   );
+  const [dateOfBirthError, setDateOfBirthError] = useState<string>('');
   const [pronoun, setPronoun] = useState<string>(initialData.pronouns || '');
   const [isUploading, setIsUploading] = useState(false);
   
@@ -731,6 +1306,21 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
   const keyboardAwareScrollViewRef = useRef<any>(null);
 
   const handleNext = async () => {
+    // Validate date of birth before proceeding
+    if (!dateOfBirth || dateOfBirth.trim() === '') {
+      setDateOfBirthError('Date of birth is required');
+      return;
+    }
+
+    const { isValidDateOfBirth } = await import('../utils/ageCalculation');
+    const validation = isValidDateOfBirth(dateOfBirth);
+    if (!validation.valid) {
+      setDateOfBirthError(validation.error || 'Invalid date of birth');
+      return;
+    }
+
+    setDateOfBirthError('');
+
     let finalProfilePicture = profilePicture;
     
     // If we have a local image (base64 or file://), upload it
@@ -771,11 +1361,16 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
       }
     }
     
+    // Calculate age from DOB for backward compatibility (database trigger will also calculate)
+    const { calculateAgeFromDOB } = await import('../utils/ageCalculation');
+    const calculatedAge = calculateAgeFromDOB(dateOfBirth);
+    
     const formData: OnboardingData = {
       nickname: name,
       userEmail: initialData.userEmail || '',
       location: location,
-      age: parseInt(age) || 0,
+      dateOfBirth: dateOfBirth,
+      age: calculatedAge || undefined, // Legacy support - database trigger will also calculate
       boardType: initialData.boardType ?? 0,
       surfLevel: initialData.surfLevel ?? -1,
       travelExperience: initialData.travelExperience ?? 0,
@@ -891,19 +1486,29 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
                 width={212}
                 onOpen={() => setActiveModal('country')}
               />
-              <Field
+              <DateOfBirthField
                 label="Age"
-                value={age}
-                onChangeText={(text) => {
-                  setAge(text);
-                  const ageNum = parseInt(text) || 0;
-                  updateFormData({ age: ageNum });
+                value={dateOfBirth}
+                onChange={async (dob) => {
+                  setDateOfBirth(dob);
+                  setDateOfBirthError('');
+                  // Validate DOB
+                  const { isValidDateOfBirth, calculateAgeFromDOB } = await import('../utils/ageCalculation');
+                  const validation = isValidDateOfBirth(dob);
+                  if (!validation.valid) {
+                    setDateOfBirthError(validation.error || 'Invalid date of birth');
+                  } else {
+                    // Calculate age for immediate feedback (database trigger will also calculate)
+                    const calculatedAge = calculateAgeFromDOB(dob);
+                    if (calculatedAge !== null) {
+                      updateFormData({ dateOfBirth: dob, age: calculatedAge });
+                    }
+                  }
                 }}
                 placeholder="Age*"
                     width={118}
                 style={styles.ageField}
-                keyboardType="numeric"
-                numericOnly={true}
+                error={dateOfBirthError}
               />
             </View>
 
@@ -1376,6 +1981,17 @@ const styles = StyleSheet.create({
   ageField: {
     // Age field specific styles if needed
   },
+  fieldError: {
+    borderColor: '#FF0000',
+  },
+  errorText: {
+    fontSize: 12,
+    fontWeight: '400',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    color: '#FF0000',
+    marginTop: 4,
+    marginLeft: 16,
+  },
   buttonContainer: {
     paddingHorizontal: spacing.xl,
     paddingBottom: Platform.OS === 'ios' ? spacing.xl : spacing.lg,
@@ -1570,5 +2186,132 @@ const styles = StyleSheet.create({
     height: 24,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  // Date picker modal styles
+  datePickerOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  datePickerModal: {
+    backgroundColor: colors.white || '#FFFFFF',
+    borderRadius: 12,
+    width: '90%',
+    maxWidth: 400,
+    overflow: 'hidden',
+    ...(Platform.OS === 'web' && {
+      boxShadow: '0 4px 20px rgba(0, 0, 0, 0.15)',
+    }),
+  },
+  datePickerHeader: {
+    padding: spacing.lg,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E0E0E0',
+    alignItems: 'center',
+  },
+  datePickerTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    color: colors.textPrimary || '#333333',
+  },
+  datePickerContainer: {
+    padding: spacing.md,
+    alignItems: 'center',
+    minHeight: 200,
+  },
+  datePicker: {
+    width: '100%',
+  },
+  datePickerActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    padding: spacing.lg,
+    borderTopWidth: 1,
+    borderTopColor: '#E0E0E0',
+    gap: spacing.lg,
+  },
+  datePickerButton: {
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+  },
+  datePickerCancelText: {
+    fontSize: 16,
+    fontWeight: '400',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    color: colors.textSecondary || '#666666',
+  },
+  datePickerConfirmText: {
+    fontSize: 16,
+    fontWeight: '600',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    color: colors.textPrimary || '#333333',
+  },
+  // Web date picker styles
+  webDatePickerContainer: {
+    flexDirection: 'row',
+    height: 300,
+    paddingVertical: 0,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: '#E0E0E0',
+    position: 'relative',
+  },
+  webDatePickerColumn: {
+    flex: 1,
+    height: '100%',
+    borderRightWidth: 1,
+    borderRightColor: '#F0F0F0',
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  webDatePickerSelectionIndicator: {
+    position: 'absolute',
+    top: '50%',
+    left: 0,
+    right: 0,
+    height: 40,
+    marginTop: -20,
+    backgroundColor: 'rgba(0, 162, 182, 0.1)',
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: '#00A2B6',
+    zIndex: 1,
+    pointerEvents: 'none',
+  },
+  webDatePickerScroll: {
+    flex: 1,
+    height: '100%',
+  },
+  webDatePickerScrollContent: {
+    paddingVertical: 130, // Center padding to show selected item in middle
+    alignItems: 'center',
+    paddingHorizontal: spacing.sm,
+  },
+  webDatePickerItem: {
+    height: 40,
+    width: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: spacing.xs,
+    minWidth: 80,
+  },
+  webDatePickerItemSelected: {
+    backgroundColor: 'transparent',
+  },
+  webDatePickerItemText: {
+    fontSize: 18,
+    fontWeight: '400',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    color: colors.textSecondary || '#999999',
+    lineHeight: 24,
+  },
+  webDatePickerItemTextSelected: {
+    fontSize: 22,
+    fontWeight: '600',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    color: colors.textPrimary || '#333333',
+    lineHeight: 28,
   },
 });

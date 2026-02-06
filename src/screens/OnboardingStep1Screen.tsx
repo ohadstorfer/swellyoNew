@@ -38,7 +38,8 @@ export interface OnboardingData {
   nickname: string;
   userEmail: string;
   location: string;
-  age: number;
+  dateOfBirth?: string; // ISO date string (YYYY-MM-DD) - preferred
+  age?: number; // Legacy support - optional for backward compatibility
   boardType: number;
   surfLevel: number;
   travelExperience: number;

@@ -24,7 +24,8 @@ export interface SupabaseUser {
 export interface SupabaseSurfer {
   user_id: string; // UUID, primary key, foreign key to users.id
   name: string; // varchar(255), not null
-  age?: number; // integer, nullable, check >= 0
+  age?: number; // integer, nullable, check >= 0 (automatically calculated from date_of_birth via trigger)
+  date_of_birth?: string; // date, nullable, ISO date string format (YYYY-MM-DD)
   pronoun?: string; // varchar(50), nullable
   country_from?: string; // varchar(255), nullable
   surfboard_type?: string; // surfboard_type enum, nullable
@@ -201,7 +202,8 @@ class SupabaseDatabaseService {
    */
   async saveSurfer(surferData: {
     name?: string;
-    age?: number;
+    age?: number; // Legacy support - will be calculated from dateOfBirth if provided
+    dateOfBirth?: string; // ISO date string (YYYY-MM-DD) - preferred over age
     pronoun?: string;
     countryFrom?: string;
     surfboardType?: string; // surfboard_type enum
@@ -334,10 +336,29 @@ class SupabaseDatabaseService {
         profileVideoUrl = profileVideoUrl.substring(0, 2048);
       }
 
+      // Validate dateOfBirth if provided
+      let dateOfBirth: string | undefined = surferData.dateOfBirth;
+      if (dateOfBirth) {
+        try {
+          const { isValidDateOfBirth } = await import('../../utils/ageCalculation');
+          const validation = isValidDateOfBirth(dateOfBirth);
+          if (!validation.valid) {
+            throw new Error(validation.error || 'Invalid date of birth');
+          }
+        } catch (error: any) {
+          // If validation fails, log but don't throw - let database constraints handle it
+          console.warn('Date of birth validation warning:', error.message);
+          // Still allow saving - database will validate with constraints
+        }
+      }
+
       const surferDataToSave: Partial<SupabaseSurfer> = {
         user_id: authUser.id,
         name: surferData.name || existingSurfer?.name || googleName || 'User', // Required field - prefer provided name, then existing, then Google name, then 'User'
-        age: surferData.age,
+        // Note: age will be automatically calculated by database trigger from date_of_birth
+        // Only set age if dateOfBirth is not provided (backward compatibility)
+        age: dateOfBirth ? undefined : surferData.age,
+        date_of_birth: dateOfBirth,
         pronoun: surferData.pronoun,
         country_from: surferData.countryFrom,
         surfboard_type: surfboardType,
@@ -422,7 +443,8 @@ class SupabaseDatabaseService {
     nickname?: string;
     userEmail?: string;
     location?: string;
-    age?: number;
+    age?: number; // Legacy support - will be calculated from dateOfBirth if provided
+    dateOfBirth?: string; // ISO date string (YYYY-MM-DD) - preferred over age
     profilePicture?: string;
     pronouns?: string;
     boardType?: number;
@@ -439,14 +461,14 @@ class SupabaseDatabaseService {
         nickname?: string;
         profilePicture?: string;
         pronouns?: string;
-        age?: number;
+        age?: number; // Legacy - not used if dateOfBirth is provided
         location?: string;
         userType?: string;
       } = {
         nickname: onboardingData.nickname, // Will be used for surfer.name
         profilePicture: onboardingData.profilePicture, // Will be used for surfer.profile_image_url
         pronouns: onboardingData.pronouns, // Will be used for surfer.pronoun
-        age: onboardingData.age, // Will be used for surfer.age
+        age: onboardingData.dateOfBirth ? undefined : onboardingData.age, // Only use age if dateOfBirth not provided
         location: onboardingData.location, // Will be used for surfer.country_from
       };
       
@@ -459,9 +481,11 @@ class SupabaseDatabaseService {
 
       // Save surfer data (all profile and preference data goes here)
       // travelExperience is now saved as integer (number of trips, 0-20+)
+      // Age will be automatically calculated by database trigger from dateOfBirth
       const surfer = await this.saveSurfer({
         name: onboardingData.nickname || 'User',
-        age: onboardingData.age,
+        dateOfBirth: onboardingData.dateOfBirth, // Preferred - age calculated by trigger
+        age: onboardingData.dateOfBirth ? undefined : onboardingData.age, // Legacy fallback
         pronoun: onboardingData.pronouns,
         countryFrom: onboardingData.location,
         boardType: onboardingData.boardType, // Will be converted to surfboard_type enum
@@ -524,7 +548,7 @@ class SupabaseDatabaseService {
       // destinations_map does NOT exist - only destinations_array exists
       const { data, error } = await supabase
         .from('surfers')
-        .select('user_id, name, age, pronoun, country_from, surfboard_type, surf_level, surf_level_description, surf_level_category, travel_experience, bio, profile_image_url, profile_video_url, destinations_array, lifestyle_keywords, wave_type_keywords, travel_buddies, created_at, updated_at, finished_onboarding')
+        .select('user_id, name, age, date_of_birth, pronoun, country_from, surfboard_type, surf_level, surf_level_description, surf_level_category, travel_experience, bio, profile_image_url, profile_video_url, destinations_array, lifestyle_keywords, wave_type_keywords, travel_buddies, created_at, updated_at, finished_onboarding')
         .eq('user_id', userId)
         .single();
 
