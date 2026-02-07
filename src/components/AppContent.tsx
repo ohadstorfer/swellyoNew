@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Alert, Platform } from 'react-native';
+import { Alert, Platform, View } from 'react-native';
 import { WelcomeScreen } from '../screens/WelcomeScreen';
 import { OnboardingWelcomeScreen } from '../screens/OnboardingWelcomeScreen';
 import { OnboardingStep1Screen, OnboardingData } from '../screens/OnboardingStep1Screen';
@@ -553,7 +553,12 @@ export const AppContent: React.FC = () => {
   // This prevents premature redirects before we know if user has a valid session
   if (isRestoringSession) {
     console.log('[AppContent] Waiting for session restoration...');
-    return null; // Show nothing while restoring session (very brief, typically < 100ms)
+    // Show a minimal loading state instead of null to prevent white screen
+    return (
+      <View style={{ flex: 1, backgroundColor: '#FFFFFF', justifyContent: 'center', alignItems: 'center' }}>
+        {/* Minimal loading indicator - prevents white screen */}
+      </View>
+    );
   }
 
   // Note: Removed premature WelcomeScreen redirect check

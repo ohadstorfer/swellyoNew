@@ -54,14 +54,23 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const restoreSession = useCallback(async () => {
     console.log('[OnboardingContext] Starting session restoration...');
     
-    if (!isSupabaseConfigured()) {
-      console.log('[OnboardingContext] Supabase not configured, skipping session restoration');
+    // Set a safety timeout to ensure we don't hang forever
+    const timeoutId = setTimeout(() => {
+      console.warn('[OnboardingContext] Session restoration timeout after 5s - forcing completion');
       setIsRestoringSession(false);
-      return;
-    }
+    }, 5000); // 5 second safety timeout
     
     try {
+      if (!isSupabaseConfigured()) {
+        console.log('[OnboardingContext] Supabase not configured, skipping session restoration');
+        clearTimeout(timeoutId);
+        setIsRestoringSession(false);
+        return;
+      }
+      
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      
+      clearTimeout(timeoutId);
       
       if (sessionError) {
         console.log('[OnboardingContext] Error getting session:', sessionError.message);
@@ -88,8 +97,9 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       } else {
         console.log('[OnboardingContext] No session found');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('[OnboardingContext] Error restoring session:', error);
+      clearTimeout(timeoutId);
     } finally {
       console.log('[OnboardingContext] Session restoration complete');
       setIsRestoringSession(false);

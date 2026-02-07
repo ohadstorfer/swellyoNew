@@ -583,7 +583,7 @@ interface PronounFieldProps {
   onOpen?: () => void;
 }
 
-const PRONOUN_OPTIONS = ['Bro', 'Sis', 'Neither'];
+const PRONOUN_OPTIONS = ['Bro', 'Sis', 'Name Only'];
 
 const PronounField: React.FC<PronounFieldProps> = ({
   label,

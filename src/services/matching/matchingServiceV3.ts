@@ -979,7 +979,8 @@ export async function findMatchingUsersV3(
     let query = supabase
       .from('surfers')
       .select('*')
-      .neq('user_id', requestingUserId);
+      .neq('user_id', requestingUserId)
+      .or('is_demo_user.is.null,is_demo_user.eq.false'); // Exclude demo users
     
     // Exclude previously matched users if provided
     // Note: Supabase doesn't support .not('user_id', 'in', array) directly
