@@ -120,3 +120,4 @@ export interface SurferData {
   wave_type_keywords?: string[] | null;
 }
 
+

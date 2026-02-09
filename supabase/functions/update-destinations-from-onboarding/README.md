@@ -207,3 +207,4 @@ The function outputs detailed logs:
 
 View logs in Supabase Dashboard → Edge Functions → update-destinations-from-onboarding → Logs
 
+
