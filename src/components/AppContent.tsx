@@ -18,6 +18,46 @@ import { messagingService } from '../services/messaging/messagingService';
 import { useOnboarding } from '../context/OnboardingContext';
 import { analyticsService } from '../services/analytics/analyticsService';
 import { useAuthGuard } from '../hooks/useAuthGuard';
+import { preloadVideosForBoardType, getVideoPreloadStatus, waitForVideoReady } from '../services/media/videoPreloadService';
+import { getSurfLevelVideoFromStorage } from '../services/media/videoService';
+
+// Helper to get first video URL for a board type
+const getFirstVideoUrlForBoardType = (boardType: number): string | null => {
+  const BOARD_VIDEO_DEFINITIONS: { [boardType: number]: Array<{ name: string; videoFileName: string; thumbnailFileName: string }> } = {
+    0: [
+      { name: 'Dipping My Toes', videoFileName: 'Dipping My Toes.mp4', thumbnailFileName: 'Dipping My Toes thumbnail.PNG' },
+      { name: 'Cruising Around', videoFileName: 'Cruising Around.mp4', thumbnailFileName: 'Cruising Around thumbnail.PNG' },
+      { name: 'Snapping', videoFileName: 'Snapping.mp4', thumbnailFileName: 'Snapping thumbnail.PNG' },
+      { name: 'Charging', videoFileName: 'Charging.mp4', thumbnailFileName: 'Charging thumbnail.PNG' },
+    ],
+    1: [
+      { name: 'Dipping My Toes', videoFileName: 'Dipping My Toes.mp4', thumbnailFileName: 'Dipping My Toes thumbnail.PNG' },
+      { name: 'Cruising Around', videoFileName: 'Cruising Around.mp4', thumbnailFileName: 'Cruising Around thumbnail.PNG' },
+      { name: 'Carving Turns', videoFileName: 'Carving Turns.mp4', thumbnailFileName: 'Carving Turns thumbnail.PNG' },
+      { name: 'Charging', videoFileName: 'Charging.mp4', thumbnailFileName: 'Charging thumbnail.PNG' },
+    ],
+    2: [
+      { name: 'Dipping My Toes', videoFileName: 'Dipping My Toes.mp4', thumbnailFileName: 'Dipping My Toes thumbnail.PNG' },
+      { name: 'Cruising Around', videoFileName: 'Cruising Around.mp4', thumbnailFileName: 'Cruising Around thumbnail.PNG' },
+      { name: 'Cross Stepping', videoFileName: 'CrossStepping.mp4', thumbnailFileName: 'CrossStepping thumbnail.PNG' },
+      { name: 'Hanging Toes', videoFileName: 'Hanging Toes.mp4', thumbnailFileName: 'Hanging Toes thumbnail.PNG' },
+    ],
+  };
+
+  const getBoardFolder = (boardType: number): string => {
+    const folderMap: { [key: number]: string } = { 0: 'shortboard', 1: 'midlength', 2: 'longboard', 3: 'softtop' };
+    return folderMap[boardType] || 'shortboard';
+  };
+
+  const boardVideos = BOARD_VIDEO_DEFINITIONS[boardType];
+  if (!boardVideos || boardVideos.length === 0) {
+    return null;
+  }
+
+  const boardFolder = getBoardFolder(boardType);
+  const firstVideo = boardVideos[0];
+  return getSurfLevelVideoFromStorage(`${boardFolder}/${firstVideo.videoFileName}`);
+};
 
 export const AppContent: React.FC = () => {
   const { currentStep, formData, setCurrentStep, updateFormData, saveStepToSupabase, isComplete, markOnboardingComplete, isDemoUser, setIsDemoUser, setUser, resetOnboarding, user, isRestoringSession } = useOnboarding();
@@ -211,7 +251,105 @@ export const AppContent: React.FC = () => {
         updateFormData({ surfLevel: 3 });
         setCurrentStep(3); // Go directly to step 3 (travel experience)
       } else {
-        setCurrentStep(2); // Go to step 2 (surf level selection)
+        // For board types with videos, ensure first video is preloaded before navigation
+        const firstVideoUrl = getFirstVideoUrlForBoardType(data.boardType);
+        
+        if (firstVideoUrl) {
+          // Check if first video is already preloaded
+          const preloadStatus = getVideoPreloadStatus(firstVideoUrl);
+          
+          if (preloadStatus?.ready) {
+            // Video is ready, navigate immediately
+            if (__DEV__) {
+              console.log('[AppContent] First video is preloaded and ready, navigating to step 2');
+            }
+            setCurrentStep(2);
+          } else {
+            // Wait for first video to be ready (up to 6 seconds with progressive checking)
+            if (__DEV__) {
+              console.log('[AppContent] Waiting for first video preload before navigating...');
+            }
+            
+            // Best Practice: Progressive timeout checking (don't wait for full timeout)
+            let checkCount = 0;
+            const maxChecks = 12; // 6 seconds / 500ms = 12 checks
+            const checkInterval = 500; // Check every 500ms
+            
+            const preloadReady = await new Promise<boolean>((resolve) => {
+              const startTime = Date.now();
+              
+              const checkPreload = () => {
+                checkCount++;
+                const status = getVideoPreloadStatus(firstVideoUrl);
+                const elapsed = Date.now() - startTime;
+                
+                if (status?.ready) {
+                  if (__DEV__) {
+                    console.log(`[AppContent] First video became ready after ${elapsed}ms (${checkCount} checks), navigating to step 2`);
+                  }
+                  resolve(true);
+                  return;
+                }
+                
+                // Progressive feedback (Best Practice: Don't block UI)
+                if (checkCount === 4 && elapsed < 2000) {
+                  if (__DEV__) {
+                    console.log('[AppContent] Still waiting for preload (2s elapsed)...');
+                  }
+                } else if (checkCount === 8 && elapsed < 4000) {
+                  if (__DEV__) {
+                    console.log('[AppContent] Still waiting for preload (4s elapsed)...');
+                  }
+                }
+                
+                // Check if timeout reached
+                if (elapsed >= 6000 || checkCount >= maxChecks) {
+                  if (__DEV__) {
+                    console.warn(`[AppContent] First video preload timeout after ${elapsed}ms (${checkCount} checks), navigating anyway (graceful degradation)`);
+                    if (status) {
+                      console.warn(`[AppContent] Preload status: ready=${status.ready}, readyState=${status.readyState}, error=${status.error?.message}`);
+                    }
+                  }
+                  resolve(false);
+                  return;
+                }
+                
+                // Continue checking
+                setTimeout(checkPreload, checkInterval);
+              };
+              
+              // Start checking immediately
+              checkPreload();
+            });
+            
+            if (preloadReady) {
+              if (__DEV__) {
+                console.log('[AppContent] First video is ready, navigating to step 2');
+              }
+              setCurrentStep(2);
+            } else {
+              // Timeout reached, navigate anyway (graceful degradation)
+              if (__DEV__) {
+                console.warn('[AppContent] Navigating to step 2 despite preload timeout (video will load normally)');
+              }
+              setCurrentStep(2);
+            }
+          }
+          
+          // Start preloading remaining videos in background (non-blocking)
+          preloadVideosForBoardType(data.boardType, 'high')
+            .then(result => {
+              if (__DEV__) {
+                console.log(`[AppContent] Background preload completed: ${result.readyCount}/${result.totalCount} videos ready`);
+              }
+            })
+            .catch(err => {
+              console.warn('[AppContent] Video preload failed (non-blocking):', err);
+            });
+        } else {
+          // No videos for this board type, navigate immediately
+          setCurrentStep(2);
+        }
       }
     } catch (error) {
       console.error('Error in Step 1 Next:', error);

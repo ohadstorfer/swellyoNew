@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   StyleSheet,
@@ -13,6 +13,7 @@ import { BoardCarousel } from '../components/BoardCarousel';
 import { colors, spacing, typography } from '../styles/theme';
 import { useOnboarding } from '../context/OnboardingContext';
 import { useIsDesktopWeb, useScreenDimensions } from '../utils/responsive';
+import { preloadVideosForBoardType } from '../services/media/videoPreloadService';
 
 interface OnboardingStep1ScreenProps {
   onNext: (data: OnboardingData) => void;
@@ -150,6 +151,74 @@ export const OnboardingStep1Screen: React.FC<OnboardingStep1ScreenProps> = ({
   };
   
   const availableBoardHeight = calculateAvailableBoardHeight();
+
+  // Track current preload promise to cancel if board type changes
+  const preloadPromiseRef = useRef<Promise<any> | null>(null);
+
+  // Early preload trigger when board type is selected (CRITICAL for maximum preload time)
+  // Best Practice: Immediate preload for first video (100ms), prevent duplicates
+  useEffect(() => {
+    if (selectedBoardId === undefined || selectedBoardId === 3) return; // Skip softtop (no videos)
+    
+    // Best Practice: Immediate preload for first video (100ms debounce for critical content)
+    const debounceDelay = 100; // Reduced from 300ms for faster preload start
+    
+    const timeoutId = setTimeout(() => {
+      // Check if preload is already in progress to prevent duplicates
+      const { getVideoPreloadStatus } = require('../services/media/videoPreloadService');
+      const firstVideoUrl = (() => {
+        const BOARD_VIDEO_DEFINITIONS: { [boardType: number]: Array<{ name: string; videoFileName: string; thumbnailFileName: string }> } = {
+          0: [{ name: 'Dipping My Toes', videoFileName: 'Dipping My Toes.mp4', thumbnailFileName: 'Dipping My Toes thumbnail.PNG' }],
+          1: [{ name: 'Dipping My Toes', videoFileName: 'Dipping My Toes.mp4', thumbnailFileName: 'Dipping My Toes thumbnail.PNG' }],
+          2: [{ name: 'Dipping My Toes', videoFileName: 'Dipping My Toes.mp4', thumbnailFileName: 'Dipping My Toes thumbnail.PNG' }],
+        };
+        const getBoardFolder = (boardType: number): string => {
+          const folderMap: { [key: number]: string } = { 0: 'shortboard', 1: 'midlength', 2: 'longboard', 3: 'softtop' };
+          return folderMap[boardType] || 'shortboard';
+        };
+        const boardVideos = BOARD_VIDEO_DEFINITIONS[selectedBoardId];
+        if (!boardVideos || boardVideos.length === 0) return null;
+        const boardFolder = getBoardFolder(selectedBoardId);
+        const { getSurfLevelVideoFromStorage } = require('../services/media/videoService');
+        return getSurfLevelVideoFromStorage(`${boardFolder}/${boardVideos[0].videoFileName}`);
+      })();
+      
+      // Check if first video is already preloaded or in progress
+      if (firstVideoUrl) {
+        const firstVideoStatus = getVideoPreloadStatus(firstVideoUrl);
+        if (firstVideoStatus?.ready) {
+          if (__DEV__) {
+            console.log(`[OnboardingStep1] First video already preloaded for board type ${selectedBoardId}, skipping preload`);
+          }
+          return; // Already preloaded, skip
+        }
+      }
+      
+      // Cancel previous preload if board type changed
+      if (preloadPromiseRef.current) {
+        // Note: We can't actually cancel the promise, but we can ignore its result
+        preloadPromiseRef.current = null;
+      }
+
+      // Start preloading videos for selected board type
+      // Best Practice: Use 'high' priority for first video, 'normal' for others
+      const preloadPromise = preloadVideosForBoardType(selectedBoardId, 'high')
+        .then(result => {
+          if (__DEV__) {
+            console.log(`[OnboardingStep1] Preloaded ${result.readyCount}/${result.totalCount} videos for board type ${selectedBoardId}`);
+          }
+        })
+        .catch(err => {
+          console.warn('[OnboardingStep1] Video preload failed (non-blocking):', err);
+        });
+      
+      preloadPromiseRef.current = preloadPromise;
+    }, debounceDelay);
+    
+    return () => {
+      clearTimeout(timeoutId);
+    };
+  }, [selectedBoardId]);
 
   const handleBoardSelect = (board: BoardType) => {
     setSelectedBoardId(board.id);

@@ -17,6 +17,7 @@ import { OnboardingData } from './OnboardingStep1Screen';
 import { getSurfLevelVideoFromStorage } from '../services/media/videoService';
 import { getImageUrl } from '../services/media/imageService';
 import { useIsDesktopWeb, useScreenDimensions, responsiveWidth, getScreenWidth } from '../utils/responsive';
+import { getVideoPreloadStatus, waitForVideoReady } from '../services/media/videoPreloadService';
 
 interface OnboardingStep2ScreenProps {
   onNext: (data: OnboardingData) => void;
@@ -252,46 +253,55 @@ export const OnboardingStep2Screen: React.FC<OnboardingStep2ScreenProps> = ({
     return 0; // Default to first video if invalid
   });
 
-  // Loading states for video optimization
-  const [isMainVideoLoading, setIsMainVideoLoading] = useState(true);
+  // Check preload status synchronously before render to optimize initial loading state
+  const initialMainVideoLoading = React.useMemo(() => {
+    if (surfLevelVideos.length === 0) return true;
+    
+    const firstVideo = surfLevelVideos[0];
+    if (!firstVideo?.videoUrl) return true;
+    
+    // Check if first video is preloaded synchronously
+    const preloadStatus = getVideoPreloadStatus(firstVideo.videoUrl);
+    const isPreloaded = preloadStatus?.ready === true;
+    
+    if (__DEV__ && isPreloaded) {
+      console.log('[OnboardingStep2] First video is preloaded on mount, skipping loading state');
+    }
+    
+    return !isPreloaded;
+  }, [surfLevelVideos]);
+
+  // Loading states for video optimization - initialized based on preload status
+  const [isMainVideoLoading, setIsMainVideoLoading] = useState(initialMainVideoLoading);
   const [isBackgroundVideoLoading, setIsBackgroundVideoLoading] = useState(true);
 
-  // Preload adjacent videos for smoother transitions
+  // Check preload status on mount and optimize loading state (for videos that weren't preloaded)
   React.useEffect(() => {
-    if (Platform.OS !== 'web' || surfLevelVideos.length === 0) return;
+    if (surfLevelVideos.length === 0) return;
     
-    const currentIndex = surfLevelVideos.findIndex(v => v.id === selectedVideoId);
-    if (currentIndex === -1) return;
+    const firstVideo = surfLevelVideos[0];
+    if (!firstVideo?.videoUrl) return;
     
-    const nextIndex = (currentIndex + 1) % surfLevelVideos.length;
-    const prevIndex = (currentIndex - 1 + surfLevelVideos.length) % surfLevelVideos.length;
-    
-    const nextVideo = surfLevelVideos[nextIndex];
-    const prevVideo = surfLevelVideos[prevIndex];
-    
-    // Preload next and previous videos (metadata only to save bandwidth)
-    const preloadVideo = (video: VideoLevel) => {
-      if (!video?.videoUrl || typeof document === 'undefined') return;
-      
-      // Use link preload for metadata only
-      const link = document.createElement('link');
-      link.rel = 'preload';
-      link.as = 'video';
-      link.href = video.videoUrl;
-      link.setAttribute('type', 'video/mp4');
-      document.head.appendChild(link);
-      
-      // Clean up after a delay to prevent memory issues
-      setTimeout(() => {
-        if (document.head.contains(link)) {
-          document.head.removeChild(link);
-        }
-      }, 30000); // Remove after 30 seconds
-    };
-    
-    if (nextVideo) preloadVideo(nextVideo);
-    if (prevVideo) preloadVideo(prevVideo);
-  }, [selectedVideoId, surfLevelVideos]);
+    // Check if first video is preloaded (double-check in case status changed)
+    const preloadStatus = getVideoPreloadStatus(firstVideo.videoUrl);
+    if (preloadStatus?.ready) {
+      if (__DEV__) {
+        console.log('[OnboardingStep2] First video is preloaded and ready');
+      }
+      setIsMainVideoLoading(false); // Skip loading state
+    } else {
+      // Wait for video to be ready (shorter timeout for faster feedback)
+      waitForVideoReady(firstVideo.videoUrl, 500)
+        .then((ready: boolean) => {
+          if (ready) {
+            if (__DEV__) {
+              console.log('[OnboardingStep2] First video became ready');
+            }
+            setIsMainVideoLoading(false);
+          }
+        });
+    }
+  }, [surfLevelVideos]);
 
   // Reset selectedVideoId when board type changes to ensure it's valid for the new board's videos
   React.useEffect(() => {
@@ -333,8 +343,9 @@ export const OnboardingStep2Screen: React.FC<OnboardingStep2ScreenProps> = ({
   const selectedVideo = surfLevelVideos.find((v: VideoLevel) => v.id === selectedVideoId) || surfLevelVideos[0];
 
   // Create video player for background video (delayed loading)
+  // FIX: Don't initialize with empty string - use selectedVideo.videoUrl or null
   const backgroundPlayer = useVideoPlayer(
-    '', // Start with empty URL
+    selectedVideo.videoUrl || null, // Use actual URL or null instead of empty string
     (player: any) => {
       // Background video will be loaded after main video starts
       if (player) {
@@ -643,4 +654,5 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
 });
+
 

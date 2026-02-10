@@ -15,6 +15,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { Text } from './Text';
 import { colors, spacing } from '../styles/theme';
+import { getVideoPreloadStatus, waitForVideoReady } from '../services/media/videoPreloadService';
 
 const getScreenWidth = () => Dimensions.get('window').width;
 
@@ -175,7 +176,24 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
   const [containerWidth, setContainerWidth] = useState(0);
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const thumbnailFadeAnim = useRef(new Animated.Value(1)).current;
-  const [isVideoLoading, setIsVideoLoading] = useState(true);
+  
+  // Get the selected video directly from selectedVideoId
+  const selectedVideo = React.useMemo(() => {
+    return videos.find(v => v.id === selectedVideoId) || videos[0];
+  }, [videos, selectedVideoId]);
+  
+  // Check preload status synchronously to initialize loading state correctly
+  const initialLoadingState = React.useMemo(() => {
+    if (!selectedVideo?.videoUrl) return true;
+    const preloadStatus = getVideoPreloadStatus(selectedVideo.videoUrl);
+    const isPreloaded = preloadStatus?.ready === true;
+    if (__DEV__ && isPreloaded) {
+      console.log('[VideoCarousel] Video is preloaded on mount, skipping loading state');
+    }
+    return !isPreloaded;
+  }, [selectedVideo?.videoUrl]);
+  
+  const [isVideoLoading, setIsVideoLoading] = useState(initialLoadingState);
   
   // Calculate video dimensions based on available height
   // Maintain aspect ratio while fitting available space
@@ -231,11 +249,6 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
   };
   
   const videoDimensions = getVideoDimensions();
-  
-  // Get the selected video directly from selectedVideoId
-  const selectedVideo = React.useMemo(() => {
-    return videos.find(v => v.id === selectedVideoId) || videos[0];
-  }, [videos, selectedVideoId]);
 
   // Reorder videos array so selected item is in the middle
   // On desktop: [2ndPrev, prev, selected, next, 2ndNext] (5 items)
@@ -291,61 +304,256 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
   // Array structure: [0: 2ndPrev, 1: Prev, 2: Selected, 3: Next, 4: 2ndNext]
   const centerIndex = 2;
 
+  // Track current play promise to cancel before replaceAsync (fixes AbortError)
+  const currentPlayPromiseRef = useRef<Promise<void> | null>(null);
+  // Track if this is the first mount to ensure replaceAsync runs on initial mount
+  const isInitialMountRef = useRef(true);
+
   // Create video player for main video
+  // Check preload status before initializing to optimize playback
+  const isVideoPreloaded = React.useMemo(() => {
+    if (!selectedVideo?.videoUrl) return false;
+    const preloadStatus = getVideoPreloadStatus(selectedVideo.videoUrl);
+    return preloadStatus?.ready === true;
+  }, [selectedVideo?.videoUrl]);
+  
   const mainVideoPlayer = useVideoPlayer(
-    selectedVideo.videoUrl || '',
+    selectedVideo.videoUrl || null,
     (player: any) => {
       if (__DEV__) {
-        console.log('[VideoCarousel] Video player initialized with URL:', selectedVideo.videoUrl);
+        console.log('[VideoCarousel] Video player initialized with URL:', selectedVideo.videoUrl, 'Preloaded:', isVideoPreloaded);
       }
       if (player && selectedVideo.videoUrl) {
         try {
           // Set properties required for autoplay
+          // DO NOT attempt play here - wait for replaceAsync to complete
           player.loop = true;
           player.muted = true;
           
-          // Try to play immediately
-          const playPromise = player.play();
-          if (playPromise !== undefined) {
-            playPromise.catch((error: any) => {
-              // Autoplay may be blocked, will retry in useEffect
-              if (__DEV__ && error.name !== 'NotAllowedError') {
-                console.warn('[VideoCarousel] Initial play attempt:', error.message);
-              }
-            });
+          if (__DEV__) {
+            console.log('[VideoCarousel] Player properties set, waiting for replaceAsync before playing');
           }
         } catch (error) {
-          console.error('Error initializing video player:', error);
+          console.error('[VideoCarousel] Error initializing video player:', error);
         }
       }
     }
   );
+  
+  // Comprehensive error handling and buffering detection (Best Practice: pauseWhenBuffering equivalent)
+  useEffect(() => {
+    if (!mainVideoPlayer || !selectedVideo.videoUrl) return;
+    
+    let isMounted = true;
+    
+    // Listen for status changes to detect errors and buffering
+    const handleStatusChange = (status: any) => {
+      if (!isMounted || !mainVideoPlayer) return;
+      
+      // Best Practice: Handle buffering (pauseWhenBuffering equivalent)
+      if (status?.isBuffering || status?.status === 'buffering') {
+        if (__DEV__) {
+          console.log('[VideoCarousel] Video is buffering, pausing playback');
+        }
+        // Pause when buffering to prevent choppy playback
+        try {
+          mainVideoPlayer.pause();
+        } catch (error) {
+          if (__DEV__) {
+            console.warn('[VideoCarousel] Error pausing during buffer:', error);
+          }
+        }
+      }
+      
+      // Handle errors
+      if (status?.error) {
+        console.error('[VideoCarousel] Video player error:', status.error, 'URL:', selectedVideo.videoUrl);
+        setIsVideoLoading(false);
+      }
+      
+      // Handle ready state
+      if (status?.status === 'readyToPlay' || status?.isReadyToPlay) {
+        if (__DEV__) {
+          console.log('[VideoCarousel] Video readyToPlay status detected');
+        }
+        setIsVideoLoading(false);
+      }
+    };
+    
+    // Listen for video errors on web
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      const findVideoElement = () => {
+        const videoElements = document.querySelectorAll('video');
+        return Array.from(videoElements).find((video: HTMLVideoElement) => {
+          return video.src === selectedVideo.videoUrl || video.currentSrc === selectedVideo.videoUrl;
+        }) as HTMLVideoElement | undefined;
+      };
+      
+      const setupErrorHandling = () => {
+        const videoElement = findVideoElement();
+        if (videoElement) {
+          const handleError = (e: Event) => {
+            const error = videoElement.error;
+            if (error) {
+              const errorMessage = `Video error: code ${error.code}, message: ${error.message}`;
+              console.error('[VideoCarousel] HTML5 video error:', errorMessage, 'URL:', selectedVideo.videoUrl);
+              setIsVideoLoading(false);
+            }
+          };
+          
+          const handleWaiting = () => {
+            if (__DEV__) {
+              console.log('[VideoCarousel] Video waiting for data (buffering)');
+            }
+            // Best Practice: Pause when buffering
+            try {
+              if (mainVideoPlayer && typeof mainVideoPlayer.pause === 'function') {
+                mainVideoPlayer.pause();
+              }
+            } catch (error) {
+              if (__DEV__) {
+                console.warn('[VideoCarousel] Error pausing during wait:', error);
+              }
+            }
+          };
+          
+          const handleCanPlay = () => {
+            if (__DEV__) {
+              console.log('[VideoCarousel] Video can play again, resuming');
+            }
+            // Resume playback after buffering
+            try {
+              if (mainVideoPlayer && typeof mainVideoPlayer.play === 'function') {
+                const playResult = mainVideoPlayer.play();
+                if (playResult !== undefined && typeof (playResult as any).catch === 'function') {
+                  (playResult as any).catch((err: any) => {
+                    if (__DEV__ && err.name !== 'NotAllowedError') {
+                      console.warn('[VideoCarousel] Error resuming after buffer:', err);
+                    }
+                  });
+                }
+              }
+            } catch (error) {
+              if (__DEV__) {
+                console.warn('[VideoCarousel] Error resuming playback:', error);
+              }
+            }
+          };
+          
+          videoElement.addEventListener('error', handleError, { once: false });
+          videoElement.addEventListener('waiting', handleWaiting, { once: false });
+          videoElement.addEventListener('canplay', handleCanPlay, { once: false });
+          
+          return () => {
+            videoElement.removeEventListener('error', handleError);
+            videoElement.removeEventListener('waiting', handleWaiting);
+            videoElement.removeEventListener('canplay', handleCanPlay);
+          };
+        }
+        return () => {};
+      };
+      
+      const cleanup = setupErrorHandling();
+      setTimeout(() => {
+        const delayedCleanup = setupErrorHandling();
+        return () => {
+          cleanup();
+          delayedCleanup();
+        };
+      }, 100);
+      
+      return () => {
+        cleanup();
+      };
+    }
+    
+    // Listen for expo-video status changes (native and web)
+    try {
+      if (mainVideoPlayer.addListener) {
+        const subscription = mainVideoPlayer.addListener('statusChange', handleStatusChange);
+        return () => {
+          isMounted = false;
+          if (subscription && typeof subscription.remove === 'function') {
+            subscription.remove();
+          }
+        };
+      }
+    } catch (error) {
+      if (__DEV__) {
+        console.warn('[VideoCarousel] Player listeners not available:', error);
+      }
+    }
+    
+    return () => {
+      isMounted = false;
+    };
+  }, [mainVideoPlayer, selectedVideo.videoUrl]);
 
-  // Track video loading state
+  // Track video loading state and check preload status
   useEffect(() => {
     if (!mainVideoPlayer || !selectedVideo.videoUrl) {
       setIsVideoLoading(true);
       return;
     }
     
-    // Reset loading state when video changes
+    // Check if video is preloaded - if so, skip loading state
+    const preloadStatus = getVideoPreloadStatus(selectedVideo.videoUrl);
+    if (preloadStatus?.ready) {
+      if (__DEV__) {
+        console.log('[VideoCarousel] Video is preloaded and ready:', selectedVideo.videoUrl);
+      }
+      setIsVideoLoading(false);
+      return;
+    }
+    
+    // Reset loading state when video changes (only if not preloaded)
     setIsVideoLoading(true);
     
-    // For web, listen to video element events
+    // Wait for video to be ready if it's being preloaded (shorter timeout for faster feedback)
+    waitForVideoReady(selectedVideo.videoUrl, 500)
+      .then((ready: boolean) => {
+        if (ready) {
+          if (__DEV__) {
+            console.log('[VideoCarousel] Video became ready:', selectedVideo.videoUrl);
+          }
+          setIsVideoLoading(false);
+        }
+      });
+    
+    // For web, listen to video element events for immediate playback
     if (Platform.OS === 'web' && typeof document !== 'undefined') {
       const handleCanPlay = () => {
         setIsVideoLoading(false);
       };
       
-      const videoElements = document.querySelectorAll('video');
-      videoElements.forEach((video: HTMLVideoElement) => {
-        video.addEventListener('canplay', handleCanPlay, { once: true });
-      });
+      // Use a more specific selector or wait for the video element to be created
+      const findVideoElement = () => {
+        const videoElements = document.querySelectorAll('video');
+        return Array.from(videoElements).find((video: HTMLVideoElement) => {
+          return video.src === selectedVideo.videoUrl || video.currentSrc === selectedVideo.videoUrl;
+        }) as HTMLVideoElement | undefined;
+      };
+      
+      // Try immediately and after a short delay (video element might not be ready yet)
+      const videoElement = findVideoElement();
+      if (videoElement) {
+        videoElement.addEventListener('canplay', handleCanPlay, { once: true });
+      }
+      
+      // Also try after a delay in case video element is created later
+      const timeoutId = setTimeout(() => {
+        const delayedVideoElement = findVideoElement();
+        if (delayedVideoElement) {
+          delayedVideoElement.addEventListener('canplay', handleCanPlay, { once: true });
+        }
+      }, 100);
       
       return () => {
-        videoElements.forEach((video: HTMLVideoElement) => {
-          video.removeEventListener('canplay', handleCanPlay);
-        });
+        clearTimeout(timeoutId);
+        const cleanupElement = findVideoElement();
+        if (cleanupElement) {
+          cleanupElement.removeEventListener('canplay', handleCanPlay);
+        }
       };
     }
     
@@ -535,6 +743,7 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
         if (playPromise !== undefined) {
           await playPromise;
           hasPlayed = true;
+          setIsVideoLoading(false);
           if (__DEV__) {
             console.log('[VideoCarousel] Video playing successfully');
           }
@@ -551,12 +760,49 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
     // Try to play immediately
     attemptPlay();
 
-    // Retry on a short delay (helps with some browsers)
-    const retryTimeout = setTimeout(() => {
-      if (!hasPlayed) {
-        attemptPlay();
-      }
-    }, 100);
+    // Multiple retries with shorter intervals for faster playback
+    const retryTimeouts: ReturnType<typeof setTimeout>[] = [];
+    [50, 100, 200].forEach((delay) => {
+      const timeout = setTimeout(() => {
+        if (!hasPlayed) {
+          attemptPlay();
+        }
+      }, delay);
+      retryTimeouts.push(timeout);
+    });
+
+    // For web, listen for canplay event for immediate playback when video is ready
+    let canPlayHandler: (() => void) | null = null;
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      const findVideoElement = () => {
+        const videoElements = document.querySelectorAll('video');
+        return Array.from(videoElements).find((video: HTMLVideoElement) => {
+          return video.src === selectedVideo.videoUrl || video.currentSrc === selectedVideo.videoUrl;
+        }) as HTMLVideoElement | undefined;
+      };
+
+      canPlayHandler = () => {
+        if (!hasPlayed && isMounted) {
+          attemptPlay();
+        }
+      };
+
+      // Try to find video element and add canplay listener
+      const setupCanPlayListener = () => {
+        const videoElement = findVideoElement();
+        if (videoElement) {
+          videoElement.addEventListener('canplay', canPlayHandler!, { once: true });
+          // Also try canplaythrough for more reliable ready state
+          videoElement.addEventListener('canplaythrough', canPlayHandler!, { once: true });
+        }
+      };
+
+      // Try immediately and after delays
+      setupCanPlayListener();
+      setTimeout(setupCanPlayListener, 50);
+      setTimeout(setupCanPlayListener, 100);
+      setTimeout(setupCanPlayListener, 200);
+    }
 
     // For web, also try on visibility change (when tab becomes visible)
     let visibilityHandler: (() => void) | null = null;
@@ -571,27 +817,74 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
 
     return () => {
       isMounted = false;
-      clearTimeout(retryTimeout);
+      retryTimeouts.forEach(timeout => clearTimeout(timeout));
+      if (canPlayHandler && Platform.OS === 'web' && typeof document !== 'undefined') {
+        const videoElement = document.querySelector('video') as HTMLVideoElement | null;
+        if (videoElement) {
+          videoElement.removeEventListener('canplay', canPlayHandler);
+          videoElement.removeEventListener('canplaythrough', canPlayHandler);
+        }
+      }
       if (visibilityHandler && typeof document !== 'undefined') {
         document.removeEventListener('visibilitychange', visibilityHandler);
       }
     };
   }, [mainVideoPlayer, selectedVideo.videoUrl]);
 
-  // Update player source when video changes
+  // Update player source when video changes OR on initial mount
+  // This ensures replaceAsync is called on initial mount for the first video
   useEffect(() => {
     if (selectedVideo.videoUrl && mainVideoPlayer) {
       const videoUrl = selectedVideo.videoUrl;
+      const isInitialMount = isInitialMountRef.current;
+      
       if (__DEV__) {
-        console.log('[VideoCarousel] Replacing video URL:', videoUrl, 'for video:', selectedVideo.name);
+        console.log('[VideoCarousel] Replacing video URL:', videoUrl, 'for video:', selectedVideo.name, 'Initial mount:', isInitialMount);
       }
+      
       if (!videoUrl) {
         console.warn('No video URL provided for:', selectedVideo.name);
         setIsVideoLoading(false);
+        isInitialMountRef.current = false;
         return;
       }
       
-      setIsVideoLoading(true);
+      // Check if video is preloaded - if so, we can skip loading state or reduce it
+      const preloadStatus = getVideoPreloadStatus(videoUrl);
+      const isPreloaded = preloadStatus?.ready === true;
+      
+      // Only set loading state if video is not preloaded
+      // For preloaded videos, replaceAsync should be very fast
+      if (!isPreloaded) {
+        setIsVideoLoading(true);
+      } else if (__DEV__) {
+        console.log('[VideoCarousel] Video is preloaded, replaceAsync should be fast');
+      }
+      
+      // FIX: Cancel previous play() promise before replaceAsync to prevent AbortError
+      if (currentPlayPromiseRef.current) {
+        currentPlayPromiseRef.current.catch(() => {
+          // Ignore cancellation errors
+        });
+        currentPlayPromiseRef.current = null;
+      }
+      
+      // Set playsInline attributes before replaceAsync (critical for iOS Safari)
+      if (Platform.OS === 'web' && typeof document !== 'undefined') {
+        const setPlaysInline = () => {
+          const videoElements = document.querySelectorAll('video');
+          videoElements.forEach((videoElement: HTMLVideoElement) => {
+            videoElement.setAttribute('playsinline', 'true');
+            videoElement.setAttribute('webkit-playsinline', 'true');
+            videoElement.setAttribute('x5-playsinline', 'true');
+            videoElement.playsInline = true;
+          });
+        };
+        setPlaysInline();
+        // Also set after a short delay in case video element is created later
+        setTimeout(setPlaysInline, 50);
+      }
+      
       const replacePromise = mainVideoPlayer.replaceAsync(videoUrl);
       if (replacePromise && typeof replacePromise.then === 'function') {
         replacePromise.then(() => {
@@ -600,27 +893,156 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
             mainVideoPlayer.loop = true;
             mainVideoPlayer.muted = true;
             
-            // Try to play after source is replaced
-            const playPromise = mainVideoPlayer.play();
-            if (playPromise !== undefined && typeof (playPromise as any).catch === 'function') {
-              (playPromise as any).then(() => {
-                setIsVideoLoading(false);
-              }).catch((playError: any) => {
-                // Autoplay may be blocked, but video is loaded
-                setIsVideoLoading(false);
-                if (__DEV__ && playError.name !== 'NotAllowedError') {
-                  console.warn('[VideoCarousel] Play after replace failed:', playError.message);
+            // Ensure playsInline is set again after replaceAsync (Best Practice: iOS Safari requirement)
+            if (Platform.OS === 'web' && typeof document !== 'undefined') {
+              const setPlaysInline = () => {
+                const videoElements = document.querySelectorAll('video');
+                videoElements.forEach((videoElement: HTMLVideoElement) => {
+                  videoElement.setAttribute('playsinline', 'true');
+                  videoElement.setAttribute('webkit-playsinline', 'true');
+                  videoElement.setAttribute('x5-playsinline', 'true');
+                  videoElement.playsInline = true;
+                });
+              };
+              setPlaysInline();
+              setTimeout(setPlaysInline, 50);
+            }
+            
+            // Best Practice: Wait for video element to be ready before playing
+            const waitForVideoReady = (): Promise<void> => {
+              return new Promise<void>((resolve) => {
+                if (Platform.OS === 'web' && typeof document !== 'undefined') {
+                  const findVideoElement = () => {
+                    const videoElements = document.querySelectorAll('video');
+                    return Array.from(videoElements).find((video: HTMLVideoElement) => {
+                      return video.src === videoUrl || video.currentSrc === videoUrl;
+                    }) as HTMLVideoElement | undefined;
+                  };
+                  
+                  const videoElement = findVideoElement();
+                  if (videoElement) {
+                    // Best Practice: Use HAVE_CURRENT_DATA (2) for faster readiness
+                    const HAVE_CURRENT_DATA = 2;
+                    if (videoElement.readyState >= HAVE_CURRENT_DATA) {
+                      if (__DEV__) {
+                        console.log(`[VideoCarousel] Video element ready (readyState: ${videoElement.readyState}), proceeding to play`);
+                      }
+                      resolve();
+                    } else {
+                      // Best Practice: canplay is the most reliable event
+                      const canPlayHandler = () => {
+                        if (__DEV__) {
+                          console.log(`[VideoCarousel] canplay event fired (readyState: ${videoElement.readyState}), proceeding to play`);
+                        }
+                        resolve();
+                      };
+                      videoElement.addEventListener('canplay', canPlayHandler, { once: true });
+                      
+                      // Timeout fallback (Best Practice: Don't wait forever)
+                      setTimeout(() => {
+                        if (__DEV__) {
+                          console.log(`[VideoCarousel] canplay timeout, proceeding anyway (readyState: ${videoElement.readyState})`);
+                        }
+                        videoElement.removeEventListener('canplay', canPlayHandler);
+                        resolve();
+                      }, 500);
+                    }
+                  } else {
+                    // Video element not found, continue anyway
+                    if (__DEV__) {
+                      console.warn('[VideoCarousel] Video element not found, proceeding to play anyway');
+                    }
+                    resolve();
+                  }
+                } else {
+                  // Native platforms - resolve immediately
+                  resolve();
                 }
               });
-            } else {
-              setIsVideoLoading(false);
-            }
+            };
+            
+            // Wait for video to be ready, then play
+            waitForVideoReady().then(() => {
+              if (!mainVideoPlayer) return;
+              
+              // Best Practice: Set properties before play
+              mainVideoPlayer.loop = true;
+              mainVideoPlayer.muted = true;
+              
+              // Now safe to play (Best Practice: Play after canplay)
+              const playPromise = mainVideoPlayer.play();
+              
+              // Store play promise to cancel if needed
+              if (playPromise !== undefined) {
+                currentPlayPromiseRef.current = playPromise as Promise<void>;
+              }
+              
+              // Best Practice: Handle play promise properly with retry logic
+              if (playPromise !== undefined && typeof (playPromise as any).catch === 'function') {
+                (playPromise as any).then(() => {
+                  setIsVideoLoading(false);
+                  if (__DEV__) {
+                    console.log('[VideoCarousel] Video playing successfully after replaceAsync');
+                  }
+                }).catch((playError: any) => {
+                  // Best Practice: Retry with exponential backoff
+                  if (playError.name !== 'NotAllowedError') {
+                    if (__DEV__) {
+                      console.warn(`[VideoCarousel] Play failed (${playError.name}): ${playError.message}, retrying...`);
+                    }
+                    
+                    // Retry after delay (exponential backoff)
+                    setTimeout(() => {
+                      if (mainVideoPlayer) {
+                        const retryPlayResult = mainVideoPlayer.play();
+                        if (retryPlayResult !== undefined && typeof (retryPlayResult as any).then === 'function') {
+                          (retryPlayResult as any)
+                            .then(() => {
+                              setIsVideoLoading(false);
+                              if (__DEV__) {
+                                console.log('[VideoCarousel] Video playing successfully after retry');
+                              }
+                            })
+                            .catch((retryError: any) => {
+                              // Final failure - video loaded but can't autoplay
+                              setIsVideoLoading(false);
+                              if (__DEV__ && retryError.name !== 'NotAllowedError') {
+                                console.warn('[VideoCarousel] Play retry failed:', retryError.message);
+                              }
+                            });
+                        } else {
+                          setIsVideoLoading(false);
+                        }
+                      }
+                    }, 200);
+                  } else {
+                    // Autoplay blocked - this is expected, video is still loaded
+                    setIsVideoLoading(false);
+                    if (__DEV__) {
+                      console.log('[VideoCarousel] Autoplay blocked (expected), video is loaded');
+                    }
+                  }
+                });
+              } else {
+                setIsVideoLoading(false);
+              }
+            });
           }
+          
+          // Mark initial mount as complete
+          isInitialMountRef.current = false;
         }).catch((error: any) => {
-          console.error('Error replacing video:', error, 'URL:', videoUrl);
+          console.error('[VideoCarousel] Error replacing video:', error, 'URL:', videoUrl);
           setIsVideoLoading(false);
+          isInitialMountRef.current = false;
         });
+      } else {
+        // If replaceAsync doesn't return a promise, mark initial mount as complete
+        isInitialMountRef.current = false;
       }
+    } else if (!selectedVideo.videoUrl || !mainVideoPlayer) {
+      // If no video URL or player, mark initial mount as complete
+      isInitialMountRef.current = false;
     }
   }, [selectedVideo.videoUrl, selectedVideo.name, mainVideoPlayer]);
 
@@ -1174,4 +1596,5 @@ const styles = StyleSheet.create({
     backgroundColor: '#CFCFCF',
   },
 });
+
 
