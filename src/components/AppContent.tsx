@@ -18,7 +18,7 @@ import { messagingService } from '../services/messaging/messagingService';
 import { useOnboarding } from '../context/OnboardingContext';
 import { analyticsService } from '../services/analytics/analyticsService';
 import { useAuthGuard } from '../hooks/useAuthGuard';
-import { preloadVideosForBoardType, getVideoPreloadStatus, waitForVideoReady } from '../services/media/videoPreloadService';
+import { preloadVideosForBoardType, getVideoPreloadStatus, waitForVideoReady, preloadLoadingVideo, getLoadingVideoUrl } from '../services/media/videoPreloadService';
 import { getSurfLevelVideoFromStorage } from '../services/media/videoService';
 
 // Helper to get first video URL for a board type
@@ -73,6 +73,31 @@ export const AppContent: React.FC = () => {
   const authCheckStartTime = useRef<number>(Date.now());
   const stopTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const minLoadingDuration = 3000; // 3 seconds minimum
+  
+  // Refs to prevent race conditions from multiple rapid clicks
+  const isNavigatingRef = useRef(false);
+  const isLoggingOutRef = useRef(false);
+  
+  // Preload loading video when arriving at step 4 (not after submitting)
+  // This reduces loading time after step 4 submission
+  useEffect(() => {
+    if (currentStep === 4) {
+      if (__DEV__) {
+        console.log('[AppContent] Arrived at step 4, preloading loading video...');
+      }
+      
+      // Start preloading loading video in background (non-blocking)
+      preloadLoadingVideo('high')
+        .then(result => {
+          if (__DEV__) {
+            console.log(`[AppContent] Loading video preload completed while on step 4: ready=${result.ready}`);
+          }
+        })
+        .catch(err => {
+          console.warn('[AppContent] Loading video preload failed (non-blocking):', err);
+        });
+    }
+  }, [currentStep]);
   
   // Check if MVP mode is enabled
   const isMVPMode = process.env.EXPO_PUBLIC_MVP_MODE === 'true';
@@ -448,7 +473,38 @@ export const AppContent: React.FC = () => {
         console.log('[AppContent] User name updated in PostHog:', userId, userProperties);
       }
       
-      setShowLoading(true); // Show loading screen
+      // Check if loading video is already preloaded (should be, since we preload on step 4 arrival)
+      const loadingVideoUrl = getLoadingVideoUrl();
+      const preloadStatus = getVideoPreloadStatus(loadingVideoUrl);
+      
+      if (preloadStatus?.ready) {
+        // Video is ready, navigate immediately
+        if (__DEV__) {
+          console.log('[AppContent] Loading video is preloaded and ready, navigating to loading screen immediately');
+        }
+        setShowLoading(true);
+      } else {
+        // Video not ready yet (should be rare if preload started on step 4 arrival)
+        // Wait briefly (up to 2 seconds) for preload to complete, then navigate anyway
+        if (__DEV__) {
+          console.log('[AppContent] Loading video not ready yet, waiting briefly before navigating...');
+        }
+        
+        const preloadReady = await waitForVideoReady(loadingVideoUrl, 2000);
+        
+        if (preloadReady) {
+          if (__DEV__) {
+            console.log('[AppContent] Loading video became ready, navigating to loading screen');
+          }
+          setShowLoading(true);
+        } else {
+          // Timeout reached, navigate anyway (graceful degradation)
+          if (__DEV__) {
+            console.warn('[AppContent] Navigating to loading screen (video will load normally)');
+          }
+          setShowLoading(true);
+        }
+      }
     } catch (error) {
       console.error('Error in Step 4 Next:', error);
       // Still allow navigation even if save fails
@@ -588,6 +644,93 @@ export const AppContent: React.FC = () => {
       setShowTripPlanningChat(false);
     }
     
+    // Preload surf level video early (non-blocking) before navigation
+    const preloadUserProfileVideo = async (targetUserId: string) => {
+      try {
+        const { supabaseDatabaseService } = await import('../services/database/supabaseDatabaseService');
+        const surferData = await supabaseDatabaseService.getSurferByUserId(targetUserId);
+        
+        if (surferData) {
+          // Calculate surf level video URL using same logic as ProfileScreen
+          const mapBoardTypeToNumber = (boardType: string): number => {
+            const boardTypeLower = boardType.toLowerCase();
+            if (boardTypeLower === 'shortboard') return 0;
+            if (boardTypeLower === 'midlength' || boardTypeLower === 'mid_length') return 1;
+            if (boardTypeLower === 'longboard') return 2;
+            return 0; // Default to shortboard
+          };
+          
+          const getBoardFolder = (boardType: number): string => {
+            const folderMap: { [key: number]: string } = {
+              0: 'shortboard',
+              1: 'midlength',
+              2: 'longboard',
+            };
+            return folderMap[boardType] || 'shortboard';
+          };
+          
+          const BOARD_VIDEO_DEFINITIONS: { [boardType: number]: Array<{ name: string; videoFileName: string; thumbnailFileName: string }> } = {
+            0: [
+              { name: 'Dipping My Toes', videoFileName: 'Dipping My Toes.mp4', thumbnailFileName: 'Dipping My Toes thumbnail.PNG' },
+              { name: 'Cruising Around', videoFileName: 'Cruising Around.mp4', thumbnailFileName: 'Cruising Around thumbnail.PNG' },
+              { name: 'Snapping', videoFileName: 'Snapping.mp4', thumbnailFileName: 'Snapping thumbnail.PNG' },
+              { name: 'Charging', videoFileName: 'Charging.mp4', thumbnailFileName: 'Charging thumbnail.PNG' },
+            ],
+            1: [
+              { name: 'Dipping My Toes', videoFileName: 'Dipping My Toes.mp4', thumbnailFileName: 'Dipping My Toes thumbnail.PNG' },
+              { name: 'Cruising Around', videoFileName: 'Cruising Around.mp4', thumbnailFileName: 'Cruising Around thumbnail.PNG' },
+              { name: 'Carving Turns', videoFileName: 'Carving Turns.mp4', thumbnailFileName: 'Carving Turns thumbnail.PNG' },
+              { name: 'Charging', videoFileName: 'Charging.mp4', thumbnailFileName: 'Charging thumbnail.PNG' },
+            ],
+            2: [
+              { name: 'Dipping My Toes', videoFileName: 'Dipping My Toes.mp4', thumbnailFileName: 'Dipping My Toes thumbnail.PNG' },
+              { name: 'Cruising Around', videoFileName: 'Cruising Around.mp4', thumbnailFileName: 'Cruising Around thumbnail.PNG' },
+              { name: 'Cross Stepping', videoFileName: 'CrossStepping.mp4', thumbnailFileName: 'CrossStepping thumbnail.PNG' },
+              { name: 'Hanging Toes', videoFileName: 'Hanging Toes.mp4', thumbnailFileName: 'Hanging Toes thumbnail.PNG' },
+            ],
+          };
+          
+          const boardType = surferData.surfboard_type || 'shortboard';
+          const surfLevel = surferData.surf_level || 1;
+          const boardTypeNum = mapBoardTypeToNumber(boardType);
+          const boardVideos = BOARD_VIDEO_DEFINITIONS[boardTypeNum];
+          
+          if (boardVideos && boardVideos.length > 0) {
+            // Convert database surf level (1-5) to app level (0-4)
+            const appLevel = surfLevel - 1;
+            
+            // Clamp to valid range
+            const videoIndex = Math.max(0, Math.min(appLevel, boardVideos.length - 1));
+            const video = boardVideos[videoIndex];
+            
+            if (video) {
+              const boardFolder = getBoardFolder(boardTypeNum);
+              const { getSurfLevelVideoFromStorage } = await import('../services/media/videoService');
+              const defaultVideoUrl = getSurfLevelVideoFromStorage(`${boardFolder}/${video.videoFileName}`);
+              
+              if (defaultVideoUrl) {
+                const { preloadVideo } = await import('../services/media/videoPreloadService');
+                preloadVideo(defaultVideoUrl, 'high')
+                  .then(result => {
+                    if (__DEV__) {
+                      console.log(`[AppContent] Preloaded surf level video for user ${targetUserId}: ready=${result.ready}`);
+                    }
+                  })
+                  .catch(err => {
+                    console.warn('[AppContent] Surf level video preload failed:', err);
+                  });
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.warn('[AppContent] Error preloading user profile video:', error);
+      }
+    };
+    
+    // Start preload immediately (non-blocking)
+    preloadUserProfileVideo(userId);
+    
     // Close conversation to show profile screen
     console.log('[AppContent] Closing conversation, setting selectedConversation to null');
     setSelectedConversation(null);
@@ -665,8 +808,39 @@ export const AppContent: React.FC = () => {
   };
 
   const handleStep1Back = () => {
-    // Navigate to onboarding welcome screen (step 0)
-    setCurrentStep(0);
+    // Prevent multiple simultaneous navigation calls
+    if (isNavigatingRef.current) {
+      if (__DEV__) {
+        console.log('[AppContent] Navigation already in progress, ignoring back button click');
+      }
+      return;
+    }
+    
+    isNavigatingRef.current = true;
+    
+    try {
+      if (__DEV__) {
+        console.log('[AppContent] Step 1 back button clicked, navigating to step 0');
+      }
+      
+      // Navigate immediately (synchronous)
+      setCurrentStep(0);
+    } catch (error) {
+      console.error('[AppContent] Error navigating back from step 1:', error);
+      // Retry navigation after a short delay
+      setTimeout(() => {
+        try {
+          setCurrentStep(0);
+        } catch (retryError) {
+          console.error('[AppContent] Retry navigation also failed:', retryError);
+        }
+      }, 100);
+    } finally {
+      // Reset flag after a delay to allow state updates to propagate
+      setTimeout(() => {
+        isNavigatingRef.current = false;
+      }, 500);
+    }
   };
 
   const handleStep2Back = () => {
@@ -828,29 +1002,70 @@ export const AppContent: React.FC = () => {
           setCurrentStep(1);
         }}
         onBack={async () => {
-          // Log out user (both regular Google auth users and demo users) before going back to welcome screen
-          console.log('Logging out user before going back to welcome screen...');
+          // Prevent multiple simultaneous logout calls
+          if (isLoggingOutRef.current) {
+            if (__DEV__) {
+              console.log('[AppContent] Logout already in progress, ignoring back button click');
+            }
+            return;
+          }
           
-          // Use centralized logout function
-          const { performLogout } = await import('../utils/logout');
-          const result = await performLogout({
-            resetOnboarding,
-            setUser,
-            setCurrentStep,
-            setIsDemoUser,
-          });
+          isLoggingOutRef.current = true;
           
-          if (!result.success) {
-            console.error('Error during logout:', result.error);
-            // Even if logout fails, ensure we clear state and navigate
+          try {
+            console.log('[AppContent] Logging out user before going back to welcome screen...');
+            
+            // Navigate immediately (synchronous) before async operations
+            // This ensures UI updates immediately even if logout takes time
+            setCurrentStep(-1);
             setUser(null);
             setIsDemoUser(false);
+            
+            // Then perform logout operations in background (non-blocking)
+            const { performLogout } = await import('../utils/logout');
+            const result = await performLogout({
+              resetOnboarding,
+              setUser: () => {}, // Already set above
+              setCurrentStep: () => {}, // Already set above
+              setIsDemoUser: () => {}, // Already set above
+            });
+            
+            // Reset onboarding state (non-blocking)
             try {
               await resetOnboarding();
             } catch (resetError) {
-              console.error('Error resetting onboarding:', resetError);
+              console.error('[AppContent] Error resetting onboarding:', resetError);
             }
-            setCurrentStep(-1);
+            
+            if (!result.success) {
+              console.error('[AppContent] Error during logout:', result.error);
+              // Navigation already happened above, so we're good
+            }
+          } catch (error) {
+            console.error('[AppContent] Error in logout handler:', error);
+            // Ensure navigation happened even if there's an error
+            try {
+              setCurrentStep(-1);
+              setUser(null);
+              setIsDemoUser(false);
+            } catch (navError) {
+              console.error('[AppContent] Error setting navigation state:', navError);
+              // Retry after delay
+              setTimeout(() => {
+                try {
+                  setCurrentStep(-1);
+                  setUser(null);
+                  setIsDemoUser(false);
+                } catch (retryError) {
+                  console.error('[AppContent] Retry navigation also failed:', retryError);
+                }
+              }, 100);
+            }
+          } finally {
+            // Reset flag after a delay to allow state updates to propagate
+            setTimeout(() => {
+              isLoggingOutRef.current = false;
+            }, 1000);
           }
         }}
       />

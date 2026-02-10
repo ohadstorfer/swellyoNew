@@ -94,6 +94,20 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           nickname: appUser.nickname,
           userEmail: appUser.email,
         }));
+        
+        // Preload profile video in background (non-blocking)
+        if (appUser?.id) {
+          const { preloadProfileVideo } = await import('../services/media/videoPreloadService');
+          preloadProfileVideo(appUser.id.toString(), 'high')
+            .then(result => {
+              if (__DEV__) {
+                console.log(`[OnboardingContext] Profile video preload completed: ready=${result?.ready}`);
+              }
+            })
+            .catch(err => {
+              console.warn('[OnboardingContext] Profile video preload failed (non-blocking):', err);
+            });
+        }
       } else {
         console.log('[OnboardingContext] No session found');
       }

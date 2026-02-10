@@ -337,3 +337,115 @@ export const clearPreloadCache = (): void => {
   preloadStatusMap.clear();
 };
 
+/**
+ * Get the URL for the loading screen video
+ * Returns the URL for '/Loading 4 to 5.mp4' using the videoService
+ */
+export const getLoadingVideoUrl = (): string => {
+  const { getVideoUrl } = require('./videoService');
+  return getVideoUrl('/Loading 4 to 5.mp4');
+};
+
+/**
+ * Preload the loading screen video
+ * Convenience function that preloads the loading video with specified priority
+ */
+export const preloadLoadingVideo = async (priority: 'high' | 'normal' = 'high'): Promise<VideoPreloadStatus> => {
+  const url = getLoadingVideoUrl();
+  return preloadVideo(url, priority);
+};
+
+// Helper function to map board type string to number (same as ProfileScreen)
+const mapBoardTypeToNumber = (boardType: string): number => {
+  const boardTypeLower = boardType.toLowerCase();
+  if (boardTypeLower === 'shortboard') return 0;
+  if (boardTypeLower === 'midlength' || boardTypeLower === 'mid_length') return 1;
+  if (boardTypeLower === 'longboard') return 2;
+  return 0; // Default to shortboard
+};
+
+/**
+ * Get profile video URL for a user
+ * Returns custom video URL if available, otherwise calculates default surf level video URL
+ */
+export const getProfileVideoUrl = async (userId: string): Promise<string | null> => {
+  try {
+    const { supabaseDatabaseService } = await import('../database/supabaseDatabaseService');
+    const surferData = await supabaseDatabaseService.getSurferByUserId(userId);
+    
+    if (!surferData) {
+      if (__DEV__) {
+        console.log(`[videoPreloadService] No profile data found for user ${userId}`);
+      }
+      return null;
+    }
+    
+    // Use custom video if available
+    if (surferData.profile_video_url) {
+      if (__DEV__) {
+        console.log(`[videoPreloadService] Found custom profile video for user ${userId}`);
+      }
+      return surferData.profile_video_url;
+    }
+    
+    // Otherwise calculate default surf level video
+    if (surferData.surfboard_type && surferData.surf_level) {
+      const boardTypeNum = mapBoardTypeToNumber(surferData.surfboard_type);
+      const boardVideos = BOARD_VIDEO_DEFINITIONS[boardTypeNum];
+      
+      if (boardVideos && boardVideos.length > 0) {
+        // Convert database surf level (1-5) to app level (0-4)
+        const appLevel = surferData.surf_level - 1;
+        
+        // Clamp to valid range
+        const videoIndex = Math.max(0, Math.min(appLevel, boardVideos.length - 1));
+        const video = boardVideos[videoIndex];
+        
+        if (video) {
+          const boardFolder = getBoardFolder(boardTypeNum);
+          const storagePath = `${boardFolder}/${video.videoFileName}`;
+          const defaultVideoUrl = getSurfLevelVideoFromStorage(storagePath);
+          
+          if (__DEV__) {
+            console.log(`[videoPreloadService] Calculated default surf level video for user ${userId}: ${defaultVideoUrl}`);
+          }
+          return defaultVideoUrl;
+        }
+      }
+    }
+    
+    if (__DEV__) {
+      console.log(`[videoPreloadService] No video URL available for user ${userId}`);
+    }
+    return null;
+  } catch (error) {
+    console.error('[videoPreloadService] Error getting profile video URL:', error);
+    return null;
+  }
+};
+
+/**
+ * Preload profile video for a user
+ * Fetches profile data and preloads the appropriate video (custom or default)
+ */
+export const preloadProfileVideo = async (userId: string, priority: 'high' | 'normal' = 'high'): Promise<VideoPreloadStatus | null> => {
+  try {
+    const videoUrl = await getProfileVideoUrl(userId);
+    if (!videoUrl) {
+      if (__DEV__) {
+        console.log(`[videoPreloadService] No video URL to preload for user ${userId}`);
+      }
+      return null;
+    }
+    
+    if (__DEV__) {
+      console.log(`[videoPreloadService] Preloading profile video for user ${userId}: ${videoUrl}`);
+    }
+    
+    return preloadVideo(videoUrl, priority);
+  } catch (error) {
+    console.error('[videoPreloadService] Error preloading profile video:', error);
+    return null;
+  }
+};
+

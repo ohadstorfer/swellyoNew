@@ -165,6 +165,21 @@ export function useAuthGuard() {
         const appUser = convertSupabaseUserToAppUser(authUser);
         console.log('[useAuthGuard] Restoring user to context:', appUser.id);
         setUser(appUser);
+        
+        // Preload profile video in background (non-blocking)
+        if (appUser?.id) {
+          const { preloadProfileVideo } = await import('../services/media/videoPreloadService');
+          preloadProfileVideo(appUser.id.toString(), 'high')
+            .then(result => {
+              if (__DEV__) {
+                console.log(`[useAuthGuard] Profile video preload completed: ready=${result?.ready}`);
+              }
+            })
+            .catch(err => {
+              console.warn('[useAuthGuard] Profile video preload failed (non-blocking):', err);
+            });
+        }
+        
         return; // Don't redirect - user is now restored
       }
 

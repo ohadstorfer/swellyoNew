@@ -23,6 +23,7 @@ import { supabaseDatabaseService, SupabaseSurfer } from '../services/database/su
 import { supabase } from '../config/supabase';
 import { getImageUrl, getCountryImageFromStorage, getCountryImageFallback, getCountryImageFromPexels } from '../services/media/imageService';
 import { getSurfLevelVideoFromStorage } from '../services/media/videoService';
+import { getVideoPreloadStatus } from '../services/media/videoPreloadService';
 import { getCountryFlag } from '../utils/countryFlags';
 import { uploadProfileImage, uploadProfileVideo } from '../services/storage/storageService';
 import { validateVideoComplete } from '../utils/videoValidation';
@@ -209,15 +210,30 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
   // Calculate readiness synchronously (not in useEffect) - Safari needs immediate URL
   const isVideoUrlReady = !!(videoUrl && videoUrl.trim() !== '');
   
-  // Create video player - simplified initialization
+  // Check if video is preloaded - initialize based on preload status
+  const isVideoPreloaded = React.useMemo(() => {
+    if (!videoUrl) return false;
+    const status = getVideoPreloadStatus(videoUrl);
+    return status?.ready === true;
+  }, [videoUrl]);
+  
+  // Track initial mount to ensure replaceAsync is called on first render
+  const isInitialMountRef = useRef(true);
+  
+  // Create video player - DO NOT attempt play here, wait for replaceAsync
   const videoPlayer = useVideoPlayer(
     videoUrl || '',
     (player: any) => {
       if (player) {
         player.staysActiveInBackground = true;
-          player.loop = true;
+        player.loop = true;
         player.muted = true; // Critical for Safari autoplay
-                  }
+        
+        if (__DEV__) {
+          console.log('[SurfSkillCard] Video player initialized with URL:', videoUrl, 'Preloaded:', isVideoPreloaded);
+          console.log('[SurfSkillCard] Player properties set, waiting for replaceAsync before playing');
+        }
+      }
     }
   );
 
@@ -290,23 +306,182 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
     };
   }, [videoPlayer, videoUrl]);
 
-  // Update player source when video changes
+  // Update player source when video changes OR on initial mount
+  // This ensures replaceAsync is called on initial mount for the first video
   useEffect(() => {
     if (videoUrl && videoPlayer) {
       const videoUrlToPlay = videoUrl;
       if (!videoUrlToPlay) {
-        console.warn('No video URL provided for surf skill video');
+        console.warn('[SurfSkillCard] No video URL provided for surf skill video');
+        isInitialMountRef.current = false;
         return;
       }
       
-      videoPlayer.replaceAsync(videoUrlToPlay).then(() => {
+      const isInitialMount = isInitialMountRef.current;
+      
+      if (__DEV__) {
+        console.log('[SurfSkillCard] Replacing video URL:', videoUrlToPlay, 'Initial mount:', isInitialMount);
+      }
+      
+      // Ensure playsInline is set before replaceAsync (Best Practice: iOS Safari requirement)
+      if (Platform.OS === 'web' && typeof document !== 'undefined') {
+        const setPlaysInline = () => {
+          const videoElements = document.querySelectorAll('video');
+          videoElements.forEach((videoElement: HTMLVideoElement) => {
+            videoElement.setAttribute('playsinline', 'true');
+            videoElement.setAttribute('webkit-playsinline', 'true');
+            videoElement.setAttribute('x5-playsinline', 'true');
+            videoElement.playsInline = true;
+          });
+        };
+        setPlaysInline();
+        setTimeout(setPlaysInline, 50);
+      }
+      
+      const replacePromise = videoPlayer.replaceAsync(videoUrlToPlay);
+      if (replacePromise && typeof replacePromise.then === 'function') {
+        replacePromise.then(() => {
           if (videoPlayer) {
+            // Set properties required for autoplay
             videoPlayer.loop = true;
             videoPlayer.muted = true;
-        }
-      }).catch((error: any) => {
-        console.error('Error replacing surf skill video:', error, 'URL:', videoUrlToPlay);
-      });
+            
+            // Ensure playsInline is set again after replaceAsync
+            if (Platform.OS === 'web' && typeof document !== 'undefined') {
+              const setPlaysInline = () => {
+                const videoElements = document.querySelectorAll('video');
+                videoElements.forEach((videoElement: HTMLVideoElement) => {
+                  videoElement.setAttribute('playsinline', 'true');
+                  videoElement.setAttribute('webkit-playsinline', 'true');
+                  videoElement.setAttribute('x5-playsinline', 'true');
+                  videoElement.playsInline = true;
+                });
+              };
+              setPlaysInline();
+              setTimeout(setPlaysInline, 50);
+            }
+            
+            // Best Practice: Wait for video element to be ready before playing
+            const waitForVideoReady = (): Promise<void> => {
+              return new Promise<void>((resolve) => {
+                if (Platform.OS === 'web' && typeof document !== 'undefined') {
+                  const findVideoElement = () => {
+                    const videoElements = document.querySelectorAll('video');
+                    return Array.from(videoElements).find((video: HTMLVideoElement) => {
+                      return video.src === videoUrlToPlay || video.currentSrc === videoUrlToPlay;
+                    }) as HTMLVideoElement | undefined;
+                  };
+                  
+                  const videoElement = findVideoElement();
+                  if (videoElement) {
+                    // Best Practice: Use HAVE_CURRENT_DATA (2) for faster readiness
+                    const HAVE_CURRENT_DATA = 2;
+                    if (videoElement.readyState >= HAVE_CURRENT_DATA) {
+                      if (__DEV__) {
+                        console.log(`[SurfSkillCard] Video element ready (readyState: ${videoElement.readyState}), proceeding to play`);
+                      }
+                      resolve();
+                    } else {
+                      // Best Practice: canplay is the most reliable event
+                      const canPlayHandler = () => {
+                        if (__DEV__) {
+                          console.log(`[SurfSkillCard] canplay event fired (readyState: ${videoElement.readyState}), proceeding to play`);
+                        }
+                        resolve();
+                      };
+                      videoElement.addEventListener('canplay', canPlayHandler, { once: true });
+                      
+                      // Timeout fallback (Best Practice: Don't wait forever)
+                      setTimeout(() => {
+                        if (__DEV__) {
+                          console.log(`[SurfSkillCard] canplay timeout, proceeding anyway (readyState: ${videoElement.readyState})`);
+                        }
+                        videoElement.removeEventListener('canplay', canPlayHandler);
+                        resolve();
+                      }, 500);
+                    }
+                  } else {
+                    // Video element not found, continue anyway
+                    if (__DEV__) {
+                      console.warn('[SurfSkillCard] Video element not found, proceeding to play anyway');
+                    }
+                    resolve();
+                  }
+                } else {
+                  // Native platforms - resolve immediately
+                  resolve();
+                }
+              });
+            };
+            
+            // Wait for video to be ready, then play
+            waitForVideoReady().then(() => {
+              if (!videoPlayer) return;
+              
+              // Best Practice: Set properties before play
+              videoPlayer.loop = true;
+              videoPlayer.muted = true;
+              
+              // Now safe to play (Best Practice: Play after canplay)
+              const playPromise = videoPlayer.play();
+              
+              // Best Practice: Handle play promise properly with retry logic
+              if (playPromise !== undefined && typeof (playPromise as any).catch === 'function') {
+                (playPromise as any).then(() => {
+                  if (__DEV__) {
+                    console.log('[SurfSkillCard] Video playing successfully after replaceAsync');
+                  }
+                }).catch((playError: any) => {
+                  // Best Practice: Retry with exponential backoff
+                  if (playError.name !== 'NotAllowedError') {
+                    if (__DEV__) {
+                      console.warn(`[SurfSkillCard] Play failed (${playError.name}): ${playError.message}, retrying...`);
+                    }
+                    
+                    // Retry after delay (exponential backoff)
+                    setTimeout(() => {
+                      if (videoPlayer) {
+                        const retryPlayResult = videoPlayer.play();
+                        if (retryPlayResult !== undefined && typeof (retryPlayResult as any).then === 'function') {
+                          (retryPlayResult as any)
+                            .then(() => {
+                              if (__DEV__) {
+                                console.log('[SurfSkillCard] Video playing successfully after retry');
+                              }
+                            })
+                            .catch((retryError: any) => {
+                              // Final failure - video loaded but can't autoplay
+                              if (__DEV__ && retryError.name !== 'NotAllowedError') {
+                                console.warn('[SurfSkillCard] Play retry failed:', retryError.message);
+                              }
+                            });
+                        }
+                      }
+                    }, 200);
+                  } else {
+                    // Autoplay blocked - this is expected, video is still loaded
+                    if (__DEV__) {
+                      console.log('[SurfSkillCard] Autoplay blocked (expected), video is loaded');
+                    }
+                  }
+                });
+              }
+            });
+          }
+          
+          // Mark initial mount as complete
+          isInitialMountRef.current = false;
+        }).catch((error: any) => {
+          console.error('[SurfSkillCard] Error replacing video:', error, 'URL:', videoUrlToPlay);
+          isInitialMountRef.current = false;
+        });
+      } else {
+        // If replaceAsync doesn't return a promise, mark initial mount as complete
+        isInitialMountRef.current = false;
+      }
+    } else if (!videoUrl || !videoPlayer) {
+      // If no video URL or player, mark initial mount as complete
+      isInitialMountRef.current = false;
     }
   }, [videoUrl, videoPlayer]);
 
@@ -807,6 +982,27 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
       
       setProfileData(surferData);
       setLoading(false);
+      
+      // Preload surf level video for other users (non-blocking)
+      if (userId && surferData) {
+        const defaultVideoUrl = getSurfLevelVideoUrl(
+          surferData.surfboard_type || 'shortboard',
+          surferData.surf_level || 1
+        );
+        
+        if (defaultVideoUrl) {
+          const { preloadVideo } = await import('../services/media/videoPreloadService');
+          preloadVideo(defaultVideoUrl, 'high')
+            .then(result => {
+              if (__DEV__) {
+                console.log(`[ProfileScreen] Surf level video preload completed: ready=${result.ready}`);
+              }
+            })
+            .catch(err => {
+              console.warn('[ProfileScreen] Surf level video preload failed (non-blocking):', err);
+            });
+        }
+      }
     } catch (error) {
       console.error('[ProfileScreen] Error loading profile data:', error);
       setLoading(false);

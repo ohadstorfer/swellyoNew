@@ -13,6 +13,7 @@ import { Text } from '../components/Text';
 import { colors, spacing } from '../styles/theme';
 import { useOnboarding } from '../context/OnboardingContext';
 import { getVideoUrl } from '../services/media/videoService';
+import { getVideoPreloadStatus, waitForVideoReady } from '../services/media/videoPreloadService';
 
 interface LoadingScreenProps {
   onComplete: () => void;
@@ -32,7 +33,16 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
   // Get video URL using the utility function
   const videoUrl = getVideoUrl('/Loading 4 to 5.mp4');
 
-  // Create video player with robust autoplay setup
+  // Check if video is preloaded - initialize loading state based on preload status
+  const isVideoPreloaded = React.useMemo(() => {
+    const status = getVideoPreloadStatus(videoUrl);
+    return status?.ready === true;
+  }, [videoUrl]);
+
+  // Track initial mount to ensure replaceAsync is called on first render
+  const isInitialMountRef = useRef(true);
+
+  // Create video player - DO NOT attempt play here, wait for replaceAsync
   const player = useVideoPlayer(videoUrl, (player: any) => {
     if (player) {
       try {
@@ -40,264 +50,503 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
         player.loop = false; // Don't loop - play once
         player.muted = true; // Must be muted for autoplay on iOS Safari
         
-        // Try to play immediately
-        const playPromise = player.play();
-        if (playPromise !== undefined) {
-          playPromise.catch((error: any) => {
-            // Autoplay may be blocked, will retry in useEffect
-            if (__DEV__ && error.name !== 'NotAllowedError') {
-              console.warn('[LoadingScreen] Initial play attempt:', error.message);
-            }
-          });
+        if (__DEV__) {
+          console.log('[LoadingScreen] Video player initialized with URL:', videoUrl, 'Preloaded:', isVideoPreloaded);
+          console.log('[LoadingScreen] Player properties set, waiting for replaceAsync before playing');
         }
       } catch (error) {
-        console.error('Error initializing video player:', error);
+        console.error('[LoadingScreen] Error initializing video player:', error);
       }
     }
   });
 
-  // Robust autoplay implementation - tries multiple times and handles all cases
-  // Also sets playsInline for iOS Safari to prevent fullscreen
+  // Comprehensive error handling and buffering detection (Best Practice: pauseWhenBuffering equivalent)
   useEffect(() => {
     if (!player || !videoUrl) return;
-
+    
     let isMounted = true;
-    let hasPlayed = false;
-
-    // For web, ensure playsInline is set on the underlying video element (iOS Safari)
-    // Also prevent all video interactions and hide controls
+    
+    // Listen for status changes to detect errors and buffering
+    const handleStatusChange = (status: any) => {
+      if (!isMounted || !player) return;
+      
+      // Best Practice: Handle buffering (pauseWhenBuffering equivalent)
+      if (status?.isBuffering || status?.status === 'buffering') {
+        if (__DEV__) {
+          console.log('[LoadingScreen] Video is buffering, pausing playback');
+        }
+        // Pause when buffering to prevent choppy playback
+        try {
+          player.pause();
+        } catch (error) {
+          if (__DEV__) {
+            console.warn('[LoadingScreen] Error pausing during buffer:', error);
+          }
+        }
+      }
+      
+      // Handle errors
+      if (status?.error) {
+        console.error('[LoadingScreen] Video player error:', status.error, 'URL:', videoUrl);
+      }
+      
+      // Handle ready state
+      if (status?.status === 'readyToPlay' || status?.isReadyToPlay) {
+        if (__DEV__) {
+          console.log('[LoadingScreen] Video readyToPlay status detected');
+        }
+      }
+    };
+    
+    // Listen for video errors on web
     if (Platform.OS === 'web' && typeof document !== 'undefined') {
-      // Inject global CSS to hide all video controls
-      const injectControlHidingCSS = () => {
-        const styleId = 'loading-screen-hide-controls';
-        if (document.getElementById(styleId)) return; // Already injected
-        
-        const style = document.createElement('style');
-        style.id = styleId;
-        style.textContent = `
-          /* Hide all video controls */
-          video::-webkit-media-controls {
-            display: none !important;
-            opacity: 0 !important;
-            visibility: hidden !important;
-            pointer-events: none !important;
-          }
-          video::-webkit-media-controls-enclosure {
-            display: none !important;
-            opacity: 0 !important;
-            visibility: hidden !important;
-            pointer-events: none !important;
-          }
-          video::-webkit-media-controls-panel {
-            display: none !important;
-            opacity: 0 !important;
-            visibility: hidden !important;
-            pointer-events: none !important;
-          }
-          video::-webkit-media-controls-play-button {
-            display: none !important;
-            opacity: 0 !important;
-            visibility: hidden !important;
-            pointer-events: none !important;
-          }
-          video::-webkit-media-controls-start-playback-button {
-            display: none !important;
-            opacity: 0 !important;
-            visibility: hidden !important;
-            pointer-events: none !important;
-          }
-          video::-webkit-media-controls-timeline {
-            display: none !important;
-            opacity: 0 !important;
-            visibility: hidden !important;
-            pointer-events: none !important;
-          }
-          video::-webkit-media-controls-current-time-display {
-            display: none !important;
-            opacity: 0 !important;
-            visibility: hidden !important;
-            pointer-events: none !important;
-          }
-          video::-webkit-media-controls-time-remaining-display {
-            display: none !important;
-            opacity: 0 !important;
-            visibility: hidden !important;
-            pointer-events: none !important;
-          }
-          video::-webkit-media-controls-mute-button {
-            display: none !important;
-            opacity: 0 !important;
-            visibility: hidden !important;
-            pointer-events: none !important;
-          }
-          video::-webkit-media-controls-volume-slider {
-            display: none !important;
-            opacity: 0 !important;
-            visibility: hidden !important;
-            pointer-events: none !important;
-          }
-          video::-webkit-media-controls-fullscreen-button {
-            display: none !important;
-            opacity: 0 !important;
-            visibility: hidden !important;
-            pointer-events: none !important;
-          }
-          video::--webkit-media-controls {
-            display: none !important;
-          }
-          video[controls] {
-            -webkit-appearance: none !important;
-          }
-        `;
-        document.head.appendChild(style);
+      const findVideoElement = () => {
+        const videoElements = document.querySelectorAll('video');
+        return Array.from(videoElements).find((video: HTMLVideoElement) => {
+          return video.src === videoUrl || video.currentSrc === videoUrl;
+        }) as HTMLVideoElement | undefined;
       };
       
-      // Inject CSS immediately
-      injectControlHidingCSS();
-      
-      // Find the video element and set playsInline attribute
-      const setPlaysInline = () => {
-        // Find all video elements (there might be multiple)
-        const videoElements = document.querySelectorAll('video');
-        videoElements.forEach((videoElement) => {
-          // Remove controls attribute completely (not just set to false)
-          videoElement.removeAttribute('controls');
-          videoElement.controls = false;
-          
-          // Set playsInline attributes for iOS Safari
-          videoElement.setAttribute('playsinline', 'true');
-          videoElement.setAttribute('webkit-playsinline', 'true');
-          videoElement.setAttribute('x5-playsinline', 'true'); // For some Android browsers
-          
-          // Prevent fullscreen
-          videoElement.setAttribute('disablePictureInPicture', 'true');
-          
-          // Prevent video interactions via event listeners
-          const preventInteraction = (e: Event) => {
-            e.preventDefault();
-            e.stopPropagation();
-            e.stopImmediatePropagation();
+      const setupErrorHandling = () => {
+        const videoElement = findVideoElement();
+        if (videoElement) {
+          const handleError = (e: Event) => {
+            const error = videoElement.error;
+            if (error) {
+              const errorMessage = `Video error: code ${error.code}, message: ${error.message}`;
+              console.error('[LoadingScreen] HTML5 video error:', errorMessage, 'URL:', videoUrl);
+            }
           };
           
-          videoElement.addEventListener('touchstart', preventInteraction, { passive: false });
-          videoElement.addEventListener('touchend', preventInteraction, { passive: false });
-          videoElement.addEventListener('touchmove', preventInteraction, { passive: false });
-          videoElement.addEventListener('click', preventInteraction, { passive: false });
-          videoElement.addEventListener('dblclick', preventInteraction, { passive: false });
+          const handleWaiting = () => {
+            if (__DEV__) {
+              console.log('[LoadingScreen] Video waiting for data (buffering)');
+            }
+            // Best Practice: Pause when buffering
+            try {
+              if (player && typeof player.pause === 'function') {
+                player.pause();
+              }
+            } catch (error) {
+              if (__DEV__) {
+                console.warn('[LoadingScreen] Error pausing during wait:', error);
+              }
+            }
+          };
           
-          // Prevent context menu
-          videoElement.addEventListener('contextmenu', preventInteraction, { passive: false });
+          const handleCanPlay = () => {
+            if (__DEV__) {
+              console.log('[LoadingScreen] Video can play again, resuming');
+            }
+            // Resume playback after buffering
+            try {
+              if (player && typeof player.play === 'function') {
+                player.play().catch((err: any) => {
+                  if (__DEV__ && err.name !== 'NotAllowedError') {
+                    console.warn('[LoadingScreen] Error resuming after buffer:', err);
+                  }
+                });
+              }
+            } catch (error) {
+              if (__DEV__) {
+                console.warn('[LoadingScreen] Error resuming playback:', error);
+              }
+            }
+          };
           
-          // Set CSS to prevent interactions and hide controls
-          (videoElement.style as any).pointerEvents = 'none';
-          (videoElement.style as any).userSelect = 'none';
-          (videoElement.style as any).WebkitUserSelect = 'none';
-          (videoElement.style as any).touchAction = 'none';
-          (videoElement.style as any).WebkitTouchCallout = 'none';
+          videoElement.addEventListener('error', handleError, { once: false });
+          videoElement.addEventListener('waiting', handleWaiting, { once: false });
+          videoElement.addEventListener('canplay', handleCanPlay, { once: false });
           
-          // Force hide controls with inline styles
-          (videoElement.style as any).WebkitAppearance = 'none';
-          (videoElement.style as any).appearance = 'none';
-          
-          // Set transparent background for video element
-          (videoElement.style as any).backgroundColor = 'transparent';
-          (videoElement.style as any).background = 'transparent';
-        });
+          return () => {
+            videoElement.removeEventListener('error', handleError);
+            videoElement.removeEventListener('waiting', handleWaiting);
+            videoElement.removeEventListener('canplay', handleCanPlay);
+          };
+        }
+        return () => {};
       };
       
-      // Try immediately and after delays (video element might not be ready)
-      setPlaysInline();
-      setTimeout(setPlaysInline, 100);
-      setTimeout(setPlaysInline, 500);
-      setTimeout(setPlaysInline, 1000);
+      const cleanup = setupErrorHandling();
+      setTimeout(() => {
+        const delayedCleanup = setupErrorHandling();
+        return () => {
+          cleanup();
+          delayedCleanup();
+        };
+      }, 100);
       
-      // Also listen for new video elements being added
-      const observer = new MutationObserver(() => {
-        setPlaysInline();
-      });
-      
-      observer.observe(document.body, {
-        childList: true,
-        subtree: true,
-      });
-      
-      // Store observer for cleanup (will be accessed in cleanup function)
-      (window as any).__loadingScreenObserver = observer;
+      return () => {
+        cleanup();
+      };
     }
-
-    // Function to attempt playing the video
-    const attemptPlay = async () => {
-      if (!isMounted || !player || hasPlayed) return;
-      
-      try {
-        // Ensure properties are set before playing
-        player.loop = false; // Don't loop - play once
-        player.muted = true; // Must be muted for autoplay on iOS Safari
-
-        // Play and handle promise
-        const playPromise = player.play();
-        if (playPromise !== undefined) {
-          await playPromise;
-          hasPlayed = true;
-          if (__DEV__) {
-            console.log('[LoadingScreen] Video playing successfully');
+    
+    // Listen for expo-video status changes (native and web)
+    try {
+      if (player.addListener) {
+        const subscription = player.addListener('statusChange', handleStatusChange);
+        return () => {
+          isMounted = false;
+          if (subscription && typeof subscription.remove === 'function') {
+            subscription.remove();
           }
-        }
-      } catch (error: any) {
-        // Silently handle autoplay restrictions - will retry
-        if (__DEV__ && error.name !== 'NotAllowedError') {
-          console.warn('[LoadingScreen] Play attempt failed:', error.message);
-        }
-        hasPlayed = false;
+        };
       }
-    };
-
-    // Try to play immediately
-    attemptPlay();
-
-    // Retry on a short delay (helps with some browsers)
-    const retryTimeout = setTimeout(() => {
-      if (!hasPlayed) {
-        attemptPlay();
+    } catch (error) {
+      if (__DEV__) {
+        console.warn('[LoadingScreen] Player listeners not available:', error);
       }
-    }, 100);
-
-    // For web, also try on visibility change (when tab becomes visible)
-    let visibilityHandler: (() => void) | null = null;
-    if (Platform.OS === 'web' && typeof document !== 'undefined') {
-      visibilityHandler = () => {
-        if (document.visibilityState === 'visible' && !hasPlayed) {
-          attemptPlay();
-        }
-      };
-      document.addEventListener('visibilitychange', visibilityHandler);
     }
-
-    // Cleanup function for web-specific code (MutationObserver)
-    let webCleanup: (() => void) | null = null;
-    if (Platform.OS === 'web' && typeof document !== 'undefined') {
-      // The cleanup for MutationObserver is returned from the web block above
-      // We'll call it in the main cleanup
-      webCleanup = (() => {
-        if (typeof window !== 'undefined' && (window as any).__loadingScreenObserver) {
-          (window as any).__loadingScreenObserver.disconnect();
-          delete (window as any).__loadingScreenObserver;
-        }
-      });
-    }
-
+    
     return () => {
       isMounted = false;
-      clearTimeout(retryTimeout);
-      if (visibilityHandler && typeof document !== 'undefined') {
-        document.removeEventListener('visibilitychange', visibilityHandler);
-      }
-      // Clean up MutationObserver if it exists
-      if (webCleanup) {
-        webCleanup();
-      }
     };
   }, [player, videoUrl]);
+
+  // For web, ensure playsInline is set on the underlying video element (iOS Safari)
+  // Also prevent all video interactions and hide controls
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+
+    // Inject global CSS to hide all video controls
+    const injectControlHidingCSS = () => {
+      const styleId = 'loading-screen-hide-controls';
+      if (document.getElementById(styleId)) return; // Already injected
+      
+      const style = document.createElement('style');
+      style.id = styleId;
+      style.textContent = `
+        /* Hide all video controls */
+        video::-webkit-media-controls {
+          display: none !important;
+          opacity: 0 !important;
+          visibility: hidden !important;
+          pointer-events: none !important;
+        }
+        video::-webkit-media-controls-enclosure {
+          display: none !important;
+          opacity: 0 !important;
+          visibility: hidden !important;
+          pointer-events: none !important;
+        }
+        video::-webkit-media-controls-panel {
+          display: none !important;
+          opacity: 0 !important;
+          visibility: hidden !important;
+          pointer-events: none !important;
+        }
+        video::-webkit-media-controls-play-button {
+          display: none !important;
+          opacity: 0 !important;
+          visibility: hidden !important;
+          pointer-events: none !important;
+        }
+        video::-webkit-media-controls-start-playback-button {
+          display: none !important;
+          opacity: 0 !important;
+          visibility: hidden !important;
+          pointer-events: none !important;
+        }
+        video::-webkit-media-controls-timeline {
+          display: none !important;
+          opacity: 0 !important;
+          visibility: hidden !important;
+          pointer-events: none !important;
+        }
+        video::-webkit-media-controls-current-time-display {
+          display: none !important;
+          opacity: 0 !important;
+          visibility: hidden !important;
+          pointer-events: none !important;
+        }
+        video::-webkit-media-controls-time-remaining-display {
+          display: none !important;
+          opacity: 0 !important;
+          visibility: hidden !important;
+          pointer-events: none !important;
+        }
+        video::-webkit-media-controls-mute-button {
+          display: none !important;
+          opacity: 0 !important;
+          visibility: hidden !important;
+          pointer-events: none !important;
+        }
+        video::-webkit-media-controls-volume-slider {
+          display: none !important;
+          opacity: 0 !important;
+          visibility: hidden !important;
+          pointer-events: none !important;
+        }
+        video::-webkit-media-controls-fullscreen-button {
+          display: none !important;
+          opacity: 0 !important;
+          visibility: hidden !important;
+          pointer-events: none !important;
+        }
+        video::--webkit-media-controls {
+          display: none !important;
+        }
+        video[controls] {
+          -webkit-appearance: none !important;
+        }
+      `;
+      document.head.appendChild(style);
+    };
+    
+    // Inject CSS immediately
+    injectControlHidingCSS();
+    
+    // Find the video element and set playsInline attribute
+    const setPlaysInline = () => {
+      // Find all video elements (there might be multiple)
+      const videoElements = document.querySelectorAll('video');
+      videoElements.forEach((videoElement) => {
+        // Remove controls attribute completely (not just set to false)
+        videoElement.removeAttribute('controls');
+        videoElement.controls = false;
+        
+        // Set playsInline attributes for iOS Safari (Best Practice: iOS Safari requirement)
+        videoElement.setAttribute('playsinline', 'true');
+        videoElement.setAttribute('webkit-playsinline', 'true');
+        videoElement.setAttribute('x5-playsinline', 'true'); // For some Android browsers
+        
+        // Prevent fullscreen
+        videoElement.setAttribute('disablePictureInPicture', 'true');
+        
+        // Prevent video interactions via event listeners
+        const preventInteraction = (e: Event) => {
+          e.preventDefault();
+          e.stopPropagation();
+          e.stopImmediatePropagation();
+        };
+        
+        videoElement.addEventListener('touchstart', preventInteraction, { passive: false });
+        videoElement.addEventListener('touchend', preventInteraction, { passive: false });
+        videoElement.addEventListener('touchmove', preventInteraction, { passive: false });
+        videoElement.addEventListener('click', preventInteraction, { passive: false });
+        videoElement.addEventListener('dblclick', preventInteraction, { passive: false });
+        
+        // Prevent context menu
+        videoElement.addEventListener('contextmenu', preventInteraction, { passive: false });
+        
+        // Set CSS to prevent interactions and hide controls
+        (videoElement.style as any).pointerEvents = 'none';
+        (videoElement.style as any).userSelect = 'none';
+        (videoElement.style as any).WebkitUserSelect = 'none';
+        (videoElement.style as any).touchAction = 'none';
+        (videoElement.style as any).WebkitTouchCallout = 'none';
+        
+        // Force hide controls with inline styles
+        (videoElement.style as any).WebkitAppearance = 'none';
+        (videoElement.style as any).appearance = 'none';
+        
+        // Set transparent background for video element
+        (videoElement.style as any).backgroundColor = 'transparent';
+        (videoElement.style as any).background = 'transparent';
+      });
+    };
+    
+    // Try immediately and after delays (video element might not be ready)
+    setPlaysInline();
+    setTimeout(setPlaysInline, 100);
+    setTimeout(setPlaysInline, 500);
+    setTimeout(setPlaysInline, 1000);
+    
+    // Also listen for new video elements being added
+    const observer = new MutationObserver(() => {
+      setPlaysInline();
+    });
+    
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+    });
+    
+    // Store observer for cleanup
+    (window as any).__loadingScreenObserver = observer;
+
+    return () => {
+      if (typeof window !== 'undefined' && (window as any).__loadingScreenObserver) {
+        (window as any).__loadingScreenObserver.disconnect();
+        delete (window as any).__loadingScreenObserver;
+      }
+    };
+  }, [videoUrl]);
+
+  // Update player source when video changes OR on initial mount
+  // This ensures replaceAsync is called on initial mount for the first video
+  useEffect(() => {
+    if (videoUrl && player) {
+      const isInitialMount = isInitialMountRef.current;
+      
+      if (__DEV__) {
+        console.log('[LoadingScreen] Replacing video URL:', videoUrl, 'Initial mount:', isInitialMount);
+      }
+      
+      if (!videoUrl) {
+        console.warn('[LoadingScreen] No video URL provided');
+        isInitialMountRef.current = false;
+        return;
+      }
+
+      // Ensure playsInline is set before replaceAsync (Best Practice: iOS Safari requirement)
+      if (Platform.OS === 'web' && typeof document !== 'undefined') {
+        const setPlaysInline = () => {
+          const videoElements = document.querySelectorAll('video');
+          videoElements.forEach((videoElement: HTMLVideoElement) => {
+            videoElement.setAttribute('playsinline', 'true');
+            videoElement.setAttribute('webkit-playsinline', 'true');
+            videoElement.setAttribute('x5-playsinline', 'true');
+            videoElement.playsInline = true;
+          });
+        };
+        setPlaysInline();
+        setTimeout(setPlaysInline, 50);
+      }
+
+      const replacePromise = player.replaceAsync(videoUrl);
+      if (replacePromise && typeof replacePromise.then === 'function') {
+        replacePromise.then(() => {
+          if (player) {
+            // Set properties required for autoplay
+            player.loop = false; // Don't loop - play once
+            player.muted = true; // Must be muted for autoplay on iOS Safari
+            
+            // Ensure playsInline is set again after replaceAsync
+            if (Platform.OS === 'web' && typeof document !== 'undefined') {
+              const setPlaysInline = () => {
+                const videoElements = document.querySelectorAll('video');
+                videoElements.forEach((videoElement: HTMLVideoElement) => {
+                  videoElement.setAttribute('playsinline', 'true');
+                  videoElement.setAttribute('webkit-playsinline', 'true');
+                  videoElement.setAttribute('x5-playsinline', 'true');
+                  videoElement.playsInline = true;
+                });
+              };
+              setPlaysInline();
+              setTimeout(setPlaysInline, 50);
+            }
+            
+            // Best Practice: Wait for video element to be ready before playing
+            const waitForVideoReady = (): Promise<void> => {
+              return new Promise<void>((resolve) => {
+                if (Platform.OS === 'web' && typeof document !== 'undefined') {
+                  const findVideoElement = () => {
+                    const videoElements = document.querySelectorAll('video');
+                    return Array.from(videoElements).find((video: HTMLVideoElement) => {
+                      return video.src === videoUrl || video.currentSrc === videoUrl;
+                    }) as HTMLVideoElement | undefined;
+                  };
+                  
+                  const videoElement = findVideoElement();
+                  if (videoElement) {
+                    // Best Practice: Use HAVE_CURRENT_DATA (2) for faster readiness
+                    const HAVE_CURRENT_DATA = 2;
+                    if (videoElement.readyState >= HAVE_CURRENT_DATA) {
+                      if (__DEV__) {
+                        console.log(`[LoadingScreen] Video element ready (readyState: ${videoElement.readyState}), proceeding to play`);
+                      }
+                      resolve();
+                    } else {
+                      // Best Practice: canplay is the most reliable event
+                      const canPlayHandler = () => {
+                        if (__DEV__) {
+                          console.log(`[LoadingScreen] canplay event fired (readyState: ${videoElement.readyState}), proceeding to play`);
+                        }
+                        resolve();
+                      };
+                      videoElement.addEventListener('canplay', canPlayHandler, { once: true });
+                      
+                      // Timeout fallback (Best Practice: Don't wait forever)
+                      setTimeout(() => {
+                        if (__DEV__) {
+                          console.log(`[LoadingScreen] canplay timeout, proceeding anyway (readyState: ${videoElement.readyState})`);
+                        }
+                        videoElement.removeEventListener('canplay', canPlayHandler);
+                        resolve();
+                      }, 500);
+                    }
+                  } else {
+                    // Video element not found, continue anyway
+                    if (__DEV__) {
+                      console.warn('[LoadingScreen] Video element not found, proceeding to play anyway');
+                    }
+                    resolve();
+                  }
+                } else {
+                  // Native platforms - resolve immediately
+                  resolve();
+                }
+              });
+            };
+            
+            // Wait for video to be ready, then play
+            waitForVideoReady().then(() => {
+              if (!player) return;
+              
+              // Best Practice: Set properties before play
+              player.loop = false;
+              player.muted = true;
+              
+              // Now safe to play (Best Practice: Play after canplay)
+              const playPromise = player.play();
+              
+              // Best Practice: Handle play promise properly with retry logic
+              if (playPromise !== undefined && typeof (playPromise as any).catch === 'function') {
+                (playPromise as any).then(() => {
+                  if (__DEV__) {
+                    console.log('[LoadingScreen] Video playing successfully after replaceAsync');
+                  }
+                }).catch((playError: any) => {
+                  // Best Practice: Retry with exponential backoff
+                  if (playError.name !== 'NotAllowedError') {
+                    if (__DEV__) {
+                      console.warn(`[LoadingScreen] Play failed (${playError.name}): ${playError.message}, retrying...`);
+                    }
+                    
+                    // Retry after delay (exponential backoff)
+                    setTimeout(() => {
+                      if (player) {
+                        const retryPlayResult = player.play();
+                        if (retryPlayResult !== undefined && typeof (retryPlayResult as any).then === 'function') {
+                          (retryPlayResult as any)
+                            .then(() => {
+                              if (__DEV__) {
+                                console.log('[LoadingScreen] Video playing successfully after retry');
+                              }
+                            })
+                            .catch((retryError: any) => {
+                              // Final failure - video loaded but can't autoplay
+                              if (__DEV__ && retryError.name !== 'NotAllowedError') {
+                                console.warn('[LoadingScreen] Play retry failed:', retryError.message);
+                              }
+                            });
+                        }
+                      }
+                    }, 200);
+                  } else {
+                    // Autoplay blocked - this is expected, video is still loaded
+                    if (__DEV__) {
+                      console.log('[LoadingScreen] Autoplay blocked (expected), video is loaded');
+                    }
+                  }
+                });
+              }
+            });
+          }
+          
+          // Mark initial mount as complete
+          isInitialMountRef.current = false;
+        }).catch((error: any) => {
+          console.error('[LoadingScreen] Error replacing video:', error, 'URL:', videoUrl);
+          isInitialMountRef.current = false;
+        });
+      } else {
+        // If replaceAsync doesn't return a promise, mark initial mount as complete
+        isInitialMountRef.current = false;
+      }
+    }
+  }, [videoUrl, player]);
 
   useEffect(() => {
     // Auto-navigate to step 5 after video completes or timeout
