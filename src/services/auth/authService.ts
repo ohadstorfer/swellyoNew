@@ -33,16 +33,39 @@ class AuthService {
     // Use Supabase if configured, otherwise fall back to old method
     if (isSupabaseConfigured()) {
       console.log('Using Supabase for Google OAuth');
-      const supabaseUser = await supabaseAuthService.signInWithGoogle();
-      // Convert Supabase user format to legacy User format for compatibility
-      return {
-        id: parseInt(supabaseUser.id.replace(/-/g, '').substring(0, 15)) || Date.now(),
-        email: supabaseUser.email,
-        nickname: supabaseUser.nickname,
-        googleId: supabaseUser.googleId || supabaseUser.id,
-        createdAt: supabaseUser.createdAt,
-        updatedAt: supabaseUser.updatedAt,
-      };
+      
+      // On web, the OAuth flow will redirect the page, so this function may not return
+      // If redirect happens, the page will navigate away and this code won't execute
+      // If redirect doesn't happen (blocked), supabaseAuthService will throw an error
+      try {
+        // This will either:
+        // 1. Return a User (if existing session found or returning from OAuth)
+        // 2. Redirect and never return (promise never resolves, page navigates away)
+        // 3. Throw an error (if redirect blocked or other error)
+        const result = await supabaseAuthService.signInWithGoogle();
+        
+        // If we get here, it means we got a user (existing session or OAuth return)
+        // The result is already a User object, so we can return it directly
+        // However, we need to verify it's in the correct format and convert if needed
+        const { convertSupabaseUserToAppUser } = await import('../../utils/userConversion');
+        const { supabase } = await import('../../config/supabase');
+        
+        // Verify we have a valid Supabase user session
+        const { data: { user: rawSupabaseUser }, error: userError } = await supabase.auth.getUser();
+        if (userError || !rawSupabaseUser) {
+          throw new Error('Failed to get Supabase user after OAuth: ' + (userError?.message || 'No user'));
+        }
+        
+        // Convert to app user format (maintains backward compatibility)
+        return convertSupabaseUserToAppUser(rawSupabaseUser);
+      } catch (error: any) {
+        // If redirect was blocked or failed, the error will be thrown here
+        // Re-throw with more context if needed
+        if (error.message && error.message.includes('Redirect to Google OAuth was blocked')) {
+          throw error; // Re-throw redirect block errors as-is
+        }
+        throw error;
+      }
     }
     
     console.log('Supabase not configured, using legacy OAuth method');

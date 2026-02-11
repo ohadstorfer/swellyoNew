@@ -17,8 +17,7 @@ export { supabaseAuthService } from './auth/supabaseAuthService';
 export type { User as SupabaseAuthUser } from './auth/supabaseAuthService';
 export { authService } from './auth/authService';
 export type { GoogleUser } from './auth/authService';
-export { simpleAuthService } from './auth/simpleAuthService';
-export { expoAuthService } from './auth/expoAuthService';
+// Deprecated: simpleAuthService and expoAuthService removed - use authService or supabaseAuthService instead
 
 // Database services
 export { databaseService } from './database/databaseService';

@@ -12,7 +12,7 @@ import { performLogout } from '../utils/logout';
  * token refresh failures, and OAuth callback flows.
  */
 export function useAuthGuard() {
-  const { user, setUser, setCurrentStep, resetOnboarding, setIsDemoUser, isDemoUser, isRestoringSession } = useOnboarding();
+  const { user, setUser, setCurrentStep, resetOnboarding, setIsDemoUser, isDemoUser, isRestoringSession, currentStep } = useOnboarding();
   const isProcessingLogoutRef = useRef(false);
   const lastAuthCheckRef = useRef<number>(0);
   const debounceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -20,18 +20,117 @@ export function useAuthGuard() {
   /**
    * Check if we're in an OAuth callback flow
    * This prevents the guard from redirecting during OAuth return
+   * Uses multiple detection methods with fallbacks for robustness
    */
+  /**
+   * Clear stale OAuth flags if they exist but OAuth is not actually in progress
+   */
+  const clearStaleOAuthFlags = useCallback(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') {
+      return;
+    }
+
+    try {
+      // Check if flags exist
+      const hasSessionFlag = sessionStorage.getItem('oauth_redirecting') === 'true';
+      const hasLocalFlag = localStorage.getItem('oauth_redirecting') === 'true';
+      
+      if (hasSessionFlag || hasLocalFlag) {
+        // Check if URL has OAuth params - if not, flags might be stale
+        const hashParams = new URLSearchParams(window.location.hash.substring(1));
+        const urlParams = new URLSearchParams(window.location.search);
+        const hasUrlParams = !!(hashParams.get('access_token') || hashParams.get('refresh_token') || 
+                                urlParams.get('code') || hashParams.get('error') || urlParams.get('error'));
+        
+        if (!hasUrlParams) {
+          // No URL params but flags are set - check timestamp
+          const timestampSession = sessionStorage.getItem('oauth_timestamp');
+          const timestampLocal = localStorage.getItem('oauth_timestamp');
+          const timestamp = timestampSession ? parseInt(timestampSession, 10) : 
+                          (timestampLocal ? parseInt(timestampLocal, 10) : 0);
+          
+          if (timestamp) {
+            const now = Date.now();
+            const oneMinute = 60 * 1000;
+            
+            // If flags are older than 1 minute and no URL params, they're likely stale
+            if (now - timestamp > oneMinute) {
+              console.log('[useAuthGuard] Clearing stale OAuth flags (no URL params, older than 1 minute)');
+              try {
+                sessionStorage.removeItem('oauth_redirecting');
+                sessionStorage.removeItem('oauth_timestamp');
+                localStorage.removeItem('oauth_redirecting');
+                localStorage.removeItem('oauth_timestamp');
+              } catch (e) {
+                // Ignore storage errors
+              }
+            }
+          }
+        }
+      }
+    } catch (error) {
+      // Ignore errors
+    }
+  }, []);
+
   const isOAuthCallback = useCallback((): boolean => {
     if (Platform.OS !== 'web' || typeof window === 'undefined') {
       return false;
     }
 
-    const hashParams = new URLSearchParams(window.location.hash.substring(1));
-    const urlParams = new URLSearchParams(window.location.search);
-    const accessToken = hashParams.get('access_token');
-    const code = urlParams.get('code');
+    try {
+      // Method 1: Check URL hash/query parameters (primary method - most reliable)
+      const hashParams = new URLSearchParams(window.location.hash.substring(1));
+      const urlParams = new URLSearchParams(window.location.search);
+      const accessToken = hashParams.get('access_token');
+      const refreshToken = hashParams.get('refresh_token');
+      const code = urlParams.get('code');
+      const errorParam = hashParams.get('error') || urlParams.get('error');
+      const type = hashParams.get('type') || urlParams.get('type');
+      
+      // OAuth callback indicators in URL - if present, definitely in OAuth callback
+      if (accessToken || refreshToken || code || (errorParam && type === 'recovery')) {
+        return true;
+      }
 
-    return !!(accessToken || code);
+      // Method 2: Check storage flags (secondary method - only trust if very recent)
+      // Only use storage flags if they're very recent (within 30 seconds) to prevent stuck flags
+      // If flags are older, they should be cleared (handled in clearStaleOAuthFlags)
+      try {
+        const isOAuthRedirectingSession = sessionStorage.getItem('oauth_redirecting') === 'true';
+        const oauthTimestampSession = sessionStorage.getItem('oauth_timestamp');
+        const isOAuthRedirectingLocal = localStorage.getItem('oauth_redirecting') === 'true';
+        const oauthTimestampLocal = localStorage.getItem('oauth_timestamp');
+        
+        if ((isOAuthRedirectingSession && oauthTimestampSession) || (isOAuthRedirectingLocal && oauthTimestampLocal)) {
+          const timestamp = oauthTimestampSession 
+            ? parseInt(oauthTimestampSession, 10)
+            : (oauthTimestampLocal ? parseInt(oauthTimestampLocal, 10) : 0);
+          
+          if (timestamp) {
+            const now = Date.now();
+            const thirtySeconds = 30 * 1000; // Only trust flags if very recent (30 seconds)
+            
+            if (now - timestamp < thirtySeconds) {
+              // Flags are very recent, might be in OAuth flow
+              return true;
+            } else {
+              // Flags are older than 30 seconds - don't trust them without URL params
+              // They'll be cleared by clearStaleOAuthFlags if older than 1 minute
+              return false;
+            }
+          }
+        }
+      } catch (e) {
+        // sessionStorage/localStorage might not be available, continue
+      }
+
+      return false;
+    } catch (error) {
+      // If any error occurs, default to not being in OAuth callback
+      console.warn('[useAuthGuard] Error checking OAuth callback:', error);
+      return false;
+    }
   }, []);
 
   /**
@@ -109,21 +208,56 @@ export function useAuthGuard() {
       return;
     }
     
-    // Don't check if we're in OAuth callback flow
-    if (isOAuthCallback()) {
-      console.log('[useAuthGuard] Skipping auth check during OAuth callback');
+    // Clear stale OAuth flags before checking auth
+    clearStaleOAuthFlags();
+    
+    // Check if we're in OAuth callback - prioritize URL params
+    const hashParams = Platform.OS === 'web' && typeof window !== 'undefined'
+      ? new URLSearchParams(window.location.hash.substring(1))
+      : new URLSearchParams();
+    const urlParams = Platform.OS === 'web' && typeof window !== 'undefined'
+      ? new URLSearchParams(window.location.search)
+      : new URLSearchParams();
+    const hasUrlParams = !!(hashParams.get('access_token') || hashParams.get('refresh_token') || 
+                           urlParams.get('code') || hashParams.get('error') || urlParams.get('error'));
+    
+    // Only skip auth check if we have URL params (definitely in OAuth callback)
+    // If only storage flags are set (no URL params), we should still check for session
+    if (hasUrlParams) {
+      console.log('[useAuthGuard] OAuth callback detected (URL params), skipping auth check');
       return;
     }
     
-    // Don't check if we're initiating an OAuth redirect
-    try {
-      const isOAuthRedirecting = sessionStorage.getItem('oauth_redirecting') === 'true';
-      if (isOAuthRedirecting) {
-        console.log('[useAuthGuard] OAuth redirect in progress, skipping auth check');
-        return;
+    // If storage flags are set but no URL params, check if there's actually a session
+    // If no session exists, the flags are stale and we should proceed with auth check
+    if (isOAuthCallback() && !hasUrlParams) {
+      // Storage flags are set but no URL params - verify session exists
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) {
+          // No session and no URL params - flags are stale, clear them and proceed with auth check
+          console.log('[useAuthGuard] OAuth flags set but no URL params and no session - clearing flags and checking auth');
+          try {
+            if (Platform.OS === 'web' && typeof window !== 'undefined') {
+              sessionStorage.removeItem('oauth_redirecting');
+              sessionStorage.removeItem('oauth_timestamp');
+              localStorage.removeItem('oauth_redirecting');
+              localStorage.removeItem('oauth_timestamp');
+            }
+          } catch (e) {
+            // Ignore storage errors
+          }
+          // Continue with auth check below
+        } else {
+          // Session exists - might be in OAuth flow, but be conservative and still check
+          // Only skip if flags are very recent (handled by isOAuthCallback returning true for < 30s)
+          console.log('[useAuthGuard] OAuth flags set with session - proceeding with auth check to verify');
+          // Continue with auth check below
+        }
+      } catch (sessionCheckError) {
+        // Error checking session - proceed with normal auth check
+        console.log('[useAuthGuard] Error checking session with OAuth flags, proceeding with auth check');
       }
-    } catch (e) {
-      // sessionStorage might not be available, continue with check
     }
 
     // Demo users are considered authenticated
@@ -142,6 +276,12 @@ export function useAuthGuard() {
         if (user !== null) {
           console.log('[useAuthGuard] User in context but no session - redirecting');
           await handleUnauthenticated();
+        } else {
+          // User is null and no session - ensure we're on WelcomeScreen
+          if (currentStep !== -1) {
+            console.log('[useAuthGuard] User is null and no session - ensuring WelcomeScreen');
+            setCurrentStep(-1);
+          }
         }
         return;
       }
@@ -207,7 +347,7 @@ export function useAuthGuard() {
         await handleUnauthenticated();
       }
     }
-  }, [user, isDemoUser, isRestoringSession, isOAuthCallback, handleUnauthenticated, setUser]);
+  }, [user, isDemoUser, isRestoringSession, isOAuthCallback, handleUnauthenticated, setUser, currentStep, setCurrentStep]);
 
   /**
    * Listen to auth state changes from Supabase
@@ -218,33 +358,90 @@ export function useAuthGuard() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       console.log('[useAuthGuard] Auth state changed:', event, session ? 'session exists' : 'no session');
 
-      // Don't process during OAuth callback
+      // Don't process during OAuth callback or redirect (use improved detection)
       if (isOAuthCallback()) {
-        console.log('[useAuthGuard] OAuth callback in progress, skipping auth state change');
+        console.log('[useAuthGuard] OAuth callback/redirect in progress, skipping auth state change');
         return;
       }
 
-      // Don't process if we're initiating an OAuth redirect
-      try {
-        const isOAuthRedirecting = sessionStorage.getItem('oauth_redirecting') === 'true';
-        if (isOAuthRedirecting) {
-          console.log('[useAuthGuard] OAuth redirect in progress, skipping auth state change');
+      // Handle sign out events
+      // BUT: Ignore SIGNED_OUT during OAuth login flow (pre-login sign-out)
+      // The oauth_redirecting flag indicates we're in the middle of a login
+      if (event === 'SIGNED_OUT') {
+        // Check if we're in an OAuth login flow
+        // This can happen in two cases:
+        // 1. We're returning from OAuth (isOAuthCallback checks URL params)
+        // 2. We're initiating OAuth (oauth_redirecting flag is set)
+        const isOAuthLogin = isOAuthCallback();
+        
+        // Also check for oauth_redirecting flag (set before redirect)
+        let isOAuthRedirecting = false;
+        if (Platform.OS === 'web' && typeof window !== 'undefined') {
+          try {
+            isOAuthRedirecting = sessionStorage.getItem('oauth_redirecting') === 'true' || 
+                                  localStorage.getItem('oauth_redirecting') === 'true';
+          } catch (e) {
+            // Ignore storage errors
+          }
+        }
+        
+        if (isOAuthLogin || isOAuthRedirecting) {
+          console.log('[useAuthGuard] SIGNED_OUT event during OAuth login - ignoring (pre-login sign-out)');
           return;
         }
-      } catch (e) {
-        // sessionStorage might not be available, continue with check
-      }
-
-      // Handle sign out events
-      if (event === 'SIGNED_OUT') {
+        
         console.log('[useAuthGuard] SIGNED_OUT event detected');
         await handleUnauthenticated();
         return;
       }
 
-      // Handle token refresh failures
+      // Handle token refresh failures with retry logic
       if (event === 'TOKEN_REFRESHED' && !session) {
-        console.log('[useAuthGuard] Token refresh failed - no session');
+        console.log('[useAuthGuard] Token refresh failed - no session, attempting retry...');
+        
+        // Retry logic for transient failures
+        let retryCount = 0;
+        const maxRetries = 3;
+        const retryDelay = 1000; // Start with 1 second
+        
+        while (retryCount < maxRetries) {
+          try {
+            // Wait before retry with exponential backoff
+            if (retryCount > 0) {
+              const delay = retryDelay * Math.pow(2, retryCount - 1);
+              await new Promise(resolve => setTimeout(resolve, delay));
+            }
+            
+            // Attempt to get session again
+            const { data: { session: retrySession }, error: retryError } = await supabase.auth.getSession();
+            
+            if (retrySession) {
+              console.log('[useAuthGuard] Token refresh retry successful');
+              // Session restored, verify user is in context
+              if (user === null) {
+                const { data: { user: authUser } } = await supabase.auth.getUser();
+                if (authUser) {
+                  const { convertSupabaseUserToAppUser } = await import('../utils/userConversion');
+                  const appUser = convertSupabaseUserToAppUser(authUser);
+                  setUser(appUser);
+                }
+              }
+              return; // Success, exit
+            }
+            
+            if (retryError) {
+              console.log(`[useAuthGuard] Token refresh retry ${retryCount + 1} failed:`, retryError.message);
+            }
+            
+            retryCount++;
+          } catch (retryError) {
+            console.error(`[useAuthGuard] Token refresh retry ${retryCount + 1} error:`, retryError);
+            retryCount++;
+          }
+        }
+        
+        // All retries exhausted - permanent failure, logout
+        console.error('[useAuthGuard] Token refresh failed after all retries - permanent failure');
         await handleUnauthenticated();
         return;
       }
@@ -288,8 +485,12 @@ export function useAuthGuard() {
     
     // If user becomes null and we're not a demo user, ensure we're on WelcomeScreen
     if (user === null && !isDemoUser) {
-      // Don't redirect if we're already on WelcomeScreen (currentStep === -1)
-      // This prevents redirect loops
+      // Ensure we're on WelcomeScreen - set currentStep if not already -1
+      // This prevents redirect loops while ensuring navigation happens
+      if (currentStep !== -1) {
+        console.log('[useAuthGuard] User is null, ensuring navigation to WelcomeScreen');
+        setCurrentStep(-1);
+      }
       return;
     }
 
@@ -297,7 +498,7 @@ export function useAuthGuard() {
     if (user !== null && !isDemoUser) {
       checkAuthState();
     }
-  }, [user, isDemoUser, isRestoringSession, checkAuthState]);
+  }, [user, isDemoUser, isRestoringSession, checkAuthState, currentStep, setCurrentStep]);
 
   /**
    * Handle app foregrounding (mobile) or focus (web)
@@ -305,24 +506,30 @@ export function useAuthGuard() {
    */
   useEffect(() => {
     if (Platform.OS === 'web') {
+      // Clear stale OAuth flags on app load/focus
+      clearStaleOAuthFlags();
+      
       const handleFocus = () => {
-        // Don't check auth state if we're in the middle of an OAuth redirect
-        try {
-          const isOAuthRedirecting = sessionStorage.getItem('oauth_redirecting') === 'true';
-          if (isOAuthRedirecting) {
-            console.log('[useAuthGuard] OAuth redirect in progress, skipping focus check');
-            // Clear the flag after a delay
-            setTimeout(() => {
-              try {
+        // Clear stale flags when window regains focus
+        clearStaleOAuthFlags();
+        // Don't check auth state if we're in the middle of an OAuth redirect (use improved detection)
+        if (isOAuthCallback()) {
+          console.log('[useAuthGuard] OAuth redirect in progress, skipping focus check');
+          // Clear stale flags after a delay if OAuth callback is no longer valid
+          setTimeout(() => {
+            try {
+              if (!isOAuthCallback()) {
+                // OAuth callback is no longer valid, clean up flags
                 sessionStorage.removeItem('oauth_redirecting');
-              } catch (e) {
-                // Ignore
+                sessionStorage.removeItem('oauth_timestamp');
+                localStorage.removeItem('oauth_redirecting');
+                localStorage.removeItem('oauth_timestamp');
               }
-            }, 2000);
-            return;
-          }
-        } catch (e) {
-          // sessionStorage might not be available, continue with check
+            } catch (e) {
+              // Ignore
+            }
+          }, 2000);
+          return;
         }
         
         console.log('[useAuthGuard] Window focused, re-checking auth state');

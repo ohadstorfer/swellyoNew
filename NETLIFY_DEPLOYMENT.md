@@ -67,6 +67,10 @@ Add the following environment variables:
 
 #### Optional Environment Variables:
 
+- `EXPO_PUBLIC_PEXELS_API_KEY` - For fetching high-quality stock photos from Pexels (for country and lifestyle images)
+  - Get it from: [Pexels API](https://www.pexels.com/api/)
+  - Free tier available
+  - If not set, the app will use placeholder images instead
 - `EXPO_PUBLIC_OPENAI_API_KEY` - Only if using OpenAI features
 - `EXPO_PUBLIC_API_BASE_URL` - If you have a custom API base URL
 

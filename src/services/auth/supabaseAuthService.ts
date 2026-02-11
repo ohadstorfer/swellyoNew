@@ -17,24 +17,85 @@ export interface User {
 }
 
 class SupabaseAuthService {
+  // Track ongoing login attempts to prevent concurrent logins
+  private ongoingLogins = new Map<string, Promise<User>>();
+
   /**
    * Sign in with Google using Supabase OAuth
+   * Prevents concurrent login attempts for the same user
    */
   async signInWithGoogle(): Promise<User> {
     if (!isSupabaseConfigured()) {
       throw new Error('Supabase is not configured. Please set EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY in your .env file.');
     }
 
-    try {
-      if (Platform.OS === 'web') {
-        return this.signInWithGoogleWeb();
-      } else {
-        return this.signInWithGoogleMobile();
-      }
-    } catch (error: any) {
-      console.error('Error signing in with Google:', error);
-      throw new Error('Sign in failed: ' + (error.message || String(error)));
+    // Check if there's already an ongoing login attempt
+    // Use a generic key since we don't know the user ID yet
+    const loginKey = 'current_login';
+    const ongoingLogin = this.ongoingLogins.get(loginKey);
+    
+    if (ongoingLogin) {
+      console.log('[SupabaseAuthService] Login already in progress, returning existing promise');
+      return ongoingLogin;
     }
+
+    // Create new login promise
+    const loginPromise = (async () => {
+      try {
+        // Set OAuth redirecting flag IMMEDIATELY to prevent auth guard from interfering
+        // This must happen BEFORE signOut() to prevent SIGNED_OUT event from triggering logout
+        if (Platform.OS === 'web' && typeof window !== 'undefined') {
+          const timestamp = Date.now().toString();
+          try {
+            sessionStorage.setItem('oauth_redirecting', 'true');
+            sessionStorage.setItem('oauth_timestamp', timestamp);
+            localStorage.setItem('oauth_redirecting', 'true');
+            localStorage.setItem('oauth_timestamp', timestamp);
+            console.log('[SupabaseAuthService] Set oauth_redirecting flag before signOut to prevent auth guard interference');
+          } catch (e) {
+            console.warn('[SupabaseAuthService] Could not set oauth_redirecting flag:', e);
+          }
+        }
+        
+        // Invalidate existing session before starting new login
+        try {
+          const { error: signOutError } = await supabase.auth.signOut();
+          if (signOutError) {
+            console.warn('[SupabaseAuthService] Error signing out existing session:', signOutError);
+            // Continue with login even if sign out fails
+          } else {
+            console.log('[SupabaseAuthService] Invalidated existing session before new login');
+          }
+        } catch (signOutError) {
+          console.warn('[SupabaseAuthService] Error during session invalidation:', signOutError);
+          // Continue with login
+        }
+
+        let result: User;
+        if (Platform.OS === 'web') {
+          result = await this.signInWithGoogleWeb();
+        } else {
+          result = await this.signInWithGoogleMobile();
+        }
+
+        // After successful login, invalidate any other sessions for this user
+        // (Supabase handles this automatically, but we log it)
+        console.log('[SupabaseAuthService] Login successful, new session created');
+        
+        return result;
+      } catch (error: any) {
+        console.error('Error signing in with Google:', error);
+        throw new Error('Sign in failed: ' + (error.message || String(error)));
+      } finally {
+        // Clean up the ongoing login tracking
+        this.ongoingLogins.delete(loginKey);
+      }
+    })();
+
+    // Store the promise to prevent concurrent attempts
+    this.ongoingLogins.set(loginKey, loginPromise);
+    
+    return loginPromise;
   }
 
   /**
@@ -50,11 +111,22 @@ class SupabaseAuthService {
       
       // Set flag IMMEDIATELY at the start to prevent useAuthGuard from interfering
       // during getSession() and the entire OAuth flow
+      // Use both sessionStorage and localStorage for robustness
+      const timestamp = Date.now().toString();
       try {
         sessionStorage.setItem('oauth_redirecting', 'true');
+        sessionStorage.setItem('oauth_timestamp', timestamp);
         console.log('Set oauth_redirecting flag early to prevent auth guard interference');
       } catch (e) {
-        console.warn('Could not set oauth_redirecting flag:', e);
+        console.warn('Could not set oauth_redirecting flag in sessionStorage:', e);
+      }
+      
+      // Also set in localStorage as fallback (survives page reloads)
+      try {
+        localStorage.setItem('oauth_redirecting', 'true');
+        localStorage.setItem('oauth_timestamp', timestamp);
+      } catch (e) {
+        console.warn('Could not set oauth_redirecting flag in localStorage:', e);
       }
       
       // First, check if we already have a valid session
@@ -69,10 +141,10 @@ class SupabaseAuthService {
           setTimeout(() => reject(new Error('getSession() timeout after 3 seconds')), 3000);
         });
         
-        const result = await Promise.race([sessionPromise, timeoutPromise]);
+        const result = await Promise.race([sessionPromise, timeoutPromise]) as Awaited<ReturnType<typeof supabase.auth.getSession>>;
         existingSession = result;
         sessionCheckError = result.error;
-        console.log('getSession() completed, session exists:', !!result?.session);
+        console.log('getSession() completed, session exists:', !!result?.data?.session);
       } catch (timeoutError: any) {
         console.warn('getSession() timed out or failed:', timeoutError?.message || timeoutError);
         // Continue with OAuth flow if getSession() fails or times out
@@ -80,9 +152,12 @@ class SupabaseAuthService {
       }
       
       if (!sessionCheckError && existingSession?.session?.user) {
-        // Clear flag since we found existing session - no redirect needed
+        // Clear flags since we found existing session - no redirect needed
         try {
           sessionStorage.removeItem('oauth_redirecting');
+          sessionStorage.removeItem('oauth_timestamp');
+          localStorage.removeItem('oauth_redirecting');
+          localStorage.removeItem('oauth_timestamp');
         } catch (e) {
           // Ignore
         }
@@ -100,11 +175,14 @@ class SupabaseAuthService {
       const errorDescription = hashParams.get('error_description');
 
       if (errorParam) {
-        // Clear the oauth_redirecting flag since OAuth failed
+        // Clear the oauth_redirecting flags since OAuth failed
         try {
           sessionStorage.removeItem('oauth_redirecting');
+          sessionStorage.removeItem('oauth_timestamp');
+          localStorage.removeItem('oauth_redirecting');
+          localStorage.removeItem('oauth_timestamp');
         } catch (e) {
-          // Ignore if sessionStorage not available
+          // Ignore if storage not available
         }
         
         // Clean up the error from URL
@@ -150,11 +228,14 @@ class SupabaseAuthService {
         // We're returning from OAuth, get the session
         console.log('Detected OAuth redirect, processing session...');
         
-        // Clear the oauth_redirecting flag since we're processing the return
+        // Clear the oauth_redirecting flags since we're processing the return
         try {
           sessionStorage.removeItem('oauth_redirecting');
+          sessionStorage.removeItem('oauth_timestamp');
+          localStorage.removeItem('oauth_redirecting');
+          localStorage.removeItem('oauth_timestamp');
         } catch (e) {
-          // Ignore if sessionStorage not available
+          // Ignore if storage not available
         }
         
         // Wait a bit for Supabase to process the session
@@ -205,14 +286,7 @@ class SupabaseAuthService {
 
       console.log('OAuth URL received:', data.url.substring(0, 100) + '...');
       
-      // Set flag to prevent useAuthGuard from interfering (redundant but ensures it's set)
-      // Flag was already set at the start, but set it again here as specified in plan
-      try {
-        sessionStorage.setItem('oauth_redirecting', 'true');
-      } catch (e) {
-        console.warn('Could not set oauth_redirecting flag:', e);
-      }
-
+      // Flags were already set at the start of the function, no need to set again
       // Actually perform the redirect to Google OAuth
       console.log('Redirecting to Google OAuth...', data.url.substring(0, 100) + '...');
       
@@ -220,23 +294,43 @@ class SupabaseAuthService {
         // Clear flag if redirect fails
         try {
           sessionStorage.removeItem('oauth_redirecting');
+          sessionStorage.removeItem('oauth_timestamp');
+          localStorage.removeItem('oauth_redirecting');
+          localStorage.removeItem('oauth_timestamp');
         } catch (e) {
           // Ignore
         }
         throw new Error('window.location is not available');
       }
       
-      // Perform redirect immediately
+      // Perform redirect using replace() for more reliable redirects
       try {
-        window.location.href = data.url;
+        // Use replace() instead of href to avoid adding to history and ensure redirect
+        // Note: After this call, if redirect works, we'll navigate away and code execution stops
+        // If redirect is blocked, we'll remain on this page and the timeout in WelcomeScreen will detect it
+        window.location.replace(data.url);
         console.log('Redirect initiated successfully');
-      } catch (redirectError) {
+        
+        // Note: We don't check if redirect worked here because:
+        // 1. If redirect works, we navigate away and this code doesn't execute
+        // 2. If redirect is blocked, we stay on the page but checking immediately might give false positives
+        // 3. The timeout in WelcomeScreen will detect if redirect was blocked after a reasonable delay
+      } catch (redirectError: any) {
         // Clear flag if redirect fails
         try {
           sessionStorage.removeItem('oauth_redirecting');
+          sessionStorage.removeItem('oauth_timestamp');
+          localStorage.removeItem('oauth_redirecting');
+          localStorage.removeItem('oauth_timestamp');
         } catch (e) {
           // Ignore
         }
+        
+        // If it's our custom error, throw it as-is
+        if (redirectError.message && redirectError.message.includes('Redirect to Google OAuth was blocked')) {
+          throw redirectError;
+        }
+        
         console.error('Failed to redirect:', redirectError);
         throw new Error(`Failed to redirect to OAuth URL: ${redirectError instanceof Error ? redirectError.message : String(redirectError)}`);
       }
@@ -624,4 +718,8 @@ class SupabaseAuthService {
 }
 
 export const supabaseAuthService = new SupabaseAuthService();
+
+// Note: The ongoingLogins Map is per-instance, so it only prevents concurrent logins
+// within the same service instance. For distributed systems, consider using a shared
+// store (Redis, database) to track ongoing logins across instances.
 

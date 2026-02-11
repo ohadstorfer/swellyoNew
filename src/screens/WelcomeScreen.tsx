@@ -16,7 +16,6 @@ import { Text } from '../components/Text';
 import { BackgroundVideo } from '../components/BackgroundVideo';
 import { colors, spacing } from '../styles/theme';
 import { authService } from '../services/auth/authService';
-import { simpleAuthService } from '../services/auth/simpleAuthService';
 import { supabaseAuthService } from '../services/auth/supabaseAuthService';
 import { isSupabaseConfigured } from '../config/supabase';
 import { useOnboarding } from '../context/OnboardingContext';
@@ -181,7 +180,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
           console.log('Detected legacy OAuth return with code, processing...');
           try {
             setIsLoading(true);
-            const user = await simpleAuthService.signInWithGoogle();
+            const user = await authService.signInWithGoogle();
             console.log('Legacy OAuth return successful, setting user:', user);
             setUser(user);
             
@@ -277,51 +276,111 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
       
       console.log('Starting Google Sign-In process...');
       
-      // Set a timeout to clear loading state if redirect doesn't happen (e.g., popup blocker)
+      // Store current URL to detect if redirect happens
+      const currentUrlBeforeRedirect = Platform.OS === 'web' && typeof window !== 'undefined' 
+        ? window.location.href 
+        : null;
+      
+      // Set a timeout to detect if redirect doesn't happen (e.g., blocked by browser)
       // This prevents the UI from being stuck in loading state
-      // Increased timeout to allow for getSession() call and OAuth initiation
+      // Increased timeout to 3 seconds to account for slower redirects
       if (Platform.OS === 'web') {
         redirectTimeout = setTimeout(() => {
-          console.warn('OAuth redirect timeout - clearing loading state. If redirect was blocked, please check popup blockers.');
-          setIsLoading(false);
-        }, 10000); // 10 second timeout to allow for getSession() and OAuth flow
+          // Only check if we're still on the same page if loading state is still active
+          // (If redirect worked, we'd be on Google's page or back with OAuth params)
+          if (isLoading && currentUrlBeforeRedirect && typeof window !== 'undefined') {
+            const hashParams = new URLSearchParams(window.location.hash.substring(1));
+            const urlParams = new URLSearchParams(window.location.search);
+            const isOAuthReturn = hashParams.get('access_token') || hashParams.get('refresh_token') || urlParams.get('code');
+            
+            // Only show error if we're definitely still on the same page AND not in OAuth return
+            // AND loading state is still active (meaning redirect didn't happen)
+            const currentUrl = window.location.href;
+            const isStillOnSamePage = currentUrl === currentUrlBeforeRedirect || 
+                                     currentUrl.startsWith(window.location.origin + window.location.pathname);
+            
+            if (!isOAuthReturn && isStillOnSamePage && isLoading) {
+              console.warn('OAuth redirect appears to have been blocked - still on same page after timeout');
+              setIsLoading(false);
+              Alert.alert(
+                'Redirect Blocked',
+                'The redirect to Google sign-in was blocked or failed.\n\n' +
+                'Please check:\n' +
+                '• Your browser allows redirects for this site\n' +
+                '• Popup blockers are disabled\n' +
+                '• Try clicking the button again\n\n' +
+                'If the problem persists, check your browser console for more details.',
+                [{ text: 'OK' }]
+              );
+            }
+          }
+        }, 3000); // 3 second timeout - allows time for redirect to process
       }
       
       if (Platform.OS === 'web') {
-        console.log('Using Simple Auth Service for web');
-        const user = await simpleAuthService.signInWithGoogle();
+        console.log('Using Auth Service for web');
         
-        // Clear timeout if sign-in completes (shouldn't happen if redirect works)
-        if (redirectTimeout) {
-          clearTimeout(redirectTimeout);
+        try {
+          const user = await authService.signInWithGoogle();
+          
+          // Clear timeout if sign-in completes without redirect (existing session or OAuth return)
+          if (redirectTimeout) {
+            clearTimeout(redirectTimeout);
+          }
+          
+          console.log('Google Sign-In successful, setting user:', user);
+          setUser(user);
+          
+          // Set default nickname and email in form data
+          updateFormData({
+            nickname: user.nickname,
+            userEmail: user.email,
+          });
+          
+          // Identify user with PostHog after Google sign-in (web)
+          const { analyticsService } = await import('../services/analytics/analyticsService');
+          const userId = user.id.toString();
+          const userProperties = {
+            $email: user.email,
+            $name: user.nickname || user.email?.split('@')[0] || 'User',
+            email: user.email,
+            name: user.nickname || user.email?.split('@')[0] || 'User',
+          };
+          analyticsService.identify(userId, userProperties);
+          console.log('[WelcomeScreen] User identified with PostHog after Google sign-in (web):', userId);
+          
+          // Check if user has finished onboarding before navigating
+          const hasFinishedOnboarding = await checkOnboardingStatus();
+          if (!hasFinishedOnboarding) {
+            onGetStarted(); // Only navigate to onboarding if not complete
+          }
+          // If complete, don't call onGetStarted() - AppContent will show ConversationsScreen
+        } catch (error: any) {
+          // Clear timeout on error
+          if (redirectTimeout) {
+            clearTimeout(redirectTimeout);
+          }
+          setIsLoading(false);
+          
+          // Check for specific redirect block error
+          if (error?.message && error.message.includes('Redirect to Google OAuth was blocked')) {
+            console.error('Google Sign-In redirect blocked:', error);
+            Alert.alert(
+              'Redirect Blocked',
+              'The redirect to Google sign-in was blocked by your browser.\n\n' +
+              'Please:\n' +
+              '• Allow redirects for this site\n' +
+              '• Disable popup blockers\n' +
+              '• Check browser security settings\n\n' +
+              'Then try again.',
+              [{ text: 'OK' }]
+            );
+          } else if (error?.message && !error.message.includes('redirect')) {
+            // Don't show error if it's a redirect (page will navigate away)
+            console.error('Google Sign-In error:', error);
+            Alert.alert('Sign-In Error', error.message || 'Failed to sign in with Google. Please try again.');
+          }
         }
-        console.log('Google Sign-In successful, setting user:', user);
-        setUser(user);
-        
-        // Set default nickname and email in form data
-        updateFormData({
-          nickname: user.nickname,
-          userEmail: user.email,
-        });
-        
-        // Identify user with PostHog after Google sign-in (web)
-        const { analyticsService } = await import('../services/analytics/analyticsService');
-        const userId = user.id.toString();
-        const userProperties = {
-          $email: user.email,
-          $name: user.nickname || user.email?.split('@')[0] || 'User',
-          email: user.email,
-          name: user.nickname || user.email?.split('@')[0] || 'User',
-        };
-        analyticsService.identify(userId, userProperties);
-        console.log('[WelcomeScreen] User identified with PostHog after Google sign-in (web):', userId);
-        
-        // Check if user has finished onboarding before navigating
-        const hasFinishedOnboarding = await checkOnboardingStatus();
-        if (!hasFinishedOnboarding) {
-          onGetStarted(); // Only navigate to onboarding if not complete
-        }
-        // If complete, don't call onGetStarted() - AppContent will show ConversationsScreen
       } else {
         // Clear timeout for mobile (not needed)
         if (redirectTimeout) {
@@ -403,6 +462,17 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
         Alert.alert(
           'Sign In Cancelled',
           'You cancelled the sign-in process. Please try again when ready.',
+          [{ text: 'OK' }]
+        );
+      } else if (errorMessage.includes('Redirect to Google OAuth was blocked')) {
+        Alert.alert(
+          'Redirect Blocked',
+          'The redirect to Google sign-in was blocked by your browser.\n\n' +
+          'Please:\n' +
+          '• Allow redirects for this site\n' +
+          '• Disable popup blockers\n' +
+          '• Check browser security settings\n\n' +
+          'Then try again.',
           [{ text: 'OK' }]
         );
       } else {

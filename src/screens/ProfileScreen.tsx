@@ -21,7 +21,7 @@ import { Text as RNText } from 'react-native';
 import { colors, spacing, typography } from '../styles/theme';
 import { supabaseDatabaseService, SupabaseSurfer } from '../services/database/supabaseDatabaseService';
 import { supabase } from '../config/supabase';
-import { getImageUrl, getCountryImageFromStorage, getCountryImageFallback, getCountryImageFromPexels, getLifestyleImageFromStorage, getLifestyleImageFromPexels, uploadLifestyleImageToStorage } from '../services/media/imageService';
+import { getImageUrl, getCountryImageFromStorage, getCountryImageFallback, getCountryImageFromPexels, getLifestyleImageFromStorage, getLifestyleImageFromPexels, uploadLifestyleImageToStorage, uploadCountryImageToStorage } from '../services/media/imageService';
 import { getSurfLevelVideoFromStorage } from '../services/media/videoService';
 import { getVideoPreloadStatus } from '../services/media/videoPreloadService';
 import { getCountryFlag } from '../utils/countryFlags';
@@ -893,94 +893,6 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
   const [failedBucketLifestyles, setFailedBucketLifestyles] = useState<Set<string>>(new Set());
   const [pexelsLifestyleImages, setPexelsLifestyleImages] = useState<{ [keyword: string]: string | null }>({});
 
-  // Pre-fetch Pexels images ONLY for top 3 destinations that might need them
-  useEffect(() => {
-    if (!profileData || !profileData.destinations_array) return;
-
-    const fetchPexelsImages = async () => {
-      // Only process top 3 destinations (the ones actually displayed)
-      const topDestinations = profileData.destinations_array 
-        ? [...profileData.destinations_array]
-            .sort((a, b) => (b.time_in_days || 0) - (a.time_in_days || 0))
-            .slice(0, 3)
-        : [];
-
-      const pexelsPromises: Promise<void>[] = [];
-
-      topDestinations.forEach((destination) => {
-        const country = destination.country || (destination as any).destination_name?.split(',')[0]?.trim() || '';
-        if (!country) return;
-
-        // Only fetch Pexels if we don't already have it
-        // We'll check if bucket image exists when it actually loads
-        if (!pexelsImages[country]) {
-          // Pre-fetch Pexels image in the background (as backup)
-          pexelsPromises.push(
-            getCountryImageFromPexels(country).then((pexelsUrl) => {
-              if (pexelsUrl) {
-                setPexelsImages((prev) => ({
-                  ...prev,
-                  [country]: pexelsUrl,
-                }));
-              } else {
-                // Mark as attempted (null) to avoid repeated failed requests
-                setPexelsImages((prev) => ({
-                  ...prev,
-                  [country]: null,
-                }));
-              }
-            })
-          );
-        }
-      });
-
-      // Fetch all Pexels images in parallel
-      await Promise.all(pexelsPromises);
-    };
-
-    fetchPexelsImages();
-  }, [profileData]);
-
-  // Pre-fetch Pexels images for lifestyle keywords
-  useEffect(() => {
-    if (!profileData || !profileData.lifestyle_keywords) return;
-
-    const fetchPexelsLifestyleImages = async () => {
-      // Only process displayed lifestyle keywords (up to 6)
-      const displayedKeywords = (profileData.lifestyle_keywords || []).slice(0, 6);
-
-      const pexelsPromises: Promise<void>[] = [];
-
-      displayedKeywords.forEach((keyword) => {
-        if (!keyword) return;
-
-        // Only fetch Pexels if we don't already have it
-        // Use original keyword as key (preserves variations)
-        if (!pexelsLifestyleImages[keyword]) {
-          pexelsPromises.push(
-            getLifestyleImageFromPexels(keyword).then((pexelsUrl) => {
-              if (pexelsUrl) {
-                setPexelsLifestyleImages((prev) => ({
-                  ...prev,
-                  [keyword]: pexelsUrl,
-                }));
-              } else {
-                // Mark as attempted (null) to avoid repeated failed requests
-                setPexelsLifestyleImages((prev) => ({
-                  ...prev,
-                  [keyword]: null,
-                }));
-              }
-            })
-          );
-        }
-      });
-
-      await Promise.all(pexelsPromises);
-    };
-
-    fetchPexelsLifestyleImages();
-  }, [profileData]);
 
   const loadProfileData = async () => {
     try {
@@ -2151,6 +2063,17 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
                         ...prev,
                         [locationForAssets]: pexelsUrl,
                       }));
+                      
+                      // Upload to storage for next time (non-blocking)
+                      uploadCountryImageToStorage(locationForAssets, pexelsUrl)
+                        .then((storageUrl) => {
+                          if (storageUrl && __DEV__) {
+                            console.log(`[ProfileScreen] Country image uploaded to storage: ${locationForAssets} -> ${storageUrl}`);
+                          }
+                        })
+                        .catch((err) => {
+                          console.warn(`[ProfileScreen] Failed to upload country image to storage:`, err);
+                        });
                     }
                   }
                 };

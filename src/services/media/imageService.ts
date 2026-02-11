@@ -218,6 +218,21 @@ export const uploadCountryImageToStorage = async (
   }
 
   try {
+    // Check authentication status FIRST
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (__DEV__) {
+      console.log('[uploadCountryImageToStorage] Auth check:', {
+        isAuthenticated: !!user,
+        userId: user?.id,
+        authError: authError?.message,
+      });
+    }
+    
+    if (!user) {
+      console.warn('[uploadCountryImageToStorage] User not authenticated - skipping upload');
+      return null;
+    }
+
     // Get the filename for this country
     const fileName = getCountryImageFileName(countryName);
     if (!fileName) {
@@ -225,6 +240,14 @@ export const uploadCountryImageToStorage = async (
         console.warn('[uploadCountryImageToStorage] Could not generate filename for:', countryName);
       }
       return null;
+    }
+
+    if (__DEV__) {
+      console.log('[uploadCountryImageToStorage] Attempting upload:', {
+        countryName,
+        fileName,
+        bucket: COUNTRIES_BUCKET,
+      });
     }
 
     // Fetch the image from Pexels URL
@@ -248,9 +271,14 @@ export const uploadCountryImageToStorage = async (
       });
 
     if (error) {
-      if (__DEV__) {
-        console.warn('[uploadCountryImageToStorage] Upload error:', error);
-      }
+      console.error('[uploadCountryImageToStorage] Upload error details:', {
+        message: error.message,
+        name: error.name,
+        bucket: COUNTRIES_BUCKET,
+        fileName,
+        userId: user?.id,
+        fullError: error,
+      });
       return null;
     }
 
@@ -617,6 +645,21 @@ export const uploadLifestyleImageToStorage = async (
   }
 
   try {
+    // Check authentication status FIRST
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (__DEV__) {
+      console.log('[uploadLifestyleImageToStorage] Auth check:', {
+        isAuthenticated: !!user,
+        userId: user?.id,
+        authError: authError?.message,
+      });
+    }
+    
+    if (!user) {
+      console.warn('[uploadLifestyleImageToStorage] User not authenticated - skipping upload');
+      return null;
+    }
+
     // Get the base filename using normalized keyword (for consistency)
     const baseFileName = getLifestyleImageFileName(lifestyleKeyword);
     if (!baseFileName) {
@@ -624,6 +667,14 @@ export const uploadLifestyleImageToStorage = async (
         console.warn('[uploadLifestyleImageToStorage] Could not generate filename for:', lifestyleKeyword);
       }
       return null;
+    }
+
+    if (__DEV__) {
+      console.log('[uploadLifestyleImageToStorage] Attempting upload:', {
+        lifestyleKeyword,
+        baseFileName,
+        bucket: LIFESTYLE_IMAGES_BUCKET,
+      });
     }
 
     // Fetch the image from Pexels URL
@@ -665,9 +716,14 @@ export const uploadLifestyleImageToStorage = async (
       });
 
     if (error) {
-      if (__DEV__) {
-        console.warn('[uploadLifestyleImageToStorage] Upload error:', error);
-      }
+      console.error('[uploadLifestyleImageToStorage] Upload error details:', {
+        message: error.message,
+        name: error.name,
+        bucket: LIFESTYLE_IMAGES_BUCKET,
+        fileName,
+        userId: user?.id,
+        fullError: error,
+      });
       return null;
     }
 

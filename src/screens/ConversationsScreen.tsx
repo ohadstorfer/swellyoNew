@@ -10,6 +10,7 @@ import {
   Modal,
   Alert,
   Animated,
+  ActivityIndicator,
 } from 'react-native';
 import { supabase } from '../config/supabase';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -138,6 +139,8 @@ export default function ConversationsScreen({
   } | null>(null);
   const [showSwellyShaper, setShowSwellyShaper] = useState(false);
   const [showSwellyoTeamWelcome, setShowSwellyoTeamWelcome] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const isLoggingOutRef = useRef(false);
 
   // Update user info when context user changes (immediate sync)
   useEffect(() => {
@@ -568,7 +571,17 @@ export default function ConversationsScreen({
 
   const handleLogout = async () => {
     console.log('handleLogout called');
+    
+    // Prevent duplicate logout calls
+    if (isLoggingOutRef.current) {
+      console.log('Logout already in progress, ignoring duplicate call');
+      return;
+    }
+    
     try {
+      // Set loading state immediately
+      isLoggingOutRef.current = true;
+      setIsLoggingOut(true);
       setShowMenu(false);
       
       // Perform logout using centralized logout function
@@ -587,39 +600,12 @@ export default function ConversationsScreen({
         console.error('Error during logout:', result.error);
         Alert.alert('Error', `Failed to logout: ${result.error || 'Unknown error'}`);
       }
-      
-      // Uncomment below to add confirmation dialog back:
-      /*
-      Alert.alert(
-        'Logout',
-        'Are you sure you want to logout?',
-        [
-          {
-            text: 'Cancel',
-            style: 'cancel',
-            onPress: () => console.log('Logout cancelled'),
-          },
-          {
-            text: 'Logout',
-            style: 'destructive',
-            onPress: async () => {
-              console.log('Logout confirmed, starting logout process...');
-              try {
-                await authService.signOut();
-                await resetOnboarding();
-                console.log('User logged out successfully');
-              } catch (error) {
-                console.error('Error during logout:', error);
-                Alert.alert('Error', `Failed to logout: ${error instanceof Error ? error.message : 'Unknown error'}`);
-              }
-            },
-          },
-        ],
-        { cancelable: true }
-      );
-      */
     } catch (error) {
       console.error('Error in handleLogout:', error);
+    } finally {
+      // Reset loading state
+      isLoggingOutRef.current = false;
+      setIsLoggingOut(false);
     }
   };
 
@@ -1328,15 +1314,21 @@ export default function ConversationsScreen({
 
                 {/* Logout */}
                 <TouchableOpacity
-                  style={styles.menuItem}
+                  style={[styles.menuItem, isLoggingOut && styles.menuItemDisabled]}
                   onPress={(e) => {
                     e.stopPropagation();
+                    if (isLoggingOut) return;
                     console.log('Logout menu item pressed');
                     handleLogout();
                   }}
-                  activeOpacity={0.7}
+                  activeOpacity={isLoggingOut ? 1 : 0.7}
+                  disabled={isLoggingOut}
                 >
-                  <Ionicons name="arrow-forward-circle-outline" size={20} color="#222B30" />
+                  {isLoggingOut ? (
+                    <ActivityIndicator size="small" color="#222B30" />
+                  ) : (
+                    <Ionicons name="arrow-forward-circle-outline" size={20} color="#222B30" />
+                  )}
                   <Text style={styles.menuItemText}>Logout</Text>
                 </TouchableOpacity>
               </View>
@@ -1351,6 +1343,23 @@ export default function ConversationsScreen({
         onClose={() => setShowSearchModal(false)}
         onUserSelect={handleUserSelect}
       />
+
+      {/* Logout Loading Overlay */}
+      {isLoggingOut && (
+        <Modal
+          visible={isLoggingOut}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => {}} // Prevent closing during logout
+        >
+          <View style={styles.logoutLoadingOverlay}>
+            <View style={styles.logoutLoadingContainer}>
+              <ActivityIndicator size="large" color="#05BCD3" />
+              <Text style={styles.logoutLoadingText}>Logging out...</Text>
+            </View>
+          </View>
+        </Modal>
+      )}
     </View>
   );
 }
@@ -1856,6 +1865,42 @@ const styles = StyleSheet.create({
     color: '#222B30',
     lineHeight: 20,
     flex: 1,
+  },
+  menuItemDisabled: {
+    opacity: 0.5,
+  },
+  logoutLoadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10000,
+    elevation: 10000,
+  },
+  logoutLoadingContainer: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 40,
+    alignItems: 'center',
+    minWidth: 300,
+    maxWidth: '85%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    elevation: 12,
+  },
+  logoutLoadingText: {
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#222B30',
+    marginTop: 16,
+    textAlign: 'center',
   },
   // Welcome conversation styles - matching Figma design
   welcomeAvatarContainer: {

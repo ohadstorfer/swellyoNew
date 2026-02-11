@@ -28,6 +28,18 @@ const OnboardingContext = createContext<OnboardingContextType | undefined>(undef
 
 const STORAGE_KEY = '@swellyo_onboarding';
 
+// Session restoration configuration
+const SESSION_RESTORATION_CONFIG = {
+  // Base timeout in milliseconds (can be overridden via environment variable)
+  baseTimeout: parseInt(process.env.EXPO_PUBLIC_SESSION_RESTORATION_TIMEOUT || '5000', 10),
+  // Maximum number of retry attempts
+  maxRetries: 3,
+  // Retry delay multiplier (exponential backoff: delay = baseDelay * (multiplier ^ attempt))
+  retryDelayMultiplier: 1.5,
+  // Base retry delay in milliseconds
+  baseRetryDelay: 1000,
+};
+
 export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   // Check if we're on the swelly_chat route
   const getInitialStep = () => {
@@ -51,73 +63,107 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   // Restore session from Supabase on mount
   // This runs FIRST to check if user has a valid session before any other logic
+  // Uses progressive retry logic with configurable timeout
   const restoreSession = useCallback(async () => {
     console.log('[OnboardingContext] Starting session restoration...');
     
-    // Set a safety timeout to ensure we don't hang forever
-    const timeoutId = setTimeout(() => {
-      console.warn('[OnboardingContext] Session restoration timeout after 5s - forcing completion');
+    if (!isSupabaseConfigured()) {
+      console.log('[OnboardingContext] Supabase not configured, skipping session restoration');
       setIsRestoringSession(false);
-    }, 5000); // 5 second safety timeout
-    
-    try {
-      if (!isSupabaseConfigured()) {
-        console.log('[OnboardingContext] Supabase not configured, skipping session restoration');
-        clearTimeout(timeoutId);
-        setIsRestoringSession(false);
-        return;
-      }
-      
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      
-      clearTimeout(timeoutId);
-      
-      if (sessionError) {
-        console.log('[OnboardingContext] Error getting session:', sessionError.message);
-        setIsRestoringSession(false);
-        return;
-      }
-      
-      if (session?.user) {
-        console.log('[OnboardingContext] Session found, restoring user:', session.user.id);
-        
-        // Convert Supabase user to app user format
-        const { convertSupabaseUserToAppUser } = await import('../utils/userConversion');
-        const appUser = convertSupabaseUserToAppUser(session.user);
-        
-        setUser(appUser);
-        console.log('[OnboardingContext] User restored from session:', appUser.id);
-        
-        // Also update form data with user info
-        setFormData(prev => ({
-          ...prev,
-          nickname: appUser.nickname,
-          userEmail: appUser.email,
-        }));
-        
-        // Preload profile video in background (non-blocking)
-        if (appUser?.id) {
-          const { preloadProfileVideo } = await import('../services/media/videoPreloadService');
-          preloadProfileVideo(appUser.id.toString(), 'high')
-            .then(result => {
-              if (__DEV__) {
-                console.log(`[OnboardingContext] Profile video preload completed: ready=${result?.ready}`);
-              }
-            })
-            .catch(err => {
-              console.warn('[OnboardingContext] Profile video preload failed (non-blocking):', err);
-            });
-        }
-      } else {
-        console.log('[OnboardingContext] No session found');
-      }
-    } catch (error: any) {
-      console.error('[OnboardingContext] Error restoring session:', error);
-      clearTimeout(timeoutId);
-    } finally {
-      console.log('[OnboardingContext] Session restoration complete');
-      setIsRestoringSession(false);
+      return;
     }
+
+    // Progressive retry logic
+    let lastError: any = null;
+    let attempt = 0;
+    const maxAttempts = SESSION_RESTORATION_CONFIG.maxRetries + 1; // +1 for initial attempt
+    
+    while (attempt < maxAttempts) {
+      try {
+        // Set a safety timeout for this attempt
+        const timeoutMs = SESSION_RESTORATION_CONFIG.baseTimeout;
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error(`Session restoration timeout after ${timeoutMs}ms`)), timeoutMs);
+        });
+        
+        // Attempt to get session with timeout
+        const sessionPromise = supabase.auth.getSession();
+        const { data: { session }, error: sessionError } = await Promise.race([
+          sessionPromise,
+          timeoutPromise,
+        ]) as any;
+        
+        // Success - process session
+        if (sessionError) {
+          throw sessionError;
+        }
+        
+        if (session?.user) {
+          console.log('[OnboardingContext] Session found, restoring user:', session.user.id);
+          
+          // Convert Supabase user to app user format
+          const { convertSupabaseUserToAppUser } = await import('../utils/userConversion');
+          const appUser = convertSupabaseUserToAppUser(session.user);
+          
+          setUser(appUser);
+          console.log('[OnboardingContext] User restored from session:', appUser.id);
+          
+          // Also update form data with user info
+          setFormData(prev => ({
+            ...prev,
+            nickname: appUser.nickname,
+            userEmail: appUser.email,
+          }));
+          
+          // Preload profile video in background (non-blocking)
+          if (appUser?.id) {
+            const { preloadProfileVideo } = await import('../services/media/videoPreloadService');
+            preloadProfileVideo(appUser.id.toString(), 'high')
+              .then(result => {
+                if (__DEV__) {
+                  console.log(`[OnboardingContext] Profile video preload completed: ready=${result?.ready}`);
+                }
+              })
+              .catch(err => {
+                console.warn('[OnboardingContext] Profile video preload failed (non-blocking):', err);
+              });
+          }
+          
+          // Success - exit retry loop
+          setIsRestoringSession(false);
+          console.log('[OnboardingContext] Session restoration complete');
+          return;
+        } else {
+          // No session found - not an error, just no session
+          console.log('[OnboardingContext] No session found');
+          setIsRestoringSession(false);
+          return;
+        }
+      } catch (error: any) {
+        lastError = error;
+        attempt++;
+        
+        if (attempt >= maxAttempts) {
+          // All retries exhausted
+          console.warn(`[OnboardingContext] Session restoration failed after ${maxAttempts} attempts:`, error?.message || error);
+          setIsRestoringSession(false);
+          return;
+        }
+        
+        // Calculate retry delay with exponential backoff
+        const retryDelay = SESSION_RESTORATION_CONFIG.baseRetryDelay * 
+          Math.pow(SESSION_RESTORATION_CONFIG.retryDelayMultiplier, attempt - 1);
+        
+        console.log(`[OnboardingContext] Session restoration attempt ${attempt} failed, retrying in ${retryDelay}ms...`, error?.message || error);
+        
+        // Wait before retrying
+        await new Promise(resolve => setTimeout(resolve, retryDelay));
+      }
+    }
+    
+    // Should not reach here, but handle just in case
+    console.error('[OnboardingContext] Session restoration failed:', lastError);
+    setIsRestoringSession(false);
   }, []); // Empty dependencies - uses stable state setters and imported function
 
   // Restore session on mount - this runs FIRST before any other logic
@@ -176,71 +222,8 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // State setters are stable, no dependencies needed
 
-  // Auth state listener - handle session expiration during onboarding
-  useEffect(() => {
-    if (!isSupabaseConfigured()) {
-      return;
-    }
-
-    // Don't interfere with demo users
-    if (isDemoUser) {
-      return;
-    }
-
-    console.log('[OnboardingContext] Setting up auth state listener');
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log('[OnboardingContext] Auth state changed:', event, session ? 'session exists' : 'no session');
-
-      // Handle sign out events
-      if (event === 'SIGNED_OUT') {
-        console.log('[OnboardingContext] SIGNED_OUT event detected during onboarding');
-        // Clear user state and reset to WelcomeScreen
-        setUser(null);
-        setIsDemoUser(false);
-        setCurrentStep(-1);
-        try {
-          await resetOnboarding();
-        } catch (error) {
-          console.error('[OnboardingContext] Error resetting onboarding on sign out:', error);
-        }
-        return;
-      }
-
-      // Handle token refresh failures
-      if (event === 'TOKEN_REFRESHED' && !session) {
-        console.log('[OnboardingContext] Token refresh failed during onboarding');
-        // Clear user state and reset to WelcomeScreen
-        setUser(null);
-        setIsDemoUser(false);
-        setCurrentStep(-1);
-        try {
-          await resetOnboarding();
-        } catch (error) {
-          console.error('[OnboardingContext] Error resetting onboarding on token refresh failure:', error);
-        }
-        return;
-      }
-
-      // If user exists in context but session is lost, clear state
-      if (user !== null && !session && (event === 'USER_UPDATED' || event === 'TOKEN_REFRESHED')) {
-        console.log('[OnboardingContext] Session lost during onboarding');
-        setUser(null);
-        setIsDemoUser(false);
-        setCurrentStep(-1);
-        try {
-          await resetOnboarding();
-        } catch (error) {
-          console.error('[OnboardingContext] Error resetting onboarding on session loss:', error);
-        }
-      }
-    });
-
-    return () => {
-      console.log('[OnboardingContext] Cleaning up auth state listener');
-      subscription.unsubscribe();
-    };
-  }, [user, isDemoUser, resetOnboarding, setUser, setIsDemoUser, setCurrentStep]);
+  // Auth state listener removed - useAuthGuard now handles all auth state changes
+  // This prevents duplicate listeners and potential race conditions
 
   const initializeDatabase = async () => {
     try {

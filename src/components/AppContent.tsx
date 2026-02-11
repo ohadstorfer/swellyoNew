@@ -78,6 +78,73 @@ export const AppContent: React.FC = () => {
   const isNavigatingRef = useRef(false);
   const isLoggingOutRef = useRef(false);
   
+  // State to track session validation
+  const [hasValidatedSession, setHasValidatedSession] = useState(false);
+  const [isSupabaseConfigured, setIsSupabaseConfigured] = useState<boolean | null>(null);
+  const sessionValidationRef = useRef(false);
+  
+  // Check if Supabase is configured on mount
+  useEffect(() => {
+    const checkSupabaseConfig = async () => {
+      try {
+        const { isSupabaseConfigured: checkConfig } = await import('../config/supabase');
+        setIsSupabaseConfigured(checkConfig());
+      } catch (error) {
+        console.error('[AppContent] Error checking Supabase config:', error);
+        setIsSupabaseConfigured(false);
+      }
+    };
+    checkSupabaseConfig();
+  }, []);
+  
+  // Validate session before showing ConversationsScreen
+  useEffect(() => {
+    // Only validate if onboarding is complete, user exists, not demo user, not already validating, and Supabase is configured
+    if (isComplete && user !== null && !isDemoUser && !isRestoringSession && 
+        !sessionValidationRef.current && isSupabaseConfigured === true) {
+      sessionValidationRef.current = true;
+      
+      // Check if there's actually a valid Supabase session
+      const validateSession = async () => {
+        try {
+          const { supabase } = await import('../config/supabase');
+          const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+          
+          if (sessionError || !session) {
+            // User exists in context but no valid session - trigger logout
+            console.log('[AppContent] User in context but no valid session - triggering logout');
+            const { performLogout } = await import('../utils/logout');
+            await performLogout({
+              resetOnboarding,
+              setUser,
+              setCurrentStep,
+              setIsDemoUser,
+            });
+            return;
+          }
+          
+          // Session is valid
+          setHasValidatedSession(true);
+        } catch (error) {
+          console.error('[AppContent] Error validating session:', error);
+          // On error, allow rendering (auth guard will handle it)
+          setHasValidatedSession(true);
+        } finally {
+          sessionValidationRef.current = false;
+        }
+      };
+      
+      validateSession();
+    } else if (user === null || !isComplete) {
+      // Reset validation state when user logs out or onboarding not complete
+      setHasValidatedSession(false);
+      sessionValidationRef.current = false;
+    } else if (isSupabaseConfigured === false) {
+      // Supabase not configured - no need to validate, allow rendering
+      setHasValidatedSession(true);
+    }
+  }, [isComplete, user, isDemoUser, isRestoringSession, isSupabaseConfigured, resetOnboarding, setUser, setCurrentStep, setIsDemoUser]);
+  
   // Preload loading video when arriving at step 4 (not after submitting)
   // This reduces loading time after step 4 submission
   useEffect(() => {
@@ -876,9 +943,16 @@ export const AppContent: React.FC = () => {
   // Note: Removed premature WelcomeScreen redirect check
   // The auth guard now handles all authentication redirects after session restoration completes
 
-  // If onboarding is complete, show conversations screen as home page (regardless of currentStep)
+  // If onboarding is complete AND user is authenticated, show conversations screen as home page
   // This check must come FIRST before any step checks
-  if (isComplete) {
+  // CRITICAL: Must check user !== null to prevent showing conversations screen after logout
+  // Also validate that session exists (unless Supabase not configured or demo user)
+  // Don't show if we're currently validating (wait for validation to complete)
+  const shouldShowConversations = isComplete && user !== null && 
+    !sessionValidationRef.current && // Don't show while validating
+    (isDemoUser || isSupabaseConfigured === false || hasValidatedSession); // Show if demo user, Supabase not configured, or session validated
+  
+  if (shouldShowConversations) {
     console.log('[AppContent] Rendering check - showProfile:', showProfile, 'viewingUserId:', viewingUserId);
     console.log('[AppContent] Rendering check - selectedConversation:', selectedConversation ? 'exists' : 'null');
     console.log('[AppContent] Rendering check - showTripPlanningChat:', showTripPlanningChat);

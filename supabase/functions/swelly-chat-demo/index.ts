@@ -5,6 +5,45 @@ const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY')
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 
+// Rate limiting configuration
+const RATE_LIMIT_CONFIG = {
+  maxRequests: parseInt(Deno.env.get('RATE_LIMIT_MAX_REQUESTS') || '100', 10),
+  windowMs: parseInt(Deno.env.get('RATE_LIMIT_WINDOW_MS') || '60000', 10),
+}
+
+interface RateLimitEntry {
+  count: number
+  resetTime: number
+}
+
+const rateLimitStore = new Map<string, RateLimitEntry>()
+
+function checkRateLimit(userId: string): { allowed: boolean; remaining: number; resetTime: number } {
+  const now = Date.now()
+  const entry = rateLimitStore.get(userId)
+  
+  if (Math.random() < 0.01) {
+    for (const [key, value] of rateLimitStore.entries()) {
+      if (value.resetTime < now) {
+        rateLimitStore.delete(key)
+      }
+    }
+  }
+  
+  if (!entry || entry.resetTime < now) {
+    const resetTime = now + RATE_LIMIT_CONFIG.windowMs
+    rateLimitStore.set(userId, { count: 1, resetTime })
+    return { allowed: true, remaining: RATE_LIMIT_CONFIG.maxRequests - 1, resetTime }
+  }
+  
+  if (entry.count >= RATE_LIMIT_CONFIG.maxRequests) {
+    return { allowed: false, remaining: 0, resetTime: entry.resetTime }
+  }
+  
+  entry.count++
+  return { allowed: true, remaining: RATE_LIMIT_CONFIG.maxRequests - entry.count, resetTime: entry.resetTime }
+}
+
 interface ChatRequest {
   message: string
   chat_id?: string
@@ -887,6 +926,30 @@ serve(async (req: Request) => {
           headers: { 
             'Content-Type': 'application/json',
             'Access-Control-Allow-Origin': '*',
+          } 
+        }
+      )
+    }
+
+    // Rate limiting check
+    const rateLimit = checkRateLimit(user.id)
+    if (!rateLimit.allowed) {
+      const retryAfter = Math.ceil((rateLimit.resetTime - Date.now()) / 1000)
+      return new Response(
+        JSON.stringify({ 
+          error: 'Rate limit exceeded',
+          message: 'Too many requests. Please try again later.',
+          retryAfter 
+        }),
+        { 
+          status: 429, 
+          headers: { 
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+            'Retry-After': retryAfter.toString(),
+            'X-RateLimit-Limit': RATE_LIMIT_CONFIG.maxRequests.toString(),
+            'X-RateLimit-Remaining': '0',
+            'X-RateLimit-Reset': rateLimit.resetTime.toString(),
           } 
         }
       )

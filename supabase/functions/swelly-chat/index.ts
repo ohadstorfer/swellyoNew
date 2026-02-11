@@ -5,6 +5,57 @@ const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY')
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 
+// Rate limiting configuration
+const RATE_LIMIT_CONFIG = {
+  // Maximum requests per window
+  maxRequests: parseInt(Deno.env.get('RATE_LIMIT_MAX_REQUESTS') || '100', 10),
+  // Time window in milliseconds (default: 1 minute)
+  windowMs: parseInt(Deno.env.get('RATE_LIMIT_WINDOW_MS') || '60000', 10),
+}
+
+// In-memory rate limiter (per function instance)
+// Note: For production, use Redis or Supabase's built-in rate limiting for distributed systems
+interface RateLimitEntry {
+  count: number
+  resetTime: number
+}
+
+const rateLimitStore = new Map<string, RateLimitEntry>()
+
+/**
+ * Simple rate limiter that tracks requests per user ID
+ * Returns true if request should be allowed, false if rate limited
+ */
+function checkRateLimit(userId: string): { allowed: boolean; remaining: number; resetTime: number } {
+  const now = Date.now()
+  const entry = rateLimitStore.get(userId)
+  
+  // Clean up expired entries periodically (every 100 checks)
+  if (Math.random() < 0.01) {
+    for (const [key, value] of rateLimitStore.entries()) {
+      if (value.resetTime < now) {
+        rateLimitStore.delete(key)
+      }
+    }
+  }
+  
+  if (!entry || entry.resetTime < now) {
+    // Create new entry or reset expired entry
+    const resetTime = now + RATE_LIMIT_CONFIG.windowMs
+    rateLimitStore.set(userId, { count: 1, resetTime })
+    return { allowed: true, remaining: RATE_LIMIT_CONFIG.maxRequests - 1, resetTime }
+  }
+  
+  if (entry.count >= RATE_LIMIT_CONFIG.maxRequests) {
+    // Rate limit exceeded
+    return { allowed: false, remaining: 0, resetTime: entry.resetTime }
+  }
+  
+  // Increment count
+  entry.count++
+  return { allowed: true, remaining: RATE_LIMIT_CONFIG.maxRequests - entry.count, resetTime: entry.resetTime }
+}
+
 interface ChatRequest {
   message: string
   chat_id?: string
@@ -853,6 +904,30 @@ serve(async (req: Request) => {
           headers: { 
             'Content-Type': 'application/json',
             'Access-Control-Allow-Origin': '*',
+          } 
+        }
+      )
+    }
+
+    // Rate limiting check
+    const rateLimit = checkRateLimit(user.id)
+    if (!rateLimit.allowed) {
+      const retryAfter = Math.ceil((rateLimit.resetTime - Date.now()) / 1000)
+      return new Response(
+        JSON.stringify({ 
+          error: 'Rate limit exceeded',
+          message: 'Too many requests. Please try again later.',
+          retryAfter 
+        }),
+        { 
+          status: 429, 
+          headers: { 
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+            'Retry-After': retryAfter.toString(),
+            'X-RateLimit-Limit': RATE_LIMIT_CONFIG.maxRequests.toString(),
+            'X-RateLimit-Remaining': '0',
+            'X-RateLimit-Reset': rateLimit.resetTime.toString(),
           } 
         }
       )
