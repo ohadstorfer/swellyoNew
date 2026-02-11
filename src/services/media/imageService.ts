@@ -13,6 +13,7 @@ import { supabase } from '../../config/supabase';
 // Supabase storage configuration for country images
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL?.trim() || '';
 const COUNTRIES_BUCKET = 'Countries';
+const LIFESTYLE_IMAGES_BUCKET = 'lifestyle-images';
 
 /**
  * Map country names to their image filenames in the Countries bucket
@@ -183,7 +184,7 @@ export const getCountryImageFromPexels = async (countryName: string): Promise<st
       const data = await response.json();
       if (data.photos && data.photos.length > 0) {
         // Return a small/medium size image (src.medium is 350x350, good for thumbnails)
-        return data.photos[0].src.medium || data.photos[0].src.small || data.photos[0].src.tiny;
+        return data.photos[0].src.small || data.photos[0].src.tiny || data.photos[0].src.medium;
       }
     }
   } catch (error) {
@@ -419,5 +420,272 @@ export const getImageUrl = (path: string): string => {
   // Production: images should be bundled as assets or served from CDN
   // For now, return the path as-is (will need to be updated for production)
   return normalizedPath;
+};
+
+// ============================================================================
+// Lifestyle Images Functions
+// ============================================================================
+
+/**
+ * Common words to remove from lifestyle keywords to extract core keyword
+ * These are common suffixes/prefixes that don't change the core meaning
+ */
+const LIFESTYLE_STOP_WORDS = [
+  'training', 'practice', 'classes', 'class', 'session', 'sessions',
+  'workout', 'workouts', 'exercise', 'exercises', 'activity', 'activities',
+  'doing', 'love', 'enjoy', 'enjoying', 'support', 'supporting',
+  'and', 'or', 'the', 'a', 'an', 'for', 'with', 'in', 'on', 'at'
+];
+
+/**
+ * Normalize lifestyle keyword by extracting core keyword from phrases
+ * Handles variations like "Yoga training" -> "yoga", "remote work" -> "remote work"
+ * 
+ * @param keyword - The lifestyle keyword (can be any text)
+ * @returns Normalized keyword for filename generation
+ */
+const normalizeLifestyleKeyword = (keyword: string): string => {
+  if (!keyword) return '';
+  
+  // Trim and lowercase for normalization
+  let normalized = keyword.trim().toLowerCase();
+  
+  // Remove common stop words to extract core keyword
+  // Split by spaces/hyphens and filter out stop words
+  const words = normalized.split(/[\s-]+/).filter(word => {
+    const cleanWord = word.replace(/[^a-z0-9]/g, ''); // Remove special chars
+    return cleanWord && !LIFESTYLE_STOP_WORDS.includes(cleanWord);
+  });
+  
+  // If we filtered out everything, use original (trimmed, lowercase)
+  if (words.length === 0) {
+    return normalized.replace(/[^a-z0-9\s-]/g, '').trim();
+  }
+  
+  // Join remaining words with space (will be converted to PascalCase in filename)
+  return words.join(' ');
+};
+
+/**
+ * Map lifestyle keyword to image filename
+ * Handles ANY text input, not just predefined keywords
+ * Normalizes variations like "Yoga training" -> "Yoga.jpg"
+ */
+const getLifestyleImageFileName = (lifestyleKeyword: string): string | null => {
+  if (!lifestyleKeyword) return null;
+  
+  // Normalize to extract core keyword
+  const normalized = normalizeLifestyleKeyword(lifestyleKeyword);
+  if (!normalized) return null;
+  
+  // Convert to PascalCase filename
+  // Split by spaces/hyphens, capitalize first letter of each word, join
+  const fileName = normalized
+    .split(/[\s-]+/)
+    .filter(word => word.length > 0)
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join('');
+  
+  if (!fileName) return null;
+  
+  // Extension will be added during upload based on image type
+  // For storage check, we'll try multiple extensions
+  return fileName;
+};
+
+/**
+ * Get the public URL for a lifestyle image stored in Supabase storage
+ * Tries multiple extensions (.jpg, .png, .webp) since format is auto-detected
+ * Always returns a URL (even if image doesn't exist yet) - let Image component's onError handle 404s
+ */
+export const getLifestyleImageFromStorage = (lifestyleKeyword: string): string | null => {
+  if (!SUPABASE_URL) {
+    if (__DEV__) {
+      console.warn('[getLifestyleImageFromStorage] SUPABASE_URL is not set');
+    }
+    return null;
+  }
+  
+  const baseFileName = getLifestyleImageFileName(lifestyleKeyword);
+  if (!baseFileName) {
+    return null;
+  }
+  
+  // Try .jpg first (most common), then .png, then .webp
+  // For now, return .jpg URL - if it doesn't exist, onError will trigger Pexels fetch
+  // Alternative: Could check all three, but that requires multiple API calls
+  // Better to let Image component's onError handle 404s
+  const fileName = `${baseFileName}.jpg`;
+  const encodedFileName = encodeURIComponent(fileName);
+  const url = `${SUPABASE_URL}/storage/v1/object/public/${LIFESTYLE_IMAGES_BUCKET}/${encodedFileName}`;
+  
+  if (__DEV__) {
+    console.log('[getLifestyleImageFromStorage] Lifestyle:', lifestyleKeyword, '-> File:', fileName, '-> URL:', url);
+  }
+  
+  return url;
+};
+
+/**
+ * Get a fallback lifestyle image URL
+ * Uses Lorem Picsum - a free, reliable service that doesn't require API keys
+ */
+export const getLifestyleImageFallback = (lifestyleKeyword: string): string => {
+  if (!lifestyleKeyword) {
+    return getLifestyleImagePlaceholder('lifestyle');
+  }
+  
+  return getLifestyleImagePlaceholder(lifestyleKeyword);
+};
+
+/**
+ * Get a placeholder image for a lifestyle keyword
+ */
+const getLifestyleImagePlaceholder = (lifestyleKeyword: string): string => {
+  const seed = lifestyleKeyword.toLowerCase().split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  const width = 350;
+  const height = 350; // Square for lifestyle icons
+  
+  return `https://picsum.photos/seed/${seed}/${width}/${height}`;
+};
+
+/**
+ * Get a lifestyle image from Pexels API (optional, requires API key)
+ * Uses the ORIGINAL keyword text for search (better results than normalized)
+ * Pexels can handle variations like "Yoga training" better than just "yoga"
+ * 
+ * @param lifestyleKeyword - The original lifestyle keyword (can be any text)
+ * @returns Pexels image URL or null
+ */
+export const getLifestyleImageFromPexels = async (lifestyleKeyword: string): Promise<string | null> => {
+  if (!lifestyleKeyword) return null;
+  
+  const PEXELS_API_KEY = process.env.EXPO_PUBLIC_PEXELS_API_KEY;
+  if (!PEXELS_API_KEY) {
+    return null;
+  }
+  
+  try {
+    // Use original keyword for Pexels search (better results)
+    // Pexels can handle phrases like "Yoga training" better than normalized "yoga"
+    const searchQuery = lifestyleKeyword.trim();
+    const encodedQuery = encodeURIComponent(searchQuery);
+    
+    // Pexels API endpoint - use square orientation for lifestyle icons
+    const apiUrl = `https://api.pexels.com/v1/search?query=${encodedQuery}&per_page=1&orientation=square`;
+    
+    const response = await fetch(apiUrl, {
+      headers: {
+        'Authorization': PEXELS_API_KEY,
+      },
+    });
+    
+    if (response.ok) {
+      const data = await response.json();
+      if (data.photos && data.photos.length > 0) {
+        // Return medium size (350x350, good for square lifestyle icons)
+        return data.photos[0].src.medium || data.photos[0].src.small || data.photos[0].src.tiny;
+      }
+    }
+  } catch (error) {
+    if (__DEV__) {
+      console.warn('[getLifestyleImageFromPexels] Error fetching from Pexels:', error);
+    }
+  }
+  
+  return null;
+};
+
+/**
+ * Upload a lifestyle image to Supabase storage bucket
+ * Auto-detects image format from blob and uses appropriate extension
+ * Uses normalized keyword for filename to ensure consistency
+ * 
+ * @param lifestyleKeyword - The original lifestyle keyword
+ * @param imageUrl - The Pexels image URL to upload
+ * @returns The public URL of the uploaded image, or null if upload failed
+ */
+export const uploadLifestyleImageToStorage = async (
+  lifestyleKeyword: string,
+  imageUrl: string
+): Promise<string | null> => {
+  if (!SUPABASE_URL || !lifestyleKeyword || !imageUrl) {
+    if (__DEV__) {
+      console.warn('[uploadLifestyleImageToStorage] Missing required parameters');
+    }
+    return null;
+  }
+
+  try {
+    // Get the base filename using normalized keyword (for consistency)
+    const baseFileName = getLifestyleImageFileName(lifestyleKeyword);
+    if (!baseFileName) {
+      if (__DEV__) {
+        console.warn('[uploadLifestyleImageToStorage] Could not generate filename for:', lifestyleKeyword);
+      }
+      return null;
+    }
+
+    // Fetch the image from Pexels URL
+    const response = await fetch(imageUrl);
+    if (!response.ok) {
+      if (__DEV__) {
+        console.warn('[uploadLifestyleImageToStorage] Failed to fetch image from Pexels:', response.status);
+      }
+      return null;
+    }
+
+    // Convert to blob and detect MIME type
+    const blob = await response.blob();
+    const mimeType = blob.type || 'image/jpeg'; // Default to jpeg
+    
+    // Determine file extension from MIME type
+    let extension = '.jpg';
+    let contentType = 'image/jpeg';
+    
+    if (mimeType.includes('png')) {
+      extension = '.png';
+      contentType = 'image/png';
+    } else if (mimeType.includes('webp')) {
+      extension = '.webp';
+      contentType = 'image/webp';
+    } else if (mimeType.includes('jpeg') || mimeType.includes('jpg')) {
+      extension = '.jpg';
+      contentType = 'image/jpeg';
+    }
+    
+    const fileName = `${baseFileName}${extension}`;
+
+    // Upload to Supabase storage
+    const { data, error } = await supabase.storage
+      .from(LIFESTYLE_IMAGES_BUCKET)
+      .upload(fileName, blob, {
+        contentType,
+        upsert: true, // Overwrite if exists
+      });
+
+    if (error) {
+      if (__DEV__) {
+        console.warn('[uploadLifestyleImageToStorage] Upload error:', error);
+      }
+      return null;
+    }
+
+    // Get the public URL
+    const { data: urlData } = supabase.storage
+      .from(LIFESTYLE_IMAGES_BUCKET)
+      .getPublicUrl(data.path);
+
+    if (__DEV__) {
+      console.log('[uploadLifestyleImageToStorage] Successfully uploaded:', lifestyleKeyword, '->', urlData.publicUrl);
+    }
+
+    return urlData.publicUrl;
+  } catch (error) {
+    if (__DEV__) {
+      console.error('[uploadLifestyleImageToStorage] Exception:', error);
+    }
+    return null;
+  }
 };
 

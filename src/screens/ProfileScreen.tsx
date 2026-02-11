@@ -21,7 +21,7 @@ import { Text as RNText } from 'react-native';
 import { colors, spacing, typography } from '../styles/theme';
 import { supabaseDatabaseService, SupabaseSurfer } from '../services/database/supabaseDatabaseService';
 import { supabase } from '../config/supabase';
-import { getImageUrl, getCountryImageFromStorage, getCountryImageFallback, getCountryImageFromPexels } from '../services/media/imageService';
+import { getImageUrl, getCountryImageFromStorage, getCountryImageFallback, getCountryImageFromPexels, getLifestyleImageFromStorage, getLifestyleImageFromPexels, uploadLifestyleImageToStorage } from '../services/media/imageService';
 import { getSurfLevelVideoFromStorage } from '../services/media/videoService';
 import { getVideoPreloadStatus } from '../services/media/videoPreloadService';
 import { getCountryFlag } from '../utils/countryFlags';
@@ -888,6 +888,10 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
 
   // Track which countries have failed bucket loads (so we know to use Pexels)
   const [failedBucketCountries, setFailedBucketCountries] = useState<Set<string>>(new Set());
+  
+  // Track which lifestyle keywords have failed bucket loads (so we know to use Pexels)
+  const [failedBucketLifestyles, setFailedBucketLifestyles] = useState<Set<string>>(new Set());
+  const [pexelsLifestyleImages, setPexelsLifestyleImages] = useState<{ [keyword: string]: string | null }>({});
 
   // Pre-fetch Pexels images ONLY for top 3 destinations that might need them
   useEffect(() => {
@@ -935,6 +939,47 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
     };
 
     fetchPexelsImages();
+  }, [profileData]);
+
+  // Pre-fetch Pexels images for lifestyle keywords
+  useEffect(() => {
+    if (!profileData || !profileData.lifestyle_keywords) return;
+
+    const fetchPexelsLifestyleImages = async () => {
+      // Only process displayed lifestyle keywords (up to 6)
+      const displayedKeywords = (profileData.lifestyle_keywords || []).slice(0, 6);
+
+      const pexelsPromises: Promise<void>[] = [];
+
+      displayedKeywords.forEach((keyword) => {
+        if (!keyword) return;
+
+        // Only fetch Pexels if we don't already have it
+        // Use original keyword as key (preserves variations)
+        if (!pexelsLifestyleImages[keyword]) {
+          pexelsPromises.push(
+            getLifestyleImageFromPexels(keyword).then((pexelsUrl) => {
+              if (pexelsUrl) {
+                setPexelsLifestyleImages((prev) => ({
+                  ...prev,
+                  [keyword]: pexelsUrl,
+                }));
+              } else {
+                // Mark as attempted (null) to avoid repeated failed requests
+                setPexelsLifestyleImages((prev) => ({
+                  ...prev,
+                  [keyword]: null,
+                }));
+              }
+            })
+          );
+        }
+      });
+
+      await Promise.all(pexelsPromises);
+    };
+
+    fetchPexelsLifestyleImages();
   }, [profileData]);
 
   const loadProfileData = async () => {
@@ -1965,6 +2010,99 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
             isViewingOwnProfile={isViewingOwnProfile}
           />
 
+          {/* Lifestyle Section - Inside profileInfoSection, before destinations */}
+          {lifestyleKeywords.length > 0 && (
+            <View style={styles.lifestyleSectionWrapper}>
+              <View style={styles.lifestyleTitleContainer}>
+                <Text style={styles.lifestyleTitle}>Lifestyle</Text>
+              </View>
+              <View style={styles.lifestyleContainerWrapper}>
+                <ScrollView 
+                  horizontal 
+                  showsHorizontalScrollIndicator={false}
+                  style={styles.lifestyleScrollView}
+                  contentContainerStyle={styles.lifestyleContainer}
+                >
+                {lifestyleKeywords.slice(0, 6).map((keyword, index) => {
+                  const lifestyleImageUrl = getLifestyleImageFromStorage(keyword);
+                  const pexelsImageUrl = pexelsLifestyleImages[keyword] || null;
+                  const hasFailedBucket = failedBucketLifestyles.has(keyword);
+                  const iconName = LIFESTYLE_ICON_MAP[keyword.toLowerCase()] || 'ellipse-outline';
+                  
+                  // Handler for when bucket image fails to load (404)
+                  const handleBucketImageError = async () => {
+                    if (__DEV__) {
+                      console.warn(`[ProfileScreen] Lifestyle bucket image failed to load: ${lifestyleImageUrl}, trying Pexels`);
+                    }
+                    
+                    // Mark this lifestyle as having failed bucket load
+                    setFailedBucketLifestyles((prev) => new Set(prev).add(keyword));
+                    
+                    // If we don't have Pexels image yet, fetch it
+                    if (!pexelsImageUrl) {
+                      const pexelsUrl = await getLifestyleImageFromPexels(keyword);
+                      if (pexelsUrl) {
+                        setPexelsLifestyleImages((prev) => ({
+                          ...prev,
+                          [keyword]: pexelsUrl,
+                        }));
+                        
+                        // Upload to storage for next time (non-blocking)
+                        uploadLifestyleImageToStorage(keyword, pexelsUrl)
+                          .then((storageUrl) => {
+                            if (storageUrl && __DEV__) {
+                              console.log(`[ProfileScreen] Lifestyle image uploaded to storage: ${keyword} -> ${storageUrl}`);
+                            }
+                          })
+                          .catch((err) => {
+                            console.warn(`[ProfileScreen] Failed to upload lifestyle image to storage:`, err);
+                          });
+                      }
+                    }
+                  };
+                  
+                  return (
+                    <View key={index} style={styles.lifestyleItem}>
+                      <View style={styles.lifestyleImageContainer}>
+                        {!hasFailedBucket && lifestyleImageUrl ? (
+                          // Try bucket first (fastest if image exists)
+                          <Image
+                            key={`bucket-${keyword}`}
+                            source={{ uri: lifestyleImageUrl }}
+                            style={styles.lifestyleImage}
+                            resizeMode="cover"
+                            onError={handleBucketImageError}
+                          />
+                        ) : pexelsImageUrl ? (
+                          // Use Pexels image if bucket failed
+                          <Image
+                            key={`pexels-${keyword}`}
+                            source={{ uri: pexelsImageUrl }}
+                            style={styles.lifestyleImage}
+                            resizeMode="cover"
+                            onError={() => {
+                              if (__DEV__) {
+                                console.warn(`[ProfileScreen] Pexels lifestyle image failed to load: ${pexelsImageUrl}`);
+                              }
+                              // Fallback to icon if Pexels also fails
+                            }}
+                          />
+                        ) : (
+                          // Fallback to icon if no images available
+                          <View style={styles.lifestyleImagePlaceholder}>
+                            <Ionicons name={iconName as any} size={24} color="#222B30" />
+                          </View>
+                        )}
+                      </View>
+                      <Text style={styles.lifestyleLabel}>{keyword}</Text>
+                    </View>
+                  );
+                })}
+                </ScrollView>
+              </View>
+            </View>
+          )}
+
           {/* Top Destinations Section */}
           {topDestinations.length > 0 && (
             <View style={styles.destinationsSection}>
@@ -2097,33 +2235,6 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
                   </View>
                 );
               })}
-            </View>
-          )}
-
-          {/* Lifestyle Section - Inside profileInfoSection, after destinations */}
-          {lifestyleKeywords.length > 0 && (
-            <View style={styles.lifestyleSectionWrapper}>
-              <View style={styles.lifestyleTitleContainer}>
-                <Text style={styles.lifestyleTitle}>Lifestyle</Text>
-              </View>
-              <ScrollView 
-                horizontal 
-                showsHorizontalScrollIndicator={false}
-                style={styles.lifestyleScrollView}
-                contentContainerStyle={styles.lifestyleContainer}
-              >
-                {lifestyleKeywords.slice(0, 6).map((keyword, index) => {
-                  const iconName = LIFESTYLE_ICON_MAP[keyword.toLowerCase()] || 'ellipse-outline';
-                  return (
-                    <View key={index} style={styles.lifestyleItem}>
-                      <View style={styles.lifestyleIconContainer}>
-                        <Ionicons name={iconName as any} size={24} color="#222B30" />
-                      </View>
-                      <Text style={styles.lifestyleLabel}>{keyword}</Text>
-                    </View>
-                  );
-                })}
-              </ScrollView>
             </View>
           )}
           </View>
@@ -2882,44 +2993,75 @@ const styles = StyleSheet.create({
     backgroundColor: '#E4E4E4',
   },
   lifestyleSectionWrapper: {
+    backgroundColor: colors.white,
+    borderRadius: 16,
+    paddingLeft: 16,
+    paddingVertical: 8,
+    gap: 8,
+    width: '100%',
     marginTop: 0,
     marginLeft: 0,
-    width: '100%',
-    gap: 7.5,
-    paddingLeft: 0,
-  },
-  lifestyleScrollView: {
-    marginTop: 6,
+    // Shadow: 0px 2px 16px 0px rgba(89,110,124,0.15)
+    ...Platform.select({
+      ios: {
+        shadowColor: '#596E7C',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.15,
+        shadowRadius: 16,
+      },
+      android: {
+        elevation: 4,
+      },
+      web: {
+        boxShadow: '0px 2px 16px 0px rgba(89, 110, 124, 0.15)',
+      },
+    }),
   },
   lifestyleTitleContainer: {
-    marginBottom: 6,
+    marginBottom: 0,
   },
   lifestyleTitle: {
-    fontSize: 13.5,
+    fontSize: 20,
     fontWeight: '700',
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
-    lineHeight: 16.5,
+    lineHeight: 24,
     color: colors.black,
+  },
+  lifestyleContainerWrapper: {
+    height: 91,
+    overflow: 'hidden',
+    width: '100%',
+  },
+  lifestyleScrollView: {
+    marginTop: 2,
   },
   lifestyleContainer: {
     flexDirection: 'row',
     gap: 12.613,
-    width: 350,
     paddingRight: 16,
   },
   lifestyleItem: {
-    width: 59.91,
     alignItems: 'center',
     gap: 0,
     marginBottom: 0,
   },
-  lifestyleIconContainer: {
-    width: 55.856,
-    height: 55.856,
-    borderRadius: 27.928,
+  lifestyleImageContainer: {
+    width: 92,
+    height: 70,
+    borderRadius: 4,
+    overflow: 'hidden',
     backgroundColor: colors.white,
-    borderWidth: 1,
-    borderColor: colors.black,
+  },
+  lifestyleImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 4,
+  },
+  lifestyleImagePlaceholder: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 4,
+    backgroundColor: colors.white,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -2930,6 +3072,7 @@ const styles = StyleSheet.create({
     lineHeight: 18.018,
     color: '#333333',
     textAlign: 'center',
+    marginTop: 0,
   },
   uploadLoadingOverlay: {
     position: 'absolute',
