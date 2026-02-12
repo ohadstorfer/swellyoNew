@@ -724,6 +724,7 @@ export const AppContent: React.FC = () => {
             if (boardTypeLower === 'shortboard') return 0;
             if (boardTypeLower === 'midlength' || boardTypeLower === 'mid_length') return 1;
             if (boardTypeLower === 'longboard') return 2;
+            if (boardTypeLower === 'softtop' || boardTypeLower === 'soft_top') return 3;
             return 0; // Default to shortboard
           };
           
@@ -732,6 +733,7 @@ export const AppContent: React.FC = () => {
               0: 'shortboard',
               1: 'midlength',
               2: 'longboard',
+              3: 'softtop',
             };
             return folderMap[boardType] || 'shortboard';
           };

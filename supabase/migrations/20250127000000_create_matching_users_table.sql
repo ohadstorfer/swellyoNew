@@ -33,3 +33,4 @@ CREATE INDEX IF NOT EXISTS idx_matching_users_destination ON matching_users(dest
 COMMENT ON TABLE matching_users IS 'Stores server-side match results for trip planning conversations';
 
 
+

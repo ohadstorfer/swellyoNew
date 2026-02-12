@@ -179,15 +179,6 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }
   }, [isRestoringSession]);
 
-  // Reset formData if it has invalid boardType when starting demo
-  useEffect(() => {
-    // If boardType is 3 (Soft Top) and we're on step 1, reset it to -1 for fresh start
-    if (currentStep === 1 && formData.boardType === 3 && isDemoUser) {
-      console.log('[OnboardingContext] Resetting boardType from 3 to -1 for demo user');
-      updateFormData({ boardType: -1 });
-    }
-  }, [currentStep, formData.boardType, isDemoUser]);
-
   // Save to local storage whenever step, formData, or isComplete changes (for step tracking and recovery)
   // Note: Supabase saving happens only when user presses "Next" button
   useEffect(() => {
@@ -195,15 +186,6 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       saveToLocalStorage();
     }
   }, [currentStep, formData, isLoaded, isComplete]);
-
-  // Reset formData if it has invalid boardType when starting demo
-  useEffect(() => {
-    // If boardType is 3 (Soft Top) and we're on step 1 as a demo user, reset it to -1 for fresh start
-    if (currentStep === 1 && formData.boardType === 3 && isDemoUser) {
-      console.log('[OnboardingContext] Resetting boardType from 3 to -1 for demo user');
-      setFormData(prev => ({ ...prev, boardType: -1 }));
-    }
-  }, [currentStep, formData.boardType, isDemoUser]);
 
   // Define resetOnboarding function early so it can be used in useEffect
   // Use useCallback to ensure stable reference for useEffect dependencies

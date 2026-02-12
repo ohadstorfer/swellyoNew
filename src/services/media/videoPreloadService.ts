@@ -361,6 +361,7 @@ const mapBoardTypeToNumber = (boardType: string): number => {
   if (boardTypeLower === 'shortboard') return 0;
   if (boardTypeLower === 'midlength' || boardTypeLower === 'mid_length') return 1;
   if (boardTypeLower === 'longboard') return 2;
+  if (boardTypeLower === 'softtop' || boardTypeLower === 'soft_top') return 3;
   return 0; // Default to shortboard
 };
 
