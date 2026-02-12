@@ -66,8 +66,8 @@ function generateEmailTemplate(data: EmailTemplateData, appUrl: string = 'https:
   const messageCount = messages.length;
   const isMultiple = messageCount > 1;
   
-  // Get conversation URL (using query parameter for deep linking)
-  const conversationUrl = `${appUrl}/?conversation=${conversationId}`;
+  // Get conversation URL (adjust based on your app's routing)
+  const conversationUrl = `${appUrl}/messages/${conversationId}`;
 
   return `
 <!DOCTYPE html>
@@ -337,7 +337,7 @@ async function sendSingleEmail(
   }
 
   const emailSubject = `${senderName} sent you a message on Swellyo`;
-  const emailTextContent = `You received a new message from ${senderName} on Swellyo.\n\n${messageData.body}\n\nView conversation: ${APP_URL}/?conversation=${conversationId}`;
+  const emailTextContent = `You received a new message from ${senderName} on Swellyo.\n\n${messageData.body}\n\nView conversation: ${APP_URL}/messages/${conversationId}`;
 
   try {
     const resendResponse = await fetch('https://api.resend.com/emails', {
