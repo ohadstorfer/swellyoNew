@@ -3,6 +3,7 @@ import { StatusBar } from 'expo-status-bar';
 import { PostHogProvider, PostHogSurveyProvider } from 'posthog-react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { OnboardingProvider } from './src/context/OnboardingContext';
+import { MessagingProvider } from './src/context/MessagingProvider';
 import { AppContent } from './src/components/AppContent';
 import { analyticsService } from './src/services/analytics/analyticsService';
 import { PostHogErrorBoundary } from './src/components/PostHogErrorBoundary';
@@ -39,15 +40,19 @@ export default function App() {
           >
             <PostHogSurveyProvider>
               <OnboardingProvider>
-                <AppContent />
-                <StatusBar style="light" />
+                <MessagingProvider>
+                  <AppContent />
+                  <StatusBar style="light" />
+                </MessagingProvider>
               </OnboardingProvider>
             </PostHogSurveyProvider>
           </PostHogProvider>
         ) : (
           <OnboardingProvider>
-            <AppContent />
-            <StatusBar style="light" />
+            <MessagingProvider>
+              <AppContent />
+              <StatusBar style="light" />
+            </MessagingProvider>
           </OnboardingProvider>
         )}
       </PostHogErrorBoundary>

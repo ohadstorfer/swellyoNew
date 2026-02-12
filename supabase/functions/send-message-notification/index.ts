@@ -61,13 +61,13 @@ function escapeHtml(text: string): string {
 /**
  * Generate HTML email template
  */
-function generateEmailTemplate(data: EmailTemplateData, appUrl: string = 'https://swellyo.com'): string {
+function generateEmailTemplate(data: EmailTemplateData, appUrl: string = 'https://swellyomvp.netlify.app'): string {
   const { sender, messages, conversationId, recipientName } = data;
   const messageCount = messages.length;
   const isMultiple = messageCount > 1;
   
-  // Get conversation URL (adjust based on your app's routing)
-  const conversationUrl = `${appUrl}/messages/${conversationId}`;
+  // Get conversation URL (using query parameter for deep linking)
+  const conversationUrl = `${appUrl}/?conversation=${conversationId}`;
 
   return `
 <!DOCTYPE html>
@@ -122,14 +122,38 @@ function generateEmailTemplate(data: EmailTemplateData, appUrl: string = 'https:
               <!-- Messages -->
               <div style="margin-bottom: 32px;">
                 ${messages.map((message, index) => `
-                  <div style="margin-bottom: ${index < messages.length - 1 ? '20px' : '0'}; padding: 16px; background-color: #f9f9f9; border-radius: 12px; border-left: 3px solid #B72DF2;">
-                    <p style="margin: 0 0 8px 0; color: #333333; font-size: 16px; line-height: 24px; white-space: pre-wrap; word-wrap: break-word;">
-                      ${escapeHtml(message.body || '')}
-                    </p>
-                    <p style="margin: 0; color: #7B7B7B; font-size: 12px;">
-                      ${formatTimestamp(message.created_at)}
-                    </p>
-                  </div>
+                   <div style="
+      margin-bottom: ${index < messages.length - 1 ? '20px' : '0'};
+      padding: 16px 16px 16px 0px;
+      background-color: #f9f9f9;
+      border-radius: 12px;
+      border-left: 3px solid #B72DF2;
+      text-align: left;
+    ">
+      
+      <p style="
+        margin: 0 0 8px 0;
+        color: #333333;
+        font-size: 16px;
+        line-height: 24px;
+        white-space: pre-wrap;
+        word-break: break-word;
+        text-align: left;
+      ">
+        ${escapeHtml(message.body || '')}
+      </p>
+
+      <p style="
+        margin: 0;
+        color: #7B7B7B;
+        font-size: 12px;
+        text-align: left;
+        padding-left: 6px;
+      ">
+        ${formatTimestamp(message.created_at)}
+      </p>
+
+    </div>
                 `).join('')}
               </div>
 
@@ -168,7 +192,7 @@ function generateEmailTemplate(data: EmailTemplateData, appUrl: string = 'https:
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-const APP_URL = Deno.env.get('APP_URL') || 'https://swellyo.com'
+const APP_URL = Deno.env.get('APP_URL') || 'https://swellyomvp.netlify.app'
 
 // Resend email service configuration
 const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY')
@@ -313,7 +337,7 @@ async function sendSingleEmail(
   }
 
   const emailSubject = `${senderName} sent you a message on Swellyo`;
-  const emailTextContent = `You received a new message from ${senderName} on Swellyo.\n\n${messageData.body}\n\nView conversation: ${APP_URL}/messages/${conversationId}`;
+  const emailTextContent = `You received a new message from ${senderName} on Swellyo.\n\n${messageData.body}\n\nView conversation: ${APP_URL}/?conversation=${conversationId}`;
 
   try {
     const resendResponse = await fetch('https://api.resend.com/emails', {

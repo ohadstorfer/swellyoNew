@@ -18,6 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import Svg, { Path, G, ClipPath, Defs, Rect } from 'react-native-svg';
 import { usePostHog } from 'posthog-react-native';
 import { messagingService, Conversation } from '../services/messaging/messagingService';
+import { useMessaging } from '../context/MessagingProvider';
 import { supabaseAuthService } from '../services/auth/supabaseAuthService';
 import { authService } from '../services/auth/authService';
 import { useOnboarding } from '../context/OnboardingContext';
@@ -112,8 +113,8 @@ export default function ConversationsScreen({
   // Arrow animation for welcome instruction
   const arrowAnim = useRef(new Animated.Value(0)).current;
   
-  const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [loading, setLoading] = useState(false); // Start as false to show conversations immediately
+  // Use MessagingProvider for conversations state
+  const { conversations, loading, refreshConversations, setCurrentConversationId } = useMessaging();
   const [conversationsLoaded, setConversationsLoaded] = useState(false); // Track if conversations have been loaded
   const [showSkeletons, setShowSkeletons] = useState(false); // Delayed skeleton display to avoid flicker
   const [userInfoLoading, setUserInfoLoading] = useState(false); // Track user info loading state
@@ -222,15 +223,10 @@ export default function ConversationsScreen({
     
     initializeUserInfo();
 
-    // Subscribe to conversation updates
-    const unsubscribe = messagingService.subscribeToConversations(() => {
-      loadConversations();
-    });
-
-    return () => {
-      unsubscribe();
-    };
-  }, []);
+    // Conversations are now managed by MessagingProvider
+    // No need to subscribe here - MessagingProvider handles it
+    setConversationsLoaded(true);
+  }, [refreshConversations]);
 
   // Check if user has sent any direct messages to show survey bubble (MVP mode only)
   // This runs when component mounts, when user ID changes, or when returning from a conversation
@@ -379,6 +375,8 @@ export default function ConversationsScreen({
     }
   };
 
+  // Conversations are now loaded by MessagingProvider
+  // This function is kept for backward compatibility but just triggers refresh
   const loadConversations = async () => {
     try {
       // Delay showing skeletons to avoid flicker for fast loads
@@ -386,17 +384,13 @@ export default function ConversationsScreen({
         setShowSkeletons(true);
       }, SKELETON_DELAY_MS);
       
-      setLoading(true);
-      const convos = await messagingService.getConversations();
+      await refreshConversations();
       
       clearTimeout(skeletonTimeout);
-      setConversations(convos);
-      setLoading(false);
       setShowSkeletons(false);
       setConversationsLoaded(true); // Mark as loaded after successful fetch
     } catch (error) {
       console.error('Error loading conversations:', error);
-      setLoading(false);
       setShowSkeletons(false);
       setConversationsLoaded(true); // Mark as loaded even on error
     }
@@ -539,6 +533,10 @@ export default function ConversationsScreen({
       
       if (existingConv && existingConv.other_user) {
         // Conversation exists, use it
+        // Set current conversation in MessagingProvider for unread logic
+        if (conv.id) {
+          setCurrentConversationId(conv.id);
+        }
         setSelectedConversation({
           id: existingConv.id,
           otherUserId: userId,
@@ -551,6 +549,10 @@ export default function ConversationsScreen({
         const { supabaseDatabaseService } = await import('../services/database/supabaseDatabaseService');
         const surferData = await supabaseDatabaseService.getSurferByUserId(userId);
         
+        // Set current conversation in MessagingProvider for unread logic
+        if (conv.id) {
+          setCurrentConversationId(conv.id);
+        }
         setSelectedConversation({
           // No id - this is a pending conversation
           otherUserId: userId,
@@ -565,6 +567,7 @@ export default function ConversationsScreen({
   };
 
   const handleBackFromChat = () => {
+    setCurrentConversationId(null);
     setSelectedConversation(null);
     loadConversations();
   };
@@ -1000,7 +1003,11 @@ export default function ConversationsScreen({
         onViewProfile={onViewUserProfile}
         onConversationCreated={(conversationId) => {
           // Update selectedConversation with the created conversation ID
-          setSelectedConversation({
+          // Set current conversation in MessagingProvider for unread logic
+        if (conv.id) {
+          setCurrentConversationId(conv.id);
+        }
+        setSelectedConversation({
             ...selectedConversation,
             id: conversationId,
           });

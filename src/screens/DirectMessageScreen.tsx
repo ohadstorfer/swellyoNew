@@ -11,6 +11,7 @@ import {
   ActivityIndicator,
   ImageBackground,
   Alert,
+  Animated,
 } from 'react-native';
 import { TextInput as PaperTextInput } from 'react-native-paper';
 import { Ionicons } from '@expo/vector-icons';
@@ -24,6 +25,9 @@ import { ProfileImage } from '../components/ProfileImage';
 import { MessageListSkeleton } from '../components/skeletons';
 import { SKELETON_DELAY_MS } from '../constants/loading';
 import { analyticsService } from '../services/analytics/analyticsService';
+import { chatHistoryCache } from '../services/messaging/chatHistoryCache';
+import { MessageActionsMenu } from '../components/MessageActionsMenu';
+import { useMessaging } from '../context/MessagingProvider';
 
 interface DirectMessageScreenProps {
   conversationId?: string; // Optional: undefined for pending conversations (will be created on first message)
@@ -48,6 +52,9 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   onConversationCreated,
   onViewProfile,
 }) => {
+  // Get markAsRead and setCurrentConversationId from MessagingProvider
+  const { markAsRead, setCurrentConversationId: setMessagingCurrentConversationId } = useMessaging();
+  
   // Debug: Log props immediately on every render (synchronous)
   console.log('[DirectMessageScreen] === COMPONENT RENDER ===');
   console.log('[DirectMessageScreen] onViewProfile exists:', !!onViewProfile);
@@ -77,8 +84,16 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const [hasTrackedFirstMessage, setHasTrackedFirstMessage] = useState(false);
   const [hasTrackedFirstReply, setHasTrackedFirstReply] = useState(false);
   const [firstMessageSentTime, setFirstMessageSentTime] = useState<number | null>(null);
+  const [isTyping, setIsTyping] = useState(false); // Typing indicator state
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editingText, setEditingText] = useState('');
+  const [menuVisible, setMenuVisible] = useState(false);
+  const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
+  const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
   const scrollViewRef = useRef<ScrollView>(null);
   const textInputRef = useRef<any>(null);
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const typingDebounceRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     // Get current user ID
@@ -121,49 +136,110 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     if (currentConversationId) {
       loadMessages();
 
+      // Set current conversation in MessagingProvider (use renamed function to avoid conflict)
+      setMessagingCurrentConversationId(currentConversationId);
+      
       // Mark conversation as read
-      messagingService.markAsRead(currentConversationId).catch(err => {
+      markAsRead(currentConversationId).catch(err => {
         console.error('Error marking as read:', err);
       });
 
-      // Subscribe to new messages
+      // Subscribe to messages with unified subscription (INSERT, UPDATE, DELETE, typing)
       const unsubscribe = messagingService.subscribeToMessages(
         currentConversationId,
-        (newMessage) => {
-              // Track first reply received (only once, and only if message is from other user)
-              if (!hasTrackedFirstReply && newMessage.sender_id !== currentUserId && currentUserId) {
-                const timeToReplyMinutes = firstMessageSentTime 
-                  ? (Date.now() - firstMessageSentTime) / (1000 * 60)
-                  : undefined;
-                analyticsService.trackReplyReceived(timeToReplyMinutes, currentConversationId);
-                setHasTrackedFirstReply(true);
-              }
-          
-          // Check if message already exists (avoid duplicates)
-          setMessages((prev) => {
-            const exists = prev.some(msg => msg.id === newMessage.id);
-            if (exists) {
-              return prev;
+        {
+          onNewMessage: (newMessage) => {
+            // Track first reply received (only once, and only if message is from other user)
+            if (!hasTrackedFirstReply && newMessage.sender_id !== currentUserId && currentUserId) {
+              const timeToReplyMinutes = firstMessageSentTime 
+                ? (Date.now() - firstMessageSentTime) / (1000 * 60)
+                : undefined;
+              analyticsService.trackReplyReceived(timeToReplyMinutes, currentConversationId);
+              setHasTrackedFirstReply(true);
             }
-            return [...prev, newMessage];
-          });
-          messagingService.markAsRead(currentConversationId, newMessage.id).catch(err => {
-            console.error('Error marking message as read:', err);
-          });
-          setTimeout(() => scrollToBottom(), 100);
+        
+            // Check if message already exists (avoid duplicates)
+            setMessages((prev) => {
+              const exists = prev.some(msg => msg.id === newMessage.id);
+              if (exists) {
+                return prev;
+              }
+              const updated = [...prev, newMessage];
+              // Update cache
+              chatHistoryCache.saveMessages(currentConversationId, updated).catch(err => {
+                console.error('Error updating cache:', err);
+              });
+              return updated;
+            });
+            markAsRead(currentConversationId).catch(err => {
+              console.error('Error marking message as read:', err);
+            });
+            setTimeout(() => scrollToBottom(), 100);
+          },
+          onMessageUpdated: (updatedMessage) => {
+            // Handle message edit
+            setMessages((prev) => {
+              const updated = prev.map(msg => 
+                msg.id === updatedMessage.id ? updatedMessage : msg
+              );
+              // Update cache
+              chatHistoryCache.updateMessage(currentConversationId, updatedMessage.id, updatedMessage).catch(err => {
+                console.error('Error updating message in cache:', err);
+              });
+              return updated;
+            });
+          },
+          onMessageDeleted: (messageId) => {
+            // Handle message deletion
+            setMessages((prev) => {
+              const updated = prev.filter(msg => msg.id !== messageId);
+              // Update cache
+              chatHistoryCache.updateMessage(currentConversationId, messageId, null).catch(err => {
+                console.error('Error updating deleted message in cache:', err);
+              });
+              return updated;
+            });
+          },
+          onTyping: (userId, isTyping) => {
+            // Only show typing indicator for other user
+            if (userId !== currentUserId) {
+              setIsTyping(isTyping);
+            }
+          },
         }
       );
 
       return () => {
         unsubscribe();
+        setIsTyping(false);
+        // Clean up typing indicators
+        if (typingDebounceRef.current) {
+          clearTimeout(typingDebounceRef.current);
+          typingDebounceRef.current = null;
+        }
+        if (typingTimeoutRef.current) {
+          clearTimeout(typingTimeoutRef.current);
+          typingTimeoutRef.current = null;
+        }
+        messagingService.stopTyping(currentConversationId).catch(() => {});
       };
     } else {
       // No conversation yet - clear messages and stop loading
       setMessages([]);
       setIsFetchingMessages(false);
       setShowSkeletons(false);
+      setIsTyping(false);
+      // Clear current conversation in MessagingProvider
+      setMessagingCurrentConversationId(null);
     }
-  }, [currentConversationId]);
+    
+    // Cleanup: Clear current conversation when component unmounts or conversation changes
+    return () => {
+      if (currentConversationId) {
+        setMessagingCurrentConversationId(null);
+      }
+    };
+  }, [currentConversationId, currentUserId, markAsRead, setMessagingCurrentConversationId]);
 
   const loadOtherUserAdvRole = async () => {
     if (!currentConversationId || !otherUserId) return;
@@ -209,8 +285,38 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         // We have messages, so don't show skeletons at all
         setShowSkeletons(false);
       }
-      const msgs = await messagingService.getMessages(currentConversationId);
-      setMessages(msgs);
+
+      // Load from cache first (instant display)
+      const cachedMessages = await chatHistoryCache.loadCachedMessages(currentConversationId);
+      if (cachedMessages && cachedMessages.length > 0) {
+        setMessages(cachedMessages);
+        // Load other user's adv_role
+        await loadOtherUserAdvRole();
+        // Scroll to bottom after messages load
+        setTimeout(() => scrollToBottom(), 200);
+      }
+
+      // Then sync with server in background (incremental sync)
+      const lastMessageId = await chatHistoryCache.getLastMessageId(currentConversationId);
+      const serverMessages = await messagingService.getMessages(
+        currentConversationId,
+        50,
+        lastMessageId || undefined
+      );
+
+      if (serverMessages.length > 0) {
+        // Merge with cached messages
+        const merged = chatHistoryCache.mergeMessages(cachedMessages || [], serverMessages);
+        setMessages(merged);
+        // Save to cache
+        await chatHistoryCache.saveMessages(currentConversationId, merged);
+      } else if (!cachedMessages || cachedMessages.length === 0) {
+        // No cache and no new messages, fetch all
+        const allMessages = await messagingService.getMessages(currentConversationId, 30);
+        setMessages(allMessages);
+        await chatHistoryCache.saveMessages(currentConversationId, allMessages);
+      }
+
       // Load other user's adv_role
       await loadOtherUserAdvRole();
       // Scroll to bottom after messages load
@@ -268,34 +374,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             onConversationCreated(targetConversationId);
           }
           
-          // Subscribe to messages for the new conversation
-          const unsubscribe = messagingService.subscribeToMessages(
-            targetConversationId,
-            (newMessage) => {
-              // Track first reply received (only once, and only if message is from other user)
-              if (!hasTrackedFirstReply && newMessage.sender_id !== currentUserId && currentUserId) {
-                const timeToReplyMinutes = firstMessageSentTime 
-                  ? (Date.now() - firstMessageSentTime) / (1000 * 60)
-                  : undefined;
-                analyticsService.trackReplyReceived(timeToReplyMinutes, targetConversationId);
-                setHasTrackedFirstReply(true);
-              }
-              
-              setMessages((prev) => {
-                const exists = prev.some(msg => msg.id === newMessage.id);
-                if (exists) {
-                  return prev;
-                }
-                return [...prev, newMessage];
-              });
-              if (targetConversationId) {
-                messagingService.markAsRead(targetConversationId, newMessage.id).catch(err => {
-                  console.error('Error marking message as read:', err);
-                });
-              }
-              setTimeout(() => scrollToBottom(), 100);
-            }
-          );
+          // Note: Subscription is handled in the main useEffect, no need to duplicate here
           
           // Store unsubscribe function (we'll need to clean it up on unmount)
           // For now, we'll let it run - the component will handle cleanup
@@ -358,10 +437,12 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         const filtered = prev.filter(msg => msg.id !== tempId);
         // Check if message already exists (from subscription)
         const exists = filtered.some(msg => msg.id === sentMessage.id);
-        if (exists) {
-          return filtered;
-        }
-        return [...filtered, sentMessage];
+        const updated = exists ? filtered : [...filtered, sentMessage];
+        // Update cache
+        chatHistoryCache.saveMessages(targetConversationId, updated).catch(err => {
+          console.error('Error updating cache:', err);
+        });
+        return updated;
       });
       
       setTimeout(() => scrollToBottom(), 100);
@@ -380,6 +461,220 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     requestAnimationFrame(() => {
       scrollViewRef.current?.scrollToEnd({ animated: true });
     });
+  };
+
+  // Handle typing indicator (debounced)
+  useEffect(() => {
+    if (!currentConversationId || !inputText.trim()) {
+      // Clear typing indicator when input is empty
+      if (typingDebounceRef.current) {
+        clearTimeout(typingDebounceRef.current);
+        typingDebounceRef.current = null;
+      }
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+        typingTimeoutRef.current = null;
+      }
+      messagingService.stopTyping(currentConversationId!).catch(() => {});
+      return;
+    }
+
+    // Debounce: send typing indicator after 300ms of inactivity
+    if (typingDebounceRef.current) {
+      clearTimeout(typingDebounceRef.current);
+    }
+
+    typingDebounceRef.current = setTimeout(() => {
+      if (currentConversationId && inputText.trim()) {
+        messagingService.startTyping(currentConversationId).catch(() => {});
+      }
+    }, 300);
+
+    // Clear typing indicator after 3 seconds of no typing
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+    typingTimeoutRef.current = setTimeout(() => {
+      if (currentConversationId) {
+        messagingService.stopTyping(currentConversationId).catch(() => {});
+      }
+    }, 3000);
+
+    return () => {
+      if (typingDebounceRef.current) {
+        clearTimeout(typingDebounceRef.current);
+      }
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
+    };
+  }, [inputText, currentConversationId]);
+
+  // Handle message edit
+  const handleEditMessage = async (messageId: string, newBody: string) => {
+    if (!currentConversationId || !newBody.trim()) return;
+
+    try {
+      // Optimistic update
+      setMessages((prev) => {
+        const updated = prev.map(msg => 
+          msg.id === messageId 
+            ? { ...msg, body: newBody, edited: true, updated_at: new Date().toISOString() }
+            : msg
+        );
+        chatHistoryCache.updateMessage(currentConversationId, messageId, updated.find(m => m.id === messageId) || null).catch(() => {});
+        return updated;
+      });
+
+      const updatedMessage = await messagingService.editMessage(currentConversationId, messageId, newBody);
+      
+      // Update with server response
+      setMessages((prev) => {
+        const updated = prev.map(msg => 
+          msg.id === messageId ? updatedMessage : msg
+        );
+        chatHistoryCache.updateMessage(currentConversationId, messageId, updatedMessage).catch(() => {});
+        return updated;
+      });
+
+      setEditingMessageId(null);
+      setEditingText('');
+    } catch (error: any) {
+      console.error('Error editing message:', error);
+      Alert.alert('Error', error?.message || 'Failed to edit message');
+      // Rollback optimistic update
+      loadMessages();
+    }
+  };
+
+  // Handle message delete
+  const handleDeleteMessage = async (messageId: string) => {
+    if (!currentConversationId) return;
+
+    Alert.alert(
+      'Delete Message',
+      'Are you sure you want to delete this message?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              // Optimistic update
+              setMessages((prev) => {
+                const updated = prev.map(msg => 
+                  msg.id === messageId 
+                    ? { ...msg, deleted: true, body: null }
+                    : msg
+                );
+                chatHistoryCache.updateMessage(currentConversationId, messageId, null).catch(() => {});
+                return updated;
+              });
+
+              await messagingService.deleteMessage(currentConversationId, messageId);
+            } catch (error: any) {
+              console.error('Error deleting message:', error);
+              Alert.alert('Error', error?.message || 'Failed to delete message');
+              // Rollback optimistic update
+              loadMessages();
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  // Handle long press on message
+  const handleMessageLongPress = (message: Message, event: any) => {
+    if (!currentUserId || message.sender_id !== currentUserId) return;
+    if (message.deleted) return;
+
+    const { pageX, pageY } = event.nativeEvent;
+    setSelectedMessage(message);
+    setEditingText(message.body || ''); // Initialize edit text
+    setMenuPosition({ x: pageX, y: pageY });
+    setMenuVisible(true);
+  };
+
+  // Check if message can be edited (within 15 minutes)
+  const canEditMessage = (message: Message): boolean => {
+    if (!currentUserId || message.sender_id !== currentUserId) return false;
+    if (message.deleted) return false;
+    
+    const messageAge = Date.now() - new Date(message.created_at).getTime();
+    const fifteenMinutes = 15 * 60 * 1000;
+    return messageAge <= fifteenMinutes;
+  };
+
+  // Typing Indicator Component
+  const TypingIndicator = () => {
+    const dot1 = useRef(new Animated.Value(0)).current;
+    const dot2 = useRef(new Animated.Value(0)).current;
+    const dot3 = useRef(new Animated.Value(0)).current;
+
+    useEffect(() => {
+      if (!isTyping) return;
+
+      const animateDot = (dot: Animated.Value, delay: number) => {
+        return Animated.loop(
+          Animated.sequence([
+            Animated.delay(delay),
+            Animated.timing(dot, {
+              toValue: 1,
+              duration: 400,
+              useNativeDriver: true,
+            }),
+            Animated.timing(dot, {
+              toValue: 0,
+              duration: 400,
+              useNativeDriver: true,
+            }),
+          ])
+        );
+      };
+
+      const animations = [
+        animateDot(dot1, 0),
+        animateDot(dot2, 200),
+        animateDot(dot3, 400),
+      ];
+
+      animations.forEach(anim => anim.start());
+
+      return () => {
+        animations.forEach(anim => anim.stop());
+      };
+    }, [isTyping]);
+
+    if (!isTyping) return null;
+
+    const opacity1 = dot1.interpolate({
+      inputRange: [0, 1],
+      outputRange: [0.3, 1],
+    });
+
+    const opacity2 = dot2.interpolate({
+      inputRange: [0, 1],
+      outputRange: [0.3, 1],
+    });
+
+    const opacity3 = dot3.interpolate({
+      inputRange: [0, 1],
+      outputRange: [0.3, 1],
+    });
+
+    return (
+      <View style={[styles.messageContainer, styles.botMessageContainer]}>
+        <View style={[styles.messageBubble, styles.botMessageBubble]}>
+          <View style={styles.typingContainer}>
+            <Animated.View style={[styles.typingDot, { opacity: opacity1 }]} />
+            <Animated.View style={[styles.typingDot, { opacity: opacity2 }]} />
+            <Animated.View style={[styles.typingDot, { opacity: opacity3 }]} />
+          </View>
+        </View>
+      </View>
+    );
   };
 
   // Reset input height when text is cleared
@@ -410,6 +705,8 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     }
     
     const isOwnMessage = message.sender_id === currentUserId;
+    const isEditing = editingMessageId === message.id;
+    const canEdit = canEditMessage(message);
     
     // For group chats, show avatar for received messages
     // For direct messages (2 users), don't show avatar since it's always the same person
@@ -418,8 +715,10 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     const senderAvatar = message.sender_avatar || message.sender?.avatar || otherUserAvatar;
     
     return (
-      <View
+      <TouchableOpacity
         key={message.id}
+        activeOpacity={0.7}
+        onLongPress={(e) => handleMessageLongPress(message, e)}
         style={[
           styles.messageContainer,
           isOwnMessage ? styles.userMessageContainer : [
@@ -461,13 +760,52 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         >
           {/* Message text container with gap */}
           <View style={styles.messageTextContainer}>
-            <Text style={[
-              isOwnMessage ? styles.userMessageText : styles.botMessageText,
-              !isOwnMessage && otherUserAdvRole === 'adv_giver' && styles.botMessageTextGiveAdv,
-              !isOwnMessage && otherUserAdvRole === 'adv_seeker' && styles.botMessageTextGetAdv,
-            ]}>
-              {message.body || ''}
-            </Text>
+            {isEditing ? (
+              <View style={styles.editContainer}>
+                <PaperTextInput
+                  value={editingText}
+                  onChangeText={setEditingText}
+                  multiline
+                  style={styles.editInput}
+                  autoFocus
+                />
+                <View style={styles.editActions}>
+                  <TouchableOpacity
+                    onPress={() => {
+                      setEditingMessageId(null);
+                      setEditingText('');
+                    }}
+                    style={styles.editButton}
+                  >
+                    <Text style={styles.editButtonText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => handleEditMessage(message.id, editingText)}
+                    style={[styles.editButton, styles.editButtonSave]}
+                  >
+                    <Text style={[styles.editButtonText, styles.editButtonTextSave]}>Save</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : message.deleted ? (
+              <Text style={[
+                isOwnMessage ? styles.userMessageText : styles.botMessageText,
+                styles.deletedMessageText,
+              ]}>
+                This message was deleted
+              </Text>
+            ) : (
+              <Text style={[
+                isOwnMessage ? styles.userMessageText : styles.botMessageText,
+                !isOwnMessage && otherUserAdvRole === 'adv_giver' && styles.botMessageTextGiveAdv,
+                !isOwnMessage && otherUserAdvRole === 'adv_seeker' && styles.botMessageTextGetAdv,
+              ]}>
+                {message.body || ''}
+              </Text>
+            )}
+            {message.edited && !message.deleted && (
+              <Text style={styles.editedBadge}>(edited)</Text>
+            )}
           </View>
           
           {/* Timestamp container with rounded corners (Figma design) */}
@@ -483,7 +821,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             </Text>
           </View>
         </View>
-      </View>
+      </TouchableOpacity>
     );
   };
 
@@ -577,9 +915,13 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
               </Text>
             </View>
           ) : (
-            messages
-              .map(renderMessage)
-              .filter(msg => msg !== null) // Filter out null messages (when variables not ready)
+            <>
+              {messages
+                .map(renderMessage)
+                .filter(msg => msg !== null) // Filter out null messages (when variables not ready)
+              }
+              <TypingIndicator />
+            </>
           )}
           {/* {isLoading && (
             <View style={[styles.messageContainer, styles.botMessageContainer]}>
@@ -640,17 +982,19 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                   }
                 }}
                 onKeyPress={(e: any) => {
-                  // Best practice: Enter sends, Shift+Enter creates new line
+                  // On web: Enter sends, Shift+Enter creates new line
+                  // On native: Enter always creates new line (no send on Enter)
                   if (Platform.OS === 'web' && e.nativeEvent.key === 'Enter') {
                     const isShiftPressed = (e.nativeEvent as any).shiftKey;
                     
                     if (!isShiftPressed) {
-                      // Enter without Shift: send message
+                      // Enter without Shift: send message (web only)
                       e.preventDefault();
                       sendMessage();
                     }
                     // Shift+Enter: allow new line (default behavior, don't prevent)
                   }
+                  // On native: Enter key always creates new line (default behavior)
                 }}
                 // Enable scrolling only when we've reached max height
                 scrollEnabled={inputHeight >= 120}
@@ -710,6 +1054,28 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
           </View>
         </View>
       </KeyboardAvoidingView>
+
+      {/* Message Actions Menu */}
+      <MessageActionsMenu
+        visible={menuVisible}
+        onClose={() => {
+          setMenuVisible(false);
+          setSelectedMessage(null);
+        }}
+        onEdit={() => {
+          if (selectedMessage && canEditMessage(selectedMessage)) {
+            setEditingMessageId(selectedMessage.id);
+            setEditingText(selectedMessage.body || '');
+          }
+        }}
+        onDelete={() => {
+          if (selectedMessage) {
+            handleDeleteMessage(selectedMessage.id);
+          }
+        }}
+        canEdit={selectedMessage ? canEditMessage(selectedMessage) : false}
+        messagePosition={menuPosition}
+      />
     </SafeAreaView>
   );
 };
@@ -1082,5 +1448,64 @@ const styles = StyleSheet.create({
   },
   sendButtonDisabled: {
     opacity: 0.5,
+  },
+  typingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 8,
+  },
+  typingDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#333333',
+  },
+  editContainer: {
+    width: '100%',
+  },
+  editInput: {
+    backgroundColor: 'transparent',
+    padding: 0,
+    margin: 0,
+    fontSize: 16,
+    minHeight: 40,
+  },
+  editActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: spacing.sm,
+    marginTop: spacing.xs,
+  },
+  editButton: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: 8,
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.textSecondary,
+  },
+  editButtonSave: {
+    backgroundColor: colors.primary || '#B72DF2',
+    borderColor: colors.primary || '#B72DF2',
+  },
+  editButtonText: {
+    fontSize: 14,
+    color: colors.text,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+  },
+  editButtonTextSave: {
+    color: colors.white,
+  },
+  editedBadge: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    fontStyle: 'italic',
+    marginTop: 4,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+  },
+  deletedMessageText: {
+    fontStyle: 'italic',
+    opacity: 0.6,
   },
 });
