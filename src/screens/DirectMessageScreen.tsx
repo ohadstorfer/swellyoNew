@@ -335,11 +335,32 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     const messageText = inputText.trim();
     const tempId = `temp-${Date.now()}`;
     
-    // Determine conversation ID - create if it doesn't exist
+    // 1. Show message immediately (optimistic) - BEFORE conversation creation
+    const tempConversationId = currentConversationId || `temp-conv-${Date.now()}`;
+    const optimisticMessage: Message = {
+      id: tempId,
+      conversation_id: tempConversationId,
+      sender_id: currentUserId,
+      body: messageText,
+      rendered_body: null,
+      attachments: [],
+      is_system: false,
+      edited: false,
+      deleted: false,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    setMessages((prev) => [...prev, optimisticMessage]);
+    setInputText('');
+    
+    // Scroll to bottom immediately
+    setTimeout(() => scrollToBottom(), 50);
+    
+    // 2. Create conversation if needed (still blocking, but message already visible)
     let targetConversationId = currentConversationId;
     
     if (!targetConversationId) {
-      // Create conversation on first message (WhatsApp-like behavior)
       try {
         setIsLoading(true);
         setLoadingMessage('');
@@ -366,6 +387,16 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
           targetConversationId = conversation.id;
           setCurrentConversationId(targetConversationId);
           
+          // Update optimistic message with real conversation ID
+          setMessages((prev) => prev.map(msg => 
+            msg.id === tempId 
+              ? { ...msg, conversation_id: targetConversationId }
+              : msg
+          ));
+          
+          // Set in MessagingProvider
+          setMessagingCurrentConversationId(targetConversationId);
+          
           // Load other user's adv_role for the new conversation
           await loadOtherUserAdvRole();
           
@@ -373,11 +404,6 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
           if (onConversationCreated) {
             onConversationCreated(targetConversationId);
           }
-          
-          // Note: Subscription is handled in the main useEffect, no need to duplicate here
-          
-          // Store unsubscribe function (we'll need to clean it up on unmount)
-          // For now, we'll let it run - the component will handle cleanup
         } catch (error) {
           // Clear timeouts on error
           clearTimeout(feedbackTimeout);
@@ -387,6 +413,9 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       } catch (error: any) {
         console.error('Error creating conversation:', error);
         const errorMessage = error?.message || 'Failed to create conversation. Please try again.';
+        // Remove optimistic message on error
+        setMessages((prev) => prev.filter(msg => msg.id !== tempId));
+        setInputText(messageText); // Restore input text
         Alert.alert('Error', errorMessage);
         setIsLoading(false);
         setLoadingMessage('');
@@ -394,28 +423,9 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       }
     }
     
-    // Optimistic update: Add message immediately to UI
-    const optimisticMessage: Message = {
-      id: tempId,
-      conversation_id: targetConversationId,
-      sender_id: currentUserId,
-      body: messageText,
-      rendered_body: null,
-      attachments: [],
-      is_system: false,
-      edited: false,
-      deleted: false,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-
-    setMessages((prev) => [...prev, optimisticMessage]);
-    setInputText('');
     setIsLoading(true);
-    
-    // Scroll to bottom immediately
-    setTimeout(() => scrollToBottom(), 50);
 
+    // 3. Send message to server (replace optimistic message with real one)
     try {
       // At this point, targetConversationId should always be defined
       if (!targetConversationId) {
@@ -451,6 +461,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       // Remove optimistic message on error
       setMessages((prev) => prev.filter(msg => msg.id !== tempId));
       setInputText(messageText); // Restore input text
+      Alert.alert('Error', 'Failed to send message. Please try again.');
     } finally {
       setIsLoading(false);
     }
