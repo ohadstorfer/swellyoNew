@@ -10,3 +10,4 @@ CREATE INDEX IF NOT EXISTS idx_messages_conversation_updated
 -- 2. Conflict resolution when merging cached and server messages
 -- 3. Real-time subscription filtering for UPDATE events
 
+

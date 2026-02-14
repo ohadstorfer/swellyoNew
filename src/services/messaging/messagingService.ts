@@ -17,6 +17,7 @@ export interface Conversation {
   // Enriched fields from joins
   last_message?: Message;
   unread_count?: number;
+  unread_truncated?: boolean; // Indicates if unread count was truncated due to query limit
   other_user?: ConversationMember;
   members?: ConversationMember[];
 }
@@ -95,8 +96,11 @@ class MessagingService {
   /**
    * Get all conversations for the current user
    * OPTIMIZED: Batches all queries to avoid N+1 problem
+   * @param limit - Maximum number of conversations to fetch (default: 50)
+   * @param offset - Number of conversations to skip (default: 0)
+   * @returns Object with conversations array and hasMore boolean indicating if more conversations exist
    */
-  async getConversations(): Promise<Conversation[]> {
+  async getConversations(limit: number = 50, offset: number = 0): Promise<{ conversations: Conversation[], hasMore: boolean }> {
     if (!isSupabaseConfigured()) {
       throw new Error('Supabase is not configured');
     }
@@ -112,21 +116,29 @@ class MessagingService {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         console.log('[messagingService] No user in getConversations - auth guard will handle redirect');
-        return []; // Return empty array, auth guard will redirect
+        return { conversations: [], hasMore: false }; // Return empty array, auth guard will redirect
       }
 
-      // Get all conversations where user is a member
+      // Get conversations where user is a member with pagination
+      // Fetch limit+1 to determine if there are more conversations
       const { data: membershipData, error: membershipError } = await supabase
         .from('conversation_members')
         .select('conversation_id')
-        .eq('user_id', user.id);
+        .eq('user_id', user.id)
+        .order('joined_at', { ascending: false })
+        .range(offset, offset + limit);
 
       if (membershipError) throw membershipError;
 
-      const conversationIds = membershipData.map(m => m.conversation_id);
+      // Check if there are more conversations (if we got limit+1, there are more)
+      const hasMore = membershipData && membershipData.length > limit;
+      
+      // Take only the requested limit (remove the extra one we fetched)
+      const paginatedMembershipData = membershipData ? membershipData.slice(0, limit) : [];
+      const conversationIds = paginatedMembershipData.map(m => m.conversation_id);
 
       if (conversationIds.length === 0) {
-        return [];
+        return { conversations: [], hasMore: false };
       }
 
       // OPTIMIZATION 1: Get conversation details with specific columns
@@ -142,25 +154,34 @@ class MessagingService {
         return [];
       }
 
-      // OPTIMIZATION 2: Batch fetch all last messages in parallel using a single query per conversation
-      // (Supabase doesn't support window functions easily, so we'll use a more efficient approach)
-      const lastMessagesPromises = conversations.map(conv =>
-        supabase
-          .from('messages')
-          .select('id, conversation_id, sender_id, body, rendered_body, attachments, is_system, edited, deleted, created_at, updated_at')
-          .eq('conversation_id', conv.id)
-          .eq('deleted', false)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle()
-      );
-      const lastMessagesResults = await Promise.all(lastMessagesPromises);
+      // OPTIMIZATION 2: Fetch all last messages in a SINGLE query (instead of N queries)
+      // Fetch all messages for all conversations, then filter to get the most recent per conversation
+      // CRITICAL: Add limit to prevent fetching millions of messages (conversationIds.length * 2 ensures we get at least 1 per conversation)
+      const messageLimit = conversationIds.length * 2;
+      const { data: allMessages, error: messagesError } = await supabase
+        .from('messages')
+        .select('id, conversation_id, sender_id, body, rendered_body, attachments, is_system, edited, deleted, created_at, updated_at')
+        .in('conversation_id', conversationIds)
+        .eq('deleted', false)
+        .order('created_at', { ascending: false })
+        .limit(messageLimit);
+
+      if (messagesError) {
+        console.error('Error fetching messages:', messagesError);
+      }
+
+      // Group messages by conversation and get the most recent (first) one for each
       const lastMessagesMap = new Map<string, Message>();
-      lastMessagesResults.forEach((result, index) => {
-        if (result.data && conversations[index]) {
-          lastMessagesMap.set(conversations[index].id, result.data);
-        }
-      });
+      if (allMessages && allMessages.length > 0) {
+        // Since messages are ordered by created_at DESC, the first message per conversation is the last one
+        const seenConversations = new Set<string>();
+        allMessages.forEach(msg => {
+          if (!seenConversations.has(msg.conversation_id)) {
+            lastMessagesMap.set(msg.conversation_id, msg);
+            seenConversations.add(msg.conversation_id);
+          }
+        });
+      }
 
       // OPTIMIZATION 3: Batch fetch all member data for all conversations
       const { data: allMembersData, error: allMembersError } = await supabase
@@ -215,26 +236,70 @@ class MessagingService {
       const usersMap = new Map(usersData.map(u => [u.id, u]));
       const surfersMap = new Map(surfersData.map(s => [s.user_id, s]));
 
-      // OPTIMIZATION 6: Batch calculate unread counts for all conversations (in parallel with name fetching above)
-      const unreadCountPromises = conversations.map(conv => {
-        const lastReadAt = userReadMap.get(conv.id) || new Date(0).toISOString();
-        const lastMessage = lastMessagesMap.get(conv.id);
-        if (!lastMessage) return Promise.resolve(0);
-        
-        return supabase
-          .from('messages')
-          .select('id', { count: 'exact', head: true })
-          .eq('conversation_id', conv.id)
-          .eq('deleted', false)
-          .neq('sender_id', user.id) // Exclude messages sent by the current user
-          .gt('created_at', lastReadAt)
-          .then(result => result.count || 0);
-      });
-      const unreadCounts = await Promise.all(unreadCountPromises);
+      // OPTIMIZATION 6: Calculate unread counts in a SINGLE query (instead of N queries)
+      // Fetch all unread messages for all conversations, then count per conversation in JavaScript
       const unreadCountMap = new Map<string, number>();
-      conversations.forEach((conv, index) => {
-        unreadCountMap.set(conv.id, unreadCounts[index]);
+      
+      // Initialize all conversations with 0 unread
+      conversations.forEach(conv => {
+        unreadCountMap.set(conv.id, 0);
       });
+
+      // Fetch all unread messages for all conversations in one query
+      // We need messages where: conversation_id IN (ids), deleted=false, sender_id != user.id, created_at > last_read_at
+      // Since last_read_at varies per conversation, we'll fetch all messages after the oldest last_read_at
+      // and filter in JavaScript (more efficient than N queries)
+      const lastReadAtValues = Array.from(userReadMap.values()).filter(ts => ts !== null);
+      const oldestLastReadAt = lastReadAtValues.length > 0
+        ? Math.min(...lastReadAtValues.map(ts => new Date(ts!).getTime()))
+        : 0; // If no last_read_at values, use 0 (epoch) to fetch all messages
+
+      // Fetch all messages that could potentially be unread
+      // Use oldest last_read_at as the lower bound (or epoch if none exist)
+      const cutoffDate = oldestLastReadAt > 0 
+        ? new Date(oldestLastReadAt).toISOString()
+        : new Date(0).toISOString(); // Epoch if no last_read_at
+
+      // CRITICAL: Add limit to prevent fetching thousands of unread messages
+      const UNREAD_MESSAGES_LIMIT = 1000;
+      const { data: unreadMessages, error: unreadError } = await supabase
+        .from('messages')
+        .select('id, conversation_id, sender_id, created_at')
+        .in('conversation_id', conversationIds)
+        .eq('deleted', false)
+        .neq('sender_id', user.id)
+        .gt('created_at', cutoffDate)
+        .limit(UNREAD_MESSAGES_LIMIT);
+
+      // Track if we hit the limit (indicates there may be more unread messages)
+      const hitUnreadLimit = unreadMessages && unreadMessages.length === UNREAD_MESSAGES_LIMIT;
+      const conversationsWithTruncatedUnread = new Set<string>();
+
+      if (!unreadError && unreadMessages) {
+        // Count unread messages per conversation (filtering by actual last_read_at)
+        unreadMessages.forEach(msg => {
+          const lastReadAt = userReadMap.get(msg.conversation_id);
+          const msgTime = new Date(msg.created_at).getTime();
+          
+          if (lastReadAt) {
+            const lastReadTime = new Date(lastReadAt).getTime();
+            if (msgTime > lastReadTime) {
+              unreadCountMap.set(msg.conversation_id, (unreadCountMap.get(msg.conversation_id) || 0) + 1);
+              // If we hit the limit, mark this conversation as potentially truncated
+              if (hitUnreadLimit) {
+                conversationsWithTruncatedUnread.add(msg.conversation_id);
+              }
+            }
+          } else {
+            // No last_read_at means all messages are unread (count this one)
+            unreadCountMap.set(msg.conversation_id, (unreadCountMap.get(msg.conversation_id) || 0) + 1);
+            // If we hit the limit, mark this conversation as potentially truncated
+            if (hitUnreadLimit) {
+              conversationsWithTruncatedUnread.add(msg.conversation_id);
+            }
+          }
+        });
+      }
 
       // Group members by conversation (after we have all data)
       const membersByConversation = new Map<string, typeof allMembersData>();
@@ -275,6 +340,7 @@ class MessagingService {
         const lastMessage = lastMessagesMap.get(conv.id);
         const unreadCount = unreadCountMap.get(conv.id) || 0;
         const enrichedMembers = enrichedMembersByConv.get(conv.id) || [];
+        const unreadTruncated = conversationsWithTruncatedUnread.has(conv.id);
 
         // For direct conversations, find the other user
         let otherUser: ConversationMember | undefined;
@@ -289,14 +355,83 @@ class MessagingService {
           ...conv,
           last_message: lastMessage,
           unread_count: unreadCount,
+          unread_truncated: unreadTruncated,
           other_user: otherUser,
           members: enrichedMembers,
         };
       });
 
-      return enrichedConversations;
+      return { conversations: enrichedConversations, hasMore };
     } catch (error) {
       console.error('Error fetching conversations:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get messages updated since a specific timestamp (version-aware sync)
+   * @param conversationId - The conversation ID
+   * @param lastSyncTimestamp - Timestamp to fetch messages updated after
+   * @param limit - Maximum number of messages to fetch (default: 20)
+   */
+  async getMessagesUpdatedSince(
+    conversationId: string,
+    lastSyncTimestamp: number,
+    limit: number = 20
+  ): Promise<Message[]> {
+    if (!isSupabaseConfigured()) {
+      throw new Error('Supabase is not configured');
+    }
+
+    try {
+      // Convert timestamp to ISO string for query
+      const lastSyncDate = new Date(lastSyncTimestamp).toISOString();
+      
+      const { data: messages, error } = await supabase
+        .from('messages')
+        .select('id, conversation_id, sender_id, body, rendered_body, attachments, is_system, edited, deleted, created_at, updated_at')
+        .eq('conversation_id', conversationId)
+        .eq('deleted', false)
+        .gt('updated_at', lastSyncDate)
+        .order('created_at', { ascending: true })
+        .limit(limit);
+
+      if (error) throw error;
+
+      if (!messages || messages.length === 0) {
+        return [];
+      }
+
+      // Fetch sender info separately for each unique sender (already batched)
+      const senderIds = [...new Set(messages.map(msg => msg.sender_id))];
+      
+      if (senderIds.length === 0) {
+        return messages.map(msg => ({
+          ...msg,
+          sender_name: undefined,
+          sender_avatar: undefined,
+        }));
+      }
+
+      // OPTIMIZATION: Batch fetch surfer data for all senders
+      const { data: surfersData } = await supabase
+        .from('surfers')
+        .select('user_id, name, profile_image_url')
+        .in('user_id', senderIds);
+
+      // Create a map for quick lookup
+      const surferMap = new Map(
+        (surfersData || []).map(s => [s.user_id, s])
+      );
+
+      // Enrich messages with sender info
+      return messages.map(msg => ({
+        ...msg,
+        sender_name: surferMap.get(msg.sender_id)?.name,
+        sender_avatar: surferMap.get(msg.sender_id)?.profile_image_url,
+      }));
+    } catch (error) {
+      console.error('Error fetching messages updated since:', error);
       throw error;
     }
   }

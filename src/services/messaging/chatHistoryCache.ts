@@ -26,6 +26,11 @@ const ESTIMATED_BYTES_PER_MESSAGE = 2000; // ~2KB per message
 
 class ChatHistoryCache {
   private conversationAccessOrder: string[] = []; // For LRU tracking
+  
+  // Session-based memory cache (no TTL expiration while app is active)
+  // Use LRU eviction for size control, not time-based expiration
+  private memoryCache = new Map<string, { messages: Message[], lastSync: number }>();
+  private MAX_MEMORY_CACHE_SIZE = 20; // LRU eviction limit (increased from 10 for better cache hit rate)
 
   /**
    * Get cache key for a conversation
@@ -105,10 +110,56 @@ class ChatHistoryCache {
   }
 
   /**
-   * Load cached messages for a conversation
-   * Returns last 30 messages instantly (WhatsApp-style)
+   * Load cached messages - SYNCHRONOUS memory check first for instant access
+   * Returns immediately from memory if available, else falls back to AsyncStorage
+   * 
+   * CRITICAL: Memory cache is session-based (no TTL expiration)
+   * Only evicted via LRU when size limit reached
    */
-  async loadCachedMessages(conversationId: string): Promise<Message[] | null> {
+  loadCachedMessages(conversationId: string): Message[] | null {
+    // CRITICAL: Check memory cache FIRST (synchronous, instant, 0ms delay)
+    const memoryCached = this.memoryCache.get(conversationId);
+    if (memoryCached) {
+      // Update LRU order
+      this.updateMemoryCacheAccess(conversationId);
+      console.log(`[chatHistoryCache] ✅ MEMORY CACHE HIT for ${conversationId}: ${memoryCached.messages.length} messages`);
+      return memoryCached.messages; // INSTANT return - no async delay
+    }
+    
+    // Memory cache miss - return null (caller will await async load)
+    console.log(`[chatHistoryCache] ❌ MEMORY CACHE MISS for ${conversationId} (memory cache size: ${this.memoryCache.size})`);
+    return null;
+  }
+  
+  /**
+   * Update memory cache access order for LRU eviction
+   */
+  private updateMemoryCacheAccess(conversationId: string): void {
+    // Remove and re-add to end (most recently used)
+    if (this.memoryCache.has(conversationId)) {
+      const data = this.memoryCache.get(conversationId)!;
+      this.memoryCache.delete(conversationId);
+      this.memoryCache.set(conversationId, data);
+      
+      // Evict oldest if over limit
+      if (this.memoryCache.size > this.MAX_MEMORY_CACHE_SIZE) {
+        const firstKey = this.memoryCache.keys().next().value;
+        this.memoryCache.delete(firstKey);
+      }
+    }
+  }
+  
+  /**
+   * Async load from AsyncStorage (fallback when memory cache misses)
+   */
+  async loadCachedMessagesAsync(conversationId: string): Promise<Message[] | null> {
+    // First check memory (synchronous)
+    const memoryResult = this.loadCachedMessages(conversationId);
+    if (memoryResult) {
+      return memoryResult;
+    }
+    
+    // Then check AsyncStorage (async)
     try {
       const key = this.getCacheKey(conversationId);
       const cached = await AsyncStorage.getItem(key);
@@ -129,9 +180,25 @@ class ChatHistoryCache {
       // Update access order for LRU
       this.updateAccessOrder(conversationId);
 
-      // Return last 30 messages (or all if less than 30)
       const messages = data.messages || [];
-      return messages.slice(-MAX_MESSAGES_PER_CONVERSATION);
+      const result = messages.slice(-MAX_MESSAGES_PER_CONVERSATION);
+      
+      // Update memory cache for next time (instant access)
+      // Use LRU eviction if needed
+      if (this.memoryCache.size >= this.MAX_MEMORY_CACHE_SIZE) {
+        // Evict oldest entry
+        const firstKey = this.memoryCache.keys().next().value;
+        this.memoryCache.delete(firstKey);
+      }
+      
+      this.memoryCache.set(conversationId, { 
+        messages: result, 
+        lastSync: data.lastSync 
+      });
+      
+      console.log(`[chatHistoryCache] 💾 Loaded ${result.length} messages from AsyncStorage and updated memory cache for ${conversationId} (memory cache size: ${this.memoryCache.size})`);
+      
+      return result;
     } catch (error) {
       console.error('[chatHistoryCache] Error loading cached messages:', error);
       return null;
@@ -158,10 +225,11 @@ class ChatHistoryCache {
         ? messagesToCache[messagesToCache.length - 1].id 
         : null;
 
+      const lastSync = Date.now();
       const cached: CachedConversation = {
         messages: messagesToCache,
         lastMessageId,
-        lastSync: Date.now(),
+        lastSync,
         version: CACHE_VERSION,
         conversationId,
       };
@@ -171,6 +239,20 @@ class ChatHistoryCache {
       
       // Update access order
       this.updateAccessOrder(conversationId);
+      
+      // Update memory cache for instant access
+      if (this.memoryCache.size >= this.MAX_MEMORY_CACHE_SIZE) {
+        // Evict oldest entry
+        const firstKey = this.memoryCache.keys().next().value;
+        this.memoryCache.delete(firstKey);
+      }
+      
+      this.memoryCache.set(conversationId, {
+        messages: messagesToCache,
+        lastSync,
+      });
+      
+      console.log(`[chatHistoryCache] 💾 Saved ${messagesToCache.length} messages to disk and memory cache for ${conversationId} (memory cache size: ${this.memoryCache.size})`);
       
       // Evict old conversations if needed
       await this.evictOldConversations();
@@ -183,6 +265,7 @@ class ChatHistoryCache {
   /**
    * Merge new messages with cached messages
    * Handles conflicts by timestamp (server messages take precedence)
+   * Uses stable sorting to prevent scroll jumps
    */
   mergeMessages(cached: Message[], newMessages: Message[]): Message[] {
     // Create a map of cached messages by ID
@@ -201,11 +284,15 @@ class ChatHistoryCache {
       }
     });
 
-    // Convert back to array and sort by created_at
+    // Convert back to array and sort with STABLE ordering
+    // CRITICAL: Sort by created_at with id fallback to prevent scroll jumps
     const merged = Array.from(messageMap.values());
-    merged.sort((a, b) => 
-      new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-    );
+    merged.sort((a, b) => {
+      const timeDiff = new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+      if (timeDiff !== 0) return timeDiff;
+      // Fallback to ID for stable ordering (handles identical timestamps, clock skew, optimistic messages)
+      return a.id.localeCompare(b.id);
+    });
 
     // Return last 30 messages
     return merged.slice(-MAX_MESSAGES_PER_CONVERSATION);
@@ -227,6 +314,32 @@ class ChatHistoryCache {
       return data.lastMessageId;
     } catch (error) {
       console.error('[chatHistoryCache] Error getting last message ID:', error);
+      return null;
+    }
+  }
+  
+  /**
+   * Get last sync timestamp for version-aware sync
+   */
+  async getLastSyncTimestamp(conversationId: string): Promise<number | null> {
+    // Check memory cache first
+    const memoryCached = this.memoryCache.get(conversationId);
+    if (memoryCached) {
+      return memoryCached.lastSync;
+    }
+    
+    // Then check AsyncStorage
+    try {
+      const key = this.getCacheKey(conversationId);
+      const cached = await AsyncStorage.getItem(key);
+      if (!cached) {
+        return null;
+      }
+      
+      const data: CachedConversation = JSON.parse(cached);
+      return data.lastSync;
+    } catch (error) {
+      console.error('[chatHistoryCache] Error getting last sync timestamp:', error);
       return null;
     }
   }
@@ -270,8 +383,45 @@ class ChatHistoryCache {
 
       data.lastSync = Date.now();
       await AsyncStorage.setItem(key, JSON.stringify(data));
+      
+      // Update memory cache if it exists
+      const memoryCached = this.memoryCache.get(conversationId);
+      if (memoryCached) {
+        if (updatedMessage) {
+          // Update existing message in memory cache
+          const index = memoryCached.messages.findIndex(msg => msg.id === messageId);
+          if (index !== -1) {
+            memoryCached.messages[index] = updatedMessage;
+          }
+        } else {
+          // Remove deleted message from memory cache
+          memoryCached.messages = memoryCached.messages.filter(msg => msg.id !== messageId);
+        }
+        memoryCached.lastSync = data.lastSync;
+      }
     } catch (error) {
       console.error('[chatHistoryCache] Error updating message in cache:', error);
+    }
+  }
+  
+  /**
+   * Warm memory cache (for preloading) - only if already in memory
+   * Does NOT trigger disk reads - only moves existing data to memory
+   */
+  warmMemoryCache(conversationId: string, messages: Message[], lastSync: number): void {
+    // Only warm if not already in memory (avoid overwriting)
+    if (!this.memoryCache.has(conversationId)) {
+      // Use LRU eviction if needed
+      if (this.memoryCache.size >= this.MAX_MEMORY_CACHE_SIZE) {
+        const firstKey = this.memoryCache.keys().next().value;
+        this.memoryCache.delete(firstKey);
+        console.log(`[chatHistoryCache] 🗑️ Evicted ${firstKey} from memory cache (LRU)`);
+      }
+      
+      this.memoryCache.set(conversationId, { messages, lastSync });
+      console.log(`[chatHistoryCache] 🔥 Warmed memory cache for ${conversationId}: ${messages.length} messages (memory cache size: ${this.memoryCache.size})`);
+    } else {
+      console.log(`[chatHistoryCache] ⚠️ Memory cache already exists for ${conversationId}, skipping warm`);
     }
   }
 

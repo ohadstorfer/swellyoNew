@@ -523,7 +523,8 @@ export default function ConversationsScreen({
   const handleUserSelect = async (userId: string) => {
     try {
       // Check if conversation already exists
-      const conversations = await messagingService.getConversations();
+      const result = await messagingService.getConversations(50, 0); // Fetch first page
+      const conversations = result.conversations;
       const existingConv = conversations.find(conv => {
         if (conv.other_user && conv.other_user.user_id === userId) {
           return true;
@@ -1152,7 +1153,7 @@ export default function ConversationsScreen({
             contentContainerStyle={styles.conversationsListContent}
             showsVerticalScrollIndicator={false}
           >
-            {loading && showSkeletons ? (
+            {loading && showSkeletons && conversations.length === 0 ? (
               <ConversationListSkeleton count={5} />
             ) : (
               <>

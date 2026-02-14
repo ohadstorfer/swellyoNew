@@ -76,7 +76,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState<string>('');
-  const [isFetchingMessages, setIsFetchingMessages] = useState(true);
+  const [isFetchingMessages, setIsFetchingMessages] = useState(false); // Start as false, only set true when actually fetching
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [otherUserAdvRole, setOtherUserAdvRole] = useState<'adv_giver' | 'adv_seeker' | null>(null);
   const [inputHeight, setInputHeight] = useState(25); // Initial height for one line
@@ -96,9 +96,19 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const typingDebounceRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
-    // Get current user ID
+    // Get current user ID - CRITICAL: Get from session first (instant, no database query)
     const getCurrentUser = async () => {
       try {
+        // First, try to get user ID from session immediately (no database query)
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user?.id) {
+          setCurrentUserId(session.user.id);
+          console.log('[DirectMessageScreen] ✅ Got currentUserId from session instantly:', session.user.id);
+          return; // Success - no need for slow database query
+        }
+        
+        // Fallback to slow database query only if session doesn't have user
+        console.log('[DirectMessageScreen] ⚠️ No user in session, falling back to database query');
         const user = await supabaseAuthService.getCurrentUser();
         if (user) {
           setCurrentUserId(user.id);
@@ -109,24 +119,11 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     };
     getCurrentUser();
 
-    // Delay skeleton display to prevent flicker for fast loads
-    // Only show skeletons if we're fetching AND we don't have any messages yet
+    // Only show skeletons if fetching AND no messages
+    // This is now redundant since we handle it in render, but keep for safety
     if (isFetchingMessages && messages.length === 0) {
-      // Show skeletons immediately if fetching and no messages (don't wait for timer)
-      // This prevents showing empty message while loading
       setShowSkeletons(true);
-      
-      // But also set up timer to handle fast loads (though we show immediately)
-    const skeletonTimer = setTimeout(() => {
-        // Keep skeletons visible if still fetching
-        if (isFetchingMessages && messages.length === 0) {
-        setShowSkeletons(true);
-      }
-    }, SKELETON_DELAY_MS);
-
-    return () => clearTimeout(skeletonTimer);
     } else {
-      // If we have messages or not fetching, don't show skeletons
       setShowSkeletons(false);
     }
   }, [isFetchingMessages, messages.length]);
@@ -134,23 +131,28 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   useEffect(() => {
     // Only load messages and subscribe if conversation exists
     if (currentConversationId) {
+      // CRITICAL: Load messages IMMEDIATELY (doesn't need currentUserId)
+      // currentUserId is only needed for markAsRead and subscription callbacks
       loadMessages();
 
-      // Set current conversation in MessagingProvider (use renamed function to avoid conflict)
+      // Set current conversation in MessagingProvider
       setMessagingCurrentConversationId(currentConversationId);
       
-      // Mark conversation as read
-      markAsRead(currentConversationId).catch(err => {
-        console.error('Error marking as read:', err);
-      });
+      // Mark conversation as read (can handle currentUserId being null initially)
+      // Will be called again when currentUserId becomes available
+      if (currentUserId) {
+        markAsRead(currentConversationId).catch(err => {
+          console.error('Error marking as read:', err);
+        });
+      }
 
-      // Subscribe to messages with unified subscription (INSERT, UPDATE, DELETE, typing)
+      // Subscribe to messages (callbacks handle currentUserId being null)
       const unsubscribe = messagingService.subscribeToMessages(
         currentConversationId,
         {
           onNewMessage: (newMessage) => {
             // Track first reply received (only once, and only if message is from other user)
-            if (!hasTrackedFirstReply && newMessage.sender_id !== currentUserId && currentUserId) {
+            if (!hasTrackedFirstReply && currentUserId && newMessage.sender_id !== currentUserId) {
               const timeToReplyMinutes = firstMessageSentTime 
                 ? (Date.now() - firstMessageSentTime) / (1000 * 60)
                 : undefined;
@@ -171,9 +173,12 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
               });
               return updated;
             });
-            markAsRead(currentConversationId).catch(err => {
-              console.error('Error marking message as read:', err);
-            });
+            // Mark as read only if currentUserId is available
+            if (currentUserId) {
+              markAsRead(currentConversationId).catch(err => {
+                console.error('Error marking message as read:', err);
+              });
+            }
             setTimeout(() => scrollToBottom(), 100);
           },
           onMessageUpdated: (updatedMessage) => {
@@ -201,8 +206,8 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             });
           },
           onTyping: (userId, isTyping) => {
-            // Only show typing indicator for other user
-            if (userId !== currentUserId) {
+            // Only show typing indicator for other user (if currentUserId is available)
+            if (currentUserId && userId !== currentUserId) {
               setIsTyping(isTyping);
             }
           },
@@ -239,7 +244,16 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         setMessagingCurrentConversationId(null);
       }
     };
-  }, [currentConversationId, currentUserId, markAsRead, setMessagingCurrentConversationId]);
+  }, [currentConversationId, markAsRead, setMessagingCurrentConversationId]); // Removed currentUserId from deps
+
+  // Separate useEffect to mark as read when currentUserId becomes available
+  useEffect(() => {
+    if (currentConversationId && currentUserId) {
+      markAsRead(currentConversationId).catch(err => {
+        console.error('Error marking as read:', err);
+      });
+    }
+  }, [currentConversationId, currentUserId, markAsRead]);
 
   const loadOtherUserAdvRole = async () => {
     if (!currentConversationId || !otherUserId) return;
@@ -266,66 +280,150 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   };
 
   const loadMessages = async () => {
+    console.log('[DirectMessageScreen] 🔄 loadMessages called for conversation:', currentConversationId);
+    
     if (!currentConversationId) {
+      console.log('[DirectMessageScreen] ⚠️ No conversation ID, clearing messages');
       setMessages([]);
       setIsFetchingMessages(false);
+      setShowSkeletons(false);
       return;
     }
     
-    // If we already have messages (e.g., optimistic message after first send),
-    // don't show skeletons - just load in the background
-    const hasExistingMessages = messages.length > 0;
+    const loadStartTime = Date.now();
+    
+    // CRITICAL: Check memory cache FIRST (synchronous, instant)
+    const memoryCheckStart = Date.now();
+    const cachedMessages = chatHistoryCache.loadCachedMessages(currentConversationId);
+    const memoryCheckTime = Date.now() - memoryCheckStart;
+    
+    console.log('[DirectMessageScreen] 🔍 Memory cache check:', {
+      conversationId: currentConversationId,
+      checkTime: `${memoryCheckTime}ms`,
+      hit: !!cachedMessages,
+      messageCount: cachedMessages?.length || 0,
+      firstMessageId: cachedMessages?.[0]?.id,
+      lastMessageId: cachedMessages?.[cachedMessages.length - 1]?.id
+    });
+    
+    if (cachedMessages && cachedMessages.length > 0) {
+      const totalTime = Date.now() - loadStartTime;
+      console.log(`[DirectMessageScreen] ✅ MEMORY CACHE HIT - Showing ${cachedMessages.length} messages instantly (${totalTime}ms total)`);
+      
+      // Memory cache hit - show instantly (no async delay, no loading state)
+      setMessages(cachedMessages);
+      setIsFetchingMessages(false);
+      setShowSkeletons(false);  // Binary: cache exists = no skeleton
+      
+      // Load other user's adv_role (non-blocking)
+      loadOtherUserAdvRole().catch(err => console.error('Error loading adv_role:', err));
+      setTimeout(() => scrollToBottom(), 200);
+      
+      // Sync with server in background (non-blocking)
+      syncWithServerInBackground();
+      return;
+    }
+    
+    console.log('[DirectMessageScreen] ⚠️ Memory cache MISS - checking AsyncStorage');
+    setIsFetchingMessages(true);
     
     try {
-      setIsFetchingMessages(true);
-      // Only show skeletons if we don't have existing messages
-      if (!hasExistingMessages) {
-        setShowSkeletons(false); // Reset skeleton state - timer will set it if needed
-      } else {
-        // We have messages, so don't show skeletons at all
-        setShowSkeletons(false);
-      }
-
-      // Load from cache first (instant display)
-      const cachedMessages = await chatHistoryCache.loadCachedMessages(currentConversationId);
-      if (cachedMessages && cachedMessages.length > 0) {
-        setMessages(cachedMessages);
-        // Load other user's adv_role
+      const asyncStartTime = Date.now();
+      const asyncCachedMessages = await chatHistoryCache.loadCachedMessagesAsync(currentConversationId);
+      const asyncTime = Date.now() - asyncStartTime;
+      
+      console.log('[DirectMessageScreen] 🔍 AsyncStorage check:', {
+        conversationId: currentConversationId,
+        checkTime: `${asyncTime}ms`,
+        hit: !!asyncCachedMessages,
+        messageCount: asyncCachedMessages?.length || 0
+      });
+      
+      if (asyncCachedMessages && asyncCachedMessages.length > 0) {
+        const totalTime = Date.now() - loadStartTime;
+        console.log(`[DirectMessageScreen] ✅ ASYNCSTORAGE CACHE HIT - Showing ${asyncCachedMessages.length} messages (${totalTime}ms total)`);
+        
+        // AsyncStorage cache hit - show messages
+        setMessages(asyncCachedMessages);
+        setIsFetchingMessages(false);
+        setShowSkeletons(false);  // Binary: cache exists = no skeleton
+        
         await loadOtherUserAdvRole();
-        // Scroll to bottom after messages load
+        setTimeout(() => scrollToBottom(), 200);
+        
+        // Sync with server in background
+        syncWithServerInBackground();
+      } else {
+        console.log('[DirectMessageScreen] ⚠️ Both caches MISS - fetching from server');
+        setShowSkeletons(true);  // Binary: no cache = show skeleton
+        
+        const serverStartTime = Date.now();
+        const serverMessages = await messagingService.getMessages(currentConversationId, 30);
+        const serverTime = Date.now() - serverStartTime;
+        const totalTime = Date.now() - loadStartTime;
+        
+        console.log(`[DirectMessageScreen] 📥 SERVER FETCH - Got ${serverMessages.length} messages in ${serverTime}ms (${totalTime}ms total)`);
+        
+        setMessages(serverMessages);
+        await chatHistoryCache.saveMessages(currentConversationId, serverMessages);
+        
+        setIsFetchingMessages(false);
+        setShowSkeletons(false);
+        
+        await loadOtherUserAdvRole();
         setTimeout(() => scrollToBottom(), 200);
       }
-
-      // Then sync with server in background (incremental sync)
-      const lastMessageId = await chatHistoryCache.getLastMessageId(currentConversationId);
-      const serverMessages = await messagingService.getMessages(
-        currentConversationId,
-        50,
-        lastMessageId || undefined
-      );
-
-      if (serverMessages.length > 0) {
-        // Merge with cached messages
-        const merged = chatHistoryCache.mergeMessages(cachedMessages || [], serverMessages);
-        setMessages(merged);
-        // Save to cache
-        await chatHistoryCache.saveMessages(currentConversationId, merged);
-      } else if (!cachedMessages || cachedMessages.length === 0) {
-        // No cache and no new messages, fetch all
-        const allMessages = await messagingService.getMessages(currentConversationId, 30);
-        setMessages(allMessages);
-        await chatHistoryCache.saveMessages(currentConversationId, allMessages);
-      }
-
-      // Load other user's adv_role
-      await loadOtherUserAdvRole();
-      // Scroll to bottom after messages load
-      setTimeout(() => scrollToBottom(), 200);
     } catch (error) {
-      console.error('Error loading messages:', error);
-    } finally {
+      console.error('[DirectMessageScreen] ❌ Error loading messages:', error);
       setIsFetchingMessages(false);
       setShowSkeletons(false);
+    }
+  };
+  
+  // Background server sync (lightweight, since realtime is active)
+  const syncWithServerInBackground = async () => {
+    if (!currentConversationId) return;
+    
+    try {
+      // CRITICAL: Since realtime subscription is active while in chat,
+      // background sync is mainly for cold re-entry gaps
+      // Keep it lightweight - only fetch recent messages (last 20)
+      
+      const lastSync = await chatHistoryCache.getLastSyncTimestamp(currentConversationId);
+      
+      // Only sync if lastSync is old (> 5 minutes) or doesn't exist
+      // If recent, realtime should have already delivered updates
+      const syncAge = lastSync ? Date.now() - lastSync : Infinity;
+      if (syncAge < 5 * 60 * 1000) {
+        // Recent sync - realtime should handle updates
+        return;
+      }
+      
+      // Fetch messages updated after last sync (version-aware)
+      // Limit to 20 messages for lightweight sync
+      const serverMessages = await messagingService.getMessagesUpdatedSince(
+        currentConversationId,
+        lastSync || 0,
+        20 // Lightweight limit
+      );
+      
+      if (serverMessages.length > 0) {
+        // CRITICAL: Use functional setState to avoid stale closure bug
+        setMessages((prev) => {
+          // Merge with current state (not outer scope variable)
+          const merged = chatHistoryCache.mergeMessages(prev, serverMessages);
+          
+          // Save to cache (non-blocking)
+          chatHistoryCache.saveMessages(currentConversationId, merged).catch(err => {
+            console.error('Error saving cache:', err);
+          });
+          
+          return merged;
+        });
+      }
+    } catch (error) {
+      console.error('Background sync error:', error);
+      // Don't show error to user - silent sync failure
     }
   };
 
@@ -710,12 +808,11 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   };
 
   const renderMessage = (message: Message) => {
-    // Don't render message until we have all required variables
-    if (!currentUserId) {
-      return null; // Can't determine if message is own or received
-    }
-    
-    const isOwnMessage = message.sender_id === currentUserId;
+    // CRITICAL: Render messages even if currentUserId isn't available yet
+    // We can determine message alignment from sender_id comparison
+    // For now, render all messages as received (will update when currentUserId loads)
+    // This allows messages to appear instantly while currentUserId loads in background
+    const isOwnMessage = currentUserId ? message.sender_id === currentUserId : false;
     const isEditing = editingMessageId === message.id;
     const canEdit = canEditMessage(message);
     
@@ -913,9 +1010,8 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             contentContainerStyle={styles.messagesContent}
             showsVerticalScrollIndicator={false}
           >
-          {!isFetchingMessages && currentConversationId && messages.length === 0 ? (
-            // Show skeletons if fetching and no messages
-            // If showSkeletons is false (timer hasn't fired), show skeletons anyway to avoid showing empty message
+          {messages.length === 0 && isFetchingMessages ? (
+            // Show skeletons only when fetching AND no messages
             <MessageListSkeleton count={5} />
           ) : messages.length === 0 && !isFetchingMessages ? (
             <View style={styles.emptyContainer}>

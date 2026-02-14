@@ -5,7 +5,7 @@
  */
 
 import React, { createContext, useContext, useReducer, useRef, useEffect, useCallback } from 'react';
-import { AppState, AppStateStatus } from 'react-native';
+import { AppState, AppStateStatus, InteractionManager } from 'react-native';
 import { 
   messagingService, 
   Conversation, 
@@ -18,6 +18,7 @@ import {
   getLastSyncTimestamp,
   updateLastSyncTimestamp,
 } from '../services/messaging/conversationListCache';
+import { chatHistoryCache } from '../services/messaging/chatHistoryCache';
 import { supabase } from '../config/supabase';
 
 // Conversation action types
@@ -223,30 +224,129 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  // Preload message histories from SERVER (not just disk)
+  // This ensures instant experience even on fresh install
+  const preloadMessageHistoriesFromServer = useCallback(async (conversations: Conversation[]) => {
+    console.log('[MessagingProvider] 🚀 PRELOAD START - conversations count:', conversations.length);
+    
+    const topConversations = conversations.slice(0, 10);
+    console.log('[MessagingProvider] 📋 Preloading top 10 conversations:', topConversations.map(c => c.id));
+    
+    const preloadStartTime = Date.now();
+    
+    InteractionManager.runAfterInteractions(() => {
+      console.log('[MessagingProvider] ⏱️ InteractionManager callback executed, starting parallel fetches');
+      
+      const preloadPromises = topConversations.map(async (conv) => {
+        const convStartTime = Date.now();
+        console.log(`[MessagingProvider] 📥 Starting fetch for conversation ${conv.id}`);
+        
+        try {
+          const messages = await messagingService.getMessages(conv.id, 20);
+          const fetchTime = Date.now() - convStartTime;
+          console.log(`[MessagingProvider] ✅ Fetched ${messages?.length || 0} messages for ${conv.id} in ${fetchTime}ms`);
+          
+          if (messages && messages.length > 0) {
+            const saveStartTime = Date.now();
+            await chatHistoryCache.saveMessages(conv.id, messages);
+            const saveTime = Date.now() - saveStartTime;
+            console.log(`[MessagingProvider] 💾 Saved ${messages.length} messages to cache for ${conv.id} in ${saveTime}ms`);
+            
+            // Verify memory cache
+            const memoryCached = chatHistoryCache.loadCachedMessages(conv.id);
+            console.log(`[MessagingProvider] 🔍 Memory cache check after save for ${conv.id}:`, {
+              inMemory: !!memoryCached,
+              messageCount: memoryCached?.length || 0
+            });
+            
+            if (!memoryCached) {
+              console.warn(`[MessagingProvider] ⚠️ Memory cache MISS after save for ${conv.id} - warming explicitly`);
+              chatHistoryCache.warmMemoryCache(conv.id, messages, Date.now());
+              
+              // Verify again
+              const afterWarm = chatHistoryCache.loadCachedMessages(conv.id);
+              console.log(`[MessagingProvider] 🔍 Memory cache check after warm for ${conv.id}:`, {
+                inMemory: !!afterWarm,
+                messageCount: afterWarm?.length || 0
+              });
+            }
+          } else {
+            console.log(`[MessagingProvider] ⚠️ No messages returned for conversation ${conv.id}`);
+          }
+        } catch (error) {
+          console.error(`[MessagingProvider] ❌ Error preloading messages from server for ${conv.id}:`, error);
+        }
+      });
+      
+      Promise.all(preloadPromises).then(() => {
+        const totalTime = Date.now() - preloadStartTime;
+        console.log(`[MessagingProvider] 🎉 PRELOAD COMPLETE - Total time: ${totalTime}ms`);
+      }).catch(err => {
+        console.error('[MessagingProvider] ❌ Error in parallel message preload:', err);
+      });
+    });
+  }, []);
+
   // Load conversations from cache first, then from server
   const loadConversations = useCallback(async () => {
+    console.log('[MessagingProvider] 🔄 loadConversations called');
+    const loadStartTime = Date.now();
+    
     try {
       setLoading(true);
       
       // Load from cache first (instant)
       const cached = await loadCachedConversationList();
       if (cached && cached.length > 0) {
+        console.log(`[MessagingProvider] 📦 Loaded ${cached.length} conversations from cache`);
         dispatch({ type: 'REPLACE_ALL', payload: cached });
+        
+        // CRITICAL: Set loading to false IMMEDIATELY after showing cached data
+        // This allows UI to render instantly, while server fetch happens in background
+        setLoading(false);
+        
+        // CRITICAL: Start preload IMMEDIATELY with cached data (don't wait for server)
+        // This ensures messages are preloaded even if server fetch is slow
+        console.log(`[MessagingProvider] 🚀 Triggering preload IMMEDIATELY with ${cached.length} cached conversations`);
+        preloadMessageHistoriesFromServer(cached);
+      } else {
+        console.log('[MessagingProvider] 📦 No cached conversations found');
+        // Keep loading true if no cache (will show skeletons)
       }
 
-      // Then fetch from server
-      const conversations = await messagingService.getConversations();
-      dispatch({ type: 'REPLACE_ALL', payload: conversations });
+      // Then fetch from server (non-blocking for UI - loading already false if cache exists)
+      const serverStartTime = Date.now();
+      const result = await messagingService.getConversations(50, 0); // Fetch first page (50 conversations)
+      const serverTime = Date.now() - serverStartTime;
+      console.log(`[MessagingProvider] 📥 Fetched ${result.conversations.length} conversations from server in ${serverTime}ms (hasMore: ${result.hasMore})`);
+      
+      dispatch({ type: 'REPLACE_ALL', payload: result.conversations });
       
       // Update cache
-      await saveCachedConversationList(conversations);
+      await saveCachedConversationList(result.conversations);
       await updateLastSyncTimestamp();
+      
+      // If preload wasn't triggered earlier (no cache), trigger it now
+      if (!cached || cached.length === 0) {
+        if (result.conversations.length > 0) {
+          console.log(`[MessagingProvider] 🚀 Triggering preload for ${result.conversations.length} conversations (no cache)`);
+          preloadMessageHistoriesFromServer(result.conversations);
+        } else {
+          console.log('[MessagingProvider] ⚠️ No conversations to preload');
+        }
+        // Set loading to false after server fetch completes (no cache case)
+        setLoading(false);
+      }
+      
+      const totalTime = Date.now() - loadStartTime;
+      console.log(`[MessagingProvider] ✅ loadConversations complete in ${totalTime}ms`);
     } catch (error) {
-      console.error('Error loading conversations:', error);
-    } finally {
+      console.error('[MessagingProvider] ❌ Error loading conversations:', error);
+      // Set loading to false on error so UI doesn't stay in loading state
       setLoading(false);
     }
-  }, []);
+    // Removed finally block - loading is now set to false in appropriate places above
+  }, [preloadMessageHistoriesFromServer]);
 
   // Mark conversation as read
   const markAsRead = useCallback(async (conversationId: string) => {
@@ -301,6 +401,54 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
         console.error('Error updating cache:', err)
       );
     }
+  }, [conversations]);
+
+  // Predictive preloading - warm memory cache for top conversations
+  // CRITICAL: Only warms memory cache, does NOT trigger disk reads
+  const preloadedConversationsRef = useRef<Set<string>>(new Set());
+  const debouncedPreloadRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    // Clear any pending preload
+    if (debouncedPreloadRef.current) {
+      clearTimeout(debouncedPreloadRef.current);
+    }
+    
+    // Debounce preloading (wait 500ms after conversations change)
+    debouncedPreloadRef.current = setTimeout(() => {
+      if (conversations.length > 0) {
+        // Only preload top 3 (not 5) to avoid performance issues
+        const topConversations = conversations.slice(0, 3);
+        
+        // Use InteractionManager to avoid blocking UI
+        InteractionManager.runAfterInteractions(() => {
+          topConversations.forEach(conv => {
+            // Skip if already preloaded this session
+            if (preloadedConversationsRef.current.has(conv.id)) {
+              return;
+            }
+            
+            // CRITICAL: Check memory cache first (synchronous, no disk read)
+            const memoryCached = chatHistoryCache.loadCachedMessages(conv.id);
+            if (memoryCached) {
+              // Already in memory - no need to preload
+              preloadedConversationsRef.current.add(conv.id);
+              return;
+            }
+            
+            // Memory cache miss - but DON'T trigger AsyncStorage read here
+            // Preloading will happen naturally when user opens conversation
+            preloadedConversationsRef.current.add(conv.id);
+          });
+        });
+      }
+    }, 500);
+    
+    return () => {
+      if (debouncedPreloadRef.current) {
+        clearTimeout(debouncedPreloadRef.current);
+      }
+    };
   }, [conversations]);
 
   // Set up subscription
