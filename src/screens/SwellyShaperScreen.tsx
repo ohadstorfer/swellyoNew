@@ -818,14 +818,14 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '400',
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
-    lineHeight: 18,
+    lineHeight: 22,
   },
   normalBotMessageText: {
     color: '#333333',
     fontSize: 18,
     fontWeight: '400',
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
-    lineHeight: 18,
+    lineHeight: 22,
   },
   timestampContainer: {
     alignItems: 'flex-start',
