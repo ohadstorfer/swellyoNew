@@ -14,23 +14,35 @@ interface CachedConversation {
   lastSync: number; // Timestamp
   version: number; // Schema version for cache invalidation
   conversationId: string;
+  accessCount: number; // Track access frequency for smart eviction
+  lastAccess: number; // Last access timestamp
 }
 
 const CACHE_KEY_PREFIX = '@swellyo_chat_history_';
 const CACHE_VERSION = 1;
-const MAX_CACHED_CONVERSATIONS = 10;
-const MAX_MESSAGES_PER_CONVERSATION = 30;
+// Removed MAX_CACHED_CONVERSATIONS hard limit - now using total cache size only
+const MAX_MESSAGES_PER_CONVERSATION = 100; // Increased from 30 to 100 for better pagination support
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const MAX_TOTAL_CACHE_SIZE_MB = 5;
 const ESTIMATED_BYTES_PER_MESSAGE = 2000; // ~2KB per message
 
 class ChatHistoryCache {
   private conversationAccessOrder: string[] = []; // For LRU tracking
+  private conversationAccessCounts = new Map<string, number>(); // Track access frequency
   
   // Session-based memory cache (no TTL expiration while app is active)
   // Use LRU eviction for size control, not time-based expiration
   private memoryCache = new Map<string, { messages: Message[], lastSync: number }>();
-  private MAX_MEMORY_CACHE_SIZE = 20; // LRU eviction limit (increased from 10 for better cache hit rate)
+  private MAX_MEMORY_CACHE_SIZE = 50; // LRU eviction limit (increased from 20 to 50 for better cache hit rate)
+  
+  // Track active conversations to prevent eviction during pagination
+  private activeConversations = new Set<string>();
+  
+  // Lock to prevent concurrent eviction calls
+  private isEvicting = false;
+  
+  // Per-conversation locks to prevent concurrent saveMessages calls
+  private conversationSaveLocks = new Map<string, Promise<void>>();
 
   /**
    * Get cache key for a conversation
@@ -60,24 +72,71 @@ class ChatHistoryCache {
   }
 
   /**
-   * Evict oldest conversations if we exceed limits
+   * Evict oldest conversations if we exceed total cache size limit
+   * CRITICAL: Does not evict active conversations (currently being loaded via pagination)
+   * CRITICAL: Uses lock to prevent concurrent eviction calls
    */
   private async evictOldConversations(): Promise<void> {
+    // Lock to prevent concurrent eviction calls
+    if (this.isEvicting) {
+      return; // Already evicting, skip this call
+    }
+    
+    this.isEvicting = true;
+    
     try {
       const allKeys = await this.getAllCacheKeys();
       
-      if (allKeys.length <= MAX_CACHED_CONVERSATIONS) {
-        return; // Within limit
+      if (allKeys.length === 0) {
+        return;
       }
 
-      // Get access times for all conversations
-      const accessTimes: Array<{ key: string; lastSync: number }> = [];
+      // Calculate total cache size
+      let totalSizeBytes = 0;
+      const accessData: Array<{ 
+        key: string; 
+        conversationId: string;
+        lastSync: number; 
+        accessCount: number; 
+        lastAccess: number; 
+        score: number;
+        sizeBytes: number;
+      }> = [];
+      
       for (const key of allKeys) {
         try {
           const cached = await AsyncStorage.getItem(key);
           if (cached) {
             const data: CachedConversation = JSON.parse(cached);
-            accessTimes.push({ key, lastSync: data.lastSync });
+            const conversationId = data.conversationId;
+            
+            // CRITICAL: Skip active conversations (being loaded via pagination)
+            if (this.activeConversations.has(conversationId)) {
+              continue; // Don't evict active conversations
+            }
+            
+            const sizeBytes = this.estimateCacheSize(data.messages || []);
+            totalSizeBytes += sizeBytes;
+            
+            const accessCount = this.conversationAccessCounts.get(conversationId) || data.accessCount || 0;
+            const lastAccess = data.lastAccess || data.lastSync;
+            
+            // Calculate eviction score: lower score = more likely to evict
+            // Higher access count = keep longer
+            // More recent access = keep longer
+            // Score = accessCount * 1000 - (time since last access in hours)
+            const hoursSinceAccess = (Date.now() - lastAccess) / (1000 * 60 * 60);
+            const score = accessCount * 1000 - hoursSinceAccess;
+            
+            accessData.push({ 
+              key, 
+              conversationId,
+              lastSync: data.lastSync, 
+              accessCount,
+              lastAccess,
+              score,
+              sizeBytes
+            });
           }
         } catch (error) {
           // Skip invalid entries
@@ -85,19 +144,87 @@ class ChatHistoryCache {
         }
       }
 
-      // Sort by lastSync (oldest first)
-      accessTimes.sort((a, b) => a.lastSync - b.lastSync);
+      const maxSizeBytes = MAX_TOTAL_CACHE_SIZE_MB * 1024 * 1024;
+      
+      // CRITICAL: Calculate total size including active conversations (for accurate limit check)
+      let totalSizeIncludingActive = totalSizeBytes;
+      for (const key of allKeys) {
+        try {
+          const cached = await AsyncStorage.getItem(key);
+          if (cached) {
+            const data: CachedConversation = JSON.parse(cached);
+            if (this.activeConversations.has(data.conversationId)) {
+              // Include active conversations in total size calculation
+              totalSizeIncludingActive += this.estimateCacheSize(data.messages || []);
+            }
+          }
+        } catch (error) {
+          // Skip invalid entries
+          continue;
+        }
+      }
+      
+      // Only evict if we exceed total cache size limit (including active)
+      if (totalSizeIncludingActive <= maxSizeBytes) {
+        return; // Within size limit
+      }
 
-      // Remove oldest conversations until we're under limit
-      const toRemove = accessTimes.slice(0, allKeys.length - MAX_CACHED_CONVERSATIONS);
-      const keysToRemove = toRemove.map(item => item.key);
+      // CRITICAL: If all conversations are active, we can't evict any (they're being saved)
+      // This is acceptable - cache will grow temporarily during active pagination
+      // The conversations will be unmarked as active after save completes, allowing future eviction
+      if (accessData.length === 0) {
+        // Check if any single active conversation alone exceeds limit (edge case)
+        let largestActive: { key: string; conversationId: string; sizeBytes: number } | null = null;
+        for (const key of allKeys) {
+          try {
+            const cached = await AsyncStorage.getItem(key);
+            if (cached) {
+              const data: CachedConversation = JSON.parse(cached);
+              if (this.activeConversations.has(data.conversationId)) {
+                const sizeBytes = this.estimateCacheSize(data.messages || []);
+                if (!largestActive || sizeBytes > largestActive.sizeBytes) {
+                  largestActive = { key, conversationId: data.conversationId, sizeBytes };
+                }
+              }
+            }
+          } catch (error) {
+            continue;
+          }
+        }
+        
+        // Only evict if a single conversation alone exceeds limit (can't be reduced otherwise)
+        if (largestActive && largestActive.sizeBytes > maxSizeBytes) {
+          await AsyncStorage.removeItem(largestActive.key);
+          console.warn(`[chatHistoryCache] Evicted active conversation ${largestActive.conversationId} (${largestActive.sizeBytes / 1024 / 1024}MB) - single conversation exceeds limit`);
+        } else {
+          console.warn(`[chatHistoryCache] All conversations are active, cache temporarily exceeds limit (${totalSizeIncludingActive / 1024 / 1024}MB). Will evict after saves complete.`);
+        }
+        return; // Can't evict more if all are active
+      }
+
+      // Sort by score (lowest first = evict first)
+      accessData.sort((a, b) => a.score - b.score);
+
+      // Remove lowest-scored conversations until we're under size limit
+      const keysToRemove: string[] = [];
+      let remainingSize = totalSizeIncludingActive;
+      
+      for (const item of accessData) {
+        if (remainingSize <= maxSizeBytes) {
+          break; // Under limit, stop evicting
+        }
+        keysToRemove.push(item.key);
+        remainingSize -= item.sizeBytes;
+      }
       
       if (keysToRemove.length > 0) {
         await AsyncStorage.multiRemove(keysToRemove);
-        console.log(`[chatHistoryCache] Evicted ${keysToRemove.length} old conversations`);
+        console.log(`[chatHistoryCache] Evicted ${keysToRemove.length} old conversations (freed ${(totalSizeIncludingActive - remainingSize) / 1024 / 1024}MB)`);
       }
     } catch (error) {
       console.error('[chatHistoryCache] Error evicting old conversations:', error);
+    } finally {
+      this.isEvicting = false; // Release lock
     }
   }
 
@@ -122,6 +249,9 @@ class ChatHistoryCache {
     if (memoryCached) {
       // Update LRU order
       this.updateMemoryCacheAccess(conversationId);
+      // Update access frequency
+      const currentCount = this.conversationAccessCounts.get(conversationId) || 0;
+      this.conversationAccessCounts.set(conversationId, currentCount + 1);
       console.log(`[chatHistoryCache] ✅ MEMORY CACHE HIT for ${conversationId}: ${memoryCached.messages.length} messages`);
       return memoryCached.messages; // INSTANT return - no async delay
     }
@@ -179,6 +309,16 @@ class ChatHistoryCache {
 
       // Update access order for LRU
       this.updateAccessOrder(conversationId);
+      
+      // Update access frequency
+      const currentCount = this.conversationAccessCounts.get(conversationId) || (data.accessCount || 0);
+      this.conversationAccessCounts.set(conversationId, currentCount + 1);
+      
+      // Update lastAccess in cache if needed
+      if (!data.lastAccess) {
+        data.lastAccess = Date.now();
+        await AsyncStorage.setItem(key, JSON.stringify(data));
+      }
 
       const messages = data.messages || [];
       const result = messages.slice(-MAX_MESSAGES_PER_CONVERSATION);
@@ -207,65 +347,117 @@ class ChatHistoryCache {
 
   /**
    * Save messages to cache
-   * Only stores last 30 messages to keep cache lightweight
+   * Stores last 100 messages (increased from 30 for better pagination support)
+   * 
+   * CRITICAL: Marks conversation as active during save to prevent eviction
+   * CRITICAL: Only truncates when saving to disk (not during merge)
+   * CRITICAL: Uses per-conversation lock to prevent concurrent writes
    */
   async saveMessages(conversationId: string, messages: Message[]): Promise<void> {
-    try {
-      // Only store last 30 messages
-      const messagesToCache = messages.slice(-MAX_MESSAGES_PER_CONVERSATION);
-      
-      // Check total cache size
-      const estimatedSize = this.estimateCacheSize(messagesToCache);
-      if (estimatedSize > MAX_TOTAL_CACHE_SIZE_MB * 1024 * 1024) {
-        console.warn('[chatHistoryCache] Cache size limit reached, evicting old conversations');
-        await this.evictOldConversations();
-      }
-
-      const lastMessageId = messagesToCache.length > 0 
-        ? messagesToCache[messagesToCache.length - 1].id 
-        : null;
-
-      const lastSync = Date.now();
-      const cached: CachedConversation = {
-        messages: messagesToCache,
-        lastMessageId,
-        lastSync,
-        version: CACHE_VERSION,
-        conversationId,
-      };
-
-      const key = this.getCacheKey(conversationId);
-      await AsyncStorage.setItem(key, JSON.stringify(cached));
-      
-      // Update access order
-      this.updateAccessOrder(conversationId);
-      
-      // Update memory cache for instant access
-      if (this.memoryCache.size >= this.MAX_MEMORY_CACHE_SIZE) {
-        // Evict oldest entry
-        const firstKey = this.memoryCache.keys().next().value;
-        this.memoryCache.delete(firstKey);
-      }
-      
-      this.memoryCache.set(conversationId, {
-        messages: messagesToCache,
-        lastSync,
-      });
-      
-      console.log(`[chatHistoryCache] 💾 Saved ${messagesToCache.length} messages to disk and memory cache for ${conversationId} (memory cache size: ${this.memoryCache.size})`);
-      
-      // Evict old conversations if needed
-      await this.evictOldConversations();
-    } catch (error) {
-      console.error('[chatHistoryCache] Error saving messages to cache:', error);
-      // Don't throw - caching is optional
+    // Wait for any existing save operation for this conversation to complete
+    const existingLock = this.conversationSaveLocks.get(conversationId);
+    if (existingLock) {
+      await existingLock;
     }
+    
+    // Create new lock for this save operation
+    const savePromise = (async () => {
+      // Mark conversation as active to prevent eviction during save
+      this.activeConversations.add(conversationId);
+      
+      try {
+        // Read existing cache to merge (prevents overwriting concurrent writes)
+        const key = this.getCacheKey(conversationId);
+        let existingCached: CachedConversation | null = null;
+        try {
+          const existing = await AsyncStorage.getItem(key);
+          if (existing) {
+            existingCached = JSON.parse(existing);
+          }
+        } catch (error) {
+          // Ignore read errors, will create new cache
+        }
+        
+        // Merge with existing messages if available
+        let messagesToCache: Message[];
+        if (existingCached && existingCached.messages && existingCached.messages.length > 0) {
+          // Merge existing with new, then truncate
+          const merged = this.mergeMessages(existingCached.messages, messages);
+          messagesToCache = merged.slice(-MAX_MESSAGES_PER_CONVERSATION);
+        } else {
+          // No existing cache, just truncate new messages
+          messagesToCache = messages.slice(-MAX_MESSAGES_PER_CONVERSATION);
+        }
+        
+        const lastMessageId = messagesToCache.length > 0 
+          ? messagesToCache[messagesToCache.length - 1].id 
+          : null;
+
+        const lastSync = Date.now();
+        const existingAccessCount = existingCached?.accessCount || this.conversationAccessCounts.get(conversationId) || 0;
+        const accessCount = existingAccessCount + 1; // Increment on save
+        
+        const cached: CachedConversation = {
+          messages: messagesToCache,
+          lastMessageId,
+          lastSync,
+          version: CACHE_VERSION,
+          conversationId,
+          accessCount,
+          lastAccess: lastSync,
+        };
+        
+        // Update in-memory access count
+        this.conversationAccessCounts.set(conversationId, accessCount);
+
+        await AsyncStorage.setItem(key, JSON.stringify(cached));
+        
+        // Update access order
+        this.updateAccessOrder(conversationId);
+        
+        // Update memory cache for instant access
+        if (this.memoryCache.size >= this.MAX_MEMORY_CACHE_SIZE) {
+          // Evict oldest entry
+          const firstKey = this.memoryCache.keys().next().value;
+          this.memoryCache.delete(firstKey);
+        }
+        
+        this.memoryCache.set(conversationId, {
+          messages: messagesToCache,
+          lastSync,
+        });
+        
+        console.log(`[chatHistoryCache] 💾 Saved ${messagesToCache.length} messages to disk and memory cache for ${conversationId} (memory cache size: ${this.memoryCache.size})`);
+        
+        // Evict old conversations if needed (after save completes)
+        // This is safe because we check activeConversations in evictOldConversations
+        await this.evictOldConversations();
+      } catch (error) {
+        console.error('[chatHistoryCache] Error saving messages to cache:', error);
+        // Don't throw - caching is optional
+      } finally {
+        // Unmark conversation as active after save completes
+        this.activeConversations.delete(conversationId);
+        // Remove lock
+        this.conversationSaveLocks.delete(conversationId);
+      }
+    })();
+    
+    // Store lock promise
+    this.conversationSaveLocks.set(conversationId, savePromise);
+    
+    // Wait for save to complete
+    await savePromise;
   }
 
   /**
    * Merge new messages with cached messages
    * Handles conflicts by timestamp (server messages take precedence)
    * Uses stable sorting to prevent scroll jumps
+   * 
+   * CRITICAL: Does NOT truncate - returns all merged messages.
+   * Truncation only happens in saveMessages() when saving to disk.
+   * This prevents data loss when merging pagination results.
    */
   mergeMessages(cached: Message[], newMessages: Message[]): Message[] {
     // Create a map of cached messages by ID
@@ -294,8 +486,9 @@ class ChatHistoryCache {
       return a.id.localeCompare(b.id);
     });
 
-    // Return last 30 messages
-    return merged.slice(-MAX_MESSAGES_PER_CONVERSATION);
+    // CRITICAL: Return ALL merged messages (no truncation)
+    // Truncation happens in saveMessages() when saving to disk
+    return merged;
   }
 
   /**

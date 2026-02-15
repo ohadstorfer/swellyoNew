@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   View,
   StyleSheet,
@@ -28,6 +28,8 @@ import { analyticsService } from '../services/analytics/analyticsService';
 import { chatHistoryCache } from '../services/messaging/chatHistoryCache';
 import { MessageActionsMenu } from '../components/MessageActionsMenu';
 import { useMessaging } from '../context/MessagingProvider';
+import { userPresenceService } from '../services/presence/userPresenceService';
+import { avatarCacheService } from '../services/media/avatarCacheService';
 
 interface DirectMessageScreenProps {
   conversationId?: string; // Optional: undefined for pending conversations (will be created on first message)
@@ -77,8 +79,13 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState<string>('');
   const [isFetchingMessages, setIsFetchingMessages] = useState(false); // Start as false, only set true when actually fetching
+  const [hasMoreMessages, setHasMoreMessages] = useState(false);
+  const [isLoadingOlderMessages, setIsLoadingOlderMessages] = useState(false);
+  const oldestMessageIdRef = useRef<string | null>(null);
+  const isLoadingOlderRef = useRef<boolean>(false); // Ref-based lock to prevent race conditions
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [otherUserAdvRole, setOtherUserAdvRole] = useState<'adv_giver' | 'adv_seeker' | null>(null);
+  const [otherUserIsOnline, setOtherUserIsOnline] = useState<boolean | null>(null);
   const [inputHeight, setInputHeight] = useState(25); // Initial height for one line
   const [showSkeletons, setShowSkeletons] = useState(false);
   const [hasTrackedFirstMessage, setHasTrackedFirstMessage] = useState(false);
@@ -255,6 +262,36 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     }
   }, [currentConversationId, currentUserId, markAsRead]);
 
+  // Subscribe to other user's online status
+  useEffect(() => {
+    if (!otherUserId) {
+      setOtherUserIsOnline(null);
+      return;
+    }
+
+    // Subscribe to user status
+    const unsubscribe = userPresenceService.subscribeToUserStatus(
+      otherUserId,
+      (isOnline) => {
+        setOtherUserIsOnline(isOnline);
+      }
+    );
+
+    // Cleanup on unmount or when otherUserId changes
+    return () => {
+      unsubscribe();
+    };
+  }, [otherUserId]);
+
+  // Prefetch avatar when component mounts or avatar URL changes
+  useEffect(() => {
+    if (otherUserAvatar) {
+      avatarCacheService.prefetchAvatar(otherUserAvatar).catch(err => {
+        console.error('[DirectMessageScreen] Error prefetching avatar:', err);
+      });
+    }
+  }, [otherUserAvatar]);
+
   const loadOtherUserAdvRole = async () => {
     if (!currentConversationId || !otherUserId) return;
     
@@ -287,8 +324,17 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       setMessages([]);
       setIsFetchingMessages(false);
       setShowSkeletons(false);
+      // Reset pagination state
+      oldestMessageIdRef.current = null;
+      setHasMoreMessages(false);
+      isLoadingOlderRef.current = false;
       return;
     }
+    
+    // Reset pagination state when loading new conversation
+    oldestMessageIdRef.current = null;
+    setHasMoreMessages(false);
+    isLoadingOlderRef.current = false; // Cancel any in-flight pagination requests
     
     const loadStartTime = Date.now();
     
@@ -314,6 +360,13 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       setMessages(cachedMessages);
       setIsFetchingMessages(false);
       setShowSkeletons(false);  // Binary: cache exists = no skeleton
+      
+      // Set pagination state
+      if (cachedMessages.length > 0) {
+        oldestMessageIdRef.current = cachedMessages[0].id;
+        // Assume there might be more messages if we have exactly the cache limit
+        setHasMoreMessages(cachedMessages.length >= 30);
+      }
       
       // Load other user's adv_role (non-blocking)
       loadOtherUserAdvRole().catch(err => console.error('Error loading adv_role:', err));
@@ -348,6 +401,13 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         setIsFetchingMessages(false);
         setShowSkeletons(false);  // Binary: cache exists = no skeleton
         
+        // Set pagination state
+        if (asyncCachedMessages.length > 0) {
+          oldestMessageIdRef.current = asyncCachedMessages[0].id;
+          // Assume there might be more messages if we have exactly the cache limit
+          setHasMoreMessages(asyncCachedMessages.length >= 30);
+        }
+        
         await loadOtherUserAdvRole();
         setTimeout(() => scrollToBottom(), 200);
         
@@ -358,14 +418,18 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         setShowSkeletons(true);  // Binary: no cache = show skeleton
         
         const serverStartTime = Date.now();
-        const serverMessages = await messagingService.getMessages(currentConversationId, 30);
+        const result = await messagingService.getMessages(currentConversationId, 30);
         const serverTime = Date.now() - serverStartTime;
         const totalTime = Date.now() - loadStartTime;
         
-        console.log(`[DirectMessageScreen] 📥 SERVER FETCH - Got ${serverMessages.length} messages in ${serverTime}ms (${totalTime}ms total)`);
+        console.log(`[DirectMessageScreen] 📥 SERVER FETCH - Got ${result.messages.length} messages in ${serverTime}ms (${totalTime}ms total, hasMore: ${result.hasMore})`);
         
-        setMessages(serverMessages);
-        await chatHistoryCache.saveMessages(currentConversationId, serverMessages);
+        setMessages(result.messages);
+        setHasMoreMessages(result.hasMore);
+        if (result.messages.length > 0) {
+          oldestMessageIdRef.current = result.messages[0].id;
+        }
+        await chatHistoryCache.saveMessages(currentConversationId, result.messages);
         
         setIsFetchingMessages(false);
         setShowSkeletons(false);
@@ -377,6 +441,66 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       console.error('[DirectMessageScreen] ❌ Error loading messages:', error);
       setIsFetchingMessages(false);
       setShowSkeletons(false);
+    }
+  };
+  
+  // Load older messages (pagination)
+  const loadOlderMessages = async () => {
+    // Ref-based lock to prevent race conditions (synchronous check)
+    if (!currentConversationId || isLoadingOlderRef.current || isLoadingOlderMessages || !hasMoreMessages || !oldestMessageIdRef.current) {
+      return;
+    }
+    
+    // Set lock immediately (synchronous) before async state update
+    isLoadingOlderRef.current = true;
+    setIsLoadingOlderMessages(true);
+    
+    try {
+      // Capture oldestMessageId at call time to prevent stale values
+      const beforeMessageId = oldestMessageIdRef.current;
+      
+      // Find the message in current state to get its created_at (avoids extra query)
+      const beforeMessage = messages.find(m => m.id === beforeMessageId);
+      const beforeMessageCreatedAt = beforeMessage?.created_at;
+      
+      const result = await messagingService.getMessages(
+        currentConversationId,
+        30,
+        undefined,
+        beforeMessageId,
+        beforeMessageCreatedAt
+      );
+      
+      if (result.messages.length > 0) {
+        // Prepend older messages to existing array
+        setMessages((prev) => {
+          // Avoid duplicates
+          const existingIds = new Set(prev.map(m => m.id));
+          const uniqueNew = result.messages.filter(m => !existingIds.has(m.id));
+          const merged = [...uniqueNew, ...prev];
+          
+          // Update cache
+          chatHistoryCache.saveMessages(currentConversationId, merged).catch(err => {
+            console.error('Error saving merged messages:', err);
+          });
+          
+          return merged;
+        });
+        
+        // Update pagination state
+        setHasMoreMessages(result.hasMore);
+        oldestMessageIdRef.current = result.messages[0].id;
+      } else {
+        setHasMoreMessages(false);
+      }
+    } catch (error) {
+      console.error('[DirectMessageScreen] Error loading older messages:', error);
+      // Reset hasMore on error to prevent stuck state
+      setHasMoreMessages(false);
+    } finally {
+      // Release lock
+      isLoadingOlderRef.current = false;
+      setIsLoadingOlderMessages(false);
     }
   };
   
@@ -937,13 +1061,14 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.headerContainer}>
+        <View style={styles.headerGradientBorder} />
         <View style={styles.header}>
           <View style={styles.headerLeft}>
             <TouchableOpacity 
               style={styles.backButton}
               onPress={onBack}
             >
-              <Ionicons name="chevron-back" size={24} color="#222B30" />
+              <Ionicons name="chevron-back" size={24} color="#FFFFFF" />
             </TouchableOpacity>
             
             <TouchableOpacity 
@@ -965,6 +1090,8 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                 name={otherUserName}
                 style={styles.avatarImage}
                 showLoadingIndicator={false}
+                isOnline={otherUserIsOnline === true}
+                advRole={otherUserAdvRole}
               />
             </TouchableOpacity>
           </View>
@@ -984,12 +1111,24 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             activeOpacity={0.7}
           >
             <Text style={styles.profileName}>{otherUserName}</Text>
-            <Text style={styles.profileTagline}>Online</Text>
+            {useMemo(() => {
+              if (otherUserIsOnline === true) {
+                return (
+                  <View style={styles.statusContainer}>
+                    <View style={styles.onlineDot} />
+                    <Text style={styles.profileTagline}>Available</Text>
+                  </View>
+                );
+              } else if (otherUserIsOnline === false) {
+                return <Text style={styles.profileTagline}>Offline</Text>;
+              }
+              return null; // Don't show anything while loading
+            }, [otherUserIsOnline])}
           </TouchableOpacity>
           
-          <TouchableOpacity style={styles.menuButton}>
-            <Ionicons name="ellipsis-vertical" size={24} color="#222B30" />
-          </TouchableOpacity>
+          {/* <TouchableOpacity style={styles.menuButton}>
+            <Ionicons name="ellipsis-vertical" size={24} color="#FFFFFF" />
+          </TouchableOpacity> */}
         </View>
       </View>
 
@@ -1009,6 +1148,14 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             style={styles.messagesList}
             contentContainerStyle={styles.messagesContent}
             showsVerticalScrollIndicator={false}
+            onScroll={(event) => {
+              const { contentOffset } = event.nativeEvent;
+              // Trigger when scrolled near top (within 200px)
+              if (contentOffset.y <= 200 && hasMoreMessages && !isLoadingOlderMessages) {
+                loadOlderMessages();
+              }
+            }}
+            scrollEventThrottle={400}
           >
           {messages.length === 0 && isFetchingMessages ? (
             // Show skeletons only when fetching AND no messages
@@ -1023,6 +1170,13 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             </View>
           ) : (
             <>
+              {/* Loading indicator for older messages */}
+              {isLoadingOlderMessages && (
+                <View style={styles.loadOlderContainer}>
+                  <ActivityIndicator size="small" color="#A0A0A0" />
+                  <Text style={styles.loadOlderText}>Loading older messages...</Text>
+                </View>
+              )}
               {messages
                 .map(renderMessage)
                 .filter(msg => msg !== null) // Filter out null messages (when variables not ready)
@@ -1193,18 +1347,18 @@ const styles = StyleSheet.create({
     backgroundColor: '#F5F5F5',
   },
   headerContainer: {
-    backgroundColor: colors.white,
-    paddingTop: 48,
-    paddingBottom: spacing.md,
+    backgroundColor: '#212121',
+    paddingTop: Platform.OS === 'web' ? 35 : 35,
+    paddingBottom: 24,
     paddingHorizontal: 0,
     alignItems: 'center',
+    position: 'relative',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     width: '100%',
     paddingHorizontal: spacing.md,
-    marginBottom: spacing.md,
   },
   headerLeft: {
     flexDirection: 'row',
@@ -1216,20 +1370,19 @@ const styles = StyleSheet.create({
     height: 24,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 5,
+    marginRight: 10,
   },
   avatar: {
-    width: 48,
+    width: 52,
     height: 52,
-    aspectRatio: 12 / 13,
-    borderRadius: 24,
-    overflow: 'hidden',
-    backgroundColor: '#D3D3D3', // Fallback background
+    borderRadius: 26,
+    // overflow: 'hidden', // Keep hidden to maintain circular shape
+    // backgroundColor: '#D3D3D3', // Fallback background
   },
   avatarImage: {
     width: '100%',
     height: '100%',
-    borderRadius: 24,
+    borderRadius: 26,
     ...(Platform.OS === 'web' && {
       objectFit: 'cover' as any,
     }),
@@ -1238,9 +1391,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#D3D3D3',
     justifyContent: 'center',
     alignItems: 'center',
-    width: 48,
+    width: 52,
     height: 52,
-    borderRadius: 24,
+    borderRadius: 26,
   },
   avatarPlaceholderText: {
     color: colors.white,
@@ -1255,17 +1408,36 @@ const styles = StyleSheet.create({
   profileName: {
     fontSize: 20,
     fontWeight: '700',
-    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : undefined,
-    lineHeight: 32,
-    color: '#333333',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter-Bold',
+    lineHeight: 28,
+    color: '#FFFFFF',
     marginBottom: 4,
   },
   profileTagline: {
     fontSize: 14,
     fontWeight: '400',
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     lineHeight: 20,
-    color: '#868686',
+    color: '#A0A0A0',
+  },
+  statusContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  onlineDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#4CAF50',
+    marginRight: 6,
+  },
+  headerGradientBorder: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 4,
+    backgroundColor: '#05BCD3', // Teal/cyan color from Figma
   },
   menuButton: {
     width: 24,
@@ -1288,6 +1460,19 @@ const styles = StyleSheet.create({
   messagesContent: {
     padding: spacing.md,
     paddingBottom: spacing.lg,
+  },
+  loadOlderContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    gap: 8,
+  },
+  loadOlderText: {
+    fontFamily: Platform.OS === 'web' ? 'var(--Family-Body, Inter), sans-serif' : 'Inter',
+    fontSize: 13,
+    fontWeight: '400',
+    color: '#A0A0A0',
   },
   loadingContainer: {
     flex: 1,

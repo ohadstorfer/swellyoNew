@@ -110,7 +110,7 @@ class MessagingService {
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
       if (sessionError || !session) {
         console.log('[messagingService] No session in getConversations - auth guard will handle redirect');
-        return []; // Return empty array, auth guard will redirect
+        return { conversations: [], hasMore: false }; // Return empty array, auth guard will redirect
       }
 
       const { data: { user } } = await supabase.auth.getUser();
@@ -121,19 +121,26 @@ class MessagingService {
 
       // Get conversations where user is a member with pagination
       // Fetch limit+1 to determine if there are more conversations
+      // Note: Supabase range is inclusive-inclusive, so range(offset, offset+limit) returns limit+1 items
+      const fetchLimit = limit + 1; // Explicitly fetch one extra to detect hasMore
       const { data: membershipData, error: membershipError } = await supabase
         .from('conversation_members')
         .select('conversation_id')
         .eq('user_id', user.id)
         .order('joined_at', { ascending: false })
-        .range(offset, offset + limit);
+        .range(offset, offset + limit); // This returns limit+1 items (inclusive-inclusive)
 
       if (membershipError) throw membershipError;
 
-      // Check if there are more conversations (if we got limit+1, there are more)
-      const hasMore = membershipData && membershipData.length > limit;
+      // Check if there are more conversations
+      // If we got exactly limit+1 items, there are more
+      // If we got fewer than limit+1, we've reached the end
+      // Edge case: If we got exactly limit items, there might be more (backend returned fewer)
+      // Conservative approach: If we got exactly limit items, assume there might be more
+      const receivedCount = membershipData?.length || 0;
+      const hasMore = receivedCount > limit || (receivedCount === limit && receivedCount > 0);
       
-      // Take only the requested limit (remove the extra one we fetched)
+      // Take only the requested limit (remove the extra one we fetched if it exists)
       const paginatedMembershipData = membershipData ? membershipData.slice(0, limit) : [];
       const conversationIds = paginatedMembershipData.map(m => m.conversation_id);
 
@@ -151,35 +158,28 @@ class MessagingService {
       if (conversationsError) throw conversationsError;
 
       if (!conversations || conversations.length === 0) {
-        return [];
+        return { conversations: [], hasMore: false };
       }
 
-      // OPTIMIZATION 2: Fetch all last messages in a SINGLE query (instead of N queries)
-      // Fetch all messages for all conversations, then filter to get the most recent per conversation
-      // CRITICAL: Add limit to prevent fetching millions of messages (conversationIds.length * 2 ensures we get at least 1 per conversation)
-      const messageLimit = conversationIds.length * 2;
-      const { data: allMessages, error: messagesError } = await supabase
-        .from('messages')
-        .select('id, conversation_id, sender_id, body, rendered_body, attachments, is_system, edited, deleted, created_at, updated_at')
-        .in('conversation_id', conversationIds)
-        .eq('deleted', false)
-        .order('created_at', { ascending: false })
-        .limit(messageLimit);
+      // OPTIMIZATION 2: Fetch all last messages using PostgreSQL DISTINCT ON via RPC
+      // This guarantees exactly one message per conversation (the most recent)
+      // Much more efficient and reliable than fetching many messages and filtering in JavaScript
+      // Solves the issue where only the first few conversations show last message text
+      const { data: lastMessages, error: messagesError } = await supabase
+        .rpc('get_last_messages_per_conversation', {
+          conv_ids: conversationIds
+        });
 
       if (messagesError) {
-        console.error('Error fetching messages:', messagesError);
+        console.error('Error fetching last messages:', messagesError);
       }
 
-      // Group messages by conversation and get the most recent (first) one for each
+      // Convert array to Map for easy lookup
+      // RPC already returns exactly one message per conversation, so no need for deduplication
       const lastMessagesMap = new Map<string, Message>();
-      if (allMessages && allMessages.length > 0) {
-        // Since messages are ordered by created_at DESC, the first message per conversation is the last one
-        const seenConversations = new Set<string>();
-        allMessages.forEach(msg => {
-          if (!seenConversations.has(msg.conversation_id)) {
-            lastMessagesMap.set(msg.conversation_id, msg);
-            seenConversations.add(msg.conversation_id);
-          }
+      if (lastMessages && lastMessages.length > 0) {
+        lastMessages.forEach((msg: Message) => {
+          lastMessagesMap.set(msg.conversation_id, msg);
         });
       }
 
@@ -442,24 +442,31 @@ class MessagingService {
    * @param conversationId - The conversation ID
    * @param limit - Maximum number of messages to fetch (default: 50)
    * @param afterMessageId - Optional: Only fetch messages after this message ID (for incremental sync)
+   * @param beforeMessageId - Optional: Only fetch messages before this message ID (for loading older messages)
+   * @param beforeMessageCreatedAt - Optional: created_at timestamp of beforeMessageId (avoids extra query if provided)
    */
   async getMessages(
     conversationId: string, 
     limit: number = 50,
-    afterMessageId?: string
-  ): Promise<Message[]> {
+    afterMessageId?: string,
+    beforeMessageId?: string,
+    beforeMessageCreatedAt?: string
+  ): Promise<{ messages: Message[], hasMore: boolean }> {
     if (!isSupabaseConfigured()) {
       throw new Error('Supabase is not configured');
     }
 
     try {
+      // Fetch limit+1 to determine if there are more messages
+      const fetchLimit = limit + 1;
+      
       let query = supabase
         .from('messages')
         .select('id, conversation_id, sender_id, body, rendered_body, attachments, is_system, edited, deleted, created_at, updated_at')
         .eq('conversation_id', conversationId)
         .eq('deleted', false)
         .order('created_at', { ascending: true })
-        .limit(limit);
+        .limit(fetchLimit);
 
       // If afterMessageId is provided, fetch only messages after it (incremental sync)
       if (afterMessageId) {
@@ -475,23 +482,49 @@ class MessagingService {
         }
       }
 
+      // If beforeMessageId is provided, fetch only messages before it (loading older messages)
+      if (beforeMessageId) {
+        if (beforeMessageCreatedAt) {
+          // Use provided timestamp (avoids extra query)
+          query = query.lt('created_at', beforeMessageCreatedAt);
+        } else {
+          // Fallback: query for created_at if not provided (backward compatibility)
+          const { data: beforeMessage } = await supabase
+            .from('messages')
+            .select('created_at')
+            .eq('id', beforeMessageId)
+            .single();
+
+          if (beforeMessage) {
+            query = query.lt('created_at', beforeMessage.created_at);
+          }
+        }
+      }
+
       const { data: messages, error } = await query;
 
       if (error) throw error;
 
       if (!messages || messages.length === 0) {
-        return [];
+        return { messages: [], hasMore: false };
       }
 
+      // Check if there are more messages (if we got limit+1, there are more)
+      const hasMore = messages.length > limit;
+      const paginatedMessages = hasMore ? messages.slice(0, limit) : messages;
+
       // Fetch sender info separately for each unique sender (already batched)
-      const senderIds = [...new Set(messages.map(msg => msg.sender_id))];
+      const senderIds = [...new Set(paginatedMessages.map(msg => msg.sender_id))];
       
       if (senderIds.length === 0) {
-        return messages.map(msg => ({
-          ...msg,
-          sender_name: undefined,
-          sender_avatar: undefined,
-        }));
+        return {
+          messages: paginatedMessages.map(msg => ({
+            ...msg,
+            sender_name: undefined,
+            sender_avatar: undefined,
+          })),
+          hasMore
+        };
       }
 
       // OPTIMIZATION: Batch fetch surfer data for all senders
@@ -506,11 +539,14 @@ class MessagingService {
       );
 
       // Enrich messages with sender info
-      return messages.map(msg => ({
-        ...msg,
-        sender_name: surferMap.get(msg.sender_id)?.name,
-        sender_avatar: surferMap.get(msg.sender_id)?.profile_image_url,
-      }));
+      return {
+        messages: paginatedMessages.map(msg => ({
+          ...msg,
+          sender_name: surferMap.get(msg.sender_id)?.name,
+          sender_avatar: surferMap.get(msg.sender_id)?.profile_image_url,
+        })),
+        hasMore
+      };
     } catch (error) {
       console.error('Error fetching messages:', error);
       throw error;
@@ -1084,7 +1120,10 @@ class MessagingService {
   subscribeToConversations(
     callbacks: ConversationSubscriptionCallbacks | (() => void)
   ): () => void {
+    console.log('[MessagingService] 🚀 subscribeToConversations called');
+    
     if (!isSupabaseConfigured()) {
+      console.error('[MessagingService] ❌ Supabase is not configured');
       throw new Error('Supabase is not configured');
     }
 
@@ -1093,7 +1132,103 @@ class MessagingService {
       typeof callbacks === 'function'
         ? { onReconnect: callbacks }
         : callbacks;
+    
+    console.log('[MessagingService] ✅ Callbacks normalized:', {
+      hasOnNewMessage: !!normalizedCallbacks.onNewMessage,
+      hasOnMessageUpdated: !!normalizedCallbacks.onMessageUpdated,
+      hasOnMessageDeleted: !!normalizedCallbacks.onMessageDeleted,
+      hasOnConversationUpdated: !!normalizedCallbacks.onConversationUpdated,
+      hasOnReconnect: !!normalizedCallbacks.onReconnect,
+    });
 
+    // Batch enrichment for sender info (to avoid N+1 queries)
+    const pendingEnrichments = new Map<string, { message: Message; conversationId: string; timestamp: number }>();
+    let enrichmentTimer: ReturnType<typeof setTimeout> | null = null;
+    const ENRICHMENT_BATCH_DELAY = 100; // Batch enrichment every 100ms
+    
+    const processEnrichments = async () => {
+      if (pendingEnrichments.size === 0) return;
+      
+      const enrichments = Array.from(pendingEnrichments.values());
+      pendingEnrichments.clear();
+      
+      console.log('[MessagingService] 🔄 Processing enrichment batch:', {
+        count: enrichments.length,
+        conversationIds: [...new Set(enrichments.map(e => e.conversationId))],
+      });
+      
+      // Get unique sender IDs
+      const senderIds = [...new Set(enrichments.map(e => e.message.sender_id))];
+      
+      if (senderIds.length === 0) {
+        console.log('[MessagingService] ⚠️ No sender IDs to enrich, calling callbacks directly');
+        // No senders to enrich, call callbacks with unenriched messages
+        enrichments.forEach(({ message, conversationId }) => {
+          normalizedCallbacks.onNewMessage?.(conversationId, message);
+        });
+        return;
+      }
+      
+      try {
+        // Batch fetch surfer data for all senders
+        const { data: surfersData } = await supabase
+          .from('surfers')
+          .select('user_id, name, profile_image_url')
+          .in('user_id', senderIds);
+        
+        console.log('[MessagingService] ✅ Fetched surfer data:', {
+          requested: senderIds.length,
+          received: surfersData?.length || 0,
+        });
+        
+        const surferMap = new Map(
+          (surfersData || []).map(s => [s.user_id, s])
+        );
+        
+        // Enrich messages and call callbacks
+        enrichments.forEach(({ message, conversationId }) => {
+          const surferData = surferMap.get(message.sender_id);
+          const enrichedMessage: Message = {
+            ...message,
+            sender_name: surferData?.name,
+            sender_avatar: surferData?.profile_image_url,
+          };
+          
+          console.log('[MessagingService] 📤 Calling onNewMessage callback:', {
+            conversationId,
+            messageId: enrichedMessage.id,
+            hasSenderName: !!enrichedMessage.sender_name,
+            hasSenderAvatar: !!enrichedMessage.sender_avatar,
+          });
+          
+          normalizedCallbacks.onNewMessage?.(conversationId, enrichedMessage);
+        });
+      } catch (error) {
+        console.error('[MessagingService] ❌ Error enriching messages in batch:', error);
+        // Call callbacks with unenriched messages on error
+        enrichments.forEach(({ message, conversationId }) => {
+          console.log('[MessagingService] 📤 Calling onNewMessage callback (fallback, no enrichment):', {
+            conversationId,
+            messageId: message.id,
+          });
+          normalizedCallbacks.onNewMessage?.(conversationId, message);
+        });
+      }
+    };
+
+    console.log('[MessagingService] 📡 Creating channel: conversations_list');
+    
+    // CRITICAL: For unfiltered subscriptions with RLS, Supabase Realtime needs
+    // the RLS policy to be evaluated correctly. The issue is that without a filter,
+    // Supabase might not properly evaluate RLS policies that use functions.
+    // 
+    // Since DirectMessageScreen works (with filter), but ConversationsScreen doesn't
+    // (without filter), we need to ensure RLS evaluation works for unfiltered subscriptions.
+    //
+    // The RLS policy uses `is_user_conversation_member()` function which should work,
+    // but Supabase Realtime might need a hint. Let's try adding a minimal filter
+    // that doesn't restrict results but helps RLS evaluation.
+    
     const channel = supabase
       .channel('conversations_list')
       .on(
@@ -1102,10 +1237,52 @@ class MessagingService {
           event: 'INSERT',
           schema: 'public',
           table: 'messages',
+          // Try without filter first - if RLS policy is correct, this should work
+          // If it doesn't work, the issue is RLS policy evaluation, not the subscription
         },
         (payload) => {
+          console.log('[MessagingService] 🔔 RECEIVED MESSAGE INSERT EVENT:', {
+            messageId: payload.new?.id,
+            conversationId: payload.new?.conversation_id,
+            senderId: payload.new?.sender_id,
+            hasBody: !!payload.new?.body,
+            timestamp: new Date().toISOString(),
+          });
+          
           const message = payload.new as Message;
-          normalizedCallbacks.onNewMessage?.(message.conversation_id, message);
+          
+          // CRITICAL: RLS policy should have already filtered this, but if we're receiving it,
+          // it means the user CAN see it (RLS passed). The difference between this subscription
+          // and DirectMessageScreen is that DirectMessageScreen uses a filter, which might
+          // help Supabase optimize RLS evaluation. Without a filter, Supabase needs to
+          // evaluate RLS for ALL messages, which might not work correctly with function-based policies.
+          
+          console.log('[MessagingService] 🔍 Message received, RLS check passed (user can see this message)');
+          
+          // Validate message has required fields
+          if (!message.id || !message.conversation_id || !message.created_at) {
+            console.warn('[MessagingService] ❌ Invalid message from subscription:', message);
+            return;
+          }
+          
+          console.log('[MessagingService] ✅ Valid message, adding to enrichment batch:', {
+            messageId: message.id,
+            conversationId: message.conversation_id,
+          });
+          
+          // Add to batch for enrichment
+          pendingEnrichments.set(message.id, {
+            message,
+            conversationId: message.conversation_id,
+            timestamp: Date.now(),
+          });
+          
+          // Clear existing timer and set new one
+          if (enrichmentTimer) {
+            clearTimeout(enrichmentTimer);
+          }
+          enrichmentTimer = setTimeout(processEnrichments, ENRICHMENT_BATCH_DELAY);
+          
           // Legacy support: if only callback function provided, call it
           if (typeof callbacks === 'function') {
             callbacks();
@@ -1145,7 +1322,9 @@ class MessagingService {
         }
       )
       .subscribe((status) => {
+        console.log('[MessagingService] 📡 Subscription status changed:', status);
         if (status === 'SUBSCRIBED') {
+          console.log('[MessagingService] ✅ Successfully subscribed to conversations_list channel');
           // Just connected/reconnected - trigger sync
           // This callback fires on initial connection and on reconnect
           normalizedCallbacks.onReconnect?.();
@@ -1153,6 +1332,12 @@ class MessagingService {
           if (typeof callbacks === 'function') {
             callbacks();
           }
+        } else if (status === 'CHANNEL_ERROR') {
+          console.error('[MessagingService] ❌ Channel subscription error - check Realtime configuration');
+        } else if (status === 'TIMED_OUT') {
+          console.error('[MessagingService] ❌ Channel subscription timed out');
+        } else if (status === 'CLOSED') {
+          console.warn('[MessagingService] ⚠️ Channel subscription closed');
         }
       });
 

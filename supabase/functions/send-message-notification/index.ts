@@ -119,50 +119,12 @@ function generateEmailTemplate(data: EmailTemplateData, appUrl: string = 'https:
                 </div>
               </div>
 
-              <!-- Messages -->
-              <div style="margin-bottom: 32px;">
-                ${messages.map((message, index) => `
-                   <div style="
-      margin-bottom: ${index < messages.length - 1 ? '20px' : '0'};
-      padding: 16px 16px 16px 0px;
-      background-color: #f9f9f9;
-      border-radius: 12px;
-      border-left: 3px solid #B72DF2;
-      text-align: left;
-    ">
-      
-      <p style="
-        margin: 0 0 8px 0;
-        color: #333333;
-        font-size: 16px;
-        line-height: 24px;
-        white-space: pre-wrap;
-        word-break: break-word;
-        text-align: left;
-      ">
-        ${escapeHtml(message.body || '')}
-      </p>
-
-      <p style="
-        margin: 0;
-        color: #7B7B7B;
-        font-size: 12px;
-        text-align: left;
-        padding-left: 6px;
-      ">
-        ${formatTimestamp(message.created_at)}
-      </p>
-
-    </div>
-                `).join('')}
-              </div>
-
               <!-- CTA Button -->
               <table role="presentation" style="width: 100%; border-collapse: collapse;">
                 <tr>
                   <td align="center" style="padding: 0;">
                     <a href="${conversationUrl}" style="display: inline-block; padding: 14px 32px; background-color: #B72DF2; color: #ffffff; text-decoration: none; border-radius: 8px; font-size: 16px; font-weight: 600; text-align: center;">
-                      View Conversation
+                      Go to Swellyo
                     </a>
                   </td>
                 </tr>

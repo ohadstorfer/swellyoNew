@@ -114,7 +114,7 @@ export default function ConversationsScreen({
   const arrowAnim = useRef(new Animated.Value(0)).current;
   
   // Use MessagingProvider for conversations state
-  const { conversations, loading, refreshConversations, setCurrentConversationId } = useMessaging();
+  const { conversations, loading, refreshConversations, setCurrentConversationId, hasMoreConversations, isLoadingMoreConversations, loadMoreConversations } = useMessaging();
   const [conversationsLoaded, setConversationsLoaded] = useState(false); // Track if conversations have been loaded
   const [showSkeletons, setShowSkeletons] = useState(false); // Delayed skeleton display to avoid flicker
   const [userInfoLoading, setUserInfoLoading] = useState(false); // Track user info loading state
@@ -142,6 +142,8 @@ export default function ConversationsScreen({
   const [showSwellyoTeamWelcome, setShowSwellyoTeamWelcome] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const isLoggingOutRef = useRef(false);
+  const scrollViewRef = useRef<ScrollView>(null);
+  const loadMoreDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Update user info when context user changes (immediate sync)
   useEffect(() => {
@@ -535,8 +537,8 @@ export default function ConversationsScreen({
       if (existingConv && existingConv.other_user) {
         // Conversation exists, use it
         // Set current conversation in MessagingProvider for unread logic
-        if (conv.id) {
-          setCurrentConversationId(conv.id);
+        if (existingConv.id) {
+          setCurrentConversationId(existingConv.id);
         }
         setSelectedConversation({
           id: existingConv.id,
@@ -551,9 +553,7 @@ export default function ConversationsScreen({
         const surferData = await supabaseDatabaseService.getSurferByUserId(userId);
         
         // Set current conversation in MessagingProvider for unread logic
-        if (conv.id) {
-          setCurrentConversationId(conv.id);
-        }
+        // Note: No conversation ID yet, will be set after creation
         setSelectedConversation({
           // No id - this is a pending conversation
           otherUserId: userId,
@@ -771,6 +771,18 @@ export default function ConversationsScreen({
   };
 
   const renderConversationItem = (conv: Conversation) => {
+    // Development-only logging
+    if (__DEV__) {
+      console.log('[ConversationsScreen] Rendering conversation:', {
+        id: conv.id,
+        hasLastMessage: !!conv.last_message,
+        lastMessageId: conv.last_message?.id,
+        lastMessageBody: conv.last_message?.body?.substring(0, 20),
+        hasOtherUser: !!conv.other_user,
+        otherUserName: conv.other_user?.name,
+      });
+    }
+    
     // Skip rendering welcome conversation here - it's handled separately
     if (conv.metadata?.isWelcome) {
       return renderWelcomeConversation(conv);
@@ -1005,8 +1017,8 @@ export default function ConversationsScreen({
         onConversationCreated={(conversationId) => {
           // Update selectedConversation with the created conversation ID
           // Set current conversation in MessagingProvider for unread logic
-        if (conv.id) {
-          setCurrentConversationId(conv.id);
+        if (conversationId) {
+          setCurrentConversationId(conversationId);
         }
         setSelectedConversation({
             ...selectedConversation,
@@ -1149,15 +1161,40 @@ export default function ConversationsScreen({
 
           {/* Conversations list */}
           <ScrollView
+            ref={scrollViewRef}
             style={styles.conversationsList}
             contentContainerStyle={styles.conversationsListContent}
             showsVerticalScrollIndicator={false}
+            onScroll={(event) => {
+              const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
+              const paddingToBottom = 200; // Trigger when 200px from bottom
+              const isNearBottom = layoutMeasurement.height + contentOffset.y >= contentSize.height - paddingToBottom;
+              
+              if (isNearBottom && hasMoreConversations && !isLoadingMoreConversations && !loading) {
+                // Debounce to prevent multiple simultaneous loads
+                if (loadMoreDebounceRef.current) {
+                  clearTimeout(loadMoreDebounceRef.current);
+                }
+                loadMoreDebounceRef.current = setTimeout(() => {
+                  loadMoreConversations();
+                }, 300);
+              }
+            }}
+            scrollEventThrottle={400}
           >
             {loading && showSkeletons && conversations.length === 0 ? (
               <ConversationListSkeleton count={5} />
             ) : (
               <>
                 {filteredConversations.map(renderConversationItem)}
+                
+                {/* Loading indicator for pagination */}
+                {isLoadingMoreConversations && (
+                  <View style={styles.loadMoreContainer}>
+                    <ActivityIndicator size="small" color="#A0A0A0" />
+                    <Text style={styles.loadMoreText}>Loading more conversations...</Text>
+                  </View>
+                )}
                 
                 {/* Welcome message instructional text - only show when welcome conversation is displayed, or in dev mode for testing */}
                 {conversationsLoaded && (conversations.length === 0 || isDevMode) && filter === 'all' && (
@@ -1541,6 +1578,19 @@ const styles = StyleSheet.create({
     paddingBottom: 120, // Space for Swelly card at bottom
     gap: 0,
   },
+  loadMoreContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    gap: 8,
+  },
+  loadMoreText: {
+    fontFamily: Platform.OS === 'web' ? 'var(--Family-Body, Inter), sans-serif' : 'Inter',
+    fontSize: 13,
+    fontWeight: '400',
+    color: '#A0A0A0',
+  },
   loadingContainer: {
     flex: 1,
     alignItems: 'center',
@@ -1650,6 +1700,7 @@ const styles = StyleSheet.create({
     fontWeight: '400',
     lineHeight: 15,
     color: '#A0A0A0',
+    textAlign: 'left' ,
   },
   timeContainer: {
     alignItems: 'flex-end',

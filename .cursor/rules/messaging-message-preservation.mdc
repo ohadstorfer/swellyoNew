@@ -1,0 +1,82 @@
+---
+alwaysApply: true
+description: Core principle for messaging system - messages must never be dropped
+---
+
+# Messaging System: Message Preservation Principle
+
+## 🧠 Core Principle
+
+**A message must never be dropped because enrichment, batching, or caching failed.**
+
+### Sacred vs Decoration
+
+- **Sacred (Must Always Succeed):**
+  - Message insertion into state
+  - Conversation creation/update with message
+  - Message persistence in cache
+  
+- **Decoration (Optional, Can Fail):**
+  - User name enrichment (`other_user.name`)
+  - Profile image enrichment (`other_user.profile_image_url`)
+  - Sender name/avatar enrichment (`sender_name`, `sender_avatar`)
+  - Member data enrichment
+
+### Implementation Rules
+
+1. **Enrichment failures must not block message insertion**
+   - If `fetchAndEnrichConversation` fails → add conversation with minimal data ("Unknown User")
+   - If `enrichConversationWithUserData` fails → update conversation with message, keep existing data
+   - If message enrichment fails → insert message without `sender_name`/`sender_avatar`
+
+2. **Fallback values are required**
+   - Missing `other_user.name` → use "Unknown User" or email prefix
+   - Missing `sender_name` → use `sender_id` or "Unknown"
+   - Missing `profile_image_url` → use null/placeholder
+
+3. **Retry logic must not block UI**
+   - Enrichment retries happen in background
+   - UI shows message immediately with fallback data
+   - Enrichment updates UI when complete
+
+4. **Error handling must preserve messages**
+   - `catch` blocks must still dispatch message/conversation updates
+   - Log errors but don't throw (caching is optional, messages are not)
+   - Return partial data rather than null when possible
+
+### Code Pattern
+
+```typescript
+// ❌ WRONG: Drops message if enrichment fails
+const enriched = await fetchAndEnrichConversation(...);
+if (enriched) {
+  dispatch({ type: 'UPDATE_CONVERSATION', payload: { conversation: enriched } });
+}
+// Message lost if enrichment fails!
+
+// ✅ CORRECT: Always add message, enrich in background
+const enriched = await fetchAndEnrichConversation(...);
+if (enriched) {
+  dispatch({ type: 'UPDATE_CONVERSATION', payload: { conversation: enriched } });
+} else {
+  // Fallback: Add conversation with minimal data, enrich later
+  const minimal = createMinimalConversation(conversationId, message);
+  dispatch({ type: 'UPDATE_CONVERSATION', payload: { conversation: minimal } });
+  // Retry enrichment in background
+  enrichInBackground(conversationId, message);
+}
+```
+
+### Files to Review
+
+- [src/context/MessagingProvider.tsx](mdc:src/context/MessagingProvider.tsx) - Message handling and enrichment
+- [src/services/messaging/messagingService.ts](mdc:src/services/messaging/messagingService.ts) - Message enrichment batching
+- [src/screens/DirectMessageScreen.tsx](mdc:src/screens/DirectMessageScreen.tsx) - Message display
+
+### Testing Checklist
+
+- [ ] Message arrives during network interruption → message still appears
+- [ ] Enrichment fails after 3 retries → message still appears with "Unknown User"
+- [ ] Multiple messages arrive simultaneously → all messages appear
+- [ ] User navigates away during enrichment → message persists when returning
+- [ ] Cache write fails → message still in UI state
