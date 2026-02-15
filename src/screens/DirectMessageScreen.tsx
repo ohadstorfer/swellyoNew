@@ -292,8 +292,8 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     }
   }, [otherUserAvatar]);
 
-  const loadOtherUserAdvRole = async () => {
-    if (!currentConversationId || !otherUserId) return;
+  const loadOtherUserAdvRole = async (): Promise<'adv_giver' | 'adv_seeker' | null> => {
+    if (!currentConversationId || !otherUserId) return null;
     
     try {
       const { data, error } = await supabase
@@ -305,14 +305,19 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       
       if (error) {
         console.error('Error fetching other user adv_role:', error);
-        return;
+        return null;
       }
       
       if (data && (data.adv_role === 'adv_giver' || data.adv_role === 'adv_seeker')) {
-        setOtherUserAdvRole(data.adv_role);
+        const advRole = data.adv_role as 'adv_giver' | 'adv_seeker';
+        setOtherUserAdvRole(advRole);
+        return advRole;
       }
+      
+      return null;
     } catch (error) {
       console.error('Error loading other user adv_role:', error);
+      return null;
     }
   };
 
@@ -356,10 +361,9 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       const totalTime = Date.now() - loadStartTime;
       console.log(`[DirectMessageScreen] ✅ MEMORY CACHE HIT - Showing ${cachedMessages.length} messages instantly (${totalTime}ms total)`);
       
-      // Memory cache hit - show instantly (no async delay, no loading state)
-      setMessages(cachedMessages);
-      setIsFetchingMessages(false);
-      setShowSkeletons(false);  // Binary: cache exists = no skeleton
+      // CRITICAL: Load adv_role BEFORE setting messages to ensure correct color on first render
+      // Load in parallel but await it before rendering messages
+      const advRolePromise = loadOtherUserAdvRole();
       
       // Set pagination state
       if (cachedMessages.length > 0) {
@@ -368,8 +372,15 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         setHasMoreMessages(cachedMessages.length >= 30);
       }
       
-      // Load other user's adv_role (non-blocking)
-      loadOtherUserAdvRole().catch(err => console.error('Error loading adv_role:', err));
+      // Wait for adv_role to load, then set messages
+      await advRolePromise;
+      
+      // Memory cache hit - show instantly (no async delay, no loading state)
+      // But only after adv_role is loaded to ensure correct colors
+      setMessages(cachedMessages);
+      setIsFetchingMessages(false);
+      setShowSkeletons(false);  // Binary: cache exists = no skeleton
+      
       setTimeout(() => scrollToBottom(), 200);
       
       // Sync with server in background (non-blocking)
@@ -396,11 +407,6 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         const totalTime = Date.now() - loadStartTime;
         console.log(`[DirectMessageScreen] ✅ ASYNCSTORAGE CACHE HIT - Showing ${asyncCachedMessages.length} messages (${totalTime}ms total)`);
         
-        // AsyncStorage cache hit - show messages
-        setMessages(asyncCachedMessages);
-        setIsFetchingMessages(false);
-        setShowSkeletons(false);  // Binary: cache exists = no skeleton
-        
         // Set pagination state
         if (asyncCachedMessages.length > 0) {
           oldestMessageIdRef.current = asyncCachedMessages[0].id;
@@ -408,7 +414,14 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
           setHasMoreMessages(asyncCachedMessages.length >= 30);
         }
         
+        // CRITICAL: Load adv_role BEFORE setting messages to ensure correct color on first render
         await loadOtherUserAdvRole();
+        
+        // AsyncStorage cache hit - show messages (after adv_role is loaded)
+        setMessages(asyncCachedMessages);
+        setIsFetchingMessages(false);
+        setShowSkeletons(false);  // Binary: cache exists = no skeleton
+        
         setTimeout(() => scrollToBottom(), 200);
         
         // Sync with server in background
@@ -424,17 +437,20 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         
         console.log(`[DirectMessageScreen] 📥 SERVER FETCH - Got ${result.messages.length} messages in ${serverTime}ms (${totalTime}ms total, hasMore: ${result.hasMore})`);
         
-        setMessages(result.messages);
         setHasMoreMessages(result.hasMore);
         if (result.messages.length > 0) {
           oldestMessageIdRef.current = result.messages[0].id;
         }
         await chatHistoryCache.saveMessages(currentConversationId, result.messages);
         
+        // CRITICAL: Load adv_role BEFORE setting messages to ensure correct color on first render
+        await loadOtherUserAdvRole();
+        
+        // Set messages after adv_role is loaded to ensure correct colors
+        setMessages(result.messages);
         setIsFetchingMessages(false);
         setShowSkeletons(false);
         
-        await loadOtherUserAdvRole();
         setTimeout(() => scrollToBottom(), 200);
       }
     } catch (error) {
@@ -1600,14 +1616,14 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '500',
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
-    lineHeight: 16,
+    lineHeight: 21,
   },
   botMessageText: {
     color: '#333333', // Figma: text-[color:var(--text\/primary,#333333)]
     fontSize: 16, // Figma: text-[length:var(--size\/xs,16px)]
     fontWeight: '500', // Figma: font-medium
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
-    lineHeight: 16, // Figma: leading-[normal]
+    lineHeight: 21, // Figma: leading-[normal]
   },
   botMessageTextGiveAdv: {
     color: '#333333', // Dark text on #DBCDBC (beige) background for adv_giver
@@ -1635,7 +1651,7 @@ const styles = StyleSheet.create({
     color: 'rgba(123, 123, 123, 0.5)', // Dark timestamp on white background for outbound messages
   },
   botTimestamp: {
-    color: '#FFFFFF', // White timestamp for received messages
+    color: 'rgba(123, 123, 123, 1)', 
   },
   inputWrapper: {
     flexDirection: 'row',

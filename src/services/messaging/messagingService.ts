@@ -180,7 +180,7 @@ class MessagingService {
       if (lastMessages && lastMessages.length > 0) {
         lastMessages.forEach((msg: Message) => {
           lastMessagesMap.set(msg.conversation_id, msg);
-        });
+      });
       }
 
       // OPTIMIZATION 3: Batch fetch all member data for all conversations
@@ -263,10 +263,10 @@ class MessagingService {
       // CRITICAL: Add limit to prevent fetching thousands of unread messages
       const UNREAD_MESSAGES_LIMIT = 1000;
       const { data: unreadMessages, error: unreadError } = await supabase
-        .from('messages')
+          .from('messages')
         .select('id, conversation_id, sender_id, created_at')
         .in('conversation_id', conversationIds)
-        .eq('deleted', false)
+          .eq('deleted', false)
         .neq('sender_id', user.id)
         .gt('created_at', cutoffDate)
         .limit(UNREAD_MESSAGES_LIMIT);
