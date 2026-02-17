@@ -697,7 +697,8 @@ export default function ConversationsScreen({
   };
 
   const renderWelcomeConversation = (conv: Conversation) => {
-    const lastMessageText = conv.last_message?.body || '';
+    // Check if last message is an image
+    const isLastMessageImage = conv.last_message?.type === 'image' || !!conv.last_message?.image_metadata;
     const lastMessageTime = conv.last_message ? formatTime(conv.last_message.created_at) : '';
     const unreadCount = conv.unread_count || 0;
 
@@ -740,12 +741,24 @@ export default function ConversationsScreen({
             ]} numberOfLines={1}>
               Swellyo Team
             </Text>
-            <Text style={[
-              styles.lastMessage,
-              Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
-            ]} numberOfLines={1}>
-              {lastMessageText}
-            </Text>
+            {isLastMessageImage ? (
+              <View style={styles.imageMessagePreview}>
+                <Ionicons name="image-outline" size={14} color="#7B7B7B" style={styles.imageIcon} />
+                <Text style={[
+                  styles.lastMessage,
+                  Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
+                ]} numberOfLines={1}>
+                  Image
+                </Text>
+              </View>
+            ) : (
+              <Text style={[
+                styles.lastMessage,
+                Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
+              ]} numberOfLines={1}>
+                {conv.last_message?.body || ''}
+              </Text>
+            )}
           </View>
         </View>
 
@@ -793,7 +806,10 @@ export default function ConversationsScreen({
       ? conv.other_user?.name || 'Unknown User'
       : conv.title || 'Group Chat';
     const avatarUrl = conv.is_direct ? conv.other_user?.profile_image_url : null;
-    const lastMessageText = conv.last_message?.body || '';
+    
+    // Check if last message is an image
+    const isLastMessageImage = conv.last_message?.type === 'image' || !!conv.last_message?.image_metadata;
+    
     const lastMessageTime = conv.last_message ? formatTime(conv.last_message.created_at) : '';
     const unreadCount = conv.unread_count || 0;
 
@@ -867,12 +883,24 @@ export default function ConversationsScreen({
             ]} numberOfLines={1}>
               {displayName}
             </Text>
-            <Text style={[
-              styles.lastMessage,
-              Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
-            ]} numberOfLines={1}>
-              {lastMessageText}
-            </Text>
+            {isLastMessageImage ? (
+              <View style={styles.imageMessagePreview}>
+                <Ionicons name="image-outline" size={14} color="#7B7B7B" style={styles.imageIcon} />
+                <Text style={[
+                  styles.lastMessage,
+                  Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
+                ]} numberOfLines={1}>
+                  Image
+                </Text>
+              </View>
+            ) : (
+              <Text style={[
+                styles.lastMessage,
+                Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
+              ]} numberOfLines={1}>
+                {conv.last_message?.body || ''}
+              </Text>
+            )}
           </View>
         </View>
 
@@ -1701,6 +1729,14 @@ const styles = StyleSheet.create({
     lineHeight: 15,
     color: '#A0A0A0',
     textAlign: 'left' ,
+  },
+  imageMessagePreview: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  imageIcon: {
+    marginRight: 4,
   },
   timeContainer: {
     alignItems: 'flex-end',

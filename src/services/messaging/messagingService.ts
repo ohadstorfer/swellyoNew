@@ -38,19 +38,56 @@ export interface ConversationMember {
   email?: string;
 }
 
+// Message type
+export type MessageType = 'text' | 'image';
+
+// Message upload state (client-side only, not stored in DB)
+export type MessageUploadState = 
+  | 'pending'      // Created locally, not yet uploaded
+  | 'uploading'   // Currently uploading to storage
+  | 'sent'        // Successfully uploaded and saved to DB
+  | 'failed';     // Upload or save failed
+
+// Image metadata interface
+export interface ImageMetadata {
+  image_url: string;           // Full-resolution image URL
+  thumbnail_url?: string;       // Optional thumbnail URL (for performance)
+  width: number;               // Original image width in pixels
+  height: number;              // Original image height in pixels
+  file_size: number;           // File size in bytes
+  mime_type: string;           // e.g., 'image/jpeg', 'image/png'
+  storage_path: string;        // Path in Supabase Storage (for deletion)
+}
+
 // Message interface
 export interface Message {
   id: string;
   conversation_id: string;
   sender_id: string;
-  body?: string;
+  
+  // Message type and content
+  type?: MessageType;           // 'text' | 'image' (defaults to 'text' for backward compatibility)
+  body?: string;                // Text content (for text messages or image captions)
   rendered_body?: any;
+  
+  // Image-specific fields (only populated for type='image')
+  image_metadata?: ImageMetadata;
+  
+  // Legacy attachments array (keep for backward compatibility)
   attachments: any[];
+  
+  // Upload state (client-side only, not stored in DB)
+  upload_state?: MessageUploadState;
+  upload_progress?: number;     // 0-100, only during 'uploading'
+  upload_error?: string;        // Error message if upload_state === 'failed'
+  
+  // Existing fields
   is_system: boolean;
   edited: boolean;
   deleted: boolean;
   created_at: string;
   updated_at: string;
+  
   // Enriched from users/surfers
   sender_name?: string;
   sender_avatar?: string;
@@ -389,7 +426,7 @@ class MessagingService {
       
       const { data: messages, error } = await supabase
         .from('messages')
-        .select('id, conversation_id, sender_id, body, rendered_body, attachments, is_system, edited, deleted, created_at, updated_at')
+        .select('id, conversation_id, sender_id, body, rendered_body, attachments, is_system, edited, deleted, created_at, updated_at, type, image_metadata')
         .eq('conversation_id', conversationId)
         .eq('deleted', false)
         .gt('updated_at', lastSyncDate)
@@ -397,6 +434,13 @@ class MessagingService {
         .limit(limit);
 
       if (error) throw error;
+
+      // #region agent log
+      // Log raw database response to check if type and image_metadata are returned
+      if (messages && messages.length > 0) {
+        fetch('http://127.0.0.1:7242/ingest/6b4e2d69-2c76-430d-914a-aa3116b97922',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'messagingService.ts:436',message:'Raw database response from getMessagesUpdatedSince',data:{totalMessages:messages.length,conversationId,lastSyncTimestamp,allMessages:messages.map((msg,idx)=>({index:idx,id:msg.id,type:msg.type,hasType:'type' in msg,imageMetadata:msg.image_metadata,hasImageMetadata:'image_metadata' in msg,rawKeys:Object.keys(msg)})),sampleMessage:messages[0]},timestamp:Date.now()})}).catch(()=>{});
+      }
+      // #endregion
 
       if (!messages || messages.length === 0) {
         return [];
@@ -462,7 +506,7 @@ class MessagingService {
       
       let query = supabase
         .from('messages')
-        .select('id, conversation_id, sender_id, body, rendered_body, attachments, is_system, edited, deleted, created_at, updated_at')
+        .select('id, conversation_id, sender_id, body, rendered_body, attachments, is_system, edited, deleted, created_at, updated_at, type, image_metadata')
         .eq('conversation_id', conversationId)
         .eq('deleted', false)
         .order('created_at', { ascending: true })
@@ -504,6 +548,13 @@ class MessagingService {
       const { data: messages, error } = await query;
 
       if (error) throw error;
+
+      // #region agent log
+      // Log raw database response to check if type and image_metadata are returned
+      if (messages && messages.length > 0) {
+        fetch('http://127.0.0.1:7242/ingest/6b4e2d69-2c76-430d-914a-aa3116b97922',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'messagingService.ts:541',message:'Raw database response from getMessages',data:{totalMessages:messages.length,conversationId,allMessages:messages.map((msg,idx)=>({index:idx,id:msg.id,type:msg.type,hasType:'type' in msg,imageMetadata:msg.image_metadata,hasImageMetadata:'image_metadata' in msg,rawKeys:Object.keys(msg)})),sampleMessage:messages[0]},timestamp:Date.now()})}).catch(()=>{});
+      }
+      // #endregion
 
       if (!messages || messages.length === 0) {
         return { messages: [], hasMore: false };
@@ -556,7 +607,7 @@ class MessagingService {
   /**
    * Send a message in a conversation
    */
-  async sendMessage(conversationId: string, body: string, attachments: any[] = []): Promise<Message> {
+  async sendMessage(conversationId: string, body: string, attachments: any[] = [], type: MessageType = 'text'): Promise<Message> {
     if (!isSupabaseConfigured()) {
       throw new Error('Supabase is not configured');
     }
@@ -575,6 +626,7 @@ class MessagingService {
           sender_id: user.id,
           body,
           attachments,
+          type: type || 'text',
         })
         .select()
         .single();
@@ -590,6 +642,91 @@ class MessagingService {
       return data;
     } catch (error) {
       console.error('Error sending message:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Create an image message record (DB-first flow)
+   * Creates the message record before upload, returns real message ID
+   */
+  async createImageMessage(conversationId: string, caption?: string): Promise<Message> {
+    if (!isSupabaseConfigured()) {
+      throw new Error('Supabase is not configured');
+    }
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        throw new Error('Not authenticated');
+      }
+
+      // Create message record with type='image' and image_metadata=null (will be populated after upload)
+      const { data, error } = await supabase
+        .from('messages')
+        .insert({
+          conversation_id: conversationId,
+          sender_id: user.id,
+          type: 'image',
+          body: caption || null,
+          image_metadata: null, // Will be populated after upload
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      // Update conversation's updated_at
+      await supabase
+        .from('conversations')
+        .update({ updated_at: new Date().toISOString() })
+        .eq('id', conversationId);
+
+      return data;
+    } catch (error) {
+      console.error('Error creating image message:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Update image message with metadata after upload completes
+   */
+  async updateImageMessageMetadata(messageId: string, imageMetadata: ImageMetadata): Promise<Message> {
+    if (!isSupabaseConfigured()) {
+      throw new Error('Supabase is not configured');
+    }
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        throw new Error('Not authenticated');
+      }
+
+      const { data, error } = await supabase
+        .from('messages')
+        .update({
+          image_metadata: imageMetadata,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', messageId)
+        .eq('sender_id', user.id) // Ensure user owns the message
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      // Update conversation's updated_at
+      if (data) {
+        await supabase
+          .from('conversations')
+          .update({ updated_at: new Date().toISOString() })
+          .eq('id', data.conversation_id);
+      }
+
+      return data;
+    } catch (error) {
+      console.error('Error updating image message metadata:', error);
       throw error;
     }
   }
@@ -803,7 +940,33 @@ class MessagingService {
           filter: `conversation_id=eq.${conversationId}`,
         },
         async (payload) => {
-          const newMessage = payload.new as Message;
+          let newMessage = payload.new as Message;
+          
+          // CRITICAL: Check if payload is missing the type field
+          // Supabase Realtime payloads should include all columns, but we verify to ensure data integrity
+          // Note: image_metadata can be null for image messages (during upload), so we only check for type
+          const needsFullFetch = newMessage.type === undefined;
+          
+          if (needsFullFetch) {
+            // Fetch full message from database to ensure all fields are present
+            try {
+              const { data: fullMessage, error } = await supabase
+                .from('messages')
+                .select('id, conversation_id, sender_id, body, rendered_body, attachments, is_system, edited, deleted, created_at, updated_at, type, image_metadata')
+                .eq('id', newMessage.id)
+                .single();
+              
+              if (!error && fullMessage) {
+                newMessage = fullMessage as Message;
+                console.log('[MessagingService] Fetched full message for INSERT:', { id: newMessage.id, type: newMessage.type, hasImageMetadata: !!newMessage.image_metadata });
+              } else {
+                console.warn('[MessagingService] Failed to fetch full message for INSERT, using payload:', error);
+              }
+            } catch (error) {
+              console.error('[MessagingService] Error fetching full message for INSERT:', error);
+              // Continue with payload as fallback
+            }
+          }
           
           // Enrich message with sender info if needed
           if (!newMessage.sender_name || !newMessage.sender_avatar) {
@@ -838,7 +1001,28 @@ class MessagingService {
           filter: `conversation_id=eq.${conversationId}`,
         },
         async (payload) => {
-          const updatedMessage = payload.new as Message;
+          let updatedMessage = payload.new as Message;
+          
+          // CRITICAL: Always fetch full message for UPDATE events to ensure we have the latest image_metadata
+          // UPDATE events are critical for image messages (when image_metadata is populated after upload)
+          // This ensures cache always has complete data
+          try {
+            const { data: fullMessage, error } = await supabase
+              .from('messages')
+              .select('id, conversation_id, sender_id, body, rendered_body, attachments, is_system, edited, deleted, created_at, updated_at, type, image_metadata')
+              .eq('id', updatedMessage.id)
+              .single();
+            
+            if (!error && fullMessage) {
+              updatedMessage = fullMessage as Message;
+              console.log('[MessagingService] Fetched full message for UPDATE:', { id: updatedMessage.id, type: updatedMessage.type, hasImageMetadata: !!updatedMessage.image_metadata });
+            } else {
+              console.warn('[MessagingService] Failed to fetch full message for UPDATE, using payload:', error);
+            }
+          } catch (error) {
+            console.error('[MessagingService] Error fetching full message for UPDATE:', error);
+            // Continue with payload as fallback
+          }
           
           // Enrich message with sender info if needed
           if (!updatedMessage.sender_name || !updatedMessage.sender_avatar) {
@@ -1400,7 +1584,7 @@ class MessagingService {
       const lastMessagesPromises = conversations.map(conv =>
         supabase
           .from('messages')
-          .select('id, conversation_id, sender_id, body, rendered_body, attachments, is_system, edited, deleted, created_at, updated_at')
+          .select('id, conversation_id, sender_id, body, rendered_body, attachments, is_system, edited, deleted, created_at, updated_at, type, image_metadata')
           .eq('conversation_id', conv.id)
           .eq('deleted', false)
           .order('created_at', { ascending: false })

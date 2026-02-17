@@ -15,7 +15,9 @@ RETURNS TABLE (
   edited boolean,
   deleted boolean,
   created_at timestamptz,
-  updated_at timestamptz
+  updated_at timestamptz,
+  type varchar,
+  image_metadata jsonb
 )
 LANGUAGE sql
 STABLE
@@ -33,7 +35,9 @@ AS $$
     m.edited,
     m.deleted,
     m.created_at,
-    m.updated_at
+    m.updated_at,
+    m.type,
+    m.image_metadata
   FROM messages m
   WHERE m.conversation_id = ANY(conv_ids)
     AND m.deleted = false

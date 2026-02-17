@@ -30,6 +30,8 @@ import { MessageActionsMenu } from '../components/MessageActionsMenu';
 import { useMessaging } from '../context/MessagingProvider';
 import { userPresenceService } from '../services/presence/userPresenceService';
 import { avatarCacheService } from '../services/media/avatarCacheService';
+import { FullscreenImageViewer } from '../components/FullscreenImageViewer';
+import { ImagePreviewModal } from '../components/ImagePreviewModal';
 
 interface DirectMessageScreenProps {
   conversationId?: string; // Optional: undefined for pending conversations (will be created on first message)
@@ -57,23 +59,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   // Get markAsRead and setCurrentConversationId from MessagingProvider
   const { markAsRead, setCurrentConversationId: setMessagingCurrentConversationId } = useMessaging();
   
-  // Debug: Log props immediately on every render (synchronous)
-  console.log('[DirectMessageScreen] === COMPONENT RENDER ===');
-  console.log('[DirectMessageScreen] onViewProfile exists:', !!onViewProfile);
-  console.log('[DirectMessageScreen] onViewProfile type:', typeof onViewProfile);
-  console.log('[DirectMessageScreen] onViewProfile:', onViewProfile);
-  console.log('[DirectMessageScreen] onBack exists:', !!onBack);
-  console.log('[DirectMessageScreen] otherUserId:', otherUserId);
-  
   const [currentConversationId, setCurrentConversationId] = useState<string | undefined>(conversationId);
-  
-  // Debug: Log props on mount and when they change
-  useEffect(() => {
-    console.log('[DirectMessageScreen] useEffect - Component mounted/updated with props:');
-    console.log('[DirectMessageScreen] useEffect - onViewProfile exists:', !!onViewProfile);
-    console.log('[DirectMessageScreen] useEffect - onViewProfile type:', typeof onViewProfile);
-    console.log('[DirectMessageScreen] useEffect - onViewProfile value:', onViewProfile);
-  }, [otherUserId, otherUserName, otherUserAvatar, onViewProfile, onBack]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -97,6 +83,11 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const [menuVisible, setMenuVisible] = useState(false);
   const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
   const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
+  const [fullscreenImageUrl, setFullscreenImageUrl] = useState<string | null>(null);
+  const [fullscreenThumbnailUrl, setFullscreenThumbnailUrl] = useState<string | null>(null);
+  const [imagePreviewVisible, setImagePreviewVisible] = useState(false);
+  const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
+  const [isProcessingImage, setIsProcessingImage] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
   const textInputRef = useRef<any>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -110,12 +101,8 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.user?.id) {
           setCurrentUserId(session.user.id);
-          console.log('[DirectMessageScreen] ✅ Got currentUserId from session instantly:', session.user.id);
           return; // Success - no need for slow database query
         }
-        
-        // Fallback to slow database query only if session doesn't have user
-        console.log('[DirectMessageScreen] ⚠️ No user in session, falling back to database query');
         const user = await supabaseAuthService.getCurrentUser();
         if (user) {
           setCurrentUserId(user.id);
@@ -189,6 +176,10 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             setTimeout(() => scrollToBottom(), 100);
           },
           onMessageUpdated: (updatedMessage) => {
+            // #region agent log
+            // Log when message is updated via WebSocket
+            fetch('http://127.0.0.1:7242/ingest/6b4e2d69-2c76-430d-914a-aa3116b97922',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'DirectMessageScreen.tsx:174',message:'Message updated via WebSocket',data:{id:updatedMessage.id,type:updatedMessage.type,hasType:updatedMessage.type!==undefined,hasImageMetadata:!!updatedMessage.image_metadata,imageMetadata:updatedMessage.image_metadata,body:updatedMessage.body?.substring(0,50),allKeys:Object.keys(updatedMessage)},timestamp:Date.now()})}).catch(()=>{});
+            // #endregion
             // Handle message edit
             setMessages((prev) => {
               const updated = prev.map(msg => 
@@ -375,6 +366,33 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       // Wait for adv_role to load, then set messages
       await advRolePromise;
       
+      // Log image messages for debugging
+      const imageMessages = cachedMessages.filter(msg => msg.type === 'image' || msg.image_metadata);
+      if (imageMessages.length > 0) {
+        console.log('[DirectMessageScreen] 🖼️ IMAGE MESSAGES IN CACHE:', {
+          totalMessages: cachedMessages.length,
+          imageMessageCount: imageMessages.length,
+          imageMessages: imageMessages.map(msg => ({
+            id: msg.id,
+            type: msg.type,
+            hasType: msg.type !== undefined,
+            hasImageMetadata: !!msg.image_metadata,
+            imageMetadata: msg.image_metadata ? {
+              hasImageUrl: !!msg.image_metadata.image_url,
+              hasThumbnailUrl: !!msg.image_metadata.thumbnail_url,
+              imageUrl: msg.image_metadata.image_url,
+              thumbnailUrl: msg.image_metadata.thumbnail_url,
+            } : null,
+            uploadState: msg.upload_state,
+          }))
+        });
+      } else {
+        console.log('[DirectMessageScreen] 📝 No image messages in cache (total messages:', cachedMessages.length, ')');
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/6b4e2d69-2c76-430d-914a-aa3116b97922',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'DirectMessageScreen.tsx:382',message:'Inspecting all cached messages for image fields',data:{totalMessages:cachedMessages.length,allMessages:cachedMessages.map((msg,idx)=>({index:idx,id:msg.id,type:msg.type,typeValue:msg.type,hasType:msg.type!==undefined,hasImageMetadata:!!msg.image_metadata,imageMetadataKeys:msg.image_metadata?Object.keys(msg.image_metadata):null,imageMetadata:msg.image_metadata,body:msg.body?.substring(0,50)})),messageKeys:cachedMessages.length>0?Object.keys(cachedMessages[0]):[]},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
+      }
+      
       // Memory cache hit - show instantly (no async delay, no loading state)
       // But only after adv_role is loaded to ensure correct colors
       setMessages(cachedMessages);
@@ -383,7 +401,36 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       
       setTimeout(() => scrollToBottom(), 200);
       
-      // Sync with server in background (non-blocking)
+      // CRITICAL: Always check server for updated messages when loading from cache
+      // This ensures image messages are loaded even if cache is stale
+      // Do this in background so it doesn't block UI
+      (async () => {
+        try {
+          const lastSync = await chatHistoryCache.getLastSyncTimestamp(currentConversationId);
+          const serverMessages = await messagingService.getMessagesUpdatedSince(
+            currentConversationId,
+            lastSync || 0,
+            30 // Check all recent messages
+          );
+          
+          if (serverMessages.length > 0) {
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/6b4e2d69-2c76-430d-914a-aa3116b97922',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'DirectMessageScreen.tsx:400',message:'Found updated messages from server after cache load',data:{totalMessages:serverMessages.length,imageMessages:serverMessages.filter(m=>m.type==='image'||m.image_metadata).length,allMessages:serverMessages.map((msg,idx)=>({index:idx,id:msg.id,type:msg.type,hasImageMetadata:!!msg.image_metadata}))},timestamp:Date.now()})}).catch(()=>{});
+            // #endregion
+            
+            // Merge server messages with cache
+            setMessages((prev) => {
+              const merged = chatHistoryCache.mergeMessages(prev, serverMessages);
+              chatHistoryCache.saveMessages(currentConversationId, merged).catch(() => {});
+              return merged;
+            });
+          }
+        } catch (error) {
+          console.error('Error checking for updated messages:', error);
+        }
+      })();
+      
+      // Also run regular background sync
       syncWithServerInBackground();
       return;
     }
@@ -417,6 +464,33 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         // CRITICAL: Load adv_role BEFORE setting messages to ensure correct color on first render
         await loadOtherUserAdvRole();
         
+        // Log image messages for debugging
+        const imageMessages = asyncCachedMessages.filter(msg => msg.type === 'image' || msg.image_metadata);
+        if (imageMessages.length > 0) {
+          console.log('[DirectMessageScreen] 🖼️ IMAGE MESSAGES IN ASYNCSTORAGE CACHE:', {
+            totalMessages: asyncCachedMessages.length,
+            imageMessageCount: imageMessages.length,
+            imageMessages: imageMessages.map(msg => ({
+              id: msg.id,
+              type: msg.type,
+              hasType: msg.type !== undefined,
+              hasImageMetadata: !!msg.image_metadata,
+              imageMetadata: msg.image_metadata ? {
+                hasImageUrl: !!msg.image_metadata.image_url,
+                hasThumbnailUrl: !!msg.image_metadata.thumbnail_url,
+                imageUrl: msg.image_metadata.image_url,
+                thumbnailUrl: msg.image_metadata.thumbnail_url,
+              } : null,
+              uploadState: msg.upload_state,
+            }))
+          });
+        } else {
+          console.log('[DirectMessageScreen] 📝 No image messages in AsyncStorage cache (total messages:', asyncCachedMessages.length, ')');
+          // #region agent log
+          fetch('http://127.0.0.1:7242/ingest/6b4e2d69-2c76-430d-914a-aa3116b97922',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'DirectMessageScreen.tsx:454',message:'Inspecting all AsyncStorage cached messages for image fields',data:{totalMessages:asyncCachedMessages.length,allMessages:asyncCachedMessages.map((msg,idx)=>({index:idx,id:msg.id,type:msg.type,typeValue:msg.type,hasType:msg.type!==undefined,hasImageMetadata:!!msg.image_metadata,imageMetadataKeys:msg.image_metadata?Object.keys(msg.image_metadata):null,imageMetadata:msg.image_metadata,body:msg.body?.substring(0,50)})),messageKeys:asyncCachedMessages.length>0?Object.keys(asyncCachedMessages[0]):[]},timestamp:Date.now()})}).catch(()=>{});
+          // #endregion
+        }
+        
         // AsyncStorage cache hit - show messages (after adv_role is loaded)
         setMessages(asyncCachedMessages);
         setIsFetchingMessages(false);
@@ -436,6 +510,11 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         const totalTime = Date.now() - loadStartTime;
         
         console.log(`[DirectMessageScreen] 📥 SERVER FETCH - Got ${result.messages.length} messages in ${serverTime}ms (${totalTime}ms total, hasMore: ${result.hasMore})`);
+        
+        // #region agent log
+        // Log ALL server messages to check for image messages
+        fetch('http://127.0.0.1:7242/ingest/6b4e2d69-2c76-430d-914a-aa3116b97922',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'DirectMessageScreen.tsx:475',message:'Inspecting all server messages for image fields',data:{totalMessages:result.messages.length,allMessages:result.messages.map((msg,idx)=>({index:idx,id:msg.id,type:msg.type,typeValue:msg.type,hasType:msg.type!==undefined,hasImageMetadata:!!msg.image_metadata,imageMetadataKeys:msg.image_metadata?Object.keys(msg.image_metadata):null,imageMetadata:msg.image_metadata,body:msg.body?.substring(0,50)})),messageKeys:result.messages.length>0?Object.keys(result.messages[0]):[]},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
         
         setHasMoreMessages(result.hasMore);
         if (result.messages.length > 0) {
@@ -546,6 +625,13 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         lastSync || 0,
         20 // Lightweight limit
       );
+      
+      // #region agent log
+      // Log background sync messages to check for image updates
+      if (serverMessages.length > 0) {
+        fetch('http://127.0.0.1:7242/ingest/6b4e2d69-2c76-430d-914a-aa3116b97922',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'DirectMessageScreen.tsx:590',message:'Background sync messages from server',data:{totalMessages:serverMessages.length,allMessages:serverMessages.map((msg,idx)=>({index:idx,id:msg.id,type:msg.type,typeValue:msg.type,hasType:msg.type!==undefined,hasImageMetadata:!!msg.image_metadata,imageMetadataKeys:msg.image_metadata?Object.keys(msg.image_metadata):null,imageMetadata:msg.image_metadata,body:msg.body?.substring(0,50)})),lastSync},timestamp:Date.now()})}).catch(()=>{});
+      }
+      // #endregion
       
       if (serverMessages.length > 0) {
         // CRITICAL: Use functional setState to avoid stale closure bug
@@ -834,6 +920,140 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     );
   };
 
+  // Handle image picker
+  const handleImagePicker = async () => {
+    if (!currentConversationId) {
+      Alert.alert('Error', 'Please wait for the conversation to load');
+      return;
+    }
+
+    try {
+      if (Platform.OS === 'web') {
+        // For web, use a file input
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.onchange = async (e: any) => {
+          const file = e.target.files[0];
+          if (file) {
+            const reader = new FileReader();
+            reader.onload = async (event: any) => {
+              const imageUri = event.target.result as string;
+              setSelectedImageUri(imageUri);
+              setImagePreviewVisible(true);
+            };
+            reader.readAsDataURL(file);
+          }
+        };
+        input.click();
+      } else {
+        // For native, use expo-image-picker
+        try {
+          const ImagePicker = require('expo-image-picker');
+          const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+          if (status !== 'granted') {
+            Alert.alert(
+              'Permission Required',
+              'Sorry, we need camera roll permissions to send images!'
+            );
+            return;
+          }
+
+          const result = await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: ImagePicker.MediaTypeOptions.Images,
+            allowsEditing: false,
+            quality: 1,
+          });
+
+          if (!result.canceled && result.assets[0]) {
+            const imageUri = result.assets[0].uri;
+            setSelectedImageUri(imageUri);
+            setImagePreviewVisible(true);
+          }
+        } catch (error) {
+          console.warn('expo-image-picker not available:', error);
+          Alert.alert(
+            'Image Picker Not Available',
+            'Please install expo-image-picker for native platforms.'
+          );
+        }
+      }
+    } catch (error) {
+      console.error('Error picking image:', error);
+      Alert.alert('Error', 'Failed to open image picker');
+    }
+  };
+
+  // Handle image send
+  const handleImageSend = async (caption?: string) => {
+    if (!selectedImageUri || !currentConversationId || !currentUserId) {
+      return;
+    }
+
+    setIsProcessingImage(true);
+
+    try {
+      // Import image upload service functions
+      const { processImage, uploadImageToStorage } = await import('../services/messaging/imageUploadService');
+      
+      // Step 1: Create message record in DB first (to get real message ID)
+      const messageRecord = await messagingService.createImageMessage(currentConversationId, caption);
+      
+      // Step 2: Process image (compress and generate thumbnail)
+      const processed = await processImage(selectedImageUri);
+      
+      // Step 3: Upload original image
+      const imageUrl = await uploadImageToStorage(
+        processed.originalUri,
+        currentConversationId,
+        messageRecord.id,
+        false
+      );
+      
+      // Step 4: Upload thumbnail
+      const thumbnailUrl = await uploadImageToStorage(
+        processed.thumbnailUri,
+        currentConversationId,
+        messageRecord.id,
+        true
+      );
+      
+      // Step 5: Update message with image metadata
+      const imageMetadata = {
+        image_url: imageUrl,
+        thumbnail_url: thumbnailUrl,
+        width: processed.width,
+        height: processed.height,
+        file_size: processed.fileSize,
+        mime_type: processed.mimeType,
+        storage_path: `${currentConversationId}/${messageRecord.id}/original.jpg`,
+      };
+      
+      await messagingService.updateImageMessageMetadata(messageRecord.id, imageMetadata);
+      
+      // Close preview modal
+      setImagePreviewVisible(false);
+      setSelectedImageUri(null);
+      setIsProcessingImage(false);
+      
+      // Scroll to bottom to show new message
+      setTimeout(() => scrollToBottom(), 200);
+    } catch (error: any) {
+      console.error('Error sending image:', error);
+      Alert.alert('Error', error?.message || 'Failed to send image');
+      setIsProcessingImage(false);
+    }
+  };
+
+  // Handle retry upload for failed image messages
+  const handleRetryUpload = async (message: Message) => {
+    if (!message.image_metadata || !currentConversationId) return;
+    
+    // TODO: Implement retry logic
+    // This should re-upload the image and update the message
+    Alert.alert('Info', 'Retry upload functionality will be implemented in Phase 3');
+  };
+
   // Handle long press on message
   const handleMessageLongPress = (message: Message, event: any) => {
     if (!currentUserId || message.sender_id !== currentUserId) return;
@@ -952,6 +1172,30 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     // We can determine message alignment from sender_id comparison
     // For now, render all messages as received (will update when currentUserId loads)
     // This allows messages to appear instantly while currentUserId loads in background
+    
+    // Debug: Log image messages being rendered
+    if (message.type === 'image' || message.image_metadata) {
+      console.log('[DirectMessageScreen] 🖼️ RENDERING IMAGE MESSAGE:', {
+        id: message.id,
+        type: message.type,
+        hasType: message.type !== undefined,
+        hasImageMetadata: !!message.image_metadata,
+        imageMetadata: message.image_metadata ? {
+          hasImageUrl: !!message.image_metadata.image_url,
+          hasThumbnailUrl: !!message.image_metadata.thumbnail_url,
+          imageUrl: message.image_metadata.image_url,
+          thumbnailUrl: message.image_metadata.thumbnail_url,
+        } : null,
+        uploadState: message.upload_state,
+        willRenderImage: !!(message.image_metadata?.image_url || message.image_metadata?.thumbnail_url),
+      });
+    }
+    // #region agent log
+    // Log ALL messages to check for potential image messages that aren't being detected
+    if (message.body && (message.body.includes('image') || message.body.includes('photo') || message.body.includes('picture'))) {
+      fetch('http://127.0.0.1:7242/ingest/6b4e2d69-2c76-430d-914a-aa3116b97922',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'DirectMessageScreen.tsx:1018',message:'Message with image-related body text found',data:{id:message.id,type:message.type,hasType:message.type!==undefined,hasImageMetadata:!!message.image_metadata,imageMetadata:message.image_metadata,body:message.body,allKeys:Object.keys(message)},timestamp:Date.now()})}).catch(()=>{});
+    }
+    // #endregion
     const isOwnMessage = currentUserId ? message.sender_id === currentUserId : false;
     const isEditing = editingMessageId === message.id;
     const canEdit = canEditMessage(message);
@@ -1004,70 +1248,181 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                   otherUserAdvRole === 'adv_giver' && styles.botMessageBubbleGiveAdv,
                   otherUserAdvRole === 'adv_seeker' && styles.botMessageBubbleGetAdv,
                 ],
+            // Conditionally apply padding: 0 for images, normal for text
+            (message.type === 'image' || message.image_metadata) && styles.imageMessageBubble,
           ]}
         >
-          {/* Message text container with gap */}
-          <View style={styles.messageTextContainer}>
-            {isEditing ? (
-              <View style={styles.editContainer}>
-                <PaperTextInput
-                  value={editingText}
-                  onChangeText={setEditingText}
-                  multiline
-                  style={styles.editInput}
-                  autoFocus
-                />
-                <View style={styles.editActions}>
+          {message.type === 'image' || message.image_metadata ? (
+            // Image message - redesigned layout
+            (() => {
+              const imageUri = message.image_metadata?.thumbnail_url || message.image_metadata?.image_url || '';
+              const imageWidth = message.image_metadata?.width || 1;
+              const imageHeight = message.image_metadata?.height || 1;
+              const aspectRatio = imageWidth > 0 && imageHeight > 0 ? imageWidth / imageHeight : 1;
+              
+              if (!imageUri) {
+                console.warn('[DirectMessageScreen] ⚠️ Image message has no URL:', {
+                  id: message.id,
+                  type: message.type,
+                  imageMetadata: message.image_metadata,
+                });
+              }
+              
+              console.log('[DirectMessageScreen] 🖼️ Image render details:', {
+                messageId: message.id,
+                imageUri: imageUri ? `${imageUri.substring(0, 50)}...` : 'NO URI',
+                imageWidth,
+                imageHeight,
+                aspectRatio,
+                hasImageMetadata: !!message.image_metadata,
+              });
+              
+              return (
+                <View style={styles.imageMessageWrapper}>
                   <TouchableOpacity
+                    activeOpacity={0.9}
                     onPress={() => {
-                      setEditingMessageId(null);
-                      setEditingText('');
+                      if (message.image_metadata?.image_url) {
+                        setFullscreenImageUrl(message.image_metadata.image_url);
+                        setFullscreenThumbnailUrl(message.image_metadata.thumbnail_url || null);
+                      }
                     }}
-                    style={styles.editButton}
+                    disabled={message.upload_state === 'uploading' || message.upload_state === 'failed'}
+                    style={styles.imageTouchable}
                   >
-                    <Text style={styles.editButtonText}>Cancel</Text>
+                    <Image
+                      source={{ uri: imageUri }}
+                      style={[
+                        styles.messageImage,
+                        { 
+                          aspectRatio: aspectRatio && aspectRatio > 0 && isFinite(aspectRatio) ? aspectRatio : 1,
+                        }
+                      ]}
+                      resizeMode="cover"
+                      onError={(error) => {
+                        console.error('[DirectMessageScreen] ❌ Image load error:', {
+                          messageId: message.id,
+                          imageUri,
+                          error,
+                        });
+                      }}
+                      onLoad={() => {
+                        console.log('[DirectMessageScreen] ✅ Image loaded successfully:', {
+                          messageId: message.id,
+                          imageUri,
+                        });
+                      }}
+                    />
+                    {message.upload_state === 'uploading' && (
+                      <View style={styles.uploadOverlay}>
+                        <ActivityIndicator size="large" color="#FFFFFF" />
+                        {message.upload_progress !== undefined && (
+                          <Text style={styles.uploadProgressText}>
+                            {Math.round(message.upload_progress)}%
+                          </Text>
+                        )}
+                      </View>
+                    )}
+                    {message.upload_state === 'failed' && (
+                      <View style={styles.failedOverlay}>
+                        <Ionicons name="alert-circle" size={24} color="#FFFFFF" />
+                        <Text style={styles.failedText}>Failed to send</Text>
+                        <TouchableOpacity
+                          style={styles.retryButton}
+                          onPress={() => handleRetryUpload(message)}
+                        >
+                          <Text style={styles.retryButtonText}>Retry</Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                    {/* Timestamp overlay on image */}
+                    <View style={styles.imageTimestampOverlay}>
+                      <Text style={styles.imageTimestamp}>
+                        {formatTime(message.created_at)}
+                      </Text>
+                    </View>
                   </TouchableOpacity>
-                  <TouchableOpacity
-                    onPress={() => handleEditMessage(message.id, editingText)}
-                    style={[styles.editButton, styles.editButtonSave]}
-                  >
-                    <Text style={[styles.editButtonText, styles.editButtonTextSave]}>Save</Text>
-                  </TouchableOpacity>
+                  {message.body && (
+                    <Text style={[
+                      styles.imageCaption,
+                      isOwnMessage ? styles.userMessageText : styles.botMessageText,
+                      !isOwnMessage && otherUserAdvRole === 'adv_giver' && styles.botMessageTextGiveAdv,
+                      !isOwnMessage && otherUserAdvRole === 'adv_seeker' && styles.botMessageTextGetAdv,
+                    ]}>
+                      {message.body}
+                    </Text>
+                  )}
                 </View>
+              );
+            })()
+          ) : (
+            // Text message
+            <>
+              <View style={styles.messageTextContainer}>
+                {isEditing ? (
+                  <View style={styles.editContainer}>
+                    <PaperTextInput
+                      value={editingText}
+                      onChangeText={setEditingText}
+                      multiline
+                      style={styles.editInput}
+                      autoFocus
+                    />
+                    <View style={styles.editActions}>
+                      <TouchableOpacity
+                        onPress={() => {
+                          setEditingMessageId(null);
+                          setEditingText('');
+                        }}
+                        style={styles.editButton}
+                      >
+                        <Text style={styles.editButtonText}>Cancel</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        onPress={() => handleEditMessage(message.id, editingText)}
+                        style={[styles.editButton, styles.editButtonSave]}
+                      >
+                        <Text style={[styles.editButtonText, styles.editButtonTextSave]}>Save</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ) : message.deleted ? (
+                  <Text style={[
+                    isOwnMessage ? styles.userMessageText : styles.botMessageText,
+                    styles.deletedMessageText,
+                  ]}>
+                    This message was deleted
+                  </Text>
+                ) : (
+                  <>
+                    <Text style={[
+                      isOwnMessage ? styles.userMessageText : styles.botMessageText,
+                      !isOwnMessage && otherUserAdvRole === 'adv_giver' && styles.botMessageTextGiveAdv,
+                      !isOwnMessage && otherUserAdvRole === 'adv_seeker' && styles.botMessageTextGetAdv,
+                    ]}>
+                      {message.body || ''}
+                    </Text>
+                    {message.edited && !message.deleted && (
+                      <Text style={styles.editedBadge}>(edited)</Text>
+                    )}
+                  </>
+                )}
               </View>
-            ) : message.deleted ? (
-              <Text style={[
-                isOwnMessage ? styles.userMessageText : styles.botMessageText,
-                styles.deletedMessageText,
+              
+              {/* Timestamp container for text messages */}
+              <View style={[
+                styles.timestampContainer,
+                isOwnMessage ? styles.userTimestampContainer : styles.botTimestampContainer,
               ]}>
-                This message was deleted
-              </Text>
-            ) : (
-              <Text style={[
-                isOwnMessage ? styles.userMessageText : styles.botMessageText,
-                !isOwnMessage && otherUserAdvRole === 'adv_giver' && styles.botMessageTextGiveAdv,
-                !isOwnMessage && otherUserAdvRole === 'adv_seeker' && styles.botMessageTextGetAdv,
-              ]}>
-                {message.body || ''}
-              </Text>
-            )}
-            {message.edited && !message.deleted && (
-              <Text style={styles.editedBadge}>(edited)</Text>
-            )}
-          </View>
-          
-          {/* Timestamp container with rounded corners (Figma design) */}
-          <View style={[
-            styles.timestampContainer,
-            isOwnMessage ? styles.userTimestampContainer : styles.botTimestampContainer,
-          ]}>
-            <Text style={[
-              styles.timestamp,
-              isOwnMessage ? styles.userTimestamp : styles.botTimestamp,
-            ]}>
-              {formatTime(message.created_at)}
-            </Text>
-          </View>
+                <Text style={[
+                  styles.timestamp,
+                  isOwnMessage ? styles.userTimestamp : styles.botTimestamp,
+                ]}>
+                  {formatTime(message.created_at)}
+                </Text>
+              </View>
+            </>
+          )}
         </View>
       </TouchableOpacity>
     );
@@ -1090,13 +1445,8 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             <TouchableOpacity 
               style={styles.avatar}
               onPress={() => {
-                console.log('[DirectMessageScreen] Avatar pressed, otherUserId:', otherUserId);
-                console.log('[DirectMessageScreen] onViewProfile exists:', !!onViewProfile);
                 if (onViewProfile) {
-                  console.log('[DirectMessageScreen] Calling onViewProfile with userId:', otherUserId);
                   onViewProfile(otherUserId);
-                } else {
-                  console.warn('[DirectMessageScreen] onViewProfile is not provided!');
                 }
               }}
               activeOpacity={0.7}
@@ -1115,13 +1465,8 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
           <TouchableOpacity 
             style={styles.profileInfo}
             onPress={() => {
-              console.log('[DirectMessageScreen] Profile info (name) pressed, otherUserId:', otherUserId);
-              console.log('[DirectMessageScreen] onViewProfile exists:', !!onViewProfile);
               if (onViewProfile) {
-                console.log('[DirectMessageScreen] Calling onViewProfile with userId:', otherUserId);
                 onViewProfile(otherUserId);
-              } else {
-                console.warn('[DirectMessageScreen] onViewProfile is not provided!');
               }
             }}
             activeOpacity={0.7}
@@ -1215,7 +1560,10 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         {/* Input Area */}
         <View style={styles.inputWrapper}>
           <View style={styles.attachButtonWrapper}>
-            <TouchableOpacity style={styles.attachButton}>
+            <TouchableOpacity 
+              style={styles.attachButton}
+              onPress={handleImagePicker}
+            >
               <Ionicons name="add" size={28} color="#222B30" />
             </TouchableOpacity>
           </View>
@@ -1353,6 +1701,32 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         canEdit={selectedMessage ? canEditMessage(selectedMessage) : false}
         messagePosition={menuPosition}
       />
+
+      {/* Fullscreen Image Viewer */}
+      <FullscreenImageViewer
+        visible={!!fullscreenImageUrl}
+        imageUrl={fullscreenImageUrl || ''}
+        thumbnailUrl={fullscreenThumbnailUrl || undefined}
+        onClose={() => {
+          setFullscreenImageUrl(null);
+          setFullscreenThumbnailUrl(null);
+        }}
+      />
+
+      {/* Image Preview Modal */}
+      {selectedImageUri && (
+        <ImagePreviewModal
+          visible={imagePreviewVisible}
+          imageUri={selectedImageUri}
+          onSend={handleImageSend}
+          onCancel={() => {
+            setImagePreviewVisible(false);
+            setSelectedImageUri(null);
+            setIsProcessingImage(false);
+          }}
+          isProcessing={isProcessingImage}
+        />
+      )}
     </SafeAreaView>
   );
 };
@@ -1587,7 +1961,7 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
     flexDirection: 'column',
     justifyContent: 'flex-end',
-    alignItems: 'flex-end', // Align to right for received messages
+    alignItems: 'flex-start', // Changed from flex-end to flex-start for proper alignment
     borderTopLeftRadius: 16, // 16px 16px 2px 16px (pointy corner at bottom left)
     borderTopRightRadius: 16,
     borderBottomLeftRadius: 2, // Pointy corner at bottom left
@@ -1600,6 +1974,15 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.08,
     shadowRadius: 20,
     elevation: 5,
+  },
+  // Image message bubble - no padding, image touches edges
+  imageMessageBubble: {
+    paddingTop: 0,
+    paddingRight: 0,
+    paddingBottom: 0,
+    paddingLeft: 0,
+    paddingHorizontal: 0,
+    overflow: 'hidden', // Ensure image respects border radius
   },
   botMessageBubbleGiveAdv: {
     backgroundColor: '#DBCDBC', // adv_giver color
@@ -1799,7 +2182,7 @@ const styles = StyleSheet.create({
   },
   editButtonText: {
     fontSize: 14,
-    color: colors.text,
+    color: colors.textDark,
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
   },
   editButtonTextSave: {
@@ -1815,5 +2198,91 @@ const styles = StyleSheet.create({
   deletedMessageText: {
     fontStyle: 'italic',
     opacity: 0.6,
+  },
+  // Image message styles - redesigned
+  imageMessageWrapper: {
+    width: '100%',
+    position: 'relative',
+    alignSelf: 'stretch',
+  },
+  imageTouchable: {
+    width: '100%',
+    position: 'relative',
+    alignSelf: 'stretch',
+  },
+  messageImage: {
+    width: '100%',
+    minHeight: 200,
+    maxHeight: 500,
+    backgroundColor: colors.backgroundGray,
+    // aspectRatio will be set dynamically from image metadata
+  },
+  imageTimestampOverlay: {
+    position: 'absolute',
+    bottom: 6,
+    right: 8,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    borderRadius: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  imageTimestamp: {
+    fontSize: 11,
+    fontWeight: '400',
+    color: '#FFFFFF',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+  },
+  uploadOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    borderRadius: borderRadius.medium,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  uploadProgressText: {
+    color: colors.white,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  failedOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    borderRadius: borderRadius.medium,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  failedText: {
+    color: colors.white,
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  retryButton: {
+    backgroundColor: colors.primary,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: borderRadius.medium,
+    marginTop: spacing.xs,
+  },
+  retryButtonText: {
+    color: colors.white,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  imageCaption: {
+    marginTop: 8,
+    paddingHorizontal: 12,
+    paddingBottom: 4,
+    fontSize: 16,
+    color: colors.textDark,
   },
 });

@@ -176,13 +176,18 @@ export const MatchedUserCard: React.FC<MatchedUserCardProps> = ({
               isLoading && styles.actionButtonDisabled
             ]}
             onPress={() => {
-              if (isLoading) return;
+              if (isLoading) {
+                console.log('[MatchedUserCard] Send Message button clicked but already loading');
+                return;
+              }
               
+              console.log('[MatchedUserCard] Send Message button clicked for userId:', user.user_id);
               setIsLoading(true);
               setLoadingAction('message');
               
               // Track connect clicked
               analyticsService.trackConnectClicked();
+              console.log('[MatchedUserCard] Calling onSendMessage with userId:', user.user_id);
               onSendMessage(user.user_id);
             }}
             activeOpacity={isLoading ? 1 : 0.7}

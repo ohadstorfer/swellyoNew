@@ -14,7 +14,9 @@ import ConversationsScreen from '../screens/ConversationsScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
 import { DirectMessageScreen } from '../screens/DirectMessageScreen';
 import { SwellyShaperScreen } from '../screens/SwellyShaperScreen';
+import { ConversationLoadingScreen } from '../components/ConversationLoadingScreen';
 import { messagingService } from '../services/messaging/messagingService';
+import { supabaseAuthService } from '../services/auth/supabaseAuthService';
 import { useOnboarding } from '../context/OnboardingContext';
 import { analyticsService } from '../services/analytics/analyticsService';
 import { useAuthGuard } from '../hooks/useAuthGuard';
@@ -608,6 +610,17 @@ export const AppContent: React.FC = () => {
     otherUserAvatar: string | null;
     fromTripPlanning?: boolean; // If true, conversation was created from trip planning recommendations
   } | null>(null);
+  
+  // State for conversation loading screen
+  const [showConversationLoading, setShowConversationLoading] = useState(false);
+  const [pendingConversation, setPendingConversation] = useState<{
+    otherUserId: string;
+    otherUserName: string;
+    otherUserAvatar: string | null;
+    fromTripPlanning: boolean;
+  } | null>(null);
+  const [currentUserAvatar, setCurrentUserAvatar] = useState<string | null>(null);
+  const [currentUserName, setCurrentUserName] = useState<string>('User');
 
   const handleChatComplete = async () => {
     console.log('[AppContent] handleChatComplete called');
@@ -811,8 +824,21 @@ export const AppContent: React.FC = () => {
   };
 
   const handleStartConversation = async (userId: string) => {
+    console.log('[AppContent] ========== handleStartConversation START ==========');
+    console.log('[AppContent] handleStartConversation called with userId:', userId);
+    console.log('[AppContent] Current state - showTripPlanningChat:', showTripPlanningChat);
+    console.log('[AppContent] Current state - profileFromTripPlanningChat:', profileFromTripPlanningChat);
+    console.log('[AppContent] Current state - showConversationLoading:', showConversationLoading);
+    console.log('[AppContent] Current state - pendingConversation:', pendingConversation);
+    console.log('[AppContent] Current state - selectedConversation:', selectedConversation);
+    
     try {
+      // Check if we're in trip planning chat context (either from profile or directly from chat)
+      const isFromTripPlanning = profileFromTripPlanningChat || showTripPlanningChat || false;
+      console.log('[AppContent] isFromTripPlanning determined as:', isFromTripPlanning, '(profileFromTripPlanningChat:', profileFromTripPlanningChat, ', showTripPlanningChat:', showTripPlanningChat, ')');
+      
       // Check if conversation already exists
+      console.log('[AppContent] Checking if conversation exists for userId:', userId);
       const result = await messagingService.getConversations(50, 0); // Fetch first page
       const conversations = result.conversations;
       const existingConv = conversations.find(conv => {
@@ -822,41 +848,114 @@ export const AppContent: React.FC = () => {
         return false;
       });
       
+      console.log('[AppContent] Conversation exists:', !!existingConv);
+      
       if (existingConv && existingConv.other_user) {
-        // Conversation exists, use it
+        // Conversation exists, use it immediately (no loading screen)
+        console.log('[AppContent] ✓ Conversation exists, navigating directly to conversation');
+        console.log('[AppContent] Conversation ID:', existingConv.id);
+        console.log('[AppContent] Other user name:', existingConv.other_user.name);
         setSelectedConversation({
           id: existingConv.id,
           otherUserId: userId,
           otherUserName: existingConv.other_user.name || 'User',
           otherUserAvatar: existingConv.other_user.profile_image_url || null,
-          fromTripPlanning: profileFromTripPlanningChat || true, // Preserve trip planning flag if coming from there
+          fromTripPlanning: isFromTripPlanning,
         });
+        console.log('[AppContent] selectedConversation state updated');
       } else {
-        // No conversation exists yet - create pending conversation
-        // Get user details for display
+        // No conversation exists yet - get user details for display
+        console.log('[AppContent] ✗ No conversation exists, fetching user data');
         const { supabaseDatabaseService } = await import('../services/database/supabaseDatabaseService');
         const surferData = await supabaseDatabaseService.getSurferByUserId(userId);
+        console.log('[AppContent] Fetched surfer data:', surferData?.name || 'Unknown');
+        console.log('[AppContent] Surfer avatar:', !!surferData?.profile_image_url);
         
-        setSelectedConversation({
-          // No id - this is a pending conversation
-          otherUserId: userId,
-          otherUserName: surferData?.name || 'User',
-          otherUserAvatar: surferData?.profile_image_url || null,
-          fromTripPlanning: profileFromTripPlanningChat || true, // Preserve trip planning flag if coming from there
-        });
+        if (isFromTripPlanning) {
+          // Show loading screen first for trip planning conversations
+          console.log('[AppContent] ✓ From trip planning - preparing to show loading screen');
+          // Load current user data for loading screen
+          try {
+            console.log('[AppContent] Loading current user data for loading screen');
+            const currentUser = await supabaseAuthService.getCurrentUser();
+            if (currentUser) {
+              console.log('[AppContent] Current user loaded:', currentUser.nickname || currentUser.email);
+              setCurrentUserAvatar(currentUser.photo || null);
+              setCurrentUserName(currentUser.nickname || currentUser.email?.split('@')[0] || 'User');
+            } else {
+              console.warn('[AppContent] No current user found');
+            }
+          } catch (error) {
+            console.error('[AppContent] Error loading current user data:', error);
+          }
+          
+          console.log('[AppContent] Setting pending conversation...');
+          setPendingConversation({
+            otherUserId: userId,
+            otherUserName: surferData?.name || 'User',
+            otherUserAvatar: surferData?.profile_image_url || null,
+            fromTripPlanning: true,
+          });
+          console.log('[AppContent] pendingConversation state updated');
+          console.log('[AppContent] Setting showConversationLoading to true...');
+          setShowConversationLoading(true);
+          console.log('[AppContent] ✓ showConversationLoading set to true');
+          console.log('[AppContent] ✓ pendingConversation set with:', {
+            otherUserId: userId,
+            otherUserName: surferData?.name || 'User',
+            hasAvatar: !!surferData?.profile_image_url,
+            fromTripPlanning: true,
+          });
+        } else {
+          // For non-trip planning, go directly to conversation
+          console.log('[AppContent] Not from trip planning - navigating directly to conversation');
+          setSelectedConversation({
+            // No id - this is a pending conversation
+            otherUserId: userId,
+            otherUserName: surferData?.name || 'User',
+            otherUserAvatar: surferData?.profile_image_url || null,
+            fromTripPlanning: false,
+          });
+        }
       }
       
       // Close profile screen to show conversation
+      console.log('[AppContent] Closing profile screen...');
       setShowProfile(false);
       setViewingUserId(null);
+      console.log('[AppContent] Profile screen closed');
       
-      // Close trip planning chat if it was open (only if not preserving the flag)
-      // Actually, we should keep trip planning chat state so back button works correctly
-      // Don't close it here - let the conversation's back button handle navigation
-      // setShowTripPlanningChat(false); // Removed - preserve trip planning chat state
+      // Note: We keep showTripPlanningChat true so back button works correctly
+      // The loading screen will be rendered on top due to rendering order
+      
+      console.log('[AppContent] ========== handleStartConversation COMPLETE ==========');
+      console.log('[AppContent] Final state - showConversationLoading:', showConversationLoading);
+      console.log('[AppContent] Final state - pendingConversation:', pendingConversation ? 'exists' : 'null');
     } catch (error) {
-      console.error('Error starting conversation:', error);
+      console.error('[AppContent] Error starting conversation:', error);
       Alert.alert('Error', 'Failed to start conversation');
+    }
+  };
+  
+  const handleConversationLoadingComplete = () => {
+    console.log('[AppContent] handleConversationLoadingComplete called');
+    console.log('[AppContent] pendingConversation:', pendingConversation);
+    
+    // After loading screen completes, navigate to conversation
+    if (pendingConversation) {
+      console.log('[AppContent] Navigating to conversation after loading screen');
+      setSelectedConversation({
+        // No id - this is a pending conversation
+        otherUserId: pendingConversation.otherUserId,
+        otherUserName: pendingConversation.otherUserName,
+        otherUserAvatar: pendingConversation.otherUserAvatar,
+        fromTripPlanning: pendingConversation.fromTripPlanning,
+      });
+      setShowConversationLoading(false);
+      setPendingConversation(null);
+      console.log('[AppContent] Navigation complete, loading screen hidden');
+    } else {
+      console.warn('[AppContent] handleConversationLoadingComplete called but no pendingConversation');
     }
   };
 
@@ -990,6 +1089,26 @@ export const AppContent: React.FC = () => {
           }}
         />
       );
+    }
+    
+    // Show conversation loading screen if pending conversation from trip planning
+    // This check MUST come before trip planning chat check to ensure it renders on top
+    console.log('[AppContent] Rendering check - showConversationLoading:', showConversationLoading, 'pendingConversation:', !!pendingConversation);
+    if (showConversationLoading && pendingConversation) {
+      console.log('[AppContent] ✓ Rendering ConversationLoadingScreen');
+      console.log('[AppContent] Loading screen props - currentUserAvatar:', !!currentUserAvatar, 'currentUserName:', currentUserName);
+      console.log('[AppContent] Loading screen props - otherUserAvatar:', !!pendingConversation.otherUserAvatar, 'otherUserName:', pendingConversation.otherUserName);
+      return (
+        <ConversationLoadingScreen
+          currentUserAvatar={currentUserAvatar}
+          currentUserName={currentUserName}
+          otherUserAvatar={pendingConversation.otherUserAvatar}
+          otherUserName={pendingConversation.otherUserName}
+          onComplete={handleConversationLoadingComplete}
+        />
+      );
+    } else {
+      console.log('[AppContent] ✗ NOT rendering ConversationLoadingScreen - showConversationLoading:', showConversationLoading, 'pendingConversation:', !!pendingConversation);
     }
     
     // Show direct message screen if conversation is selected

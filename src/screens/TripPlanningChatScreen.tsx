@@ -1036,9 +1036,14 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   }, [inputText]);
 
   const handleSendMessage = async (userId: string) => {
+    console.log('[TripPlanningChatScreen] handleSendMessage called with userId:', userId);
+    console.log('[TripPlanningChatScreen] onStartConversation exists:', !!onStartConversation);
+    
     if (onStartConversation) {
+      console.log('[TripPlanningChatScreen] Calling onStartConversation');
       onStartConversation(userId);
     } else {
+      console.warn('[TripPlanningChatScreen] onStartConversation not available, calling onChatComplete');
       onChatComplete?.();
     }
   };
