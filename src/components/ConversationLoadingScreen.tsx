@@ -5,6 +5,7 @@ import {
   StyleSheet,
   Animated,
   Platform,
+  Easing,
 } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { ProfileImage } from './ProfileImage';
@@ -41,84 +42,156 @@ export const ConversationLoadingScreen: React.FC<ConversationLoadingScreenProps>
   
   // Animation for cover sliding away to reveal the line
   const coverTranslateX = useRef(new Animated.Value(0)).current; // Start covering the line
-  const iconOpacity = useRef(new Animated.Value(0)).current;
-  const iconScale = useRef(new Animated.Value(0.5)).current;
+  
+  // Text slider animation
+  const textSlideX = useRef(new Animated.Value(0)).current; // For sliding text horizontally
+  
+  // Separate animated values for each icon (4 icons)
+  const icon1Opacity = useRef(new Animated.Value(0)).current;
+  const icon1Scale = useRef(new Animated.Value(0.5)).current;
+  const icon2Opacity = useRef(new Animated.Value(0)).current;
+  const icon2Scale = useRef(new Animated.Value(0.5)).current;
+  const icon3Opacity = useRef(new Animated.Value(0)).current;
+  const icon3Scale = useRef(new Animated.Value(0.5)).current;
+  const icon4Opacity = useRef(new Animated.Value(0)).current;
+  const icon4Scale = useRef(new Animated.Value(0.5)).current;
   
   // Animations for profile images sliding in
   const leftProfileTranslateX = useRef(new Animated.Value(-200)).current; // Start off-screen left
   const rightProfileTranslateX = useRef(new Animated.Value(200)).current; // Start off-screen right
-  const profileVerticalOffset = useRef(new Animated.Value(0)).current; // For moving closer together vertically
   const profileHorizontalOffset = useRef(new Animated.Value(0)).current; // For moving closer together horizontally
+  const profileScale = useRef(new Animated.Value(0.85)).current; // Start smaller, then grow when getting closer
   
   // Interpolate combined horizontal movement for left profile
+  // Slides directly to spread-out position, then moves closer
   const leftProfileFinalX = Animated.add(
     leftProfileTranslateX,
     profileHorizontalOffset.interpolate({
       inputRange: [0, 1],
-      outputRange: [0, 100], // Move right when getting closer
+      outputRange: [0, 50], // Move right when getting closer (slightly less movement)
     })
   );
   
   // Interpolate combined horizontal movement for right profile
+  // Slides directly to spread-out position, then moves closer
   const rightProfileFinalX = Animated.add(
     rightProfileTranslateX,
     profileHorizontalOffset.interpolate({
       inputRange: [0, 1],
-      outputRange: [0, -100], // Move left when getting closer
+      outputRange: [0, -80], // Move left when getting closer (slightly less movement)
     })
   );
 
   useEffect(() => {
     console.log('[ConversationLoadingScreen] useEffect triggered, starting animations');
     
-    // Step 1: Profile images slide in from opposite sides (0.8 seconds)
+    // Step 1: Profile images slide directly to their spread-out positions (closer to center, not at borders)
+    // Left profile slides to -40 (closer to center than before)
     const leftProfileSlideIn = Animated.timing(leftProfileTranslateX, {
-      toValue: 0, // Slide to final position
+      toValue: -40, // Slide directly to spread-out position (closer to center)
       duration: 800,
       useNativeDriver: true,
     });
     
+    // Right profile slides to 40 (closer to center than before)
     const rightProfileSlideIn = Animated.timing(rightProfileTranslateX, {
-      toValue: 0, // Slide to final position
+      toValue: 40, // Slide directly to spread-out position (closer to center)
       duration: 800,
       useNativeDriver: true,
     });
     
-    // Step 2: Cover slides away to reveal line (3 seconds, starts after profiles are in)
+    // Step 2: Cover slides away to reveal line (3 seconds, starts after profiles slide in)
     const coverAnimation = Animated.timing(coverTranslateX, {
       toValue: 434.5, // Slide completely off-screen to the right
       duration: 3000,
-      delay: 800, // Start after profiles slide in
+      delay: 800, // Start after profiles slide in (800ms)
       useNativeDriver: true,
     });
 
-    // Step 3: After line animation completes, profiles move closer together (one above the other)
-    const profilesMoveCloserVertical = Animated.timing(profileVerticalOffset, {
-      toValue: 1, // Move closer vertically
+    // Step 3: After line animation completes, profiles move closer together horizontally and grow
+    const profilesMoveCloserHorizontal = Animated.timing(profileHorizontalOffset, {
+      toValue: 1, // Move closer horizontally (right overlaps left)
       duration: 600,
-      delay: 3800, // Start after line animation completes (800ms slide in + 3000ms line)
+      delay: 3800, // Start after line animation completes (800ms slide + 3000ms line)
       useNativeDriver: true,
     });
     
-    const profilesMoveCloserHorizontal = Animated.timing(profileHorizontalOffset, {
-      toValue: 1, // Move closer horizontally
+    const profilesGrow = Animated.timing(profileScale, {
+      toValue: 1.15, // Grow by 15% (from 0.85 to 1.15)
       duration: 600,
+      delay: 3800, // Same timing as move closer
+      useNativeDriver: true,
+    });
+
+    // Animate icons fade in and scale up sequentially after line animation finishes
+    // Line animation finishes at 3800ms (800ms slide + 3000ms line)
+    // Icons appear one after another with 150ms delay between each
+    const icon1Fade = Animated.timing(icon1Opacity, {
+      toValue: 1,
+      duration: 400,
+      delay: 3800, // Start after line animation finishes
+      easing: Easing.in(Easing.ease),
+      useNativeDriver: true,
+    });
+    const icon1ScaleAnim = Animated.timing(icon1Scale, {
+      toValue: 1,
+      duration: 400,
       delay: 3800,
+      easing: Easing.in(Easing.ease),
       useNativeDriver: true,
     });
-
-    // Animate icons fade in and scale up (start after line begins)
-    const iconFadeAnimation = Animated.timing(iconOpacity, {
+    
+    const icon2Fade = Animated.timing(icon2Opacity, {
       toValue: 1,
       duration: 400,
-      delay: 1500, // Start after profiles are in and line starts
+      delay: 3950, // 150ms after icon 1
+      easing: Easing.in(Easing.ease),
       useNativeDriver: true,
     });
-
-    const iconScaleAnimation = Animated.timing(iconScale, {
+    const icon2ScaleAnim = Animated.timing(icon2Scale, {
       toValue: 1,
       duration: 400,
-      delay: 1500,
+      delay: 3950,
+      easing: Easing.in(Easing.ease),
+      useNativeDriver: true,
+    });
+    
+    const icon3Fade = Animated.timing(icon3Opacity, {
+      toValue: 1,
+      duration: 400,
+      delay: 4100, // 150ms after icon 2
+      easing: Easing.in(Easing.ease),
+      useNativeDriver: true,
+    });
+    const icon3ScaleAnim = Animated.timing(icon3Scale, {
+      toValue: 1,
+      duration: 400,
+      delay: 4100,
+      easing: Easing.in(Easing.ease),
+      useNativeDriver: true,
+    });
+    
+    const icon4Fade = Animated.timing(icon4Opacity, {
+      toValue: 1,
+      duration: 400,
+      delay: 4250, // 150ms after icon 3
+      easing: Easing.in(Easing.ease),
+      useNativeDriver: true,
+    });
+    const icon4ScaleAnim = Animated.timing(icon4Scale, {
+      toValue: 1,
+      duration: 400,
+      delay: 4250,
+      easing: Easing.in(Easing.ease),
+      useNativeDriver: true,
+    });
+    
+    // Text slider animation - slides to second text after 3000ms
+    const textSlideAnimation = Animated.timing(textSlideX, {
+      toValue: 1, // Slide to show second text
+      duration: 450,
+      delay: 3000, // Start after 3000ms
+      easing: Easing.out(Easing.ease),
       useNativeDriver: true,
     });
 
@@ -128,10 +201,17 @@ export const ConversationLoadingScreen: React.FC<ConversationLoadingScreenProps>
       leftProfileSlideIn,
       rightProfileSlideIn,
       coverAnimation,
-      profilesMoveCloserVertical,
       profilesMoveCloserHorizontal,
-      iconFadeAnimation,
-      iconScaleAnimation,
+      profilesGrow,
+      icon1Fade,
+      icon1ScaleAnim,
+      icon2Fade,
+      icon2ScaleAnim,
+      icon3Fade,
+      icon3ScaleAnim,
+      icon4Fade,
+      icon4ScaleAnim,
+      textSlideAnimation,
     ]).start(() => {
       console.log('[ConversationLoadingScreen] All animations completed');
     });
@@ -152,14 +232,29 @@ export const ConversationLoadingScreen: React.FC<ConversationLoadingScreenProps>
   // SVG path for the animated line (from Figma specs)
   const animatedLinePath = "M0 150.5C28.6667 144.333 91 158.4 111 264C131 369.6 199.5 425.5 248 412C296.5 398.5 333.415 347.5 291.5 242.5C251.9 143.3 316 0 434.5 0";
 
+  // Text content for the slider
+  const textSet1 = {
+    line1: `Alright ${currentUserName || 'there'}!`,
+    line2: 'Community powered travel',
+    line3: 'starts with you!',
+  };
+  
+  const textSet2 = {
+    line1: 'Get connected!',
+    line2: 'Authentic profiles create',
+    line3: 'authentic connections.',
+  };
+
   return (
     <View style={styles.container}>
-      {/* Title Text */}
-      <Text style={styles.titleText}>
-  Let's drop in{"\n"}
-  with Swelly!
-</Text>
-      
+      {/* Top Text - "Let's drop in with Swelly!" */}
+      <View style={styles.topTextContainer}>
+        <Text style={styles.topTitleText}>
+          Let's drop in{"\n"}
+          with Swelly!
+        </Text>
+      </View>
+
       {/* Profile Pictures and Animated Line */}
       <View style={styles.profilesContainer}>
         {/* Left Profile - Current User */}
@@ -170,12 +265,7 @@ export const ConversationLoadingScreen: React.FC<ConversationLoadingScreenProps>
             {
               transform: [
                 { translateX: leftProfileFinalX },
-                { 
-                  translateY: profileVerticalOffset.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [0, -30], // Move up when getting closer
-                  })
-                },
+                { scale: profileScale },
               ],
             }
           ]}
@@ -223,8 +313,8 @@ export const ConversationLoadingScreen: React.FC<ConversationLoadingScreenProps>
               style={[
                 styles.iconPosition1,
                 {
-                  opacity: iconOpacity,
-                  transform: [{ scale: iconScale }],
+                  opacity: icon1Opacity,
+                  transform: [{ scale: icon1Scale }],
                 },
               ]}
             >
@@ -255,8 +345,8 @@ export const ConversationLoadingScreen: React.FC<ConversationLoadingScreenProps>
               style={[
                 styles.iconPosition2,
                 {
-                  opacity: iconOpacity,
-                  transform: [{ scale: iconScale }],
+                  opacity: icon2Opacity,
+                  transform: [{ scale: icon2Scale }],
                 },
               ]}
             >
@@ -344,8 +434,8 @@ export const ConversationLoadingScreen: React.FC<ConversationLoadingScreenProps>
               style={[
                 styles.iconPosition3,
                 {
-                  opacity: iconOpacity,
-                  transform: [{ scale: iconScale }],
+                  opacity: icon3Opacity,
+                  transform: [{ scale: icon3Scale }],
                 },
               ]}
             >
@@ -392,8 +482,8 @@ export const ConversationLoadingScreen: React.FC<ConversationLoadingScreenProps>
               style={[
                 styles.iconPosition4,
                 {
-                  opacity: iconOpacity,
-                  transform: [{ scale: iconScale }],
+                  opacity: icon4Opacity,
+                  transform: [{ scale: icon4Scale }],
                 },
               ]}
             >
@@ -546,12 +636,7 @@ export const ConversationLoadingScreen: React.FC<ConversationLoadingScreenProps>
             {
               transform: [
                 { translateX: rightProfileFinalX },
-                { 
-                  translateY: profileVerticalOffset.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [0, 30], // Move down when getting closer
-                  })
-                },
+                { scale: profileScale },
               ],
             }
           ]}
@@ -566,6 +651,67 @@ export const ConversationLoadingScreen: React.FC<ConversationLoadingScreenProps>
           </View>
         </Animated.View>
       </View>
+      
+      {/* Animated Text Slider - Positioned at bottom */}
+      <View style={styles.textSliderContainer}>
+        {/* First Text Set */}
+        <Animated.View
+          style={[
+            styles.textSet,
+            {
+              transform: [
+                {
+                  translateX: textSlideX.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0, -350], // Slide out to the left
+                  }),
+                },
+              ],
+              opacity: textSlideX.interpolate({
+                inputRange: [0, 0.5, 1],
+                outputRange: [1, 0.5, 0], // Fade out as it slides
+              }),
+            },
+          ]}
+        >
+          <Text style={styles.titleText}>
+            {textSet1.line1}
+          </Text>
+          <Text style={styles.subtitleText}>
+            {textSet1.line2}{'\n'}
+            {textSet1.line3}
+          </Text>
+        </Animated.View>
+        
+        {/* Second Text Set */}
+        <Animated.View
+          style={[
+            styles.textSet,
+            {
+              transform: [
+                {
+                  translateX: textSlideX.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [350, 0], // Slide in from the right
+                  }),
+                },
+              ],
+              opacity: textSlideX.interpolate({
+                inputRange: [0, 0.5, 1],
+                outputRange: [0, 0.5, 1], // Fade in as it slides
+              }),
+            },
+          ]}
+        >
+          <Text style={styles.titleText}>
+            {textSet2.line1}
+          </Text>
+          <Text style={styles.subtitleText}>
+            {textSet2.line2}{'\n'}
+            {textSet2.line3}
+          </Text>
+        </Animated.View>
+      </View>
     </View>
   );
 };
@@ -578,10 +724,40 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     backgroundColor: '#F5F5F5',
-    justifyContent: 'center',
     alignItems: 'center',
     zIndex: 1000,
     paddingHorizontal: 20,
+  },
+  topTextContainer: {
+    position: 'absolute',
+    top: 80, // Gap from top
+    width: 350,
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  topTitleText: {
+    color: '#333',
+    textAlign: 'center',
+    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat',
+    fontSize: 24,
+    fontWeight: '700',
+    lineHeight: 28.8, // 120% of 24
+  },
+  textSliderContainer: {
+    width: 350,
+    height: 120,
+    position: 'absolute',
+    bottom: 60, // Gap from bottom
+    left: '50%',
+    marginLeft: -175, // Half of width to center
+    overflow: 'hidden',
+    zIndex: 10,
+  },
+  textSet: {
+    position: 'absolute',
+    width: 350,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   titleText: {
     color: '#333',
@@ -590,13 +766,22 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '700',
     lineHeight: 28.8, // 120% of 24
-    width: 350,
-    marginBottom: 60,
+    marginBottom: 8,
+  },
+  subtitleText: {
+    color: '#333',
+    textAlign: 'center',
+    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat',
+    fontSize: 18,
+    fontWeight: '400',
+    lineHeight: 24,
   },
   profilesContainer: {
     width: '100%',
     height: 500, // Fixed height to ensure space
-    position: 'relative',
+    position: 'absolute',
+    top: '50%',
+    marginTop: -250, // Half of height to center vertically
     zIndex: 1,
   },
   profileWrapper: {

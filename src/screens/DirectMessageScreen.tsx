@@ -1669,8 +1669,13 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                 onPress={sendMessage}
                 disabled={!inputText.trim() || isLoading}
               >
-                <Ionicons 
+                {/* <Ionicons 
                   name={inputText.trim() ? "arrow-up" : "mic"} 
+                  size={20} 
+                  color="#FFFFFF" 
+                /> */}
+                <Ionicons 
+                  name="arrow-up" 
                   size={20} 
                   color="#FFFFFF" 
                 />
