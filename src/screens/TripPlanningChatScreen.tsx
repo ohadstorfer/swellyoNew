@@ -1290,8 +1290,13 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
                 placeholder="Type your message.."
                 multiline={true}
                 maxLength={500}
-                onSubmitEditing={undefined}
-                returnKeyType="default"
+                onSubmitEditing={() => {
+                  // On native: Send button on keyboard sends message
+                  if (Platform.OS !== 'web') {
+                    sendMessage();
+                  }
+                }}
+                returnKeyType="send" // Show "Send" button on native keyboards
                 blurOnSubmit={false}
                 onContentSizeChange={(event: any) => {
                   const { height } = event.nativeEvent.contentSize;

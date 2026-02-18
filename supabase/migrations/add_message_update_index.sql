@@ -3,7 +3,7 @@
 
 CREATE INDEX IF NOT EXISTS idx_messages_conversation_updated 
   ON messages(conversation_id, updated_at DESC)
-  WHERE deleted = false;
+  
 
 -- This index helps with:
 -- 1. Efficient queries for edited messages (ORDER BY updated_at)

@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 import { TextInput as PaperTextInput } from 'react-native-paper';
 import { Ionicons } from '@expo/vector-icons';
+import Svg, { Path } from 'react-native-svg';
 import { Text } from '../components/Text';
 import { colors, spacing, typography, borderRadius } from '../styles/theme';
 import { messagingService, Message } from '../services/messaging/messagingService';
@@ -192,9 +193,28 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             }
             
             setMessages((prev) => {
-              const updated = prev.map(msg => 
-                msg.id === updatedMessage.id ? updatedMessage : msg
-              );
+              const existingIndex = prev.findIndex(msg => msg.id === updatedMessage.id);
+              let updated: typeof prev;
+              
+              if (existingIndex !== -1) {
+                // Update existing message
+                updated = prev.map(msg => 
+                  msg.id === updatedMessage.id ? updatedMessage : msg
+                );
+              } else {
+                // Message not in state yet - add it (important for deleted messages that should be visible)
+                // Only add if it's part of this conversation
+                if (updatedMessage.conversation_id === currentConversationId) {
+                  updated = [...prev, updatedMessage].sort((a, b) => {
+                    const timeDiff = new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+                    if (timeDiff !== 0) return timeDiff;
+                    return a.id.localeCompare(b.id);
+                  });
+                } else {
+                  updated = prev;
+                }
+              }
+              
               // Update cache
               chatHistoryCache.updateMessage(currentConversationId, updatedMessage.id, updatedMessage).catch(err => {
                 console.error('Error updating message in cache:', err);
@@ -229,14 +249,13 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                 previousDeleted: messageExists.deleted,
               });
               
+              const deletedMessage = { ...messageExists, deleted: true, body: undefined };
               const updated = prev.map(msg => 
-                msg.id === messageId 
-                  ? { ...msg, deleted: true, body: undefined }
-                  : msg
+                msg.id === messageId ? deletedMessage : msg
               );
               
-              // Update cache
-              chatHistoryCache.updateMessage(currentConversationId, messageId, null).catch(err => {
+              // Update cache with deleted message (not null) so it persists
+              chatHistoryCache.updateMessage(currentConversationId, messageId, deletedMessage).catch(err => {
                 console.error('[DirectMessageScreen] Error updating deleted message in cache:', err);
               });
               
@@ -435,6 +454,12 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       
       // Memory cache hit - show instantly (no async delay, no loading state)
       // But only after adv_role is loaded to ensure correct colors
+      const deletedCount = cachedMessages.filter(m => m.deleted).length;
+      console.log('[DirectMessageScreen] Loading messages from memory cache:', {
+        totalMessages: cachedMessages.length,
+        deletedMessages: deletedCount,
+        deletedMessageIds: cachedMessages.filter(m => m.deleted).map(m => m.id),
+      });
       setMessages(cachedMessages);
       setIsFetchingMessages(false);
       setShowSkeletons(false);  // Binary: cache exists = no skeleton
@@ -443,9 +468,23 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       
       // CRITICAL: Always check server for updated messages when loading from cache
       // This ensures image messages are loaded even if cache is stale
+      // Also fetch ALL messages (including deleted) to ensure deleted messages are included
       // Do this in background so it doesn't block UI
+      console.log('[DirectMessageScreen] Starting background sync to fetch deleted messages...');
       (async () => {
         try {
+          console.log('[DirectMessageScreen] Fetching full message list from server...');
+          // Fetch full message list from server to ensure deleted messages are included
+          // getMessagesUpdatedSince might miss deleted messages if cache was saved after deletion
+          // Fetch more messages (100) to ensure we get deleted messages even if they're older
+          const fullResult = await messagingService.getMessages(currentConversationId, 100);
+          const deletedInFull = fullResult.messages.filter(m => m.deleted).length;
+          console.log('[DirectMessageScreen] ✅ Full server fetch for deleted messages:', {
+            totalMessages: fullResult.messages.length,
+            deletedMessages: deletedInFull,
+            deletedMessageIds: fullResult.messages.filter(m => m.deleted).map(m => m.id),
+          });
+          
           const lastSync = await chatHistoryCache.getLastSyncTimestamp(currentConversationId);
           const serverMessages = await messagingService.getMessagesUpdatedSince(
             currentConversationId,
@@ -453,12 +492,40 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             30 // Check all recent messages
           );
           
+          // Merge full message list (includes deleted) with cache to ensure deleted messages are present
+          setMessages((prev) => {
+            const deletedInPrev = prev.filter(m => m.deleted).length;
+            const deletedInFull = fullResult.messages.filter(m => m.deleted).length;
+            
+            // Merge full server messages with cache (ensures deleted messages are included)
+            const merged = chatHistoryCache.mergeMessages(prev, fullResult.messages);
+            const deletedInMerged = merged.filter(m => m.deleted).length;
+            
+            console.log('[DirectMessageScreen] After full merge:', {
+              prevDeleted: deletedInPrev,
+              fullDeleted: deletedInFull,
+              mergedDeleted: deletedInMerged,
+              totalMerged: merged.length,
+            });
+            
+            chatHistoryCache.saveMessages(currentConversationId, merged).catch(() => {});
+            return merged;
+          });
+          
+          // Also handle incremental updates if any
           if (serverMessages.length > 0) {
+            const deletedInServer = serverMessages.filter(m => m.deleted).length;
+            console.log('[DirectMessageScreen] Server sync after cache load:', {
+              totalMessages: serverMessages.length,
+              deletedMessages: deletedInServer,
+              deletedMessageIds: serverMessages.filter(m => m.deleted).map(m => m.id),
+            });
+            
             // #region agent log
             fetch('http://127.0.0.1:7242/ingest/6b4e2d69-2c76-430d-914a-aa3116b97922',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'DirectMessageScreen.tsx:400',message:'Found updated messages from server after cache load',data:{totalMessages:serverMessages.length,imageMessages:serverMessages.filter(m=>m.type==='image'||m.image_metadata).length,allMessages:serverMessages.map((msg,idx)=>({index:idx,id:msg.id,type:msg.type,hasImageMetadata:!!msg.image_metadata}))},timestamp:Date.now()})}).catch(()=>{});
             // #endregion
             
-            // Merge server messages with cache
+            // Merge incremental updates
             setMessages((prev) => {
               const merged = chatHistoryCache.mergeMessages(prev, serverMessages);
               chatHistoryCache.saveMessages(currentConversationId, merged).catch(() => {});
@@ -466,7 +533,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             });
           }
         } catch (error) {
-          console.error('Error checking for updated messages:', error);
+          console.error('[DirectMessageScreen] ❌ Error checking for updated messages (including deleted):', error);
         }
       })();
       
@@ -532,6 +599,12 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         }
         
         // AsyncStorage cache hit - show messages (after adv_role is loaded)
+        const deletedCount = asyncCachedMessages.filter(m => m.deleted).length;
+        console.log('[DirectMessageScreen] Loading messages from AsyncStorage cache:', {
+          totalMessages: asyncCachedMessages.length,
+          deletedMessages: deletedCount,
+          deletedMessageIds: asyncCachedMessages.filter(m => m.deleted).map(m => m.id),
+        });
         setMessages(asyncCachedMessages);
         setIsFetchingMessages(false);
         setShowSkeletons(false);  // Binary: cache exists = no skeleton
@@ -550,6 +623,13 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         const totalTime = Date.now() - loadStartTime;
         
         console.log(`[DirectMessageScreen] 📥 SERVER FETCH - Got ${result.messages.length} messages in ${serverTime}ms (${totalTime}ms total, hasMore: ${result.hasMore})`);
+        
+        const deletedCount = result.messages.filter(m => m.deleted).length;
+        console.log('[DirectMessageScreen] Server messages include deleted:', {
+          totalMessages: result.messages.length,
+          deletedMessages: deletedCount,
+          deletedMessageIds: result.messages.filter(m => m.deleted).map(m => m.id),
+        });
         
         // #region agent log
         // Log ALL server messages to check for image messages
@@ -1014,16 +1094,23 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       // Optimistic update - mark message as deleted immediately
       console.log('[DirectMessageScreen] Applying optimistic update');
       setMessages((prev) => {
+        const messageToDelete = prev.find(msg => msg.id === messageId);
+        if (!messageToDelete) {
+          console.warn('[DirectMessageScreen] Message not found for deletion', { messageId });
+          return prev;
+        }
+        
+        const deletedMessage = { ...messageToDelete, deleted: true, body: undefined };
         const updated = prev.map(msg => {
           if (msg.id === messageId) {
             console.log('[DirectMessageScreen] Marking message as deleted in UI', { messageId });
-            return { ...msg, deleted: true, body: undefined };
+            return deletedMessage;
           }
           return msg;
         });
         
-        // Update cache asynchronously
-        chatHistoryCache.updateMessage(currentConversationId, messageId, null).catch((err) => {
+        // Update cache with deleted message (not null) so it persists
+        chatHistoryCache.updateMessage(currentConversationId, messageId, deletedMessage).catch((err) => {
           console.error('[DirectMessageScreen] Error updating cache:', err);
         });
         
@@ -1591,12 +1678,22 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                     </View>
                   </View>
                 ) : message.deleted ? (
-                  <Text style={[
-                    isOwnMessage ? styles.userMessageText : styles.botMessageText,
-                    styles.deletedMessageText,
-                  ]}>
-                    This message was deleted
-                  </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                    <View style={{ opacity: 0.6 }}>
+                      <Svg height={16} viewBox="0 -960 960 960" width={16} fill={colors.textDark}>
+                        <Path d="M324-111.5Q251-143 197-197t-85.5-127Q80-397 80-480t31.5-156Q143-709 197-763t127-85.5Q397-880 480-880t156 31.5Q709-817 763-763t85.5 127Q880-563 880-480t-31.5 156Q817-251 763-197t-127 85.5Q563-80 480-80t-156-31.5ZM480-160q54 0 104-17.5t92-50.5L228-676q-33 42-50.5 92T160-480q0 134 93 227t227 93Zm252-124q33-42 50.5-92T800-480q0-134-93-227t-227-93q-54 0-104 17.5T284-732l448 448ZM480-480Z" />
+                      </Svg>
+                    </View>
+                    <Text style={[
+                      isOwnMessage ? styles.userMessageText : styles.botMessageText,
+                      styles.deletedMessageText,
+                    ]}>
+                      {isOwnMessage 
+                        ? 'You deleted this message'
+                        : `${message.sender_name || message.sender?.name || otherUserName || 'Someone'} deleted this message`
+                      }
+                    </Text>
+                  </View>
                 ) : (
                   <>
                     <Text style={[
@@ -1743,7 +1840,17 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                 </View>
               )}
               {messages
-                .map(renderMessage)
+                .map((msg, idx) => {
+                  // Log deleted messages being rendered
+                  if (msg.deleted) {
+                    console.log(`[DirectMessageScreen] Rendering deleted message at index ${idx}:`, {
+                      id: msg.id,
+                      deleted: msg.deleted,
+                      body: msg.body,
+                    });
+                  }
+                  return renderMessage(msg);
+                })
                 .filter(msg => msg !== null) // Filter out null messages (when variables not ready)
               }
               <TypingIndicator />
@@ -1788,8 +1895,13 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                 placeholder="Type your message.."
                 multiline={true}
                 maxLength={500}
-                onSubmitEditing={undefined} // Disable default submit on Enter (we handle it manually)
-                returnKeyType="default" // Always default to allow multiline
+                onSubmitEditing={() => {
+                  // On native: Send button on keyboard sends message
+                  if (Platform.OS !== 'web') {
+                    sendMessage();
+                  }
+                }}
+                returnKeyType="send" // Show "Send" button on native keyboards
                 blurOnSubmit={false}
                 onContentSizeChange={(event: any) => {
                   // Best practice: Smooth expansion based on actual content size
@@ -1812,7 +1924,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                 }}
                 onKeyPress={(e: any) => {
                   // On web: Enter sends, Shift+Enter creates new line
-                  // On native: Enter always creates new line (no send on Enter)
+                  // On native: Send button on keyboard sends (handled by onSubmitEditing)
                   if (Platform.OS === 'web' && e.nativeEvent.key === 'Enter') {
                     const isShiftPressed = (e.nativeEvent as any).shiftKey;
                     
@@ -1823,7 +1935,6 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                     }
                     // Shift+Enter: allow new line (default behavior, don't prevent)
                   }
-                  // On native: Enter key always creates new line (default behavior)
                 }}
                 // Enable scrolling only when we've reached max height
                 scrollEnabled={inputHeight >= 120}

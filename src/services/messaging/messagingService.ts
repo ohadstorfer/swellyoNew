@@ -428,7 +428,7 @@ class MessagingService {
         .from('messages')
         .select('id, conversation_id, sender_id, body, rendered_body, attachments, is_system, edited, deleted, created_at, updated_at, type, image_metadata')
         .eq('conversation_id', conversationId)
-        .eq('deleted', false)
+        // Note: We include deleted messages so they can be displayed with "deleted" placeholder
         .gt('updated_at', lastSyncDate)
         .order('created_at', { ascending: true })
         .limit(limit);
@@ -508,7 +508,7 @@ class MessagingService {
         .from('messages')
         .select('id, conversation_id, sender_id, body, rendered_body, attachments, is_system, edited, deleted, created_at, updated_at, type, image_metadata')
         .eq('conversation_id', conversationId)
-        .eq('deleted', false)
+        // Note: We include deleted messages so they can be displayed with "deleted" placeholder
         .order('created_at', { ascending: true })
         .limit(fetchLimit);
 
@@ -1649,12 +1649,13 @@ class MessagingService {
 
       // Enrich with last message and unread counts (reuse logic from getConversations)
       // This is a simplified version - full enrichment would be the same as getConversations
+      // Note: We include deleted messages so they can be displayed with "deleted" placeholder
       const lastMessagesPromises = conversations.map(conv =>
         supabase
           .from('messages')
           .select('id, conversation_id, sender_id, body, rendered_body, attachments, is_system, edited, deleted, created_at, updated_at, type, image_metadata')
           .eq('conversation_id', conv.id)
-          .eq('deleted', false)
+          // Note: We include deleted messages so they can be displayed with "deleted" placeholder
           .order('created_at', { ascending: false })
           .limit(1)
           .maybeSingle()

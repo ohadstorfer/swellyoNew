@@ -40,7 +40,7 @@ AS $$
     m.image_metadata
   FROM messages m
   WHERE m.conversation_id = ANY(conv_ids)
-    AND m.deleted = false
+    -- Note: We include deleted messages so they can be displayed with "deleted" placeholder
   ORDER BY m.conversation_id, m.created_at DESC;
 $$;
 

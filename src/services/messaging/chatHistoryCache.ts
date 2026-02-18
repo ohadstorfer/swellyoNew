@@ -379,11 +379,51 @@ class ChatHistoryCache {
         }
         
         // Merge with existing messages if available
+        // CRITICAL: Always merge to preserve deleted messages from cache
         let messagesToCache: Message[];
         if (existingCached && existingCached.messages && existingCached.messages.length > 0) {
           // Merge existing with new, then truncate
+          // This preserves deleted messages from cache that aren't in the new messages
           const merged = this.mergeMessages(existingCached.messages, messages);
+          const deletedCount = merged.filter(m => m.deleted).length;
+          const deletedInCache = existingCached.messages.filter(m => m.deleted).length;
+          const deletedInNew = messages.filter(m => m.deleted).length;
+          console.log(`[chatHistoryCache] Merging messages: ${existingCached.messages.length} cached (${deletedInCache} deleted) + ${messages.length} new (${deletedInNew} deleted) = ${merged.length} total (${deletedCount} deleted)`);
+          
+          // CRITICAL: Before truncating, ensure we preserve deleted messages
+          // If we're about to lose deleted messages due to truncation, we need to keep them
           messagesToCache = merged.slice(-MAX_MESSAGES_PER_CONVERSATION);
+          
+          // Check if we lost any deleted messages during truncation
+          const deletedAfterTruncate = messagesToCache.filter(m => m.deleted).length;
+          if (deletedCount > deletedAfterTruncate) {
+            console.warn(`[chatHistoryCache] ⚠️ Lost ${deletedCount - deletedAfterTruncate} deleted messages during truncation - attempting to preserve them`);
+            
+            // Find deleted messages that were lost
+            const lostDeleted = merged.filter(m => m.deleted && !messagesToCache.find(cached => cached.id === m.id));
+            
+            // Add them back, replacing oldest non-deleted messages if needed
+            if (lostDeleted.length > 0) {
+              // Sort by created_at to keep the most recent deleted messages
+              lostDeleted.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+              
+              // Replace oldest non-deleted messages with deleted ones (up to the limit)
+              const nonDeleted = messagesToCache.filter(m => !m.deleted);
+              const toKeep = Math.max(0, MAX_MESSAGES_PER_CONVERSATION - lostDeleted.length);
+              const keptNonDeleted = nonDeleted.slice(-toKeep);
+              
+              // Combine: kept non-deleted + all deleted (both from cache and new)
+              const allDeleted = [...messagesToCache.filter(m => m.deleted), ...lostDeleted];
+              allDeleted.sort((a, b) => {
+                const timeDiff = new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+                if (timeDiff !== 0) return timeDiff;
+                return a.id.localeCompare(b.id);
+              });
+              
+              messagesToCache = [...keptNonDeleted, ...allDeleted].slice(-MAX_MESSAGES_PER_CONVERSATION);
+              console.log(`[chatHistoryCache] ✅ Preserved deleted messages: ${messagesToCache.filter(m => m.deleted).length} deleted in final cache`);
+            }
+          }
         } else {
           // No existing cache, just truncate new messages
           messagesToCache = messages.slice(-MAX_MESSAGES_PER_CONVERSATION);
@@ -461,17 +501,19 @@ class ChatHistoryCache {
    */
   mergeMessages(cached: Message[], newMessages: Message[]): Message[] {
     // Create a map of cached messages by ID
+    // CRITICAL: Start with ALL cached messages (including deleted ones)
     const messageMap = new Map<string, Message>();
     cached.forEach(msg => messageMap.set(msg.id, msg));
 
     // Update or add new messages
+    // CRITICAL: Server messages take precedence, but we preserve cached messages that aren't in the server response
     newMessages.forEach(newMsg => {
       const existing = messageMap.get(newMsg.id);
       if (existing) {
         // Server message takes precedence (might be edited/deleted)
         messageMap.set(newMsg.id, newMsg);
       } else {
-        // New message
+        // New message from server
         messageMap.set(newMsg.id, newMsg);
       }
     });
@@ -487,6 +529,7 @@ class ChatHistoryCache {
     });
 
     // CRITICAL: Return ALL merged messages (no truncation)
+    // This includes deleted messages from cache that aren't in the server response
     // Truncation happens in saveMessages() when saving to disk
     return merged;
   }
@@ -558,21 +601,46 @@ class ChatHistoryCache {
       const cached = await AsyncStorage.getItem(key);
       
       if (!cached) {
+        console.log(`[chatHistoryCache] updateMessage: No cache found for ${conversationId}`);
         return; // No cache to update
       }
 
       const data: CachedConversation = JSON.parse(cached);
+      const beforeCount = data.messages.length;
+      const deletedBefore = data.messages.filter(m => m.deleted).length;
       
       if (updatedMessage) {
-        // Update existing message
+        // Update existing message (including soft-deleted messages with deleted: true)
         const index = data.messages.findIndex(msg => msg.id === messageId);
         if (index !== -1) {
+          const wasDeleted = data.messages[index].deleted;
           data.messages[index] = updatedMessage;
+          console.log(`[chatHistoryCache] updateMessage: Updated message ${messageId} in cache (wasDeleted: ${wasDeleted}, nowDeleted: ${updatedMessage.deleted})`);
+        } else {
+          // Message not in cache yet, add it (for soft-deleted messages that should still be visible)
+          if (updatedMessage.deleted) {
+            data.messages.push(updatedMessage);
+            // Sort to maintain order
+            data.messages.sort((a, b) => {
+              const timeDiff = new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+              if (timeDiff !== 0) return timeDiff;
+              return a.id.localeCompare(b.id);
+            });
+            console.log(`[chatHistoryCache] updateMessage: Added deleted message ${messageId} to cache`);
+          } else {
+            console.log(`[chatHistoryCache] updateMessage: Message ${messageId} not in cache and not deleted, skipping`);
+          }
         }
       } else {
-        // Remove deleted message
+        // Only remove if explicitly null (hard delete) - soft deletes should pass the message with deleted: true
+        // For soft deletes, updatedMessage should be the message with deleted: true, not null
+        console.warn(`[chatHistoryCache] updateMessage: Removing message ${messageId} from cache (hard delete)`);
         data.messages = data.messages.filter(msg => msg.id !== messageId);
       }
+      
+      const afterCount = data.messages.length;
+      const deletedAfter = data.messages.filter(m => m.deleted).length;
+      console.log(`[chatHistoryCache] updateMessage: Cache updated - ${beforeCount} -> ${afterCount} messages, ${deletedBefore} -> ${deletedAfter} deleted`);
 
       data.lastSync = Date.now();
       await AsyncStorage.setItem(key, JSON.stringify(data));
@@ -581,13 +649,24 @@ class ChatHistoryCache {
       const memoryCached = this.memoryCache.get(conversationId);
       if (memoryCached) {
         if (updatedMessage) {
-          // Update existing message in memory cache
+          // Update existing message in memory cache (including soft-deleted messages)
           const index = memoryCached.messages.findIndex(msg => msg.id === messageId);
           if (index !== -1) {
             memoryCached.messages[index] = updatedMessage;
+          } else {
+            // Message not in memory cache yet, add it (for soft-deleted messages that should still be visible)
+            if (updatedMessage.deleted) {
+              memoryCached.messages.push(updatedMessage);
+              // Sort to maintain order
+              memoryCached.messages.sort((a, b) => {
+                const timeDiff = new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+                if (timeDiff !== 0) return timeDiff;
+                return a.id.localeCompare(b.id);
+              });
+            }
           }
         } else {
-          // Remove deleted message from memory cache
+          // Only remove if explicitly null (hard delete) - soft deletes should pass the message with deleted: true
           memoryCached.messages = memoryCached.messages.filter(msg => msg.id !== messageId);
         }
         memoryCached.lastSync = data.lastSync;

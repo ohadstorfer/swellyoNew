@@ -727,8 +727,13 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
                 placeholder="Type your message.."
                 multiline={true}
                 maxLength={500}
-                onSubmitEditing={undefined} // Disable default submit on Enter (we handle it manually)
-                returnKeyType="default" // Always default to allow multiline
+                onSubmitEditing={() => {
+                  // On native: Send button on keyboard sends message
+                  if (Platform.OS !== 'web') {
+                    sendMessage();
+                  }
+                }}
+                returnKeyType="send" // Show "Send" button on native keyboards
                 blurOnSubmit={false}
                 onContentSizeChange={(event: any) => {
                   // Best practice: Smooth expansion based on actual content size
