@@ -25,7 +25,9 @@ export const SwellyoTeamWelcome: React.FC<SwellyoTeamWelcomeProps> = ({
 }) => {
   const welcomeMessage = `Hey! Welcome to Swellyo 🤙
 
-Stoked you're here. Swellyo began as a wild idea between friends who believed travel could be deeper — more connected to culture, nature, and each other. Over time, that idea became a shared vision for a new kind of travel ecosystem, one shaped by community and the environments we move through.
+Stoked you're here. Swellyo began as a wild idea between friends who believed travel could be deeper — more connected to culture, nature, and each other.
+
+Over time, that idea became a shared vision for a new kind of travel ecosystem, one shaped by community and the environments we move through.
 
 We're grateful to be building this with you.
 

@@ -1337,8 +1337,57 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
       onMessageUpdated: (conversationId, message) => {
         dispatch({ type: 'MESSAGE_UPDATED', payload: { conversationId, message } });
       },
-      onMessageDeleted: (conversationId, messageId) => {
+      onMessageDeleted: async (conversationId, messageId) => {
         dispatch({ type: 'MESSAGE_DELETED', payload: { conversationId, messageId } });
+        
+        // If deleted message was the last one, fetch previous message immediately
+        const conv = conversationsRef.current.find(c => c.id === conversationId);
+        if (conv?.last_message?.id === messageId) {
+          try {
+            // Fetch the most recent non-deleted message (limit 1, order by created_at DESC)
+            const { data: previousMessages, error } = await supabase
+              .from('messages')
+              .select('id, conversation_id, sender_id, body, rendered_body, attachments, is_system, edited, deleted, created_at, updated_at, type, image_metadata')
+              .eq('conversation_id', conversationId)
+              .eq('deleted', false)
+              .order('created_at', { ascending: false })
+              .limit(1);
+            
+            if (!error && previousMessages && previousMessages.length > 0) {
+              const prevMessage = previousMessages[0];
+              // Enrich with sender info
+              const { data: surferData } = await supabase
+                .from('surfers')
+                .select('name, profile_image_url')
+                .eq('user_id', prevMessage.sender_id)
+                .maybeSingle();
+              
+              const enrichedMessage: Message = {
+                ...prevMessage,
+                sender_name: surferData?.name,
+                sender_avatar: surferData?.profile_image_url,
+              };
+              
+              dispatch({ 
+                type: 'UPDATE_CONVERSATION', 
+                payload: { 
+                  conversation: { ...conv, last_message: enrichedMessage } 
+                } 
+              });
+            } else {
+              // No previous message - keep undefined
+              dispatch({ 
+                type: 'UPDATE_CONVERSATION', 
+                payload: { 
+                  conversation: { ...conv, last_message: undefined } 
+                } 
+              });
+            }
+          } catch (error) {
+            console.error('[MessagingProvider] Error fetching previous message after delete:', error);
+            // On error, keep undefined (already set by MESSAGE_DELETED action)
+          }
+        }
       },
       onConversationUpdated: (conversationId, updatedAt) => {
         dispatch({ type: 'CONVERSATION_UPDATED', payload: { conversationId, updatedAt } });

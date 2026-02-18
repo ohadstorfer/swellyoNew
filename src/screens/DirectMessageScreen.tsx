@@ -12,6 +12,7 @@ import {
   ImageBackground,
   Alert,
   Animated,
+  Modal,
 } from 'react-native';
 import { TextInput as PaperTextInput } from 'react-native-paper';
 import { Ionicons } from '@expo/vector-icons';
@@ -83,6 +84,8 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const [menuVisible, setMenuVisible] = useState(false);
   const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
   const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
+  const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
+  const [pendingDeleteMessageId, setPendingDeleteMessageId] = useState<string | null>(null);
   const [fullscreenImageUrl, setFullscreenImageUrl] = useState<string | null>(null);
   const [fullscreenThumbnailUrl, setFullscreenThumbnailUrl] = useState<string | null>(null);
   const [imagePreviewVisible, setImagePreviewVisible] = useState(false);
@@ -90,8 +93,8 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const [isProcessingImage, setIsProcessingImage] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
   const textInputRef = useRef<any>(null);
-  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const typingDebounceRef = useRef<NodeJS.Timeout | null>(null);
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const typingDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     // Get current user ID - CRITICAL: Get from session first (instant, no database query)
@@ -181,6 +184,13 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             fetch('http://127.0.0.1:7242/ingest/6b4e2d69-2c76-430d-914a-aa3116b97922',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'DirectMessageScreen.tsx:174',message:'Message updated via WebSocket',data:{id:updatedMessage.id,type:updatedMessage.type,hasType:updatedMessage.type!==undefined,hasImageMetadata:!!updatedMessage.image_metadata,imageMetadata:updatedMessage.image_metadata,body:updatedMessage.body?.substring(0,50),allKeys:Object.keys(updatedMessage)},timestamp:Date.now()})}).catch(()=>{});
             // #endregion
             // Handle message edit
+            // Check if message was being edited locally (concurrent edit from another client)
+            if (editingMessageId === updatedMessage.id) {
+              // Another client edited - accept server version (last write wins)
+              setEditingMessageId(null);
+              setEditingText('');
+            }
+            
             setMessages((prev) => {
               const updated = prev.map(msg => 
                 msg.id === updatedMessage.id ? updatedMessage : msg
@@ -193,13 +203,43 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             });
           },
           onMessageDeleted: (messageId) => {
-            // Handle message deletion
+            console.log('[DirectMessageScreen] onMessageDeleted callback triggered', {
+              messageId,
+              conversationId: currentConversationId,
+              editingMessageId,
+            });
+            
+            // Handle message deletion (soft delete - keep message but mark as deleted)
+            // If message was being edited, cancel edit mode
+            if (editingMessageId === messageId) {
+              console.log('[DirectMessageScreen] Cancelling edit mode for deleted message');
+              setEditingMessageId(null);
+              setEditingText('');
+            }
+            
             setMessages((prev) => {
-              const updated = prev.filter(msg => msg.id !== messageId);
+              const messageExists = prev.find(msg => msg.id === messageId);
+              if (!messageExists) {
+                console.warn('[DirectMessageScreen] Message not found in state for deletion', { messageId });
+                return prev;
+              }
+              
+              console.log('[DirectMessageScreen] Marking message as deleted in state', {
+                messageId,
+                previousDeleted: messageExists.deleted,
+              });
+              
+              const updated = prev.map(msg => 
+                msg.id === messageId 
+                  ? { ...msg, deleted: true, body: undefined }
+                  : msg
+              );
+              
               // Update cache
               chatHistoryCache.updateMessage(currentConversationId, messageId, null).catch(err => {
-                console.error('Error updating deleted message in cache:', err);
+                console.error('[DirectMessageScreen] Error updating deleted message in cache:', err);
               });
+              
               return updated;
             });
           },
@@ -712,11 +752,13 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
           setCurrentConversationId(targetConversationId);
           
           // Update optimistic message with real conversation ID
-          setMessages((prev) => prev.map(msg => 
-            msg.id === tempId 
-              ? { ...msg, conversation_id: targetConversationId }
-              : msg
-          ));
+          if (targetConversationId) {
+            setMessages((prev) => prev.map(msg => 
+              msg.id === tempId 
+                ? { ...msg, conversation_id: targetConversationId! }
+                : msg
+            ));
+          }
           
           // Set in MessagingProvider
           setMessagingCurrentConversationId(targetConversationId);
@@ -823,7 +865,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       if (currentConversationId && inputText.trim()) {
         messagingService.startTyping(currentConversationId).catch(() => {});
       }
-    }, 300);
+    }, 300) as ReturnType<typeof setTimeout>;
 
     // Clear typing indicator after 3 seconds of no typing
     if (typingTimeoutRef.current) {
@@ -833,7 +875,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       if (currentConversationId) {
         messagingService.stopTyping(currentConversationId).catch(() => {});
       }
-    }, 3000);
+    }, 3000) as ReturnType<typeof setTimeout>;
 
     return () => {
       if (typingDebounceRef.current) {
@@ -848,6 +890,15 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   // Handle message edit
   const handleEditMessage = async (messageId: string, newBody: string) => {
     if (!currentConversationId || !newBody.trim()) return;
+
+    // Check if message can still be edited (edit window expiration check)
+    const message = messages.find(m => m.id === messageId);
+    if (!message || !canEditMessage(message)) {
+      Alert.alert('Error', 'This message can no longer be edited');
+      setEditingMessageId(null);
+      setEditingText('');
+      return;
+    }
 
     try {
       // Optimistic update
@@ -884,40 +935,129 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
 
   // Handle message delete
   const handleDeleteMessage = async (messageId: string) => {
-    if (!currentConversationId) return;
+    console.log('[DirectMessageScreen] handleDeleteMessage called', { messageId, currentConversationId });
+    
+    if (!currentConversationId) {
+      console.error('[DirectMessageScreen] Cannot delete message: no conversation ID');
+      Alert.alert('Error', 'Conversation not loaded');
+      setMenuVisible(false);
+      setSelectedMessage(null);
+      return;
+    }
 
+    // Close menu first
+    setMenuVisible(false);
+    setSelectedMessage(null);
+
+    // Find the message to get its details for logging
+    const messageToDelete = messages.find(msg => msg.id === messageId);
+    if (!messageToDelete) {
+      console.error('[DirectMessageScreen] Message not found for deletion', { messageId });
+      Alert.alert('Error', 'Message not found');
+      return;
+    }
+
+    console.log('[DirectMessageScreen] Showing delete confirmation dialog', {
+      messageId,
+      conversationId: currentConversationId,
+      messageBody: messageToDelete.body?.substring(0, 50),
+      isSystem: messageToDelete.is_system,
+      platform: Platform.OS,
+    });
+
+    // On web, use custom modal since Alert.alert doesn't support button callbacks properly
+    if (Platform.OS === 'web') {
+      setPendingDeleteMessageId(messageId);
+      setDeleteConfirmVisible(true);
+      return;
+    }
+
+    // On native platforms, use Alert.alert
     Alert.alert(
       'Delete Message',
       'Are you sure you want to delete this message?',
       [
-        { text: 'Cancel', style: 'cancel' },
         {
           text: 'Delete',
           style: 'destructive',
           onPress: async () => {
-            try {
-              // Optimistic update
-              setMessages((prev) => {
-                const updated = prev.map(msg => 
-                  msg.id === messageId 
-                    ? { ...msg, deleted: true, body: null }
-                    : msg
-                );
-                chatHistoryCache.updateMessage(currentConversationId, messageId, null).catch(() => {});
-                return updated;
-              });
-
-              await messagingService.deleteMessage(currentConversationId, messageId);
-            } catch (error: any) {
-              console.error('Error deleting message:', error);
-              Alert.alert('Error', error?.message || 'Failed to delete message');
-              // Rollback optimistic update
-              loadMessages();
-            }
+            console.log('[DirectMessageScreen] Alert Delete button pressed - START');
+            await performDelete(messageId);
           },
         },
-      ]
+        { 
+          text: 'Cancel', 
+          style: 'cancel',
+          onPress: () => {
+            console.log('[DirectMessageScreen] Delete cancelled by user');
+          }
+        },
+      ],
+      { cancelable: true }
     );
+  };
+
+  // Extract delete logic to reusable function
+  const performDelete = async (messageId: string) => {
+    if (!currentConversationId) {
+      console.error('[DirectMessageScreen] Cannot delete message: no conversation ID');
+      Alert.alert('Error', 'Conversation not loaded');
+      return;
+    }
+
+    console.log('[DirectMessageScreen] Delete confirmed, starting deletion process', {
+      messageId,
+      conversationId: currentConversationId,
+    });
+
+    try {
+      // Optimistic update - mark message as deleted immediately
+      console.log('[DirectMessageScreen] Applying optimistic update');
+      setMessages((prev) => {
+        const updated = prev.map(msg => {
+          if (msg.id === messageId) {
+            console.log('[DirectMessageScreen] Marking message as deleted in UI', { messageId });
+            return { ...msg, deleted: true, body: undefined };
+          }
+          return msg;
+        });
+        
+        // Update cache asynchronously
+        chatHistoryCache.updateMessage(currentConversationId, messageId, null).catch((err) => {
+          console.error('[DirectMessageScreen] Error updating cache:', err);
+        });
+        
+        return updated;
+      });
+
+      // Call delete service
+      console.log('[DirectMessageScreen] Calling messagingService.deleteMessage', {
+        conversationId: currentConversationId,
+        messageId,
+      });
+      
+      await messagingService.deleteMessage(currentConversationId, messageId);
+      
+      console.log('[DirectMessageScreen] Message deleted successfully', { messageId });
+
+      // The real-time subscription will handle updating the UI
+      // But we've already done the optimistic update above
+      
+    } catch (error: any) {
+      console.error('[DirectMessageScreen] Error deleting message:', error);
+      console.error('[DirectMessageScreen] Error details:', {
+        message: error?.message,
+        stack: error?.stack,
+        conversationId: currentConversationId,
+        messageId,
+      });
+      
+      Alert.alert('Error', error?.message || 'Failed to delete message');
+      
+      // Rollback optimistic update by reloading messages
+      console.log('[DirectMessageScreen] Rolling back optimistic update');
+      loadMessages();
+    }
   };
 
   // Handle image picker
@@ -1056,24 +1196,88 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
 
   // Handle long press on message
   const handleMessageLongPress = (message: Message, event: any) => {
-    if (!currentUserId || message.sender_id !== currentUserId) return;
-    if (message.deleted) return;
+    console.log('[DirectMessageScreen] handleMessageLongPress called', {
+      messageId: message.id,
+      currentUserId,
+      messageSenderId: message.sender_id,
+      isOwnMessage: currentUserId === message.sender_id,
+      isDeleted: message.deleted,
+      isSystem: message.is_system,
+    });
+    
+    if (!currentUserId || message.sender_id !== currentUserId) {
+      console.log('[DirectMessageScreen] Long press ignored - not own message');
+      return;
+    }
+    if (message.deleted) {
+      console.log('[DirectMessageScreen] Long press ignored - message deleted');
+      return;
+    }
+    if (message.is_system) {
+      console.log('[DirectMessageScreen] Long press ignored - system message');
+      return;
+    }
 
     const { pageX, pageY } = event.nativeEvent;
+    console.log('[DirectMessageScreen] Opening menu', {
+      messageId: message.id,
+      position: { x: pageX, y: pageY },
+    });
+    
+    // Set selected message first, then show menu
+    // Use a small delay to ensure state is set before menu renders
     setSelectedMessage(message);
     setEditingText(message.body || ''); // Initialize edit text
     setMenuPosition({ x: pageX, y: pageY });
-    setMenuVisible(true);
+    
+    // Use setTimeout to ensure selectedMessage is set before menu becomes visible
+    setTimeout(() => {
+      setMenuVisible(true);
+      console.log('[DirectMessageScreen] Menu state set', {
+        menuVisible: true,
+        selectedMessageId: message.id,
+        selectedMessageSet: true,
+      });
+    }, 0);
   };
 
   // Check if message can be edited (within 15 minutes)
   const canEditMessage = (message: Message): boolean => {
     if (!currentUserId || message.sender_id !== currentUserId) return false;
     if (message.deleted) return false;
+    if (message.is_system) return false; // Prevent system message edit
     
     const messageAge = Date.now() - new Date(message.created_at).getTime();
     const fifteenMinutes = 15 * 60 * 1000;
     return messageAge <= fifteenMinutes;
+  };
+
+  // Check if message can be deleted
+  const canDeleteMessage = (message: Message): boolean => {
+    console.log('[DirectMessageScreen] canDeleteMessage check', {
+      messageId: message.id,
+      currentUserId,
+      messageSenderId: message.sender_id,
+      isOwnMessage: currentUserId === message.sender_id,
+      isDeleted: message.deleted,
+      isSystem: message.is_system,
+    });
+    
+    if (!currentUserId || message.sender_id !== currentUserId) {
+      console.log('[DirectMessageScreen] canDeleteMessage: false - not own message');
+      return false;
+    }
+    if (message.deleted) {
+      console.log('[DirectMessageScreen] canDeleteMessage: false - already deleted');
+      return false;
+    }
+    if (message.is_system) {
+      console.log('[DirectMessageScreen] canDeleteMessage: false - system message');
+      return false;
+    }
+    
+    console.log('[DirectMessageScreen] canDeleteMessage: true');
+    return true; // No time limit on delete
   };
 
   // Typing Indicator Component
@@ -1699,13 +1903,104 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
           }
         }}
         onDelete={() => {
+          console.log('[DirectMessageScreen] onDelete callback called', {
+            selectedMessage: selectedMessage ? {
+              id: selectedMessage.id,
+              body: selectedMessage.body?.substring(0, 30),
+            } : null,
+          });
           if (selectedMessage) {
+            console.log('[DirectMessageScreen] Calling handleDeleteMessage', {
+              messageId: selectedMessage.id,
+            });
             handleDeleteMessage(selectedMessage.id);
+          } else {
+            console.error('[DirectMessageScreen] No selected message to delete');
           }
         }}
         canEdit={selectedMessage ? canEditMessage(selectedMessage) : false}
+        canDelete={(() => {
+          // Only calculate when menu is visible and message is selected
+          if (!menuVisible || !selectedMessage) {
+            return false;
+          }
+          const canDelete = canDeleteMessage(selectedMessage);
+          console.log('[DirectMessageScreen] MessageActionsMenu canDelete prop', {
+            hasSelectedMessage: !!selectedMessage,
+            canDelete,
+            menuVisible,
+            selectedMessageId: selectedMessage?.id,
+            currentUserId,
+            messageSenderId: selectedMessage.sender_id,
+          });
+          return canDelete;
+        })()}
         messagePosition={menuPosition}
       />
+
+      {/* Delete Confirmation Modal (Web only) */}
+      {Platform.OS === 'web' && (
+        <Modal
+          visible={deleteConfirmVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={() => {
+            setDeleteConfirmVisible(false);
+            setPendingDeleteMessageId(null);
+          }}
+        >
+          <TouchableOpacity
+            style={styles.deleteModalOverlay}
+            activeOpacity={1}
+            onPress={() => {
+              setDeleteConfirmVisible(false);
+              setPendingDeleteMessageId(null);
+            }}
+          >
+            <TouchableOpacity
+              activeOpacity={1}
+              onPress={(e) => {
+                // Prevent overlay from closing when clicking inside modal
+                if (e && typeof e.stopPropagation === 'function') {
+                  e.stopPropagation();
+                }
+              }}
+              style={styles.deleteModalContent}
+            >
+              <Text style={styles.deleteModalTitle}>Delete Message</Text>
+              <Text style={styles.deleteModalMessage}>
+                Are you sure you want to delete this message?
+              </Text>
+              <View style={styles.deleteModalButtons}>
+                <TouchableOpacity
+                  style={[styles.deleteModalButton, styles.deleteModalButtonCancel]}
+                  onPress={() => {
+                    console.log('[DirectMessageScreen] Delete cancelled by user (web modal)');
+                    setDeleteConfirmVisible(false);
+                    setPendingDeleteMessageId(null);
+                  }}
+                >
+                  <Text style={styles.deleteModalButtonCancelText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.deleteModalButton, styles.deleteModalButtonDelete]}
+                  onPress={async () => {
+                    console.log('[DirectMessageScreen] Delete confirmed (web modal)');
+                    const messageId = pendingDeleteMessageId;
+                    setDeleteConfirmVisible(false);
+                    setPendingDeleteMessageId(null);
+                    if (messageId) {
+                      await performDelete(messageId);
+                    }
+                  }}
+                >
+                  <Text style={styles.deleteModalButtonDeleteText}>Delete</Text>
+                </TouchableOpacity>
+              </View>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </Modal>
+      )}
 
       {/* Fullscreen Image Viewer */}
       <FullscreenImageViewer
@@ -2289,5 +2584,70 @@ const styles = StyleSheet.create({
     paddingBottom: 4,
     fontSize: 16,
     color: colors.textDark,
+  },
+  // Delete Confirmation Modal Styles (Web)
+  deleteModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  deleteModalContent: {
+    backgroundColor: colors.white,
+    borderRadius: 12,
+    padding: spacing.lg,
+    minWidth: 300,
+    maxWidth: 400,
+    ...(Platform.OS === 'web' && {
+      boxShadow: '0px 4px 12px rgba(0, 0, 0, 0.15)',
+    }),
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  deleteModalTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: colors.textDark,
+    marginBottom: spacing.sm,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+  },
+  deleteModalMessage: {
+    fontSize: 16,
+    color: colors.textDark,
+    marginBottom: spacing.lg,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+  },
+  deleteModalButtons: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: spacing.sm,
+  },
+  deleteModalButton: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    borderRadius: borderRadius.medium,
+    minWidth: 80,
+    alignItems: 'center',
+  },
+  deleteModalButtonCancel: {
+    backgroundColor: colors.backgroundGray,
+  },
+  deleteModalButtonCancelText: {
+    color: colors.textDark,
+    fontSize: 16,
+    fontWeight: '500',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+  },
+  deleteModalButtonDelete: {
+    backgroundColor: '#FF3B30',
+  },
+  deleteModalButtonDeleteText: {
+    color: colors.white,
+    fontSize: 16,
+    fontWeight: '600',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
   },
 });

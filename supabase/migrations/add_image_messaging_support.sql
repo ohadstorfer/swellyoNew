@@ -42,3 +42,4 @@ ALTER COLUMN type SET NOT NULL;
 COMMENT ON COLUMN public.messages.type IS 'Message type: text or image';
 COMMENT ON COLUMN public.messages.image_metadata IS 'Image metadata for image messages: {image_url, thumbnail_url, width, height, file_size, mime_type, storage_path}. Null during upload, populated after upload completes.';
 
+

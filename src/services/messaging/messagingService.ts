@@ -1196,7 +1196,7 @@ class MessagingService {
       // Check if message exists and belongs to user
       const { data: existingMessage, error: fetchError } = await supabase
         .from('messages')
-        .select('id, sender_id, created_at')
+        .select('id, sender_id, created_at, is_system, type')
         .eq('id', messageId)
         .eq('conversation_id', conversationId)
         .eq('sender_id', user.id)
@@ -1204,6 +1204,16 @@ class MessagingService {
 
       if (fetchError || !existingMessage) {
         throw new Error('Message not found or you do not have permission to edit it');
+      }
+
+      // Prevent editing system messages
+      if (existingMessage.is_system) {
+        throw new Error('System messages cannot be edited');
+      }
+
+      // Prevent empty body for text messages
+      if (!newBody.trim() && existingMessage.type === 'text') {
+        throw new Error('Message body cannot be empty');
       }
 
       // Check 15-minute edit window
@@ -1246,28 +1256,58 @@ class MessagingService {
    * Delete a message (soft delete)
    */
   async deleteMessage(conversationId: string, messageId: string): Promise<void> {
+    console.log('[messagingService] deleteMessage called', { conversationId, messageId });
+    
     if (!isSupabaseConfigured()) {
+      console.error('[messagingService] Supabase not configured');
       throw new Error('Supabase is not configured');
     }
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
+        console.error('[messagingService] User not authenticated');
         throw new Error('Not authenticated');
       }
+
+      console.log('[messagingService] Checking message ownership', {
+        messageId,
+        conversationId,
+        userId: user.id,
+      });
 
       // Check if message exists and belongs to user
       const { data: existingMessage, error: fetchError } = await supabase
         .from('messages')
-        .select('id, sender_id')
+        .select('id, sender_id, is_system')
         .eq('id', messageId)
         .eq('conversation_id', conversationId)
         .eq('sender_id', user.id)
         .single();
 
       if (fetchError || !existingMessage) {
+        console.error('[messagingService] Message not found or permission denied', {
+          messageId,
+          conversationId,
+          userId: user.id,
+          error: fetchError,
+        });
         throw new Error('Message not found or you do not have permission to delete it');
       }
+
+      console.log('[messagingService] Message found', {
+        messageId,
+        isSystem: existingMessage.is_system,
+        senderId: existingMessage.sender_id,
+      });
+
+      // Prevent deleting system messages
+      if (existingMessage.is_system) {
+        console.error('[messagingService] Attempted to delete system message', { messageId });
+        throw new Error('System messages cannot be deleted');
+      }
+
+      console.log('[messagingService] Performing soft delete', { messageId, conversationId });
 
       // Soft delete
       const { error: deleteError } = await supabase
@@ -1281,15 +1321,43 @@ class MessagingService {
         .eq('conversation_id', conversationId)
         .eq('sender_id', user.id);
 
-      if (deleteError) throw deleteError;
+      if (deleteError) {
+        console.error('[messagingService] Error updating message to deleted', {
+          messageId,
+          conversationId,
+          error: deleteError,
+        });
+        throw deleteError;
+      }
+
+      console.log('[messagingService] Message soft deleted successfully', { messageId });
 
       // Update conversation's updated_at
-      await supabase
+      console.log('[messagingService] Updating conversation timestamp', { conversationId });
+      const { error: conversationUpdateError } = await supabase
         .from('conversations')
         .update({ updated_at: new Date().toISOString() })
         .eq('id', conversationId);
+
+      if (conversationUpdateError) {
+        console.error('[messagingService] Error updating conversation timestamp', {
+          conversationId,
+          error: conversationUpdateError,
+        });
+        // Don't throw - conversation update is not critical
+      } else {
+        console.log('[messagingService] Conversation timestamp updated', { conversationId });
+      }
+
+      console.log('[messagingService] deleteMessage completed successfully', { messageId, conversationId });
     } catch (error) {
-      console.error('Error deleting message:', error);
+      console.error('[messagingService] Error in deleteMessage:', error);
+      console.error('[messagingService] Error details:', {
+        message: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined,
+        conversationId,
+        messageId,
+      });
       throw error;
     }
   }
