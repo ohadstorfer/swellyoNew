@@ -1757,7 +1757,6 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                 name={otherUserName}
                 style={styles.avatarImage}
                 showLoadingIndicator={false}
-                isOnline={otherUserIsOnline === true}
                 advRole={otherUserAdvRole}
               />
             </TouchableOpacity>

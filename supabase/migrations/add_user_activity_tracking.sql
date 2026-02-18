@@ -29,12 +29,24 @@ $$ LANGUAGE plpgsql;
 -- Enable RLS
 ALTER TABLE public.user_activity ENABLE ROW LEVEL SECURITY;
 
+-- Drop existing policies if they exist (for idempotency)
+DROP POLICY IF EXISTS "Users can view own activity" ON public.user_activity;
+DROP POLICY IF EXISTS "Users can insert own activity" ON public.user_activity;
+DROP POLICY IF EXISTS "Users can update own activity" ON public.user_activity;
+
 -- Policy: Users can view their own activity
 CREATE POLICY "Users can view own activity"
 ON public.user_activity
 FOR SELECT
 TO authenticated
 USING (auth.uid() = user_id);
+
+-- Policy: Users can insert their own activity
+CREATE POLICY "Users can insert own activity"
+ON public.user_activity
+FOR INSERT
+TO authenticated
+WITH CHECK (auth.uid() = user_id);
 
 -- Policy: Users can update their own activity
 CREATE POLICY "Users can update own activity"

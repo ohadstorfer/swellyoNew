@@ -116,11 +116,12 @@ class UserPresenceService {
     }
     this.userStatusSubscriptions.get(userId)!.add(callback);
 
-    // Get initial status from presence
+    // Get initial status (with database fallback)
     this.getUserStatusFromPresence(userId).then(isOnline => {
       callback(isOnline);
     }).catch(error => {
       console.error(`[UserPresenceService] Error getting initial status for ${userId}:`, error);
+      callback(false); // Default to offline on error
     });
 
     console.log(`[UserPresenceService] Subscribed to user ${userId} (total subscriptions: ${this.userStatusSubscriptions.size})`);
@@ -167,7 +168,9 @@ class UserPresenceService {
       // Listen to presence changes
       this.presenceChannel
         .on('presence', { event: 'sync' }, () => {
-          this.notifyAllSubscribers();
+          this.notifyAllSubscribers().catch(error => {
+            console.error('[UserPresenceService] Error in notifyAllSubscribers:', error);
+          });
         })
         .on('presence', { event: 'join' }, ({ key, newPresences }: any) => {
           // User came online
@@ -211,26 +214,66 @@ class UserPresenceService {
 
   /**
    * Get user status from presence
+   * Falls back to database check if presence is not available
    */
   private async getUserStatusFromPresence(userId: string): Promise<boolean> {
-    if (!this.presenceChannel) {
-      return false;
+    // First try presence API (real-time)
+    if (this.presenceChannel) {
+      try {
+        const state = this.presenceChannel.presenceState();
+        const userPresence = state[userId];
+        if (userPresence && userPresence.length > 0) {
+          return true; // User is online via presence
+        }
+      } catch (error) {
+        console.error(`[UserPresenceService] Error getting presence state for ${userId}:`, error);
+      }
     }
 
+    // Fallback: Check database for online status
     try {
-      const state = this.presenceChannel.presenceState();
-      const userPresence = state[userId];
-      return !!userPresence && userPresence.length > 0;
+      const { data: activity, error } = await supabase
+        .from('user_activity')
+        .select('is_online, last_seen_at')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (error) {
+        console.warn(`[UserPresenceService] Error checking user_activity for ${userId}:`, error);
+        return false;
+      }
+
+      if (activity) {
+        // Check if user is marked as online
+        if (activity.is_online) {
+          return true;
+        }
+
+        // Also check if user was active recently (within last 5 minutes)
+        // This handles cases where presence hasn't synced yet
+        if (activity.last_seen_at) {
+          const lastSeen = new Date(activity.last_seen_at);
+          const now = new Date();
+          const diffMinutes = (now.getTime() - lastSeen.getTime()) / 60000;
+          
+          if (diffMinutes < 5) {
+            // User was active recently, consider them online
+            return true;
+          }
+        }
+      }
     } catch (error) {
-      console.error(`[UserPresenceService] Error getting presence state for ${userId}:`, error);
-      return false;
+      console.error(`[UserPresenceService] Error in database fallback for ${userId}:`, error);
     }
+
+    return false; // Default to offline
   }
 
   /**
    * Notify all subscribers of current presence state
+   * Also checks database as fallback
    */
-  private notifyAllSubscribers(): void {
+  private async notifyAllSubscribers(): Promise<void> {
     if (!this.presenceChannel) {
       return;
     }
@@ -238,18 +281,30 @@ class UserPresenceService {
     try {
       const state = this.presenceChannel.presenceState();
       
-      this.userStatusSubscriptions.forEach((callbacks, userId) => {
+      // Get all unique user IDs that have subscriptions
+      const userIds = Array.from(this.userStatusSubscriptions.keys());
+      
+      // Check presence for each user
+      for (const userId of userIds) {
         const userPresence = state[userId];
-        const isOnline = !!userPresence && userPresence.length > 0;
+        let isOnline = !!userPresence && userPresence.length > 0;
         
-        callbacks.forEach(callback => {
-          try {
-            callback(isOnline);
-          } catch (error) {
-            console.error(`[UserPresenceService] Error in callback for ${userId}:`, error);
-          }
-        });
-      });
+        // If not found in presence, check database as fallback
+        if (!isOnline) {
+          isOnline = await this.getUserStatusFromPresence(userId);
+        }
+        
+        const callbacks = this.userStatusSubscriptions.get(userId);
+        if (callbacks) {
+          callbacks.forEach(callback => {
+            try {
+              callback(isOnline);
+            } catch (error) {
+              console.error(`[UserPresenceService] Error in callback for ${userId}:`, error);
+            }
+          });
+        }
+      }
     } catch (error) {
       console.error('[UserPresenceService] Error notifying subscribers:', error);
     }
