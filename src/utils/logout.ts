@@ -1,6 +1,7 @@
 import { authService } from '../services/auth/authService';
 import { analyticsService } from '../services/analytics/analyticsService';
 import { supabase } from '../config/supabase';
+import { userPresenceService } from '../services/presence/userPresenceService';
 
 /**
  * Centralized logout function that properly clears all user state
@@ -62,7 +63,17 @@ export async function performLogout(options: LogoutOptions = {}): Promise<Logout
     }
 
     // Then perform async logout operations (non-blocking)
-    // Step 1: Explicitly sign out from Supabase first
+    // Step 1: Stop tracking presence (untrack from presence channel)
+    // This ensures other users see the 'leave' event immediately
+    try {
+      await userPresenceService.stopTrackingCurrentUser();
+      console.log('[Logout] Presence tracking stopped');
+    } catch (presenceError) {
+      console.error('[Logout] Error stopping presence tracking:', presenceError);
+      // Continue with logout even if presence stop fails
+    }
+
+    // Step 2: Explicitly sign out from Supabase first
     try {
       const { error: supabaseError } = await supabase.auth.signOut();
       if (supabaseError) {
@@ -75,7 +86,7 @@ export async function performLogout(options: LogoutOptions = {}): Promise<Logout
       // Continue with logout even if Supabase sign out fails
     }
 
-    // Step 2: Sign out from auth service wrapper
+    // Step 3: Sign out from auth service wrapper
     try {
       await authService.signOut();
       console.log('[Logout] Auth service sign out successful');
@@ -84,7 +95,7 @@ export async function performLogout(options: LogoutOptions = {}): Promise<Logout
       // Continue with logout even if auth sign out fails
     }
 
-    // Step 3: Reset PostHog analytics
+    // Step 4: Reset PostHog analytics
     try {
       analyticsService.reset();
       console.log('[Logout] PostHog analytics reset successful');
@@ -93,7 +104,7 @@ export async function performLogout(options: LogoutOptions = {}): Promise<Logout
       // Continue with logout even if analytics reset fails
     }
 
-    // Step 4: Reset onboarding state (if provided)
+    // Step 5: Reset onboarding state (if provided)
     if (options.resetOnboarding) {
       try {
         const result = options.resetOnboarding();

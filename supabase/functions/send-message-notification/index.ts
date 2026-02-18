@@ -180,20 +180,20 @@ async function shouldSendEmail(
     return false;
   }
 
-  // Check if user was online recently (skip email if active)
+  // Check if user was online recently (skip email if active within threshold)
   const { data: activity } = await supabase
     .from('user_activity')
-    .select('last_seen_at, is_online')
+    .select('last_seen_at')
     .eq('user_id', recipientId)
-    .single();
+    .maybeSingle();
 
-  if (activity) {
+  if (activity?.last_seen_at) {
     const lastSeen = new Date(activity.last_seen_at);
     const now = new Date();
     const diffMinutes = (now.getTime() - lastSeen.getTime()) / 60000;
 
-    if (activity.is_online || diffMinutes < ONLINE_THRESHOLD_MINUTES) {
-      console.log(`[Email Notification] Skipping - user ${recipientId} is online or was active recently`);
+    if (diffMinutes < ONLINE_THRESHOLD_MINUTES) {
+      console.log(`[Email Notification] Skipping - user ${recipientId} was active recently (${diffMinutes.toFixed(1)} minutes ago)`);
       return false;
     }
   }

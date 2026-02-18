@@ -13,6 +13,7 @@ import {
   Alert,
   Animated,
   Modal,
+  Dimensions,
 } from 'react-native';
 import { TextInput as PaperTextInput } from 'react-native-paper';
 import { Ionicons } from '@expo/vector-icons';
@@ -81,6 +82,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const [firstMessageSentTime, setFirstMessageSentTime] = useState<number | null>(null);
   const [isTyping, setIsTyping] = useState(false); // Typing indicator state
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [realtimeHealthy, setRealtimeHealthy] = useState(true); // Track realtime subscription health
   const [editingText, setEditingText] = useState('');
   const [menuVisible, setMenuVisible] = useState(false);
   const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
@@ -145,10 +147,15 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       }
 
       // Subscribe to messages (callbacks handle currentUserId being null)
+      // Note: We need to track subscription health, but messagingService doesn't expose it directly
+      // We'll infer health from message activity (messages received recently = healthy)
       const unsubscribe = messagingService.subscribeToMessages(
         currentConversationId,
         {
           onNewMessage: (newMessage) => {
+            // Mark realtime as healthy when we receive messages
+            setRealtimeHealthy(true);
+            
             // Track first reply received (only once, and only if message is from other user)
             if (!hasTrackedFirstReply && currentUserId && newMessage.sender_id !== currentUserId) {
               const timeToReplyMinutes = firstMessageSentTime 
@@ -323,6 +330,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     const unsubscribe = userPresenceService.subscribeToUserStatus(
       otherUserId,
       (isOnline) => {
+        console.log(`[DirectMessageScreen] User ${otherUserId} status updated: ${isOnline ? 'online' : 'offline'}`);
         setOtherUserIsOnline(isOnline);
       }
     );
@@ -719,22 +727,32 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     }
   };
   
-  // Background server sync (lightweight, since realtime is active)
+  // Background server sync (conditional - only if realtime is unhealthy or disconnected)
   const syncWithServerInBackground = async () => {
     if (!currentConversationId) return;
     
+    // Skip if realtime is healthy - it should deliver all updates
+    if (realtimeHealthy) {
+      return;
+    }
+    
     try {
-      // CRITICAL: Since realtime subscription is active while in chat,
-      // background sync is mainly for cold re-entry gaps
-      // Keep it lightweight - only fetch recent messages (last 20)
+      // CRITICAL: Only sync if realtime subscription is unhealthy or disconnected >5 minutes
+      // Realtime subscription is primary - background sync is fallback only
       
       const lastSync = await chatHistoryCache.getLastSyncTimestamp(currentConversationId);
       
-      // Only sync if lastSync is old (> 5 minutes) or doesn't exist
-      // If recent, realtime should have already delivered updates
+      // Check if we've received messages recently (health check)
+      const lastMessageTime = messages.length > 0 ? new Date(messages[messages.length - 1].created_at).getTime() : 0;
+      const messageAge = lastMessageTime > 0 ? Date.now() - lastMessageTime : Infinity;
+      
+      // Only sync if:
+      // 1. Realtime is unhealthy (already checked above), AND
+      // 2. Last message was >5 minutes ago (no recent activity), OR
+      // 3. Last sync was >5 minutes ago (cold start scenario)
       const syncAge = lastSync ? Date.now() - lastSync : Infinity;
-      if (syncAge < 5 * 60 * 1000) {
-        // Recent sync - realtime should handle updates
+      if (messageAge < 5 * 60 * 1000 && syncAge < 5 * 60 * 1000) {
+        // Recent activity - skip sync
         return;
       }
       
@@ -1293,23 +1311,17 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     });
     
     if (!currentUserId || message.sender_id !== currentUserId) {
-      console.log('[DirectMessageScreen] Long press ignored - not own message');
       return;
     }
     if (message.deleted) {
-      console.log('[DirectMessageScreen] Long press ignored - message deleted');
       return;
     }
     if (message.is_system) {
-      console.log('[DirectMessageScreen] Long press ignored - system message');
       return;
     }
 
     const { pageX, pageY } = event.nativeEvent;
-    console.log('[DirectMessageScreen] Opening menu', {
-      messageId: message.id,
-      position: { x: pageX, y: pageY },
-    });
+    
     
     // Set selected message first, then show menu
     // Use a small delay to ensure state is set before menu renders
@@ -1320,11 +1332,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     // Use setTimeout to ensure selectedMessage is set before menu becomes visible
     setTimeout(() => {
       setMenuVisible(true);
-      console.log('[DirectMessageScreen] Menu state set', {
-        menuVisible: true,
-        selectedMessageId: message.id,
-        selectedMessageSet: true,
-      });
+     
     }, 0);
   };
 
@@ -1341,25 +1349,15 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
 
   // Check if message can be deleted
   const canDeleteMessage = (message: Message): boolean => {
-    console.log('[DirectMessageScreen] canDeleteMessage check', {
-      messageId: message.id,
-      currentUserId,
-      messageSenderId: message.sender_id,
-      isOwnMessage: currentUserId === message.sender_id,
-      isDeleted: message.deleted,
-      isSystem: message.is_system,
-    });
+   
     
     if (!currentUserId || message.sender_id !== currentUserId) {
-      console.log('[DirectMessageScreen] canDeleteMessage: false - not own message');
       return false;
     }
     if (message.deleted) {
-      console.log('[DirectMessageScreen] canDeleteMessage: false - already deleted');
       return false;
     }
     if (message.is_system) {
-      console.log('[DirectMessageScreen] canDeleteMessage: false - system message');
       return false;
     }
     
@@ -1464,23 +1462,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     // For now, render all messages as received (will update when currentUserId loads)
     // This allows messages to appear instantly while currentUserId loads in background
     
-    // Debug: Log image messages being rendered
-    if (message.type === 'image' || message.image_metadata) {
-      console.log('[DirectMessageScreen] 🖼️ RENDERING IMAGE MESSAGE:', {
-        id: message.id,
-        type: message.type,
-        hasType: message.type !== undefined,
-        hasImageMetadata: !!message.image_metadata,
-        imageMetadata: message.image_metadata ? {
-          hasImageUrl: !!message.image_metadata.image_url,
-          hasThumbnailUrl: !!message.image_metadata.thumbnail_url,
-          imageUrl: message.image_metadata.image_url,
-          thumbnailUrl: message.image_metadata.thumbnail_url,
-        } : null,
-        uploadState: message.upload_state,
-        willRenderImage: !!(message.image_metadata?.image_url || message.image_metadata?.thumbnail_url),
-      });
-    }
+  
     // #region agent log
     // Log ALL messages to check for potential image messages that aren't being detected
     if (message.body && (message.body.includes('image') || message.body.includes('photo') || message.body.includes('picture'))) {
@@ -1541,6 +1523,11 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                 ],
             // Conditionally apply padding: 0 for images, normal for text
             (message.type === 'image' || message.image_metadata) && styles.imageMessageBubble,
+            // Remove maxWidth constraint for deleted messages from other user
+            message.deleted && !isOwnMessage && {
+              maxWidth: Dimensions.get('window').width - 120, // Screen width minus padding
+              alignSelf: 'flex-start',
+            },
           ]}
         >
           {message.type === 'image' || message.image_metadata ? (
@@ -1559,14 +1546,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                 });
               }
               
-              console.log('[DirectMessageScreen] 🖼️ Image render details:', {
-                messageId: message.id,
-                imageUri: imageUri ? `${imageUri.substring(0, 50)}...` : 'NO URI',
-                imageWidth,
-                imageHeight,
-                aspectRatio,
-                hasImageMetadata: !!message.image_metadata,
-              });
+              
               
               return (
                 <View style={styles.imageMessageWrapper}>
@@ -1597,12 +1577,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                           error,
                         });
                       }}
-                      onLoad={() => {
-                        console.log('[DirectMessageScreen] ✅ Image loaded successfully:', {
-                          messageId: message.id,
-                          imageUri,
-                        });
-                      }}
+
                     />
                     {message.upload_state === 'uploading' && (
                       <View style={styles.uploadOverlay}>
@@ -1649,7 +1624,11 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
           ) : (
             // Text message
             <>
-              <View style={styles.messageTextContainer}>
+              <View style={[
+                styles.messageTextContainer,
+                // Allow full width for deleted messages from other user
+                message.deleted && !isOwnMessage && styles.deletedMessageTextContainer,
+              ]}>
                 {isEditing ? (
                   <View style={styles.editContainer}>
                     <PaperTextInput
@@ -1703,9 +1682,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                     ]}>
                       {message.body || ''}
                     </Text>
-                    {message.edited && !message.deleted && (
-                      <Text style={styles.editedBadge}>(edited)</Text>
-                    )}
+                    
                   </>
                 )}
               </View>
@@ -1720,7 +1697,13 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                   isOwnMessage ? styles.userTimestamp : styles.botTimestamp,
                 ]}>
                   {formatTime(message.created_at)}
+
+                  {message.edited && !message.deleted && (
+                      <Text style={styles.editedBadge}>  (edited)</Text>
+                    )}
+
                 </Text>
+                
               </View>
             </>
           )}
@@ -1841,13 +1824,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
               {messages
                 .map((msg, idx) => {
                   // Log deleted messages being rendered
-                  if (msg.deleted) {
-                    console.log(`[DirectMessageScreen] Rendering deleted message at index ${idx}:`, {
-                      id: msg.id,
-                      deleted: msg.deleted,
-                      body: msg.body,
-                    });
-                  }
+                  
                   return renderMessage(msg);
                 })
                 .filter(msg => msg !== null) // Filter out null messages (when variables not ready)
@@ -2608,6 +2585,11 @@ const styles = StyleSheet.create({
   deletedMessageText: {
     fontStyle: 'italic',
     opacity: 0.6,
+  },
+  deletedMessageTextContainer: {
+    width: '100%', // Ensure container can expand
+    flexShrink: 0, // Prevent shrinking
+    flexWrap: 'wrap', // Allow text to wrap naturally
   },
   // Image message styles - redesigned
   imageMessageWrapper: {

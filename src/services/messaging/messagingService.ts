@@ -125,6 +125,8 @@ export interface ConversationSubscriptionCallbacks {
 class MessagingService {
   // Track active subscriptions for cleanup
   private activeSubscriptions = new Map<string, any>();
+  // Track channels per conversation (for typing indicators)
+  private activeChannels = new Map<string, any>(); // conversationId -> channel
   // Track typing state per conversation
   private typingState = new Map<string, Map<string, number>>(); // conversationId -> userId -> timestamp
   // Rate limiting for typing indicators (500ms)
@@ -1063,15 +1065,12 @@ class MessagingService {
           }
         }
       )
-      // Handle typing indicators via broadcast
+      // Handle typing indicators via broadcast (event-driven, no polling)
       .on(
         'broadcast',
         { event: 'typing' },
         (payload) => {
           const { userId, isTyping } = payload.payload as { userId: string; isTyping: boolean };
-          if (normalizedCallbacks.onTyping) {
-            normalizedCallbacks.onTyping(userId, isTyping);
-          }
           
           // Track typing state
           const conversationTypingState = this.typingState.get(conversationId);
@@ -1082,40 +1081,44 @@ class MessagingService {
               conversationTypingState.delete(userId);
             }
           }
+          
+          // Event-driven cleanup: Check for stale entries when processing events
+          if (conversationTypingState) {
+            const now = Date.now();
+            conversationTypingState.forEach((timestamp, uid) => {
+              if (now - timestamp > 3000) {
+                conversationTypingState.delete(uid);
+                if (normalizedCallbacks.onTyping) {
+                  normalizedCallbacks.onTyping(uid, false);
+                }
+              }
+            });
+          }
+          
+          // Notify callback
+          if (normalizedCallbacks.onTyping) {
+            normalizedCallbacks.onTyping(userId, isTyping);
+          }
         }
       )
       .subscribe((status) => {
         if (status === 'SUBSCRIBED') {
           console.log(`Subscribed to messages for conversation ${conversationId}`);
+          // Store channel for typing indicators
+          this.activeChannels.set(conversationId, channel);
         } else if (status === 'CHANNEL_ERROR') {
           console.error(`Error subscribing to messages for conversation ${conversationId}`);
+          this.activeChannels.delete(conversationId);
         }
       });
 
-    // Auto-cleanup typing indicators after 3 seconds
-    const typingCleanupInterval = setInterval(() => {
-      const conversationTypingState = this.typingState.get(conversationId);
-      if (conversationTypingState) {
-        const now = Date.now();
-        const staleUsers: string[] = [];
-        
-        conversationTypingState.forEach((timestamp, userId) => {
-          if (now - timestamp > 3000) {
-            staleUsers.push(userId);
-            if (normalizedCallbacks.onTyping) {
-              normalizedCallbacks.onTyping(userId, false);
-            }
-          }
-        });
-        
-        staleUsers.forEach(userId => conversationTypingState.delete(userId));
-      }
-    }, 1000);
+    // Note: Typing cleanup is now event-driven (handled in broadcast event handler above)
+    // No polling interval needed - cleanup happens when processing typing events
 
     const unsubscribe = () => {
-      clearInterval(typingCleanupInterval);
       supabase.removeChannel(channel);
       this.activeSubscriptions.delete(conversationId);
+      this.activeChannels.delete(conversationId);
       this.typingState.delete(conversationId);
       this.lastTypingEvent.delete(conversationId);
     };
@@ -1145,7 +1148,19 @@ class MessagingService {
 
       this.lastTypingEvent.set(conversationId, now);
 
-      const channel = supabase.channel(`messages:${conversationId}`);
+      // Use existing channel if available, otherwise create and subscribe
+      let channel = this.activeChannels.get(conversationId);
+      
+      if (!channel) {
+        // Channel doesn't exist, create and subscribe it
+        channel = supabase.channel(`messages:${conversationId}`);
+        await channel.subscribe();
+        this.activeChannels.set(conversationId, channel);
+        
+        // Wait a bit for subscription to be ready
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+
       await channel.send({
         type: 'broadcast',
         event: 'typing',
@@ -1168,7 +1183,19 @@ class MessagingService {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      const channel = supabase.channel(`messages:${conversationId}`);
+      // Use existing channel if available, otherwise create and subscribe
+      let channel = this.activeChannels.get(conversationId);
+      
+      if (!channel) {
+        // Channel doesn't exist, create and subscribe it
+        channel = supabase.channel(`messages:${conversationId}`);
+        await channel.subscribe();
+        this.activeChannels.set(conversationId, channel);
+        
+        // Wait a bit for subscription to be ready
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+
       await channel.send({
         type: 'broadcast',
         event: 'typing',

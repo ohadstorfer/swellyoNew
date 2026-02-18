@@ -991,10 +991,27 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
     }
   }, [loadConversations, isLoadingMoreConversations, hasMoreConversations]);
 
-  // Handle reconnect sync
+  // Track subscription health for reconnect sync optimization
+  const subscriptionHealthyRef = useRef<boolean>(true);
+  const lastSyncRef = useRef<number>(0);
+
+  // Handle reconnect sync (subscription-aware)
   const handleReconnect = useCallback(async () => {
     try {
+      const now = Date.now();
       const lastSync = await getLastSyncTimestamp();
+      const syncAge = now - lastSync;
+      lastSyncRef.current = lastSync;
+      
+      // Only sync if:
+      // 1. Subscription is unhealthy, OR
+      // 2. Last sync was >10 minutes ago (time-based fallback)
+      // Note: Explicit reconnect events from subscription status callback always trigger sync
+      if (subscriptionHealthyRef.current && syncAge < 10 * 60 * 1000) {
+        // Skip - subscription is healthy and recent sync
+        return;
+      }
+      
       const updated = await messagingService.getConversationsUpdatedSince(lastSync);
       
       if (updated.length > 0) {
@@ -1011,6 +1028,7 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
       }
       
       await updateLastSyncTimestamp();
+      lastSyncRef.current = now;
     } catch (error) {
       console.error('Error syncing on reconnect:', error);
     }
@@ -1021,13 +1039,47 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
     conversationsRef.current = conversations;
   }, [conversations]);
 
-  // Update cache when conversations change
+  // Debounced cache writes - batch writes during rapid updates, flush on critical events
+  const cacheWriteTimerRef = useRef<NodeJS.Timeout | null>(null);
+
   useEffect(() => {
     if (conversations.length > 0) {
-      saveCachedConversationList(conversations).catch(err => 
-        console.error('Error updating cache:', err)
-      );
+      // Clear existing timer
+      if (cacheWriteTimerRef.current) {
+        clearTimeout(cacheWriteTimerRef.current);
+      }
+      
+      // Debounce write (2 seconds)
+      cacheWriteTimerRef.current = setTimeout(() => {
+        saveCachedConversationList(conversations).catch(err => 
+          console.error('Error updating cache:', err)
+        );
+      }, 2000);
     }
+    
+    return () => {
+      if (cacheWriteTimerRef.current) {
+        clearTimeout(cacheWriteTimerRef.current);
+      }
+    };
+  }, [conversations]);
+
+  // Flush cache immediately on critical events (app background, logout)
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
+      if (nextAppState === 'background' || nextAppState === 'inactive') {
+        // Flush cache immediately on background
+        if (cacheWriteTimerRef.current) {
+          clearTimeout(cacheWriteTimerRef.current);
+          cacheWriteTimerRef.current = null;
+        }
+        if (conversations.length > 0) {
+          saveCachedConversationList(conversations).catch(() => {});
+        }
+      }
+    });
+    
+    return () => subscription.remove();
   }, [conversations]);
 
   // Predictive preloading - warm memory cache for top conversations
@@ -1041,11 +1093,11 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
       clearTimeout(debouncedPreloadRef.current);
     }
     
-    // Debounce preloading (wait 500ms after conversations change)
-    debouncedPreloadRef.current = setTimeout(() => {
-      if (conversations.length > 0) {
-        // Only preload top 3 (not 5) to avoid performance issues
-        const topConversations = conversations.slice(0, 3);
+      // Debounce preloading (wait 500ms after conversations change)
+      debouncedPreloadRef.current = setTimeout(() => {
+        if (conversations.length > 0) {
+          // Only preload top 1 conversation (reduced from 3) to minimize resource usage
+          const topConversations = conversations.slice(0, 1);
         
         // Use InteractionManager to avoid blocking UI
         InteractionManager.runAfterInteractions(() => {
@@ -1119,6 +1171,9 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
             hasBody: !!message.body,
             timestamp: new Date().toISOString(),
           });
+        // Mark subscription as healthy when receiving messages
+        subscriptionHealthyRef.current = true;
+        
         // Validate message completeness
         if (!message || !message.id || !message.conversation_id || !message.created_at) {
           console.warn('[MessagingProvider] ⚠️ Invalid message received:', message);
@@ -1392,7 +1447,11 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
       onConversationUpdated: (conversationId, updatedAt) => {
         dispatch({ type: 'CONVERSATION_UPDATED', payload: { conversationId, updatedAt } });
       },
-      onReconnect: handleReconnect,
+      onReconnect: () => {
+        // Explicit reconnect event from subscription status - always sync
+        subscriptionHealthyRef.current = true;
+        handleReconnect();
+      },
     };
 
     console.log('[MessagingProvider] 📞 Calling messagingService.subscribeToConversations...');
@@ -1401,9 +1460,10 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
     subscriptionCleanupRef.current = cleanup;
 
     // Listen to app state changes (background → foreground)
+    // Only sync if needed (subscription-aware)
     const subscription = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
       if (nextAppState === 'active') {
-        // App came to foreground - revalidate
+        // App came to foreground - check if sync is needed (subscription-aware)
         handleReconnect();
       }
     });

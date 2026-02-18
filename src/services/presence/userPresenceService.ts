@@ -2,36 +2,44 @@ import { supabase, isSupabaseConfigured } from '../../config/supabase';
 import { AppState, AppStateStatus } from 'react-native';
 
 /**
- * User Presence Service
- * Efficient service to track and subscribe to user online status using Supabase Presence API
+ * User Presence Service - Optimized
  * 
- * Optimizations:
- * - Single global presence channel (not per-user channels)
- * - Debounced database updates (batch writes every 30 seconds)
- * - Subscription deduplication (multiple components can subscribe to same user)
- * - Throttled presence updates (every 20 seconds)
- * - Automatic cleanup when no subscribers remain
+ * Simplified design:
+ * - Uses Supabase Presence API for real-time status (primary)
+ * - Falls back to last_seen_at from database (secondary)
+ * - Calculates online status from last_seen_at (within 5 minutes = online)
+ * - Minimal database writes (only on app state changes)
+ * - Single timer for presence updates
  */
+
+// Configuration
+const PRESENCE_UPDATE_INTERVAL = 60000; // 60 seconds - presence heartbeat (increased from 20s)
+const ONLINE_THRESHOLD_MINUTES = 5; // Consider user online if active within 5 minutes
+const MAX_SUBSCRIPTIONS = 50;
+const METRICS_LOG_INTERVAL = 5 * 60 * 1000; // Log metrics every 5 minutes
 
 class UserPresenceService {
   private static instance: UserPresenceService;
-  private presenceChannel: any | null = null; // Single global channel
+  private presenceChannel: any | null = null;
   private userStatusSubscriptions = new Map<string, Set<(isOnline: boolean) => void>>();
   private currentUserId: string | null = null;
   private presenceUpdateInterval: NodeJS.Timeout | null = null;
-  private dbUpdateDebounceTimer: NodeJS.Timeout | null = null;
-  private lastDbUpdate: number = 0;
   private appStateSubscription: any = null;
   private isTrackingCurrentUser: boolean = false;
+  private lastDbWrite: number = 0;
+  private readonly DB_WRITE_COOLDOWN = 60000; // Only write to DB max once per minute
+  private presenceChannelHealthy: boolean = false;
   
-  // Configuration constants
-  private readonly DB_UPDATE_INTERVAL = 30000; // 30 seconds
-  private readonly PRESENCE_UPDATE_INTERVAL = 20000; // 20 seconds
-  private readonly MAX_SUBSCRIPTIONS = 50; // Limit concurrent subscriptions
+  // Metrics tracking
+  private metrics = {
+    presenceUpdates: 0,
+    dbWrites: 0,
+    statusQueries: 0,
+    lastReset: Date.now(),
+  };
+  private metricsLogInterval: NodeJS.Timeout | null = null;
 
-  private constructor() {
-    // Private constructor for singleton pattern
-  }
+  private constructor() {}
 
   static getInstance(): UserPresenceService {
     if (!UserPresenceService.instance) {
@@ -42,45 +50,45 @@ class UserPresenceService {
 
   /**
    * Track current user's online status
-   * Should be called once when user logs in
    */
   async trackCurrentUser(): Promise<void> {
     if (!isSupabaseConfigured()) {
-      console.warn('[UserPresenceService] Supabase not configured, presence tracking disabled');
+      console.warn('[UserPresenceService] Supabase not configured');
       return;
     }
 
     if (this.isTrackingCurrentUser) {
-      console.log('[UserPresenceService] Already tracking current user');
       return;
     }
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
-        console.warn('[UserPresenceService] No user found, cannot track presence');
         return;
       }
 
       this.currentUserId = user.id;
       this.isTrackingCurrentUser = true;
 
-      // Initialize presence channel if not already created
+      // Initialize presence channel
       await this.ensurePresenceChannel();
 
-      // Track current user's presence
+      // Initial presence update
       await this.updateCurrentUserPresence();
 
-      // Set up periodic presence updates
+      // Initial database write
+      await this.writeLastSeenToDatabase();
+
+      // Start periodic presence updates
       this.startPresenceUpdateInterval();
 
       // Listen to app state changes
       this.setupAppStateListener();
 
-      // Initial database update
-      await this.debouncedDbUpdate();
+      // Start metrics logging
+      this.startMetricsLogging();
 
-      console.log('[UserPresenceService] Started tracking current user presence');
+      console.log('[UserPresenceService] Started tracking presence');
     } catch (error) {
       console.error('[UserPresenceService] Error tracking current user:', error);
     }
@@ -88,20 +96,17 @@ class UserPresenceService {
 
   /**
    * Subscribe to a user's online status
-   * Returns unsubscribe function
    */
   subscribeToUserStatus(
     userId: string,
     callback: (isOnline: boolean) => void
   ): () => void {
     if (!isSupabaseConfigured()) {
-      console.warn('[UserPresenceService] Supabase not configured, subscription disabled');
-      return () => {}; // Return no-op unsubscribe
+      return () => {};
     }
 
-    // Limit concurrent subscriptions
-    if (this.userStatusSubscriptions.size >= this.MAX_SUBSCRIPTIONS) {
-      console.warn(`[UserPresenceService] Max subscriptions reached (${this.MAX_SUBSCRIPTIONS}), cannot subscribe to ${userId}`);
+    if (this.userStatusSubscriptions.size >= MAX_SUBSCRIPTIONS) {
+      console.warn(`[UserPresenceService] Max subscriptions reached`);
       return () => {};
     }
 
@@ -110,21 +115,18 @@ class UserPresenceService {
       console.error('[UserPresenceService] Error ensuring presence channel:', error);
     });
 
-    // Add callback to subscription set
+    // Add callback
     if (!this.userStatusSubscriptions.has(userId)) {
       this.userStatusSubscriptions.set(userId, new Set());
     }
     this.userStatusSubscriptions.get(userId)!.add(callback);
 
-    // Get initial status (with database fallback)
-    this.getUserStatusFromPresence(userId).then(isOnline => {
+    // Get initial status
+    this.getUserStatus(userId).then(isOnline => {
       callback(isOnline);
-    }).catch(error => {
-      console.error(`[UserPresenceService] Error getting initial status for ${userId}:`, error);
-      callback(false); // Default to offline on error
+    }).catch(() => {
+      callback(false);
     });
-
-    console.log(`[UserPresenceService] Subscribed to user ${userId} (total subscriptions: ${this.userStatusSubscriptions.size})`);
 
     // Return unsubscribe function
     return () => {
@@ -135,15 +137,12 @@ class UserPresenceService {
   /**
    * Unsubscribe from a user's status
    */
-  unsubscribeFromUserStatus(userId: string, callback: (isOnline: boolean) => void): void {
+  private unsubscribeFromUserStatus(userId: string, callback: (isOnline: boolean) => void): void {
     const callbacks = this.userStatusSubscriptions.get(userId);
     if (callbacks) {
       callbacks.delete(callback);
-      
-      // If no more callbacks for this user, remove the entry
       if (callbacks.size === 0) {
         this.userStatusSubscriptions.delete(userId);
-        console.log(`[UserPresenceService] Unsubscribed from user ${userId} (no more subscribers)`);
       }
     }
   }
@@ -153,14 +152,14 @@ class UserPresenceService {
    */
   private async ensurePresenceChannel(): Promise<void> {
     if (this.presenceChannel) {
-      return; // Channel already exists
+      return;
     }
 
     try {
       this.presenceChannel = supabase.channel('presence:users', {
         config: {
           presence: {
-            key: 'user_id', // Use user_id as the presence key
+            key: 'user_id',
           },
         },
       });
@@ -168,25 +167,22 @@ class UserPresenceService {
       // Listen to presence changes
       this.presenceChannel
         .on('presence', { event: 'sync' }, () => {
-          this.notifyAllSubscribers().catch(error => {
-            console.error('[UserPresenceService] Error in notifyAllSubscribers:', error);
-          });
+          this.notifyAllSubscribers();
         })
-        .on('presence', { event: 'join' }, ({ key, newPresences }: any) => {
-          // User came online
-          const userId = key;
-          this.notifySubscribersForUser(userId, true);
+        .on('presence', { event: 'join' }, ({ key }: any) => {
+          console.log('[UserPresenceService] User joined presence:', key);
+          this.notifySubscribersForUser(key, true);
         })
-        .on('presence', { event: 'leave' }, ({ key, leftPresences }: any) => {
-          // User went offline
-          const userId = key;
-          this.notifySubscribersForUser(userId, false);
+        .on('presence', { event: 'leave' }, ({ key }: any) => {
+          console.log('[UserPresenceService] User left presence:', key);
+          this.notifySubscribersForUser(key, false);
         })
         .subscribe((status: string) => {
+          this.presenceChannelHealthy = status === 'SUBSCRIBED';
           if (status === 'SUBSCRIBED') {
             console.log('[UserPresenceService] Presence channel subscribed');
-          } else if (status === 'CHANNEL_ERROR') {
-            console.error('[UserPresenceService] Presence channel error');
+          } else {
+            console.warn('[UserPresenceService] Presence channel unhealthy:', status);
           }
         });
     } catch (error) {
@@ -207,93 +203,170 @@ class UserPresenceService {
         user_id: this.currentUserId,
         online_at: new Date().toISOString(),
       });
+      this.metrics.presenceUpdates++;
     } catch (error) {
       console.error('[UserPresenceService] Error updating presence:', error);
     }
   }
 
   /**
-   * Get user status from presence
-   * Falls back to database check if presence is not available
+   * Get user status - checks presence first, then database fallback
+   * Always checks database as fallback if user not found in presence (even if presence is healthy)
+   * This handles: initial status checks, users not yet synced to presence, network partitions
    */
-  private async getUserStatusFromPresence(userId: string): Promise<boolean> {
-    // First try presence API (real-time)
-    if (this.presenceChannel) {
+  private async getUserStatus(userId: string): Promise<boolean> {
+    // Check presence first (if available)
+    if (this.presenceChannel && this.presenceChannelHealthy) {
       try {
         const state = this.presenceChannel.presenceState();
         const userPresence = state[userId];
         if (userPresence && userPresence.length > 0) {
-          return true; // User is online via presence
+          return true; // User is online in presence - trust it
         }
+        // User not found in presence - check database as fallback
+        // This handles: initial status before presence sync, users not yet in presence state
       } catch (error) {
-        console.error(`[UserPresenceService] Error getting presence state for ${userId}:`, error);
+        // Fall through to database check if presence check fails
       }
     }
 
-    // Fallback: Check database for online status
+    // Fallback: Query database if presence unavailable OR user not found in presence
+    // This handles: network partitions, subscription drops, mobile background kills, initial status
+    return this.getUserStatusFromDatabase(userId);
+  }
+
+  /**
+   * Get user status from database (fallback when presence unavailable)
+   */
+  private async getUserStatusFromDatabase(userId: string): Promise<boolean> {
+    this.metrics.statusQueries++;
+    
     try {
       const { data: activity, error } = await supabase
         .from('user_activity')
-        .select('is_online, last_seen_at')
+        .select('last_seen_at')
         .eq('user_id', userId)
         .maybeSingle();
 
-      if (error) {
-        console.warn(`[UserPresenceService] Error checking user_activity for ${userId}:`, error);
+      if (error || !activity?.last_seen_at) {
         return false;
       }
 
-      if (activity) {
-        // Check if user is marked as online
-        if (activity.is_online) {
-          return true;
-        }
-
-        // Also check if user was active recently (within last 5 minutes)
-        // This handles cases where presence hasn't synced yet
-        if (activity.last_seen_at) {
-          const lastSeen = new Date(activity.last_seen_at);
-          const now = new Date();
-          const diffMinutes = (now.getTime() - lastSeen.getTime()) / 60000;
-          
-          if (diffMinutes < 5) {
-            // User was active recently, consider them online
-            return true;
-          }
-        }
-      }
+      // Calculate if user was active recently
+      const lastSeen = new Date(activity.last_seen_at);
+      const now = new Date();
+      const diffMinutes = (now.getTime() - lastSeen.getTime()) / 60000;
+      
+      return diffMinutes < ONLINE_THRESHOLD_MINUTES;
     } catch (error) {
-      console.error(`[UserPresenceService] Error in database fallback for ${userId}:`, error);
+      return false;
+    }
+  }
+
+  /**
+   * Batch get status for multiple users (for efficiency)
+   * Checks presence first, then database for users not found in presence
+   */
+  private async getBatchUserStatus(userIds: string[]): Promise<Map<string, boolean>> {
+    const results = new Map<string, boolean>();
+
+    // First check presence for all users (if healthy)
+    if (this.presenceChannel && this.presenceChannelHealthy) {
+      try {
+        const state = this.presenceChannel.presenceState();
+        userIds.forEach(userId => {
+          const userPresence = state[userId];
+          if (userPresence && userPresence.length > 0) {
+            results.set(userId, true); // User is online in presence
+          }
+        });
+      } catch (error) {
+        // Fall through to database check if presence check fails
+      }
     }
 
-    return false; // Default to offline
+    // For users not found in presence, check database as fallback
+    const usersToCheck = userIds.filter(userId => !results.has(userId));
+    
+    if (usersToCheck.length > 0) {
+      this.metrics.statusQueries += usersToCheck.length;
+      
+      try {
+        const { data: activities, error } = await supabase
+          .from('user_activity')
+          .select('user_id, last_seen_at')
+          .in('user_id', usersToCheck);
+
+        if (!error && activities) {
+          const now = Date.now();
+          activities.forEach(activity => {
+            if (activity.last_seen_at) {
+              const lastSeen = new Date(activity.last_seen_at).getTime();
+              const diffMinutes = (now - lastSeen) / 60000;
+              results.set(activity.user_id, diffMinutes < ONLINE_THRESHOLD_MINUTES);
+            } else {
+              results.set(activity.user_id, false);
+            }
+          });
+        }
+
+        // Set false for users not found in database
+        usersToCheck.forEach(userId => {
+          if (!results.has(userId)) {
+            results.set(userId, false);
+          }
+        });
+      } catch (error) {
+        // Set all to false on error
+        usersToCheck.forEach(userId => {
+          results.set(userId, false);
+        });
+      }
+    }
+
+    return results;
   }
 
   /**
    * Notify all subscribers of current presence state
-   * Also checks database as fallback
+   * Uses presence when available, but always checks database for users not in presence
    */
   private async notifyAllSubscribers(): Promise<void> {
-    if (!this.presenceChannel) {
+    if (!this.presenceChannel || this.userStatusSubscriptions.size === 0) {
       return;
     }
 
     try {
-      const state = this.presenceChannel.presenceState();
-      
-      // Get all unique user IDs that have subscriptions
       const userIds = Array.from(this.userStatusSubscriptions.keys());
       
-      // Check presence for each user
-      for (const userId of userIds) {
-        const userPresence = state[userId];
-        let isOnline = !!userPresence && userPresence.length > 0;
-        
-        // If not found in presence, check database as fallback
-        if (!isOnline) {
-          isOnline = await this.getUserStatusFromPresence(userId);
+      // Check presence first (if healthy)
+      const presenceResults = new Map<string, boolean>();
+      if (this.presenceChannelHealthy) {
+        try {
+          const state = this.presenceChannel.presenceState();
+          userIds.forEach(userId => {
+            const userPresence = state[userId];
+            if (userPresence && userPresence.length > 0) {
+              presenceResults.set(userId, true); // User is online in presence
+            }
+          });
+        } catch (error) {
+          // Fall through to database check
         }
-        
+      }
+      
+      // For users not found in presence, check database as fallback
+      const usersToCheck = userIds.filter(userId => !presenceResults.has(userId));
+      if (usersToCheck.length > 0) {
+        const dbStatusMap = await this.getBatchUserStatus(usersToCheck);
+        dbStatusMap.forEach((isOnline, userId) => {
+          presenceResults.set(userId, isOnline);
+        });
+      }
+      
+      // Notify all subscribers with combined results
+      userIds.forEach(userId => {
+        const isOnline = presenceResults.get(userId) ?? false;
         const callbacks = this.userStatusSubscriptions.get(userId);
         if (callbacks) {
           callbacks.forEach(callback => {
@@ -304,7 +377,7 @@ class UserPresenceService {
             }
           });
         }
-      }
+      });
     } catch (error) {
       console.error('[UserPresenceService] Error notifying subscribers:', error);
     }
@@ -316,6 +389,7 @@ class UserPresenceService {
   private notifySubscribersForUser(userId: string, isOnline: boolean): void {
     const callbacks = this.userStatusSubscriptions.get(userId);
     if (callbacks) {
+      console.log(`[UserPresenceService] Notifying ${callbacks.size} subscriber(s) for user ${userId}: ${isOnline ? 'online' : 'offline'}`);
       callbacks.forEach(callback => {
         try {
           callback(isOnline);
@@ -323,66 +397,137 @@ class UserPresenceService {
           console.error(`[UserPresenceService] Error in callback for ${userId}:`, error);
         }
       });
+    } else {
+      console.log(`[UserPresenceService] No subscribers for user ${userId}`);
     }
   }
 
   /**
    * Start periodic presence updates
+   * Only updates presence - database writes happen on app state changes
    */
   private startPresenceUpdateInterval(): void {
     if (this.presenceUpdateInterval) {
-      return; // Already started
+      return;
     }
 
     this.presenceUpdateInterval = setInterval(() => {
       if (this.currentUserId && this.isTrackingCurrentUser) {
-        this.updateCurrentUserPresence().catch(error => {
-          console.error('[UserPresenceService] Error in periodic presence update:', error);
-        });
+        // Only update presence (lightweight) - no periodic database writes
+        this.updateCurrentUserPresence().catch(() => {});
       }
-    }, this.PRESENCE_UPDATE_INTERVAL);
+    }, PRESENCE_UPDATE_INTERVAL);
   }
 
   /**
-   * Debounced database update
-   * Batches writes to user_activity table every 30 seconds
+   * Write last_seen_at to database (with cooldown to reduce writes)
+   * Works with both old schema (with is_online, updated_at) and new schema (simplified)
    */
-  private async debouncedDbUpdate(): Promise<void> {
+  private async writeLastSeenToDatabase(): Promise<void> {
     if (!this.currentUserId) {
       return;
     }
 
-    // Clear existing timer
-    if (this.dbUpdateDebounceTimer) {
-      clearTimeout(this.dbUpdateDebounceTimer);
+    const now = Date.now();
+    if (now - this.lastDbWrite < this.DB_WRITE_COOLDOWN) {
+      return; // Too soon since last write
     }
 
-    // Set new timer
-    this.dbUpdateDebounceTimer = setTimeout(async () => {
-      const now = Date.now();
+    try {
+      const timestamp = new Date().toISOString();
       
-      // Only update if enough time has passed
-      if (now - this.lastDbUpdate < this.DB_UPDATE_INTERVAL) {
-        return;
-      }
+      // Try to update existing row first
+      const { data: existing } = await supabase
+        .from('user_activity')
+        .select('user_id')
+        .eq('user_id', this.currentUserId)
+        .maybeSingle();
 
-      try {
-        await supabase
+      if (existing) {
+        // Row exists, update it
+        // Try simplified schema first (new), fallback to old schema if needed
+        const { error: updateError } = await supabase
           .from('user_activity')
-          .upsert({
+          .update({ last_seen_at: timestamp })
+          .eq('user_id', this.currentUserId);
+
+        if (updateError) {
+          // If update fails, try with old schema fields (for backward compatibility)
+          const { error: oldSchemaError } = await supabase
+            .from('user_activity')
+            .update({ 
+              last_seen_at: timestamp,
+              is_online: true,
+              updated_at: timestamp,
+            })
+            .eq('user_id', this.currentUserId);
+
+          if (oldSchemaError) {
+            console.error('[UserPresenceService] Error updating user_activity:', oldSchemaError);
+          }
+        }
+      } else {
+        // Row doesn't exist, insert it
+        // Try simplified schema first (new)
+        const { error: insertError } = await supabase
+          .from('user_activity')
+          .insert({ 
             user_id: this.currentUserId,
-            last_seen_at: new Date().toISOString(),
-            is_online: true,
-            updated_at: new Date().toISOString(),
-          }, {
-            onConflict: 'user_id',
+            last_seen_at: timestamp,
           });
 
-        this.lastDbUpdate = now;
-      } catch (error) {
-        console.error('[UserPresenceService] Error updating user_activity:', error);
+        if (insertError) {
+          // If insert fails, try with old schema fields (for backward compatibility)
+          const { error: oldSchemaError } = await supabase
+            .from('user_activity')
+            .insert({ 
+              user_id: this.currentUserId,
+              last_seen_at: timestamp,
+              is_online: true,
+              updated_at: timestamp,
+            });
+
+          if (oldSchemaError) {
+            console.error('[UserPresenceService] Error inserting user_activity:', oldSchemaError);
+          }
+        }
       }
-    }, this.DB_UPDATE_INTERVAL);
+
+      this.lastDbWrite = now;
+      this.metrics.dbWrites++;
+    } catch (error) {
+      console.error('[UserPresenceService] Error writing to database:', error);
+    }
+  }
+
+  /**
+   * Start metrics logging
+   */
+  private startMetricsLogging(): void {
+    if (this.metricsLogInterval) {
+      return;
+    }
+
+    this.metricsLogInterval = setInterval(() => {
+      this.logMetrics();
+    }, METRICS_LOG_INTERVAL);
+  }
+
+  /**
+   * Log metrics for monitoring
+   */
+  private logMetrics(): void {
+    const elapsed = (Date.now() - this.metrics.lastReset) / 60000; // minutes
+    if (elapsed > 0) {
+      console.log('[PresenceMetrics]', {
+        presenceUpdatesPerHour: (this.metrics.presenceUpdates / elapsed) * 60,
+        dbWritesPerHour: (this.metrics.dbWrites / elapsed) * 60,
+        statusQueriesPerHour: (this.metrics.statusQueries / elapsed) * 60,
+        presenceChannelHealthy: this.presenceChannelHealthy,
+      });
+    }
+    // Reset
+    this.metrics = { presenceUpdates: 0, dbWrites: 0, statusQueries: 0, lastReset: Date.now() };
   }
 
   /**
@@ -390,7 +535,7 @@ class UserPresenceService {
    */
   private setupAppStateListener(): void {
     if (this.appStateSubscription) {
-      return; // Already set up
+      return;
     }
 
     this.appStateSubscription = AppState.addEventListener('change', async (nextAppState: AppStateStatus) => {
@@ -399,31 +544,17 @@ class UserPresenceService {
       }
 
       if (nextAppState === 'active') {
-        // App came to foreground - update presence
+        // App came to foreground - update presence immediately
         await this.updateCurrentUserPresence();
-        await this.debouncedDbUpdate();
-      } else if (nextAppState === 'background' || nextAppState === 'inactive') {
-        // App went to background - mark as offline in database (but keep presence for a bit)
-        try {
-          await supabase
-            .from('user_activity')
-            .upsert({
-              user_id: this.currentUserId,
-              last_seen_at: new Date().toISOString(),
-              is_online: false,
-              updated_at: new Date().toISOString(),
-            }, {
-              onConflict: 'user_id',
-            });
-        } catch (error) {
-          console.error('[UserPresenceService] Error updating offline status:', error);
-        }
+        await this.writeLastSeenToDatabase();
       }
+      // Note: We don't mark as offline when going to background
+      // The presence API handles this automatically, and last_seen_at will expire naturally
     });
   }
 
   /**
-   * Stop tracking current user (on logout)
+   * Stop tracking current user
    */
   async stopTrackingCurrentUser(): Promise<void> {
     if (!this.isTrackingCurrentUser) {
@@ -436,20 +567,6 @@ class UserPresenceService {
         await this.presenceChannel.untrack();
       }
 
-      // Update database to offline
-      if (this.currentUserId) {
-        await supabase
-          .from('user_activity')
-          .upsert({
-            user_id: this.currentUserId,
-            last_seen_at: new Date().toISOString(),
-            is_online: false,
-            updated_at: new Date().toISOString(),
-          }, {
-            onConflict: 'user_id',
-          });
-      }
-
       this.isTrackingCurrentUser = false;
       this.currentUserId = null;
 
@@ -459,12 +576,12 @@ class UserPresenceService {
         this.presenceUpdateInterval = null;
       }
 
-      if (this.dbUpdateDebounceTimer) {
-        clearTimeout(this.dbUpdateDebounceTimer);
-        this.dbUpdateDebounceTimer = null;
+      if (this.metricsLogInterval) {
+        clearInterval(this.metricsLogInterval);
+        this.metricsLogInterval = null;
       }
 
-      console.log('[UserPresenceService] Stopped tracking current user');
+      console.log('[UserPresenceService] Stopped tracking');
     } catch (error) {
       console.error('[UserPresenceService] Error stopping tracking:', error);
     }
@@ -474,27 +591,19 @@ class UserPresenceService {
    * Cleanup all subscriptions and channels
    */
   cleanup(): void {
-    // Stop tracking current user
-    this.stopTrackingCurrentUser().catch(error => {
-      console.error('[UserPresenceService] Error in cleanup:', error);
-    });
+    this.stopTrackingCurrentUser().catch(() => {});
 
-    // Remove app state listener
     if (this.appStateSubscription) {
       this.appStateSubscription.remove();
       this.appStateSubscription = null;
     }
 
-    // Remove presence channel
     if (this.presenceChannel) {
       supabase.removeChannel(this.presenceChannel);
       this.presenceChannel = null;
     }
 
-    // Clear all subscriptions
     this.userStatusSubscriptions.clear();
-
-    console.log('[UserPresenceService] Cleaned up all subscriptions');
   }
 }
 
