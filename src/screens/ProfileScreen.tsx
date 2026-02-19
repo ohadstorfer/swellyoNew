@@ -42,6 +42,7 @@ interface ProfileScreenProps {
   onMessage?: (userId: string) => void; // Callback when message button is clicked
   onContinueEdit?: () => void; // Callback when "continue edit" button is clicked
   onEdit?: () => void; // Callback when edit button is clicked
+  fromOnboardingChat?: boolean; // When true, show Edit (left) + Save (right) header buttons
 }
 
 // Board type mapping
@@ -746,6 +747,32 @@ const EditButtonIcon: React.FC = () => {
   );
 };
 
+// Onboarding-completion header: back arrow (left = Edit) - Figma 18x18
+const OnboardingBackArrowIcon: React.FC = () => (
+  <Svg width={18} height={18} viewBox="0 0 18 18" fill="none">
+    <Path
+      d="M11.25 13.5L6.75 9L11.25 4.5"
+      stroke="#222B30"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </Svg>
+);
+
+// Onboarding-completion header: save/cloud icon (right = Save) - Figma 18x18
+const OnboardingSaveIcon: React.FC = () => (
+  <Svg width={18} height={18} viewBox="0 0 18 18" fill="none">
+    <Path
+      d="M3 12.1817C2.09551 11.5762 1.5 10.5452 1.5 9.375C1.5 7.61732 2.84363 6.17347 4.55981 6.01453C4.91086 3.8791 6.76518 2.25 9 2.25C11.2348 2.25 13.0891 3.8791 13.4402 6.01453C15.1564 6.17347 16.5 7.61732 16.5 9.375C16.5 10.5452 15.9045 11.5762 15 12.1817M6 12L9 9M9 9L12 12M9 9V15.75"
+      stroke="#222B30"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </Svg>
+);
+
 // Plus Icon SVG Component
 const PlusIcon: React.FC<{ size?: number }> = ({ size = 40 }) => {
   const scale = size / 40;
@@ -771,7 +798,7 @@ const PlusIcon: React.FC<{ size?: number }> = ({ size = 40 }) => {
   );
 };
 
-export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, onMessage, onContinueEdit, onEdit }) => {
+export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, onMessage, onContinueEdit, onEdit, fromOnboardingChat = false }) => {
   // Get onboarding context for logout
   const { resetOnboarding, setUser, setCurrentStep, setIsDemoUser } = useOnboarding();
   
@@ -1313,28 +1340,47 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
           <ProfileSkeleton />
         </ScrollView>
         {/* Header Buttons - Always visible even during loading */}
-        <TouchableOpacity style={styles.backButton} onPress={onBack}>
-          <View style={styles.backButtonContainer}>
-            <BackButtonIcon />
-          </View>
-        </TouchableOpacity>
-        {isViewingOwnProfile && onEdit ? (
-          <TouchableOpacity style={styles.editButton} onPress={onEdit}>
-            <View style={styles.editButtonContainer}>
-              <EditButtonIcon />
-            </View>
-          </TouchableOpacity>
-        ) : userId && onMessage ? (
-          <TouchableOpacity 
-            style={styles.messageButton}
-            onPress={() => onMessage(userId)}
-          >
-            <View style={styles.messageButtonContainer}>
-              <Ionicons name="chatbubble-outline" size={18} color="#222B30" />
-              <Text style={styles.messageButtonText}>Message</Text>
-            </View>
-          </TouchableOpacity>
-        ) : null}
+        {fromOnboardingChat && isViewingOwnProfile && onEdit && onBack ? (
+          <>
+            <TouchableOpacity style={styles.onboardingPillButtonLeft} onPress={onEdit}>
+              <View style={styles.onboardingPillButtonContainer}>
+                <OnboardingBackArrowIcon />
+                <Text style={styles.onboardingPillButtonText}>Edit</Text>
+              </View>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.onboardingPillButtonRight} onPress={onBack}>
+              <View style={styles.onboardingPillButtonContainer}>
+                <OnboardingSaveIcon />
+                <Text style={styles.onboardingPillButtonText}>Save</Text>
+              </View>
+            </TouchableOpacity>
+          </>
+        ) : (
+          <>
+            <TouchableOpacity style={styles.backButton} onPress={onBack}>
+              <View style={styles.backButtonContainer}>
+                <BackButtonIcon />
+              </View>
+            </TouchableOpacity>
+            {isViewingOwnProfile && onEdit ? (
+              <TouchableOpacity style={styles.editButton} onPress={onEdit}>
+                <View style={styles.editButtonContainer}>
+                  <EditButtonIcon />
+                </View>
+              </TouchableOpacity>
+            ) : userId && onMessage ? (
+              <TouchableOpacity 
+                style={styles.messageButton}
+                onPress={() => onMessage(userId)}
+              >
+                <View style={styles.messageButtonContainer}>
+                  <Ionicons name="chatbubble-outline" size={18} color="#222B30" />
+                  <Text style={styles.messageButtonText}>Message</Text>
+                </View>
+              </TouchableOpacity>
+            ) : null}
+          </>
+        )}
       </SafeAreaView>
     );
   }
@@ -1750,36 +1796,56 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
         </View>
 
         {/* Header Buttons */}
-        {/* Back Button - Always visible, goes to ConversationsScreen (home) */}
-        <TouchableOpacity style={styles.backButton} onPress={onBack}>
-          <View style={styles.backButtonContainer}>
-            <BackButtonIcon />
-          </View>
-        </TouchableOpacity>
+        {fromOnboardingChat && isViewingOwnProfile && onEdit && onBack ? (
+          // After Swelly onboarding: left = Edit, right = Save (home)
+          <>
+            <TouchableOpacity style={styles.onboardingPillButtonLeft} onPress={onEdit}>
+              <View style={styles.onboardingPillButtonContainer}>
+                <OnboardingBackArrowIcon />
+                <Text style={styles.onboardingPillButtonText}>Edit</Text>
+              </View>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.onboardingPillButtonRight} onPress={onBack}>
+              <View style={styles.onboardingPillButtonContainer}>
+                <OnboardingSaveIcon />
+                <Text style={styles.onboardingPillButtonText}>Save</Text>
+              </View>
+            </TouchableOpacity>
+          </>
+        ) : (
+          <>
+            {/* Back Button - Always visible, goes to ConversationsScreen (home) */}
+            <TouchableOpacity style={styles.backButton} onPress={onBack}>
+              <View style={styles.backButtonContainer}>
+                <BackButtonIcon />
+              </View>
+            </TouchableOpacity>
 
-        {/* Edit Button - Only visible when viewing own profile */}
-        {isViewingOwnProfile && onEdit ? (
-          <TouchableOpacity style={styles.editButton} onPress={onEdit}>
-            <View style={styles.editButtonContainer}>
-              <EditButtonIcon />
-            </View>
-          </TouchableOpacity>
-        ) : userId && onMessage ? (
-          // Message Button - Visible when viewing other user's profile
-          <TouchableOpacity 
-            style={styles.messageButton}
-            onPress={() => {
-              if (userId && onMessage) {
-                onMessage(userId);
-              }
-            }}
-          >
-            <View style={styles.messageButtonContainer}>
-              <Ionicons name="chatbubble-outline" size={18} color="#222B30" />
-              <Text style={styles.messageButtonText}>Message</Text>
-            </View>
-          </TouchableOpacity>
-        ) : null}
+            {/* Edit Button - Only visible when viewing own profile */}
+            {isViewingOwnProfile && onEdit ? (
+              <TouchableOpacity style={styles.editButton} onPress={onEdit}>
+                <View style={styles.editButtonContainer}>
+                  <EditButtonIcon />
+                </View>
+              </TouchableOpacity>
+            ) : userId && onMessage ? (
+              // Message Button - Visible when viewing other user's profile
+              <TouchableOpacity 
+                style={styles.messageButton}
+                onPress={() => {
+                  if (userId && onMessage) {
+                    onMessage(userId);
+                  }
+                }}
+              >
+                <View style={styles.messageButtonContainer}>
+                  <Ionicons name="chatbubble-outline" size={18} color="#222B30" />
+                  <Text style={styles.messageButtonText}>Message</Text>
+                </View>
+              </TouchableOpacity>
+            ) : null}
+          </>
+        )}
 
         {/* Profile Picture - Centered */}
         <View style={styles.profilePictureContainer}>
@@ -2327,6 +2393,48 @@ const styles = StyleSheet.create({
     right: spacing.md, // 16px gap from right edge
     top: 54,
     zIndex: 10,
+  },
+  // Onboarding-completion header: pill buttons (Figma 4412-5265, 4412-5266)
+  onboardingPillButtonLeft: {
+    position: 'absolute',
+    left: spacing.md,
+    top: 54,
+    zIndex: 10,
+  },
+  onboardingPillButtonRight: {
+    position: 'absolute',
+    right: spacing.md,
+    top: 54,
+    zIndex: 10,
+  },
+  onboardingPillButtonContainer: {
+    flexDirection: 'row',
+    height: 40,
+    minWidth: 70,
+    paddingVertical: 10,
+    paddingLeft: 8,
+    paddingRight: 12,
+    alignItems: 'center',
+    gap: 4,
+    borderRadius: 48,
+    borderWidth: 1,
+    borderColor: '#EEE',
+    backgroundColor: '#FFF',
+    ...(Platform.OS === 'web' && {
+      boxShadow: '0px 2px 4px rgba(0, 0, 0, 0.1)',
+    }),
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  onboardingPillButtonText: {
+    fontSize: 12,
+    fontWeight: '400',
+    color: '#222B30',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    lineHeight: 15,
   },
   messageButtonContainer: {
     height: 40,

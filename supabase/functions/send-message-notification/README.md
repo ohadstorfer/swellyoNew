@@ -5,8 +5,7 @@ This edge function handles email notifications for direct messages between users
 ## Features
 
 - **Batching**: Groups multiple messages from the same sender (5 minute window or max 5 messages)
-- **Rate Limiting**: Max 1 email per user per 10 minutes
-- **Online Detection**: Skips emails if user was online in last 5 minutes
+- **Rate Limiting**: Max 1 email per recipient per 30 minutes (any sender). Resets when the recipient is active after the last email (e.g. they logged in, then went inactive again).
 - **Beautiful HTML Emails**: Responsive email template with sender info and message content
 
 ## Setup

@@ -65,8 +65,8 @@ function generateEmailTemplate(data: EmailTemplateData, appUrl: string = 'https:
   const { sender, messages, conversationId, recipientName } = data;
   const messageCount = messages.length;
   const isMultiple = messageCount > 1;
-  
-  // Get conversation URL (adjust based on your app's routing)
+  const greetingName = recipientName || 'there';
+
   const conversationUrl = `${appUrl}/messages/${conversationId}`;
 
   return `
@@ -75,71 +75,65 @@ function generateEmailTemplate(data: EmailTemplateData, appUrl: string = 'https:
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark">
+  <meta name="supported-color-schemes" content="dark">
   <title>New Message${isMultiple ? 's' : ''} from ${sender.name}</title>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,800;1,900&display=swap" rel="stylesheet">
 </head>
-<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f5f5f5;">
-  <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: #f5f5f5;">
+<body style="margin: 0; padding: 0; font-family: Montserrat, -apple-system, BlinkMacSystemFont, sans-serif; background-color: #0d0d0d; color-scheme: dark;">
+  <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: #0d0d0d;">
     <tr>
       <td align="center" style="padding: 40px 20px;">
-        <table role="presentation" style="max-width: 600px; width: 100%; border-collapse: collapse; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-          
+        <table role="presentation" style="max-width: 600px; width: 100%; border-collapse: collapse; border-radius: 15px; border: 1px solid #05BCD3; background: #202125; overflow: hidden;">
           <!-- Header -->
           <tr>
-            <td style="background: linear-gradient(135deg, #B72DF2 0%, #8B1FC7 100%); padding: 32px 24px; text-align: center;">
-              <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 700; letter-spacing: -0.5px;">
-                Swellyo
+            <td style="border-radius: 15px 15px 0 0; background: linear-gradient(90deg, #05BCD3 0.01%, #DBCDBC 125.83%); padding: 28px 24px; text-align: center;">
+              <h1 style="margin: 0; color: #FFF; text-align: center; font-family: Montserrat, sans-serif; font-size: 32px; font-style: italic; font-weight: 900; line-height: 120%;">
+                SWELLYO
               </h1>
             </td>
           </tr>
-
-          <!-- Content -->
+          <!-- Greeting -->
           <tr>
-            <td style="padding: 32px 24px;">
-              <!-- Greeting -->
-              <p style="margin: 0 0 24px 0; color: #333333; font-size: 16px; line-height: 24px;">
-                ${recipientName ? `Hi ${recipientName},` : 'Hi there,'}
+            <td style="padding: 24px 24px 0 24px; text-align: center;">
+              <p style="margin: 0; color: #FFF; text-align: center; font-family: Montserrat, sans-serif; font-size: 24px; font-style: normal; font-weight: 800; line-height: 120%;">
+                Yo ${escapeHtml(greetingName)}!
               </p>
-
-              <!-- Sender Info -->
-              <div style="display: flex; align-items: center; margin-bottom: 24px; padding-bottom: 24px; border-bottom: 1px solid #e5e5e5;">
-                ${sender.avatar ? `
-                  <img src="${sender.avatar}" alt="${sender.name}" style="width: 48px; height: 48px; border-radius: 50%; object-fit: cover; margin-right: 12px; border: 2px solid #e5e5e5;">
-                ` : `
-                  <div style="width: 48px; height: 48px; border-radius: 50%; background-color: #B72DF2; display: flex; align-items: center; justify-content: center; margin-right: 12px; color: #ffffff; font-size: 18px; font-weight: 600;">
-                    ${sender.name.charAt(0).toUpperCase()}
-                  </div>
-                `}
-                <div>
-                  <p style="margin: 0; color: #333333; font-size: 18px; font-weight: 600;">
-                    ${sender.name}
-                  </p>
-                  <p style="margin: 4px 0 0 0; color: #7B7B7B; font-size: 14px;">
-                    ${isMultiple ? `sent you ${messageCount} new messages` : 'sent you a message'}
-                  </p>
-                </div>
-              </div>
-
-              <!-- CTA Button -->
-              <table role="presentation" style="width: 100%; border-collapse: collapse;">
+            </td>
+          </tr>
+          <!-- Profile picture -->
+          <tr>
+            <td align="center" style="padding: 20px 24px;">
+              ${sender.avatar
+    ? `<img src="${escapeHtml(sender.avatar)}" alt="${escapeHtml(sender.name)}" width="80" height="80" style="display: block; width: 80px; height: 80px; border-radius: 40px; border: 3px solid #FFF; object-fit: cover;" />`
+    : `<div style="display: inline-block; width: 80px; height: 80px; border-radius: 40px; border: 3px solid #FFF; background: #05BCD3; color: #FFF; font-family: Montserrat, sans-serif; font-size: 28px; font-weight: 800; line-height: 74px; text-align: center;">${escapeHtml(sender.name.charAt(0).toUpperCase())}</div>`}
+            </td>
+          </tr>
+          <!-- Main content text -->
+          <tr>
+            <td style="padding: 0 24px 24px 24px; text-align: center;">
+              <p style="margin: 0 0 8px 0; color: #FFF; text-align: center; font-family: Montserrat, sans-serif; font-size: 18px; font-style: normal; font-weight: 400; line-height: 120%;">
+                You got a message from <span style="color: #FFF; font-family: Montserrat, sans-serif; font-size: 18px; font-style: normal; font-weight: 600; line-height: 120%;">${escapeHtml(sender.name)}</span>!
+              </p>
+              <p style="margin: 0 0 24px 0; color: #FFF; text-align: center; font-family: Montserrat, sans-serif; font-size: 18px; font-style: normal; font-weight: 400; line-height: 120%;">
+                Keep the chat going!
+              </p>
+              <table role="presentation" style="margin: 0 auto; border-collapse: collapse;">
                 <tr>
-                  <td align="center" style="padding: 0;">
-                    <a href="${conversationUrl}" style="display: inline-block; padding: 14px 32px; background-color: #B72DF2; color: #ffffff; text-decoration: none; border-radius: 8px; font-size: 16px; font-weight: 600; text-align: center;">
-                      Go to Swellyo
+                  <td align="center">
+                    <a href="${conversationUrl}" style="display: inline-block; padding: 14px 32px; background: linear-gradient(90deg, #06BCD3 0%, #AECAC1 100%); color: #FFF; text-decoration: none; border-radius: 8px; font-family: Montserrat, sans-serif; font-size: 16px; font-weight: 700; text-align: center;">
+                      Go To Swellyo
                     </a>
                   </td>
                 </tr>
               </table>
             </td>
           </tr>
-
           <!-- Footer -->
           <tr>
-            <td style="padding: 24px; background-color: #f9f9f9; text-align: center; border-top: 1px solid #e5e5e5;">
-              <p style="margin: 0 0 8px 0; color: #7B7B7B; font-size: 12px; line-height: 18px;">
-                You're receiving this email because you have a conversation with ${sender.name} on Swellyo.
-              </p>
-              <p style="margin: 0; color: #7B7B7B; font-size: 12px; line-height: 18px;">
-                <a href="${appUrl}" style="color: #B72DF2; text-decoration: none;">Visit Swellyo</a>
+            <td style="padding: 24px; text-align: center; border-top: 1px solid #05BCD3;">
+              <p style="margin: 0; color: #FFF; text-align: center; font-family: Montserrat, sans-serif; font-size: 14px; font-style: normal; font-weight: 400; line-height: 120%;">
+                You're receiving this email because you have a conversation with ${escapeHtml(sender.name)} on Swellyo.
               </p>
             </td>
           </tr>
@@ -164,58 +158,54 @@ const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY')
 const EMAIL_FROM = Deno.env.get('EMAIL_FROM') || 'Swellyo <onboarding@resend.dev>'
 
 // Configuration constants
-const RATE_LIMIT_MINUTES = 30 // 30-minute cooldown between emails per sender→recipient
-const ONLINE_THRESHOLD_MINUTES = 5 // Skip if user was online in last 5 minutes
+const RATE_LIMIT_MINUTES = 30 // 30-minute cooldown: no new email to this recipient after ANY email we sent them
 
 /**
- * Check if user should receive email notification
+ * Check if user should receive email notification.
+ * 1) 30-minute rate limit after ANY email we sent to this recipient (not per sender).
+ * 2) Rate limit resets when the user was active after we sent: if they logged in after the last email, we may send again.
  */
 async function shouldSendEmail(
   supabase: any,
   recipientId: string,
-  senderId: string
+  _senderId: string
 ): Promise<boolean> {
   // Don't send email to sender
-  if (recipientId === senderId) {
+  if (recipientId === _senderId) {
     return false;
   }
 
-  // Check if user was online recently (skip email if active within threshold)
+  const now = new Date();
+
+  // Fetch recipient activity (used only for rate-limit reset: active after last email = allow send)
   const { data: activity } = await supabase
     .from('user_activity')
     .select('last_seen_at')
     .eq('user_id', recipientId)
     .maybeSingle();
 
-  if (activity?.last_seen_at) {
-    const lastSeen = new Date(activity.last_seen_at);
-    const now = new Date();
-    const diffMinutes = (now.getTime() - lastSeen.getTime()) / 60000;
-
-    if (diffMinutes < ONLINE_THRESHOLD_MINUTES) {
-      console.log(`[Email Notification] Skipping - user ${recipientId} was active recently (${diffMinutes.toFixed(1)} minutes ago)`);
-      return false;
-    }
-  }
-
-  // Check rate limiting - don't send if email was sent recently
+  // 30-minute rate limit: check most recent email we sent to this recipient (any sender)
   const { data: recentNotification } = await supabase
     .from('message_email_notifications')
     .select('email_sent_at')
     .eq('recipient_id', recipientId)
-    .eq('sender_id', senderId)
     .not('email_sent_at', 'is', null)
     .order('email_sent_at', { ascending: false })
     .limit(1)
-    .single();
+    .maybeSingle();
 
   if (recentNotification?.email_sent_at) {
     const lastSent = new Date(recentNotification.email_sent_at);
-    const now = new Date();
     const diffMinutes = (now.getTime() - lastSent.getTime()) / 60000;
 
     if (diffMinutes < RATE_LIMIT_MINUTES) {
-      console.log(`[Email Notification] Skipping - rate limit (last email sent ${diffMinutes.toFixed(1)} minutes ago)`);
+      // 3) Reset: if user was active after we sent that email, allow send (they "came back")
+      const lastSeenAt = activity?.last_seen_at ? new Date(activity.last_seen_at) : null;
+      if (lastSeenAt && lastSeenAt > lastSent) {
+        console.log(`[Email Notification] Allowing - rate limit reset (user was active after last email)`);
+        return true;
+      }
+      console.log(`[Email Notification] Skipping - rate limit (last email to recipient ${diffMinutes.toFixed(1)} min ago)`);
       return false;
     }
   }
@@ -436,10 +426,10 @@ serve(async (req) => {
     for (const member of members) {
       const recipientId = member.user_id;
 
-      // Check if should send email (30-minute cooldown + online detection)
+      // Check if should send email (30-minute cooldown, resets when recipient was active after last email)
       const shouldSend = await shouldSendEmail(supabase, recipientId, sender_id);
       if (!shouldSend) {
-        console.log(`[Email Notification] [${requestId}] Skipping email for recipient ${recipientId} (rate limit or online)`);
+        console.log(`[Email Notification] [${requestId}] Skipping email for recipient ${recipientId} (rate limit)`);
         continue;
       }
 

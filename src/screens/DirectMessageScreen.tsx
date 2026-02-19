@@ -20,7 +20,7 @@ import { Ionicons } from '@expo/vector-icons';
 import Svg, { Path } from 'react-native-svg';
 import { Text } from '../components/Text';
 import { colors, spacing, typography, borderRadius } from '../styles/theme';
-import { messagingService, Message } from '../services/messaging/messagingService';
+import { messagingService, Message, RealtimeSubscriptionStatus } from '../services/messaging/messagingService';
 import { supabaseAuthService } from '../services/auth/supabaseAuthService';
 import { getImageUrl } from '../services/media/imageService';
 import { supabase } from '../config/supabase';
@@ -98,6 +98,21 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const textInputRef = useRef<any>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const typingDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastTypingSentAtRef = useRef<number>(0);
+  const currentUserIdRef = useRef<string | null>(null);
+  const currentConversationIdRef = useRef<string | undefined>(undefined);
+  const typingFailsafeRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hasTriedReconnectRef = useRef(false);
+  const [reconnectAttempt, setReconnectAttempt] = useState(0);
+  const [realtimeStatus, setRealtimeStatus] = useState<RealtimeSubscriptionStatus | null>(null);
+
+  // Keep refs in sync so subscription callbacks always see latest values
+  useEffect(() => {
+    currentUserIdRef.current = currentUserId;
+  }, [currentUserId]);
+  useEffect(() => {
+    currentConversationIdRef.current = currentConversationId;
+  }, [currentConversationId]);
 
   useEffect(() => {
     // Get current user ID - CRITICAL: Get from session first (instant, no database query)
@@ -129,10 +144,10 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   }, [isFetchingMessages, messages.length]);
 
   useEffect(() => {
-    // Only load messages and subscribe if conversation exists
     if (currentConversationId) {
-      // CRITICAL: Load messages IMMEDIATELY (doesn't need currentUserId)
-      // currentUserId is only needed for markAsRead and subscription callbacks
+      if (reconnectAttempt === 0) {
+        hasTriedReconnectRef.current = false;
+      }
       loadMessages();
 
       // Set current conversation in MessagingProvider
@@ -152,35 +167,44 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       const unsubscribe = messagingService.subscribeToMessages(
         currentConversationId,
         {
+          onSubscriptionStatus: (status) => {
+            setRealtimeStatus(status);
+            if (status === 'SUBSCRIBED') {
+              setRealtimeHealthy(true);
+              hasTriedReconnectRef.current = false;
+            } else if (status === 'CHANNEL_ERROR') {
+              if (!hasTriedReconnectRef.current) {
+                hasTriedReconnectRef.current = true;
+                setReconnectAttempt((a) => a + 1);
+              } else {
+                setRealtimeHealthy(false);
+              }
+            }
+          },
           onNewMessage: (newMessage) => {
-            // Mark realtime as healthy when we receive messages
             setRealtimeHealthy(true);
-            
-            // Track first reply received (only once, and only if message is from other user)
-            if (!hasTrackedFirstReply && currentUserId && newMessage.sender_id !== currentUserId) {
-              const timeToReplyMinutes = firstMessageSentTime 
+            const convId = currentConversationIdRef.current;
+            const me = currentUserIdRef.current;
+            if (!hasTrackedFirstReply && me && newMessage.sender_id !== me) {
+              const timeToReplyMinutes = firstMessageSentTime
                 ? (Date.now() - firstMessageSentTime) / (1000 * 60)
                 : undefined;
-              analyticsService.trackReplyReceived(timeToReplyMinutes, currentConversationId);
+              analyticsService.trackReplyReceived(timeToReplyMinutes, convId ?? '');
               setHasTrackedFirstReply(true);
             }
-        
-            // Check if message already exists (avoid duplicates)
             setMessages((prev) => {
               const exists = prev.some(msg => msg.id === newMessage.id);
-              if (exists) {
-                return prev;
-              }
+              if (exists) return prev;
               const updated = [...prev, newMessage];
-              // Update cache
-              chatHistoryCache.saveMessages(currentConversationId, updated).catch(err => {
-                console.error('Error updating cache:', err);
-              });
+              if (convId) {
+                chatHistoryCache.saveMessages(convId, updated).catch(err => {
+                  console.error('Error updating cache:', err);
+                });
+              }
               return updated;
             });
-            // Mark as read only if currentUserId is available
-            if (currentUserId) {
-              markAsRead(currentConversationId).catch(err => {
+            if (me && convId) {
+              markAsRead(convId).catch(err => {
                 console.error('Error marking message as read:', err);
               });
             }
@@ -209,9 +233,8 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                   msg.id === updatedMessage.id ? updatedMessage : msg
                 );
               } else {
-                // Message not in state yet - add it (important for deleted messages that should be visible)
-                // Only add if it's part of this conversation
-                if (updatedMessage.conversation_id === currentConversationId) {
+                const convId = currentConversationIdRef.current;
+                if (convId && updatedMessage.conversation_id === convId) {
                   updated = [...prev, updatedMessage].sort((a, b) => {
                     const timeDiff = new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
                     if (timeDiff !== 0) return timeDiff;
@@ -221,18 +244,20 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                   updated = prev;
                 }
               }
-              
-              // Update cache
-              chatHistoryCache.updateMessage(currentConversationId, updatedMessage.id, updatedMessage).catch(err => {
-                console.error('Error updating message in cache:', err);
-              });
+              const convId = currentConversationIdRef.current;
+              if (convId) {
+                chatHistoryCache.updateMessage(convId, updatedMessage.id, updatedMessage).catch(err => {
+                  console.error('Error updating message in cache:', err);
+                });
+              }
               return updated;
             });
           },
           onMessageDeleted: (messageId) => {
+            const convId = currentConversationIdRef.current;
             console.log('[DirectMessageScreen] onMessageDeleted callback triggered', {
               messageId,
-              conversationId: currentConversationId,
+              conversationId: convId,
               editingMessageId,
             });
             
@@ -257,22 +282,33 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
               });
               
               const deletedMessage = { ...messageExists, deleted: true, body: undefined };
-              const updated = prev.map(msg => 
+              const updated = prev.map(msg =>
                 msg.id === messageId ? deletedMessage : msg
               );
-              
-              // Update cache with deleted message (not null) so it persists
-              chatHistoryCache.updateMessage(currentConversationId, messageId, deletedMessage).catch(err => {
-                console.error('[DirectMessageScreen] Error updating deleted message in cache:', err);
-              });
-              
+              if (convId) {
+                chatHistoryCache.updateMessage(convId, messageId, deletedMessage).catch(err => {
+                  console.error('[DirectMessageScreen] Error updating deleted message in cache:', err);
+                });
+              }
               return updated;
             });
           },
           onTyping: (userId, isTyping) => {
-            // Only show typing indicator for other user (if currentUserId is available)
-            if (currentUserId && userId !== currentUserId) {
-              setIsTyping(isTyping);
+            const me = currentUserIdRef.current;
+            if (me && userId !== me) {
+              if (typingFailsafeRef.current) {
+                clearTimeout(typingFailsafeRef.current);
+                typingFailsafeRef.current = null;
+              }
+              if (isTyping) {
+                setIsTyping(true);
+                typingFailsafeRef.current = setTimeout(() => {
+                  typingFailsafeRef.current = null;
+                  setIsTyping(false);
+                }, 4000);
+              } else {
+                setIsTyping(false);
+              }
             }
           },
         }
@@ -281,7 +317,10 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       return () => {
         unsubscribe();
         setIsTyping(false);
-        // Clean up typing indicators
+        if (typingFailsafeRef.current) {
+          clearTimeout(typingFailsafeRef.current);
+          typingFailsafeRef.current = null;
+        }
         if (typingDebounceRef.current) {
           clearTimeout(typingDebounceRef.current);
           typingDebounceRef.current = null;
@@ -308,7 +347,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         setMessagingCurrentConversationId(null);
       }
     };
-  }, [currentConversationId, markAsRead, setMessagingCurrentConversationId]); // Removed currentUserId from deps
+  }, [currentConversationId, markAsRead, setMessagingCurrentConversationId, reconnectAttempt]);
 
   // Separate useEffect to mark as read when currentUserId becomes available
   useEffect(() => {
@@ -938,10 +977,9 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     });
   };
 
-  // Handle typing indicator (debounced)
+  // Handle typing indicator: send startTyping soon after user starts typing (leading + throttle), stopTyping after 3s idle (trailing)
   useEffect(() => {
     if (!currentConversationId || !inputText.trim()) {
-      // Clear typing indicator when input is empty
       if (typingDebounceRef.current) {
         clearTimeout(typingDebounceRef.current);
         typingDebounceRef.current = null;
@@ -950,22 +988,28 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         clearTimeout(typingTimeoutRef.current);
         typingTimeoutRef.current = null;
       }
+      lastTypingSentAtRef.current = 0;
       messagingService.stopTyping(currentConversationId!).catch(() => {});
       return;
     }
 
-    // Debounce: send typing indicator after 300ms of inactivity
-    if (typingDebounceRef.current) {
-      clearTimeout(typingDebounceRef.current);
+    const now = Date.now();
+    const timeSinceLastSent = lastTypingSentAtRef.current ? now - lastTypingSentAtRef.current : Infinity;
+    // Send startTyping 100ms after they start (or after throttle interval): leading + throttle ~500ms
+    if (timeSinceLastSent >= 500) {
+      if (typingDebounceRef.current) {
+        clearTimeout(typingDebounceRef.current);
+      }
+      typingDebounceRef.current = setTimeout(() => {
+        typingDebounceRef.current = null;
+        if (currentConversationId && inputText.trim()) {
+          messagingService.startTyping(currentConversationId).catch(() => {});
+          lastTypingSentAtRef.current = Date.now();
+        }
+      }, 100) as ReturnType<typeof setTimeout>;
     }
 
-    typingDebounceRef.current = setTimeout(() => {
-      if (currentConversationId && inputText.trim()) {
-        messagingService.startTyping(currentConversationId).catch(() => {});
-      }
-    }, 300) as ReturnType<typeof setTimeout>;
-
-    // Clear typing indicator after 3 seconds of no typing
+    // Trailing: clear typing indicator after 3 seconds of no typing
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current);
     }

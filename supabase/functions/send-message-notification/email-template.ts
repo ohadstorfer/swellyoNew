@@ -38,119 +38,11 @@ function formatTimestamp(timestamp: string): string {
   if (diffDays < 7) return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
 
   // Format as date if older than a week
-  return date.toLocaleDateString('en-US', { 
-    month: 'short', 
+  return date.toLocaleDateString('en-US', {
+    month: 'short',
     day: 'numeric',
     year: date.getFullYear() !== now.getFullYear() ? 'numeric' : undefined
   });
-}
-
-/**
- * Generate HTML email template
- */
-export function generateEmailTemplate(data: EmailTemplateData, appUrl: string = 'https://swellyo.com'): string {
-  const { sender, messages, conversationId, recipientName } = data;
-  const messageCount = messages.length;
-  const isMultiple = messageCount > 1;
-  
-  // Get conversation URL (adjust based on your app's routing)
-  const conversationUrl = `${appUrl}/messages/${conversationId}`;
-
-  return `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>New Message${isMultiple ? 's' : ''} from ${sender.name}</title>
-</head>
-<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f5f5f5;">
-  <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: #f5f5f5;">
-    <tr>
-      <td align="center" style="padding: 40px 20px;">
-        <table role="presentation" style="max-width: 600px; width: 100%; border-collapse: collapse; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-          
-          <!-- Header -->
-          <tr>
-            <td style="background: linear-gradient(135deg, #B72DF2 0%, #8B1FC7 100%); padding: 32px 24px; text-align: center;">
-              <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 700; letter-spacing: -0.5px;">
-                Swellyo
-              </h1>
-            </td>
-          </tr>
-
-          <!-- Content -->
-          <tr>
-            <td style="padding: 32px 24px;">
-              <!-- Greeting -->
-              <p style="margin: 0 0 24px 0; color: #333333; font-size: 16px; line-height: 24px;">
-                ${recipientName ? `Hi ${recipientName},` : 'Hi there,'}
-              </p>
-
-              <!-- Sender Info -->
-              <div style="display: flex; align-items: center; margin-bottom: 24px; padding-bottom: 24px; border-bottom: 1px solid #e5e5e5;">
-                ${sender.avatar ? `
-                  <img src="${sender.avatar}" alt="${sender.name}" style="width: 48px; height: 48px; border-radius: 50%; object-fit: cover; margin-right: 12px; border: 2px solid #e5e5e5;">
-                ` : `
-                  <div style="width: 48px; height: 48px; border-radius: 50%; background-color: #B72DF2; display: flex; align-items: center; justify-content: center; margin-right: 12px; color: #ffffff; font-size: 18px; font-weight: 600;">
-                    ${sender.name.charAt(0).toUpperCase()}
-                  </div>
-                `}
-                <div>
-                  <p style="margin: 0; color: #333333; font-size: 18px; font-weight: 600;">
-                    ${sender.name}
-                  </p>
-                  <p style="margin: 4px 0 0 0; color: #7B7B7B; font-size: 14px;">
-                    ${isMultiple ? `sent you ${messageCount} new messages` : 'sent you a message'}
-                  </p>
-                </div>
-              </div>
-
-              <!-- Messages -->
-              <div style="margin-bottom: 32px;">
-                ${messages.map((message, index) => `
-                  <div style="margin-bottom: ${index < messages.length - 1 ? '20px' : '0'}; padding: 16px; background-color: #f9f9f9; border-radius: 12px; border-left: 3px solid #B72DF2;">
-                    <p style="margin: 0 0 8px 0; color: #333333; font-size: 16px; line-height: 24px; white-space: pre-wrap; word-wrap: break-word;">
-                      ${escapeHtml(message.body || '')}
-                    </p>
-                    <p style="margin: 0; color: #7B7B7B; font-size: 12px;">
-                      ${formatTimestamp(message.created_at)}
-                    </p>
-                  </div>
-                `).join('')}
-              </div>
-
-              <!-- CTA Button -->
-              <table role="presentation" style="width: 100%; border-collapse: collapse;">
-                <tr>
-                  <td align="center" style="padding: 0;">
-                    <a href="${conversationUrl}" style="display: inline-block; padding: 14px 32px; background-color: #B72DF2; color: #ffffff; text-decoration: none; border-radius: 8px; font-size: 16px; font-weight: 600; text-align: center;">
-                      View Conversation
-                    </a>
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
-
-          <!-- Footer -->
-          <tr>
-            <td style="padding: 24px; background-color: #f9f9f9; text-align: center; border-top: 1px solid #e5e5e5;">
-              <p style="margin: 0 0 8px 0; color: #7B7B7B; font-size: 12px; line-height: 18px;">
-                You're receiving this email because you have a conversation with ${sender.name} on Swellyo.
-              </p>
-              <p style="margin: 0; color: #7B7B7B; font-size: 12px; line-height: 18px;">
-                <a href="${appUrl}" style="color: #B72DF2; text-decoration: none;">Visit Swellyo</a>
-              </p>
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>
-  `.trim();
 }
 
 /**
@@ -167,3 +59,90 @@ function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, (m) => map[m]);
 }
 
+/**
+ * Generate HTML email template
+ */
+export function generateEmailTemplate(data: EmailTemplateData, appUrl: string = 'https://swellyo.com'): string {
+  const { sender, messages, conversationId, recipientName } = data;
+  const messageCount = messages.length;
+  const isMultiple = messageCount > 1;
+  const greetingName = recipientName || 'there';
+
+  const conversationUrl = `${appUrl}/messages/${conversationId}`;
+
+  return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark">
+  <meta name="supported-color-schemes" content="dark">
+  <title>New Message${isMultiple ? 's' : ''} from ${sender.name}</title>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,800;1,900&display=swap" rel="stylesheet">
+</head>
+<body style="margin: 0; padding: 0; font-family: Montserrat, -apple-system, BlinkMacSystemFont, sans-serif; background-color: #0d0d0d; color-scheme: dark;">
+  <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: #0d0d0d;">
+    <tr>
+      <td align="center" style="padding: 40px 20px;">
+        <table role="presentation" style="max-width: 600px; width: 100%; border-collapse: collapse; border-radius: 15px; border: 1px solid #05BCD3; background: #202125; overflow: hidden;">
+          <!-- Header -->
+          <tr>
+            <td style="border-radius: 15px 15px 0 0; background: linear-gradient(90deg, #05BCD3 0.01%, #DBCDBC 125.83%); padding: 28px 24px; text-align: center;">
+              <h1 style="margin: 0; color: #FFF; text-align: center; font-family: Montserrat, sans-serif; font-size: 32px; font-style: italic; font-weight: 900; line-height: 120%;">
+                SWELLYO
+              </h1>
+            </td>
+          </tr>
+          <!-- Greeting -->
+          <tr>
+            <td style="padding: 24px 24px 0 24px; text-align: center;">
+              <p style="margin: 0; color: #FFF; text-align: center; font-family: Montserrat, sans-serif; font-size: 24px; font-style: normal; font-weight: 800; line-height: 120%;">
+                Yo ${escapeHtml(greetingName)}!
+              </p>
+            </td>
+          </tr>
+          <!-- Profile picture -->
+          <tr>
+            <td align="center" style="padding: 20px 24px;">
+              ${sender.avatar
+    ? `<img src="${escapeHtml(sender.avatar)}" alt="${escapeHtml(sender.name)}" width="80" height="80" style="display: block; width: 80px; height: 80px; border-radius: 40px; border: 3px solid #FFF; object-fit: cover;" />`
+    : `<div style="display: inline-block; width: 80px; height: 80px; border-radius: 40px; border: 3px solid #FFF; background: #05BCD3; color: #FFF; font-family: Montserrat, sans-serif; font-size: 28px; font-weight: 800; line-height: 74px; text-align: center;">${escapeHtml(sender.name.charAt(0).toUpperCase())}</div>`}
+            </td>
+          </tr>
+          <!-- Main content text -->
+          <tr>
+            <td style="padding: 0 24px 24px 24px; text-align: center;">
+              <p style="margin: 0 0 8px 0; color: #FFF; text-align: center; font-family: Montserrat, sans-serif; font-size: 18px; font-style: normal; font-weight: 400; line-height: 120%;">
+                You got a message from <span style="color: #FFF; font-family: Montserrat, sans-serif; font-size: 18px; font-style: normal; font-weight: 600; line-height: 120%;">${escapeHtml(sender.name)}</span>!
+              </p>
+              <p style="margin: 0 0 24px 0; color: #FFF; text-align: center; font-family: Montserrat, sans-serif; font-size: 18px; font-style: normal; font-weight: 400; line-height: 120%;">
+                Keep the chat going!
+              </p>
+              <table role="presentation" style="margin: 0 auto; border-collapse: collapse;">
+                <tr>
+                  <td align="center">
+                    <a href="${conversationUrl}" style="display: inline-block; padding: 14px 32px; background: linear-gradient(90deg, #06BCD3 0%, #AECAC1 100%); color: #FFF; text-decoration: none; border-radius: 8px; font-family: Montserrat, sans-serif; font-size: 16px; font-weight: 700; text-align: center;">
+                      Go To Swellyo
+                    </a>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <!-- Footer -->
+          <tr>
+            <td style="padding: 24px; text-align: center; border-top: 1px solid #05BCD3;">
+              <p style="margin: 0; color: #FFF; text-align: center; font-family: Montserrat, sans-serif; font-size: 14px; font-style: normal; font-weight: 400; line-height: 120%;">
+                You're receiving this email because you have a conversation with ${escapeHtml(sender.name)} on Swellyo.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+  `.trim();
+}

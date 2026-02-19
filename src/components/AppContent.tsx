@@ -597,6 +597,7 @@ export const AppContent: React.FC = () => {
   const [viewingUserId, setViewingUserId] = useState<string | null>(null);
   const [profileFromSwellyShaper, setProfileFromSwellyShaper] = useState(false); // Track if profile was opened from Swelly Shaper
   const [profileFromTripPlanningChat, setProfileFromTripPlanningChat] = useState(false); // Track if profile was opened from trip planning chat
+  const [profileFromOnboardingChat, setProfileFromOnboardingChat] = useState(false); // Track if profile was opened right after Swelly onboarding chat (special header)
   
   // Trip planning chat state - persisted between navigations
   const [tripPlanningChatId, setTripPlanningChatId] = useState<string | null>(null);
@@ -625,10 +626,10 @@ export const AppContent: React.FC = () => {
   const handleChatComplete = async () => {
     console.log('[AppContent] handleChatComplete called');
     
-    // Set showProfile FIRST to prevent race condition
-    // Navigate to profile
+    // Set showProfile and from-onboarding flag FIRST to prevent race condition
+    setProfileFromOnboardingChat(true); // Show special header (Swelly Shaper left, Save right)
     setShowProfile(true);
-    console.log('[AppContent] Navigating to profile screen');
+    console.log('[AppContent] Navigating to profile screen (from onboarding chat)');
     
     // Mark onboarding as complete AFTER setting showProfile
     // This ensures showProfile is true when isComplete becomes true, preventing blocking logic from redirecting
@@ -661,6 +662,7 @@ export const AppContent: React.FC = () => {
     setShowProfile(false);
     setViewingUserId(null);
     setProfileFromSwellyShaper(false); // Reset flag if it was set
+    setProfileFromOnboardingChat(false); // Reset so next profile open uses normal header
   };
 
   const handleSwellyShaperBack = () => {
@@ -674,8 +676,8 @@ export const AppContent: React.FC = () => {
   const handleSwellyShaperViewProfile = () => {
     console.log('[AppContent] handleSwellyShaperViewProfile called');
     console.log('[AppContent] Current state - showSwellyShaper:', showSwellyShaper, 'showProfile:', showProfile);
-    // Navigate from Swelly Shaper to profile
-    // Back button will always go to homepage (conversations screen)
+    // Navigate from Swelly Shaper to profile - set flag so user sees Edit/Save header and can save or go back to Swelly Shaper
+    setProfileFromOnboardingChat(true);
     setViewingUserId(null); // Ensure viewing own profile
     setShowSwellyShaper(false);
     setShowProfile(true);
@@ -1081,9 +1083,9 @@ export const AppContent: React.FC = () => {
           onBack={handleProfileBack}
           userId={viewingUserId ?? undefined}
           onMessage={handleStartConversation}
+          fromOnboardingChat={profileFromOnboardingChat}
           onEdit={() => {
-            // When clicking edit, preserve the flag if it was already set
-            // (user came from Swelly Shaper), so they can navigate back
+            // When clicking edit (from onboarding profile), open Swelly Shaper without resetting fromOnboardingChat
             setShowProfile(false);
             setShowSwellyShaper(true);
           }}

@@ -105,12 +105,16 @@ export interface MessageReaction {
   reacted_at: string;
 }
 
+// Realtime subscription status (from Supabase channel .subscribe() callback)
+export type RealtimeSubscriptionStatus = 'SUBSCRIBED' | 'TIMED_OUT' | 'CHANNEL_ERROR' | 'CLOSED';
+
 // Subscription callbacks interface
 export interface MessageSubscriptionCallbacks {
   onNewMessage?: (message: Message) => void;
   onMessageUpdated?: (message: Message) => void;
   onMessageDeleted?: (messageId: string) => void;
   onTyping?: (userId: string, isTyping: boolean) => void;
+  onSubscriptionStatus?: (status: RealtimeSubscriptionStatus) => void;
 }
 
 // Conversation list subscription callbacks
@@ -124,13 +128,34 @@ export interface ConversationSubscriptionCallbacks {
 
 class MessagingService {
   // Track active subscriptions for cleanup
-  private activeSubscriptions = new Map<string, any>();
-  // Track channels per conversation (for typing indicators)
-  private activeChannels = new Map<string, any>(); // conversationId -> channel
+  private activeSubscriptions = new Map<string, () => void>();
+  // Single source of truth: one channel per conversation (created before subscribe, used for messages + typing)
+  private activeChannels = new Map<string, ReturnType<typeof supabase.channel>>();
   // Track typing state per conversation
   private typingState = new Map<string, Map<string, number>>(); // conversationId -> userId -> timestamp
   // Rate limiting for typing indicators (500ms)
   private lastTypingEvent = new Map<string, number>(); // conversationId -> timestamp
+
+  /**
+   * Get or create the Realtime channel for a conversation. Creates and stores the channel only if it
+   * does not exist (pending map). Used by subscribeToMessages so one channel is shared for
+   * postgres_changes and broadcast typing. Returns the same instance every time for that conversationId.
+   */
+  private getOrCreateConversationChannel(conversationId: string) {
+    let channel = this.activeChannels.get(conversationId);
+    if (channel) return channel;
+    channel = supabase.channel(`messages:${conversationId}`);
+    this.activeChannels.set(conversationId, channel);
+    return channel;
+  }
+
+  /**
+   * Get existing channel for a conversation. Does not create. Used by startTyping/stopTyping so
+   * they never create a second channel—they only send on the channel from subscribeToMessages.
+   */
+  private getChannel(conversationId: string): ReturnType<typeof supabase.channel> | undefined {
+    return this.activeChannels.get(conversationId);
+  }
 
   /**
    * Get all conversations for the current user
@@ -930,8 +955,10 @@ class MessagingService {
       this.typingState.set(conversationId, new Map());
     }
 
-    const channel = supabase
-      .channel(`messages:${conversationId}`)
+    // Single channel per conversation: get or create (stored immediately so startTyping/stopTyping use same instance)
+    const channel = this.getOrCreateConversationChannel(conversationId);
+
+    channel
       // Handle new messages (INSERT)
       .on(
         'postgres_changes',
@@ -1095,6 +1122,9 @@ class MessagingService {
             });
           }
           
+          if (__DEV__) {
+            console.log('[MessagingService] Typing received', { conversationId, userId, isTyping });
+          }
           // Notify callback
           if (normalizedCallbacks.onTyping) {
             normalizedCallbacks.onTyping(userId, isTyping);
@@ -1104,12 +1134,11 @@ class MessagingService {
       .subscribe((status) => {
         if (status === 'SUBSCRIBED') {
           console.log(`Subscribed to messages for conversation ${conversationId}`);
-          // Store channel for typing indicators
-          this.activeChannels.set(conversationId, channel);
         } else if (status === 'CHANNEL_ERROR') {
           console.error(`Error subscribing to messages for conversation ${conversationId}`);
           this.activeChannels.delete(conversationId);
         }
+        normalizedCallbacks.onSubscriptionStatus?.(status as RealtimeSubscriptionStatus);
       });
 
     // Note: Typing cleanup is now event-driven (handled in broadcast event handler above)
@@ -1128,7 +1157,8 @@ class MessagingService {
   }
 
   /**
-   * Start typing indicator (with rate limiting)
+   * Start typing indicator (with rate limiting). Uses the same channel as subscribeToMessages;
+   * never creates a second channel.
    */
   async startTyping(conversationId: string): Promise<void> {
     if (!isSupabaseConfigured()) {
@@ -1139,40 +1169,32 @@ class MessagingService {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
+      const channel = this.getChannel(conversationId);
+      if (!channel) return; // No channel until subscribeToMessages has run (e.g. DM screen open)
+
       // Rate limiting: max 1 event per 500ms
       const lastEvent = this.lastTypingEvent.get(conversationId) || 0;
       const now = Date.now();
       if (now - lastEvent < 500) {
-        return; // Skip if too soon
+        return;
       }
-
       this.lastTypingEvent.set(conversationId, now);
-
-      // Use existing channel if available, otherwise create and subscribe
-      let channel = this.activeChannels.get(conversationId);
-      
-      if (!channel) {
-        // Channel doesn't exist, create and subscribe it
-        channel = supabase.channel(`messages:${conversationId}`);
-        await channel.subscribe();
-        this.activeChannels.set(conversationId, channel);
-        
-        // Wait a bit for subscription to be ready
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
 
       await channel.send({
         type: 'broadcast',
         event: 'typing',
         payload: { userId: user.id, isTyping: true },
       });
+      if (__DEV__) {
+        console.log('[MessagingService] Typing sent', { conversationId, userId: user.id });
+      }
     } catch (error) {
       console.error('Error sending typing indicator:', error);
     }
   }
 
   /**
-   * Stop typing indicator
+   * Stop typing indicator. Uses the same channel as subscribeToMessages; never creates a second channel.
    */
   async stopTyping(conversationId: string): Promise<void> {
     if (!isSupabaseConfigured()) {
@@ -1183,18 +1205,8 @@ class MessagingService {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      // Use existing channel if available, otherwise create and subscribe
-      let channel = this.activeChannels.get(conversationId);
-      
-      if (!channel) {
-        // Channel doesn't exist, create and subscribe it
-        channel = supabase.channel(`messages:${conversationId}`);
-        await channel.subscribe();
-        this.activeChannels.set(conversationId, channel);
-        
-        // Wait a bit for subscription to be ready
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
+      const channel = this.getChannel(conversationId);
+      if (!channel) return;
 
       await channel.send({
         type: 'broadcast',
