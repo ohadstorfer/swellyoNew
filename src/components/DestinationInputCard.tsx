@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View,
   StyleSheet,
@@ -7,13 +7,22 @@ import {
   Platform,
   Dimensions,
   Image,
-  Modal,
+  ImageBackground,
+  ScrollView,
+  NativeSyntheticEvent,
+  NativeScrollEvent,
+  PanResponder,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Text } from './Text';
 import { colors, spacing, typography, borderRadius } from '../styles/theme';
 import { getCountryFlag } from '../utils/countryFlags';
+import {
+  getCountryImageFromStorage,
+  getCountryImageFallback,
+  getCountryImageFromPexels,
+} from '../services/media/imageService';
 
 interface DestinationInputCardProps {
   destination: string;
@@ -24,8 +33,9 @@ interface DestinationInputCardProps {
   }) => void;
   currentIndex?: number;
   totalCount?: number;
-  onPrevious?: () => void;
   onNext?: () => void;
+  onSave?: () => void;
+  saveDisabled?: boolean;
   isReadOnly?: boolean;
   initialAreas?: string;
   initialTimeValue?: string;
@@ -34,13 +44,26 @@ interface DestinationInputCardProps {
 
 type TimeUnit = 'days' | 'weeks' | 'months' | 'years';
 
+const TIME_UNITS: TimeUnit[] = ['days', 'weeks', 'months', 'years'];
+const UNIT_LABELS: Record<TimeUnit, string> = { days: 'Days', weeks: 'Weeks', months: 'Months', years: 'Years' };
+const UNIT_ITEM_WIDTH = 58;
+const UNIT_CAROUSEL_CONTAINER_WIDTH = 179;
+
+// Infinite scroll: 100 copies of the 4 units on each side of center (201 cycles = 804 items)
+const REPEAT_SIDES = 100;
+const CENTER_CYCLE_INDEX = REPEAT_SIDES;
+const TOTAL_UNIT_ITEMS = (REPEAT_SIDES * 2 + 1) * TIME_UNITS.length;
+const CENTER_ITEM_INDEX = CENTER_CYCLE_INDEX * TIME_UNITS.length;
+const RECENTER_THRESHOLD = TIME_UNITS.length * 25; // recenter when within 25 cycles of edge
+
 export const DestinationInputCard: React.FC<DestinationInputCardProps> = ({
   destination,
   onDataChange,
   currentIndex = 0,
   totalCount = 1,
-  onPrevious,
   onNext,
+  onSave,
+  saveDisabled = false,
   isReadOnly = false,
   initialAreas,
   initialTimeValue,
@@ -49,10 +72,35 @@ export const DestinationInputCard: React.FC<DestinationInputCardProps> = ({
   const [areas, setAreas] = useState(initialAreas || '');
   const [timeValue, setTimeValue] = useState(initialTimeValue || '2');
   const [timeUnit, setTimeUnit] = useState<TimeUnit>(initialTimeUnit || 'weeks');
-  const [isUnitPickerVisible, setIsUnitPickerVisible] = useState(false);
-  const [unitButtonLayout, setUnitButtonLayout] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
-  const unitButtonRef = useRef<View>(null);
+  const unitScrollRef = useRef<ScrollView>(null);
   const onDataChangeRef = useRef(onDataChange);
+  const scrollEndTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scrollXRef = useRef(0);
+  const startScrollXRef = useRef(0);
+  const dragStartRef = useRef<{ clientX: number; scrollX: number } | null>(null);
+  const unitSelectorWrapperRef = useRef<View>(null);
+  const maxScrollX = (TOTAL_UNIT_ITEMS - 1) * UNIT_ITEM_WIDTH;
+  const unitScrollIndexRef = useRef(CENTER_ITEM_INDEX + TIME_UNITS.indexOf(initialTimeUnit || 'weeks'));
+  const [unitScrollIndex, setUnitScrollIndex] = useState(() => CENTER_ITEM_INDEX + TIME_UNITS.indexOf(initialTimeUnit || 'weeks'));
+
+  // Country background image (same system as ProfileScreen destinations)
+  const [countryImageFailed, setCountryImageFailed] = useState(false);
+  const [pexelsImageUrl, setPexelsImageUrl] = useState<string | null>(null);
+  const countryImageUrl = getCountryImageFromStorage(destination);
+  const countryFlagUrl = getCountryFlag(destination);
+  const handleBucketImageError = async () => {
+    setCountryImageFailed(true);
+    const url = await getCountryImageFromPexels(destination);
+    if (url) setPexelsImageUrl(url);
+  };
+  const backgroundImageUri =
+    (!countryImageFailed && countryImageUrl) || pexelsImageUrl
+      ? (countryImageFailed ? pexelsImageUrl! : countryImageUrl!)
+      : countryFlagUrl || getCountryImageFallback(destination);
+  useEffect(() => {
+    setCountryImageFailed(false);
+    setPexelsImageUrl(null);
+  }, [destination]);
 
   // Update ref when onDataChange changes
   useEffect(() => {
@@ -138,79 +186,180 @@ export const DestinationInputCard: React.FC<DestinationInputCardProps> = ({
 
   const handleUnitSelect = (unit: TimeUnit) => {
     setTimeUnit(unit);
-    setIsUnitPickerVisible(false);
   };
 
-  const handleUnitButtonPress = () => {
-    if (unitButtonRef.current) {
-      unitButtonRef.current.measure((x, y, width, height, pageX, pageY) => {
-        setUnitButtonLayout({ x: pageX, y: pageY, width, height });
-        setIsUnitPickerVisible(!isUnitPickerVisible);
-      });
+  // Snap to nearest option and update timeUnit; recenter when near edges for infinite feel
+  const snapToNearestUnit = (scrollX: number) => {
+    let index = Math.round(scrollX / UNIT_ITEM_WIDTH);
+    const clampedIndex = Math.max(0, Math.min(TOTAL_UNIT_ITEMS - 1, index));
+    index = clampedIndex;
+    const unitIndex = index % TIME_UNITS.length;
+    const newUnit = TIME_UNITS[unitIndex];
+    if (newUnit !== timeUnit) setTimeUnit(newUnit);
+
+    let targetX: number;
+    let newScrollIndex = index;
+    if (index >= TOTAL_UNIT_ITEMS - RECENTER_THRESHOLD) {
+      newScrollIndex = index - CENTER_ITEM_INDEX;
+      targetX = newScrollIndex * UNIT_ITEM_WIDTH;
+      unitScrollRef.current?.scrollTo({ x: targetX, animated: false });
+    } else if (index < RECENTER_THRESHOLD) {
+      newScrollIndex = index + CENTER_ITEM_INDEX;
+      targetX = newScrollIndex * UNIT_ITEM_WIDTH;
+      unitScrollRef.current?.scrollTo({ x: targetX, animated: false });
     } else {
-      setIsUnitPickerVisible(!isUnitPickerVisible);
+      targetX = index * UNIT_ITEM_WIDTH;
+      unitScrollRef.current?.scrollTo({ x: targetX, animated: true });
+    }
+    scrollXRef.current = targetX;
+    unitScrollIndexRef.current = newScrollIndex;
+    setUnitScrollIndex(newScrollIndex);
+  };
+
+  const handleScrollEnd = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const x = event.nativeEvent.contentOffset.x;
+    snapToNearestUnit(x);
+  };
+
+  const onMomentumScrollEnd = handleScrollEnd;
+  const onScrollEndDrag = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    if (scrollEndTimeoutRef.current) clearTimeout(scrollEndTimeoutRef.current);
+    scrollEndTimeoutRef.current = setTimeout(() => handleScrollEnd(event), 100);
+  };
+
+  const onUnitScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const x = event.nativeEvent.contentOffset.x;
+    scrollXRef.current = x;
+    const idx = Math.round(x / UNIT_ITEM_WIDTH);
+    if (idx !== unitScrollIndexRef.current) {
+      unitScrollIndexRef.current = idx;
+      setUnitScrollIndex(idx);
     }
   };
 
-  // Close unit picker when clicking outside
-  useEffect(() => {
-    if (!isUnitPickerVisible) {
-      return;
+  // PanResponder: capture horizontal drag on selector so parent carousel doesn't scroll (native + web touch)
+  const unitPanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => false,
+        onMoveShouldSetPanResponderCapture: (_, gestureState) => {
+          if (isReadOnly) return false;
+          const { dx, dy } = gestureState;
+          return Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 4;
+        },
+        onPanResponderGrant: () => {
+          startScrollXRef.current = scrollXRef.current;
+        },
+        onPanResponderMove: (_, gestureState) => {
+          const newX = Math.max(0, Math.min(maxScrollX, startScrollXRef.current - gestureState.dx));
+          unitScrollRef.current?.scrollTo({ x: newX, animated: false });
+          scrollXRef.current = newX;
+        },
+        onPanResponderRelease: () => {
+          snapToNearestUnit(scrollXRef.current);
+        },
+      }),
+    [isReadOnly, maxScrollX]
+  );
+
+  // Web (including desktop): pointer capture so parent carousel doesn't get the drag
+  const onUnitPointerDown = (e: any) => {
+    if (isReadOnly || Platform.OS !== 'web') return;
+    const ne = e.nativeEvent;
+    const target = ne.target as HTMLElement;
+    if (target?.setPointerCapture) target.setPointerCapture(ne.pointerId);
+    dragStartRef.current = { clientX: ne.clientX, scrollX: scrollXRef.current };
+  };
+  const onUnitPointerMove = (e: any) => {
+    if (!dragStartRef.current || Platform.OS !== 'web') return;
+    const ne = e.nativeEvent;
+    ne.preventDefault();
+    ne.stopPropagation();
+    const dx = ne.clientX - dragStartRef.current.clientX;
+    const newScrollX = Math.max(0, Math.min(maxScrollX, dragStartRef.current.scrollX - dx));
+    dragStartRef.current = { clientX: ne.clientX, scrollX: newScrollX };
+    unitScrollRef.current?.scrollTo({ x: newScrollX, animated: false });
+    scrollXRef.current = newScrollX;
+  };
+  const onUnitPointerUp = (e: any) => {
+    if (Platform.OS !== 'web') return;
+    const ne = e.nativeEvent;
+    const target = ne.target as HTMLElement;
+    if (target?.releasePointerCapture) target.releasePointerCapture(ne.pointerId);
+    if (dragStartRef.current) {
+      snapToNearestUnit(scrollXRef.current);
+      dragStartRef.current = null;
     }
+  };
+  const onUnitPointerCancel = (e: any) => {
+    if (Platform.OS !== 'web') return;
+    dragStartRef.current = null;
+  };
 
-    const handlePressOutside = () => {
-      setIsUnitPickerVisible(false);
+  // Initial scroll position to center the selected unit in the infinite list
+  useEffect(() => {
+    const id = requestAnimationFrame(() => {
+      const startIndex = CENTER_ITEM_INDEX + TIME_UNITS.indexOf(timeUnit);
+      const startX = startIndex * UNIT_ITEM_WIDTH;
+      unitScrollRef.current?.scrollTo({ x: startX, animated: false });
+      scrollXRef.current = startX;
+      unitScrollIndexRef.current = startIndex;
+      setUnitScrollIndex(startIndex);
+    });
+    return () => cancelAnimationFrame(id);
+  }, []);
+
+  // Clean up scroll-end timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (scrollEndTimeoutRef.current) clearTimeout(scrollEndTimeoutRef.current);
     };
+  }, []);
 
-    // Add a small delay to avoid immediate close
-    const timer = setTimeout(() => {
-      // This will be handled by the overlay
-    }, 100);
-
-    return () => clearTimeout(timer);
-  }, [isUnitPickerVisible]);
-
-  const flagUrl = getCountryFlag(destination);
   const screenWidth = Dimensions.get('window').width;
-  const cardWidth = Math.min(328, screenWidth - 62); // 328px from Figma, with padding
+  const cardWidth = Math.min(328, screenWidth - 62);
+
+  const showBucketFirst = !countryImageFailed && countryImageUrl;
+  const backgroundUri = showBucketFirst
+    ? countryImageUrl!
+    : pexelsImageUrl || countryFlagUrl || getCountryImageFallback(destination);
 
   return (
     <View style={[styles.container, { width: cardWidth }]}>
-      <LinearGradient
-        colors={[
-          'rgba(5, 188, 211, 0.5)',
-          'rgba(219, 205, 188, 0.5)',
-          'rgba(232, 223, 209, 0.5)',
-          'rgba(246, 243, 237, 0.5)',
-        ]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.gradientWrapper}
-      >
-        <View style={styles.card}>
-          {/* Header with flag and destination name */}
-          <View style={styles.header}>
-            {flagUrl ? (
-              <Image 
-                source={{ uri: flagUrl }} 
-                style={styles.flagImage}
-                resizeMode="contain"
-              />
+      <View style={[styles.cardOuter, { width: cardWidth }]}>
+        {/* Flag outside cardWrapper so it isn't clipped when overlapping top */}
+        <View style={styles.flagCircleWrapper} pointerEvents="none">
+          <View style={styles.flagCircle}>
+            {countryFlagUrl ? (
+              <Image source={{ uri: countryFlagUrl }} style={styles.flagCircleImage} resizeMode="cover" />
             ) : (
               <Text style={styles.flagEmoji}>🌊</Text>
             )}
-            <Text style={styles.destinationName}>{destination}</Text>
           </View>
+        </View>
+        <View style={[styles.cardWrapper, { width: cardWidth }]}>
+          <ImageBackground
+            source={{ uri: backgroundUri }}
+            style={styles.backgroundImage}
+            resizeMode="cover"
+            onError={showBucketFirst ? handleBucketImageError : undefined}
+          >
+            <View style={styles.frostedOverlay} />
+          </ImageBackground>
+          <View style={styles.card}>
+            {/* Destination name */}
+            <Text style={styles.destinationName}>{destination}</Text>
 
           {/* Input Fields */}
           <View style={styles.content}>
             {/* Areas Input */}
             <TouchableOpacity style={styles.inputContainer} activeOpacity={1} disabled={isReadOnly}>
+              <Ionicons name="location-outline" size={20} color="#A0A0A0" style={styles.inputIcon} />
               <TextInput
                 style={[styles.textInput, isReadOnly && styles.inputReadOnly]}
                 value={areas}
                 onChangeText={setAreas}
-                placeholder="🎯 City/town/surf spots..."
+                placeholder="City/town/surf spots..."
                 placeholderTextColor="#A0A0A0"
                 multiline={false}
                 editable={!isReadOnly}
@@ -261,163 +410,90 @@ export const DestinationInputCard: React.FC<DestinationInputCardProps> = ({
                     })}
                   />
                 </View>
-                <View style={styles.unitSelectorContainer}>
-                  <TouchableOpacity
-                    ref={unitButtonRef}
-                    style={[styles.unitButton, isReadOnly && styles.unitButtonReadOnly]}
-                    onPress={handleUnitButtonPress}
-                    activeOpacity={0.7}
-                    disabled={isReadOnly}
+                <View
+                  ref={unitSelectorWrapperRef}
+                  style={[styles.unitCarouselContainer, isReadOnly && styles.unitCarouselReadOnly]}
+                  accessibilityRole="adjustable"
+                  accessibilityLabel="Time unit"
+                  accessibilityValue={{ text: UNIT_LABELS[timeUnit] }}
+                  {...(Platform.OS === 'web'
+                    ? {
+                        onPointerDown: onUnitPointerDown,
+                        onPointerMove: onUnitPointerMove,
+                        onPointerUp: onUnitPointerUp,
+                        onPointerCancel: onUnitPointerCancel,
+                      }
+                    : unitPanResponder.panHandlers)}
+                >
+                  <ScrollView
+                    ref={unitScrollRef}
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    scrollEventThrottle={16}
+                    decelerationRate="fast"
+                    snapToInterval={UNIT_ITEM_WIDTH}
+                    snapToAlignment="center"
+                    disableIntervalMomentum
+                    contentContainerStyle={[
+                      styles.unitCarouselContent,
+                      { paddingHorizontal: (UNIT_CAROUSEL_CONTAINER_WIDTH - UNIT_ITEM_WIDTH) / 2 },
+                    ]}
+                    onScroll={onUnitScroll}
+                    onMomentumScrollEnd={onMomentumScrollEnd}
+                    onScrollEndDrag={onScrollEndDrag}
+                    scrollEnabled={false}
+                    {...(Platform.OS === 'web' && { style: { overflow: 'hidden' } as any })}
                   >
-                    <Text style={[styles.unitText, isReadOnly && styles.unitTextReadOnly]}>
-                      {timeUnit.charAt(0).toUpperCase() + timeUnit.slice(1)}
-                    </Text>
-                    {!isReadOnly && <Ionicons name="chevron-down" size={16} color={colors.textPrimary} />}
-                  </TouchableOpacity>
+                    {Array.from({ length: TOTAL_UNIT_ITEMS }, (_, i) => {
+                      const unit = TIME_UNITS[i % TIME_UNITS.length];
+                      const isSelected = i === unitScrollIndex;
+                      return (
+                        <View key={i} style={[styles.unitCarouselItem, { width: UNIT_ITEM_WIDTH }]}>
+                          <Text
+                            style={[
+                              styles.unitCarouselItemText,
+                              isSelected ? styles.unitCarouselItemTextSelected : styles.unitCarouselItemTextFaded,
+                              isReadOnly && styles.unitCarouselItemTextReadOnly,
+                            ]}
+                          >
+                            {UNIT_LABELS[unit]}
+                          </Text>
+                        </View>
+                      );
+                    })}
+                  </ScrollView>
+                  {/* Figma: gradient overlay so text fades at edges (linear-gradient 90deg #FFF 0%, transparent 50%, #FFF 100%) */}
+                  <View style={styles.unitCarouselGradientOverlay} pointerEvents="none">
+                    <LinearGradient
+                      colors={['#FFFFFF', 'rgba(255, 255, 255, 0)', '#FFFFFF']}
+                      locations={[0, 0.5, 1]}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 0 }}
+                      style={StyleSheet.absoluteFill}
+                    />
+                  </View>
                 </View>
               </View>
             </View>
           </View>
 
-          {/* Navigation Controls */}
-          <View style={styles.navigationContainer}>
-            {currentIndex > 0 && onPrevious ? (
-              <TouchableOpacity
-                style={[styles.navArrow, isReadOnly && styles.navArrowReadOnly]}
-                onPress={onPrevious}
-                activeOpacity={0.7}
-              >
-                <Ionicons name="chevron-back" size={24} color={isReadOnly ? '#CCCCCC' : colors.textPrimary} />
-              </TouchableOpacity>
-            ) : (
-              <View style={styles.navArrowPlaceholder} />
-            )}
-
-            <View style={styles.dotsContainer}>
-              {Array.from({ length: totalCount }).map((_, index) => (
-                <View
-                  key={index}
-                  style={[
-                    styles.dot,
-                    index === currentIndex ? styles.dotActive : styles.dotInactive,
-                  ]}
-                />
-              ))}
-            </View>
-
-            {currentIndex < totalCount - 1 && onNext ? (
-              <TouchableOpacity
-                style={[styles.navArrow, isReadOnly && styles.navArrowReadOnly]}
-                onPress={onNext}
-                activeOpacity={0.7}
-              >
-                <Ionicons name="chevron-forward" size={24} color={isReadOnly ? '#CCCCCC' : colors.textPrimary} />
-              </TouchableOpacity>
-            ) : (
-              <View style={styles.navArrowPlaceholder} />
-            )}
-          </View>
-        </View>
-      </LinearGradient>
-
-      {/* Unit Picker Modal - Rendered outside card hierarchy */}
-      <Modal
-        visible={isUnitPickerVisible}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => setIsUnitPickerVisible(false)}
-      >
-        <TouchableOpacity
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => setIsUnitPickerVisible(false)}
-        >
-          <View
-            style={[
-              styles.unitOptionsContainerPortal,
-              unitButtonLayout && {
-                position: 'absolute',
-                top: unitButtonLayout.y + unitButtonLayout.height + 8,
-                left: unitButtonLayout.x,
-                width: unitButtonLayout.width,
-              },
-            ]}
-            onStartShouldSetResponder={() => true}
-          >
+          {/* Next or Save button: Save on last card, Next otherwise */}
+          {!isReadOnly && (onNext || onSave) && (
             <TouchableOpacity
-              activeOpacity={1}
-              onPress={(e) => e.stopPropagation()}
+              style={[
+                onSave ? styles.saveButton : styles.nextButton,
+                onSave && saveDisabled && styles.saveButtonDisabled,
+              ]}
+              onPress={onSave || onNext}
+              activeOpacity={0.85}
+              disabled={onSave ? saveDisabled : false}
             >
-              <View style={styles.unitOptionsGrid}>
-                <TouchableOpacity
-                  style={[
-                    styles.unitOptionGrid,
-                    timeUnit === 'days' && styles.unitOptionGridSelected,
-                  ]}
-                  onPress={() => handleUnitSelect('days')}
-                >
-                  <Text
-                    style={[
-                      styles.unitOptionGridText,
-                      timeUnit === 'days' && styles.unitOptionGridTextSelected,
-                    ]}
-                  >
-                    Days
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[
-                    styles.unitOptionGrid,
-                    timeUnit === 'weeks' && styles.unitOptionGridSelected,
-                  ]}
-                  onPress={() => handleUnitSelect('weeks')}
-                >
-                  <Text
-                    style={[
-                      styles.unitOptionGridText,
-                      timeUnit === 'weeks' && styles.unitOptionGridTextSelected,
-                    ]}
-                  >
-                    Weeks
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[
-                    styles.unitOptionGrid,
-                    timeUnit === 'months' && styles.unitOptionGridSelected,
-                  ]}
-                  onPress={() => handleUnitSelect('months')}
-                >
-                  <Text
-                    style={[
-                      styles.unitOptionGridText,
-                      timeUnit === 'months' && styles.unitOptionGridTextSelected,
-                    ]}
-                  >
-                    Months
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[
-                    styles.unitOptionGrid,
-                    timeUnit === 'years' && styles.unitOptionGridSelected,
-                  ]}
-                  onPress={() => handleUnitSelect('years')}
-                >
-                  <Text
-                    style={[
-                      styles.unitOptionGridText,
-                      timeUnit === 'years' && styles.unitOptionGridTextSelected,
-                    ]}
-                  >
-                    Years
-                  </Text>
-                </TouchableOpacity>
-              </View>
+              <Text style={styles.nextButtonText}>{onSave ? 'Save' : 'Next'}</Text>
             </TouchableOpacity>
-          </View>
-        </TouchableOpacity>
-      </Modal>
+          )}
+        </View>
+        </View>
+      </View>
     </View>
   );
 };
@@ -427,58 +503,97 @@ const styles = StyleSheet.create({
     padding: 8,
     overflow: 'visible',
   },
-  gradientWrapper: {
-    borderRadius: 24,
-    padding: 8,
+  cardOuter: {
     overflow: 'visible',
+    paddingTop: 56, /* 16 from flag bottom to Chile text → card starts at 56 (flag bottom 72 − 16 gap) */
+  },
+  cardWrapper: {
+    borderRadius: 24,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
+    position: 'relative',
+  },
+  backgroundImage: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    borderRadius: 24,
+  },
+  frostedOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(255, 255, 255, 0.72)',
+    borderRadius: 24,
   },
   card: {
-    backgroundColor: colors.white,
-    borderRadius: 16,
-    paddingBottom: 24,
-    shadowColor: '#596E7C',
-    shadowOffset: { width: 1, height: 2 },
-    shadowOpacity: 0.16,
-    shadowRadius: 7,
-    elevation: 5,
-    overflow: 'visible',
+    borderRadius: 24,
+    paddingTop: 32, /* 16 gap from flag bottom to Chile text (flag bottom 72, Chile at 88) */
+    paddingHorizontal: 24, /* 24 horizontal gap each side for country content */
+    paddingBottom: 16,
   },
-  header: {
-    flexDirection: 'row',
+  flagCircleWrapper: {
+    position: 'absolute',
+    /* Card starts at 56 (cardOuter paddingTop). top: 50 → only 6px of flag above card; increase for more stick-out, decrease for less. */
+    top: 50,
+    left: 0,
+    right: 0,
     alignItems: 'center',
+    zIndex: 1,
+  },
+  flagCircle: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: colors.white,
+    overflow: 'hidden',
     justifyContent: 'center',
-    gap: 10,
-    paddingVertical: 16,
+    alignItems: 'center',
+    borderWidth: 3,
+    borderColor: colors.white,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  flagCircleImage: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
   },
   flagEmoji: {
-    fontSize: 24,
-    lineHeight: 22,
-  },
-  flagImage: {
-    width: 24,
-    height: 24,
+    fontSize: 28,
   },
   destinationName: {
-    fontSize: 20,
-    fontWeight: '700',
+    fontSize: 16,
+    fontWeight: '400',
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
     color: '#333333',
-    lineHeight: 24,
+    lineHeight: 22,
+    marginBottom: 32, /* 32 gap between country area and input field */
   },
   content: {
-    gap: 16,
-    paddingHorizontal: 16,
+    gap: 12,
     overflow: 'visible',
   },
   inputContainer: {
-    backgroundColor: colors.white,
-    borderWidth: 1,
-    borderColor: '#CFCFCF',
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
     borderRadius: 12,
     height: 56,
-    justifyContent: 'center',
     paddingHorizontal: 16,
     paddingVertical: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 3,
     ...(Platform.OS === 'web' && {
       outline: 'none',
       outlineWidth: 0,
@@ -494,6 +609,9 @@ const styles = StyleSheet.create({
         borderColor: '#CFCFCF',
       },
     } as any),
+  },
+  inputIcon: {
+    marginRight: 12,
   },
   textInput: {
     flex: 1,
@@ -529,14 +647,17 @@ const styles = StyleSheet.create({
   },
   timeInputBox: {
     flex: 1,
-    backgroundColor: colors.white,
-    borderWidth: 1,
-    borderColor: '#CFCFCF',
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
     borderRadius: 12,
     height: 56,
     justifyContent: 'center',
     paddingHorizontal: 16,
     paddingVertical: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 3,
     ...(Platform.OS === 'web' && {
       outline: 'none',
       outlineWidth: 0,
@@ -575,140 +696,93 @@ const styles = StyleSheet.create({
       },
     } as any),
   },
-  unitSelectorContainer: {
-    flex: 1,
-    position: 'relative',
-  },
-  unitButton: {
-    backgroundColor: colors.white,
-    borderWidth: 1,
-    borderColor: '#CFCFCF',
-    borderRadius: 12,
+  unitCarouselContainer: {
+    width: UNIT_CAROUSEL_CONTAINER_WIDTH,
     height: 56,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    ...(Platform.OS === 'web' && {
-      outline: 'none',
-      outlineWidth: 0,
-      outlineStyle: 'none',
-      outlineColor: 'transparent',
-      // @ts-ignore
-      '&:focus': {
-        outline: 'none',
-        borderColor: '#CFCFCF',
-      },
-    } as any),
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0)',
-    justifyContent: 'flex-start',
-    alignItems: 'flex-start',
-  },
-  unitOptionsContainerPortal: {
-    backgroundColor: colors.white,
-    borderWidth: 1,
-    borderColor: '#CFCFCF',
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
     borderRadius: 12,
+    overflow: 'hidden',
+    justifyContent: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
-    zIndex: 9001,
-    padding: 8,
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 3,
+    position: 'relative',
   },
-  unitOptionsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
+  unitCarouselGradientOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 12,
   },
-  unitOptionGrid: {
-    flex: 1,
-    minWidth: '45%',
-    backgroundColor: '#FAFAFA',
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
-    borderRadius: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
+  unitCarouselContent: {
     alignItems: 'center',
     justifyContent: 'center',
   },
-  unitOptionGridSelected: {
-    backgroundColor: '#0788B0',
-    borderColor: '#0788B0',
+  unitCarouselItem: {
+    height: 56,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  unitOptionGridText: {
-    fontSize: 14,
+  unitCarouselItemText: {
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
-    fontWeight: '500',
-    color: colors.textPrimary,
-  },
-  unitOptionGridTextSelected: {
-    color: colors.white,
-    fontWeight: '600',
-  },
-  unitText: {
     fontSize: 16,
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    fontStyle: 'normal',
     fontWeight: '400',
-    color: colors.textPrimary,
     lineHeight: 22,
   },
-  navigationContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    gap: 48,
+  unitCarouselItemTextSelected: {
+    color: '#333333',
+    fontWeight: '400',
   },
-  navArrow: {
-    width: 24,
-    height: 24,
+  unitCarouselItemTextFaded: {
+    color: '#B0B0B0',
+  },
+  unitCarouselReadOnly: {
+    opacity: 0.6,
+    backgroundColor: '#F5F5F5',
+  },
+  unitCarouselItemTextReadOnly: {
+    color: '#999999',
+  },
+  nextButton: {
+    backgroundColor: '#2C2C2C',
+    borderRadius: 14,
+    height: 52,
     justifyContent: 'center',
     alignItems: 'center',
+    marginTop: 16,
+    marginBottom: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 5,
   },
-  navArrowPlaceholder: {
-    width: 24,
-    height: 24,
+  nextButtonText: {
+    color: colors.white,
+    fontSize: 17,
+    fontWeight: '700',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
   },
-  dotsContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  saveButton: {
+    backgroundColor: '#212121',
+    borderRadius: 14,
+    height: 52,
     justifyContent: 'center',
-    gap: 6,
-    flex: 1,
+    alignItems: 'center',
+    marginTop: 16,
+    marginBottom: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 5,
   },
-  dot: {
-    borderRadius: 4,
-  },
-  dotActive: {
-    width: 24,
-    height: 8,
-    backgroundColor: '#0788B0',
-  },
-  dotInactive: {
-    width: 8,
-    height: 8,
-    backgroundColor: '#CFCFCF',
+  saveButtonDisabled: {
+    opacity: 0.5,
   },
   inputReadOnly: {
     opacity: 0.6,
     backgroundColor: '#F5F5F5',
-  },
-  unitButtonReadOnly: {
-    opacity: 0.6,
-    backgroundColor: '#F5F5F5',
-  },
-  unitTextReadOnly: {
-    color: '#999999',
-  },
-  navArrowReadOnly: {
-    opacity: 0.5,
   },
 });

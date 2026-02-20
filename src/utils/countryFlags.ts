@@ -251,15 +251,16 @@ function getCountryISO(countryName?: string): string | null {
   return null;
 }
 
+/** Flag image width: use w160 for sharp display at 50–80px (e.g. destination card circles). w20 was too small and looked blurry when scaled. */
+const FLAG_IMAGE_WIDTH = 160;
+
 /**
  * Get flag image URL for a country name
- * Uses flagcdn.com API for reliable flag images
+ * Uses flagcdn.com API (w160 for crisp display in cards/circles)
  */
 export function getCountryFlag(countryName?: string): string | null {
   const iso = getCountryISO(countryName);
   if (!iso) return null;
-  
-  // Use flagcdn.com - simple, reliable, and free
-  return `https://flagcdn.com/w20/${iso}.png`;
+  return `https://flagcdn.com/w${FLAG_IMAGE_WIDTH}/${iso}.png`;
 }
 

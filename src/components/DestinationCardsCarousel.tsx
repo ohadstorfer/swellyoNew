@@ -3,14 +3,12 @@ import {
   View,
   StyleSheet,
   FlatList,
-  TouchableOpacity,
   Dimensions,
   Platform,
+  PanResponder,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { Text } from './Text';
 import { DestinationInputCard } from './DestinationInputCard';
-import { colors, spacing, borderRadius } from '../styles/theme';
+import { spacing } from '../styles/theme';
 
 type TimeUnit = 'days' | 'weeks' | 'months' | 'years';
 
@@ -26,6 +24,8 @@ interface DestinationCardsCarouselProps {
   onSubmit: (data: DestinationData[]) => void;
   isReadOnly?: boolean;
   initialData?: DestinationData[];
+  /** When true, carousel uses full screen width (no horizontal padding from parent). */
+  fullWidth?: boolean;
 }
 
 export const DestinationCardsCarousel: React.FC<DestinationCardsCarouselProps> = ({
@@ -33,9 +33,16 @@ export const DestinationCardsCarousel: React.FC<DestinationCardsCarouselProps> =
   onSubmit,
   isReadOnly = false,
   initialData,
+  fullWidth = false,
 }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
-  
+  const currentIndexRef = useRef(0);
+  currentIndexRef.current = currentIndex;
+  // Index at gesture start so swipe threshold is relative to where the user started, not viewability.
+  const scrollStartIndexRef = useRef(0);
+  const itemWidthRef = useRef(0);
+  const destinationsLengthRef = useRef(0);
+
   // Initialize destination data from initialData if provided (read-only mode)
   const initializeDestinationData = (): Record<string, DestinationData> => {
     if (initialData && initialData.length > 0) {
@@ -51,7 +58,19 @@ export const DestinationCardsCarousel: React.FC<DestinationCardsCarouselProps> =
   const [destinationData, setDestinationData] = useState<Record<string, DestinationData>>(initializeDestinationData);
   const flatListRef = useRef<FlatList>(null);
   const screenWidth = Dimensions.get('window').width;
-  const cardWidth = Math.min(328, screenWidth - 62); // 328px from Figma, with padding
+  // Full-width carousel rules: (1) The current card is always at the horizontal center of the
+  // screen and not affected by other cards. (2) Next/previous cards show a small peek (PEEK)
+  // on the sides when present; if there is no next or previous card, the centered card's
+  // position is unchanged (first: only right peek, last: only left peek).
+  const PEEK = 24;
+  const CARD_GAP = 4;
+  const cardWidth = fullWidth
+    ? screenWidth - 2 * PEEK
+    : Math.min(328, screenWidth - 62);
+  const itemWidth = fullWidth ? cardWidth + CARD_GAP : cardWidth + spacing.md;
+  const carouselPaddingHorizontal = fullWidth ? PEEK : undefined;
+  itemWidthRef.current = itemWidth;
+  destinationsLengthRef.current = destinations.length;
 
   // Update destination data when individual card data changes (only if not read-only)
   const handleCardDataChange = useCallback((destination: string, data: {
@@ -89,10 +108,74 @@ export const DestinationCardsCarousel: React.FC<DestinationCardsCarouselProps> =
 
   const scrollToIndex = (index: number) => {
     if (index >= 0 && index < destinations.length) {
-      flatListRef.current?.scrollToIndex({ index, animated: true });
+      if (fullWidth) {
+        flatListRef.current?.scrollToOffset({
+          offset: index * itemWidth,
+          animated: true,
+        });
+      } else {
+        flatListRef.current?.scrollToIndex({
+          index,
+          animated: true,
+        });
+      }
+      currentIndexRef.current = index;
       setCurrentIndex(index);
     }
   };
+
+  // Full-width: swipe does exactly the same as Next/Previous (one card, same animation, no free scroll).
+  // Native scroll is disabled; PanResponder detects swipe and we call the same scrollToOffset as the buttons.
+  const SWIPE_THRESHOLD = 40;
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_, { dx }) => Math.abs(dx) > 10,
+      onPanResponderRelease: (_, { dx }) => {
+        const cur = currentIndexRef.current;
+        const len = destinationsLengthRef.current;
+        const iw = itemWidthRef.current;
+        if (len === 0) return;
+        if (dx < -SWIPE_THRESHOLD && cur < len - 1) {
+          const nextIndex = cur + 1;
+          flatListRef.current?.scrollToOffset({ offset: nextIndex * iw, animated: true });
+          currentIndexRef.current = nextIndex;
+          setCurrentIndex(nextIndex);
+        } else if (dx > SWIPE_THRESHOLD && cur > 0) {
+          const prevIndex = cur - 1;
+          flatListRef.current?.scrollToOffset({ offset: prevIndex * iw, animated: true });
+          currentIndexRef.current = prevIndex;
+          setCurrentIndex(prevIndex);
+        }
+      },
+    })
+  ).current;
+
+  // Non-fullWidth: optional snap on scroll end (keep for non-fullWidth if needed later)
+  const handleScrollEnd = useCallback(
+    (event: any) => {
+      if (fullWidth || destinations.length === 0) return;
+      const offsetX = event?.nativeEvent?.contentOffset?.x ?? 0;
+      const cur = scrollStartIndexRef.current;
+      const curOffset = cur * itemWidth;
+      const threshold = itemWidth * 0.25;
+      let targetIndex = cur;
+      if (offsetX > curOffset + threshold && cur + 1 < destinations.length) {
+        targetIndex = cur + 1;
+      } else if (offsetX < curOffset - threshold && cur > 0) {
+        targetIndex = cur - 1;
+      }
+      if (targetIndex !== cur) {
+        flatListRef.current?.scrollToOffset({
+          offset: targetIndex * itemWidth,
+          animated: true,
+        });
+        currentIndexRef.current = targetIndex;
+        setCurrentIndex(targetIndex);
+      }
+    },
+    [fullWidth, destinations.length, itemWidth]
+  );
 
   const scrollToPrevious = () => {
     if (currentIndex > 0) {
@@ -119,13 +202,28 @@ export const DestinationCardsCarousel: React.FC<DestinationCardsCarouselProps> =
     itemVisiblePercentThreshold: 50,
   }).current;
 
+  // When fullWidth, we don't use snapToOffsets: swipe is handled in onScrollEndDrag/onMomentumScrollEnd
+  // and we snap only to next or previous card (same movement as Next/Previous buttons).
+  const snapToOffsets = !fullWidth && destinations.length > 0
+    ? destinations.map((_, i) => i * itemWidth)
+    : undefined;
+
+  // Right spacer so total content width is 2*PEEK + n*itemWidth and last card can scroll to center
+  const listFooterComponent = fullWidth ? (
+    <View style={{ width: PEEK }} />
+  ) : undefined;
+
   return (
     <View style={styles.container}>
       {/* Cards Carousel */}
-      <View style={styles.carouselContainer}>
+      <View
+        style={styles.carouselContainer}
+        {...(fullWidth ? panResponder.panHandlers : {})}
+      >
         <FlatList
           ref={flatListRef}
           data={destinations}
+          scrollEnabled={!fullWidth}
           renderItem={({ item, index }) => {
             const cardData = destinationData[item];
             // Parse timeInText to extract value and unit
@@ -144,14 +242,18 @@ export const DestinationCardsCarousel: React.FC<DestinationCardsCarouselProps> =
               }
             }
             return (
-              <View style={[styles.cardWrapper, { width: cardWidth }]}>
+              <View style={[
+                styles.cardWrapper,
+                { width: cardWidth, marginRight: fullWidth ? CARD_GAP : spacing.md },
+              ]}>
                 <DestinationInputCard
                   destination={item}
                   onDataChange={(data) => handleCardDataChange(item, data)}
                   currentIndex={index}
                   totalCount={destinations.length}
-                  onPrevious={scrollToPrevious}
-                  onNext={scrollToNext}
+                  onNext={index < destinations.length - 1 ? scrollToNext : undefined}
+                  onSave={index === destinations.length - 1 ? handleSubmit : undefined}
+                  saveDisabled={index === destinations.length - 1 ? !isAllDataValid() : false}
                   isReadOnly={isReadOnly}
                   initialAreas={cardData?.areas.join(', ')}
                   initialTimeValue={initialTimeValue}
@@ -162,18 +264,28 @@ export const DestinationCardsCarousel: React.FC<DestinationCardsCarouselProps> =
           }}
           keyExtractor={(item, index) => `destination-${item}-${index}`}
           horizontal
-          pagingEnabled
+          pagingEnabled={!fullWidth}
           showsHorizontalScrollIndicator={false}
-          snapToInterval={cardWidth + spacing.md}
+          snapToInterval={fullWidth ? undefined : itemWidth}
+          snapToOffsets={snapToOffsets}
+          snapToAlignment={fullWidth ? 'start' : 'start'}
           decelerationRate="fast"
+          onScrollBeginDrag={() => { scrollStartIndexRef.current = currentIndexRef.current; }}
+          onScrollEndDrag={handleScrollEnd}
+          onMomentumScrollEnd={handleScrollEnd}
           onViewableItemsChanged={onViewableItemsChanged}
           viewabilityConfig={viewabilityConfig}
-          contentContainerStyle={styles.carouselContent}
+          contentContainerStyle={[
+            styles.carouselContent,
+            fullWidth && styles.carouselContentFullWidth,
+            carouselPaddingHorizontal !== undefined && { paddingHorizontal: carouselPaddingHorizontal },
+          ]}
           getItemLayout={(_, index) => ({
-            length: cardWidth + spacing.md,
-            offset: (cardWidth + spacing.md) * index,
+            length: itemWidth,
+            offset: fullWidth ? PEEK + itemWidth * index : itemWidth * index,
             index,
           })}
+          ListFooterComponent={listFooterComponent}
           {...(Platform.OS === 'web' && {
             style: {
               overflowX: 'auto' as any,
@@ -184,20 +296,6 @@ export const DestinationCardsCarousel: React.FC<DestinationCardsCarouselProps> =
           })}
         />
       </View>
-
-      {/* Submit Button - Hidden in read-only mode */}
-      {!isReadOnly && (
-        <TouchableOpacity
-          style={[
-            styles.submitButton,
-            !isAllDataValid() && styles.submitButtonDisabled,
-          ]}
-          onPress={handleSubmit}
-          disabled={!isAllDataValid()}
-        >
-          <Text style={styles.submitButtonText}>Save All</Text>
-        </TouchableOpacity>
-      )}
     </View>
   );
 };
@@ -211,31 +309,15 @@ const styles = StyleSheet.create({
   carouselContainer: {
     width: '100%',
     position: 'relative',
-    marginBottom: spacing.md,
   },
   carouselContent: {
     paddingHorizontal: spacing.md,
     alignItems: 'center',
   },
+  carouselContentFullWidth: {
+    paddingHorizontal: 12,
+  },
   cardWrapper: {
     marginRight: spacing.md,
-  },
-  submitButton: {
-    backgroundColor: '#B72DF2',
-    borderRadius: borderRadius.medium,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.lg,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minWidth: 200,
-  },
-  submitButtonDisabled: {
-    opacity: 0.5,
-  },
-  submitButtonText: {
-    color: colors.white,
-    fontSize: 16,
-    fontWeight: '700',
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
   },
 });

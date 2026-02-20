@@ -11,6 +11,7 @@ import {
   Image,
   ImageBackground,
   Animated,
+  Dimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../components/Text';
@@ -588,13 +589,16 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
          message.id === destinationCardsMessageId && 
          destinationList.length > 0 && (
           <View style={styles.uiComponentContainer}>
-            <DestinationCardsCarousel
-              destinations={destinationsSubmitted ? submittedDestinationData.map(d => d.destination) : destinationList}
-              onSubmit={handleDestinationSubmit}
-              isReadOnly={destinationsSubmitted}
-              initialData={destinationsSubmitted ? submittedDestinationData : undefined}
-            />
-          </View>
+            <View style={styles.destinationCarouselFullWidth}>
+              <DestinationCardsCarousel
+                destinations={destinationsSubmitted ? submittedDestinationData.map(d => d.destination) : destinationList}
+                onSubmit={handleDestinationSubmit}
+                isReadOnly={destinationsSubmitted}
+                initialData={destinationsSubmitted ? submittedDestinationData : undefined}
+                fullWidth
+              />
+            </View>
+        </View>
         )}
         
         {/* Render budget buttons if this is the message that originally requested them */}
@@ -964,6 +968,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingTop: spacing.sm,
     paddingBottom: spacing.md,
+  },
+  destinationCarouselFullWidth: {
+    marginHorizontal: -(spacing.md * 2),
+    width: Dimensions.get('window').width,
+    paddingHorizontal: 0,
   },
 });
 
