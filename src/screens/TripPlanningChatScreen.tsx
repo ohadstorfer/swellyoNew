@@ -4,7 +4,6 @@ import {
   StyleSheet,
   SafeAreaView,
   ScrollView,
-  TextInput,
   TouchableOpacity,
   Alert,
   KeyboardAvoidingView,
@@ -13,7 +12,6 @@ import {
   ImageBackground,
   Animated,
 } from 'react-native';
-import { TextInput as PaperTextInput } from 'react-native-paper';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../components/Text';
 import { colors, spacing } from '../styles/theme';
@@ -27,6 +25,7 @@ import { findMatchingUsersV3 } from '../services/matching/matchingServiceV3';
 import { supabaseAuthService } from '../services/auth/supabaseAuthService';
 import { MatchedUser, TripPlanningRequest } from '../types/tripPlanning';
 import { analyticsService } from '../services/analytics/analyticsService';
+import { ChatTextInput } from '../components/ChatTextInput';
 
 /**
  * Count how many criteria are requested (helper function for UI)
@@ -245,9 +244,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   const [pendingPartialMatches, setPendingPartialMatches] = useState<MatchedUser[] | null>(null);
   const [pendingSingleCriterionMatches, setPendingSingleCriterionMatches] = useState<MatchedUser[] | null>(null);
   const [singleCriterionType, setSingleCriterionType] = useState<string | null>(null);
-  const [inputHeight, setInputHeight] = useState(25);
   const scrollViewRef = useRef<ScrollView>(null);
-  const textInputRef = useRef<any>(null);
 
   // Test API connection and initialize chat context on component mount
   useEffect(() => {
@@ -1271,101 +1268,20 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
 
         {/* Input Area */}
         <View style={styles.inputWrapper}>
-          <View style={styles.attachButtonWrapper}>
-            <TouchableOpacity style={styles.attachButton}>
-              <Ionicons name="add" size={28} color="#222B30" />
-            </TouchableOpacity>
-          </View>
-          
-          <View style={[
-            styles.inputContainer,
-            { minHeight: Math.max(48, inputHeight + 16) }
-          ]}>
-            <View style={styles.inputInnerContainer}>
-              <PaperTextInput
-                ref={textInputRef}
-                mode="flat"
-                value={inputText}
-                onChangeText={setInputText}
-                placeholder="Type your message.."
-                multiline={true}
-                maxLength={500}
-                onSubmitEditing={() => {
-                  // On native: Send button on keyboard sends message
-                  if (Platform.OS !== 'web') {
-                    sendMessage();
-                  }
-                }}
-                returnKeyType="send" // Show "Send" button on native keyboards
-                blurOnSubmit={false}
-                onContentSizeChange={(event: any) => {
-                  const { height } = event.nativeEvent.contentSize;
-                  if (!height || height < 0) return;
-                  const calculatedHeight = Math.max(25, Math.ceil(height));
-                  const cappedHeight = Math.min(calculatedHeight, 120);
-                  if (Math.abs(cappedHeight - inputHeight) >= 1) {
-                    setInputHeight(cappedHeight);
-                  }
-                }}
-                onKeyPress={(e: any) => {
-                  if (Platform.OS === 'web' && e.nativeEvent.key === 'Enter') {
-                    const isShiftPressed = (e.nativeEvent as any).shiftKey;
-                    if (!isShiftPressed) {
-                      e.preventDefault();
-                      sendMessage();
-                    }
-                  }
-                }}
-                scrollEnabled={inputHeight >= 120}
-                textAlignVertical={inputHeight <= 25 ? "center" : "top"}
-                style={[
-                  styles.paperTextInput,
-                  { 
-                    height: inputHeight,
-                    maxHeight: 120,
-                    ...(inputHeight <= 25 && {
-                      paddingTop: 5,
-                    }),
-                  }
-                ]}
-                contentStyle={[
-                  styles.paperTextInputContent,
-                  {
-                    paddingTop: 0,
-                    paddingBottom: 0,
-                    minHeight: 25,
-                  }
-                ]}
-                underlineColor="transparent"
-                activeUnderlineColor="transparent"
-                selectionColor={colors.primary || '#B72DF2'}
-                placeholderTextColor="#7B7B7B"
-                textColor="#333333"
-                theme={{
-                  colors: {
-                    primary: colors.primary || '#B72DF2',
-                    text: '#333333',
-                    placeholder: '#7B7B7B',
-                    background: 'transparent',
-                  },
-                }}
-              />
-            </View>
-            
-            <View style={styles.sendButtonWrapper}>
-              <TouchableOpacity 
-                style={[styles.sendButton, (!inputText.trim() || isLoading) && styles.sendButtonDisabled]}
-                onPress={sendMessage}
-                disabled={!inputText.trim() || isLoading}
-              >
-                <Ionicons 
-                  name={inputText.trim() ? "arrow-up" : "mic"} 
-                  size={20} 
-                  color="#FFFFFF" 
-                />
+          <ChatTextInput
+            value={inputText}
+            onChangeText={setInputText}
+            onSend={sendMessage}
+            disabled={isLoading}
+            placeholder="Type your message.."
+            maxLength={500}
+            primaryColor={colors.primary || '#B72DF2'}
+            leftAccessory={
+              <TouchableOpacity style={styles.attachButton}>
+                <Ionicons name="add" size={28} color="#222B30" />
               </TouchableOpacity>
-            </View>
-          </View>
+            }
+          />
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -1591,88 +1507,6 @@ const styles = StyleSheet.create({
     height: 28,
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  inputContainer: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.white,
-    paddingLeft: 10,
-    paddingRight: 8,
-    paddingTop: 8,
-    paddingBottom: 8,
-    minHeight: 48,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 32,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 32,
-    ...(Platform.OS === 'web' && {
-      boxShadow: '0px 0px 20px rgba(0, 0, 0, 0.08)',
-      transition: 'min-height 0.2s ease' as any,
-    }),
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.08,
-    shadowRadius: 20,
-    elevation: 5,
-  },
-  inputInnerContainer: {
-    flex: 1,
-    paddingHorizontal: 8,
-    paddingVertical: 0,
-    justifyContent: 'center',
-    minHeight: 25,
-    position: 'relative',
-    alignSelf: 'stretch',
-  },
-  paperTextInput: {
-    backgroundColor: 'transparent',
-    paddingHorizontal: 0,
-    paddingVertical: 0,
-    margin: 0,
-    fontSize: 18,
-    fontWeight: '400',
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
-    lineHeight: 22,
-    minHeight: 25,
-    textAlign: 'left',
-    ...(Platform.OS === 'web' && {
-      outline: 'none' as any,
-      resize: 'none' as any,
-      overflow: 'auto' as any,
-      textAlign: 'left' as any,
-    }),
-  },
-  paperTextInputContent: {
-    paddingHorizontal: 0,
-    paddingVertical: 0,
-    margin: 0,
-    minHeight: 25,
-    fontSize: 18,
-    lineHeight: 22,
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
-    textAlign: 'left',
-    ...(Platform.OS === 'web' && {
-      outline: 'none' as any,
-      textAlign: 'left' as any,
-    }),
-  },
-  sendButtonWrapper: {
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginLeft: 8,
-  },
-  sendButton: {
-    width: 35,
-    height: 35,
-    borderRadius: 48,
-    backgroundColor: '#B72DF2',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 10,
-  },
-  sendButtonDisabled: {
-    opacity: 0.5,
   },
   typingContainer: {
     flexDirection: 'row',

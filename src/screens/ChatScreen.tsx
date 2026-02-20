@@ -4,7 +4,6 @@ import {
   StyleSheet,
   SafeAreaView,
   ScrollView,
-  TextInput,
   TouchableOpacity,
   Alert,
   KeyboardAvoidingView,
@@ -13,7 +12,6 @@ import {
   ImageBackground,
   Animated,
 } from 'react-native';
-import { TextInput as PaperTextInput } from 'react-native-paper';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../components/Text';
 import { colors, spacing, typography, borderRadius } from '../styles/theme';
@@ -25,6 +23,7 @@ import { messagingService } from '../services/messaging/messagingService';
 import { analyticsService } from '../services/analytics/analyticsService';
 import { DestinationCardsCarousel } from '../components/DestinationCardsCarousel';
 import { BudgetButtonSelector } from '../components/BudgetButtonSelector';
+import { ChatTextInput } from '../components/ChatTextInput';
 
 interface Message {
   id: string;
@@ -54,10 +53,8 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
   const [isInitializing, setIsInitializing] = useState(true);
   const [chatId, setChatId] = useState<string | null>(null);
   const [isFinished, setIsFinished] = useState(false);
-  const [inputHeight, setInputHeight] = useState(25); // Initial height for one line
   const [onboardingStartTime] = useState<number>(Date.now()); // Track when onboarding chat started
   const scrollViewRef = useRef<ScrollView>(null);
-  const textInputRef = useRef<any>(null);
   
   // State for destination cards
   const [showDestinationCards, setShowDestinationCards] = useState(false);
@@ -705,124 +702,20 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
 
         {/* Input Area */}
         <View style={styles.inputWrapper}>
-          <View style={styles.attachButtonWrapper}>
-            <TouchableOpacity style={styles.attachButton}>
-              <Ionicons name="add" size={28} color="#222B30" />
-            </TouchableOpacity>
-          </View>
-          
-          <View style={[
-            styles.inputContainer,
-            // Dynamically adjust container height based on input height
-            // Container height = inputHeight + vertical padding (8px top + 8px bottom = 16px)
-            // Minimum 48px for single line
-            { minHeight: Math.max(48, inputHeight + 16) }
-          ]}>
-            <View style={styles.inputInnerContainer}>
-              <PaperTextInput
-                ref={textInputRef}
-                mode="flat"
-                value={inputText}
-                onChangeText={setInputText}
-                placeholder="Type your message.."
-                multiline={true}
-                maxLength={500}
-                onSubmitEditing={() => {
-                  // On native: Send button on keyboard sends message
-                  if (Platform.OS !== 'web') {
-                    sendMessage();
-                  }
-                }}
-                returnKeyType="send" // Show "Send" button on native keyboards
-                blurOnSubmit={false}
-                onContentSizeChange={(event: any) => {
-                  // Best practice: Smooth expansion based on actual content size
-                  const { height } = event.nativeEvent.contentSize;
-                  
-                  if (!height || height < 0) return; // Guard against invalid values
-                  
-                  // Calculate proper height:
-                  // - Minimum: 34px (single line with proper line height)
-                  // - Maximum: 120px (~6 lines, approximately 5-6 lines of text)
-                  // - Use content height if it's larger than minimum
-                  const calculatedHeight = Math.max(25, Math.ceil(height));
-                  const cappedHeight = Math.min(calculatedHeight, 120);
-                  
-                  // Only update if height actually changed (prevents unnecessary re-renders)
-                  // Use a small threshold to avoid jittery updates
-                  if (Math.abs(cappedHeight - inputHeight) >= 1) {
-                    setInputHeight(cappedHeight);
-                  }
-                }}
-                onKeyPress={(e: any) => {
-                  // Best practice: Enter sends, Shift+Enter creates new line
-                  if (Platform.OS === 'web' && e.nativeEvent.key === 'Enter') {
-                    const isShiftPressed = (e.nativeEvent as any).shiftKey;
-                    
-                    if (!isShiftPressed) {
-                      // Enter without Shift: send message
-                      e.preventDefault();
-                      sendMessage();
-                    }
-                    // Shift+Enter: allow new line (default behavior, don't prevent)
-                  }
-                }}
-                // Enable scrolling only when we've reached max height
-                scrollEnabled={inputHeight >= 120}
-                // Center text vertically for single line, top for multiline
-                textAlignVertical={inputHeight <= 25 ? "center" : "top"}
-                style={[
-                  styles.paperTextInput,
-                  { 
-                    // Dynamic height: starts at 34px, expands up to 120px
-                    height: inputHeight,
-                    maxHeight: 120,
-                    // Center placeholder vertically for single line
-                    ...(inputHeight <= 25 && {
-                      paddingTop: 5,// Center based on line height (22px)
-                      // paddingBottom: (34 - 22) / 2,
-                    }),
-                  }
-                ]}
-                contentStyle={[
-                  styles.paperTextInputContent,
-                  {
-                    // Ensure content has proper padding and alignment
-                    paddingTop: 0,
-                    paddingBottom: 0,
-                    minHeight: 25.
-                  }
-                ]}
-                underlineColor="transparent"
-                activeUnderlineColor="transparent"
-                selectionColor={colors.primary || '#B72DF2'}
-                placeholderTextColor="#7B7B7B"
-                textColor="#333333"
-                theme={{
-                  colors: {
-                    primary: colors.primary || '#B72DF2',
-                    text: '#333333',
-                    placeholder: '#7B7B7B',
-                    background: 'transparent',
-                  },
-                }}
-              />
-            </View>
-            
-            <View style={styles.sendButtonWrapper}>
-              <TouchableOpacity 
-                style={[styles.sendButton, (!inputText.trim() || isLoading) && styles.sendButtonDisabled]}
-                onPress={sendMessage}
-                disabled={!inputText.trim() || isLoading}
-              >
-                <Ionicons 
-                  name={inputText.trim() ? "arrow-up" : "mic"} 
-                  size={20} 
-                  color="#FFFFFF" 
-                />
+          <ChatTextInput
+            value={inputText}
+            onChangeText={setInputText}
+            onSend={sendMessage}
+            disabled={isLoading}
+            placeholder="Type your message.."
+            maxLength={500}
+            primaryColor={colors.primary || '#B72DF2'}
+            leftAccessory={
+              <TouchableOpacity style={styles.attachButton}>
+                <Ionicons name="add" size={28} color="#222B30" />
               </TouchableOpacity>
-            </View>
-          </View>
+            }
+          />
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -1062,93 +955,6 @@ const styles = StyleSheet.create({
     height: 28,
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  inputContainer: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center', // Center align items vertically to prevent send button from affecting line height
-    backgroundColor: colors.white,
-    paddingLeft: 10,
-    paddingRight: 8,
-    paddingTop: 8,
-    paddingBottom: 8,
-    // Dynamic minHeight: 48px for single line (34px text + 14px padding)
-    // Will expand as inputHeight grows
-    minHeight: 48,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 32,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 32,
-    ...(Platform.OS === 'web' && {
-      boxShadow: '0px 0px 20px rgba(0, 0, 0, 0.08)',
-      transition: 'min-height 0.2s ease' as any, // Smooth height transitions
-    }),
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.08,
-    shadowRadius: 20,
-    elevation: 5,
-  },
-  inputInnerContainer: {
-    flex: 1,
-    paddingHorizontal: 8,
-    paddingVertical: 0,
-    // Center content vertically for single line, flex-start for multiline
-    justifyContent: 'center',
-    minHeight: 25, // Minimum single line height
-    position: 'relative',
-    // Ensure proper alignment for placeholder
-    alignSelf: 'stretch',
-  },
-  paperTextInput: {
-    backgroundColor: 'transparent',
-    paddingHorizontal: 0,
-    paddingVertical: 0,
-    margin: 0,
-    fontSize: 18,
-    fontWeight: '400',
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
-    lineHeight: 22, // Line height for proper text spacing
-    minHeight: 25, // Single line minimum
-    textAlign: 'left', // Ensure text aligns to left
-    ...(Platform.OS === 'web' && {
-      outline: 'none' as any,
-      resize: 'none' as any, // Prevent manual resizing on web
-      overflow: 'auto' as any, // Allow scrolling when content exceeds max height
-      textAlign: 'left' as any, // Left align text on web
-    }),
-  },
-  paperTextInputContent: {
-    paddingHorizontal: 0,
-    paddingVertical: 0,
-    margin: 0,
-    minHeight: 25, // Single line minimum
-    fontSize: 18,
-    lineHeight: 22, // Consistent line height
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
-    textAlign: 'left', // Left align text
-    ...(Platform.OS === 'web' && {
-      outline: 'none' as any,
-      textAlign: 'left' as any, // Left align text on web
-    }),
-  },
-  sendButtonWrapper: {
-    // Isolate send button to prevent it from affecting input line height
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginLeft: 8,
-  },
-  sendButton: {
-    width: 35,
-    height: 35,
-    borderRadius: 48,
-    backgroundColor: '#B72DF2',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 10,
-  },
-  sendButtonDisabled: {
-    opacity: 0.5,
   },
   typingContainer: {
     flexDirection: 'row',
