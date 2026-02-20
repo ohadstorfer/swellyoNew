@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { LinearGradient } from 'expo-linear-gradient';
-import Svg, { Path, Circle } from 'react-native-svg';
+import Svg, { Circle } from 'react-native-svg';
 import { Text } from './Text';
 import { colors, spacing } from '../styles/theme';
 import { getVideoPreloadStatus, waitForVideoReady } from '../services/media/videoPreloadService';
@@ -139,21 +139,43 @@ const AnimatedThumbnail: React.FC<AnimatedThumbnailProps> = ({
         style={[
           baseStyle,
           isActive && activeStyle,
-          isActive && borderStyle, // Apply border directly to thumbnail container
           {
             opacity,
             transform: [{ translateX }],
           },
         ]}
       >
-        {/* Use image for thumbnails - thumbnailUrl should point to actual image files */}
-        {item.thumbnailUrl ? (
-          <Image
-            source={{ uri: item.thumbnailUrl }}
-            style={imageStyle}
-            resizeMode="cover"
-          />
-        ) : null}
+        {/* Active: gradient border (90deg #05BCD3 → #DBCDBC 70%); inactive: plain wrapper */}
+        {isActive ? (
+          <View style={styles.thumbnailImageWrapper}>
+            <LinearGradient
+              colors={['#05BCD3', '#DBCDBC']}
+              locations={[0, 0.7]}
+              start={{ x: 0, y: 0.5 }}
+              end={{ x: 1, y: 0.5 }}
+              style={styles.activeGradientBorder}
+            />
+            <View style={styles.activeGradientInner}>
+              {item.thumbnailUrl ? (
+                <Image
+                  source={{ uri: item.thumbnailUrl }}
+                  style={imageStyle}
+                  resizeMode="cover"
+                />
+              ) : null}
+            </View>
+          </View>
+        ) : (
+          <View style={styles.thumbnailImageWrapper}>
+            {item.thumbnailUrl ? (
+              <Image
+                source={{ uri: item.thumbnailUrl }}
+                style={imageStyle}
+                resizeMode="cover"
+              />
+            ) : null}
+          </View>
+        )}
       </Animated.View>
     </TouchableOpacity>
   );
@@ -1272,14 +1294,13 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
             style={styles.gradientOverlay}
           /> */}
           
-          {/* Frame Border SVG */}
-          <Svg style={styles.frameBorder} width="100%" height="100%" viewBox="0 0 344 328" fill="none" preserveAspectRatio="none">
-            <Path 
-              d="M86.8411 2H26C12.7452 2 2 12.7452 2 26V82.9884M256.523 2H317.365C330.619 2 341.365 12.7452 341.365 26V82.9884M341.365 244.965V301.953C341.365 315.208 330.619 325.953 317.365 325.953H256.523M86.8411 325.953H26C12.7452 325.953 2 315.208 2 301.953V244.965" 
-              stroke="white" 
-              strokeWidth="4"
-            />
-          </Svg>
+          {/* Frame: 4 corners only, same radius (24) as video */}
+          <View style={styles.frameBorderWrapper} pointerEvents="none">
+            <View style={[styles.frameCorner, styles.frameCornerTopLeft]} />
+            <View style={[styles.frameCorner, styles.frameCornerTopRight]} />
+            <View style={[styles.frameCorner, styles.frameCornerBottomLeft]} />
+            <View style={[styles.frameCorner, styles.frameCornerBottomRight]} />
+          </View>
           
           {/* Recording Indicator */}
           <View style={styles.recIcon}>
@@ -1465,13 +1486,54 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 24,
     opacity: 0.2,
   },
-  frameBorder: {
+  frameBorderWrapper: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    pointerEvents: 'none',
+  },
+  frameCorner: {
+    position: 'absolute',
+    width: 56,
+    height: 56,
+    borderColor: 'white',
+  },
+  frameCornerTopLeft: {
+    top: 0,
+    left: 0,
+    borderTopWidth: 4,
+    borderLeftWidth: 4,
+    borderRightWidth: 0,
+    borderBottomWidth: 0,
+    borderTopLeftRadius: 24,
+  },
+  frameCornerTopRight: {
+    top: 0,
+    right: 0,
+    borderTopWidth: 4,
+    borderRightWidth: 4,
+    borderLeftWidth: 0,
+    borderBottomWidth: 0,
+    borderTopRightRadius: 24,
+  },
+  frameCornerBottomLeft: {
+    bottom: 0,
+    left: 0,
+    borderBottomWidth: 4,
+    borderLeftWidth: 4,
+    borderTopWidth: 0,
+    borderRightWidth: 0,
+    borderBottomLeftRadius: 24,
+  },
+  frameCornerBottomRight: {
+    bottom: 0,
+    right: 0,
+    borderBottomWidth: 4,
+    borderRightWidth: 4,
+    borderTopWidth: 0,
+    borderLeftWidth: 0,
+    borderBottomRightRadius: 24,
   },
   recIcon: {
     position: 'absolute',
@@ -1552,10 +1614,17 @@ const styles = StyleSheet.create({
     alignSelf: 'center', // Center within the 131px container
   },
   thumbnailActive: {
-    width: 119,
+    width: 118,
     height: 80,
     overflow: 'visible', // Allow border to be visible
     alignSelf: 'center', // Center within the 131px container
+    // aspect-ratio 59/40 ≈ 118/80
+  },
+  thumbnailImageWrapper: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 8,
+    overflow: 'hidden',
   },
   thumbnailImage: {
     width: '100%',
@@ -1566,11 +1635,28 @@ const styles = StyleSheet.create({
     opacity: 1,
   },
   activeBorder: {
-    borderWidth: 4,
+    borderWidth: 2,
     borderColor: '#05BCD3',
-    borderRadius: 16, // More rounded border
-    // Border is drawn on the element itself, so it will be visible
-    // even with overflow: hidden on the container
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  // Gradient border: linear-gradient(90deg, #05BCD3 0%, #DBCDBC 70%)
+  activeGradientBorder: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderRadius: 8,
+  },
+  activeGradientInner: {
+    position: 'absolute',
+    top: 2,
+    left: 2,
+    right: 2,
+    bottom: 2,
+    borderRadius: 6,
+    overflow: 'hidden',
   },
   dotsContainer: {
     flexDirection: 'row',
