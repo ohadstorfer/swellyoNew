@@ -340,14 +340,6 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
     scrollToBottom();
   }, [messages, isInitializing, isLoading]);
 
-  // Reset input height when text is cleared
-  useEffect(() => {
-    if (!inputText.trim()) {
-      setInputHeight(25); // Reset to single line height
-    }
-  }, [inputText]);
-
-
   // Typing animation component
   const TypingIndicator = () => {
     const dot1 = useRef(new Animated.Value(0)).current;

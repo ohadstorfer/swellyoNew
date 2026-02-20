@@ -1024,13 +1024,6 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     scrollToBottom();
   }, [messages, isInitializing, isLoading]);
 
-  // Reset input height when text is cleared
-  useEffect(() => {
-    if (!inputText.trim()) {
-      setInputHeight(25);
-    }
-  }, [inputText]);
-
   const handleSendMessage = async (userId: string) => {
     if (onStartConversation) {
       onStartConversation(userId);

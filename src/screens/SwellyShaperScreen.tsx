@@ -175,8 +175,7 @@ export const SwellyShaperScreen: React.FC<SwellyShaperScreenProps> = ({ onBack, 
 
     const userMessage = inputText.trim();
     setInputText('');
-    setInputHeight(25); // Reset input height to initial size after sending
-    
+
     // Add user message
     const userMsg: Message = {
       id: Date.now().toString(),

@@ -1480,13 +1480,6 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     );
   };
 
-  // Reset input height when text is cleared
-  useEffect(() => {
-    if (!inputText.trim()) {
-      setInputHeight(25); // Reset to single line height
-    }
-  }, [inputText]);
-
   // Scroll to bottom when messages change
   useEffect(() => {
     if (messages.length > 0 && !isFetchingMessages) {
