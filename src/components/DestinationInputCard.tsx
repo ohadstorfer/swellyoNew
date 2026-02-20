@@ -74,7 +74,7 @@ export const DestinationInputCard: React.FC<DestinationInputCardProps> = ({
   const [timeUnit, setTimeUnit] = useState<TimeUnit>(initialTimeUnit || 'weeks');
   const unitScrollRef = useRef<ScrollView>(null);
   const onDataChangeRef = useRef(onDataChange);
-  const scrollEndTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scrollEndTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null); // kept for cleanup if unmount runs stale closure (e.g. hot reload)
   const scrollXRef = useRef(0);
   const startScrollXRef = useRef(0);
   const dragStartRef = useRef<{ clientX: number; scrollX: number } | null>(null);
@@ -189,26 +189,26 @@ export const DestinationInputCard: React.FC<DestinationInputCardProps> = ({
   };
 
   // Snap to nearest option and update timeUnit; recenter when near edges for infinite feel
-  const snapToNearestUnit = (scrollX: number) => {
-    let index = Math.round(scrollX / UNIT_ITEM_WIDTH);
+    const snapToNearestUnit = (scrollX: number) => {
+    const index = Math.round(scrollX / UNIT_ITEM_WIDTH);
     const clampedIndex = Math.max(0, Math.min(TOTAL_UNIT_ITEMS - 1, index));
-    index = clampedIndex;
-    const unitIndex = index % TIME_UNITS.length;
+    const unitIndex = clampedIndex % TIME_UNITS.length;
     const newUnit = TIME_UNITS[unitIndex];
     if (newUnit !== timeUnit) setTimeUnit(newUnit);
 
     let targetX: number;
-    let newScrollIndex = index;
-    if (index >= TOTAL_UNIT_ITEMS - RECENTER_THRESHOLD) {
-      newScrollIndex = index - CENTER_ITEM_INDEX;
+    let newScrollIndex: number;
+    if (clampedIndex >= TOTAL_UNIT_ITEMS - RECENTER_THRESHOLD) {
+      newScrollIndex = clampedIndex - CENTER_ITEM_INDEX;
       targetX = newScrollIndex * UNIT_ITEM_WIDTH;
       unitScrollRef.current?.scrollTo({ x: targetX, animated: false });
-    } else if (index < RECENTER_THRESHOLD) {
-      newScrollIndex = index + CENTER_ITEM_INDEX;
+    } else if (clampedIndex < RECENTER_THRESHOLD) {
+      newScrollIndex = clampedIndex + CENTER_ITEM_INDEX;
       targetX = newScrollIndex * UNIT_ITEM_WIDTH;
       unitScrollRef.current?.scrollTo({ x: targetX, animated: false });
     } else {
-      targetX = index * UNIT_ITEM_WIDTH;
+      newScrollIndex = clampedIndex;
+      targetX = clampedIndex * UNIT_ITEM_WIDTH;
       unitScrollRef.current?.scrollTo({ x: targetX, animated: true });
     }
     scrollXRef.current = targetX;
@@ -217,15 +217,11 @@ export const DestinationInputCard: React.FC<DestinationInputCardProps> = ({
   };
 
   const handleScrollEnd = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const x = event.nativeEvent.contentOffset.x;
-    snapToNearestUnit(x);
+    snapToNearestUnit(event.nativeEvent.contentOffset.x);
   };
 
+  const onScrollEndDrag = handleScrollEnd;
   const onMomentumScrollEnd = handleScrollEnd;
-  const onScrollEndDrag = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    if (scrollEndTimeoutRef.current) clearTimeout(scrollEndTimeoutRef.current);
-    scrollEndTimeoutRef.current = setTimeout(() => handleScrollEnd(event), 100);
-  };
 
   const onUnitScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const x = event.nativeEvent.contentOffset.x;
@@ -309,12 +305,6 @@ export const DestinationInputCard: React.FC<DestinationInputCardProps> = ({
     return () => cancelAnimationFrame(id);
   }, []);
 
-  // Clean up scroll-end timeout on unmount
-  useEffect(() => {
-    return () => {
-      if (scrollEndTimeoutRef.current) clearTimeout(scrollEndTimeoutRef.current);
-    };
-  }, []);
 
   const screenWidth = Dimensions.get('window').width;
   const cardWidth = Math.min(328, screenWidth - 62);
@@ -539,7 +529,7 @@ const styles = StyleSheet.create({
   flagCircleWrapper: {
     position: 'absolute',
     /* Card starts at 56 (cardOuter paddingTop). top: 50 → only 6px of flag above card; increase for more stick-out, decrease for less. */
-    top: 50,
+    top: 40,
     left: 0,
     right: 0,
     alignItems: 'center',
