@@ -1,12 +1,10 @@
-/**
- * Swelly Service Copy - For Testing Server-Side Matching
- * 
- * This is a copy of swellyService.ts with additional methods for server-side matching.
- * Used for testing the new server-side matching system without modifying existing code.
- */
-
 import { supabase, isSupabaseConfigured } from '../../config/supabase';
-import { TripPlanningRequest, MatchedUser } from '../../types/tripPlanning';
+import type { MatchedUser } from '../../types/tripPlanning';
+
+/**
+ * Swelly Service Copy - uses "swelly-trip-planning-copy" edge for trip-planning and server-side matching.
+ * Same interface as swellyService but points to the Copy edge and adds findMatchingUsersServer.
+ */
 
 export interface SwellyChatRequest {
   message: string;
@@ -17,6 +15,11 @@ export interface SwellyChatResponse {
   return_message: string;
   is_finished: boolean;
   data?: any;
+  ui_hints?: {
+    show_destination_cards?: boolean;
+    destinations?: string[];
+    show_budget_buttons?: boolean;
+  };
 }
 
 export interface SwellyContinueChatRequest {
@@ -27,24 +30,18 @@ export interface SwellyContinueChatResponse {
   return_message: string;
   is_finished: boolean;
   data?: any;
+  ui_hints?: {
+    show_destination_cards?: boolean;
+    destinations?: string[];
+    show_budget_buttons?: boolean;
+  };
 }
 
-export interface ServerMatchingRequest {
-  chatId: string;
-  tripPlanningData: TripPlanningRequest;
-}
-
-export interface ServerMatchingResponse {
-  matches: MatchedUser[];
-  totalCount: number;
-  chatId: string;
-}
-
-class SwellyServiceCopy {
+class SwellyService {
   /**
-   * Get the Supabase Edge Function URL for Swelly trip planning (copy version)
+   * Get the Supabase Edge Function URL for Swelly chat
    */
-  private getFunctionUrl(endpoint: string): string {
+  private getFunctionUrl(endpoint: string, conversationType: 'onboarding' | 'trip-planning' = 'onboarding'): string {
     if (!isSupabaseConfigured()) {
       throw new Error('Supabase is not configured');
     }
@@ -54,8 +51,11 @@ class SwellyServiceCopy {
       throw new Error('EXPO_PUBLIC_SUPABASE_URL is not set');
     }
     
-    // Use the copy version of the edge function
-    return `${supabaseUrl}/functions/v1/swelly-trip-planning copy${endpoint}`;
+    // Copy flow: use "swelly-trip-planning-copy" edge for all trip-planning (and health when used from Copy screen)
+    const isDevMode = process.env.EXPO_PUBLIC_DEV_MODE === 'true';
+    const chatFunctionName = isDevMode ? 'swelly-chat-demo' : 'swelly-chat';
+    const functionName = conversationType === 'trip-planning' ? 'swelly-trip-planning-copy' : chatFunctionName;
+    return `${supabaseUrl}/functions/v1/${functionName}${endpoint}`;
   }
 
   /**
@@ -65,7 +65,8 @@ class SwellyServiceCopy {
     const { data: { session }, error } = await supabase.auth.getSession();
     
     if (error || !session) {
-      throw new Error('Not authenticated. Please sign in again.');
+      console.log('[swellyService] No session - auth guard will handle redirect');
+      throw new Error('Not authenticated'); // Still throw for type safety, but auth guard will catch
     }
 
     const anonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
@@ -81,17 +82,21 @@ class SwellyServiceCopy {
   }
 
   /**
-   * Start a new trip planning conversation (uses copy edge function)
+   * Start a new conversation with Swelly
+   * @param request - Initial message or context for the conversation
+   * @param conversationId - Optional Supabase conversation ID to link chat history
+   * @returns Swelly's response and chat ID
    */
-  async startTripPlanningConversation(
-    request: SwellyChatRequest,
+  async startNewConversation(
+    request: SwellyChatRequest, 
     conversationId?: string
   ): Promise<SwellyChatResponse> {
     try {
       const url = this.getFunctionUrl('/new_chat');
       const headers = await this.getAuthHeaders();
       
-      console.log('[SwellyServiceCopy] Starting new trip planning conversation:', url);
+      console.log('[SwellyService] Starting new conversation:', url);
+      console.log('[SwellyService] Request body:', JSON.stringify(request));
       
       const response = await fetch(url, {
         method: 'POST',
@@ -102,24 +107,33 @@ class SwellyServiceCopy {
         }),
       });
 
+      console.log('[SwellyService] Response status:', response.status);
+      console.log('[SwellyService] Response ok:', response.ok);
+
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(`Failed to start conversation: ${response.status} ${errorText}`);
+        console.error('[SwellyService] Error response:', errorText);
+        throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
       }
 
-      const data: SwellyChatResponse = await response.json();
-      return data;
+      const result = await response.json();
+      console.log('[SwellyService] Response data:', result);
+      return result;
     } catch (error) {
-      console.error('[SwellyServiceCopy] Error starting conversation:', error);
+      console.error('[SwellyService] Error starting new conversation:', error);
       throw error;
     }
   }
 
   /**
-   * Continue trip planning conversation (uses copy edge function)
+   * Continue an existing conversation with Swelly
+   * @param chatId - The chat ID from the previous conversation
+   * @param request - The user's message
+   * @param conversationId - Optional Supabase conversation ID to link chat history
+   * @returns Swelly's response
    */
-  async continueTripPlanningConversation(
-    chatId: string,
+  async continueConversation(
+    chatId: string, 
     request: SwellyContinueChatRequest,
     conversationId?: string
   ): Promise<SwellyContinueChatResponse> {
@@ -127,7 +141,7 @@ class SwellyServiceCopy {
       const url = this.getFunctionUrl(`/continue/${chatId}`);
       const headers = await this.getAuthHeaders();
       
-      console.log('[SwellyServiceCopy] Continuing conversation:', url);
+      console.log('[SwellyService] Continuing conversation:', url);
       
       const response = await fetch(url, {
         method: 'POST',
@@ -140,62 +154,30 @@ class SwellyServiceCopy {
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(`Failed to continue conversation: ${response.status} ${errorText}`);
+        console.error('[SwellyService] Error response:', errorText);
+        throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
       }
 
-      const data: SwellyContinueChatResponse = await response.json();
-      return data;
+      const result = await response.json();
+      console.log('[SwellyService] Response data:', result);
+      return result;
     } catch (error) {
-      console.error('[SwellyServiceCopy] Error continuing conversation:', error);
+      console.error('[SwellyService] Error continuing conversation:', error);
       throw error;
     }
   }
 
   /**
-   * Find matches using server-side matching
-   * This calls the new /find-matches endpoint
+   * Get chat history for a specific conversation
+   * @param chatId - The chat ID
+   * @returns Chat history
    */
-  async findMatchesServer(
-    chatId: string,
-    tripPlanningData: TripPlanningRequest
-  ): Promise<ServerMatchingResponse> {
+  async getChatHistory(chatId: string): Promise<any> {
     try {
-      const url = this.getFunctionUrl('/find-matches');
+      const url = this.getFunctionUrl(`/${chatId}`);
       const headers = await this.getAuthHeaders();
       
-      console.log('[SwellyServiceCopy] Finding matches server-side:', url);
-      console.log('[SwellyServiceCopy] Request:', { chatId, tripPlanningData });
-      
-      const response = await fetch(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          chatId,
-          tripPlanningData,
-        }),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to find matches: ${response.status} ${errorText}`);
-      }
-
-      const data: ServerMatchingResponse = await response.json();
-      console.log(`[SwellyServiceCopy] Found ${data.totalCount} matches`);
-      return data;
-    } catch (error) {
-      console.error('[SwellyServiceCopy] Error finding matches:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Health check for the edge function
-   */
-  async healthCheck(): Promise<{ status: string; message: string }> {
-    try {
-      const url = this.getFunctionUrl('/health');
-      const headers = await this.getAuthHeaders();
+      console.log('[SwellyService] Getting chat history:', url);
       
       const response = await fetch(url, {
         method: 'GET',
@@ -203,28 +185,233 @@ class SwellyServiceCopy {
       });
 
       if (!response.ok) {
-        throw new Error(`Health check failed: ${response.status}`);
+        const errorText = await response.text();
+        console.error('[SwellyService] Error response:', errorText);
+        throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
       }
 
-      return await response.json();
+      const result = await response.json();
+      console.log('[SwellyService] Chat history:', result);
+      return result;
     } catch (error) {
-      console.error('[SwellyServiceCopy] Error in health check:', error);
+      console.error('[SwellyService] Error getting chat history:', error);
       throw error;
     }
   }
 
   /**
-   * Attach matched users to message (for backward compatibility)
-   * Note: With server-side matching, matches are already saved, but this can be used for metadata
+   * Get trip planning chat history for a specific conversation
+   * @param chatId - The chat ID
+   * @returns Chat history with messages
+   */
+  async getTripPlanningHistory(chatId: string): Promise<{ chat_id: string; messages: Array<{ role: string; content: string }> }> {
+    try {
+      const url = this.getFunctionUrl(`/${chatId}`, 'trip-planning');
+      const headers = await this.getAuthHeaders();
+      
+      console.log('[SwellyService] Getting trip planning history:', url);
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        headers,
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[SwellyService] Error response:', errorText);
+        throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+      }
+
+      const result = await response.json();
+      console.log('[SwellyService] Trip planning history:', result);
+      return result;
+    } catch (error) {
+      console.error('[SwellyService] Error getting trip planning history:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Check if the Swelly API is healthy and available (Copy flow uses trip-planning-copy edge)
+   * @returns Health check response
+   */
+  async healthCheck(): Promise<any> {
+    try {
+      const url = this.getFunctionUrl('/health', 'trip-planning');
+      const headers = await this.getAuthHeaders();
+      
+      console.log('[SwellyService] Checking API health:', url);
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        headers,
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const result = await response.json();
+      console.log('[SwellyService] Health check result:', result);
+      return result;
+    } catch (error) {
+      console.error('[SwellyService] Error checking API health:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Initialize a conversation with Swelly using user's onboarding data
+   * This creates a context message from the user's profile
+   * 
+   * @param userProfile - User's onboarding/profile data
+   * @returns Swelly's initial response and chat ID
+   */
+  async initializeWithProfile(userProfile: {
+    nickname?: string;
+    age?: number;
+    boardType?: number;
+    surfLevel?: number;
+    travelExperience?: number;
+  }): Promise<SwellyChatResponse> {
+    // Build context message from user profile
+    const boardTypeNames: { [key: number]: string } = {
+      0: 'shortboarder',
+      1: 'midlength surfer',
+      2: 'longboarder',
+      3: 'soft top surfer',
+    };
+
+    // Use the actual calculated surf level category instead of hardcoded mapping
+    let surfLevelName = 'intermediate'; // Default fallback
+    if (userProfile.boardType !== undefined && userProfile.surfLevel !== undefined) {
+      try {
+         const { getSurfLevelMapping } = await import('../../utils/surfLevelMapping');
+        const mapping = getSurfLevelMapping(userProfile.boardType, userProfile.surfLevel);
+        if (mapping && mapping.category) {
+          surfLevelName = mapping.category;
+        }
+      } catch (error) {
+        console.warn('[SwellyService] Failed to get surf level mapping, using default:', error);
+      }
+    }
+
+    const boardTypeName = boardTypeNames[userProfile.boardType ?? -1] || 'surfer';
+    const trips = userProfile.travelExperience ?? 0;
+    const name = userProfile.nickname || 'User';
+    const age = userProfile.age ? `, age ${userProfile.age}` : '';
+
+    const contextMessage = `Context: ${name}${age}, ${boardTypeName}, ${surfLevelName} level surfer, ${trips} surf trips`;
+
+    return this.startNewConversation({
+      message: contextMessage,
+    });
+  }
+
+  /**
+   * Start a new trip planning conversation with Swelly
+   * @param request - Initial message for the trip planning conversation
+   * @param conversationId - Optional Supabase conversation ID to link chat history
+   * @returns Swelly's response and chat ID
+   */
+  async startTripPlanningConversation(
+    request: SwellyChatRequest, 
+    conversationId?: string
+  ): Promise<SwellyChatResponse> {
+    try {
+      const url = this.getFunctionUrl('/new_chat', 'trip-planning');
+      const headers = await this.getAuthHeaders();
+      
+      console.log('[SwellyService] Starting trip planning conversation:', url);
+      console.log('[SwellyService] Request body:', JSON.stringify(request));
+      
+      const response = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          ...request,
+          conversation_id: conversationId,
+        }),
+      });
+
+      console.log('[SwellyService] Response status:', response.status);
+      console.log('[SwellyService] Response ok:', response.ok);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[SwellyService] Error response:', errorText);
+        throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+      }
+
+      const result = await response.json();
+      console.log('[SwellyService] Response data:', result);
+      return result;
+    } catch (error) {
+      console.error('[SwellyService] Error starting trip planning conversation:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Continue an existing trip planning conversation with Swelly
+   * @param chatId - The chat ID from the previous conversation
+   * @param request - The user's message
+   * @param conversationId - Optional Supabase conversation ID to link chat history
+   * @returns Swelly's response
+   */
+  async continueTripPlanningConversation(
+    chatId: string, 
+    request: SwellyContinueChatRequest,
+    conversationId?: string
+  ): Promise<SwellyContinueChatResponse> {
+    try {
+      const url = this.getFunctionUrl(`/continue/${chatId}`, 'trip-planning');
+      const headers = await this.getAuthHeaders();
+      
+      console.log('[SwellyService] Continuing trip planning conversation:', url);
+      
+      const response = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          ...request,
+          conversation_id: conversationId,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[SwellyService] Error response:', errorText);
+        throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+      }
+
+      const result = await response.json();
+      console.log('[SwellyService] Response data:', result);
+      return result;
+    } catch (error) {
+      console.error('[SwellyService] Error continuing trip planning conversation:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Attach matched users to the last assistant message in a trip planning conversation
+   * @param chatId - The chat ID for the conversation
+   * @param matchedUsers - Array of matched users to attach
+   * @param destinationCountry - Destination country for the matched users
    */
   async attachMatchedUsersToMessage(
     chatId: string,
-    matchedUsers: MatchedUser[],
+    matchedUsers: any[],
     destinationCountry: string
   ): Promise<void> {
     try {
-      const url = this.getFunctionUrl(`/attach-matches/${chatId}`);
+      const url = this.getFunctionUrl(`/attach-matches/${chatId}`, 'trip-planning');
       const headers = await this.getAuthHeaders();
+      
+      console.log('[SwellyService] Attaching matched users to message:', url);
+      console.log('[SwellyService] Matched users count:', matchedUsers.length);
+      console.log('[SwellyService] Destination country:', destinationCountry);
       
       const response = await fetch(url, {
         method: 'POST',
@@ -237,79 +424,81 @@ class SwellyServiceCopy {
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(`Failed to attach matches: ${response.status} ${errorText}`);
+        console.error('[SwellyService] Error attaching matched users:', errorText);
+        // Don't throw - log error but don't block UI
+        console.warn('[SwellyService] Failed to save matched users to backend, but matches are still displayed in UI');
+        return;
       }
 
-      console.log('[SwellyServiceCopy] Matched users attached to message');
+      const result = await response.json();
+      console.log('[SwellyService] Matched users attached successfully:', result);
     } catch (error) {
-      console.error('[SwellyServiceCopy] Error attaching matched users:', error);
-      throw error;
+      console.error('[SwellyService] Error attaching matched users to message:', error);
+      // Don't throw - log error but don't block UI
+      console.warn('[SwellyService] Failed to save matched users to backend, but matches are still displayed in UI');
     }
   }
 
   /**
-   * Get trip planning chat history
+   * Run matching on the server (Copy flow only). POSTs to /find-matches on the Copy edge.
+   * @param chatId - Trip planning chat ID
+   * @param tripPlanningData - Extracted data from Swelly response (destination_country, area, queryFilters, etc.)
+   * @returns Matched users in client MatchedUser shape
    */
-  async getTripPlanningHistory(chatId: string): Promise<{ chat_id: string; messages: any[] }> {
-    try {
-      const url = this.getFunctionUrl(`/${chatId}`);
-      const headers = await this.getAuthHeaders();
-      
-      const response = await fetch(url, {
-        method: 'GET',
-        headers,
-      });
+  async findMatchingUsersServer(
+    chatId: string,
+    tripPlanningData: any
+  ): Promise<{ matches: MatchedUser[] }> {
+    const url = this.getFunctionUrl('/find-matches', 'trip-planning');
+    const headers = await this.getAuthHeaders();
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to get history: ${response.status} ${errorText}`);
-      }
+    console.log('[SwellyServiceCopy] Finding matches server-side:', url);
 
-      return await response.json();
-    } catch (error) {
-      console.error('[SwellyServiceCopy] Error getting history:', error);
-      throw error;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ chatId, tripPlanningData }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('[SwellyServiceCopy] find-matches error:', errorText);
+      throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
     }
-  }
 
-  /**
-   * Get matches from database for a chat
-   * This retrieves previously saved matches
-   */
-  async getMatchesFromDatabase(chatId: string): Promise<MatchedUser[]> {
-    try {
-      // Query the matching_users table directly
-      const { data, error } = await supabase
-        .from('matching_users')
-        .select('*')
-        .eq('chat_id', chatId)
-        .order('match_score', { ascending: false })
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        throw new Error(`Failed to get matches: ${error.message}`);
-      }
-
-      // Convert database records to MatchedUser format
-      const matches: MatchedUser[] = (data || []).map((record: any) => ({
-        user_id: record.matched_user_id,
-        match_score: record.match_score,
-        matched_areas: record.matched_areas || [],
-        common_lifestyle_keywords: record.common_lifestyle_keywords || [],
-        common_wave_keywords: record.common_wave_keywords || [],
-        days_in_destination: record.days_in_destination || 0,
-        match_quality: record.match_quality,
-        // Note: We'll need to fetch user details separately if needed
-        // For now, return basic match data
-      }));
-
-      return matches;
-    } catch (error) {
-      console.error('[SwellyServiceCopy] Error getting matches from database:', error);
-      throw error;
+    const data = await response.json();
+    if (data.error) {
+      throw new Error(data.error);
     }
+
+    const serverMatches = data.matches || [];
+    const matches: MatchedUser[] = serverMatches.map((m: any) => mapServerMatchToMatchedUser(m));
+    console.log('[SwellyServiceCopy] Server returned', matches.length, 'matches');
+    return { matches };
   }
 }
 
-export const swellyServiceCopy = new SwellyServiceCopy();
+/**
+ * Map server MatchResult (snake_case) to client MatchedUser (camelCase where needed)
+ */
+function mapServerMatchToMatchedUser(m: any): MatchedUser {
+  return {
+    user_id: m.user_id,
+    name: m.name ?? 'User',
+    profile_image_url: m.profile_image_url ?? null,
+    match_score: m.match_score ?? 0,
+    matched_areas: m.matched_areas,
+    common_lifestyle_keywords: m.common_lifestyle_keywords,
+    common_wave_keywords: m.common_wave_keywords,
+    surfboard_type: m.surfboard_type,
+    surf_level: m.surf_level,
+    travel_experience: m.travel_experience,
+    country_from: m.country_from,
+    age: m.age,
+    days_in_destination: m.days_in_destination,
+    destinations_array: m.destinations_array,
+    matchQuality: m.match_quality ?? undefined,
+  };
+}
 
+export const swellyServiceCopy = new SwellyService();

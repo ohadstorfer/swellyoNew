@@ -15,14 +15,11 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../components/Text';
 import { colors, spacing } from '../styles/theme';
-// COPY VERSION - Uses server-side matching
 import { swellyServiceCopy, SwellyChatResponse } from '../services/swelly/swellyServiceCopy';
 import { useOnboarding } from '../context/OnboardingContext';
 import { getImageUrl } from '../services/media/imageService';
 import { MatchedUserCard } from '../components/MatchedUserCard';
 import { messagingService } from '../services/messaging/messagingService';
-// NOTE: Not using client-side matching services - using server-side instead
-import { supabaseAuthService } from '../services/auth/supabaseAuthService';
 import { MatchedUser, TripPlanningRequest } from '../types/tripPlanning';
 import { analyticsService } from '../services/analytics/analyticsService';
 import { ChatTextInput } from '../components/ChatTextInput';
@@ -147,71 +144,6 @@ function getSingleCriterionType(request: TripPlanningRequest): string | null {
   return null;
 }
 
-/**
- * Generate question for partial matches - ask user if they want to see them
- */
-function generatePartialMatchQuestion(
-  matchedUsers: MatchedUser[], 
-  request: TripPlanningRequest, 
-  quality: NonNullable<MatchedUser['matchQuality']>
-): string {
-  const firstMatch = matchedUsers[0];
-  const differenceParts: string[] = [];
-
-  // Build description of what was found vs what was requested
-  if (quality.differences.age) {
-    const { requested, found } = quality.differences.age;
-    const requestedStr = Array.isArray(requested) 
-      ? `${requested[0]}-${requested[1]} years old`
-      : `${requested} years old`;
-    differenceParts.push(`no ${requestedStr} surfers (found ${found} years old instead)`);
-  }
-  if (quality.differences.country_from) {
-    const { requested, found } = quality.differences.country_from;
-    differenceParts.push(`no surfers from ${requested.join(' or ')} (found ${found} instead)`);
-  }
-  if (quality.differences.surfboard_type) {
-    const { requested, found } = quality.differences.surfboard_type;
-    differenceParts.push(`no ${requested.join(' or ')} surfers (found ${found} instead)`);
-  }
-  if (quality.differences.area) {
-    const { requested, found } = quality.differences.area;
-    differenceParts.push(`no surfers who surfed in ${requested} (found ${found || 'other areas'} instead)`);
-  }
-
-  // Build the question message
-  let message = "Bro, I couldn't find exactly what you're looking for";
-  if (differenceParts.length > 0) {
-    message += ` (${differenceParts.join(', ')})`;
-  }
-  
-  // Add what we DID find
-  const foundParts: string[] = [];
-  if (firstMatch.country_from && quality.matchedCriteria.country_from) {
-    foundParts.push(`from ${firstMatch.country_from}`);
-  }
-  if (firstMatch.age && quality.matchedCriteria.age) {
-    foundParts.push(`${firstMatch.age} years old`);
-  }
-  if (firstMatch.surfboard_type && quality.matchedCriteria.surfboard_type) {
-    foundParts.push(`uses a ${firstMatch.surfboard_type}`);
-  }
-  if (request.destination_country && quality.matchedCriteria.destination_country) {
-    foundParts.push(`surfed in ${request.destination_country}`);
-  }
-
-  if (foundParts.length > 0) {
-    message += `, but I did find ${foundParts.join(', ')}`;
-    if (matchedUsers.length > 1) {
-      message += ` (${matchedUsers.length} options)`;
-    }
-  }
-
-  message += ". Would you like me to send them to you, or do you want to change your request?";
-
-  return message;
-}
-
 interface TripPlanningChatScreenProps {
   onChatComplete?: () => void;
   onViewUserProfile?: (userId: string, fromTripPlanningChat?: boolean) => void;
@@ -241,7 +173,6 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   const [isFinished, setIsFinished] = useState(false);
   const [matchedUsers, setMatchedUsers] = useState<any[]>(persistedMatchedUsers || []);
   const [destinationCountry, setDestinationCountry] = useState<string>(persistedDestination || '');
-  const [pendingPartialMatches, setPendingPartialMatches] = useState<MatchedUser[] | null>(null);
   const [pendingSingleCriterionMatches, setPendingSingleCriterionMatches] = useState<MatchedUser[] | null>(null);
   const [singleCriterionType, setSingleCriterionType] = useState<string | null>(null);
   const scrollViewRef = useRef<ScrollView>(null);
@@ -253,9 +184,14 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         // Track swelly_chat_entered
         analyticsService.trackSwellyChatEntered();
         
+        // Health check is best-effort: don't block init if it fails (e.g. CORS in local dev or edge not deployed)
         console.log('Testing API connection...');
-        const health = await swellyServiceCopy.healthCheck();
-        console.log('API health check successful:', health);
+        try {
+          const health = await swellyServiceCopy.healthCheck();
+          console.log('API health check successful:', health);
+        } catch (healthErr) {
+          console.warn('API health check failed (continuing anyway):', healthErr);
+        }
         
         // If we have a persisted chatId, restore the conversation
         if (persistedChatId) {
@@ -274,7 +210,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
                     persistedChatId,
                     stored.matchedUsers,
                     stored.destinationCountry
-                  ).catch((err: unknown) => {
+                  ).catch(err => {
                     console.warn('[TripPlanningChatScreen] Failed to migrate match group to backend:', err);
                   });
                 }
@@ -524,7 +460,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
           // Save matched users to backend
           if (chatId) {
             console.log('[TripPlanningChatScreen] Saving single criterion matches - matchedUsersCount:', pendingSingleCriterionMatches.length);
-            swellyServiceCopy.attachMatchedUsersToMessage(chatId, pendingSingleCriterionMatches, destinationCountry).catch((err: unknown) => {
+            swellyServiceCopy.attachMatchedUsersToMessage(chatId, pendingSingleCriterionMatches, destinationCountry).catch(err => {
               console.error('[TripPlanningChatScreen] Failed to save single criterion matches to backend:', err);
             });
           }
@@ -560,121 +496,6 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         // User wants to add more criteria - clear pending matches and continue normal flow
         setPendingSingleCriterionMatches(null);
         setSingleCriterionType(null);
-        setMatchedUsers([]);
-      }
-    }
-    
-    // Check if user wants to see pending partial matches
-    if (pendingPartialMatches && pendingPartialMatches.length > 0) {
-      const userText = userMessage.text.toLowerCase();
-      const wantsToSee = userText.includes('yes') || 
-                        userText.includes('send') || 
-                        userText.includes('show') || 
-                        userText.includes('sure') ||
-                        userText.includes('ok') ||
-                        userText.includes('okay') ||
-                        userText.includes('yeah');
-      
-      if (wantsToSee) {
-        // User confirmed - show the partial matches
-        const partialMatchesMessageText = `Here are ${pendingPartialMatches.length} option${pendingPartialMatches.length > 1 ? 's' : ''} that best match what you're looking for:`;
-        
-        setMessages(prev => {
-          const withUserMessage = [...prev, userMessage];
-          
-          // Find the message that contains the partial matches and update it
-          const updated = withUserMessage.map((msg) => {
-            // Find the message that has the pending partial matches stored
-            if (msg.matchedUsers && 
-                msg.matchedUsers.length === pendingPartialMatches.length &&
-                msg.matchedUsers[0]?.user_id === pendingPartialMatches[0]?.user_id) {
-              // Update this message to show the matches
-              return {
-                ...msg,
-                text: partialMatchesMessageText,
-                isMatchedUsers: true,
-                matchedUsers: pendingPartialMatches,
-                destinationCountry: msg.destinationCountry || destinationCountry,
-              };
-            }
-            return msg;
-          });
-          
-          // If we couldn't find the message, create a new one (fallback)
-          const foundMessage = updated.some(msg => msg.isMatchedUsers && msg.matchedUsers && msg.matchedUsers.length === pendingPartialMatches.length);
-          if (!foundMessage) {
-            updated.push({
-              id: (Date.now() + 1).toString(),
-              text: partialMatchesMessageText,
-              isUser: false,
-              timestamp: new Date().toLocaleTimeString('en-US', { 
-                hour: '2-digit', 
-                minute: '2-digit',
-                hour12: false 
-              }),
-              isMatchedUsers: true,
-              matchedUsers: pendingPartialMatches,
-              destinationCountry: destinationCountry,
-            });
-          }
-          
-          // Aggregate all matched users for onChatStateChange
-          const allMatchedUsers: MatchedUser[] = [];
-          let latestDestination = destinationCountry;
-          
-          updated.forEach(msg => {
-            if (msg.matchedUsers && msg.matchedUsers.length > 0) {
-              allMatchedUsers.push(...msg.matchedUsers);
-              if (msg.destinationCountry) {
-                latestDestination = msg.destinationCountry;
-              }
-            }
-          });
-          
-          // Notify parent with all matched users (use setTimeout to avoid state update issues)
-          if (onChatStateChange) {
-            setTimeout(() => {
-              onChatStateChange(chatId, allMatchedUsers, latestDestination);
-            }, 0);
-          }
-          
-          // Save matched users to backend
-          if (chatId) {
-            console.log('[TripPlanningChatScreen] Saving partial matches - matchedUsersCount:', pendingPartialMatches.length);
-            swellyServiceCopy.attachMatchedUsersToMessage(chatId, pendingPartialMatches, destinationCountry).catch((err: unknown) => {
-              console.error('[TripPlanningChatScreen] Failed to save partial matches to backend:', err);
-            });
-          }
-          
-          return updated;
-        });
-        
-        // Keep global state for backward compatibility
-        setMatchedUsers(pendingPartialMatches);
-        
-          // Track Swelly list created for partial matches
-          analyticsService.trackSwellyListCreated(pendingPartialMatches.length, 'partial_match');
-          
-          // Add filter decision message after matches are displayed
-          setMessages(prev => {
-            const filterDecisionMessage: Message = {
-              id: (Date.now() + 2).toString(),
-              text: "Would you like to keep your current filters or clear them and start fresh?",
-              isUser: false,
-              timestamp: new Date().toLocaleTimeString('en-US', { 
-                hour: '2-digit', 
-                minute: '2-digit',
-                hour12: false 
-              }),
-            };
-            return [...prev, filterDecisionMessage];
-          });
-          
-          setPendingPartialMatches(null);
-          return; // Don't process this as a normal message
-      } else if (userText.includes('no') || userText.includes('change') || userText.includes('different')) {
-        // User wants to change request - clear pending matches and continue normal flow
-        setPendingPartialMatches(null);
         setMatchedUsers([]);
       }
     }
@@ -725,14 +546,12 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
       if (response.is_finished && response.data) {
         setIsFinished(true);
         
-        // Trip planning: Trigger matching algorithm
+        // Trip planning: Server-side matching (Copy flow)
         try {
-          // Get current user ID
-          const currentUser = await supabaseAuthService.getCurrentUser();
-          if (!currentUser || !currentUser.id) {
-            throw new Error('User not authenticated');
+          if (!chatId) {
+            throw new Error('Chat ID is required for server-side matching');
           }
-          
+
           // Show "finding matches..." message
           const findingMatchesMessage: Message = {
             id: (Date.now() + 2).toString(),
@@ -745,10 +564,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             }),
           };
           setMessages(prev => [...prev, findingMatchesMessage]);
-          
-          // Find matching users
-          console.log('Finding matches with data:', response.data);
-          console.log('Query filters from response:', response.data.queryFilters);
+
           const requestData = {
             destination_country: response.data.destination_country,
             area: response.data.area || null,
@@ -763,20 +579,9 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             queryFilters: response.data.queryFilters || null,
             filtersFromNonNegotiableStep: response.data.filtersFromNonNegotiableStep || false,
           };
-          console.log('Request data being passed to findMatchingUsers:', JSON.stringify(requestData, null, 2));
-          console.log('queryFilters in request:', requestData.queryFilters);
-          
-          // SERVER-SIDE MATCHING: Call the new server-side matching endpoint
-          console.log('[TripPlanningChatScreenCopy] Using server-side matching');
-          if (!chatId) {
-            throw new Error('Chat ID is required for server-side matching');
-          }
-          const matchingResponse = await swellyServiceCopy.findMatchesServer(chatId, requestData);
-          const matchedUsers = matchingResponse.matches;
-          console.log('[TripPlanningChatScreenCopy] Server-side matching returned', matchedUsers.length, 'matches');
-          
-          console.log('Matched users found:', matchedUsers.length, matchedUsers);
-          console.log('Filters from non-negotiable step:', response.data.filtersFromNonNegotiableStep);
+
+          const { matches: matchedUsers } = await swellyServiceCopy.findMatchingUsersServer(chatId, response.data);
+          console.log('Matched users found (server):', matchedUsers.length);
           
           // Check if this is a single criterion request that needs confirmation
           const needsConfirmation = (matchedUsers as any).__needsConfirmation === true;
@@ -814,167 +619,85 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             return;
           }
           
-          // Check if matches are exact or partial
-          const hasMatchQuality = matchedUsers.some(u => u.matchQuality);
-          const hasExactMatches = hasMatchQuality 
-            ? matchedUsers.some(u => u.matchQuality?.exactMatch === true)
-            : true; // If no quality data, assume exact matches
-          const hasPartialMatches = matchedUsers.length > 0 && hasMatchQuality && !hasExactMatches;
-          
-          // Display matched users
+          // Display matched users (always show when server returns matches)
           if (matchedUsers.length > 0) {
-            if (hasExactMatches || !hasMatchQuality) {
-              // Exact matches - show immediately
-              // Remove the "Finding..." message and add the results message
-              const matchesMessageText = `Found ${matchedUsers.length} awesome match${matchedUsers.length > 1 ? 'es' : ''} for you!`;
-              const matchesDestination = response.data.destination_country || '';
+            const matchesMessageText = `Found ${matchedUsers.length} awesome match${matchedUsers.length > 1 ? 'es' : ''} for you!`;
+            const matchesDestination = response.data.destination_country || '';
+            
+            setMessages(prev => {
+              // Filter out the "Finding the perfect surfers..." message
+              const filtered = prev.filter(msg => msg.text !== 'Finding the perfect surfers for you...');
+              const matchesMessage: Message = {
+                id: (Date.now() + 3).toString(),
+                text: matchesMessageText,
+                isUser: false,
+                timestamp: new Date().toLocaleTimeString('en-US', { 
+                  hour: '2-digit', 
+                  minute: '2-digit',
+                  hour12: false 
+                }),
+                isMatchedUsers: true,
+                matchedUsers: matchedUsers,
+                destinationCountry: matchesDestination,
+              };
+              const updated = [...filtered, matchesMessage];
               
-              setMessages(prev => {
-                // Filter out the "Finding the perfect surfers..." message
-                const filtered = prev.filter(msg => msg.text !== 'Finding the perfect surfers for you...');
-                const matchesMessage: Message = {
-                  id: (Date.now() + 3).toString(),
-                  text: matchesMessageText,
-                  isUser: false,
-                  timestamp: new Date().toLocaleTimeString('en-US', { 
-                    hour: '2-digit', 
-                    minute: '2-digit',
-                    hour12: false 
-                  }),
-                  isMatchedUsers: true,
-                  matchedUsers: matchedUsers, // Store matched users with the message
-                  destinationCountry: matchesDestination, // Store destination with the message
-                };
-                const updated = [...filtered, matchesMessage];
-                
-                // Aggregate all matched users from all messages (including the new one)
-                const allMatchedUsers: MatchedUser[] = [];
-                let latestDestination = matchesDestination;
-                
-                updated.forEach(msg => {
-                  if (msg.matchedUsers && msg.matchedUsers.length > 0) {
-                    allMatchedUsers.push(...msg.matchedUsers);
-                    if (msg.destinationCountry) {
-                      latestDestination = msg.destinationCountry;
-                    }
+              const allMatchedUsers: MatchedUser[] = [];
+              let latestDestination = matchesDestination;
+              
+              updated.forEach(msg => {
+                if (msg.matchedUsers && msg.matchedUsers.length > 0) {
+                  allMatchedUsers.push(...msg.matchedUsers);
+                  if (msg.destinationCountry) {
+                    latestDestination = msg.destinationCountry;
                   }
-                });
-                
-                // Notify parent with all matched users (call after state update)
-                if (onChatStateChange) {
-                  setTimeout(() => {
-                    onChatStateChange(chatId, allMatchedUsers, latestDestination);
-                  }, 0);
                 }
-                
-                // Save matched users to backend
-                if (chatId) {
-                  console.log('[TripPlanningChatScreen] Saving exact matches - matchedUsersCount:', matchedUsers.length);
-                  swellyServiceCopy.attachMatchedUsersToMessage(chatId, matchedUsers, matchesDestination).catch((err: unknown) => {
-                    console.error('[TripPlanningChatScreen] Failed to save exact matches to backend:', err);
-                  });
-                }
-                
-                return updated;
               });
               
-              // Keep global state for backward compatibility (can be removed later)
-              setMatchedUsers(matchedUsers);
-              setDestinationCountry(matchesDestination);
-              
-              // Track Swelly list created
-              const intentType = requestData.purpose?.purpose_type || 'general_guidance';
-              analyticsService.trackSwellyListCreated(matchedUsers.length, intentType);
-              
-              // Add filter decision message after matches are displayed
-              setMessages(prev => {
-                const filterDecisionMessage: Message = {
-                  id: (Date.now() + 4).toString(),
-                  text: "Would you like to keep your current filters or clear them and start fresh?",
-                  isUser: false,
-                  timestamp: new Date().toLocaleTimeString('en-US', { 
-                    hour: '2-digit', 
-                    minute: '2-digit',
-                    hour12: false 
-                  }),
-                };
-                return [...prev, filterDecisionMessage];
-              });
-            } else if (hasPartialMatches) {
-              // Partial matches - ask user first
-              const firstMatch = matchedUsers[0];
-              const quality = firstMatch.matchQuality;
-              if (quality) {
-                const partialMessage = generatePartialMatchQuestion(matchedUsers, requestData, quality);
-                // Remove the "Finding..." message and add the partial match question
-                setMessages(prev => {
-                  const filtered = prev.filter(msg => msg.text !== 'Finding the perfect surfers for you...');
-                  const askMessage: Message = {
-                    id: (Date.now() + 3).toString(),
-                    text: partialMessage,
-                    isUser: false,
-                    timestamp: new Date().toLocaleTimeString('en-US', { 
-                      hour: '2-digit', 
-                      minute: '2-digit',
-                      hour12: false 
-                    }),
-                    isMatchedUsers: false,
-                    // Store matched users in the message for when user confirms
-                    matchedUsers: matchedUsers,
-                    destinationCountry: response.data.destination_country || '',
-                  };
-                  return [...filtered, askMessage];
-                });
-                
-                // Store partial matches temporarily (will show if user confirms)
-                setPendingPartialMatches(matchedUsers);
-                setDestinationCountry(response.data.destination_country || '');
+              if (onChatStateChange) {
+                setTimeout(() => {
+                  onChatStateChange(chatId, allMatchedUsers, latestDestination);
+                }, 0);
               }
-            }
-          } else {
-            // No matches found - analyze why and generate helpful message
-            analyticsService.trackSwellySearchFailed();
-            
-            // Import and use the analysis function
-            const { analyzeNoMatchesReason } = await import('../services/matching/matchingService');
-            
-            // Get rejected matches and destination-filtered surfers from the result (if available)
-            const rejectedMatches = (matchedUsers as any).__rejectedMatches || [];
-            const destinationFilteredSurfers = (matchedUsers as any).__destinationFilteredSurfers || [];
-            const passedOtherFiltersCount = (matchedUsers as any).__passedOtherFilters || 0;
-            const mustHaveKeywordsFilteredOut = (matchedUsers as any).__mustHaveKeywordsFilteredOut || false;
-            const mustHaveKeywords = (matchedUsers as any).__mustHaveKeywords || [];
-            
-            // Count criteria to provide better error messages
-            const criteriaCount = countRequestedCriteria(requestData);
-            
-            console.log('[TripPlanningChatScreen] No matches found. Analyzing reason...', {
-              rejectedMatchesCount: rejectedMatches.length,
-              destinationFilteredSurfersCount: destinationFilteredSurfers.length,
-              passedOtherFiltersCount,
-              hasDestinationFiltered: !!destinationFilteredSurfers.length,
-              mustHaveKeywordsFilteredOut,
-              mustHaveKeywords,
-              criteriaCount,
+              
+              if (chatId) {
+                console.log('[TripPlanningChatScreen] Saving exact matches - matchedUsersCount:', matchedUsers.length);
+                swellyServiceCopy.attachMatchedUsersToMessage(chatId, matchedUsers, matchesDestination).catch(err => {
+                  console.error('[TripPlanningChatScreen] Failed to save exact matches to backend:', err);
+                });
+              }
+              
+              return updated;
             });
             
-            const explanation = analyzeNoMatchesReason(
-              requestData, 
-              rejectedMatches,
-              destinationFilteredSurfers,
-              passedOtherFiltersCount,
-              mustHaveKeywordsFilteredOut,
-              mustHaveKeywords
-            );
+            setMatchedUsers(matchedUsers);
+            setDestinationCountry(matchesDestination);
             
-            console.log('[TripPlanningChatScreen] Generated explanation:', explanation);
+            const intentType = requestData.purpose?.purpose_type || 'general_guidance';
+            analyticsService.trackSwellyListCreated(matchedUsers.length, intentType);
             
-            // Remove the "Finding..." message and add the error explanation
+            setMessages(prev => {
+              const filterDecisionMessage: Message = {
+                id: (Date.now() + 4).toString(),
+                text: "Would you like to keep your current filters or clear them and start fresh?",
+                isUser: false,
+                timestamp: new Date().toLocaleTimeString('en-US', { 
+                  hour: '2-digit', 
+                  minute: '2-digit',
+                  hour12: false 
+                }),
+              };
+              return [...prev, filterDecisionMessage];
+            });
+          } else {
+            // No matches found - generic message (server does not return analysis)
+            analyticsService.trackSwellySearchFailed();
+            const noMatchesText = 'No surfers match your criteria right now. Try adjusting your destination or filters.';
             setMessages(prev => {
               const filtered = prev.filter(msg => msg.text !== 'Finding the perfect surfers for you...');
               const noMatchesMessage: Message = {
                 id: (Date.now() + 3).toString(),
-                text: explanation,
+                text: noMatchesText,
                 isUser: false,
                 timestamp: new Date().toLocaleTimeString('en-US', { 
                   hour: '2-digit', 
@@ -994,7 +717,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
           
           const errorMessage: Message = {
             id: (Date.now() + 2).toString(),
-            text: `Sorry, there was an error finding matches: ${error instanceof Error ? error.message : String(error)}. Please try again later.`,
+            text: `Sorry, I couldn't find any matches for your search. Try adjusting your destination or preferences and search again.`,
             isUser: false,
             timestamp: new Date().toLocaleTimeString('en-US', { 
               hour: '2-digit', 
@@ -1025,9 +748,14 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   }, [messages, isInitializing, isLoading]);
 
   const handleSendMessage = async (userId: string) => {
+    console.log('[TripPlanningChatScreen] handleSendMessage called with userId:', userId);
+    console.log('[TripPlanningChatScreen] onStartConversation exists:', !!onStartConversation);
+    
     if (onStartConversation) {
+      console.log('[TripPlanningChatScreen] Calling onStartConversation');
       onStartConversation(userId);
     } else {
+      console.warn('[TripPlanningChatScreen] onStartConversation not available, calling onChatComplete');
       onChatComplete?.();
     }
   };
@@ -1214,7 +942,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
           
           <View style={styles.profileInfo}>
             <Text style={styles.profileName}>Swelly</Text>
-            <Text style={styles.profileTagline}>Let’s grow your surf travel community!</Text>
+            <Text style={styles.profileTagline}>Let's grow your surf travel community!</Text>
           </View>
           
           {/* <TouchableOpacity style={styles.menuButton}>
@@ -1399,12 +1127,13 @@ const styles = StyleSheet.create({
   },
   matchedUsersContainer: {
     marginBottom: 16,
+    alignItems: 'center',
     // Padding removed - let botMessageContainer handle padding
   },
   matchedUsersCards: {
     marginTop: 12,
-    marginLeft: 16, // Match botMessageContainer paddingLeft
-    marginRight: 48, // Match botMessageContainer paddingRight
+    alignSelf: 'stretch',  // Take full width
+    alignItems: 'center', 
     gap: 16,
   },
   messageContainer: {
@@ -1453,14 +1182,14 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '400',
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
-    lineHeight: 18,
+    lineHeight: 22,
   },
   botMessageText: {
     color: '#333333',
     fontSize: 18,
     fontWeight: '400',
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
-    lineHeight: 18,
+    lineHeight: 22,
   },
   timestampContainer: {
     alignItems: 'flex-start',
@@ -1507,4 +1236,3 @@ const styles = StyleSheet.create({
     backgroundColor: '#333333',
   },
 });
-

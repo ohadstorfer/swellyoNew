@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+// find-matches: inlined below (no local imports - only index.ts is deployed)
 
 const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY')
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
@@ -51,6 +52,396 @@ interface Message {
   metadata?: MessageMetadata
 }
 
+// === INLINED find-matches: full LLM destination utils, no local imports ===
+interface MatchResultInline {
+  user_id: string
+  name: string
+  profile_image_url?: string | null
+  match_score: number
+  priority_score?: number
+  general_score?: number
+  matched_areas?: string[]
+  matched_towns?: string[]
+  common_lifestyle_keywords?: string[]
+  common_wave_keywords?: string[]
+  surfboard_type?: string
+  surf_level?: number
+  travel_experience?: string
+  country_from?: string
+  age?: number
+  days_in_destination?: number
+  destinations_array?: Array<{ country: string; area: string[]; time_in_days: number; time_in_text?: string }>
+  match_quality?: any
+}
+const AREA_OPTIONS_INLINE = ['north', 'south', 'east', 'west', 'south-west', 'south-east', 'north-west', 'north-east'] as const
+type AreaOptionInline = typeof AREA_OPTIONS_INLINE[number]
+type MatchingIntentInline = 'surf_spots' | 'hikes' | 'stays' | 'providers' | 'equipment' | 'towns_within_area' | 'general'
+interface NormalizedDestinationInline {
+  country: string
+  area?: AreaOptionInline | AreaOptionInline[]
+  towns?: string[]
+}
+interface SurferDataInline {
+  user_id: string
+  name?: string
+  country_from?: string | null
+  surfboard_type?: string | null
+  age?: number | null
+  surf_level?: number | null
+  surf_level_category?: string | null
+  travel_experience?: number | string | null
+  travel_buddies?: string | null
+  travel_type?: string | null
+}
+async function normalizeAreaInline(country: string, areaInput: string | null | undefined, intent: MatchingIntentInline): Promise<AreaOptionInline[]> {
+  if (!areaInput) return []
+  if (!OPENAI_API_KEY) {
+    console.warn('[find-matches] OpenAI key not set, skip area norm')
+    return []
+  }
+  try {
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_API_KEY}` },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: 'You are a helpful assistant that returns only valid JSON arrays. Do not include any explanatory text.' },
+          { role: 'user', content: `Given the country "${country}" and area/region/town "${areaInput}", normalize it to one or more of these fixed area options: ${AREA_OPTIONS_INLINE.join(', ')}. Return ONLY a JSON array of strings from the fixed options. Example: ["south-west"].` }
+        ],
+        temperature: 0.3,
+        max_tokens: 100,
+      }),
+    })
+    if (!res.ok) throw new Error(`OpenAI ${res.status}`)
+    const data = await res.json()
+    const content = data.choices[0]?.message?.content?.trim()
+    if (!content) return []
+    let areas: string[] = []
+    try {
+      const parsed = JSON.parse(content)
+      areas = Array.isArray(parsed) ? parsed : (parsed.areas && Array.isArray(parsed.areas) ? parsed.areas : [])
+    } catch {
+      const m = content.match(/\[.*?\]/)
+      if (m) areas = JSON.parse(m[0])
+    }
+    return areas.filter((a: string) => AREA_OPTIONS_INLINE.includes(a.toLowerCase() as AreaOptionInline)).map((a: string) => a.toLowerCase() as AreaOptionInline)
+  } catch (e) {
+    console.error('[find-matches] normalizeArea', e)
+    return []
+  }
+}
+async function extractTownsInline(country: string, areaInput: string | null | undefined, intent: MatchingIntentInline, normalizedAreas: AreaOptionInline[]): Promise<string[]> {
+  if (intent !== 'surf_spots' && intent !== 'stays' && intent !== 'providers') return []
+  if (!areaInput || !OPENAI_API_KEY) return []
+  try {
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_API_KEY}` },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: 'You are a helpful assistant that returns only valid JSON arrays. Do not include any explanatory text.' },
+          { role: 'user', content: `Given the country "${country}", area "${areaInput}", and normalized areas ${JSON.stringify(normalizedAreas)}, extract specific town names if mentioned or relevant. Return ONLY a JSON array of town names (strings), or [] if none.` }
+        ],
+        temperature: 0.3,
+        max_tokens: 200,
+      }),
+    })
+    if (!res.ok) return []
+    const data = await res.json()
+    const content = data.choices[0]?.message?.content?.trim()
+    if (!content) return []
+    let towns: string[] = []
+    try {
+      const parsed = JSON.parse(content)
+      towns = Array.isArray(parsed) ? parsed : (parsed.towns && Array.isArray(parsed.towns) ? parsed.towns : [])
+    } catch {
+      const m = content.match(/\[.*?\]/)
+      if (m) towns = JSON.parse(m[0])
+    }
+    return towns.filter((t: any) => typeof t === 'string' && t.trim().length > 0)
+  } catch (e) {
+    console.error('[find-matches] extractTowns', e)
+    return []
+  }
+}
+function determineIntentInline(request: any): MatchingIntentInline {
+  const topics = (request.purpose?.specific_topics || []).map((t: string) => t.toLowerCase())
+  if (topics.some((t: string) => t.includes('surf spot') || t.includes('wave') || t.includes('break'))) return 'surf_spots'
+  if (topics.some((t: string) => t.includes('hike') || t.includes('trail') || t.includes('walk'))) return 'hikes'
+  if (topics.some((t: string) => t.includes('stay') || t.includes('accommodation') || t.includes('hotel') || t.includes('hostel'))) return 'stays'
+  if (topics.some((t: string) => t.includes('provider') || t.includes('shop') || t.includes('rental'))) return 'providers'
+  if (topics.some((t: string) => t.includes('equipment') || t.includes('board') || t.includes('gear'))) return 'equipment'
+  return 'general'
+}
+async function normalizeDestinationInline(request: any, intent: MatchingIntentInline): Promise<NormalizedDestinationInline> {
+  const country = request.destination_country
+  const areaInput = request.area
+  const normalizedAreas = await normalizeAreaInline(country, areaInput, intent)
+  const towns = await extractTownsInline(country, areaInput, intent, normalizedAreas)
+  return {
+    country,
+    area: normalizedAreas.length === 1 ? normalizedAreas[0] : normalizedAreas,
+    towns: towns.length > 0 ? towns : undefined,
+  }
+}
+function parseUserDestinationInline(destination: { country: string; area: string[] } | { destination_name: string } | string): { country: string; area?: AreaOptionInline[]; towns?: string[] } {
+  if (typeof destination === 'object' && 'country' in destination) {
+    const country = destination.country
+    const areas = (destination.area || []) as string[]
+    const areaParts: AreaOptionInline[] = []
+    const townParts: string[] = []
+    for (const area of areas) {
+      const lower = area.toLowerCase()
+      const matched = AREA_OPTIONS_INLINE.find(opt => lower === opt || lower.includes(opt) || opt.includes(lower))
+      if (matched) areaParts.push(matched)
+      else townParts.push(area)
+    }
+    return { country, area: areaParts.length > 0 ? areaParts : undefined, towns: townParts.length > 0 ? townParts : undefined }
+  }
+  const name = typeof destination === 'string' ? destination : (destination as any).destination_name || ''
+  const parts = name.split(',').map((p: string) => p.trim())
+  const country = parts[0] || ''
+  if (parts.length === 1) return { country }
+  const areaParts: AreaOptionInline[] = []
+  const townParts: string[] = []
+  for (let i = 1; i < parts.length; i++) {
+    const part = parts[i].toLowerCase()
+    const matched = AREA_OPTIONS_INLINE.find(a => part === a || part.includes(a) || a.includes(part))
+    if (matched) areaParts.push(matched)
+    else townParts.push(parts[i])
+  }
+  return { country, area: areaParts.length > 0 ? areaParts : undefined, towns: townParts.length > 0 ? townParts : undefined }
+}
+function hasRequestedAreaInArrayInline(userDest: any, requestedArea: string | null | undefined): boolean {
+  if (!requestedArea) return false
+  const lower = requestedArea.toLowerCase()
+  if (typeof userDest === 'object' && 'country' in userDest) {
+    return (userDest.area || []).some((area: string) => area.toLowerCase() === lower || area.toLowerCase().includes(lower) || lower.includes(area.toLowerCase()))
+  }
+  if (typeof userDest === 'string') {
+    const parts = userDest.split(',').map((p: string) => p.trim())
+    if (parts.length > 1) return parts.slice(1).some((p: string) => p.toLowerCase() === lower || p.toLowerCase().includes(lower) || lower.includes(p.toLowerCase()))
+  }
+  if (typeof userDest === 'object' && 'destination_name' in userDest) {
+    const name = (userDest as any).destination_name || ''
+    const parts = name.split(',').map((p: string) => p.trim())
+    if (parts.length > 1) return parts.slice(1).some((p: string) => p.toLowerCase() === lower || p.toLowerCase().includes(lower) || lower.includes(p.toLowerCase()))
+  }
+  return false
+}
+function destinationMatchesInline(userDest: any, norm: NormalizedDestinationInline): { countryMatch: boolean; areaMatch: boolean; townMatch: boolean; matchedAreas: AreaOptionInline[]; matchedTowns: string[] } {
+  const u = parseUserDestinationInline(userDest)
+  const requested = norm.country.split(',').map((c: string) => c.trim().toLowerCase()).filter((c: string) => c.length > 0)
+  const userCountry = u.country.toLowerCase().trim()
+  const countryMatch = requested.some((r: string) => {
+    if (userCountry === r) return true
+    if ((r === 'usa' || r === 'united states') && (userCountry.includes('united states') || userCountry.includes('usa'))) return true
+    if ((r === 'uk' || r === 'united kingdom') && (userCountry.includes('united kingdom') || /\buk\b/.test(userCountry))) return true
+    const escaped = r.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    return new RegExp('\\b' + escaped + '\\b', 'i').test(userCountry)
+  })
+  if (!countryMatch) return { countryMatch: false, areaMatch: false, townMatch: false, matchedAreas: [], matchedTowns: [] }
+  const reqAreas = Array.isArray(norm.area) ? norm.area : norm.area ? [norm.area] : []
+  const userAreas = u.area || []
+  const matchedAreas = reqAreas.filter((ra: AreaOptionInline) => userAreas.some((ua: AreaOptionInline) => ua === ra))
+  const reqTowns = norm.towns || []
+  const userTowns = u.towns || []
+  const matchedTowns = reqTowns.filter((rt: string) => userTowns.some((ut: string) => ut.toLowerCase() === rt.toLowerCase() || ut.toLowerCase().includes(rt.toLowerCase()) || rt.toLowerCase().includes(ut.toLowerCase())))
+  return { countryMatch: true, areaMatch: matchedAreas.length > 0, townMatch: matchedTowns.length > 0, matchedAreas, matchedTowns }
+}
+function getTravelExpLevelInline(t: number | string | undefined | null): number {
+  if (t === undefined || t === null) return 2
+  if (typeof t === 'number') {
+    if (t <= 3) return 1
+    if (t <= 9) return 2
+    if (t <= 19) return 3
+    return 4
+  }
+  if (typeof t === 'string') {
+    const M: Record<string, number> = { 'new_nomad': 1, 'rising_voyager': 2, 'wave_hunter': 3, 'chicken_joe': 4 }
+    return M[t.toLowerCase()] || 2
+  }
+  return 2
+}
+function buildSurferQueryInline(req: any, requestingUserId: string, excludedIds: string[], supabaseAdmin: any): any {
+  let q = supabaseAdmin
+    .from('surfers')
+    .select('*')
+    .neq('user_id', requestingUserId)
+    .or('is_demo_user.is.null,is_demo_user.eq.false')
+  if (excludedIds?.length > 0) {
+    if (excludedIds.length <= 10) for (const id of excludedIds) q = q.neq('user_id', id)
+  }
+  return q
+}
+function filterExcludedInMemoryInline(surfers: any[], ids: string[]): any[] {
+  if (!ids?.length) return surfers
+  return surfers.filter((s: any) => !ids.includes(s.user_id))
+}
+async function getPreviouslyMatchedUserIdsInline(chatId: string, supabaseAdmin: any): Promise<string[]> {
+  const { data, error } = await supabaseAdmin.from('matching_users').select('matched_user_id').eq('chat_id', chatId)
+  if (error) return []
+  return (data || []).map((r: any) => r.matched_user_id)
+}
+
+// Criteria filtering (same logic as original: country_from, surfboard_type, surf_level)
+// Category to numeric level: same as src/utils/surfLevelMapping.ts (DB format 1-5)
+const SURF_LEVEL_CATEGORY_TO_NUM: Record<string, number> = {
+  beginner: 1,
+  intermediate: 2,
+  advanced: 3,
+  pro: 4,
+}
+function countryFromMatchInline(requested: string[], userCountry: string | null | undefined): boolean {
+  if (!requested?.length) return true
+  if (!userCountry || typeof userCountry !== 'string') return false
+  const userLower = userCountry.trim().toLowerCase()
+  return requested.some((c: string) => {
+    const rcTrimmed = String(c).trim().toLowerCase()
+    if (userLower === rcTrimmed) return true
+    if ((rcTrimmed === 'united states' || rcTrimmed === 'usa') && (userLower.includes('united states') || userLower.includes('usa'))) return true
+    if ((rcTrimmed === 'uk' || rcTrimmed === 'united kingdom') && (userLower.includes('united kingdom') || /\buk\b/.test(userLower))) return true
+    return userLower.includes(rcTrimmed) || rcTrimmed.includes(userLower)
+  })
+}
+function normalizeBoardTypeInline(v: string): string {
+  const lower = (v || '').toLowerCase().replace(/\s+/g, '_')
+  if (lower === 'midlength' || lower === 'mid_length') return 'mid_length'
+  if (lower === 'longboard' || lower === 'long_board') return 'longboard'
+  if (lower === 'shortboard' || lower === 'short_board') return 'shortboard'
+  if (lower === 'softtop' || lower === 'soft_top') return 'soft_top'
+  return v
+}
+function surfLevelCategoryToMinNumericInline(categories: string[]): number {
+  if (!categories?.length) return 0
+  const levels = categories.map((cat: string) => SURF_LEVEL_CATEGORY_TO_NUM[(cat || '').toLowerCase()]).filter((n: number) => n != null && !isNaN(n))
+  return levels.length ? Math.min(...levels) : 0
+}
+function passesCriteriaInline(entry: { surfer: any; hasAreaMatch: boolean; daysInDestination: number; bestMatch: any }, queryFilters: any): boolean {
+  const s = entry.surfer
+  if (queryFilters?.country_from && Array.isArray(queryFilters.country_from) && queryFilters.country_from.length > 0) {
+    if (!countryFromMatchInline(queryFilters.country_from, s.country_from)) return false
+  }
+  if (queryFilters?.surfboard_type && Array.isArray(queryFilters.surfboard_type) && queryFilters.surfboard_type.length > 0) {
+    const normalized = queryFilters.surfboard_type.map(normalizeBoardTypeInline)
+    const userBoard = normalizeBoardTypeInline(s.surfboard_type || '')
+    if (!userBoard || !normalized.includes(userBoard)) return false
+  }
+  if (queryFilters?.surf_level_category != null) {
+    const requested = Array.isArray(queryFilters.surf_level_category) ? queryFilters.surf_level_category : [queryFilters.surf_level_category]
+    const requestedCategories = requested.map((x: string) => (x || '').toLowerCase()).filter(Boolean)
+    if (requestedCategories.length > 0) {
+      const userCategory = (s.surf_level_category || '').toLowerCase()
+      const userLevel = typeof s.surf_level === 'number' ? s.surf_level : 0
+      const matchByCategory = userCategory && requestedCategories.includes(userCategory)
+      const minLevel = surfLevelCategoryToMinNumericInline(requestedCategories)
+      const matchByNumeric = minLevel > 0 && userLevel >= minLevel
+      if (!matchByCategory && !matchByNumeric) return false
+    }
+  }
+  return true
+}
+
+async function saveMatchesInline(chatId: string, requestingUserId: string, matches: MatchResultInline[], supabaseAdmin: any, filters?: any, destinationCountry?: string, area?: string | null): Promise<void> {
+  if (!matches?.length) return
+  const records = matches.map(m => ({
+    chat_id: chatId,
+    requesting_user_id: requestingUserId,
+    matched_user_id: m.user_id,
+    destination_country: destinationCountry || null,
+    area: area || null,
+    match_score: m.match_score,
+    priority_score: m.priority_score ?? null,
+    general_score: m.general_score ?? null,
+    matched_areas: m.matched_areas ?? null,
+    matched_towns: m.matched_towns ?? null,
+    common_lifestyle_keywords: m.common_lifestyle_keywords ?? null,
+    common_wave_keywords: m.common_wave_keywords ?? null,
+    days_in_destination: m.days_in_destination ?? null,
+    match_quality: m.match_quality ?? null,
+    filters_applied: filters ?? null,
+  }))
+  const { error } = await supabaseAdmin.from('matching_users').upsert(records, { onConflict: 'chat_id,matched_user_id', ignoreDuplicates: false })
+  if (error) throw new Error('Failed to save matches: ' + error.message)
+}
+async function findMatchingUsersV3Server(request: any, requestingUserId: string, chatId: string, supabaseAdmin: any): Promise<MatchResultInline[]> {
+  if (!request.destination_country) throw new Error('V3 algorithm requires destination_country')
+  console.log('[find-matches] findMatchingUsersV3Server: destination_country=', request.destination_country, 'area=', request.area)
+  const excludedUserIds = await getPreviouslyMatchedUserIdsInline(chatId, supabaseAdmin)
+  console.log('[find-matches] Excluded user IDs (previously matched):', excludedUserIds?.length ?? 0)
+  const intent = determineIntentInline(request)
+  const normalizedDest = await normalizeDestinationInline(request, intent)
+  console.log('[find-matches] Normalized destination:', JSON.stringify(normalizedDest))
+  const query = buildSurferQueryInline(request, requestingUserId, excludedUserIds, supabaseAdmin)
+  const { data: allSurfers, error: queryErr } = await query
+  if (queryErr) throw new Error('Error querying surfers: ' + queryErr.message)
+  console.log('[find-matches] Surfers from DB (before exclusions):', allSurfers?.length ?? 0)
+  if (!allSurfers?.length) return []
+  const filteredSurfers = filterExcludedInMemoryInline(allSurfers, excludedUserIds)
+  console.log('[find-matches] Surfers after excluding previously matched:', filteredSurfers.length)
+  const requestedArea = request.area || null
+  const countryMatched: Array<{ surfer: any; hasAreaMatch: boolean; daysInDestination: number; bestMatch: { countryMatch: boolean; areaMatch: boolean; townMatch: boolean; matchedAreas: any[]; matchedTowns: string[] } }> = []
+  for (const userSurfer of filteredSurfers) {
+    let days = 0
+    let bestMatch: { countryMatch: boolean; areaMatch: boolean; townMatch: boolean; matchedAreas: any[]; matchedTowns: string[] } | null = null
+    let hasAreaMatch = false
+    if (userSurfer.destinations_array?.length) {
+      for (const dest of userSurfer.destinations_array) {
+        const d = 'country' in dest ? dest : (dest as any).destination_name || ''
+        const match = destinationMatchesInline(d, normalizedDest)
+        if (match.countryMatch) {
+          days += dest.time_in_days || 0
+          if (requestedArea && hasRequestedAreaInArrayInline(dest, requestedArea)) hasAreaMatch = true
+          if (!bestMatch || (match.areaMatch && !bestMatch.areaMatch) || (match.townMatch && !bestMatch.townMatch)) bestMatch = match
+        }
+      }
+    }
+    if (!bestMatch || !bestMatch.countryMatch || days === 0) continue
+    countryMatched.push({ surfer: userSurfer, hasAreaMatch, daysInDestination: days, bestMatch })
+  }
+  console.log('[find-matches] Surfers with country match (destinations_array + time_in_days > 0):', countryMatched.length)
+
+  // Apply optional criteria filters (country_from, surfboard_type, surf_level_category)
+  const queryFilters = request.queryFilters || null
+  let afterCriteria = countryMatched
+  if (queryFilters && typeof queryFilters === 'object') {
+    afterCriteria = countryMatched.filter((entry) => passesCriteriaInline(entry, queryFilters))
+    console.log('[find-matches] After criteria filter (country_from/surfboard_type/surf_level):', afterCriteria.length)
+  }
+
+  // No scoring: sort by area match first (when user requested area), then by days_in_destination descending
+  afterCriteria.sort((a, b) => {
+    if (requestedArea) {
+      if (a.hasAreaMatch && !b.hasAreaMatch) return -1
+      if (!a.hasAreaMatch && b.hasAreaMatch) return 1
+    }
+    return b.daysInDestination - a.daysInDestination
+  })
+  return afterCriteria.map(({ surfer: userSurfer, hasAreaMatch, daysInDestination, bestMatch }) => ({
+    user_id: userSurfer.user_id,
+    name: userSurfer.name || 'User',
+    profile_image_url: userSurfer.profile_image_url ?? null,
+    match_score: daysInDestination,
+    priority_score: 0,
+    general_score: undefined as number | undefined,
+    matched_areas: bestMatch.matchedAreas ?? [],
+    matched_towns: bestMatch.matchedTowns ?? [],
+    common_lifestyle_keywords: [],
+    common_wave_keywords: [],
+    surfboard_type: userSurfer.surfboard_type,
+    surf_level: userSurfer.surf_level,
+    travel_experience: userSurfer.travel_experience?.toString(),
+    country_from: userSurfer.country_from,
+    age: userSurfer.age,
+    days_in_destination: daysInDestination,
+    destinations_array: userSurfer.destinations_array,
+    match_quality: { matchCount: 1, countryMatch: bestMatch.countryMatch, areaMatch: bestMatch.areaMatch, townMatch: bestMatch.townMatch },
+  }))
+}
+// === END INLINED find-matches ===
+
 const TRIP_PLANNING_PROMPT: string = `
 You are Swelly, a smart, laid-back surfer who's the ultimate go-to buddy for all things surfing and beach lifestyle. You're a cool local friend, full of knowledge about surfing destinations, techniques, and ocean safety, with insights about waves, travel tips, and coastal culture. Your tone is relaxed, friendly, and cheerful, with just the right touch of warm, uplifting energy. A sharper edge of surf-related sarcasm keeps the vibe lively and fun, like quipping about rookies wiping out or "perfect" conditions for no-shows. You're smart, resourceful, and genuinely supportive, with responses no longer than 120 words. When offering options, you keep it short with 2-3 clear choices. Responses avoid overusing words like "chill," staying vibrant and fresh, and occasionally use casual text-style abbreviations like "ngl" or "imo". Use the words dude, bro, shredder, gnarly, stoke.
 
@@ -67,12 +458,13 @@ CONVERSATION FLOW:
 STEP 1 - ENTRY POINT:
 ALWAYS start with this exact question in your FIRST response: "Yo! Let’s Travel! I can connect you with like minded surfers or surf travelers who have experience in specific destinations you are curious about. So, what are you looking for?"
 
-CRITICAL: If this is the first message in the conversation (new_chat), you MUST ask this question regardless of what the user said in their initial message. Treat their initial message as context/introduction, but still ask STEP 1's question. Only AFTER the user responds to this question should you interpret their response and proceed.
+When the first message in the conversation (new_chat) is vague or just a greeting, respond with STEP 1's question. If the user's first message clearly asks for surfers or matches and includes criteria (e.g. origin, board type, level) and/or a destination, treat it as their real request: extract what you can (destination if mentioned, criteria if mentioned) and only ask for what is missing (e.g. if they did not mention a destination, ask: "Which destination do you want to connect with surfers who've been there? (e.g. El Salvador, Costa Rica)"). Do not repeat STEP 1 when they already gave a direct request.
 
 INTERPRET USER RESPONSE (be smart and natural):
 - If user directly asks for surfers/matches/people (e.g., "send me surfers", "find me people", "show me matches", "who surfed in [place]") → They want matches NOW → Go to STEP 6 (Quick Match)
 - If user mentions a specific destination/country/place → Extract destination and proceed to STEP 2
-- If user asks for general matching (e.g., "find me surfers like me", "connect me with similar surfers") → Proceed to STEP 2 (General Matching)
+- If user asks for general matching without a destination (e.g., "find me surfers like me") → Ask which destination they want to connect with surfers who have been there, then proceed to STEP 2 once they answer
+- When the user has already provided criteria (e.g. country of origin, surfboard type, surf level) but NO destination: acknowledge those criteria in your reply, then ask only for the destination. Example: "Got it — Israeli, shortboard, advanced. To find matches we need a destination: where do you want to connect with surfers who've been there? (e.g. El Salvador, Costa Rica, Philippines)." Do not ask "What are you looking for?" as if they had said nothing.
 
 Examples of responses that mean "they know destination":
 - "Sri Lanka"
@@ -88,38 +480,24 @@ Examples of responses that mean "they know destination":
 
 IMPORTANT: Use natural language understanding. If the user's response is ambiguous, ask a clarifying question, but try to infer intent from context.
 
-STEP 2 - DESTINATION-BASED OR GENERAL MATCHING:
-This step handles two types of requests:
+STEP 2 - DESTINATION-BASED MATCHING:
+We only have two filters: (1) destination country, (2) area (if the user specifies one). Count filters like this:
+- Filter 1 = destination_country (when user mentions a place they want to connect with surfers who surfed there)
+- Filter 2 = area (only when user explicitly mentions an area/region/town, e.g. "La Libertad", "Siargao")
 
-A) DESTINATION-BASED MATCHING (User mentions a specific place):
-If user mentions a destination (country, area, or town), extract it and proceed:
-- Extract destination_country (REQUIRED if location mentioned)
-- Extract area/town if mentioned (optional)
-- Ask about area/town if not mentioned but relevant
-- Count how many criteria user provided: destination_country (always 1) + country_from (if provided) + age_range (if provided) + surfboard_type (if provided) + surf_level (if provided)
-  - If user provided 2+ criteria total: Skip STEP 3, go directly to STEP 4 (finish and search immediately)
-  - If user provided only 1 criterion (just destination): Proceed to STEP 3
+CRITICAL - DO NOT ASK FOR AREA WHEN USER ONLY SAID A COUNTRY:
+- If the user only mentioned a country (e.g. "someone who surfed in El Salvador", "connect me to people who surfed in Costa Rica"), do NOT ask "which area?" Proceed with destination_country only. That counts as 1 filter.
+- If the user does mention an area (e.g. "El Salvador, La Libertad" or "Siargao, Philippines"), resolve the country and area clearly. If you are unsure which country an area belongs to or whether the area name is correct, ask the user once to clarify. Once clear, extract both destination_country and area (2 filters).
 
-B) GENERAL MATCHING (User wants to connect with similar surfers):
-If user asks for general matching without a specific destination:
-- Extract any criteria they mention (age, surf level, board type, etc.)
-- Count how many criteria user provided: country_from + age_range + surfboard_type + surf_level + destination_country (if any)
-  - If user provided 2+ criteria: Skip STEP 3, go directly to STEP 4 (finish and search immediately)
-  - If user provided only 1 criterion: Proceed to STEP 3
-
-CRITICAL: When counting criteria, include ALL criteria mentioned in the user's message:
-- destination_country = 1 criterion
-- country_from = 1 criterion  
-- age_range = 1 criterion
-- surfboard_type = 1 criterion
-- surf_level = 1 criterion
-- area = counts as part of destination, not separate
+FLOW:
+- If user provided 2 filters (destination country + area): Do not ask further. Go directly to STEP 4 (set is_finished: true and search).
+- If user provided 1 filter (destination country only): Ask ONCE: "Want to add anything else (e.g. a specific area, surf level, age)?" If they say no or just want to search → set is_finished: true with destination_country and area: null, then search. If they say yes and give an area → set area, now 2 filters, set is_finished: true and search. If they say yes but mention something other than area (e.g. surf level, age), still finish and search with just destination (country + area if they also gave one); do not ask again.
 
 Examples:
-- "send me a 99 yo surfer from greece" → country_from (1) + age (1) = 2 criteria → SKIP STEP 3, go to STEP 4
-- "find me surfers from USA" → country_from (1) = 1 criterion → Go to STEP 3
-- "El Salvador, shortboarders" → destination_country (1) + surfboard_type (1) = 2 criteria → SKIP STEP 3, go to STEP 4
-- "Costa Rica" → destination_country (1) = 1 criterion → Go to STEP 3
+- "Costa Rica" → 1 filter (country only) → Ask once "add anything else?" then finish and search when they respond
+- "El Salvador, La Libertad" → 2 filters → Go directly to STEP 4, search immediately
+- "Someone who surfed in Sri Lanka" → 1 filter → Do NOT ask for area. Ask once "add anything else?" then search
+- "Philippines, Siargao" → 2 filters → Go directly to STEP 4, search immediately
 
 CRITICAL: Extract destination AND area if both are mentioned together!
 THIS IS YOUR PRIMARY JOB - Extract correctly, don't rely on fallback code!
@@ -165,289 +543,82 @@ If user mentions both country and area/region in the same message, extract BOTH 
 
 STEP 2 FLOW:
 1. Extract destination_country (and area if mentioned) immediately if user mentioned a destination
-2. If area/region not mentioned but destination is mentioned, ask for specific area/town (if relevant)
-3. Extract any matching criteria the user mentioned (age, surf level, board type, etc.)
-4. Go directly to STEP 3 (Clarify Purpose)
+2. Do NOT ask for area when the user only mentioned a country
+3. If user gave 2 filters (country + area) → go to STEP 4 and finish (set is_finished: true)
+4. If user gave 1 filter (country only) → ask once "Want to add anything else (e.g. specific area, surf level, age)?" then when they respond, finish and search (with or without area depending on their answer)
 
-STEP 3 - CLARIFY PURPOSE (ONLY if user hasn't provided multiple criteria):
-Ask: "Awesome! Are you looking for specific advice, general help and guidance, or just connecting with a like-minded traveler? Any specific topic?"
-
-Capture: purpose_type (one of: "specific_advice", "general_guidance", "connect_traveler", or combination)
-Capture: specific_topics (array of topics if mentioned, e.g., ["visa", "best waves", "accommodation", "local spots"])
-
-SKIP STEP 3 IF: User already provided multiple criteria (destination + country_from/age/board/level, OR country_from + age/board/level, etc.)
-- If user provided 2+ criteria, go directly to STEP 4
-
-IMPORTANT: Throughout the conversation, extract criteria from user messages automatically (don't ask explicitly):
-- REQUIRED (non_negotiable_criteria): Phrases like "must be", "have to be", "only", "require" → These are hard filters
-- PREFERRED (prioritize_filters): Phrases like "prioritize", "prefer", "would like", "I'd like", "ideally" → These get priority scores (1-10: nice to have, 10-30: very helpful, 30-50: major advantage, 100: exception)
-
-Go to STEP 4
-
-STEP 4 - PROVIDE OPTIONS:
-After clarifying purpose in STEP 3, you can finish the conversation. Extract any criteria the user mentioned naturally throughout the conversation.
-
-Examples:
-- "must be from Israel" → non_negotiable_criteria: { "country_from": ["Israel"] }
-- "prioritize surfers from Israel" → prioritize_filters: { "origin_country": "Israel" }
-- "I prefer longboarders" → prioritize_filters: { "board_type": "longboard" }
-- "would like advanced surfers" → If board type specified: queryFilters: { "surf_level_category": ["advanced", "pro"], "surfboard_type": ["shortboard"] } (ALWAYS include "pro" with "advanced")
-  If board type NOT specified: Ask user which board type, then set both fields
-
-IMPORTANT: If the user mentions criteria we don't have in our database (like physical appearance, personal details, languages, etc.), you should:
-1. Silently extract and use the criteria we DO have (country, age, surf level, board type, destination experience)
-2. DO NOT explain what we can or can't filter by - just proceed with matching using available criteria
-3. DO NOT mention that certain criteria aren't available - just proceed silently
-4. DO NOT preemptively mention partial matches or "closest matches" - let the system search first, then explain results
-5. DO NOT use markdown formatting (no asterisks, no bold, no code blocks)
-6. DO NOT explain your filtering capabilities - just proceed directly to matching
-
-⚠️ CRITICAL: DESTINATION HANDLING ⚠️
-- If user mentions a destination/region (e.g., "surfed in Central America", "want to go to Southeast Asia", "has been to Europe"), ALWAYS expand it to countries and put in destination_country
-- Example: "surfed in Central America" → destination_country: "Belize, Costa Rica, El Salvador, Guatemala, Honduras, Nicaragua, Panama" (comma-separated)
-- Example: "surfed in Southeast Asia" → destination_country: "Thailand, Indonesia, Philippines, Malaysia, Vietnam, Cambodia, Myanmar"
-
-Example responses:
-- User: "I want a blond surfer from Israel" → You: "Got it! I'll find you surfers from Israel!" (Don't mention hair color or filtering capabilities)
-- User: "Someone tall who's been to Costa Rica" → You: "I'll find surfers who've been to Costa Rica!" (Don't mention height or filtering capabilities)
-- User: "Spanish speaking surfer" → You: Automatically expand to all Spanish-speaking countries, extract them, and proceed directly to matching (Don't explain anything, just finish and search)
-
-CRITICAL: DO NOT say things like "if there's no exact match, I'll show the closest matches" - just search and let the system handle the results.
-CRITICAL: DO NOT use markdown formatting in your responses - use plain text only.
-
-CRITICAL: Extract criteria from user messages throughout the ENTIRE conversation automatically. If the user mentions filtering criteria at any point (e.g., "I want shortboarders", "from Israel", "age 18-30", "must be from USA", "prioritize longboarders"), extract it immediately:
-- REQUIRED criteria → store in non_negotiable_criteria
-- PREFERRED criteria → store in prioritize_filters with appropriate priority scores
-
-The system will automatically:
-- Apply filtering logic regardless of when criteria was mentioned
-- If no exact matches found, return the closest matches
-- Score matches based on all criteria (destination, age, surf level, board type, etc.)
-
-BE SMART ABOUT USER REQUESTS:
-- Handle typos gracefully: "uropean" → understand as "European" and expand to all European countries
-- Handle general terms and regions: Automatically expand regions/areas/continents/language groups to all relevant countries WITHOUT asking the user
-  * When user mentions a region (e.g., "Middle East", "Asia", "Europe", "Latin America", "Scandinavia", "Balkans", etc.), automatically generate a comprehensive list of all countries in that region
-  * When user mentions a language group (e.g., "Spanish speaking", "Arabic speaking", "French speaking", etc.), automatically generate a comprehensive list of all countries where that language is widely spoken
-  * When user mentions a continent or subcontinent (e.g., "North America", "South America", "Central America", "Southeast Asia", etc.), automatically generate a comprehensive list of all countries in that area
-  * Use your knowledge of geography, geopolitics, and linguistics to create accurate, comprehensive lists
-  * Include all relevant countries - be thorough but accurate
-  * Use standard country names (e.g., "USA" not "United States of America", "UAE" not "United Arab Emirates")
-  * DO NOT ask the user to pick a specific country when they mention a region - automatically expand it to all relevant countries
-  * DO NOT explain that regions aren't "clean filters" - just expand them silently and proceed with matching
-  * ⚠️ CRITICAL: When user mentions a region/continent as a DESTINATION (e.g., "surfed in Central America", "want to go to Southeast Asia"), expand it to countries and put in destination_country as comma-separated string (e.g., "Belize, Costa Rica, El Salvador, Guatemala, Honduras, Nicaragua, Panama")
-- Infer intent: If user says "similar age" and you know they're 25, extract age_range: [20, 30]
-- Be forgiving: Don't reject requests due to typos or grammar mistakes - understand the intent
-- If user says "they will use shortboard" or "must be shortboarders" → extract surfboard_type: ["shortboard"]
-- If something is unclear, make a reasonable inference based on context rather than asking for clarification
-- DO NOT use markdown formatting in your responses (no asterisks for bold, no code blocks, no markdown syntax)
-
-CRITICAL: You MUST extract non_negotiable_criteria from the user's response, even if they don't explicitly answer the question. Look for phrases like:
-- "must be from [country]" → country_from: ["Country"]
-- "have to be from [country]" → country_from: ["Country"]
-- "the surfer have to be from [country]" → country_from: ["Country"]
-- "the surfers have to be from [country]" → country_from: ["Country"]
-- "only from [country]" → country_from: ["Country"]
-- "be only from [country]" → country_from: ["Country"]
-- "from [country] or [country]" → country_from: ["Country1", "Country2"]
-- "from [country] or any country within [country]" → country_from: ["Country1", "Country2"] (extract both)
-- "must be shortboarders" → surfboard_type: ["shortboard"]
-- "similar age" → age_range: [min, max] (infer from context)
-- "surf level [X]" → surf_level_category: "beginner"/"intermediate"/"advanced"/"pro" (convert numeric to category)
-- "beginner" / "intermediate" / "advanced" / "pro" → surf_level_category: "beginner"/"intermediate"/["advanced", "pro"]/"pro"
-- "intermediate-advanced" / "beginner to intermediate" → surf_level_category: ["intermediate", "advanced", "pro"] (ALWAYS include "pro" when "advanced" is mentioned)
-
-⚠️ CRITICAL: DESTINATION NAMES/REGIONS MUST GO IN destination_country! ⚠️
-- If user mentions "Central America", "Southeast Asia", "Europe", or any region/continent → Expand to countries and put in destination_country (comma-separated)
-- Example: "surfed in Central America" → destination_country: "Belize, Costa Rica, El Salvador, Guatemala, Honduras, Nicaragua, Panama"
-- Example: "surfed in Southeast Asia" → destination_country: "Thailand, Indonesia, Philippines, Malaysia, Vietnam, Cambodia, Myanmar"
-
-Examples:
-- User: "the surfers have to be from Israel or the USA" → non_negotiable_criteria: { "country_from": ["Israel", "USA"] }
-- User: "The surfer HAVE TO be only from Israel or any country within the USA" → non_negotiable_criteria: { "country_from": ["Israel", "USA"] }
-- User: "must be from USA" → non_negotiable_criteria: { "country_from": ["USA"] }
-- User: "only shortboarders" → non_negotiable_criteria: { "surfboard_type": ["shortboard"] }
-- User: "from Israel, similar age" → non_negotiable_criteria: { "country_from": ["Israel"], "age_range": [similar_age_min, similar_age_max] }
-- User: "must have similar age as me +- 5 years" (user is 25) → non_negotiable_criteria: { "age_range": [20, 30] }
-- User: "age 18-30" → non_negotiable_criteria: { "age_range": [18, 30] }
-- User: "around my age" (user is 25) → non_negotiable_criteria: { "age_range": [20, 30] } (infer ±5 years)
-- User: "From the USA or any uropean country, Between 20 to 30 yo, and that they will use shortboard" → non_negotiable_criteria: { "country_from": ["USA", "France", "Spain", "Portugal", "Italy", "Germany", "Netherlands", "Belgium", "Switzerland", "Austria", "Greece", "Ireland", "Norway", "Sweden", "Denmark", "Finland", "Poland", "Czech Republic", "Hungary", "Romania", "Croatia", "Slovenia"], "age_range": [20, 30], "surfboard_type": ["shortboard"] }
-- User: "any European country" (with typo "uropean") → non_negotiable_criteria: { "country_from": ["France", "Spain", "Portugal", "Italy", "Germany", "United Kingdom", "Netherlands", "Sweden", "Norway", "Denmark", "Finland", "Ireland", "Greece", "Austria", "Belgium", "Switzerland", "Poland", "Czech Republic", "Hungary", "Romania", "Croatia", "Slovenia"] }
-- User: "from Asia" or "any Asian country" → non_negotiable_criteria: { "country_from": ["Japan", "China", "South Korea", "Thailand", "Indonesia", "Philippines", "India", "Sri Lanka", "Malaysia", "Vietnam"] }
-- User: "Latin American countries" → non_negotiable_criteria: { "country_from": ["Mexico", "Brazil", "Costa Rica", "Nicaragua", "El Salvador", "Panama", "Peru", "Chile", "Argentina", "Ecuador"] }
-- User: "From the USA or any European country" → non_negotiable_criteria: { "country_from": ["USA", "France", "Spain", "Portugal", "Italy", "Germany", "Netherlands", "Belgium", "Switzerland", "Austria", "Greece", "Ireland", "Norway", "Sweden", "Denmark", "Finland", "Poland", "Czech Republic", "Hungary", "Romania", "Croatia", "Slovenia", "United Kingdom", ...] } (automatically generate comprehensive list of European countries)
-- User: "young surfer from the middle east" → non_negotiable_criteria: { "country_from": ["Israel", "UAE", "Lebanon", "Saudi Arabia", "Oman", "Yemen", "Jordan", "Egypt", "Iran", "Iraq", "Kuwait", "Qatar", "Bahrain", "Palestine", "Syria", ...], "age_range": [18, 30] } (automatically expand "middle east" to comprehensive list of Middle Eastern countries and infer "young" as 18-30)
-- User: "Spanish speaking surfer" → non_negotiable_criteria: { "country_from": ["Spain", "Mexico", "Guatemala", "Honduras", "El Salvador", "Nicaragua", "Costa Rica", "Panama", "Colombia", "Venezuela", "Ecuador", "Peru", "Bolivia", "Chile", "Argentina", "Uruguay", "Paraguay", "Dominican Republic", "Cuba", "Puerto Rico", ...] } (automatically generate comprehensive list of Spanish-speaking countries without asking)
-
-STEP 4 - PROVIDE OPTIONS:
-After clarifying purpose and extracting any criteria mentioned naturally, you MUST:
+STEP 4 - FINISH AND SEARCH:
+When ready to search (2 filters provided, or 1 filter and user declined to add more, or 1 filter and user added something):
 1. Set is_finished: true
 2. Set return_message to: "Copy! Here are a few advisor options that best match what you're looking for."
-3. Include ALL collected data in the "data" field (destination_country, area, budget, purpose, non_negotiable_criteria, prioritize_filters, queryFilters)
+3. Include in the "data" field: destination_country (required), area (if user specified one, else null), budget (null if not specified), destination_known (true/false), purpose (default: { purpose_type: "connect_traveler", specific_topics: [] }), user_context (optional)
 
-CRITICAL: Do NOT say "Let me pull up some options" or "One sec!" - just set is_finished: true and return the completion message immediately.
+IMPORTANT:
+- DO NOT use markdown formatting (no asterisks, no bold, no code blocks)
+- DO NOT say "Let me pull up some options" or "One sec!" - just set is_finished: true and return the completion message
+- Matching is by destination only (country + optional area). The system finds surfers who have been to that place
 
-When is_finished: true, the system will automatically find matches. You don't need to wait or say you're looking - just finish the conversation.
+BE SMART ABOUT USER REQUESTS:
+- Handle typos gracefully: "uropean" → "European", "Philippins" → "Philippines"
+- When user mentions a region/continent as a DESTINATION (e.g. "surfed in Central America", "Southeast Asia"), expand to countries and put in destination_country as comma-separated
+- Be forgiving with grammar and spelling; if unclear, ask once to clarify (especially for area/country)
+- DO NOT use markdown formatting in your responses
 
-MATCHING LOGIC (for your understanding - the system handles this automatically):
-
-DESTINATION-BASED MATCHING:
-If user requests surfers who surfed/stayed/traveled in a specific place:
-1. Search for users who surfed in that country (check destinations_array for matching country)
-2. If user requested a specific area/town:
-   - Search within the "area" array within destinations_array to find the requested area
-   - Surfers who have the requested area in their "area" array appear FIRST (higher priority)
-   - Then, surfers who only been in that country (without the specific area) appear after
-3. Priority scoring applies based on prioritize_filters
-
-GENERAL MATCHING (no specific destination):
-- Match based on user criteria (age, surf level, board type, etc.)
-- Use priority scoring system for preferences
-- Match surfers with similar profiles and interests
-
-INTENT-DRIVEN RULES (for different request types):
-- Surf spots: Country + Area required, Town only if explicitly needed, Skill level required
-- Hikes: Area required, Extra weight for like-minded travelers
-- Stays / providers: Area required, Town if requested, Budget matters
-- Equipment: Area required, Priority on experience, Surf style should NOT be inferred as required (shortboarders can recommend longboard shops)
-- Choosing towns within an area: Area required, Priority on time spent in area + like-minded travelers
+When is_finished: true, the system will automatically find matches by destination (country + optional area). You don't need to wait or say you're looking - just finish the conversation.
 
 STEP 6 - QUICK MATCH (User directly asks for surfers/matches):
-If user directly asks for surfers/matches without going through the full flow (e.g., "send me surfers in El Salvador", "find me people who surfed in Sri Lanka", "show me matches for Costa Rica"):
+If user directly asks for surfers/matches (e.g. "send me surfers in El Salvador", "find me people who surfed in Sri Lanka", "show me matches for Costa Rica"):
 1. Extract destination from their message (country, area if mentioned)
-2. If purpose/criteria not mentioned, use defaults:
-   - purpose: { purpose_type: "connect_traveler", specific_topics: [] }
-   - non_negotiable_criteria: {} (empty, no filters)
-3. Set is_finished: true immediately with the data structure
-4. Say: "Copy! Here are a few advisor options that best match what you're looking for."
+2. If 2 filters (country + area): set is_finished: true immediately and search
+3. If 1 filter (country only): ask once "Want to add anything else (e.g. specific area)?" then when they respond, set is_finished: true and search
+4. Use purpose: { purpose_type: "connect_traveler", specific_topics: [] } when not specified
+5. Say: "Copy! Here are a few advisor options that best match what you're looking for."
 
-IMPORTANT: 
-- Your return_message should ONLY contain the friendly message text (e.g., "Copy! Here are a few advisor options...")
-- DO NOT include any JSON, code blocks, or data structures in the return_message
-- Set is_finished: true and include the complete data structure in the "data" field
-- The return_message is what the user sees - keep it natural and conversational
+IMPORTANT: return_message should ONLY contain the friendly message text. Set is_finished: true and include the data structure in the "data" field. Do NOT include JSON in return_message.
 
 DATA STRUCTURE (when is_finished: true):
 {
-  "destination_country": "Country name", // REQUIRED if location mentioned - NEVER null! Correct typos: "filipins" → "Philippines"
-  "area": "Area/region name or null if not specified", // Extract if mentioned: "Siargao, filipins" → area: "Siargao"
-  "budget": 1 | 2 | 3 | null, // null if not specified
-  "destination_known": true | false, // whether user knew destination from start
+  "destination_country": "Country name", // REQUIRED if location mentioned - NEVER null. Correct typos: "filipins" → "Philippines"
+  "area": "Area/region name or null if not specified", // Only include if user specified an area
+  "budget": 1 | 2 | 3 | null,
+  "destination_known": true | false,
   "purpose": {
     "purpose_type": "specific_advice" | "general_guidance" | "connect_traveler" | "combination",
-    "specific_topics": ["topic1", "topic2"] // array of specific topics mentioned
-  },
-  "non_negotiable_criteria": {
-    "country_from": ["country1"], // array or null
-    "surfboard_type": ["type1"], // array or null
-    "age_range": [min, max], // array or null
-    "surf_level_category": string | string[], // 'beginner', 'intermediate', 'advanced', or 'pro' - PREFERRED (can be array for multiple levels)
-    "surf_level_min": number, // Legacy: number or null (only use if category not available)
-    "surf_level_max": number, // Legacy: number or null (only use if category not available)
-    "other": "text description" // string or null
-  },
-  "prioritize_filters": {
-    // V3: Priority scoring system (LLM-scored priorities, not binary filters)
-    // Scores: 1-10 (nice to have), 10-30 (very helpful), 30-50 (major advantage), 100 (exception - should almost always surface)
-    // Extract from phrases like "prioritize longboarders", "I prefer surfers from Israel", etc.
-    // These are preferences (not requirements) that get bonus points in matching
-    "origin_country": { "value": "Israel", "priority": 20 }, // e.g., "prioritize surfers from Israel" → priority: 20
-    "board_type": { "value": "shortboard", "priority": 15 }, // e.g., "prioritize longboarders" → priority: 15
-    "surf_level_category": { "value": "advanced", "priority": 30 }, // e.g., "prioritize advanced surfers" → priority: 30 (major advantage)
-    "surfboard_type": { "value": "shortboard", "priority": 15 }, // REQUIRED when using surf_level_category - category-based filtering requires board type
-    "age_range": { "value": [20, 30], "priority": 10 }, // e.g., "prioritize younger surfers" → priority: 10
-    "travel_experience": { "value": "wave_hunter", "priority": 25 }, // e.g., "prioritize experienced travelers" → priority: 25
-    "group_type": { "value": "solo", "priority": 10 } // e.g., "prioritize solo travelers" → priority: 10
+    "specific_topics": ["topic1", "topic2"]
   },
   "user_context": {
-    // Include relevant user info that affects matching
-    "mentioned_preferences": ["preference1"], // things user mentioned wanting
-    "mentioned_deal_breakers": ["dealbreaker1"] // things user mentioned avoiding
-  }
+    "mentioned_preferences": [],
+    "mentioned_deal_breakers": []
+  },
+  "queryFilters": { "country_from": ["Israel"], "surfboard_type": ["shortboard"], "surf_level_category": ["advanced", "pro"] } // Optional: include when user specified origin, board type, or level. Use exact country names and enum values.
 }
+Do NOT include non_negotiable_criteria or prioritize_filters in the data. Matching is by destination (country + optional area) and, when provided, by queryFilters (country_from, surfboard_type, surf_level_category). When the user specified criteria (e.g. "Israeli", "shortboard", "advanced"), include queryFilters in data so the system can filter matches.
 
 RESPONSE FORMAT - CRITICAL: YOU MUST ALWAYS RETURN VALID JSON!
 ⚠️ NEVER RETURN PLAIN TEXT - ALWAYS RETURN A JSON OBJECT! ⚠️
 
 You MUST always return a JSON object with this structure (NO EXCEPTIONS):
 {
-  "return_message": "The conversational text Swelly says to the user (NO JSON, NO code blocks, NO markdown formatting - use plain text only, no asterisks for bold)",
+  "return_message": "The conversational text Swelly says to the user (plain text only, no markdown)",
   "is_finished": true or false,
   "data": {
-    "destination_country": "...", // REQUIRED if location mentioned - NEVER null!
-    "area": "...", // or null if not specified
+    "destination_country": "...", // REQUIRED when location mentioned - NEVER null
+    "area": "..." or null,
     "budget": 1 | 2 | 3 | null,
     "destination_known": true | false,
-    "purpose": {...},
-    "non_negotiable_criteria": {...},
-    "user_context": {...}
+    "purpose": { "purpose_type": "connect_traveler", "specific_topics": [] },
+    "user_context": {}
   }
 }
 
 CRITICAL RULES:
-- ALWAYS return valid JSON - even when asking questions or continuing the conversation
-- NEVER return plain text - your response MUST be a JSON object
-- The return_message field contains the conversational text
-- The data field contains the structured trip planning data
-- If you return plain text instead of JSON, the system will fail!
-
-CRITICAL RULES:
-- Always return JSON format, even when is_finished is false
-- Set is_finished: true when:
-  a) You have destination + purpose + non_negotiable_criteria (full flow), OR
-  b) User directly asks for surfers/matches and you can extract at least the destination (quick match)
-- For quick matches, if purpose/criteria not specified, use defaults:
-  - purpose: { purpose_type: "connect_traveler", specific_topics: [] }
-  - non_negotiable_criteria: {} (empty object)
-- EXTRACTION IS YOUR JOB: You MUST extract all information from user messages:
-  * If user says "Costa Rica, Pavones" → destination_country: "Costa Rica", area: "Pavones"
-  * If user says "Siargao, filipins" → destination_country: "Philippines", area: "Siargao" (CORRECT THE TYPO!)
-  * If user says "must be from USA or Israel" → non_negotiable_criteria: { "country_from": ["USA", "Israel"] }
-  * If user says "must have similar age as me +- 5 years" (and user is 25) → non_negotiable_criteria: { "age_range": [20, 30] }
-  * If user says "on a budget" → budget: 1
-  * Always extract what the user says, don't wait for them to repeat it
-  
-  ⚠️ CRITICAL DESTINATION EXTRACTION RULES - THIS IS YOUR PRIMARY JOB! ⚠️
-  - When user mentions ANY location (country, city, area), you MUST extract destination_country immediately
-  - NEVER set destination_country to null if a location was mentioned - this is a CRITICAL ERROR!
-  - Correct typos automatically: "filipins" → "Philippines", "Isreal" → "Israel", "Brasil" → "Brazil"
-  - If you see "Siargao, filipins" → Extract: destination_country: "Philippines", area: "Siargao" (CORRECT THE TYPO!)
-  - If you see "El Tunco, El Salvador" → Extract: destination_country: "El Salvador", area: "El Tunco"
-  - If you see "Costa Rica, Pavones" → Extract: destination_country: "Costa Rica", area: "Pavones"
-  - Be smart about typos - if intent is clear, correct it and extract properly
-  - Examples of CORRECT extraction:
-    * User: "Siargao, filipins" → { destination_country: "Philippines", area: "Siargao" } ✅
-    * User: "El Salvador" → { destination_country: "El Salvador", area: null } ✅
-  - Examples of WRONG extraction (DON'T DO THIS):
-    * User: "Siargao, filipins" → { destination_country: null, area: null } ❌ CRITICAL ERROR!
-    * User: "Siargao, filipins" → { destination_country: "filipins", area: "Siargao" } ❌ (Didn't correct typo!)
-  
-  CRITICAL: When extracting age criteria, you MUST populate BOTH:
-    - queryFilters: { age_min: X, age_max: Y } (for database filtering)
-    - non_negotiable_criteria: { age_range: [X, Y] } (for backward compatibility and display)
-- ⚠️ MOST CRITICAL: DESTINATION EXTRACTION ⚠️
-  * If user mentions ANY location, you MUST extract destination_country in the "data" field
-  * NEVER set destination_country to null if a location was mentioned
-  * Correct typos: "filipins" → "Philippines", "Siargao, filipins" → { destination_country: "Philippines", area: "Siargao" }
-  * This is YOUR PRIMARY RESPONSIBILITY - don't rely on fallback code!
-  
-- CRITICAL: The "return_message" field should contain ONLY the conversational text that Swelly says to the user
-- DO NOT include JSON code blocks, data structures, or technical details in return_message
-- When is_finished: true, return_message should be a simple, friendly message like "Copy! Here are a few advisor options that best match what you're looking for."
-- All trip planning data goes in the "data" field, NOT in return_message
-- ⚠️ CRITICAL: ALWAYS return valid JSON - NEVER return plain text! ⚠️
-- Your response MUST be a JSON object, even when asking questions
-- DO NOT wrap your response in markdown code blocks
-- Return the JSON object directly (starting with { and ending with })
-- DO NOT include comments in JSON (no // or /* */ comments) - JSON.parse() cannot handle comments
-- DO NOT use markdown formatting in return_message (no asterisks for bold, no code blocks, no markdown syntax) - use plain text only
-- Example of CORRECT response:
-  {"return_message": "Awesome choice! What's your vibe?", "is_finished": false, "data": {"destination_country": "Philippines", "area": "Siargao", ...}}
-- Example of WRONG response (DON'T DO THIS):
-  "Awesome choice! What's your vibe?" ❌ (This is plain text, not JSON!)
-- Ask ONE question at a time
-- Be conversational and natural
-- If user provides context about themselves (age, surf level, etc.), use it to inform suggestions
+- ALWAYS return valid JSON. NEVER return plain text.
+- Set is_finished: true when: (a) User gave 2 filters (country + area) and you are ready to search, OR (b) User gave 1 filter and either declined to add more or added something and you are ready to search, OR (c) Quick match: user asked for surfers and you extracted at least destination_country.
+- When is_finished: true, data MUST include destination_country (and area if user specified one). Do NOT include non_negotiable_criteria or prioritize_filters.
+- DESTINATION EXTRACTION: When user mentions ANY location, extract destination_country immediately. Correct typos ("filipins" → "Philippines"). If they mention area too, extract both. NEVER set destination_country to null if a location was mentioned.
+- return_message = conversational text only. All structured data goes in "data". No JSON or markdown in return_message.
+- Example: {"return_message": "Want to add anything else?", "is_finished": false, "data": {"destination_country": "Costa Rica", "area": null, ...}}
+- Ask ONE question at a time. Be conversational.
 - For destination suggestions, consider their past destinations, preferences, and vibe
 - Always get explicit approval before finalizing a destination
 `
@@ -1245,13 +1416,15 @@ async function getPreviouslyMatchedUserIdsFromHistory(
 }
 
 serve(async (req: Request) => {
-  // Handle CORS
+  // Handle CORS preflight - must return 200 with CORS headers so browser allows the actual request
   if (req.method === 'OPTIONS') {
     return new Response(null, {
+      status: 200,
       headers: {
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
         'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+        'Access-Control-Max-Age': '86400',
       },
     })
   }
@@ -1353,8 +1526,8 @@ ${getPronounInstructions(userProfile.pronoun)}`
       // Initialize chat history
       const messages: Message[] = [
         { role: 'system', content: systemPrompt },
-        // Add explicit instruction for first response - MUST ask STEP 1 question
-        { role: 'system', content: 'CRITICAL: This is the FIRST message in a NEW conversation. The user has just introduced themselves or started the conversation. You MUST respond with STEP 1\'s question: "Yo! Let’s Travel! I can connect you with like minded surfers or surf travelers who have experience in specific destinations you are curious about. So, what are you looking for?" Do NOT skip to STEP 2. Wait for the user to answer STEP 1 first. Treat their initial message as context/introduction only.' },
+        // First message: if user already gave a clear request (surfers/matches + criteria or destination), treat it as real request and only ask for what is missing (e.g. destination). Otherwise use STEP 1.
+        { role: 'system', content: 'This is the FIRST message in a NEW conversation. If the user\'s message clearly asks for surfers or matches and includes criteria (e.g. "Israeli", "shortboard", "advanced") and/or a destination (e.g. "El Salvador"), treat it as their real request: extract destination if mentioned, extract criteria if mentioned, and only ask for what is missing (e.g. "Which destination do you want to connect with surfers who\'ve been there? (e.g. El Salvador, Costa Rica)"). If their message is vague or just a greeting, respond with STEP 1\'s question: "Yo! Let\'s Travel! I can connect you with like minded surfers or surf travelers who have experience in specific destinations you are curious about. So, what are you looking for?"' },
         { role: 'user', content: body.message }
       ]
 
@@ -1421,28 +1594,15 @@ ${getPronounInstructions(userProfile.pronoun)}`
         
         // Extract data from parsed response
         let tripPlanningData = parsed.data
-        // Normalize non_negotiable_criteria.country_from if present in parsed.data
-        if (tripPlanningData && tripPlanningData.non_negotiable_criteria) {
-          tripPlanningData = {
-            ...tripPlanningData,
-            non_negotiable_criteria: await normalizeNonNegotiableCriteria(tripPlanningData.non_negotiable_criteria)
-          };
-        }
+        // Copy flow: no criteria normalization; only destination/area matter
         if (!tripPlanningData && parsed.is_finished) {
-          // If data is not in a nested "data" field, extract from root level
-          // Normalize non_negotiable_criteria.country_from if present
-          const normalizedNonNegotiableCriteria = await normalizeNonNegotiableCriteria(parsed.non_negotiable_criteria);
-          
           tripPlanningData = {
             destination_country: parsed.destination_country,
             area: parsed.area,
             budget: parsed.budget,
             destination_known: parsed.destination_known,
             purpose: parsed.purpose,
-            non_negotiable_criteria: normalizedNonNegotiableCriteria,
             user_context: parsed.user_context,
-            queryFilters: null, // Initialize queryFilters field
-            filtersFromNonNegotiableStep: false, // Initialize flag
           }
         }
         
@@ -1844,7 +2004,7 @@ ${getPronounInstructions(userProfile.pronoun)}`
         console.log('⚠️ LLM returned plain text instead of JSON - retrying with JSON enforcement...')
         console.log('Plain text response:', assistantMessage.substring(0, 200))
         // Add a stronger system message and retry
-        const strongJsonEnforcement = `ERROR: You returned plain text instead of JSON. This is a CRITICAL ERROR. You MUST return a JSON object. Your response MUST be valid JSON starting with { and ending with }. Example: {"return_message": "Your text here", "is_finished": false, "data": {"destination_country": "Philippines", "area": "Siargao", "budget": null, "destination_known": true, "purpose": {"purpose_type": "connect_traveler", "specific_topics": []}, "non_negotiable_criteria": {}, "user_context": {}}}. Return ONLY the JSON object, nothing else.`
+        const strongJsonEnforcement = `ERROR: You returned plain text instead of JSON. This is a CRITICAL ERROR. You MUST return a JSON object. Your response MUST be valid JSON starting with { and ending with }. Example: {"return_message": "Your text here", "is_finished": false, "data": {"destination_country": "Philippines", "area": "Siargao", "budget": null, "destination_known": true, "purpose": {"purpose_type": "connect_traveler", "specific_topics": []}, "user_context": {}}}. Return ONLY the JSON object, nothing else.`
         messages.push({ role: 'system', content: strongJsonEnforcement })
         assistantMessage = await callOpenAI(messages)
         console.log('Retry response:', assistantMessage.substring(0, 200))
@@ -1971,18 +2131,13 @@ ${getPronounInstructions(userProfile.pronoun)}`
         // FALLBACK ONLY: Enrich data from conversation history if ChatGPT didn't extract it
         // NOTE: ChatGPT should be the primary extractor. This is only a safety net.
         if (tripPlanningData) {
-          tripPlanningData.non_negotiable_criteria = tripPlanningData.non_negotiable_criteria || {}
-          
-          // Only run fallback extraction if ChatGPT didn't extract criteria
-          const needsFallback = !tripPlanningData.non_negotiable_criteria || 
-                                Object.keys(tripPlanningData.non_negotiable_criteria).length === 0 ||
-                                (!tripPlanningData.area && tripPlanningData.destination_country)
+          // Copy flow: only run fallback when destination_country or area is missing (no criteria extraction)
+          const needsFallback = !tripPlanningData.destination_country || (!tripPlanningData.area && tripPlanningData.destination_country)
           
           if (needsFallback) {
-            console.log('⚠️ ChatGPT did not extract all data - using fallback extraction from conversation history')
+            console.log('⚠️ ChatGPT did not extract all data - using fallback extraction from conversation history (destination/area only)')
             console.log('Current data before enrichment:', JSON.stringify(tripPlanningData, null, 2))
             
-            // Look through user messages for missing data
             for (let i = messages.length - 1; i >= 0; i--) {
               if (messages[i].role === 'user') {
                 const userMsg = messages[i].content
@@ -1990,131 +2145,18 @@ ${getPronounInstructions(userProfile.pronoun)}`
                 
                 // Extract area if missing (e.g., "Costa Rica, Pavones" -> area: "Pavones")
                 if (!tripPlanningData.area && tripPlanningData.destination_country) {
-                  // Check if message contains both country and area (comma-separated)
                   const countryLower = tripPlanningData.destination_country.toLowerCase()
                   if (userMsgLower.includes(countryLower)) {
-                    // Try to extract area after comma
                     const parts = userMsg.split(',').map(p => p.trim())
                     if (parts.length > 1) {
-                      // Find the country part and get what comes after
                       const countryIndex = parts.findIndex(p => p.toLowerCase().includes(countryLower))
                       if (countryIndex >= 0 && countryIndex < parts.length - 1) {
                         const area = parts[countryIndex + 1]
-                        if (area && area.length > 0 && area.length < 50) { // Reasonable area name length
+                        if (area && area.length > 0 && area.length < 50) {
                           tripPlanningData.area = area
                           console.log(`✅ Extracted area "${area}" from user message: "${userMsg}"`)
                         }
                       }
-                    }
-                  }
-                }
-                
-                // Extract country_from criteria (very flexible patterns)
-                // Check if message mentions countries AND has requirement language
-                const hasRequirementLanguage = userMsgLower.includes('from') || 
-                                               userMsgLower.includes('must be') || 
-                                               userMsgLower.includes('have to be') || 
-                                               userMsgLower.includes('the surfer') || 
-                                               userMsgLower.includes('the surfers') || 
-                                               userMsgLower.includes('they have to be') ||
-                                               userMsgLower.includes('must be from') || 
-                                               userMsgLower.includes('have to be from') ||
-                                               userMsgLower.includes('only from') ||
-                                               userMsgLower.includes('be only from') ||
-                                               userMsgLower.includes('send me') ||
-                                               userMsgLower.includes('i want') ||
-                                               userMsgLower.includes('connect me') ||
-                                               userMsgLower.includes('find me') ||
-                                               userMsgLower.includes('american') ||
-                                               userMsgLower.includes('americans')
-                
-                const mentionsUSA = userMsgLower.includes('usa') || 
-                                   userMsgLower.includes('united states') || 
-                                   userMsgLower.includes('u.s.a') || 
-                                   userMsgLower.includes('u.s.') || 
-                                   userMsgLower.includes('american') ||
-                                   (userMsgLower.includes('us') && !userMsgLower.includes('israel'))
-                
-                const mentionsIsrael = userMsgLower.includes('israel')
-                
-                // If message has requirement language AND mentions countries, extract them
-                if (hasRequirementLanguage && (mentionsUSA || mentionsIsrael)) {
-                  if (!tripPlanningData.non_negotiable_criteria.country_from) {
-                    tripPlanningData.non_negotiable_criteria.country_from = []
-                  }
-                  
-                  if (mentionsUSA) {
-                    // Validate "USA" against official list, use AI correction if needed
-                    let countryName: string | null = 'USA';
-                    if (!validateCountryName(countryName)) {
-                      console.log(`⚠️ "USA" not found in official list, asking AI to correct...`);
-                      const corrected = await correctCountryNameWithAI(countryName);
-                      if (corrected && validateCountryName(corrected)) {
-                        countryName = corrected;
-                      } else {
-                        console.warn(`❌ Could not correct "USA", skipping`);
-                        countryName = null;
-                      }
-                    }
-                    if (countryName && !tripPlanningData.non_negotiable_criteria.country_from.includes(countryName)) {
-                      tripPlanningData.non_negotiable_criteria.country_from.push(countryName);
-                      console.log(`✅ Extracted and validated "${countryName}" from user message: "${userMsg}"`);
-                    }
-                  }
-                  
-                  if (mentionsIsrael) {
-                    // Validate "Israel" against official list
-                    let countryName: string | null = 'Israel';
-                    if (!validateCountryName(countryName)) {
-                      console.log(`⚠️ "Israel" not found in official list, asking AI to correct...`);
-                      const corrected = await correctCountryNameWithAI(countryName);
-                      if (corrected && validateCountryName(corrected)) {
-                        countryName = corrected;
-                      } else {
-                        console.warn(`❌ Could not correct "Israel", skipping`);
-                        countryName = null;
-                      }
-                    }
-                    if (countryName && !tripPlanningData.non_negotiable_criteria.country_from.includes(countryName)) {
-                      tripPlanningData.non_negotiable_criteria.country_from.push(countryName);
-                      console.log(`✅ Extracted and validated "${countryName}" from user message: "${userMsg}"`);
-                    }
-                  }
-                  
-                  if (tripPlanningData.non_negotiable_criteria.country_from.length > 0) {
-                    console.log('✅ Final country_from criteria:', tripPlanningData.non_negotiable_criteria.country_from)
-                  }
-                }
-                
-                // Extract other criteria patterns
-                if (userMsgLower.includes('must be') || userMsgLower.includes('have to be') || userMsgLower.includes('only')) {
-                  // Extract surfboard type
-                  if (userMsgLower.includes('shortboard') || userMsgLower.includes('short board')) {
-                    tripPlanningData.non_negotiable_criteria.surfboard_type = tripPlanningData.non_negotiable_criteria.surfboard_type || []
-                    if (!tripPlanningData.non_negotiable_criteria.surfboard_type.includes('shortboard')) {
-                      tripPlanningData.non_negotiable_criteria.surfboard_type.push('shortboard')
-                      console.log(`✅ Extracted surfboard_type: shortboard from "${userMsg}"`)
-                    }
-                  }
-                  if (userMsgLower.includes('midlength') || userMsgLower.includes('mid length') || userMsgLower.includes('mid-length')) {
-                    tripPlanningData.non_negotiable_criteria.surfboard_type = tripPlanningData.non_negotiable_criteria.surfboard_type || []
-                    if (!tripPlanningData.non_negotiable_criteria.surfboard_type.includes('mid_length')) {
-                      tripPlanningData.non_negotiable_criteria.surfboard_type.push('mid_length')
-                      console.log(`✅ Extracted surfboard_type: mid_length from "${userMsg}"`)
-                    }
-                  }
-                  if (userMsgLower.includes('longboard') || userMsgLower.includes('long board')) {
-                    tripPlanningData.non_negotiable_criteria.surfboard_type = tripPlanningData.non_negotiable_criteria.surfboard_type || []
-                    if (!tripPlanningData.non_negotiable_criteria.surfboard_type.includes('longboard')) {
-                      tripPlanningData.non_negotiable_criteria.surfboard_type.push('longboard')
-                      console.log(`✅ Extracted surfboard_type: longboard from "${userMsg}"`)
-                    }
-                  }
-                  if (userMsgLower.includes('softtop') || userMsgLower.includes('soft top') || userMsgLower.includes('soft-top')) {
-                    tripPlanningData.non_negotiable_criteria.surfboard_type = tripPlanningData.non_negotiable_criteria.surfboard_type || []
-                    if (!tripPlanningData.non_negotiable_criteria.surfboard_type.includes('soft_top')) {
-                      tripPlanningData.non_negotiable_criteria.surfboard_type.push('soft_top')
-                      console.log(`✅ Extracted surfboard_type: soft_top from "${userMsg}"`)
                     }
                   }
                 }
@@ -2145,10 +2187,7 @@ ${getPronounInstructions(userProfile.pronoun)}`
                 purpose_type: 'connect_traveler',
                 specific_topics: []
               },
-              non_negotiable_criteria: parsed.non_negotiable_criteria || {},
               user_context: parsed.user_context || {},
-              queryFilters: null, // Initialize queryFilters field
-              filtersFromNonNegotiableStep: false, // Initialize flag
             }
             
             // If still no data, try to extract from previous messages in conversation
@@ -2169,10 +2208,7 @@ ${getPronounInstructions(userProfile.pronoun)}`
                           purpose_type: 'connect_traveler',
                           specific_topics: []
                         },
-                        non_negotiable_criteria: await normalizeNonNegotiableCriteria(prevParsed.non_negotiable_criteria || prevParsed.data?.non_negotiable_criteria || {}),
                         user_context: prevParsed.user_context || prevParsed.data?.user_context || {},
-                        queryFilters: prevParsed.data?.queryFilters ? await normalizeQueryFilters(prevParsed.data.queryFilters) : null, // Preserve and normalize existing queryFilters
-                        filtersFromNonNegotiableStep: prevParsed.data?.filtersFromNonNegotiableStep || false, // Preserve flag
                       }
                       console.log('✅ Extracted data from previous message:', tripPlanningData)
                       break
@@ -2895,31 +2931,58 @@ ${getPronounInstructions(userProfile.pronoun)}`
           )
         }
 
-        // Import matching service
-        const { findMatchingUsersV3Server } = await import('./services/matchingService')
-        const { saveMatches } = await import('./services/databaseService')
+        // Normalize tripPlanningData to snake_case (client/LLM may send camelCase)
+        const raw = body.tripPlanningData || {}
+        console.log('[find-matches] Request body keys:', { chatId: body.chatId, tripPlanningDataKeys: Object.keys(raw) })
+        let queryFilters = raw.queryFilters ?? raw.query_filters ?? null
+        if (queryFilters && typeof queryFilters === 'object') {
+          queryFilters = await normalizeQueryFilters(queryFilters)
+        }
+        const tripPlanningData = {
+          destination_country: raw.destination_country ?? raw.destinationCountry ?? null,
+          area: raw.area ?? null,
+          budget: raw.budget ?? null,
+          destination_known: raw.destination_known ?? raw.destinationKnown ?? false,
+          purpose: raw.purpose ?? { purpose_type: 'connect_traveler', specific_topics: [] },
+          user_context: raw.user_context ?? raw.userContext ?? null,
+          queryFilters: queryFilters || null,
+        }
 
-        // Run server-side matching
+        if (!tripPlanningData.destination_country || String(tripPlanningData.destination_country).trim() === '') {
+          console.error('[find-matches] Missing destination_country in tripPlanningData. Keys received:', Object.keys(raw))
+          return new Response(
+            JSON.stringify({ error: 'destination_country is required for matching. Ensure the chat response data includes destination_country or destinationCountry.' }),
+            { status: 400, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } }
+          )
+        }
+
+        console.log('[find-matches] Normalized request:', {
+          destination_country: tripPlanningData.destination_country,
+          area: tripPlanningData.area,
+          queryFilters: tripPlanningData.queryFilters ? Object.keys(tripPlanningData.queryFilters) : null,
+        })
+
+        // Run server-side matching (same behaviour as main flow, matching on server)
         console.log('[find-matches] Starting server-side matching for chat:', body.chatId)
         const matches = await findMatchingUsersV3Server(
-          body.tripPlanningData,
+          tripPlanningData,
           user.id,
           body.chatId,
           supabaseAdmin
         )
 
         // Save matches to database
-        await saveMatches(
+        await saveMatchesInline(
           body.chatId,
           user.id,
           matches,
-          body.tripPlanningData.queryFilters || null,
-          body.tripPlanningData.destination_country,
-          body.tripPlanningData.area || null,
-          supabaseAdmin
+          supabaseAdmin,
+          null,
+          tripPlanningData.destination_country,
+          tripPlanningData.area || null
         )
 
-        console.log(`[find-matches] Successfully found and saved ${matches.length} matches`)
+        console.log('[find-matches] Successfully found and saved', matches.length, 'matches')
 
         return new Response(
           JSON.stringify({

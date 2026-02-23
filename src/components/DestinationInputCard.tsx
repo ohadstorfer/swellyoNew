@@ -12,6 +12,7 @@ import {
   NativeSyntheticEvent,
   NativeScrollEvent,
   PanResponder,
+  LayoutAnimation,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -188,13 +189,22 @@ export const DestinationInputCard: React.FC<DestinationInputCardProps> = ({
     setTimeUnit(unit);
   };
 
+  // Smooth selection transition when changing unit
+  const scheduleLayoutAnimation = () => {
+    LayoutAnimation.configureNext({
+      duration: 220,
+      update: { type: LayoutAnimation.Types.easeInEaseOut },
+      create: { type: LayoutAnimation.Types.easeInEaseOut },
+    });
+  };
+
   // Snap to nearest option and update timeUnit; recenter when near edges for infinite feel
-    const snapToNearestUnit = (scrollX: number) => {
+  const snapToNearestUnit = (scrollX: number) => {
     const index = Math.round(scrollX / UNIT_ITEM_WIDTH);
     const clampedIndex = Math.max(0, Math.min(TOTAL_UNIT_ITEMS - 1, index));
     const unitIndex = clampedIndex % TIME_UNITS.length;
     const newUnit = TIME_UNITS[unitIndex];
-    if (newUnit !== timeUnit) setTimeUnit(newUnit);
+    const willChangeSelection = newUnit !== timeUnit;
 
     let targetX: number;
     let newScrollIndex: number;
@@ -210,6 +220,11 @@ export const DestinationInputCard: React.FC<DestinationInputCardProps> = ({
       newScrollIndex = clampedIndex;
       targetX = clampedIndex * UNIT_ITEM_WIDTH;
       unitScrollRef.current?.scrollTo({ x: targetX, animated: true });
+    }
+
+    if (willChangeSelection) {
+      scheduleLayoutAnimation();
+      setTimeUnit(newUnit);
     }
     scrollXRef.current = targetX;
     unitScrollIndexRef.current = newScrollIndex;

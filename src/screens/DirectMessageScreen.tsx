@@ -1255,9 +1255,10 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             quality: 1,
           });
 
-          if (!result.canceled && result.assets[0]) {
-            const imageUri = result.assets[0].uri;
-            setSelectedImageUri(imageUri);
+          const uri = result.assets?.[0]?.uri ?? (result as { uri?: string }).uri;
+          const canceled = result.canceled === true || (result as { cancelled?: boolean }).cancelled === true;
+          if (uri && !canceled) {
+            setSelectedImageUri(uri);
             setImagePreviewVisible(true);
           }
         } catch (error) {

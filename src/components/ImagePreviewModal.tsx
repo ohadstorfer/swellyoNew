@@ -46,6 +46,7 @@ export const ImagePreviewModal: React.FC<ImagePreviewModalProps> = ({
       transparent
       animationType="fade"
       onRequestClose={handleCancel}
+      statusBarTranslucent={Platform.OS === 'android'}
     >
       <View style={styles.overlay}>
         <View style={styles.container}>
@@ -58,7 +59,6 @@ export const ImagePreviewModal: React.FC<ImagePreviewModalProps> = ({
             >
               <Text style={styles.cancelButtonText}>Cancel</Text>
             </TouchableOpacity>
-            <Text style={styles.title}>Preview</Text>
             <TouchableOpacity
               style={[styles.sendButton, isProcessing && styles.sendButtonDisabled]}
               onPress={handleSend}

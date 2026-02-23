@@ -104,6 +104,8 @@ export default function ConversationsScreen({
   const isMVPMode = process.env.EXPO_PUBLIC_MVP_MODE === 'true';
   // Check if dev mode is enabled
   const isDevMode = process.env.EXPO_PUBLIC_DEV_MODE === 'true';
+  // Show Swelly Copy card: when LOCAL_MODE is true or in dev builds (__DEV__) so it works without env reload
+  const showSwellyCopyCard = (process.env.EXPO_PUBLIC_LOCAL_MODE === 'true' || __DEV__) && !!onSwellyPressCopy;
   
   // Survey bubble state and animations
   const [showSurveyBubble, setShowSurveyBubble] = useState(false);
@@ -1336,8 +1338,41 @@ export default function ConversationsScreen({
       {/* Swelly conversation card - positioned at bottom */}
       <View style={styles.swellyCardWrapper}>
         {renderSwellyConversation()}
-        {/* Dev mode: Second Swelly button for TripPlanningChatScreenCopy */}
-       
+        {/* Local mode: Second Swelly button for TripPlanningChatScreenCopy (server-side matching) */}
+        {showSwellyCopyCard ? (
+          <TouchableOpacity
+            style={[styles.swellyContainer, styles.swellyContainerDev]}
+            onPress={onSwellyPressCopy}
+          >
+            <View style={styles.conversationContent}>
+              <View style={styles.swellyAvatarContainer}>
+                <View style={styles.swellyAvatarRing}>
+                  <Image
+                    source={{ uri: getImageUrl('/Ellipse 11.svg') }}
+                    style={styles.swellyEllipseBackground}
+                    resizeMode="contain"
+                  />
+                  <View style={styles.swellyAvatarImageContainer}>
+                    <Image
+                      source={{ uri: getImageUrl('/Swelly avatar onboarding.png') }}
+                      style={styles.swellyAvatarImage}
+                      resizeMode="cover"
+                    />
+                  </View>
+                </View>
+              </View>
+              <View style={styles.swellyTextContainer}>
+                <Text style={styles.swellyName}>Swelly (Copy)</Text>
+                <Text style={[
+                  styles.swellyLastMessage,
+                  Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
+                ]} numberOfLines={1}>
+                  Test server-side matching
+                </Text>
+              </View>
+            </View>
+          </TouchableOpacity>
+        ) : null}
       </View>
 
       {/* Menu Modal */}

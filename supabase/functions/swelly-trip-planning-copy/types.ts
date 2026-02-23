@@ -45,50 +45,21 @@ export interface MatchRecord {
   created_at: string;
 }
 
-// Request payload for matching endpoint
+// Request payload for matching endpoint (Copy flow: destination + optional area only)
 export interface MatchingRequest {
   chatId: string;
   tripPlanningData: {
     destination_country: string;
     area?: string | null;
     budget?: 1 | 2 | 3 | null;
-    destination_known: boolean;
-    purpose: {
+    destination_known?: boolean;
+    purpose?: {
       purpose_type: 'specific_advice' | 'general_guidance' | 'connect_traveler' | 'combination';
       specific_topics?: string[];
     };
-    non_negotiable_criteria?: {
-      country_from?: string[];
-      surfboard_type?: string[];
-      age_range?: [number, number];
-      surf_level_min?: number;
-      surf_level_max?: number;
-      surf_level_category?: string;
-      other?: string;
-    } | null;
     user_context?: {
       mentioned_preferences?: string[];
       mentioned_deal_breakers?: string[];
-    } | null;
-    queryFilters?: {
-      country_from?: string[];
-      age_min?: number;
-      age_max?: number;
-      surfboard_type?: string[];
-      surf_level_min?: number;
-      surf_level_max?: number;
-      surf_level_category?: string;
-      destination_days_min?: { destination: string; min_days: number };
-    } | null;
-    filtersFromNonNegotiableStep?: boolean;
-    prioritize_filters?: {
-      origin_country?: string;
-      board_type?: string;
-      surf_level?: number;
-      surf_level_category?: string;
-      age_range?: [number, number];
-      travel_experience?: string;
-      group_type?: string;
     } | null;
   };
 }
