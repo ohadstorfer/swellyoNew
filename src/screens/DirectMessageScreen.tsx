@@ -93,6 +93,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const [fullscreenThumbnailUrl, setFullscreenThumbnailUrl] = useState<string | null>(null);
   const [imagePreviewVisible, setImagePreviewVisible] = useState(false);
   const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
+  const selectedImageUriForUploadRef = useRef<string | null>(null);
   const [isProcessingImage, setIsProcessingImage] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
   const chatInputRef = useRef<ChatTextInputRef>(null);
@@ -1253,12 +1254,16 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             mediaTypes: ImagePicker.MediaTypeOptions.Images,
             allowsEditing: false,
             quality: 1,
+            base64: true,
           });
 
           const uri = result.assets?.[0]?.uri ?? (result as { uri?: string }).uri;
+          const base64 = result.assets?.[0]?.base64 ?? (result as { base64?: string }).base64;
           const canceled = result.canceled === true || (result as { cancelled?: boolean }).cancelled === true;
           if (uri && !canceled) {
-            setSelectedImageUri(uri);
+            selectedImageUriForUploadRef.current = uri;
+            const previewUri = base64 ? `data:image/jpeg;base64,${base64}` : uri;
+            setSelectedImageUri(previewUri);
             setImagePreviewVisible(true);
           }
         } catch (error) {
@@ -1277,7 +1282,8 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
 
   // Handle image send
   const handleImageSend = async (caption?: string) => {
-    if (!selectedImageUri || !currentConversationId || !currentUserId) {
+    const uriToUse = selectedImageUriForUploadRef.current ?? selectedImageUri;
+    if (!uriToUse || !currentConversationId || !currentUserId) {
       return;
     }
 
@@ -1291,7 +1297,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       const messageRecord = await messagingService.createImageMessage(currentConversationId, caption);
       
       // Step 2: Process image (compress and generate thumbnail)
-      const processed = await processImage(selectedImageUri);
+      const processed = await processImage(uriToUse);
       
       // Step 3: Upload original image
       const imageUrl = await uploadImageToStorage(
@@ -1323,6 +1329,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       await messagingService.updateImageMessageMetadata(messageRecord.id, imageMetadata);
       
       // Close preview modal
+      selectedImageUriForUploadRef.current = null;
       setImagePreviewVisible(false);
       setSelectedImageUri(null);
       setIsProcessingImage(false);
@@ -2034,6 +2041,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
           imageUri={selectedImageUri}
           onSend={handleImageSend}
           onCancel={() => {
+            selectedImageUriForUploadRef.current = null;
             setImagePreviewVisible(false);
             setSelectedImageUri(null);
             setIsProcessingImage(false);
