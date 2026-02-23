@@ -1228,19 +1228,21 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         input.type = 'file';
         input.accept = 'image/*';
         input.onchange = async (e: any) => {
+          const isMobileWeb = typeof window !== 'undefined' && window.innerWidth <= 768;
           if (DEBUG_IMAGE_PICKER) console.log('[ImagePicker] checkpoint 3: input onchange fired', { hasFile: !!e?.target?.files?.[0] });
+          if (DEBUG_IMAGE_PICKER && isMobileWeb) (window as any).alert('1. File selected');
           const file = e.target.files[0];
           if (file) {
             const reader = new FileReader();
             reader.onload = async (event: any) => {
-              if (DEBUG_IMAGE_PICKER) {
-                console.log('[ImagePicker] checkpoint 4: FileReader.onload fired, about to set state');
-                const isNarrow = typeof window !== 'undefined' && window.innerWidth <= 768;
-                if (isNarrow) (window as any).alert('onload fired'); // temporary: confirm callback runs on mobile web
-              }
+              if (DEBUG_IMAGE_PICKER) console.log('[ImagePicker] checkpoint 4: FileReader.onload fired, about to set state');
+              if (DEBUG_IMAGE_PICKER && isMobileWeb) (window as any).alert('2. onload fired');
               const imageUri = event.target.result as string;
-              setSelectedImageUri(imageUri);
-              setImagePreviewVisible(true);
+              // Defer state update to next tick so iOS Safari runs it after returning from system picker (often fixes "nothing happens")
+              setTimeout(() => {
+                setSelectedImageUri(imageUri);
+                setImagePreviewVisible(true);
+              }, 0);
             };
             reader.readAsDataURL(file);
           }
