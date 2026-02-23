@@ -21,59 +21,30 @@ export interface LogoutResult {
 
 /**
  * Performs a complete logout:
- * 1. Signs out from Supabase/auth service (explicit Supabase signOut)
- * 2. Signs out from auth service wrapper
- * 3. Resets PostHog analytics
- * 4. Resets onboarding state (if provided)
- * 5. Clears user from context (if provided)
- * 6. Navigates to welcome screen (if provided)
+ *
+ * IMPORTANT: Server/session teardown and storage clear happen FIRST, then UI state.
+ * This prevents useAuthGuard (and session restore) from re-populating the user
+ * while logout is in progress (session exists + user===null would restore user).
+ *
+ * Order: 1) Sign out Supabase + auth, 2) Clear persistence (resetOnboarding),
+ * 3) Then clear context and navigate so there is no session to restore.
  */
 export async function performLogout(options: LogoutOptions = {}): Promise<LogoutResult> {
   try {
     console.log('[Logout] Starting logout process...');
 
-    // Navigate immediately (synchronous) before async operations
-    // This ensures UI updates immediately
-    if (options.setCurrentStep) {
-      try {
-        options.setCurrentStep(-1);
-        console.log('[Logout] Navigated to WelcomeScreen (immediate)');
-      } catch (navError) {
-        console.error('[Logout] Error navigating immediately:', navError);
-      }
-    }
+    // --- Phase 1: Tear down session and persistence BEFORE clearing UI state ---
+    // So no code path can restore user from an existing session or storage.
 
-    // Clear user state immediately (synchronous)
-    if (options.setUser) {
-      try {
-        options.setUser(null);
-        console.log('[Logout] User cleared from context (immediate)');
-      } catch (userError) {
-        console.error('[Logout] Error clearing user from context:', userError);
-      }
-    }
-
-    if (options.setIsDemoUser) {
-      try {
-        options.setIsDemoUser(false);
-        console.log('[Logout] Demo user flag cleared (immediate)');
-      } catch (demoError) {
-        console.error('[Logout] Error clearing demo user flag:', demoError);
-      }
-    }
-
-    // Then perform async logout operations (non-blocking)
-    // Step 1: Stop tracking presence (untrack from presence channel)
-    // This ensures other users see the 'leave' event immediately
+    // Step 1: Stop presence tracking
     try {
       await userPresenceService.stopTrackingCurrentUser();
       console.log('[Logout] Presence tracking stopped');
     } catch (presenceError) {
       console.error('[Logout] Error stopping presence tracking:', presenceError);
-      // Continue with logout even if presence stop fails
     }
 
-    // Step 2: Explicitly sign out from Supabase first
+    // Step 2: Sign out from Supabase (must complete before we clear user from context)
     try {
       const { error: supabaseError } = await supabase.auth.signOut();
       if (supabaseError) {
@@ -83,7 +54,6 @@ export async function performLogout(options: LogoutOptions = {}): Promise<Logout
       }
     } catch (supabaseError) {
       console.error('[Logout] Error signing out from Supabase:', supabaseError);
-      // Continue with logout even if Supabase sign out fails
     }
 
     // Step 3: Sign out from auth service wrapper
@@ -92,7 +62,6 @@ export async function performLogout(options: LogoutOptions = {}): Promise<Logout
       console.log('[Logout] Auth service sign out successful');
     } catch (authError) {
       console.error('[Logout] Error signing out from auth service:', authError);
-      // Continue with logout even if auth sign out fails
     }
 
     // Step 4: Reset PostHog analytics
@@ -101,21 +70,45 @@ export async function performLogout(options: LogoutOptions = {}): Promise<Logout
       console.log('[Logout] PostHog analytics reset successful');
     } catch (analyticsError) {
       console.error('[Logout] Error resetting PostHog analytics:', analyticsError);
-      // Continue with logout even if analytics reset fails
     }
 
-    // Step 5: Reset onboarding state (if provided)
+    // Step 5: Clear persistence and onboarding state (AsyncStorage + context)
     if (options.resetOnboarding) {
       try {
         const result = options.resetOnboarding();
-        // Handle both sync and async resetOnboarding
         if (result instanceof Promise) {
           await result;
         }
-        console.log('[Logout] Onboarding state reset successful');
+        console.log('[Logout] Onboarding state and storage cleared');
       } catch (resetError) {
         console.error('[Logout] Error resetting onboarding state:', resetError);
-        // Continue with logout even if reset fails
+      }
+    }
+
+    // --- Phase 2: Update UI state after session and storage are cleared ---
+    // This ensures useAuthGuard won't see session + user===null and re-restore user.
+    if (options.setCurrentStep) {
+      try {
+        options.setCurrentStep(-1);
+        console.log('[Logout] Navigated to WelcomeScreen');
+      } catch (navError) {
+        console.error('[Logout] Error navigating:', navError);
+      }
+    }
+    if (options.setUser) {
+      try {
+        options.setUser(null);
+        console.log('[Logout] User cleared from context');
+      } catch (userError) {
+        console.error('[Logout] Error clearing user from context:', userError);
+      }
+    }
+    if (options.setIsDemoUser) {
+      try {
+        options.setIsDemoUser(false);
+        console.log('[Logout] Demo user flag cleared');
+      } catch (demoError) {
+        console.error('[Logout] Error clearing demo user flag:', demoError);
       }
     }
 

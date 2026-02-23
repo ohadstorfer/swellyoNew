@@ -21,6 +21,8 @@ interface ImagePreviewModalProps {
   isProcessing?: boolean;
 }
 
+const DEBUG_IMAGE_PICKER = typeof __DEV__ !== 'undefined' && __DEV__ && Platform.OS === 'web';
+
 export const ImagePreviewModal: React.FC<ImagePreviewModalProps> = ({
   visible,
   imageUri,
@@ -28,6 +30,9 @@ export const ImagePreviewModal: React.FC<ImagePreviewModalProps> = ({
   onCancel,
   isProcessing = false,
 }) => {
+  if (DEBUG_IMAGE_PICKER && visible) {
+    console.log('[ImagePicker] checkpoint 6: ImagePreviewModal render with visible=true', { imageUriLength: imageUri?.length ?? 0 });
+  }
   const [caption, setCaption] = useState('');
 
   const handleSend = () => {

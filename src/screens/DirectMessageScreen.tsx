@@ -1211,6 +1211,9 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     }
   };
 
+  // Debug: gate instrumentation for mobile web image preview (Phase 1 - remove after fix verified)
+  const DEBUG_IMAGE_PICKER = typeof __DEV__ !== 'undefined' && __DEV__ && Platform.OS === 'web';
+
   // Handle image picker
   const handleImagePicker = async () => {
     if (!currentConversationId) {
@@ -1225,10 +1228,16 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         input.type = 'file';
         input.accept = 'image/*';
         input.onchange = async (e: any) => {
+          if (DEBUG_IMAGE_PICKER) console.log('[ImagePicker] checkpoint 3: input onchange fired', { hasFile: !!e?.target?.files?.[0] });
           const file = e.target.files[0];
           if (file) {
             const reader = new FileReader();
             reader.onload = async (event: any) => {
+              if (DEBUG_IMAGE_PICKER) {
+                console.log('[ImagePicker] checkpoint 4: FileReader.onload fired, about to set state');
+                const isNarrow = typeof window !== 'undefined' && window.innerWidth <= 768;
+                if (isNarrow) (window as any).alert('onload fired'); // temporary: confirm callback runs on mobile web
+              }
               const imageUri = event.target.result as string;
               setSelectedImageUri(imageUri);
               setImagePreviewVisible(true);
@@ -1236,6 +1245,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             reader.readAsDataURL(file);
           }
         };
+        if (DEBUG_IMAGE_PICKER) console.log('[ImagePicker] checkpoint 1: about to input.click()');
         input.click();
       } else {
         // For native, use expo-image-picker
