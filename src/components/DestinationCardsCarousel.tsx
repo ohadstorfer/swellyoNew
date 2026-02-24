@@ -5,7 +5,6 @@ import {
   FlatList,
   Dimensions,
   Platform,
-  PanResponder,
 } from 'react-native';
 import { DestinationInputCard } from './DestinationInputCard';
 import { spacing } from '../styles/theme';
@@ -124,37 +123,12 @@ export const DestinationCardsCarousel: React.FC<DestinationCardsCarouselProps> =
     }
   };
 
-  // Full-width: swipe does exactly the same as Next/Previous (one card, same animation, no free scroll).
-  // Native scroll is disabled; PanResponder detects swipe and we call the same scrollToOffset as the buttons.
-  const SWIPE_THRESHOLD = 40;
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => false,
-      onMoveShouldSetPanResponder: (_, { dx }) => Math.abs(dx) > 10,
-      onPanResponderRelease: (_, { dx }) => {
-        const cur = currentIndexRef.current;
-        const len = destinationsLengthRef.current;
-        const iw = itemWidthRef.current;
-        if (len === 0) return;
-        if (dx < -SWIPE_THRESHOLD && cur < len - 1) {
-          const nextIndex = cur + 1;
-          flatListRef.current?.scrollToOffset({ offset: nextIndex * iw, animated: true });
-          currentIndexRef.current = nextIndex;
-          setCurrentIndex(nextIndex);
-        } else if (dx > SWIPE_THRESHOLD && cur > 0) {
-          const prevIndex = cur - 1;
-          flatListRef.current?.scrollToOffset({ offset: prevIndex * iw, animated: true });
-          currentIndexRef.current = prevIndex;
-          setCurrentIndex(prevIndex);
-        }
-      },
-    })
-  ).current;
-
-  // Non-fullWidth: optional snap on scroll end (keep for non-fullWidth if needed later)
+  // Use native horizontal scroll only (no PanResponder). Vertical gestures then go to the parent
+  // chat ScrollView, so scrolling up/down over the cards works. directionalLockEnabled on the
+  // FlatList lets the system assign vertical = parent, horizontal = carousel.
   const handleScrollEnd = useCallback(
     (event: any) => {
-      if (fullWidth || destinations.length === 0) return;
+      if (destinations.length === 0) return;
       const offsetX = event?.nativeEvent?.contentOffset?.x ?? 0;
       const cur = scrollStartIndexRef.current;
       const curOffset = cur * itemWidth;
@@ -174,7 +148,7 @@ export const DestinationCardsCarousel: React.FC<DestinationCardsCarouselProps> =
         setCurrentIndex(targetIndex);
       }
     },
-    [fullWidth, destinations.length, itemWidth]
+    [destinations.length, itemWidth]
   );
 
   const scrollToPrevious = () => {
@@ -202,9 +176,8 @@ export const DestinationCardsCarousel: React.FC<DestinationCardsCarouselProps> =
     itemVisiblePercentThreshold: 50,
   }).current;
 
-  // When fullWidth, we don't use snapToOffsets: swipe is handled in onScrollEndDrag/onMomentumScrollEnd
-  // and we snap only to next or previous card (same movement as Next/Previous buttons).
-  const snapToOffsets = !fullWidth && destinations.length > 0
+  // Snap to one card per position for both fullWidth and non-fullWidth.
+  const snapToOffsets = destinations.length > 0
     ? destinations.map((_, i) => i * itemWidth)
     : undefined;
 
@@ -215,15 +188,11 @@ export const DestinationCardsCarousel: React.FC<DestinationCardsCarouselProps> =
 
   return (
     <View style={styles.container}>
-      {/* Cards Carousel */}
-      <View
-        style={styles.carouselContainer}
-        {...(fullWidth ? panResponder.panHandlers : {})}
-      >
+      <View style={styles.carouselContainer}>
         <FlatList
           ref={flatListRef}
           data={destinations}
-          scrollEnabled={!fullWidth}
+          scrollEnabled
           renderItem={({ item, index }) => {
             const cardData = destinationData[item];
             // Parse timeInText to extract value and unit
@@ -264,11 +233,11 @@ export const DestinationCardsCarousel: React.FC<DestinationCardsCarouselProps> =
           }}
           keyExtractor={(item, index) => `destination-${item}-${index}`}
           horizontal
-          pagingEnabled={!fullWidth}
+          directionalLockEnabled
           showsHorizontalScrollIndicator={false}
-          snapToInterval={fullWidth ? undefined : itemWidth}
+          snapToInterval={itemWidth}
           snapToOffsets={snapToOffsets}
-          snapToAlignment={fullWidth ? 'start' : 'start'}
+          snapToAlignment="start"
           decelerationRate="fast"
           onScrollBeginDrag={() => { scrollStartIndexRef.current = currentIndexRef.current; }}
           onScrollEndDrag={handleScrollEnd}

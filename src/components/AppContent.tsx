@@ -22,6 +22,7 @@ import { analyticsService } from '../services/analytics/analyticsService';
 import { useAuthGuard } from '../hooks/useAuthGuard';
 import { preloadVideosForBoardType, getVideoPreloadStatus, waitForVideoReady, preloadLoadingVideo, getLoadingVideoUrl } from '../services/media/videoPreloadService';
 import { getSurfLevelVideoFromStorage } from '../services/media/videoService';
+import { STEP_WELCOME } from '../constants/onboardingSteps';
 
 // Helper to get first video URL for a board type
 const getFirstVideoUrlForBoardType = (boardType: number): string | null => {
@@ -1215,7 +1216,7 @@ export const AppContent: React.FC = () => {
             
             // Navigate immediately (synchronous) before async operations
             // This ensures UI updates immediately even if logout takes time
-            setCurrentStep(-1);
+            setCurrentStep(STEP_WELCOME);
             setUser(null);
             setIsDemoUser(false);
             
@@ -1243,7 +1244,7 @@ export const AppContent: React.FC = () => {
             console.error('[AppContent] Error in logout handler:', error);
             // Ensure navigation happened even if there's an error
             try {
-              setCurrentStep(-1);
+              setCurrentStep(STEP_WELCOME);
               setUser(null);
               setIsDemoUser(false);
             } catch (navError) {
@@ -1251,7 +1252,7 @@ export const AppContent: React.FC = () => {
               // Retry after delay
               setTimeout(() => {
                 try {
-                  setCurrentStep(-1);
+                  setCurrentStep(STEP_WELCOME);
                   setUser(null);
                   setIsDemoUser(false);
                 } catch (retryError) {
@@ -1346,7 +1347,7 @@ export const AppContent: React.FC = () => {
     );
   }
 
-  // Show welcome screen by default (before onboarding starts, when currentStep is -1 or not 0-5)
+  // Show welcome screen by default (before onboarding starts, when currentStep is STEP_WELCOME or not 0-5)
   // Note: currentStep === 0 shows OnboardingWelcomeScreen (handled above)
   // This handles: initial load, or when user hasn't started onboarding yet
   // Auth guard ensures unauthenticated users are redirected here

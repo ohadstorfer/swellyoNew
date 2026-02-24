@@ -717,6 +717,7 @@ class ChatHistoryCache {
       const keys = await this.getAllCacheKeys();
       await AsyncStorage.multiRemove(keys);
       this.conversationAccessOrder = [];
+      this.memoryCache.clear();
     } catch (error) {
       console.error('[chatHistoryCache] Error clearing all cache:', error);
     }

@@ -7,6 +7,7 @@ import { MessagingProvider } from './src/context/MessagingProvider';
 import { AppContent } from './src/components/AppContent';
 import { analyticsService } from './src/services/analytics/analyticsService';
 import { PostHogErrorBoundary } from './src/components/PostHogErrorBoundary';
+import { registerLogoutHandlers } from './src/utils/registerLogoutHandlers';
 
 const POSTHOG_API_KEY = process.env.EXPO_PUBLIC_POSTHOG_API_KEY || '';
 const POSTHOG_HOST = process.env.EXPO_PUBLIC_POSTHOG_HOST || 'https://app.posthog.com';
@@ -17,6 +18,7 @@ export default function App() {
   useEffect(() => {
     // Initialize PostHog analytics (instance-based for tracking)
     analyticsService.initialize();
+    registerLogoutHandlers();
   }, []);
 
   const handleNavigationReady = () => {

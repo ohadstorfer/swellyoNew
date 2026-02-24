@@ -216,12 +216,13 @@ export const ConversationLoadingScreen: React.FC<ConversationLoadingScreenProps>
       console.log('[ConversationLoadingScreen] All animations completed');
     });
 
-    // Call onComplete after total animation duration (800ms slide + 3000ms line + 600ms move closer = 4400ms)
-    console.log('[ConversationLoadingScreen] Setting timer to call onComplete in 4400ms');
+    // Call onComplete 2 seconds after profile pics animation (move closer + grow) finishes
+    // Profile animation ends at 3800 + 600 = 4400ms, then wait 2000ms = 6400ms total
+    console.log('[ConversationLoadingScreen] Setting timer to call onComplete in 6400ms');
     const timer = setTimeout(() => {
       console.log('[ConversationLoadingScreen] Timer fired, calling onComplete');
       onComplete();
-    }, 4400);
+    }, 6400);
 
     return () => {
       console.log('[ConversationLoadingScreen] Cleanup: clearing timer');
@@ -837,8 +838,8 @@ const styles = StyleSheet.create({
     position: 'absolute', // Use absolute positioning
     left: '50%', // Center horizontally
     marginLeft: -217.25, // Half of width to center (434.5 / 2)
-    top: '50%', // Center vertically
-    marginTop: -206.994, // Half of height to center (413.988 / 2)
+    top: '50%', // Center vertically - shifted up so line bottom sits above bottom text
+    marginTop: -286, // Move line up so bottom of line is above Second Text Set
     overflow: 'hidden', // Hide the cover when it slides off-screen
     zIndex: 1, // Lower than profile images
   },

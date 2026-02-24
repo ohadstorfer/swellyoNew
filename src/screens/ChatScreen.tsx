@@ -682,6 +682,8 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
           style={styles.messagesList}
           contentContainerStyle={styles.messagesContent}
           showsVerticalScrollIndicator={false}
+          nestedScrollEnabled
+          directionalLockEnabled
         >
           {messages.map(renderMessage)}
           {(isLoading || isInitializing) && (

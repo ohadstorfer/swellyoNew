@@ -99,3 +99,25 @@ export const updateCachedUserProfilePhoto = async (photo: string | null, userId:
   }
 };
 
+/**
+ * Clear cached user profile (e.g. on logout).
+ * Non-throwing; safe to call from logout handlers.
+ */
+export const clearCachedUserProfile = async (): Promise<void> => {
+  try {
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      try {
+        const testKey = '__storage_test__';
+        window.localStorage.setItem(testKey, 'test');
+        window.localStorage.removeItem(testKey);
+      } catch (e) {
+        console.warn('localStorage not available, skipping cache clear');
+        return;
+      }
+    }
+    await AsyncStorage.removeItem(USER_PROFILE_CACHE_KEY);
+  } catch (error) {
+    console.warn('Error clearing cached user profile (non-critical):', error);
+  }
+};
+

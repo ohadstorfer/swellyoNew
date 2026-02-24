@@ -22,6 +22,8 @@ import { chatHistoryCache } from '../services/messaging/chatHistoryCache';
 import { supabase } from '../config/supabase';
 import { avatarCacheService } from '../services/media/avatarCacheService';
 import { userPresenceService } from '../services/presence/userPresenceService';
+import { resetForLogout as imageUploadResetForLogout } from '../services/messaging/imageUploadService';
+import { useOnboarding } from './OnboardingContext';
 
 // Conversation action types
 type ConversationAction =
@@ -727,6 +729,7 @@ const enrichConversationWithUserData = async (
 };
 
 export function MessagingProvider({ children }: { children: React.ReactNode }) {
+  const { user } = useOnboarding();
   const [conversations, dispatch] = useReducer(conversationReducer, []);
   const [loading, setLoading] = React.useState(true);
   const [hasMoreConversations, setHasMoreConversations] = React.useState(false);
@@ -741,6 +744,22 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
   
   // Track active enrichment operations per conversation to prevent race conditions
   const activeEnrichments = useRef<Map<string, Promise<Conversation | null>>>(new Map());
+
+  // Auth-state-driven reset: when user becomes null (logout/session loss), unsubscribe and clear state (single authority)
+  useEffect(() => {
+    if (user) {
+      currentUserIdRef.current = user.id;
+      return;
+    }
+    currentUserIdRef.current = null;
+    const cleanup = subscriptionCleanupRef.current;
+    subscriptionCleanupRef.current = null;
+    if (cleanup) {
+      cleanup();
+    }
+    dispatch({ type: 'REPLACE_ALL', payload: { conversations: [] } });
+    imageUploadResetForLogout().catch((err) => console.error('[MessagingProvider] Error resetting uploads on logout:', err));
+  }, [user]);
 
   // Calculate unread total
   const unreadTotal = conversations.reduce((sum, conv) => sum + (conv.unread_count || 0), 0);
@@ -1164,13 +1183,15 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
     console.log('[MessagingProvider] 🚀 Setting up subscription...');
     const callbacks: ConversationSubscriptionCallbacks = {
       onNewMessage: async (conversationId, message) => {
-          console.log('[MessagingProvider] 🔔 onNewMessage callback triggered:', {
-            conversationId,
-            messageId: message.id,
-            senderId: message.sender_id,
-            hasBody: !!message.body,
-            timestamp: new Date().toISOString(),
-          });
+        const activeUserId = currentUserIdRef.current;
+        if (!activeUserId) return;
+        console.log('[MessagingProvider] 🔔 onNewMessage callback triggered:', {
+          conversationId,
+          messageId: message.id,
+          senderId: message.sender_id,
+          hasBody: !!message.body,
+          timestamp: new Date().toISOString(),
+        });
         // Mark subscription as healthy when receiving messages
         subscriptionHealthyRef.current = true;
         
@@ -1390,9 +1411,13 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
         dispatch({ type: 'NEW_MESSAGE', payload: { conversationId, message } });
       },
       onMessageUpdated: (conversationId, message) => {
+        const activeUserId = currentUserIdRef.current;
+        if (!activeUserId) return;
         dispatch({ type: 'MESSAGE_UPDATED', payload: { conversationId, message } });
       },
       onMessageDeleted: async (conversationId, messageId) => {
+        const activeUserId = currentUserIdRef.current;
+        if (!activeUserId) return;
         dispatch({ type: 'MESSAGE_DELETED', payload: { conversationId, messageId } });
         
         // If deleted message was the last one, fetch previous message immediately
@@ -1445,6 +1470,8 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
         }
       },
       onConversationUpdated: (conversationId, updatedAt) => {
+        const activeUserId = currentUserIdRef.current;
+        if (!activeUserId) return;
         dispatch({ type: 'CONVERSATION_UPDATED', payload: { conversationId, updatedAt } });
       },
       onReconnect: () => {

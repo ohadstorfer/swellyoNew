@@ -1211,9 +1211,6 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     }
   };
 
-  // Debug: gate instrumentation for mobile web image preview (Phase 1 - remove after fix verified)
-  const DEBUG_IMAGE_PICKER = typeof __DEV__ !== 'undefined' && __DEV__ && Platform.OS === 'web';
-
   // Handle image picker
   const handleImagePicker = async () => {
     if (!currentConversationId) {
@@ -1227,18 +1224,14 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         const input = document.createElement('input');
         input.type = 'file';
         input.accept = 'image/*';
-        input.onchange = async (e: any) => {
-          const isMobileWeb = typeof window !== 'undefined' && window.innerWidth <= 768;
-          if (DEBUG_IMAGE_PICKER) console.log('[ImagePicker] checkpoint 3: input onchange fired', { hasFile: !!e?.target?.files?.[0] });
-          if (DEBUG_IMAGE_PICKER && isMobileWeb) (window as any).alert('1. File selected');
+        input.onchange = (e: any) => {
           const file = e.target.files[0];
           if (file) {
             const reader = new FileReader();
-            reader.onload = async (event: any) => {
-              if (DEBUG_IMAGE_PICKER) console.log('[ImagePicker] checkpoint 4: FileReader.onload fired, about to set state');
-              if (DEBUG_IMAGE_PICKER && isMobileWeb) (window as any).alert('2. onload fired');
+            reader.onload = (event: any) => {
               const imageUri = event.target.result as string;
-              // Defer state update to next tick so iOS Safari runs it after returning from system picker (often fixes "nothing happens")
+              selectedImageUriForUploadRef.current = imageUri;
+              // Defer state updates to next tick so iOS Safari applies them after page has resumed from picker
               setTimeout(() => {
                 setSelectedImageUri(imageUri);
                 setImagePreviewVisible(true);
@@ -1247,10 +1240,9 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             reader.readAsDataURL(file);
           }
         };
-        if (DEBUG_IMAGE_PICKER) console.log('[ImagePicker] checkpoint 1: about to input.click()');
         input.click();
       } else {
-        // For native, use expo-image-picker
+        // For native, use expo-image-picker (allowsEditing: true so iOS returns file:// URI instead of ph://)
         try {
           const ImagePicker = require('expo-image-picker');
           const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -1264,18 +1256,16 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
 
           const result = await ImagePicker.launchImageLibraryAsync({
             mediaTypes: ImagePicker.MediaTypeOptions.Images,
-            allowsEditing: false,
+            allowsEditing: true,
+            aspect: [4, 3],
             quality: 1,
-            base64: true,
           });
 
           const uri = result.assets?.[0]?.uri ?? (result as { uri?: string }).uri;
-          const base64 = result.assets?.[0]?.base64 ?? (result as { base64?: string }).base64;
           const canceled = result.canceled === true || (result as { cancelled?: boolean }).cancelled === true;
           if (uri && !canceled) {
             selectedImageUriForUploadRef.current = uri;
-            const previewUri = base64 ? `data:image/jpeg;base64,${base64}` : uri;
-            setSelectedImageUri(previewUri);
+            setSelectedImageUri(uri);
             setImagePreviewVisible(true);
           }
         } catch (error) {

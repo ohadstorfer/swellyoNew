@@ -469,7 +469,7 @@ export async function removePendingUpload(messageId: string): Promise<void> {
 }
 
 /**
- * Clear all pending uploads
+ * Clear all pending uploads (storage only; no in-memory queue or timers in this service).
  */
 export async function clearAllPendingUploads(): Promise<void> {
   try {
@@ -481,5 +481,14 @@ export async function clearAllPendingUploads(): Promise<void> {
   } catch (error) {
     console.error('[imageUploadService] Error clearing pending uploads:', error);
   }
+}
+
+/**
+ * Atomic reset for logout: clear all pending upload storage.
+ * Call from auth-driven effect (when user becomes null) and from logout registry.
+ * This service has no in-memory queue or retry timers; uploads are driven by the screen.
+ */
+export async function resetForLogout(): Promise<void> {
+  await clearAllPendingUploads();
 }
 

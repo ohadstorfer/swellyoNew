@@ -6,6 +6,7 @@ import { onboardingService } from '../services/onboarding/onboardingService';
 import { supabaseDatabaseService } from '../services/database/supabaseDatabaseService';
 import { isSupabaseConfigured, supabase } from '../config/supabase';
 import { Platform } from 'react-native';
+import { STEP_WELCOME } from '../constants/onboardingSteps';
 
 interface OnboardingContextType {
   currentStep: number;
@@ -50,7 +51,7 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         return 5; // Go directly to chat screen
       }
     }
-    return -1; // Default to -1 (WelcomeScreen), not 0 (OnboardingWelcomeScreen)
+    return STEP_WELCOME; // Default to WelcomeScreen, not OnboardingWelcomeScreen (0)
   };
 
   const [currentStep, setCurrentStep] = useState(getInitialStep());
@@ -191,7 +192,7 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   // Use useCallback to ensure stable reference for useEffect dependencies
   // State setters from useState are stable, so they don't need to be in dependencies
   const resetOnboarding = useCallback(async () => {
-    setCurrentStep(-1); // Go back to welcome screen (-1 = WelcomeScreen)
+    setCurrentStep(STEP_WELCOME); // Go back to welcome screen
     setFormData({});
     setUser(null);
     setIsComplete(false);
@@ -261,7 +262,7 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         // 1. Not on swelly_chat route
         // 2. There's a user (logged in)
         // 3. Onboarding is not complete
-        // Otherwise, default to -1 (WelcomeScreen)
+        // Otherwise, default to STEP_WELCOME (WelcomeScreen)
         if (!isOnSwellyChatRoute) {
           if (hasUser && !isOnboardingComplete && parsed.currentStep === 0) {
             // User is logged in and needs onboarding, restore step 0
@@ -271,7 +272,7 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             setCurrentStep(parsed.currentStep);
           } else {
             // No user or onboarding complete, default to WelcomeScreen
-            setCurrentStep(-1);
+            setCurrentStep(STEP_WELCOME);
           }
         }
         

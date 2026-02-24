@@ -3,6 +3,7 @@ import { Platform } from 'react-native';
 import { supabase } from '../config/supabase';
 import { useOnboarding } from '../context/OnboardingContext';
 import { performLogout } from '../utils/logout';
+import { STEP_WELCOME } from '../constants/onboardingSteps';
 
 /**
  * Centralized authentication guard hook
@@ -182,14 +183,14 @@ export function useAuthGuard() {
         // Force redirect even if logout fails
         setUser(null);
         setIsDemoUser(false);
-        setCurrentStep(-1);
+        setCurrentStep(STEP_WELCOME);
       }
     } catch (error) {
       console.error('[useAuthGuard] Error during logout:', error);
       // Force redirect even if logout fails
       setUser(null);
       setIsDemoUser(false);
-      setCurrentStep(-1);
+      setCurrentStep(STEP_WELCOME);
     } finally {
       // Reset flag after a delay to allow state updates to propagate
       setTimeout(() => {
@@ -278,9 +279,9 @@ export function useAuthGuard() {
           await handleUnauthenticated();
         } else {
           // User is null and no session - ensure we're on WelcomeScreen
-          if (currentStep !== -1) {
+          if (currentStep !== STEP_WELCOME) {
             console.log('[useAuthGuard] User is null and no session - ensuring WelcomeScreen');
-            setCurrentStep(-1);
+            setCurrentStep(STEP_WELCOME);
           }
         }
         return;
@@ -485,11 +486,11 @@ export function useAuthGuard() {
     
     // If user becomes null and we're not a demo user, ensure we're on WelcomeScreen
     if (user === null && !isDemoUser) {
-      // Ensure we're on WelcomeScreen - set currentStep if not already -1
+      // Ensure we're on WelcomeScreen - set currentStep if not already STEP_WELCOME
       // This prevents redirect loops while ensuring navigation happens
-      if (currentStep !== -1) {
+      if (currentStep !== STEP_WELCOME) {
         console.log('[useAuthGuard] User is null, ensuring navigation to WelcomeScreen');
-        setCurrentStep(-1);
+        setCurrentStep(STEP_WELCOME);
       }
       return;
     }

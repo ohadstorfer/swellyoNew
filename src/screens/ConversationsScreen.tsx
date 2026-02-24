@@ -121,12 +121,8 @@ export default function ConversationsScreen({
   const [showSkeletons, setShowSkeletons] = useState(false); // Delayed skeleton display to avoid flicker
   const [userInfoLoading, setUserInfoLoading] = useState(false); // Track user info loading state
   const [filter, setFilter] = useState<FilterType>('all');
-  // Initialize with cached user data from context for immediate display
-  const [userName, setUserName] = useState(() => {
-    if (contextUser?.nickname) return contextUser.nickname;
-    if (contextUser?.email) return contextUser.email.split('@')[0];
-    return 'User';
-  });
+  // Single source of truth for header display name (derived from context)
+  const headerDisplayName = contextUser ? (contextUser.nickname || contextUser.email?.split('@')[0] || 'User') : 'User';
   const [userAvatar, setUserAvatar] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(() => {
     return contextUser?.id?.toString() || null;
@@ -147,13 +143,14 @@ export default function ConversationsScreen({
   const scrollViewRef = useRef<ScrollView>(null);
   const loadMoreDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Update user info when context user changes (immediate sync)
+  // Update user info when context user changes (immediate sync); reset header when logged out
   useEffect(() => {
     if (contextUser) {
-      const newName = contextUser.nickname || (contextUser.email ? contextUser.email.split('@')[0] : 'User');
-      setUserName(newName);
       const userId = contextUser.id?.toString() || null;
       setCurrentUserId(userId);
+    } else {
+      setUserAvatar(null);
+      setCurrentUserId(null);
     }
   }, [contextUser]);
 
@@ -163,7 +160,7 @@ export default function ConversationsScreen({
     if (currentUserId && isMVPMode) {
       // Get user properties for identification
       let userEmail = contextUser?.email;
-      let displayName = contextUser?.nickname || userName || 'User';
+      let displayName = contextUser?.nickname || headerDisplayName || 'User';
       
       // If we don't have email, try to fetch user data
       if (!userEmail && currentUserId) {
@@ -201,36 +198,40 @@ export default function ConversationsScreen({
         console.log('[ConversationsScreen] User identified with PostHog on mount:', currentUserId, userProperties);
       }
     }
-  }, [currentUserId, isMVPMode, contextUser, userName]);
+  }, [currentUserId, isMVPMode, contextUser, headerDisplayName]);
 
   useEffect(() => {
     loadConversations();
-    
-    // Load from cache first, then fetch if needed
+
+    if (!contextUser) {
+      setConversationsLoaded(true);
+      return;
+    }
+
+    // Load from cache first, then fetch if needed (only when we have a logged-in user)
     const initializeUserInfo = async () => {
-      // Try to load from cache
       const cachedProfile = await loadCachedUserProfile();
       if (cachedProfile) {
-        // Use cached data immediately
-        setUserName(cachedProfile.name);
-        setUserAvatar(cachedProfile.photo);
-        if (cachedProfile.userId) {
-          setCurrentUserId(cachedProfile.userId);
+        try {
+          const { data: { user: authUser } } = await supabase.auth.getUser();
+          if (authUser && cachedProfile.userId === authUser.id) {
+            setUserAvatar(cachedProfile.photo);
+            if (cachedProfile.userId) setCurrentUserId(cachedProfile.userId);
+            return;
+          }
+        } catch (_) {
+          // Fall through to loadUserInfo on auth error
         }
-        // Don't fetch from server if we have valid cache
-        return;
       }
-      
-      // No cache or cache invalid - fetch from server
+
       await loadUserInfo();
     };
-    
+
     initializeUserInfo();
 
     // Conversations are now managed by MessagingProvider
-    // No need to subscribe here - MessagingProvider handles it
     setConversationsLoaded(true);
-  }, [refreshConversations]);
+  }, [refreshConversations, contextUser]);
 
   // Check if user has sent any direct messages to show survey bubble (MVP mode only)
   // This runs when component mounts, when user ID changes, or when returning from a conversation
@@ -355,10 +356,7 @@ export default function ConversationsScreen({
         const newPhoto = user.photo || null;
         const newUserId = user.id || null;
         
-        // Update state
-        if (newName !== userName) {
-          setUserName(newName);
-        }
+        // Update state (display name is derived from contextUser; only avatar and id from server)
         if (newUserId !== currentUserId) {
           setCurrentUserId(newUserId);
         }
@@ -1096,7 +1094,7 @@ export default function ConversationsScreen({
             // Ensure user is identified with their name before triggering survey
             if (currentUserId) {
               let userEmail = contextUser?.email;
-              let displayName = contextUser?.nickname || userName || 'User';
+              let displayName = contextUser?.nickname || headerDisplayName || 'User';
               
               // If we don't have email, try to fetch user data
               if (!userEmail && currentUserId) {
@@ -1169,11 +1167,11 @@ export default function ConversationsScreen({
             <>
               <ProfileImage
                 imageUrl={userAvatar}
-                name={userName}
+                name={headerDisplayName}
                 style={styles.headerAvatar}
                 showLoadingIndicator={false}
               />
-              <Text style={styles.headerTitle}>Hello {userName}</Text>
+              <Text style={styles.headerTitle}>Hello {headerDisplayName}</Text>
             </>
           )}
         </TouchableOpacity>
