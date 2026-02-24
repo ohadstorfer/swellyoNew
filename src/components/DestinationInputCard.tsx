@@ -41,6 +41,8 @@ interface DestinationInputCardProps {
   initialAreas?: string;
   initialTimeValue?: string;
   initialTimeUnit?: TimeUnit;
+  /** Called with a focus function so the carousel can refocus this card's areas input after Next (keeps keyboard open). */
+  registerFocusRef?: (focus: (() => void) | undefined) => void;
 }
 
 type TimeUnit = 'days' | 'weeks' | 'months' | 'years';
@@ -69,10 +71,12 @@ export const DestinationInputCard: React.FC<DestinationInputCardProps> = ({
   initialAreas,
   initialTimeValue,
   initialTimeUnit,
+  registerFocusRef,
 }) => {
   const [areas, setAreas] = useState(initialAreas || '');
   const [timeValue, setTimeValue] = useState(initialTimeValue || '2');
   const [timeUnit, setTimeUnit] = useState<TimeUnit>(initialTimeUnit || 'weeks');
+  const areasInputRef = useRef<TextInput>(null);
   const unitScrollRef = useRef<ScrollView>(null);
   const onDataChangeRef = useRef(onDataChange);
   const scrollEndTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null); // kept for cleanup if unmount runs stale closure (e.g. hot reload)
@@ -107,6 +111,13 @@ export const DestinationInputCard: React.FC<DestinationInputCardProps> = ({
   useEffect(() => {
     onDataChangeRef.current = onDataChange;
   }, [onDataChange]);
+
+  // Register focus function so carousel can refocus this card's areas input after Next (keeps keyboard open)
+  useEffect(() => {
+    if (!registerFocusRef) return;
+    registerFocusRef(() => areasInputRef.current?.focus());
+    return () => registerFocusRef(undefined);
+  }, [registerFocusRef]);
 
   // Calculate time data whenever values change
   useEffect(() => {
@@ -192,7 +203,7 @@ export const DestinationInputCard: React.FC<DestinationInputCardProps> = ({
   // Smooth selection transition when changing unit
   const scheduleLayoutAnimation = () => {
     LayoutAnimation.configureNext({
-      duration: 220,
+      duration: 120,
       update: { type: LayoutAnimation.Types.easeInEaseOut },
       create: { type: LayoutAnimation.Types.easeInEaseOut },
     });
@@ -361,6 +372,7 @@ export const DestinationInputCard: React.FC<DestinationInputCardProps> = ({
             <TouchableOpacity style={styles.inputContainer} activeOpacity={1} disabled={isReadOnly}>
               <Ionicons name="location-outline" size={20} color="#A0A0A0" style={styles.inputIcon} />
               <TextInput
+                ref={areasInputRef}
                 style={[styles.textInput, isReadOnly && styles.inputReadOnly]}
                 value={areas}
                 onChangeText={setAreas}

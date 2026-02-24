@@ -41,6 +41,9 @@ export const DestinationCardsCarousel: React.FC<DestinationCardsCarouselProps> =
   const scrollStartIndexRef = useRef(0);
   const itemWidthRef = useRef(0);
   const destinationsLengthRef = useRef(0);
+  /** Focus functions per card index so we can refocus the next card's input after Next (keep keyboard open). */
+  const focusRefsRef = useRef<Record<number, (() => void) | undefined>>({});
+  const focusAfterNextRef = useRef(false);
 
   // Initialize destination data from initialData if provided (read-only mode)
   const initializeDestinationData = (): Record<string, DestinationData> => {
@@ -105,8 +108,9 @@ export const DestinationCardsCarousel: React.FC<DestinationCardsCarouselProps> =
     onSubmit(allData);
   };
 
-  const scrollToIndex = (index: number) => {
+  const scrollToIndex = (index: number, focusInputAfterScroll?: boolean) => {
     if (index >= 0 && index < destinations.length) {
+      if (focusInputAfterScroll) focusAfterNextRef.current = true;
       if (fullWidth) {
         flatListRef.current?.scrollToOffset({
           offset: index * itemWidth,
@@ -147,6 +151,13 @@ export const DestinationCardsCarousel: React.FC<DestinationCardsCarouselProps> =
         currentIndexRef.current = targetIndex;
         setCurrentIndex(targetIndex);
       }
+      if (focusAfterNextRef.current) {
+        const idx = currentIndexRef.current;
+        setTimeout(() => {
+          focusRefsRef.current[idx]?.();
+          focusAfterNextRef.current = false;
+        }, 50);
+      }
     },
     [destinations.length, itemWidth]
   );
@@ -159,7 +170,7 @@ export const DestinationCardsCarousel: React.FC<DestinationCardsCarouselProps> =
 
   const scrollToNext = () => {
     if (currentIndex < destinations.length - 1) {
-      scrollToIndex(currentIndex + 1);
+      scrollToIndex(currentIndex + 1, true);
     }
   };
 
@@ -227,6 +238,7 @@ export const DestinationCardsCarousel: React.FC<DestinationCardsCarouselProps> =
                   initialAreas={cardData?.areas.join(', ')}
                   initialTimeValue={initialTimeValue}
                   initialTimeUnit={initialTimeUnit}
+                  registerFocusRef={isReadOnly ? undefined : (fn) => { focusRefsRef.current[index] = fn; }}
                 />
               </View>
             );
