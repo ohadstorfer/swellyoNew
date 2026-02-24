@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, forwardRef, useImperativeHandle } from 'react';
 import {
   View,
   StyleSheet,
@@ -41,8 +41,10 @@ interface DestinationInputCardProps {
   initialAreas?: string;
   initialTimeValue?: string;
   initialTimeUnit?: TimeUnit;
-  /** Called with a focus function so the carousel can refocus this card's areas input after Next (keeps keyboard open). */
-  registerFocusRef?: (focus: (() => void) | undefined) => void;
+}
+
+export interface DestinationInputCardRef {
+  focusAreaInput: () => void;
 }
 
 type TimeUnit = 'days' | 'weeks' | 'months' | 'years';
@@ -59,25 +61,31 @@ const TOTAL_UNIT_ITEMS = (REPEAT_SIDES * 2 + 1) * TIME_UNITS.length;
 const CENTER_ITEM_INDEX = CENTER_CYCLE_INDEX * TIME_UNITS.length;
 const RECENTER_THRESHOLD = TIME_UNITS.length * 25; // recenter when within 25 cycles of edge
 
-export const DestinationInputCard: React.FC<DestinationInputCardProps> = ({
-  destination,
-  onDataChange,
-  currentIndex = 0,
-  totalCount = 1,
-  onNext,
-  onSave,
-  saveDisabled = false,
-  isReadOnly = false,
-  initialAreas,
-  initialTimeValue,
-  initialTimeUnit,
-  registerFocusRef,
-}) => {
+export const DestinationInputCard = forwardRef<DestinationInputCardRef, DestinationInputCardProps>(function DestinationInputCard(
+  {
+    destination,
+    onDataChange,
+    currentIndex = 0,
+    totalCount = 1,
+    onNext,
+    onSave,
+    saveDisabled = false,
+    isReadOnly = false,
+    initialAreas,
+    initialTimeValue,
+    initialTimeUnit,
+  },
+  ref
+) {
   const [areas, setAreas] = useState(initialAreas || '');
   const [timeValue, setTimeValue] = useState(initialTimeValue || '2');
   const [timeUnit, setTimeUnit] = useState<TimeUnit>(initialTimeUnit || 'weeks');
-  const areasInputRef = useRef<TextInput>(null);
   const unitScrollRef = useRef<ScrollView>(null);
+  const areasInputRef = useRef<TextInput>(null);
+
+  useImperativeHandle(ref, () => ({
+    focusAreaInput: () => areasInputRef.current?.focus?.(),
+  }), []);
   const onDataChangeRef = useRef(onDataChange);
   const scrollEndTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null); // kept for cleanup if unmount runs stale closure (e.g. hot reload)
   const scrollXRef = useRef(0);
@@ -111,13 +119,6 @@ export const DestinationInputCard: React.FC<DestinationInputCardProps> = ({
   useEffect(() => {
     onDataChangeRef.current = onDataChange;
   }, [onDataChange]);
-
-  // Register focus function so carousel can refocus this card's areas input after Next (keeps keyboard open)
-  useEffect(() => {
-    if (!registerFocusRef) return;
-    registerFocusRef(() => areasInputRef.current?.focus());
-    return () => registerFocusRef(undefined);
-  }, [registerFocusRef]);
 
   // Calculate time data whenever values change
   useEffect(() => {
@@ -203,7 +204,7 @@ export const DestinationInputCard: React.FC<DestinationInputCardProps> = ({
   // Smooth selection transition when changing unit
   const scheduleLayoutAnimation = () => {
     LayoutAnimation.configureNext({
-      duration: 120,
+      duration: 220,
       update: { type: LayoutAnimation.Types.easeInEaseOut },
       create: { type: LayoutAnimation.Types.easeInEaseOut },
     });
@@ -513,7 +514,7 @@ export const DestinationInputCard: React.FC<DestinationInputCardProps> = ({
       </View>
     </View>
   );
-};
+});
 
 const styles = StyleSheet.create({
   container: {

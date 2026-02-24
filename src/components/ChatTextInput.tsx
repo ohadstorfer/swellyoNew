@@ -166,6 +166,11 @@ export const ChatTextInput = forwardRef<ChatTextInputRef, ChatTextInputProps>(fu
                   minHeight: MIN_INPUT_HEIGHT,
                   maxHeight: MAX_INPUT_HEIGHT,
                   lineHeight: LINE_HEIGHT,
+                  // Single line: nudge text up so it looks vertically centered (helps when textAlignVertical is ignored, e.g. Web)
+                  ...(inputHeight <= MIN_INPUT_HEIGHT && {
+                    paddingTop: 8,
+                    paddingBottom: 12,
+                  }),
                 },
               ]}
               placeholder={placeholder}
@@ -199,7 +204,6 @@ export const ChatTextInput = forwardRef<ChatTextInputRef, ChatTextInputProps>(fu
         <TouchableOpacity
           style={[
             styles.sendButton,
-            { backgroundColor: primaryColor },
             isSendDisabled && styles.sendButtonDisabled,
           ]}
           onPress={handleSend}
@@ -319,6 +323,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginLeft: 8,
     marginBottom: 2,
+    backgroundColor: '#B72DF2',
   },
   sendButtonDisabled: {
     opacity: 0.4,

@@ -6,8 +6,10 @@ import {
   Dimensions,
   Platform,
 } from 'react-native';
-import { DestinationInputCard } from './DestinationInputCard';
+import { DestinationInputCard, type DestinationInputCardRef } from './DestinationInputCard';
 import { spacing } from '../styles/theme';
+
+const FOCUS_NEXT_INPUT_DELAY_MS = 380;
 
 type TimeUnit = 'days' | 'weeks' | 'months' | 'years';
 
@@ -41,9 +43,6 @@ export const DestinationCardsCarousel: React.FC<DestinationCardsCarouselProps> =
   const scrollStartIndexRef = useRef(0);
   const itemWidthRef = useRef(0);
   const destinationsLengthRef = useRef(0);
-  /** Focus functions per card index so we can refocus the next card's input after Next (keep keyboard open). */
-  const focusRefsRef = useRef<Record<number, (() => void) | undefined>>({});
-  const focusAfterNextRef = useRef(false);
 
   // Initialize destination data from initialData if provided (read-only mode)
   const initializeDestinationData = (): Record<string, DestinationData> => {
@@ -59,6 +58,7 @@ export const DestinationCardsCarousel: React.FC<DestinationCardsCarouselProps> =
   
   const [destinationData, setDestinationData] = useState<Record<string, DestinationData>>(initializeDestinationData);
   const flatListRef = useRef<FlatList>(null);
+  const cardRefsMap = useRef<Record<number, DestinationInputCardRef | null>>({});
   const screenWidth = Dimensions.get('window').width;
   // Full-width carousel rules: (1) The current card is always at the horizontal center of the
   // screen and not affected by other cards. (2) Next/previous cards show a small peek (PEEK)
@@ -108,9 +108,8 @@ export const DestinationCardsCarousel: React.FC<DestinationCardsCarouselProps> =
     onSubmit(allData);
   };
 
-  const scrollToIndex = (index: number, focusInputAfterScroll?: boolean) => {
+  const scrollToIndex = (index: number) => {
     if (index >= 0 && index < destinations.length) {
-      if (focusInputAfterScroll) focusAfterNextRef.current = true;
       if (fullWidth) {
         flatListRef.current?.scrollToOffset({
           offset: index * itemWidth,
@@ -151,13 +150,6 @@ export const DestinationCardsCarousel: React.FC<DestinationCardsCarouselProps> =
         currentIndexRef.current = targetIndex;
         setCurrentIndex(targetIndex);
       }
-      if (focusAfterNextRef.current) {
-        const idx = currentIndexRef.current;
-        setTimeout(() => {
-          focusRefsRef.current[idx]?.();
-          focusAfterNextRef.current = false;
-        }, 50);
-      }
     },
     [destinations.length, itemWidth]
   );
@@ -169,9 +161,13 @@ export const DestinationCardsCarousel: React.FC<DestinationCardsCarouselProps> =
   };
 
   const scrollToNext = () => {
-    if (currentIndex < destinations.length - 1) {
-      scrollToIndex(currentIndex + 1, true);
-    }
+    if (currentIndex >= destinations.length - 1) return;
+    const nextIdx = currentIndex + 1;
+    scrollToIndex(nextIdx);
+    // Focus the next card's areas input after scroll so keyboard stays open (user can keep typing).
+    setTimeout(() => {
+      cardRefsMap.current[nextIdx]?.focusAreaInput?.();
+    }, FOCUS_NEXT_INPUT_DELAY_MS);
   };
 
   const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
@@ -227,6 +223,7 @@ export const DestinationCardsCarousel: React.FC<DestinationCardsCarouselProps> =
                 { width: cardWidth, marginRight: fullWidth ? CARD_GAP : spacing.md },
               ]}>
                 <DestinationInputCard
+                  ref={(r) => { cardRefsMap.current[index] = r; }}
                   destination={item}
                   onDataChange={(data) => handleCardDataChange(item, data)}
                   currentIndex={index}
@@ -238,7 +235,6 @@ export const DestinationCardsCarousel: React.FC<DestinationCardsCarouselProps> =
                   initialAreas={cardData?.areas.join(', ')}
                   initialTimeValue={initialTimeValue}
                   initialTimeUnit={initialTimeUnit}
-                  registerFocusRef={isReadOnly ? undefined : (fn) => { focusRefsRef.current[index] = fn; }}
                 />
               </View>
             );
