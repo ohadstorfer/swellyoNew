@@ -96,6 +96,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const selectedImageUriForUploadRef = useRef<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const isPickerOpenRef = useRef(false);
+  const pickerFallbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isProcessingImage, setIsProcessingImage] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
   const chatInputRef = useRef<ChatTextInputRef>(null);
@@ -117,9 +118,13 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     currentConversationIdRef.current = currentConversationId;
   }, [currentConversationId]);
 
-  // Clean up file input if user navigates away while picker is open (web only)
+  // Clean up file input and fallback timeout if user navigates away while picker is open (web only)
   useEffect(() => {
     return () => {
+      if (pickerFallbackTimeoutRef.current) {
+        clearTimeout(pickerFallbackTimeoutRef.current);
+        pickerFallbackTimeoutRef.current = null;
+      }
       if (typeof document !== 'undefined' && fileInputRef.current?.parentNode) {
         fileInputRef.current.parentNode.removeChild(fileInputRef.current);
         fileInputRef.current = null;
@@ -1237,6 +1242,13 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         if (isPickerOpenRef.current) return;
         isPickerOpenRef.current = true;
 
+        // Fallback: if user cancels picker, iOS Safari never fires change; reset flag so next tap can open again.
+        if (pickerFallbackTimeoutRef.current) clearTimeout(pickerFallbackTimeoutRef.current);
+        pickerFallbackTimeoutRef.current = setTimeout(() => {
+          isPickerOpenRef.current = false;
+          pickerFallbackTimeoutRef.current = null;
+        }, 10000);
+
         // Append to DOM and use addEventListener so iOS Safari fires change (see e.g. SO 47664777).
         const input = document.createElement('input') as HTMLInputElement;
         input.type = 'file';
@@ -1250,6 +1262,10 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         fileInputRef.current = input;
 
         const handleChange = (e: Event) => {
+          if (pickerFallbackTimeoutRef.current) {
+            clearTimeout(pickerFallbackTimeoutRef.current);
+            pickerFallbackTimeoutRef.current = null;
+          }
           const target = e.target as HTMLInputElement | null;
           const file = target?.files?.[0];
           isPickerOpenRef.current = false;

@@ -222,7 +222,7 @@ const styles = StyleSheet.create({
   wrapper: {
     flex: 1,
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-end',
     width: '100%',
     ...(Platform.OS === 'web' && ({
       outlineStyle: 'none',
@@ -232,7 +232,7 @@ const styles = StyleSheet.create({
   attachButtonWrapper: {
     justifyContent: 'flex-end',
     alignItems: 'flex-end',
-    paddingBottom: 6,
+    paddingBottom: 12,
     marginRight: 8,
   },
   messageInputContainer: {
