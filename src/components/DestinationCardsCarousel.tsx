@@ -9,6 +9,8 @@ import {
 import { DestinationInputCard, type DestinationInputCardRef } from './DestinationInputCard';
 import { spacing } from '../styles/theme';
 
+const FOCUS_NEXT_INPUT_DELAY_MS = 380;
+
 type TimeUnit = 'days' | 'weeks' | 'months' | 'years';
 
 interface DestinationData {
@@ -161,9 +163,11 @@ export const DestinationCardsCarousel: React.FC<DestinationCardsCarouselProps> =
   const scrollToNext = () => {
     if (currentIndex >= destinations.length - 1) return;
     const nextIdx = currentIndex + 1;
-    // Focus first (same user gesture) so iOS Safari keeps keyboard open; then scroll.
-    cardRefsMap.current[nextIdx]?.focusAreaInput?.();
     scrollToIndex(nextIdx);
+    // Focus the next card's areas input after scroll so keyboard stays open (user can keep typing).
+    setTimeout(() => {
+      cardRefsMap.current[nextIdx]?.focusAreaInput?.();
+    }, FOCUS_NEXT_INPUT_DELAY_MS);
   };
 
   const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
