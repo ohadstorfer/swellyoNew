@@ -94,6 +94,8 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const [imagePreviewVisible, setImagePreviewVisible] = useState(false);
   const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
   const selectedImageUriForUploadRef = useRef<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const isPickerOpenRef = useRef(false);
   const [isProcessingImage, setIsProcessingImage] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
   const chatInputRef = useRef<ChatTextInputRef>(null);
@@ -114,6 +116,17 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   useEffect(() => {
     currentConversationIdRef.current = currentConversationId;
   }, [currentConversationId]);
+
+  // Clean up file input if user navigates away while picker is open (web only)
+  useEffect(() => {
+    return () => {
+      if (typeof document !== 'undefined' && fileInputRef.current?.parentNode) {
+        fileInputRef.current.parentNode.removeChild(fileInputRef.current);
+        fileInputRef.current = null;
+      }
+      isPickerOpenRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     // Get current user ID - CRITICAL: Get from session first (instant, no database query)
@@ -1220,26 +1233,50 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
 
     try {
       if (Platform.OS === 'web') {
-        // For web, use a file input
-        const input = document.createElement('input');
+        if (typeof document === 'undefined' || !document.body) return;
+        if (isPickerOpenRef.current) return;
+        isPickerOpenRef.current = true;
+
+        // Append to DOM and use addEventListener so iOS Safari fires change (see e.g. SO 47664777).
+        const input = document.createElement('input') as HTMLInputElement;
         input.type = 'file';
         input.accept = 'image/*';
-        input.onchange = (e: any) => {
-          const file = e.target.files[0];
-          if (file) {
-            const reader = new FileReader();
-            reader.onload = (event: any) => {
-              const imageUri = event.target.result as string;
-              selectedImageUriForUploadRef.current = imageUri;
-              // Defer state updates to next tick so iOS Safari applies them after page has resumed from picker
-              setTimeout(() => {
-                setSelectedImageUri(imageUri);
-                setImagePreviewVisible(true);
-              }, 0);
-            };
-            reader.readAsDataURL(file);
+        Object.assign(input.style, {
+          position: 'fixed',
+          left: '-9999px',
+          opacity: '0',
+          pointerEvents: 'none',
+        });
+        fileInputRef.current = input;
+
+        const handleChange = (e: Event) => {
+          const target = e.target as HTMLInputElement | null;
+          const file = target?.files?.[0];
+          isPickerOpenRef.current = false;
+          if (fileInputRef.current?.parentNode) {
+            fileInputRef.current.parentNode.removeChild(fileInputRef.current);
+            fileInputRef.current = null;
           }
+          if (!file) return;
+          const reader = new FileReader();
+          reader.onload = (event: ProgressEvent<FileReader>) => {
+            const imageUri = event.target?.result as string;
+            if (!imageUri) return;
+            selectedImageUriForUploadRef.current = imageUri;
+            setTimeout(() => {
+              setSelectedImageUri(imageUri);
+              setImagePreviewVisible(true);
+            }, 0);
+          };
+          reader.onerror = () => {
+            console.error('[DirectMessageScreen] FileReader failed to read image');
+            Alert.alert('Error', 'Could not read the selected image. Please try another.');
+          };
+          reader.readAsDataURL(file);
         };
+
+        input.addEventListener('change', handleChange);
+        document.body.appendChild(input);
         input.click();
       } else {
         // For native, use expo-image-picker (allowsEditing: true so iOS returns file:// URI instead of ph://)
