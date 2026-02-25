@@ -39,6 +39,15 @@ interface SwellyShaperScreenProps {
 
 const SWELLY_SHAPER_CHAT_ID_KEY = '@swellyo_swelly_shaper_chat_id';
 
+/** Clear the persisted Swelly Shaper chat ID (called on logout). */
+export async function clearSwellyShaperChatId(): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(SWELLY_SHAPER_CHAT_ID_KEY);
+  } catch (e) {
+    console.warn('[SwellyShaperScreen] Failed to clear chat ID:', e);
+  }
+}
+
 export const SwellyShaperScreen: React.FC<SwellyShaperScreenProps> = ({ onBack, onViewProfile }) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');

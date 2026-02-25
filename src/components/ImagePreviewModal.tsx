@@ -57,13 +57,16 @@ export const ImagePreviewModal: React.FC<ImagePreviewModalProps> = ({
         <View style={styles.container}>
           {/* Header */}
           <View style={styles.header}>
-            <TouchableOpacity
-              style={styles.cancelButton}
-              onPress={handleCancel}
-              disabled={isProcessing}
-            >
-              <Text style={styles.cancelButtonText}>Cancel</Text>
-            </TouchableOpacity>
+            {isProcessing ? (
+              <View style={styles.cancelButton} />
+            ) : (
+              <TouchableOpacity
+                style={styles.cancelButton}
+                onPress={handleCancel}
+              >
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity
               style={[styles.sendButton, isProcessing && styles.sendButtonDisabled]}
               onPress={handleSend}
@@ -84,12 +87,6 @@ export const ImagePreviewModal: React.FC<ImagePreviewModalProps> = ({
               style={styles.image}
               resizeMode="contain"
             />
-            {isProcessing && (
-              <View style={styles.processingOverlay}>
-                <ActivityIndicator size="large" color="#FFFFFF" />
-                <Text style={styles.processingText}>Processing image...</Text>
-              </View>
-            )}
           </View>
 
           {/* Caption Input */}
@@ -176,22 +173,6 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
-  processingOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  processingText: {
-    marginTop: spacing.sm,
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
-  },
   captionContainer: {
     padding: spacing.md,
     borderTopWidth: 1,
@@ -201,7 +182,7 @@ const styles = StyleSheet.create({
     minHeight: 60,
     maxHeight: 120,
     fontSize: 16,
-    color: colors.text,
+    color: colors.textPrimary,
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
     textAlignVertical: 'top',
   },

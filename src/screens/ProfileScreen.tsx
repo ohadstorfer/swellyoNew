@@ -1803,7 +1803,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
               <View style={styles.onboardingPillButtonContainer}>
                 <OnboardingBackArrowIcon />
                 <Text style={styles.onboardingPillButtonText}>Edit</Text>
-              </View>
+              </View>mp
             </TouchableOpacity>
             <TouchableOpacity style={styles.onboardingPillButtonRight} onPress={onBack}>
               <View style={styles.onboardingPillButtonContainer}>
@@ -2101,9 +2101,13 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
                 const isUSA = ['USA', 'United States', 'US', 'U.S.', 'U.S.A.'].includes(country);
                 const primaryLocation = isUSA && state ? state : country;
                 
-                // Add first area to display name ONLY for USA destinations
-                const firstArea = isUSA && areas.length > 0 ? areas[0] : '';
-                const displayName = firstArea ? `${primaryLocation}, ${firstArea}` : primaryLocation;
+                // Add first area to display name ONLY for USA destinations;
+                // skip area if it equals state (case-insensitive); if so, use next area; if none, show no area
+                const stateLower = primaryLocation.trim().toLowerCase();
+                const areaToShow = isUSA && areas.length > 0
+                  ? (areas.find((a) => (a != null && String(a).trim().toLowerCase() !== stateLower)) ?? '')
+                  : '';
+                const displayName = areaToShow ? `${primaryLocation}, ${areaToShow}` : primaryLocation;
                 
                 // Use state for image/flag lookup if USA, otherwise use country
                 const locationForAssets = isUSA && state ? state : country;

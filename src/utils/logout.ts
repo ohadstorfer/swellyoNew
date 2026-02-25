@@ -118,14 +118,14 @@ function navigateToWelcomeScreen(options: LogoutOptions): void {
 }
 
 /**
- * Performs a full logout by running three layers in order:
+ * Performs a full logout by running in order:
  * 1. destroySession (infra: presence + authService.signOut) with timeout and AbortSignal
  * 2. resetAppStateAfterLogout (onboarding/storage + user/demo flags)
- * 3. navigateToWelcomeScreen (setCurrentStep(STEP_WELCOME))
- * 4. analyticsService.reset() after context/navigation so analytics is reset after user is cleared
+ * 3. logoutRegistry.executeAll (cache/storage clears) – before navigation so User B never sees User A's data
+ * 4. navigateToWelcomeScreen (setCurrentStep(STEP_WELCOME))
+ * 5. analyticsService.reset()
  *
- * If Layer 1 times out, we abort its signal so any late steps no-op and we still run
- * Layers 2 and 3 so the user is never stuck on loading.
+ * logoutInProgress is always reset in finally so a single failure cannot block future logouts.
  */
 export async function performLogout(options: LogoutOptions = {}): Promise<LogoutResult> {
   try {
@@ -162,6 +162,14 @@ export async function performLogout(options: LogoutOptions = {}): Promise<Logout
       console.warn('[Logout] Layer 2 finished with error or timeout, proceeding:', layer2Error);
     }
 
+    // Run registry (cache/storage clears) before navigation so User B never sees User A's data.
+    try {
+      await logoutRegistry.executeAll({ timeoutMs: 8000 });
+      console.log('[Logout] Registry handlers completed');
+    } catch (registryErr) {
+      console.error('[Logout] Registry error:', registryErr);
+    }
+
     // Layer 3: Navigation
     navigateToWelcomeScreen(options);
 
@@ -173,13 +181,6 @@ export async function performLogout(options: LogoutOptions = {}): Promise<Logout
       console.error('[Logout] Error resetting analytics:', analyticsError);
     }
 
-    logoutInProgress = false;
-
-    // Fire-and-forget: run registry (upload cancel + storage clears). Never block logout.
-    void logoutRegistry.executeAll({ timeoutMs: 5000 }).catch((err) => {
-      console.error('[Logout] Registry error:', err);
-    });
-
     console.log('[Logout] Logout process completed successfully');
     return { success: true };
   } catch (error) {
@@ -189,5 +190,7 @@ export async function performLogout(options: LogoutOptions = {}): Promise<Logout
       success: false,
       error: errorMessage,
     };
+  } finally {
+    logoutInProgress = false;
   }
 }

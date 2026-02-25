@@ -26,6 +26,14 @@ export interface SwellyContinueChatRequest {
   message: string;
 }
 
+/** Trip-planning payload when is_finished is true (optional shape for type hints). */
+export interface TripPlanningFinishedData {
+  search_summary?: string;
+  destination_country?: string;
+  area?: string | null;
+  [key: string]: unknown;
+}
+
 export interface SwellyContinueChatResponse {
   return_message: string;
   is_finished: boolean;

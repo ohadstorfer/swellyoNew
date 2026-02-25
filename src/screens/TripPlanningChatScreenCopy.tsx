@@ -12,6 +12,8 @@ import {
   ImageBackground,
   Animated,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import Svg, { Path } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../components/Text';
 import { colors, spacing } from '../styles/theme';
@@ -175,6 +177,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   const [destinationCountry, setDestinationCountry] = useState<string>(persistedDestination || '');
   const [pendingSingleCriterionMatches, setPendingSingleCriterionMatches] = useState<MatchedUser[] | null>(null);
   const [singleCriterionType, setSingleCriterionType] = useState<string | null>(null);
+  const [pendingSearch, setPendingSearch] = useState<{ data: any; searchSummary: string } | null>(null);
   const scrollViewRef = useRef<ScrollView>(null);
 
   // Test API connection and initialize chat context on component mount
@@ -387,6 +390,115 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     initializeChat();
   }, [formData]); // Re-run if formData changes
 
+  const runFindMatches = async (currentChatId: string, tripPlanningData: any) => {
+    if (!currentChatId) return;
+    setPendingSearch(null);
+    setIsLoading(true);
+    const requestData = {
+      destination_country: tripPlanningData.destination_country,
+      area: tripPlanningData.area || null,
+      budget: tripPlanningData.budget || null,
+      destination_known: tripPlanningData.destination_known || false,
+      purpose: tripPlanningData.purpose || { purpose_type: 'general_guidance', specific_topics: [] },
+      non_negotiable_criteria: tripPlanningData.non_negotiable_criteria || null,
+      user_context: tripPlanningData.user_context || null,
+      queryFilters: tripPlanningData.queryFilters || null,
+      filtersFromNonNegotiableStep: tripPlanningData.filtersFromNonNegotiableStep || false,
+    };
+    const findingMatchesMessage: Message = {
+      id: (Date.now() + 2).toString(),
+      text: 'Finding the perfect surfers for you...',
+      isUser: false,
+      timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+    };
+    setMessages(prev => [...prev, findingMatchesMessage]);
+    try {
+      const { matches: matchedUsers } = await swellyServiceCopy.findMatchingUsersServer(currentChatId, tripPlanningData);
+      console.log('Matched users found (server):', matchedUsers.length);
+      const needsConfirmation = (matchedUsers as any).__needsConfirmation === true;
+      const isSingleCriterion = (matchedUsers as any).__singleCriterion === true;
+      if (needsConfirmation && isSingleCriterion && matchedUsers.length > 0) {
+        const criterionType = getSingleCriterionType(requestData);
+        const confirmationMessage = generateSingleCriterionConfirmationMessage(criterionType || 'requirement', matchedUsers.length);
+        const askMessage: Message = {
+          id: (Date.now() + 3).toString(),
+          text: confirmationMessage,
+          isUser: false,
+          timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+          isMatchedUsers: false,
+        };
+        setMessages(prev => [...prev, askMessage]);
+        setPendingSingleCriterionMatches(matchedUsers);
+        setSingleCriterionType(criterionType);
+        setDestinationCountry(tripPlanningData.destination_country);
+        setIsFinished(false);
+        return;
+      }
+      if (matchedUsers.length > 0) {
+        const matchesMessageText = `Found ${matchedUsers.length} awesome match${matchedUsers.length > 1 ? 'es' : ''} for you!`;
+        const matchesDestination = tripPlanningData.destination_country || '';
+        setMessages(prev => {
+          const filtered = prev.filter(msg => msg.text !== 'Finding the perfect surfers for you...');
+          const matchesMessage: Message = {
+            id: (Date.now() + 3).toString(),
+            text: matchesMessageText,
+            isUser: false,
+            timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+            isMatchedUsers: true,
+            matchedUsers: matchedUsers,
+            destinationCountry: matchesDestination,
+          };
+          const updated = [...filtered, matchesMessage];
+          const allMatchedUsers: MatchedUser[] = [];
+          let latestDestination = matchesDestination;
+          updated.forEach(msg => {
+            if (msg.matchedUsers && msg.matchedUsers.length > 0) {
+              allMatchedUsers.push(...msg.matchedUsers);
+              if (msg.destinationCountry) latestDestination = msg.destinationCountry;
+            }
+          });
+          if (onChatStateChange) setTimeout(() => onChatStateChange(currentChatId, allMatchedUsers, latestDestination), 0);
+          if (currentChatId) {
+            swellyServiceCopy.attachMatchedUsersToMessage(currentChatId, matchedUsers, matchesDestination).catch(err =>
+              console.error('[TripPlanningChatScreen] Failed to save exact matches to backend:', err));
+          }
+          return updated;
+        });
+        setMatchedUsers(matchedUsers);
+        setDestinationCountry(matchesDestination);
+        analyticsService.trackSwellyListCreated(matchedUsers.length, requestData.purpose?.purpose_type || 'general_guidance');
+        setMessages(prev => [...prev, {
+          id: (Date.now() + 4).toString(),
+          text: "Would you like to keep your current filters or clear them and start fresh?",
+          isUser: false,
+          timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+        }]);
+      } else {
+        analyticsService.trackSwellySearchFailed();
+        const noMatchesText = 'No surfers match your criteria right now. Try adjusting your destination or filters.';
+        setMessages(prev => {
+          const filtered = prev.filter(msg => msg.text !== 'Finding the perfect surfers for you...');
+          return [...filtered, {
+            id: (Date.now() + 3).toString(),
+            text: noMatchesText,
+            isUser: false,
+            timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+          }];
+        });
+      }
+    } catch (error) {
+      console.error('Error finding matching users:', error);
+      analyticsService.trackSwellySearchFailed('error');
+      setMessages(prev => [...prev, {
+        id: (Date.now() + 2).toString(),
+        text: `Sorry, I couldn't find any matches for your search. Try adjusting your destination or preferences and search again.`,
+        isUser: false,
+        timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+      }]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const sendMessage = async () => {
     if (!inputText.trim() || isLoading) return;
@@ -523,211 +635,32 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         setChatId(response.chat_id || null);
       }
 
-      const botMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        text: response.return_message,
-        isUser: false,
-        timestamp: new Date().toLocaleTimeString('en-US', { 
-          hour: '2-digit', 
-          minute: '2-digit',
-          hour12: false 
-        }),
-      };
+      // If chat is finished, show summary + Search only — do not add the completion message
+      if (response.is_finished && response.data) {
+        setIsFinished(true);
+        setPendingSearch({
+          data: response.data,
+          searchSummary: response.data?.search_summary ?? '',
+        });
+      } else {
+        const botMessage: Message = {
+          id: (Date.now() + 1).toString(),
+          text: response.return_message,
+          isUser: false,
+          timestamp: new Date().toLocaleTimeString('en-US', { 
+            hour: '2-digit', 
+            minute: '2-digit',
+            hour12: false 
+          }),
+        };
+        setMessages(prev => [...prev, botMessage]);
+      }
 
-      setMessages(prev => [...prev, botMessage]);
-
-      // If chat is finished, handle completion
       console.log('Response check:', { 
         is_finished: response.is_finished, 
         has_data: !!response.data,
         data: response.data 
       });
-      
-      if (response.is_finished && response.data) {
-        setIsFinished(true);
-        
-        // Trip planning: Server-side matching (Copy flow)
-        try {
-          if (!chatId) {
-            throw new Error('Chat ID is required for server-side matching');
-          }
-
-          // Show "finding matches..." message
-          const findingMatchesMessage: Message = {
-            id: (Date.now() + 2).toString(),
-            text: 'Finding the perfect surfers for you...',
-            isUser: false,
-            timestamp: new Date().toLocaleTimeString('en-US', { 
-              hour: '2-digit', 
-              minute: '2-digit',
-              hour12: false 
-            }),
-          };
-          setMessages(prev => [...prev, findingMatchesMessage]);
-
-          const requestData = {
-            destination_country: response.data.destination_country,
-            area: response.data.area || null,
-            budget: response.data.budget || null,
-            destination_known: response.data.destination_known || false,
-            purpose: response.data.purpose || {
-              purpose_type: 'general_guidance',
-              specific_topics: [],
-            },
-            non_negotiable_criteria: response.data.non_negotiable_criteria || null,
-            user_context: response.data.user_context || null,
-            queryFilters: response.data.queryFilters || null,
-            filtersFromNonNegotiableStep: response.data.filtersFromNonNegotiableStep || false,
-          };
-
-          const { matches: matchedUsers } = await swellyServiceCopy.findMatchingUsersServer(chatId, response.data);
-          console.log('Matched users found (server):', matchedUsers.length);
-          
-          // Check if this is a single criterion request that needs confirmation
-          const needsConfirmation = (matchedUsers as any).__needsConfirmation === true;
-          const isSingleCriterion = (matchedUsers as any).__singleCriterion === true;
-          
-          if (needsConfirmation && isSingleCriterion && matchedUsers.length > 0) {
-            // Single criterion request - ask user if they want to add more criteria
-            const criterionType = getSingleCriterionType(requestData);
-            const confirmationMessage = generateSingleCriterionConfirmationMessage(
-              criterionType || 'requirement',
-              matchedUsers.length
-            );
-            
-            const askMessage: Message = {
-              id: (Date.now() + 3).toString(),
-              text: confirmationMessage,
-              isUser: false,
-              timestamp: new Date().toLocaleTimeString('en-US', { 
-                hour: '2-digit', 
-                minute: '2-digit',
-                hour12: false 
-              }),
-              isMatchedUsers: false,
-            };
-            setMessages(prev => [...prev, askMessage]);
-            
-            // Store matches temporarily (will show if user confirms)
-            setPendingSingleCriterionMatches(matchedUsers);
-            setSingleCriterionType(criterionType);
-            setDestinationCountry(response.data.destination_country);
-            
-            // Don't finish the chat - allow user to respond
-            setIsFinished(false);
-            setIsLoading(false);
-            return;
-          }
-          
-          // Display matched users (always show when server returns matches)
-          if (matchedUsers.length > 0) {
-            const matchesMessageText = `Found ${matchedUsers.length} awesome match${matchedUsers.length > 1 ? 'es' : ''} for you!`;
-            const matchesDestination = response.data.destination_country || '';
-            
-            setMessages(prev => {
-              // Filter out the "Finding the perfect surfers..." message
-              const filtered = prev.filter(msg => msg.text !== 'Finding the perfect surfers for you...');
-              const matchesMessage: Message = {
-                id: (Date.now() + 3).toString(),
-                text: matchesMessageText,
-                isUser: false,
-                timestamp: new Date().toLocaleTimeString('en-US', { 
-                  hour: '2-digit', 
-                  minute: '2-digit',
-                  hour12: false 
-                }),
-                isMatchedUsers: true,
-                matchedUsers: matchedUsers,
-                destinationCountry: matchesDestination,
-              };
-              const updated = [...filtered, matchesMessage];
-              
-              const allMatchedUsers: MatchedUser[] = [];
-              let latestDestination = matchesDestination;
-              
-              updated.forEach(msg => {
-                if (msg.matchedUsers && msg.matchedUsers.length > 0) {
-                  allMatchedUsers.push(...msg.matchedUsers);
-                  if (msg.destinationCountry) {
-                    latestDestination = msg.destinationCountry;
-                  }
-                }
-              });
-              
-              if (onChatStateChange) {
-                setTimeout(() => {
-                  onChatStateChange(chatId, allMatchedUsers, latestDestination);
-                }, 0);
-              }
-              
-              if (chatId) {
-                console.log('[TripPlanningChatScreen] Saving exact matches - matchedUsersCount:', matchedUsers.length);
-                swellyServiceCopy.attachMatchedUsersToMessage(chatId, matchedUsers, matchesDestination).catch(err => {
-                  console.error('[TripPlanningChatScreen] Failed to save exact matches to backend:', err);
-                });
-              }
-              
-              return updated;
-            });
-            
-            setMatchedUsers(matchedUsers);
-            setDestinationCountry(matchesDestination);
-            
-            const intentType = requestData.purpose?.purpose_type || 'general_guidance';
-            analyticsService.trackSwellyListCreated(matchedUsers.length, intentType);
-            
-            setMessages(prev => {
-              const filterDecisionMessage: Message = {
-                id: (Date.now() + 4).toString(),
-                text: "Would you like to keep your current filters or clear them and start fresh?",
-                isUser: false,
-                timestamp: new Date().toLocaleTimeString('en-US', { 
-                  hour: '2-digit', 
-                  minute: '2-digit',
-                  hour12: false 
-                }),
-              };
-              return [...prev, filterDecisionMessage];
-            });
-          } else {
-            // No matches found - generic message (server does not return analysis)
-            analyticsService.trackSwellySearchFailed();
-            const noMatchesText = 'No surfers match your criteria right now. Try adjusting your destination or filters.';
-            setMessages(prev => {
-              const filtered = prev.filter(msg => msg.text !== 'Finding the perfect surfers for you...');
-              const noMatchesMessage: Message = {
-                id: (Date.now() + 3).toString(),
-                text: noMatchesText,
-                isUser: false,
-                timestamp: new Date().toLocaleTimeString('en-US', { 
-                  hour: '2-digit', 
-                  minute: '2-digit',
-                  hour12: false 
-                }),
-              };
-              return [...filtered, noMatchesMessage];
-            });
-          }
-        } catch (error) {
-          console.error('Error finding matching users:', error);
-          console.error('Error details:', error);
-          
-          // Track swelly_search_failed
-          analyticsService.trackSwellySearchFailed('error');
-          
-          const errorMessage: Message = {
-            id: (Date.now() + 2).toString(),
-            text: `Sorry, I couldn't find any matches for your search. Try adjusting your destination or preferences and search again.`,
-            isUser: false,
-            timestamp: new Date().toLocaleTimeString('en-US', { 
-              hour: '2-digit', 
-              minute: '2-digit',
-              hour12: false 
-            }),
-          };
-          setMessages(prev => [...prev, errorMessage]);
-        }
-      }
 
     } catch (error) {
       console.error('Error sending message:', error);
@@ -745,7 +678,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages, isInitializing, isLoading]);
+  }, [messages, isInitializing, isLoading, pendingSearch]);
 
   const handleSendMessage = async (userId: string) => {
     console.log('[TripPlanningChatScreen] handleSendMessage called with userId:', userId);
@@ -969,6 +902,39 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             showsVerticalScrollIndicator={false}
           >
             {messages.map(renderMessage)}
+            {pendingSearch !== null && (
+              <View style={styles.pendingSearchBlock}>
+                <View style={[styles.messageContainer, styles.botMessageContainer]}>
+                  <View style={[styles.messageBubble, styles.botMessageBubble]}>
+                    <View style={styles.messageTextContainer}>
+                      <Text style={styles.botMessageText}>
+                        {pendingSearch.searchSummary.trim() || 'Ready to search with your current filters.'}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+                <View style={styles.searchButtonWrapper}>
+                  <TouchableOpacity
+                    activeOpacity={0.8}
+                    disabled={isLoading}
+                    onPress={() => chatId && runFindMatches(chatId, pendingSearch.data)}
+                    style={styles.searchButtonTouchable}
+                  >
+                    <LinearGradient
+                      colors={['#05BCD3', '#DBCDBC']}
+                      locations={[0, 0.7]}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 0 }}
+                      style={styles.searchButtonGradientOuter}
+                    >
+                      <View style={styles.searchButtonInner}>
+                        <Text style={styles.searchButtonText}>Search</Text>
+                      </View>
+                    </LinearGradient>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
             {(isLoading || isInitializing) && (
               <View style={[styles.messageContainer, styles.botMessageContainer]}>
                 <View style={[styles.messageBubble, styles.botMessageBubble]}>
@@ -993,7 +959,9 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             primaryColor={colors.primary || '#B72DF2'}
             leftAccessory={
               <TouchableOpacity style={styles.attachButton}>
-                <Ionicons name="add" size={28} color="#222B30" />
+                <Svg width={28} height={28} viewBox="0 -960 960 960" fill="#222B30">
+                  <Path d="M440-120v-240h80v80h320v80H520v80h-80Zm-320-80v-80h240v80H120Zm160-160v-80H120v-80h160v-80h80v240h-80Zm160-80v-80h400v80H440Zm160-160v-240h80v80h160v80H680v80h-80Zm-480-80v-80h400v80H120Z" />
+                </Svg>
               </TouchableOpacity>
             }
           />
@@ -1234,5 +1202,36 @@ const styles = StyleSheet.create({
     height: 8,
     borderRadius: 4,
     backgroundColor: '#333333',
+  },
+  pendingSearchBlock: {
+    marginBottom: 4,
+  },
+  searchButtonWrapper: {
+    marginTop: 12,
+    alignItems: 'center',
+    width: '100%',
+  },
+  searchButtonTouchable: {
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  searchButtonGradientOuter: {
+    padding: 2,
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  searchButtonInner: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  searchButtonText: {
+    color: '#222B30',
+    fontSize: 16,
+    fontWeight: '600',
+    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : undefined,
   },
 });

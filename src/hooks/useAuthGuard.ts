@@ -307,10 +307,10 @@ export function useAuthGuard() {
         console.log('[useAuthGuard] Restoring user to context:', appUser.id);
         setUser(appUser);
         
-        // Preload profile video in background (non-blocking)
-        if (appUser?.id) {
+        // Preload profile video in background (non-blocking) - use auth UUID for surfers table lookup
+        if (authUser?.id) {
           const { preloadProfileVideo } = await import('../services/media/videoPreloadService');
-          preloadProfileVideo(appUser.id.toString(), 'high')
+          preloadProfileVideo(authUser.id, 'high')
             .then(result => {
               if (__DEV__) {
                 console.log(`[useAuthGuard] Profile video preload completed: ready=${result?.ready}`);

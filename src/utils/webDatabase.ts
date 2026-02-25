@@ -75,6 +75,15 @@ class WebDatabaseService {
     }
   }
 
+  /** Remove all stored user data (called on logout). */
+  clearAll(): void {
+    try {
+      localStorage.removeItem(this.STORAGE_KEY);
+    } catch (error) {
+      console.error('Error clearing users from localStorage:', error);
+    }
+  }
+
   private getAllUsersFromStorage(): User[] {
     try {
       const stored = localStorage.getItem(this.STORAGE_KEY);

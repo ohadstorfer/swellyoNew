@@ -1219,6 +1219,26 @@ class MessagingService {
   }
 
   /**
+   * Reset all in-memory state (called on logout).
+   * Unsubscribes from every active channel, then clears all maps.
+   */
+  resetAll(): void {
+    // Unsubscribe from all active channels
+    this.activeSubscriptions.forEach((unsubscribe) => {
+      try {
+        unsubscribe();
+      } catch (e) {
+        console.warn('[MessagingService] Error during unsubscribe in resetAll:', e);
+      }
+    });
+    this.activeSubscriptions.clear();
+    this.activeChannels.clear();
+    this.typingState.clear();
+    this.lastTypingEvent.clear();
+    console.log('[MessagingService] All in-memory state reset');
+  }
+
+  /**
    * Edit a message (with 15-minute edit window)
    */
   async editMessage(conversationId: string, messageId: string, newBody: string): Promise<Message> {

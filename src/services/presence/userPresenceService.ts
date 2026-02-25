@@ -554,7 +554,9 @@ class UserPresenceService {
   }
 
   /**
-   * Stop tracking current user
+   * Stop tracking current user and fully clean up all resources.
+   * Removes the presence channel, app state listener, and status subscriptions
+   * so no stale state leaks across user sessions.
    */
   async stopTrackingCurrentUser(): Promise<void> {
     if (!this.isTrackingCurrentUser) {
@@ -581,29 +583,34 @@ class UserPresenceService {
         this.metricsLogInterval = null;
       }
 
-      console.log('[UserPresenceService] Stopped tracking');
+      // Remove app state listener
+      if (this.appStateSubscription) {
+        this.appStateSubscription.remove();
+        this.appStateSubscription = null;
+      }
+
+      // Remove presence channel
+      if (this.presenceChannel) {
+        supabase.removeChannel(this.presenceChannel);
+        this.presenceChannel = null;
+        this.presenceChannelHealthy = false;
+      }
+
+      // Clear all status subscriptions
+      this.userStatusSubscriptions.clear();
+
+      console.log('[UserPresenceService] Stopped tracking and cleaned up');
     } catch (error) {
       console.error('[UserPresenceService] Error stopping tracking:', error);
     }
   }
 
   /**
-   * Cleanup all subscriptions and channels
+   * Cleanup all subscriptions and channels.
+   * Delegates to stopTrackingCurrentUser() which now handles full cleanup.
    */
   cleanup(): void {
     this.stopTrackingCurrentUser().catch(() => {});
-
-    if (this.appStateSubscription) {
-      this.appStateSubscription.remove();
-      this.appStateSubscription = null;
-    }
-
-    if (this.presenceChannel) {
-      supabase.removeChannel(this.presenceChannel);
-      this.presenceChannel = null;
-    }
-
-    this.userStatusSubscriptions.clear();
   }
 }
 

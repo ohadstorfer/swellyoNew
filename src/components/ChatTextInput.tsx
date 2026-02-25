@@ -23,13 +23,14 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 import { colors } from '../styles/theme';
 
 // Height constants (WhatsApp/Instagram pattern): padding + (lineCount × line height)
+// Ensure BASE_HEIGHT + (1 * LINE_HEIGHT) === MIN_INPUT_HEIGHT to avoid twitch between effect and onContentSizeChange
 const INPUT_PADDING_VERTICAL = 10;
 const LINE_HEIGHT = 20;
 const BASE_HEIGHT = INPUT_PADDING_VERTICAL * 2;
 const MIN_LINES = 1;
 const MAX_LINES = 5;
-const MIN_INPUT_HEIGHT = BASE_HEIGHT + MIN_LINES * LINE_HEIGHT; // 40
-const MAX_INPUT_HEIGHT = BASE_HEIGHT + MAX_LINES * LINE_HEIGHT;   // 120
+const MIN_INPUT_HEIGHT = BASE_HEIGHT + LINE_HEIGHT; // 40, same as BASE_HEIGHT + (1 * LINE_HEIGHT)
+const MAX_INPUT_HEIGHT = BASE_HEIGHT + MAX_LINES * LINE_HEIGHT; // 120
 
 const SEND_ICON_SIZE = 20;
 
@@ -77,6 +78,7 @@ export const ChatTextInput = forwardRef<ChatTextInputRef, ChatTextInputProps>(fu
   ref
 ) {
   const inputRef = useRef<TextInput>(null);
+  const lastLineCountRef = useRef<number>(1);
   const [inputHeight, setInputHeight] = useState<number>(MIN_INPUT_HEIGHT);
   const [measureWidth, setMeasureWidth] = useState<number>(0);
 
@@ -94,8 +96,18 @@ export const ChatTextInput = forwardRef<ChatTextInputRef, ChatTextInputProps>(fu
 
   useEffect(() => {
     if (value === '') {
+      lastLineCountRef.current = 0;
       setInputHeight(MIN_INPUT_HEIGHT);
+      return;
     }
+    const lineCount = 1 + (value.match(/\n/g) || []).length;
+    if (lineCount < lastLineCountRef.current) {
+      const clampedLines = Math.min(Math.max(lineCount, MIN_LINES), MAX_LINES);
+      const heightFromValue = BASE_HEIGHT + clampedLines * LINE_HEIGHT;
+      const nextHeight = Math.max(MIN_INPUT_HEIGHT, Math.min(MAX_INPUT_HEIGHT, heightFromValue));
+      setInputHeight(nextHeight);
+    }
+    lastLineCountRef.current = lineCount;
   }, [value]);
 
   const handleContentSizeChange = useCallback(
@@ -232,7 +244,7 @@ const styles = StyleSheet.create({
   attachButtonWrapper: {
     justifyContent: 'flex-end',
     alignItems: 'flex-end',
-    paddingBottom: 12,
+    paddingBottom: 16,
     marginRight: 8,
   },
   messageInputContainer: {
@@ -285,6 +297,7 @@ const styles = StyleSheet.create({
       overflow: 'hidden' as any,
     })),
   },
+  // Mirror uses whiteSpace: pre-wrap on Web so newlines (Enter) are respected and handleWebMeasureLayout sees correct height
   webMeasureText: {
     fontSize: 16,
     lineHeight: LINE_HEIGHT,

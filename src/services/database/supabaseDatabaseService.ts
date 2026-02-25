@@ -542,13 +542,21 @@ class SupabaseDatabaseService {
       return null;
     }
 
-    
+    // surfers.user_id is UUID; numeric app ids must not be passed
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!userId || !uuidRegex.test(userId)) {
+      if (__DEV__ && userId) {
+        console.warn('[getSurferByUserId] userId is not a UUID (surfers.user_id expects UUID):', userId);
+      }
+      return null;
+    }
+
     try {
       // OPTIMIZATION: Select only columns that exist in the database
       // destinations_map does NOT exist - only destinations_array exists
       const { data, error } = await supabase
         .from('surfers')
-        .select('user_id, name, age, date_of_birth, pronoun, country_from, surfboard_type, surf_level, surf_level_description, surf_level_category, travel_experience, bio, profile_image_url, profile_video_url, destinations_array, lifestyle_keywords, wave_type_keywords, travel_buddies, created_at, updated_at, finished_onboarding')
+        .select('user_id, name, age, pronoun, country_from, surfboard_type, surf_level, surf_level_description, surf_level_category, travel_experience, bio, profile_image_url, profile_video_url, destinations_array, lifestyle_keywords, wave_type_keywords, travel_buddies, created_at, updated_at, finished_onboarding')
         .eq('user_id', userId)
         .single();
 

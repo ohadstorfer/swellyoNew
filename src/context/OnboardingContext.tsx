@@ -116,10 +116,10 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             userEmail: appUser.email,
           }));
           
-          // Preload profile video in background (non-blocking)
-          if (appUser?.id) {
+          // Preload profile video in background (non-blocking) - use auth UUID for surfers table lookup
+          if (session.user?.id) {
             const { preloadProfileVideo } = await import('../services/media/videoPreloadService');
-            preloadProfileVideo(appUser.id.toString(), 'high')
+            preloadProfileVideo(session.user.id, 'high')
               .then(result => {
                 if (__DEV__) {
                   console.log(`[OnboardingContext] Profile video preload completed: ready=${result?.ready}`);
@@ -244,10 +244,19 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         const isOnSwellyChatRoute = Platform.OS === 'web' && typeof window !== 'undefined' && window.location &&
           ((window.location.pathname || '').includes('swelly_chat') || (window.location.hash || '').includes('swelly_chat'));
         
-        // Load user data if available
+        // Load user data if available; prefer nickname from formData for header display
         const hasUser = parsed.user !== null && parsed.user !== undefined;
         if (hasUser) {
-          setUser(parsed.user);
+          const formNickname = parsed.formData?.nickname;
+          const useFormNickname =
+            typeof formNickname === 'string' &&
+            formNickname.trim() !== '' &&
+            formNickname !== 'User';
+          setUser(
+            useFormNickname
+              ? { ...parsed.user, nickname: formNickname.trim() }
+              : parsed.user
+          );
         }
         
         // Load onboarding completion status - prioritize database value over local storage
