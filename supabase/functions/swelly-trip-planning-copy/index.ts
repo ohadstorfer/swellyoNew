@@ -10,6 +10,12 @@ interface ChatRequest {
   message: string
   chat_id?: string
   conversation_id?: string
+  /** When adding filters (Add Filter flow), client sends current queryFilters so we can merge. */
+  existing_query_filters?: any
+  adding_filters?: boolean
+  /** Optional: preserve destination/area when merging in add-filters mode. */
+  existing_destination_country?: string | null
+  existing_area?: string | null
 }
 
 interface ChatResponse {
@@ -44,6 +50,15 @@ interface MessageMetadata {
   matchTimestamp?: string
   awaitingFilterDecision?: boolean
   isFilterDecisionPrompt?: boolean
+  actionRow?: {
+    requestData?: any
+    selectedAction?: 'new_chat' | 'add_filter' | 'more' | null
+  }
+  searchSummaryBlock?: {
+    requestData?: any
+    searchSummary?: string
+    selectedAction?: 'search' | 'continue_editing' | null
+  }
 }
 
 interface Message {
@@ -461,6 +476,9 @@ function buildSearchSpecInline(request: any, queryFilters: any, hasDestination: 
   return parts.length ? parts.join(', ') : '(no filters)'
 }
 
+/** Max number of matches returned per request; "More" returns the next batch (previously matched are excluded). */
+const MATCHES_PAGE_SIZE = 3
+
 async function findMatchingUsersV3Server(request: any, requestingUserId: string, chatId: string, supabaseAdmin: any): Promise<MatchResultInline[]> {
   const hasDestination = request.destination_country && String(request.destination_country).trim() !== ''
   const queryFilters = request.queryFilters || null
@@ -535,8 +553,9 @@ async function findMatchingUsersV3Server(request: any, requestingUserId: string,
         match_quality: { matchCount: 1, countryMatch: false, areaMatch: false, townMatch: false },
       }
     })
-    console.log('[find-matches] Result:', generalResults.length, 'matches (path=general)')
-    return generalResults
+    const limited = generalResults.slice(0, MATCHES_PAGE_SIZE)
+    console.log('[find-matches] Result:', limited.length, `matches (path=general, max per page=${MATCHES_PAGE_SIZE})`)
+    return limited
   }
 
   // Destination path: existing logic
@@ -623,8 +642,9 @@ async function findMatchingUsersV3Server(request: any, requestingUserId: string,
     destinations_array: userSurfer.destinations_array,
     match_quality: { matchCount: 1, countryMatch: bestMatch.countryMatch, areaMatch: bestMatch.areaMatch, townMatch: bestMatch.townMatch },
   }))
-  console.log('[find-matches] Result:', destResults.length, 'matches (path=destination)')
-  return destResults
+  const destLimited = destResults.slice(0, MATCHES_PAGE_SIZE)
+  console.log('[find-matches] Result:', destLimited.length, `matches (path=destination, max per page=${MATCHES_PAGE_SIZE})`)
+  return destLimited
 }
 // === END INLINED find-matches ===
 
@@ -783,9 +803,10 @@ DATA STRUCTURE (when is_finished: true):
     "mentioned_deal_breakers": []
   },
   "queryFilters": { "country_from": ["Israel"], "surfboard_type": ["shortboard"], "surf_level_category": ["advanced", "pro"] } // Optional: include when user specified origin, board type, or level. Use exact country names and enum values.
-  "search_summary": "Short casual one-line summary of what we're searching for, shown to the user before they tap Search. REQUIRED when is_finished is true. Examples: \"Sweet so we're going for American dude that surfed Hawaii and is also a shortboarder just like you!\" or \"Got it — Israeli advanced longboarder around 25, no destination.\" Tone: friendly, first person, no markdown. Base it on destination_country, area, queryFilters."
+  "search_summary": "Short casual one-line summary of what we're searching for, shown to the user before they tap Search. REQUIRED when is_finished is true. Examples: \"Sweet so we're going for American dude that surfed Hawaii and is also a shortboarder just like you!\" or \"Got it — Israeli advanced shortboarder!\" or \"Sweet, we're going for an advanced Israeli shortboarder.\" Tone: friendly, first person, no markdown. Base it ONLY on the criteria (destination_country, area, queryFilters). Do NOT mention that there is no destination, no specific destination, or that we're going global — just describe the filters."
 }
 Do NOT include non_negotiable_criteria or prioritize_filters in the data. When is_finished is true, ALWAYS set search_summary so the user sees what will be searched. Matching is by destination (country + optional area) and, when provided, by queryFilters (country_from, surfboard_type, surf_level_category). When the user specified criteria (e.g. "Israeli", "shortboard", "advanced"), include queryFilters in data so the system can filter matches.
+For return_message and search_summary: when matching without a destination (only queryFilters), do NOT say \"no destination\", \"no specific destination\", \"going global\", or similar. Only mention the existing filters (e.g. \"Got you, bro — searching for an advanced Israeli shortboarder.\").
 
 RESPONSE FORMAT - CRITICAL: YOU MUST ALWAYS RETURN VALID JSON!
 ⚠️ NEVER RETURN PLAIN TEXT - ALWAYS RETURN A JSON OBJECT! ⚠️
@@ -811,6 +832,7 @@ CRITICAL RULES:
 - When is_finished: true, data MUST include either destination_country (and area if user specified one) OR queryFilters with at least one criterion (e.g. country_from, age_min/age_max) if matching without destination. Also include search_summary: a short, casual one-line summary of what we're searching for (e.g. "Sweet so we're going for American dude that surfed Hawaii and is also a shortboarder just like you!"). Do NOT include non_negotiable_criteria or prioritize_filters.
 - DESTINATION EXTRACTION: When user mentions ANY location, extract destination_country immediately. Correct typos ("filipins" → "Philippines"). If they mention area too, extract both. NEVER set destination_country to null if a location was mentioned.
 - return_message = conversational text only. All structured data goes in "data". No JSON or markdown in return_message.
+- When there is no destination (general match): in return_message and search_summary, describe only the filters (e.g. \"Got you, bro — searching for an advanced Israeli shortboarder.\"). Do NOT mention \"no destination\", \"no specific destination\", or \"going global\".
 - Example: {"return_message": "Want to add anything else?", "is_finished": false, "data": {"destination_country": "Costa Rica", "area": null, ...}}
 - Ask ONE question at a time. Be conversational.
 - For destination suggestions, consider their past destinations, preferences, and vibe
@@ -1101,6 +1123,45 @@ async function normalizeQueryFilters(queryFilters: any): Promise<any> {
   }
 
   return normalized;
+}
+
+/** Sentinel: when extracted has this for an array key, clear that filter (e.g. "any board"). */
+const QUERY_FILTER_CLEAR = '__clear__'
+
+/**
+ * Merge existing queryFilters with newly extracted ones (additive: union arrays, scalars use extracted or keep existing).
+ * Used when user taps "Add Filter" and sends a follow-up message.
+ */
+function mergeQueryFiltersAdding(existing: any, extracted: any): any {
+  if (!existing || typeof existing !== 'object') {
+    return extracted && typeof extracted === 'object' ? { ...extracted } : {}
+  }
+  const merged = { ...existing }
+  if (!extracted || typeof extracted !== 'object') {
+    return merged
+  }
+  const arrayKeys = ['country_from', 'surfboard_type', 'surf_level_category'] as const
+  for (const key of arrayKeys) {
+    const ext = extracted[key]
+    if (ext === null || ext === QUERY_FILTER_CLEAR || (Array.isArray(ext) && ext.length === 0)) {
+      delete merged[key]
+      continue
+    }
+    const existingArr = Array.isArray(merged[key]) ? merged[key] : (merged[key] != null ? [merged[key]] : [])
+    const extractedArr = Array.isArray(ext) ? ext : (ext != null ? [ext] : [])
+    const combined = [...existingArr, ...extractedArr]
+    const unique = Array.from(new Set(combined.map((x: any) => String(x).trim()).filter(Boolean)))
+    if (unique.length > 0) {
+      merged[key] = unique
+    } else {
+      delete merged[key]
+    }
+  }
+  if (typeof extracted.age_min === 'number') merged.age_min = extracted.age_min
+  else if (extracted.age_min === null || extracted.age_min === QUERY_FILTER_CLEAR) delete merged.age_min
+  if (typeof extracted.age_max === 'number') merged.age_max = extracted.age_max
+  else if (extracted.age_max === null || extracted.age_max === QUERY_FILTER_CLEAR) delete merged.age_max
+  return merged
 }
 
 /**
@@ -1451,70 +1512,6 @@ CRITICAL RULES - BE SMART AND FLEXIBLE:
 }
 
 /**
- * Detect user intent regarding filter management (keep or clear filters)
- */
-async function detectFilterIntent(
-  userMessage: string,
-  conversationHistory: Message[]
-): Promise<'keep' | 'clear' | 'unclear'> {
-  if (!OPENAI_API_KEY) {
-    throw new Error('OPENAI_API_KEY is not set')
-  }
-
-  const prompt = `You are analyzing a user's message to determine their intent regarding search filters in a trip planning conversation.
-
-The user was just asked: "Yo! How do these matches look? If you want to find more surfers, I can keep your current filters and add to them, or we can start fresh with new ones. What do you think?"
-
-Analyze the user's response and classify it as one of:
-- "keep": User wants to keep current filters and possibly add more (e.g., "keep", "yes", "add more", "refine", "keep them", "yes keep", "keep filters", "add to them", "refine them")
-- "clear": User wants to clear all filters and start over (e.g., "clear", "start over", "new search", "reset", "clear them", "start fresh", "new", "clear filters", "remove filters")
-- "unclear": Cannot determine intent or user is asking a question
-
-User's message: "${userMessage}"
-
-Respond with ONLY one word: "keep", "clear", or "unclear".`
-
-  try {
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${OPENAI_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [
-          { role: 'system', content: 'You are a classifier that analyzes user intent. Respond with only one word: keep, clear, or unclear.' },
-          { role: 'user', content: prompt }
-        ],
-        temperature: 0.1,
-        max_tokens: 10,
-      }),
-    })
-
-    if (!response.ok) {
-      const errorText = await response.text()
-      console.error('Error calling OpenAI for filter intent detection:', errorText)
-      return 'unclear'
-    }
-
-    const data = await response.json()
-    const intent = data.choices[0]?.message?.content?.trim().toLowerCase()
-
-    if (intent === 'keep' || intent === 'clear') {
-      console.log(`[detectFilterIntent] Detected intent: ${intent}`)
-      return intent
-    }
-
-    console.log(`[detectFilterIntent] Intent unclear, got: ${intent}`)
-    return 'unclear'
-  } catch (error) {
-    console.error('Error detecting filter intent:', error)
-    return 'unclear'
-  }
-}
-
-/**
  * Save chat history to database
  */
 async function saveChatHistory(
@@ -1616,7 +1613,7 @@ serve(async (req: Request) => {
       status: 200,
       headers: {
         'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
+        'Access-Control-Allow-Methods': 'POST, GET, PATCH, OPTIONS',
         'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
         'Access-Control-Max-Age': '86400',
       },
@@ -1907,98 +1904,17 @@ ${getPronounInstructions(userProfile.pronoun)}`
         messages.splice(0, 1, { role: 'system', content: TRIP_PLANNING_PROMPT + '\n\n' + profileContext })
       }
 
-      // Check if we're waiting for a filter decision (matches were just sent)
-      let awaitingFilterDecision = false
-      let existingQueryFilters: any = null
-      let filterIntent: 'keep' | 'clear' | 'unclear' | null = null
-      
-      // Check the most recent assistant message for the awaitingFilterDecision flag
-      for (let i = messages.length - 1; i >= 0; i--) {
-        if (messages[i].role === 'assistant') {
-          if (messages[i].metadata?.awaitingFilterDecision === true) {
-            awaitingFilterDecision = true
-            console.log('[continue] Found awaitingFilterDecision flag - user is responding to filter question')
-            
-            // Extract existing queryFilters from previous assistant messages
-            try {
-              const prevParsed = JSON.parse(messages[i].content)
-              if (prevParsed.data?.queryFilters) {
-                existingQueryFilters = prevParsed.data.queryFilters
-                console.log('[continue] Found existing queryFilters:', JSON.stringify(existingQueryFilters, null, 2))
-              }
-            } catch (e) {
-              // Not JSON, continue
-            }
-            break
-          }
-        }
-      }
-      
-      // If awaiting filter decision, detect user intent
-      if (awaitingFilterDecision) {
-        console.log('[continue] Detecting filter intent from user message:', body.message)
-        filterIntent = await detectFilterIntent(body.message, messages)
-        console.log('[continue] Detected filter intent:', filterIntent)
-        
-        if (filterIntent === 'clear') {
-          // Clear all filters - reset queryFilters to null
-          console.log('[continue] User wants to clear filters - will reset queryFilters')
-          // Remove the flag from metadata
-          for (let i = messages.length - 1; i >= 0; i--) {
-            if (messages[i].role === 'assistant' && messages[i].metadata?.awaitingFilterDecision) {
-              const metadata = messages[i].metadata
-              if (metadata) {
-                delete metadata.awaitingFilterDecision
-              }
-            }
-          }
-        } else if (filterIntent === 'keep') {
-          // Keep filters - will merge with existing filters later
-          console.log('[continue] User wants to keep filters - will merge with existing filters')
-          // Remove the flag from metadata
-          for (let i = messages.length - 1; i >= 0; i--) {
-            if (messages[i].role === 'assistant' && messages[i].metadata?.awaitingFilterDecision) {
-              const metadata = messages[i].metadata
-              if (metadata) {
-                delete metadata.awaitingFilterDecision
-              }
-            }
-          }
-        } else {
-          // Unclear intent - ask for clarification
-          console.log('[continue] Filter intent unclear - asking for clarification')
-          const clarificationMessage = "I didn't quite catch that. Would you like to keep your current filters or clear them and start fresh?"
-          
-          // Add clarification as assistant message
-          messages.push({ role: 'assistant', content: JSON.stringify({
-            return_message: clarificationMessage,
-            is_finished: false,
-            data: null
-          })})
-          
-          // Save and return early
-          await saveChatHistory(chatId, messages, user.id, body.conversation_id || null, supabaseAdmin)
-          
-          return new Response(
-            JSON.stringify({
-              chat_id: chatId,
-              return_message: clarificationMessage,
-              is_finished: false,
-              data: null
-            }),
-            {
-              status: 200,
-              headers: {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-              },
-            }
-          )
-        }
-      }
-      
       // Add new user message
       messages.push({ role: 'user', content: body.message })
+      
+      // When adding filters, inject context so LLM interprets "also X" / "any X" correctly
+      if (body.adding_filters && body.existing_query_filters && typeof body.existing_query_filters === 'object') {
+        const filterSummary = JSON.stringify(body.existing_query_filters)
+        messages.splice(messages.length - 1, 0, {
+          role: 'system',
+          content: `The user is adding to existing search filters. Current filters: ${filterSummary}. Interpret their message as additional or broadening criteria (e.g. "also longboard" = add longboard; "any board" or "all boards" = remove board filter).`
+        })
+      }
       
       // Check if user mentioned a destination - if so, remind AI to use A, not STEP 2B
       const currentUserMessageLower = body.message.toLowerCase()
@@ -2117,53 +2033,16 @@ ${getPronounInstructions(userProfile.pronoun)}`
         console.error('Error checking for accumulated filters:', error)
       }
       
-      // Handle filter management based on user intent
-      if (awaitingFilterDecision && filterIntent) {
-        // User just responded to filter decision question
-        if (filterIntent === 'clear') {
-          // Clear all filters - use only new filters (don't merge with existing)
-          console.log('🗑️ User cleared filters - using only new filters:', JSON.stringify(extractedQueryFilters, null, 2))
-          // extractedQueryFilters will contain only new filters extracted from current message
-          // Don't merge with existingQueryFilters or accumulatedFilters
-        } else if (filterIntent === 'keep') {
-          // Keep filters - merge with existing filters
-          if (existingQueryFilters) {
-            if (extractedQueryFilters) {
-              extractedQueryFilters = {
-                ...existingQueryFilters,
-                ...extractedQueryFilters, // Current filters override existing ones
-              }
-              console.log('🔄 Merged filters (existing + current):', JSON.stringify(extractedQueryFilters, null, 2))
-            } else {
-              extractedQueryFilters = existingQueryFilters
-              console.log('📦 Using existing filters only:', JSON.stringify(extractedQueryFilters, null, 2))
-            }
-          } else if (accumulatedFilters) {
-            // Fallback to accumulated filters if existingQueryFilters not found
-            if (extractedQueryFilters) {
-              extractedQueryFilters = {
-                ...accumulatedFilters,
-                ...extractedQueryFilters,
-              }
-              console.log('🔄 Merged filters (accumulated + current):', JSON.stringify(extractedQueryFilters, null, 2))
-            } else {
-              extractedQueryFilters = accumulatedFilters
-              console.log('📦 Using accumulated filters only:', JSON.stringify(extractedQueryFilters, null, 2))
-            }
-          }
+      // Merge current filters with accumulated filters (current takes precedence)
+      if (accumulatedFilters && extractedQueryFilters) {
+        extractedQueryFilters = {
+          ...accumulatedFilters,
+          ...extractedQueryFilters, // Current filters override accumulated ones
         }
-      } else {
-        // Normal flow: Merge current filters with accumulated filters (current takes precedence)
-        if (accumulatedFilters && extractedQueryFilters) {
-          extractedQueryFilters = {
-            ...accumulatedFilters,
-            ...extractedQueryFilters, // Current filters override accumulated ones
-          }
-          console.log('🔄 Merged filters (accumulated + current):', JSON.stringify(extractedQueryFilters, null, 2))
-        } else if (accumulatedFilters && !extractedQueryFilters) {
-          extractedQueryFilters = accumulatedFilters
-          console.log('📦 Using accumulated filters only:', JSON.stringify(extractedQueryFilters, null, 2))
-        }
+        console.log('🔄 Merged filters (accumulated + current):', JSON.stringify(extractedQueryFilters, null, 2))
+      } else if (accumulatedFilters && !extractedQueryFilters) {
+        extractedQueryFilters = accumulatedFilters
+        console.log('📦 Using accumulated filters only:', JSON.stringify(extractedQueryFilters, null, 2))
       }
 
       // If we detected unmappable criteria, add a system message to inform the LLM
@@ -2506,7 +2385,29 @@ ${getPronounInstructions(userProfile.pronoun)}`
         // This should happen AFTER all tripPlanningData initialization
         // CRITICAL: Always add queryFilters if they were extracted, even if tripPlanningData already exists
         // Also populate non_negotiable_criteria.age_range from queryFilters.age_min/age_max
-        if (extractedQueryFilters && Object.keys(extractedQueryFilters).length > 0) {
+        if (body.adding_filters && body.existing_query_filters && typeof body.existing_query_filters === 'object') {
+          // Add-filter mode: merge existing filters (from client) with newly extracted ones (union arrays, scalars from extracted or keep existing)
+          const merged = mergeQueryFiltersAdding(body.existing_query_filters, extractedQueryFilters || {})
+          const normalizedQueryFilters = await normalizeQueryFilters(merged)
+          if (!tripPlanningData) {
+            tripPlanningData = {
+              destination_country: body.existing_destination_country ?? null,
+              area: body.existing_area ?? null,
+              budget: null,
+              destination_known: true,
+              purpose: { purpose_type: 'connect_traveler', specific_topics: [] },
+              non_negotiable_criteria: {},
+              user_context: {},
+              queryFilters: normalizedQueryFilters,
+              filtersFromNonNegotiableStep: false,
+            }
+          } else {
+            tripPlanningData.queryFilters = normalizedQueryFilters
+            if (body.existing_destination_country != null) tripPlanningData.destination_country = body.existing_destination_country
+            if (body.existing_area != null) tripPlanningData.area = body.existing_area
+          }
+          console.log('✅ Merged filters (add-filter mode):', JSON.stringify(normalizedQueryFilters, null, 2))
+        } else if (extractedQueryFilters && Object.keys(extractedQueryFilters).length > 0) {
           // If age filters were extracted, also populate non_negotiable_criteria.age_range
           if (extractedQueryFilters.age_min !== undefined && extractedQueryFilters.age_max !== undefined) {
             if (!tripPlanningData) {
@@ -2571,20 +2472,8 @@ ${getPronounInstructions(userProfile.pronoun)}`
             // Normalize queryFilters before assigning to ensure country names are correct
             const normalizedQueryFilters = await normalizeQueryFilters(extractedQueryFilters);
             
-            // Handle filter management based on user intent
-            if (awaitingFilterDecision && filterIntent === 'clear') {
-              // User wants to clear filters - use only new filters
-              tripPlanningData.queryFilters = normalizedQueryFilters
-              console.log('🗑️ User cleared filters - using only new filters')
-            } else if (awaitingFilterDecision && filterIntent === 'keep' && tripPlanningData.queryFilters) {
-              // User wants to keep filters - merge with existing
-              tripPlanningData.queryFilters = {
-                ...tripPlanningData.queryFilters,
-                ...normalizedQueryFilters, // Current filters override existing ones
-              }
-              console.log('🔄 Merged filters (existing + current)')
-            } else if (tripPlanningData.queryFilters) {
-              // Normal merge (no filter decision context)
+            // Merge filters: current takes precedence over accumulated
+            if (tripPlanningData.queryFilters) {
               tripPlanningData.queryFilters = {
                 ...tripPlanningData.queryFilters,
                 ...normalizedQueryFilters, // Current filters override accumulated ones
@@ -2844,7 +2733,7 @@ ${getPronounInstructions(userProfile.pronoun)}`
     // Route: POST /swelly-trip-planning/attach-matches/:chat_id
     if (path.includes('/attach-matches/') && req.method === 'POST') {
       const chatId = path.split('/attach-matches/')[1]
-      const body: { matchedUsers: MatchedUser[]; destinationCountry: string } = await req.json()
+      const body: { matchedUsers: MatchedUser[]; destinationCountry: string; requestData?: any } = await req.json()
 
       if (!chatId) {
         return new Response(
@@ -2965,7 +2854,7 @@ ${getPronounInstructions(userProfile.pronoun)}`
           matchedUsers: body.matchedUsers,
           destinationCountry: body.destinationCountry,
           matchTimestamp: new Date().toISOString(),
-          awaitingFilterDecision: true // Set flag to track that we're waiting for filter decision
+          actionRow: { requestData: body.requestData ?? null, selectedAction: null }
         }
         
         console.log('[attach-matches] Attached metadata to message:', {
@@ -3011,7 +2900,7 @@ ${getPronounInstructions(userProfile.pronoun)}`
         }
 
         return new Response(
-          JSON.stringify({ success: true, message: 'Matched users attached successfully' }),
+          JSON.stringify({ success: true, message: 'Matched users attached successfully', messageIndex: targetAssistantIndex }),
           {
             status: 200,
             headers: {
@@ -3031,6 +2920,160 @@ ${getPronounInstructions(userProfile.pronoun)}`
               'Access-Control-Allow-Origin': '*',
             } 
           }
+        )
+      }
+    }
+
+    // Route: PATCH /swelly-trip-planning/update-match-action/:chat_id
+    if (path.includes('/update-match-action/') && req.method === 'PATCH') {
+      const chatId = path.split('/update-match-action/')[1]?.split('/')[0] ?? path.split('/update-match-action/')[1]
+      const body: { messageIndex: number; selectedAction: 'new_chat' | 'add_filter' | 'more' } = await req.json().catch(() => ({}))
+
+      if (!chatId) {
+        return new Response(
+          JSON.stringify({ error: 'Missing chat_id' }),
+          { status: 400, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } }
+        )
+      }
+      if (typeof body.messageIndex !== 'number' || body.messageIndex < 0) {
+        return new Response(
+          JSON.stringify({ error: 'Invalid messageIndex' }),
+          { status: 400, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } }
+        )
+      }
+      if (!body.selectedAction || !['new_chat', 'add_filter', 'more'].includes(body.selectedAction)) {
+        return new Response(
+          JSON.stringify({ error: 'Invalid selectedAction' }),
+          { status: 400, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } }
+        )
+      }
+
+      try {
+        const messages = await getChatHistory(chatId, supabaseAdmin)
+        if (messages.length === 0) {
+          return new Response(JSON.stringify({ error: 'Chat not found' }), { status: 404, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } })
+        }
+        const i = body.messageIndex
+        if (i >= messages.length) {
+          return new Response(JSON.stringify({ error: 'Message index out of range' }), { status: 400, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } })
+        }
+        const msg = messages[i]
+        if (!msg.metadata) msg.metadata = {}
+        if (!msg.metadata.actionRow) msg.metadata.actionRow = { requestData: null, selectedAction: null }
+        msg.metadata.actionRow.selectedAction = body.selectedAction
+        await saveChatHistory(chatId, messages, user.id, null, supabaseAdmin)
+        return new Response(JSON.stringify({ success: true }), { status: 200, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } })
+      } catch (error) {
+        console.error('Error updating match action:', error)
+        return new Response(
+          JSON.stringify({ error: 'Failed to update match action', details: error instanceof Error ? error.message : String(error) }),
+          { status: 500, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } }
+        )
+      }
+    }
+
+    // Route: PATCH /swelly-trip-planning-copy/update-match-filters/:chat_id
+    if (path.includes('/update-match-filters/') && req.method === 'PATCH') {
+      const chatId = path.split('/update-match-filters/')[1]?.split('/')[0] ?? path.split('/update-match-filters/')[1]
+      const body: { messageIndex: number; requestData: any } = await req.json().catch(() => ({}))
+
+      if (!chatId) {
+        return new Response(
+          JSON.stringify({ error: 'Missing chat_id' }),
+          { status: 400, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } }
+        )
+      }
+      if (typeof body.messageIndex !== 'number' || body.messageIndex < 0) {
+        return new Response(
+          JSON.stringify({ error: 'Invalid messageIndex' }),
+          { status: 400, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } }
+        )
+      }
+      if (body.requestData === undefined) {
+        return new Response(
+          JSON.stringify({ error: 'Missing requestData' }),
+          { status: 400, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } }
+        )
+      }
+
+      try {
+        const messages = await getChatHistory(chatId, supabaseAdmin)
+        if (messages.length === 0) {
+          return new Response(JSON.stringify({ error: 'Chat not found' }), { status: 404, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } })
+        }
+        const i = body.messageIndex
+        if (i >= messages.length) {
+          return new Response(JSON.stringify({ error: 'Message index out of range' }), { status: 400, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } })
+        }
+        const msg = messages[i]
+        if (!msg.metadata) msg.metadata = {}
+        if (!msg.metadata.actionRow) msg.metadata.actionRow = { requestData: null, selectedAction: null }
+        msg.metadata.actionRow.requestData = body.requestData
+        await saveChatHistory(chatId, messages, user.id, null, supabaseAdmin)
+        return new Response(JSON.stringify({ success: true }), { status: 200, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } })
+      } catch (error) {
+        console.error('Error updating match filters:', error)
+        return new Response(
+          JSON.stringify({ error: 'Failed to update match filters', details: error instanceof Error ? error.message : String(error) }),
+          { status: 500, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } }
+        )
+      }
+    }
+
+    // Route: PATCH /swelly-trip-planning-copy/update-search-summary-block/:chat_id
+    const updateSearchSummaryBlockMatch = path.match(/update-search-summary-block\/([a-f0-9-]{36})/i)
+    if (updateSearchSummaryBlockMatch && req.method === 'PATCH') {
+      const chatId = updateSearchSummaryBlockMatch[1]
+      const body: { requestData: any; searchSummary: string; selectedAction: 'search' | 'continue_editing' | null; messageIndex?: number } = await req.json().catch(() => ({} as any))
+
+      if (!chatId) {
+        return new Response(
+          JSON.stringify({ error: 'Missing chat_id' }),
+          { status: 400, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } }
+        )
+      }
+      if (body.requestData === undefined) {
+        return new Response(
+          JSON.stringify({ error: 'Missing requestData' }),
+          { status: 400, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } }
+        )
+      }
+
+      try {
+        const messages = await getChatHistory(chatId, supabaseAdmin)
+        if (messages.length === 0) {
+          return new Response(JSON.stringify({ error: 'Chat not found' }), { status: 404, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } })
+        }
+        let targetIndex = -1
+        if (typeof body.messageIndex === 'number' && body.messageIndex >= 0 && body.messageIndex < messages.length && messages[body.messageIndex].role === 'assistant') {
+          targetIndex = body.messageIndex
+        }
+        if (targetIndex < 0) {
+          // Fallback: find the last assistant message (existing clients)
+          for (let i = messages.length - 1; i >= 0; i--) {
+            if (messages[i].role === 'assistant') {
+              targetIndex = i
+              break
+            }
+          }
+        }
+        if (targetIndex < 0) {
+          return new Response(JSON.stringify({ error: 'No assistant message found' }), { status: 400, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } })
+        }
+        const msg = messages[targetIndex]
+        if (!msg.metadata) msg.metadata = {}
+        msg.metadata.searchSummaryBlock = {
+          requestData: body.requestData,
+          searchSummary: body.searchSummary ?? '',
+          selectedAction: body.selectedAction ?? null,
+        }
+        await saveChatHistory(chatId, messages, user.id, null, supabaseAdmin)
+        return new Response(JSON.stringify({ success: true }), { status: 200, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } })
+      } catch (error) {
+        console.error('Error updating search summary block:', error)
+        return new Response(
+          JSON.stringify({ error: 'Failed to update search summary block', details: error instanceof Error ? error.message : String(error) }),
+          { status: 500, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } }
         )
       }
     }

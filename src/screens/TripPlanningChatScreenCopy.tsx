@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   View,
   StyleSheet,
@@ -11,6 +11,8 @@ import {
   Image,
   ImageBackground,
   Animated,
+  Modal,
+  Pressable,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Path } from 'react-native-svg';
@@ -25,6 +27,19 @@ import { messagingService } from '../services/messaging/messagingService';
 import { MatchedUser, TripPlanningRequest } from '../types/tripPlanning';
 import { analyticsService } from '../services/analytics/analyticsService';
 import { ChatTextInput } from '../components/ChatTextInput';
+import {
+  queryFiltersToDisplayList,
+  removeFilterFromRequestData,
+  type FilterDisplayItem,
+} from '../utils/tripPlanningFilters';
+
+/** First question shown when starting or restarting trip planning (matches backend prompt). */
+const TRIP_PLANNING_FIRST_QUESTION =
+  "Yo! Let's Travel! I can connect you with like minded surfers or surf travelers who have experience in specific destinations you are curious about. So, what are you looking for?";
+
+/** Follow-up when user taps "Continue Editing" after search summary. */
+const CONTINUE_EDITING_FOLLOW_UP =
+  "What would you like to change? Destination, filters, or vibe—tell me and we'll dial it in.";
 
 /**
  * Count how many criteria are requested (helper function for UI)
@@ -90,6 +105,20 @@ interface Message {
   isMatchedUsers?: boolean; // Flag to indicate this message should render matched user cards
   matchedUsers?: MatchedUser[]; // Store matched users with the message
   destinationCountry?: string; // Store destination country with the message
+  actionRow?: {
+    requestData: any; // trip planning request for this match (for Add Filter / More)
+    selectedAction: 'new_chat' | 'add_filter' | 'more' | null;
+  };
+  /** Backend message index (set on restore) for PATCH update-match-action */
+  backendMessageIndex?: number;
+  /** True when this is the search_summary bot message (shows "Review filters" button) */
+  isSearchSummary?: boolean;
+  /** Search/Edit block attached to this message (persisted and restored like actionRow) */
+  searchSummaryBlock?: {
+    requestData: any;
+    searchSummary: string;
+    selectedAction: 'search' | 'continue_editing' | null;
+  };
 }
 
 /**
@@ -178,7 +207,66 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   const [pendingSingleCriterionMatches, setPendingSingleCriterionMatches] = useState<MatchedUser[] | null>(null);
   const [singleCriterionType, setSingleCriterionType] = useState<string | null>(null);
   const [pendingSearch, setPendingSearch] = useState<{ data: any; searchSummary: string } | null>(null);
+  const [pendingSearchSelectedAction, setPendingSearchSelectedAction] = useState<'search' | 'continue_editing' | null>(null);
+  const [lastMatchRequestData, setLastMatchRequestData] = useState<any | null>(null);
+  const [lastMatchActionPressed, setLastMatchActionPressed] = useState<'new_chat' | 'add_filter' | 'more' | null>(null);
+  const [existingFiltersForAdd, setExistingFiltersForAdd] = useState<{ data: any } | null>(null);
+  const [filtersMenuVisible, setFiltersMenuVisible] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
+
+  // Current filters source: existingFiltersForAdd (when adding filters), pendingSearch (after search_summary), or last match message
+  const { currentRequestData, filterSourceMessage, filterSource } = useMemo(() => {
+    if (existingFiltersForAdd?.data) {
+      return { currentRequestData: existingFiltersForAdd.data, filterSourceMessage: null as Message | null, filterSource: 'existingFiltersForAdd' as const };
+    }
+    if (pendingSearch?.data) {
+      return { currentRequestData: pendingSearch.data, filterSourceMessage: null as Message | null, filterSource: 'pendingSearch' as const };
+    }
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i];
+      if (msg.actionRow?.requestData) {
+        return { currentRequestData: msg.actionRow.requestData, filterSourceMessage: msg, filterSource: 'message' as const };
+      }
+    }
+    return { currentRequestData: null, filterSourceMessage: null, filterSource: null };
+  }, [existingFiltersForAdd, messages, pendingSearch]);
+
+  const filterDisplayList = useMemo(
+    () => (currentRequestData ? queryFiltersToDisplayList(currentRequestData.queryFilters, currentRequestData) : []),
+    [currentRequestData]
+  );
+  const filterCount = filterDisplayList.length;
+
+  // Animated conic-style border: rotation and glow on filter change
+  const spinRef = useRef(new Animated.Value(0)).current;
+  const glowRef = useRef(new Animated.Value(0)).current;
+  // Border spin: continuous rotation (no iteration limit) so the gradient always sweeps
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.timing(spinRef, {
+        toValue: 1,
+        duration: 3000,
+        useNativeDriver: true,
+      }),
+      { resetBeforeIteration: true }
+    );
+    spinRef.setValue(0);
+    loop.start();
+    return () => loop.stop();
+  }, [spinRef]);
+  const spin = spinRef.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
+  const glowOpacity = glowRef.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1] });
+  const glowScale = glowRef.interpolate({ inputRange: [0, 1], outputRange: [1, 1.08] });
+  const prevFilterCountRef = useRef(filterCount);
+  useEffect(() => {
+    if (prevFilterCountRef.current !== filterCount) {
+      prevFilterCountRef.current = filterCount;
+      Animated.sequence([
+        Animated.timing(glowRef, { toValue: 1, duration: 1000, useNativeDriver: true }),
+        Animated.timing(glowRef, { toValue: 0, duration: 4700, useNativeDriver: true }),
+      ]).start();
+    }
+  }, [filterCount, glowRef]);
 
   // Test API connection and initialize chat context on component mount
   useEffect(() => {
@@ -237,11 +325,12 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
               const restoredMessages: Message[] = [];
               let messageId = 1;
               let skippedInitialContext = false;
-              
-              for (const msg of history.messages) {
+
+              for (let i = 0; i < history.messages.length; i++) {
+                const msg = history.messages[i];
                 // Skip system messages
                 if (msg.role === 'system') continue;
-                
+
                 // Skip initial context message (it's just for backend context, not for display)
                 if (msg.role === 'user' && (
                   msg.content.includes("I'm looking to connect with surfers") ||
@@ -251,31 +340,32 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
                   console.log('[TripPlanningChatScreen] Skipping initial context message:', msg.content.substring(0, 50));
                   continue;
                 }
-                
+
                 // Parse assistant messages that might be JSON
                 let messageText = msg.content;
                 if (msg.role === 'assistant') {
                   try {
                     const parsed = JSON.parse(msg.content);
-                    messageText = parsed.return_message || msg.content;
+                    messageText = parsed.data?.search_summary ?? parsed.return_message ?? msg.content;
                   } catch {
                     // Not JSON, use as-is
                   }
                 }
-                
+
                 const messageIdStr = String(messageId++);
                 const restoredMessage: Message = {
                   id: messageIdStr,
                   text: messageText,
                   isUser: msg.role === 'user',
-                  timestamp: new Date().toLocaleTimeString('en-US', { 
-                    hour: '2-digit', 
+                  timestamp: new Date().toLocaleTimeString('en-US', {
+                    hour: '2-digit',
                     minute: '2-digit',
-                    hour12: false 
+                    hour12: false
                   }),
+                  backendMessageIndex: i,
                 };
-                
-                // Extract matched users from message metadata (if present)
+
+                // Extract matched users and action row from message metadata (if present)
                 if (msg.role === 'assistant') {
                   // Debug: Check if message has any metadata
                   if ((msg as any).metadata) {
@@ -288,7 +378,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
                   } else {
                     console.log('[TripPlanningChatScreen] Assistant message has no metadata, messageTextPreview:', messageText.substring(0, 50));
                   }
-                  
+
                   if ((msg as any).metadata?.matchedUsers) {
                     const metadata = (msg as any).metadata;
                     console.log('[TripPlanningChatScreen] Found matched users in message metadata - count:', metadata.matchedUsers.length);
@@ -296,10 +386,49 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
                     restoredMessage.isMatchedUsers = true;
                     restoredMessage.matchedUsers = metadata.matchedUsers;
                     restoredMessage.destinationCountry = metadata.destinationCountry;
+                    if (metadata.actionRow) {
+                      restoredMessage.actionRow = {
+                        requestData: metadata.actionRow.requestData ?? undefined,
+                        selectedAction: metadata.actionRow.selectedAction ?? null,
+                      };
+                    }
+                  }
+                  const searchSummaryBlock = (msg as any).metadata?.searchSummaryBlock;
+                  if (searchSummaryBlock && searchSummaryBlock.requestData != null) {
+                    restoredMessage.isSearchSummary = true;
+                    restoredMessage.searchSummaryBlock = {
+                      requestData: searchSummaryBlock.requestData,
+                      searchSummary: searchSummaryBlock.searchSummary ?? '',
+                      selectedAction: searchSummaryBlock.selectedAction ?? null,
+                    };
                   }
                 }
-                
+
                 restoredMessages.push(restoredMessage);
+              }
+
+              // Restore pending search block from last assistant message that has searchSummaryBlock
+              let lastSearchSummaryBlock: { requestData: any; searchSummary: string; selectedAction: 'search' | 'continue_editing' | null } | null = null;
+              for (let i = history.messages.length - 1; i >= 0; i--) {
+                const msg = history.messages[i];
+                if (msg.role === 'assistant' && (msg as any).metadata?.searchSummaryBlock) {
+                  const block = (msg as any).metadata.searchSummaryBlock;
+                  if (block.requestData != null) {
+                    lastSearchSummaryBlock = {
+                      requestData: block.requestData,
+                      searchSummary: block.searchSummary ?? '',
+                      selectedAction: block.selectedAction ?? null,
+                    };
+                    break;
+                  }
+                }
+              }
+              if (lastSearchSummaryBlock) {
+                setPendingSearch({
+                  data: lastSearchSummaryBlock.requestData,
+                  searchSummary: lastSearchSummaryBlock.searchSummary,
+                });
+                setPendingSearchSelectedAction(lastSearchSummaryBlock.selectedAction);
               }
               
               console.log('[TripPlanningChatScreen] Restored', restoredMessages.length, 'messages, skippedInitialContext:', skippedInitialContext);
@@ -392,7 +521,6 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
 
   const runFindMatches = async (currentChatId: string, tripPlanningData: any) => {
     if (!currentChatId) return;
-    setPendingSearch(null);
     setIsLoading(true);
     const requestData = {
       destination_country: tripPlanningData.destination_country,
@@ -405,19 +533,14 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
       queryFilters: tripPlanningData.queryFilters || null,
       filtersFromNonNegotiableStep: tripPlanningData.filtersFromNonNegotiableStep || false,
     };
-    const findingMatchesMessage: Message = {
-      id: (Date.now() + 2).toString(),
-      text: 'Finding the perfect surfers for you...',
-      isUser: false,
-      timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
-    };
-    setMessages(prev => [...prev, findingMatchesMessage]);
+    
     try {
       const { matches: matchedUsers } = await swellyServiceCopy.findMatchingUsersServer(currentChatId, tripPlanningData);
       console.log('Matched users found (server):', matchedUsers.length);
       const needsConfirmation = (matchedUsers as any).__needsConfirmation === true;
       const isSingleCriterion = (matchedUsers as any).__singleCriterion === true;
       if (needsConfirmation && isSingleCriterion && matchedUsers.length > 0) {
+        setLastMatchRequestData(tripPlanningData);
         const criterionType = getSingleCriterionType(requestData);
         const confirmationMessage = generateSingleCriterionConfirmationMessage(criterionType || 'requirement', matchedUsers.length);
         const askMessage: Message = {
@@ -437,16 +560,18 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
       if (matchedUsers.length > 0) {
         const matchesMessageText = `Found ${matchedUsers.length} awesome match${matchedUsers.length > 1 ? 'es' : ''} for you!`;
         const matchesDestination = tripPlanningData.destination_country || '';
+        const newMatchMessageId = (Date.now() + 3).toString();
         setMessages(prev => {
           const filtered = prev.filter(msg => msg.text !== 'Finding the perfect surfers for you...');
           const matchesMessage: Message = {
-            id: (Date.now() + 3).toString(),
+            id: newMatchMessageId,
             text: matchesMessageText,
             isUser: false,
             timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
             isMatchedUsers: true,
             matchedUsers: matchedUsers,
             destinationCountry: matchesDestination,
+            actionRow: { requestData: tripPlanningData, selectedAction: null },
           };
           const updated = [...filtered, matchesMessage];
           const allMatchedUsers: MatchedUser[] = [];
@@ -459,20 +584,20 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
           });
           if (onChatStateChange) setTimeout(() => onChatStateChange(currentChatId, allMatchedUsers, latestDestination), 0);
           if (currentChatId) {
-            swellyServiceCopy.attachMatchedUsersToMessage(currentChatId, matchedUsers, matchesDestination).catch(err =>
+            swellyServiceCopy.attachMatchedUsersToMessage(currentChatId, matchedUsers, matchesDestination, tripPlanningData).then(res => {
+              if (res?.messageIndex != null) {
+                setMessages(prevMsgs => prevMsgs.map(m => m.id === newMatchMessageId ? { ...m, backendMessageIndex: res!.messageIndex } : m));
+              }
+            }).catch(err =>
               console.error('[TripPlanningChatScreen] Failed to save exact matches to backend:', err));
           }
           return updated;
         });
         setMatchedUsers(matchedUsers);
         setDestinationCountry(matchesDestination);
+        setLastMatchRequestData(null);
+        setLastMatchActionPressed(null);
         analyticsService.trackSwellyListCreated(matchedUsers.length, requestData.purpose?.purpose_type || 'general_guidance');
-        setMessages(prev => [...prev, {
-          id: (Date.now() + 4).toString(),
-          text: "Would you like to keep your current filters or clear them and start fresh?",
-          isUser: false,
-          timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
-        }]);
       } else {
         analyticsService.trackSwellySearchFailed();
         const noMatchesText = 'No surfers match your criteria right now. Try adjusting your destination or filters.';
@@ -515,7 +640,9 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     };
 
     console.log('Sending message:', userMessage.text);
-    
+    setPendingSearch(null);
+    setPendingSearchSelectedAction(null);
+
     // Check if user wants to see pending single criterion matches
     if (pendingSingleCriterionMatches && pendingSingleCriterionMatches.length > 0) {
       const userText = userMessage.text.toLowerCase();
@@ -531,11 +658,11 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
       if (wantsToSee) {
         // User confirmed - show the single criterion matches
         const singleCriterionMessageText = `Found ${pendingSingleCriterionMatches.length} awesome match${pendingSingleCriterionMatches.length > 1 ? 'es' : ''} for you!`;
-        
+        const newMatchMessageId = (Date.now() + 1).toString();
         setMessages(prev => {
           const withUserMessage = [...prev, userMessage];
           const matchesMessage: Message = {
-            id: (Date.now() + 1).toString(),
+            id: newMatchMessageId,
             text: singleCriterionMessageText,
             isUser: false,
             timestamp: new Date().toLocaleTimeString('en-US', { 
@@ -546,6 +673,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             isMatchedUsers: true,
             matchedUsers: pendingSingleCriterionMatches,
             destinationCountry: destinationCountry,
+            actionRow: { requestData: lastMatchRequestData ?? undefined, selectedAction: null },
           };
           const updated = [...withUserMessage, matchesMessage];
           
@@ -572,7 +700,11 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
           // Save matched users to backend
           if (chatId) {
             console.log('[TripPlanningChatScreen] Saving single criterion matches - matchedUsersCount:', pendingSingleCriterionMatches.length);
-            swellyServiceCopy.attachMatchedUsersToMessage(chatId, pendingSingleCriterionMatches, destinationCountry).catch(err => {
+            swellyServiceCopy.attachMatchedUsersToMessage(chatId, pendingSingleCriterionMatches, destinationCountry, lastMatchRequestData ?? undefined).then(res => {
+              if (res?.messageIndex != null) {
+                setMessages(prevMsgs => prevMsgs.map(m => m.id === newMatchMessageId ? { ...m, backendMessageIndex: res!.messageIndex } : m));
+              }
+            }).catch(err => {
               console.error('[TripPlanningChatScreen] Failed to save single criterion matches to backend:', err);
             });
           }
@@ -580,26 +712,13 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
           return updated;
         });
         
+        setLastMatchRequestData(null);
+        setLastMatchActionPressed(null);
         // Keep global state for backward compatibility
         setMatchedUsers(pendingSingleCriterionMatches);
         
           // Track Swelly list created for single criterion matches
           analyticsService.trackSwellyListCreated(pendingSingleCriterionMatches.length, 'single_criterion');
-          
-          // Add filter decision message after matches are displayed
-          setMessages(prev => {
-            const filterDecisionMessage: Message = {
-              id: (Date.now() + 2).toString(),
-              text: "Would you like to keep your current filters or clear them and start fresh?",
-              isUser: false,
-              timestamp: new Date().toLocaleTimeString('en-US', { 
-                hour: '2-digit', 
-                minute: '2-digit',
-                hour12: false 
-              }),
-            };
-            return [...prev, filterDecisionMessage];
-          });
           
           setPendingSingleCriterionMatches(null);
           setSingleCriterionType(null);
@@ -622,9 +741,16 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
       if (chatId) {
         // Continue existing chat
         console.log('Continuing chat with ID:', chatId);
-        response = await swellyServiceCopy.continueTripPlanningConversation(chatId, {
+        const continuePayload: { message: string; existing_query_filters?: any; adding_filters?: boolean; existing_destination_country?: string | null; existing_area?: string | null } = {
           message: userMessage.text,
-        });
+        };
+        if (existingFiltersForAdd?.data?.queryFilters != null) {
+          continuePayload.existing_query_filters = existingFiltersForAdd.data.queryFilters;
+          continuePayload.adding_filters = true;
+          if (existingFiltersForAdd.data.destination_country != null) continuePayload.existing_destination_country = existingFiltersForAdd.data.destination_country;
+          if (existingFiltersForAdd.data.area != null) continuePayload.existing_area = existingFiltersForAdd.data.area;
+        }
+        response = await swellyServiceCopy.continueTripPlanningConversation(chatId, continuePayload);
       } else {
         // This shouldn't happen since we initialize chat on mount, but fallback just in case
         console.log('Starting new chat (fallback)');
@@ -635,13 +761,37 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         setChatId(response.chat_id || null);
       }
 
-      // If chat is finished, show summary + Search only — do not add the completion message
+      // If chat is finished, add search_summary as a normal message and show Search button
       if (response.is_finished && response.data) {
         setIsFinished(true);
+        const summaryText = response.data?.search_summary ?? 'Ready to search with your current filters.';
+        const searchSummary = response.data?.search_summary ?? '';
+        const botMessage: Message = {
+          id: (Date.now() + 1).toString(),
+          text: summaryText,
+          isUser: false,
+          timestamp: new Date().toLocaleTimeString('en-US', {
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false
+          }),
+          isSearchSummary: true,
+          searchSummaryBlock: {
+            requestData: response.data,
+            searchSummary,
+            selectedAction: null,
+          },
+        };
+        setMessages(prev => [...prev, botMessage]);
         setPendingSearch({
           data: response.data,
-          searchSummary: response.data?.search_summary ?? '',
+          searchSummary,
         });
+        setPendingSearchSelectedAction(null);
+        if (chatId) {
+          swellyServiceCopy.updateSearchSummaryBlock(chatId, response.data, searchSummary, null).catch(err =>
+            console.warn('[TripPlanningChatScreen] Failed to persist search summary block:', err));
+        }
       } else {
         const botMessage: Message = {
           id: (Date.now() + 1).toString(),
@@ -666,6 +816,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
       console.error('Error sending message:', error);
       Alert.alert('Error', 'Failed to send message. Please try again.');
     } finally {
+      setExistingFiltersForAdd(null);
       setIsLoading(false);
     }
   };
@@ -678,7 +829,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages, isInitializing, isLoading, pendingSearch]);
+  }, [messages, isInitializing, isLoading, pendingSearch, lastMatchRequestData]);
 
   const handleSendMessage = async (userId: string) => {
     console.log('[TripPlanningChatScreen] handleSendMessage called with userId:', userId);
@@ -765,9 +916,89 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     );
   };
 
+  const handleMatchAction = (messageId: string, action: 'new_chat' | 'add_filter' | 'more') => {
+    let messageIndexForPatch: number | null = null;
+    setMessages(prev => {
+      const updated = prev.map(m =>
+        m.id === messageId && m.actionRow
+          ? { ...m, actionRow: { ...m.actionRow, selectedAction: action } }
+          : m
+      );
+      const msg = updated.find(m => m.id === messageId);
+      const requestData = msg?.actionRow?.requestData;
+      messageIndexForPatch = msg?.backendMessageIndex ?? prev.findIndex(m => m.id === messageId);
+      if (action === 'new_chat') {
+        const firstQuestionMessage: Message = {
+          id: (Date.now() + 1).toString(),
+          text: TRIP_PLANNING_FIRST_QUESTION,
+          isUser: false,
+          timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+        };
+        return [...updated, firstQuestionMessage];
+      }
+      if (action === 'add_filter' && requestData != null) {
+        setIsFinished(false);
+        setExistingFiltersForAdd({ data: { ...requestData } });
+        const addFilterBotMessage: Message = {
+          id: (Date.now() + 1).toString(),
+          text: "Great! We can add some filters to your search. What would you like to add? For example: board type, surf level, destinations they've surfed, age, or country of origin.",
+          isUser: false,
+          timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+        };
+        return [...updated, addFilterBotMessage];
+      }
+      if (action === 'more' && chatId && requestData != null) {
+        runFindMatches(chatId, requestData);
+        return updated;
+      }
+      return updated;
+    });
+    if (action === 'new_chat') {
+      setPendingSearch(null);
+      setIsFinished(false);
+      setExistingFiltersForAdd(null);
+      setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100);
+    }
+    if (messageIndexForPatch != null && messageIndexForPatch >= 0 && chatId) {
+      swellyServiceCopy.updateMatchActionSelection(chatId, messageIndexForPatch, action).catch(err =>
+        console.warn('[TripPlanningChatScreen] Failed to persist action selection:', err));
+    }
+  };
+
+  const handleRemoveFilter = (item: FilterDisplayItem) => {
+    if (!currentRequestData) return;
+    const nextRequestData = removeFilterFromRequestData(currentRequestData, item);
+    if (filterSource === 'existingFiltersForAdd') {
+      setExistingFiltersForAdd({ data: nextRequestData });
+      return;
+    }
+    if (filterSource === 'pendingSearch' && pendingSearch) {
+      setPendingSearch({ data: nextRequestData, searchSummary: pendingSearch.searchSummary ?? '' });
+      return;
+    }
+    if (filterSource === 'message' && filterSourceMessage?.id) {
+      setMessages(prev =>
+        prev.map(m =>
+          m.id === filterSourceMessage.id && m.actionRow
+            ? { ...m, actionRow: { ...m.actionRow, requestData: nextRequestData } }
+            : m
+        )
+      );
+      const backendIndex = filterSourceMessage.backendMessageIndex;
+      if (chatId != null && typeof backendIndex === 'number' && backendIndex >= 0) {
+        swellyServiceCopy.updateMatchRequestData(chatId, backendIndex, nextRequestData).catch(err =>
+          console.warn('[TripPlanningChatScreen] Failed to persist filter removal:', err));
+      }
+    }
+  };
+
   const renderMessage = (message: Message) => {
     // If this message has matched users, render cards instead
     if (message.isMatchedUsers && message.matchedUsers && message.matchedUsers.length > 0) {
+      const selectedAction = message.actionRow?.selectedAction ?? null;
+      const requestData = message.actionRow?.requestData;
+      const hasActionRow = requestData != null;
+      const disabled = selectedAction !== null;
       return (
         <View key={message.id}>
           <View style={[
@@ -803,39 +1034,203 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
               />
             ))}
           </View>
+
+          {/* Per-message action row (New Chat, Add Filter, More Matches) */}
+          {hasActionRow && (
+            <View style={styles.actionButtonsRow}>
+              <TouchableOpacity
+                activeOpacity={0.8}
+                disabled={disabled}
+                onPress={() => handleMatchAction(message.id, 'new_chat')}
+                style={styles.actionButtonTouchable}
+              >
+                <LinearGradient
+                  colors={['#05BCD3', '#DBCDBC']}
+                  locations={[0, 0.7]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={styles.searchButtonGradientOuter}
+                >
+                  <View style={[styles.actionButtonInner, selectedAction === 'new_chat' && styles.actionButtonInnerSelected]}>
+                    <Text style={[styles.searchButtonTextSmall, selectedAction === 'new_chat' && styles.actionButtonTextSelected]}>New Chat</Text>
+                  </View>
+                </LinearGradient>
+              </TouchableOpacity>
+              <TouchableOpacity
+                activeOpacity={0.8}
+                disabled={disabled}
+                onPress={() => handleMatchAction(message.id, 'add_filter')}
+                style={styles.actionButtonTouchable}
+              >
+                <LinearGradient
+                  colors={['#05BCD3', '#DBCDBC']}
+                  locations={[0, 0.7]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={styles.searchButtonGradientOuter}
+                >
+                  <View style={[styles.actionButtonInner, selectedAction === 'add_filter' && styles.actionButtonInnerSelected]}>
+                    <Text style={[styles.searchButtonTextSmall, selectedAction === 'add_filter' && styles.actionButtonTextSelected]}>Add Filter</Text>
+                  </View>
+                </LinearGradient>
+              </TouchableOpacity>
+              {(message.matchedUsers?.length ?? 0) >= 3 && (
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  disabled={disabled}
+                  onPress={() => handleMatchAction(message.id, 'more')}
+                  style={styles.actionButtonTouchable}
+                >
+                  <LinearGradient
+                    colors={['#05BCD3', '#DBCDBC']}
+                    locations={[0, 0.7]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={styles.searchButtonGradientOuter}
+                  >
+                    <View style={[styles.actionButtonInner, selectedAction === 'more' && styles.actionButtonInnerSelected]}>
+                      <Text style={[styles.searchButtonTextSmall, selectedAction === 'more' && styles.actionButtonTextSelected]}>3 More</Text>
+                    </View>
+                  </LinearGradient>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
         </View>
       );
     }
 
     // Regular message rendering
+    const selectedSearchAction = message.searchSummaryBlock?.selectedAction ?? null;
+    const hasSearchSummaryBlock = message.searchSummaryBlock != null;
+    const searchDisabled = selectedSearchAction !== null || isLoading;
+
     return (
-      <View
-        key={message.id}
-        style={[
-          styles.messageContainer,
-          message.isUser ? styles.userMessageContainer : styles.botMessageContainer,
-        ]}
-      >
+      <View key={message.id}>
         <View
           style={[
-            styles.messageBubble,
-            message.isUser ? styles.userMessageBubble : styles.botMessageBubble,
+            styles.messageContainer,
+            message.isUser ? styles.userMessageContainer : styles.botMessageContainer,
           ]}
         >
-          <View style={styles.messageTextContainer}>
-            <Text style={message.isUser ? styles.userMessageText : styles.botMessageText}>
-              {message.text}
-            </Text>
-          </View>
-          <View style={styles.timestampContainer}>
-            <Text style={[
-              styles.timestamp,
-              message.isUser ? styles.userTimestamp : styles.botTimestamp,
-            ]}>
-              {message.timestamp}
-            </Text>
+          <View
+            style={[
+              styles.messageBubble,
+              message.isUser ? styles.userMessageBubble : styles.botMessageBubble,
+            ]}
+          >
+            <View style={styles.messageTextContainer}>
+              <Text style={message.isUser ? styles.userMessageText : styles.botMessageText}>
+                {message.text}
+              </Text>
+              {!message.isUser && message.isSearchSummary && (
+                <View style={styles.reviewFiltersRow}>
+                  <TouchableOpacity
+                    onPress={() => setFiltersMenuVisible(true)}
+                    activeOpacity={0.8}
+                    style={styles.reviewFiltersButton}
+                  >
+                    <Svg width={18} height={18} viewBox="0 -960 960 960" fill="#555">
+                      <Path d="M440-120v-240h80v80h320v80H520v80h-80Zm-320-80v-80h240v80H120Zm160-160v-80H120v-80h160v-80h80v240h-80Zm160-80v-80h400v80H440Zm160-160v-240h80v80h160v80H680v80h-80Zm-480-80v-80h400v80H120Z" />
+                    </Svg>
+                    <Text style={styles.reviewFiltersButtonText}>Review filters</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+            <View style={styles.timestampContainer}>
+              <Text style={[
+                styles.timestamp,
+                message.isUser ? styles.userTimestamp : styles.botTimestamp,
+              ]}>
+                {message.timestamp}
+              </Text>
+            </View>
           </View>
         </View>
+
+        {/* Per-message Search/Edit row (same location as message, persisted via searchSummaryBlock) */}
+        {!message.isUser && hasSearchSummaryBlock && message.searchSummaryBlock && (
+          <View style={styles.pendingSearchBlock}>
+            <View style={[styles.searchButtonWrapper, styles.pendingSearchButtonsRow]}>
+              <TouchableOpacity
+                activeOpacity={0.8}
+                disabled={searchDisabled}
+                onPress={() => {
+                  if (searchDisabled) return;
+                  const block = message.searchSummaryBlock!;
+                  setMessages(prev =>
+                    prev.map(m =>
+                      m.id === message.id && m.searchSummaryBlock
+                        ? { ...m, searchSummaryBlock: { ...m.searchSummaryBlock!, selectedAction: 'continue_editing' as const } }
+                        : m
+                    )
+                  );
+                  const botMessage: Message = {
+                    id: (Date.now() + 1).toString(),
+                    text: CONTINUE_EDITING_FOLLOW_UP,
+                    isUser: false,
+                    timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+                  };
+                  setMessages(prev => [...prev, botMessage]);
+                  if (chatId) {
+                    swellyServiceCopy.updateSearchSummaryBlock(chatId, block.requestData, block.searchSummary, 'continue_editing', message.backendMessageIndex).catch(err =>
+                      console.warn('[TripPlanningChatScreen] Failed to persist search summary selection:', err));
+                  }
+                  setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100);
+                }}
+                style={[styles.searchButtonTouchable, styles.pendingSearchButtonTouchable]}
+              >
+                <LinearGradient
+                  colors={['#05BCD3', '#DBCDBC']}
+                  locations={[0, 0.7]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={styles.searchButtonGradientOuter}
+                >
+                  <View style={[styles.searchButtonInner, selectedSearchAction === 'continue_editing' && styles.actionButtonInnerSelected, styles.searchEditButtonContent]}>
+                    <Svg width={16} height={16} viewBox="0 -960 960 960" fill={selectedSearchAction === 'continue_editing' ? '#0D7480' : '#222B30'}>
+                      <Path d="M200-200h57l391-391-57-57-391 391v57Zm-80 80v-170l528-527q12-11 26.5-17t30.5-6q16 0 31 6t26 18l55 56q12 11 17.5 26t5.5 30q0 16-5.5 30.5T817-647L290-120H120Zm640-584-56-56 56 56Zm-141 85-28-29 57 57-29-28Z" />
+                    </Svg>
+                    <Text style={[styles.searchButtonText, selectedSearchAction === 'continue_editing' && styles.actionButtonTextSelected]}>Edit</Text>
+                  </View>
+                </LinearGradient>
+              </TouchableOpacity>
+              <TouchableOpacity
+                activeOpacity={0.8}
+                disabled={searchDisabled}
+                onPress={() => {
+                  if (!chatId || searchDisabled) return;
+                  const block = message.searchSummaryBlock!;
+                  setMessages(prev =>
+                    prev.map(m =>
+                      m.id === message.id && m.searchSummaryBlock
+                        ? { ...m, searchSummaryBlock: { ...m.searchSummaryBlock!, selectedAction: 'search' as const } }
+                        : m
+                    )
+                  );
+                  runFindMatches(chatId, block.requestData);
+                  swellyServiceCopy.updateSearchSummaryBlock(chatId, block.requestData, block.searchSummary, 'search', message.backendMessageIndex).catch(err =>
+                    console.warn('[TripPlanningChatScreen] Failed to persist search summary selection:', err));
+                }}
+                style={[styles.searchButtonTouchable, styles.pendingSearchButtonTouchable]}
+              >
+                <LinearGradient
+                  colors={['#05BCD3', '#DBCDBC']}
+                  locations={[0, 0.7]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={styles.searchButtonGradientOuter}
+                >
+                  <View style={[styles.searchButtonInner, selectedSearchAction === 'search' && styles.actionButtonInnerSelected, styles.searchEditButtonContent]}>
+                    <Ionicons name="search" size={16} color={selectedSearchAction === 'search' ? '#0D7480' : '#222B30'} />
+                    <Text style={[styles.searchButtonText, selectedSearchAction === 'search' && styles.actionButtonTextSelected]}>Search</Text>
+                  </View>
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
       </View>
     );
   };
@@ -902,39 +1297,6 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             showsVerticalScrollIndicator={false}
           >
             {messages.map(renderMessage)}
-            {pendingSearch !== null && (
-              <View style={styles.pendingSearchBlock}>
-                <View style={[styles.messageContainer, styles.botMessageContainer]}>
-                  <View style={[styles.messageBubble, styles.botMessageBubble]}>
-                    <View style={styles.messageTextContainer}>
-                      <Text style={styles.botMessageText}>
-                        {pendingSearch.searchSummary.trim() || 'Ready to search with your current filters.'}
-                      </Text>
-                    </View>
-                  </View>
-                </View>
-                <View style={styles.searchButtonWrapper}>
-                  <TouchableOpacity
-                    activeOpacity={0.8}
-                    disabled={isLoading}
-                    onPress={() => chatId && runFindMatches(chatId, pendingSearch.data)}
-                    style={styles.searchButtonTouchable}
-                  >
-                    <LinearGradient
-                      colors={['#05BCD3', '#DBCDBC']}
-                      locations={[0, 0.7]}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 0 }}
-                      style={styles.searchButtonGradientOuter}
-                    >
-                      <View style={styles.searchButtonInner}>
-                        <Text style={styles.searchButtonText}>Search</Text>
-                      </View>
-                    </LinearGradient>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            )}
             {(isLoading || isInitializing) && (
               <View style={[styles.messageContainer, styles.botMessageContainer]}>
                 <View style={[styles.messageBubble, styles.botMessageBubble]}>
@@ -958,15 +1320,81 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             maxLength={500}
             primaryColor={colors.primary || '#B72DF2'}
             leftAccessory={
-              <TouchableOpacity style={styles.attachButton}>
-                <Svg width={28} height={28} viewBox="0 -960 960 960" fill="#222B30">
-                  <Path d="M440-120v-240h80v80h320v80H520v80h-80Zm-320-80v-80h240v80H120Zm160-160v-80H120v-80h160v-80h80v240h-80Zm160-80v-80h400v80H440Zm160-160v-240h80v80h160v80H680v80h-80Zm-480-80v-80h400v80H120Z" />
-                </Svg>
+              <TouchableOpacity
+                onPress={() => setFiltersMenuVisible(true)}
+                activeOpacity={0.8}
+                style={styles.filtersButtonOuter}
+              >
+                <Animated.View style={[styles.filtersButtonGlowWrap, { transform: [{ scale: glowScale }] }]}>
+                  <View style={styles.filtersButtonBorderClip}>
+                    <Animated.View
+                      style={[
+                        styles.filtersButtonGradientWrap,
+                        {
+                          transform: [{ rotate: spin }],
+                          opacity: glowOpacity,
+                        },
+                      ]}
+                    >
+                      <LinearGradient
+                        colors={['#7C3AED', '#A78BFA', '#C4B5FD', '#7C3AED', '#6D28D9']}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={StyleSheet.absoluteFill}
+                      />
+                    </Animated.View>
+                    <View style={styles.filtersButtonInner}>
+                      {filterCount > 0 && (
+                        <Text style={styles.filtersButtonCount}>{filterCount}</Text>
+                      )}
+                      <Svg width={28} height={28} viewBox="0 -960 960 960" fill="#222B30">
+                        <Path d="M440-120v-240h80v80h320v80H520v80h-80Zm-320-80v-80h240v80H120Zm160-160v-80H120v-80h160v-80h80v240h-80Zm160-80v-80h400v80H440Zm160-160v-240h80v80h160v80H680v80h-80Zm-480-80v-80h400v80H120Z" />
+                      </Svg>
+                    </View>
+                  </View>
+                </Animated.View>
               </TouchableOpacity>
             }
           />
         </View>
       </KeyboardAvoidingView>
+
+      {/* Filters menu overlay */}
+      <Modal
+        visible={filtersMenuVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setFiltersMenuVisible(false)}
+      >
+        <Pressable style={styles.filtersMenuBackdrop} onPress={() => setFiltersMenuVisible(false)}>
+          <Pressable style={styles.filtersMenuCard} onPress={e => e.stopPropagation()}>
+            <View style={styles.filtersMenuHeader}>
+              <Text style={styles.filtersMenuTitle}>Filters</Text>
+              <TouchableOpacity onPress={() => setFiltersMenuVisible(false)} hitSlop={12}>
+                <Ionicons name="close" size={24} color="#222B30" />
+              </TouchableOpacity>
+            </View>
+            {filterDisplayList.length === 0 ? (
+              <Text style={styles.filtersMenuEmpty}>No filters applied</Text>
+            ) : (
+              <ScrollView style={styles.filtersMenuList} keyboardShouldPersistTaps="handled">
+                {filterDisplayList.map(item => (
+                  <View key={item.id} style={styles.filtersMenuItem}>
+                    <Text style={styles.filtersMenuLabel} numberOfLines={1}>{item.label}</Text>
+                    <TouchableOpacity
+                      onPress={() => handleRemoveFilter(item)}
+                      style={styles.filtersMenuRemove}
+                      hitSlop={8}
+                    >
+                      <Ionicons name="close-circle" size={22} color="#7B7B7B" />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </ScrollView>
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -1184,12 +1612,126 @@ const styles = StyleSheet.create({
   attachButtonWrapper: {
     paddingBottom: 15,
     marginRight: 8,
+    marginTop: 6,
+  },
+  filtersButtonOuter: {
+    alignSelf: 'flex-start',
+    transform: [{ translateY: 6 }],
+  },
+  filtersButtonGlowWrap: {
+    // Wrapper for glow scale animation
+  },
+  filtersButtonBorderClip: {
+    overflow: 'hidden',
+    borderRadius: 14,
+    padding: 2,
+  },
+  filtersButtonGradientWrap: {
+    position: 'absolute',
+    width: '200%',
+    height: '200%',
+    left: '-50%',
+    top: '-50%',
+  },
+  filtersButtonInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    backgroundColor: colors.white,
+    borderRadius: 12,
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+    minHeight: 28,
+  },
+  filtersButtonCount: {
+    fontFamily: Platform.OS === 'web' ? 'var(--Family-Body, Inter), sans-serif' : 'Inter',
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#222B30',
+    lineHeight: 28,
+  },
+  filtersButtonRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  filterBadge: {
+    minWidth: 20,
+    height: 20,
+    paddingHorizontal: 6,
+    borderRadius: 10,
+    backgroundColor: '#05BCD3',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  filterBadgeText: {
+    fontFamily: Platform.OS === 'web' ? 'var(--Family-Body, Inter), sans-serif' : 'Inter',
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#FFF',
   },
   attachButton: {
     width: 28,
     height: 28,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  filtersMenuBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'flex-end',
+    paddingHorizontal: 16,
+    paddingBottom: 120,
+  },
+  filtersMenuCard: {
+    backgroundColor: colors.white,
+    borderRadius: 12,
+    maxHeight: 320,
+    paddingTop: 12,
+    paddingBottom: 12,
+  },
+  filtersMenuHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+  },
+  filtersMenuTitle: {
+    fontFamily: Platform.OS === 'web' ? 'var(--Family-Body, Inter), sans-serif' : 'Inter',
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#222B30',
+  },
+  filtersMenuEmpty: {
+    fontFamily: Platform.OS === 'web' ? 'var(--Family-Body, Inter), sans-serif' : 'Inter',
+    fontSize: 14,
+    color: '#7B7B7B',
+    paddingHorizontal: 16,
+    paddingVertical: 24,
+  },
+  filtersMenuList: {
+    maxHeight: 260,
+  },
+  filtersMenuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#E4E4E4',
+  },
+  filtersMenuLabel: {
+    flex: 1,
+    fontFamily: Platform.OS === 'web' ? 'var(--Family-Body, Inter), sans-serif' : 'Inter',
+    fontSize: 14,
+    color: '#222B30',
+    marginRight: 8,
+  },
+  filtersMenuRemove: {
+    padding: 4,
   },
   typingContainer: {
     flexDirection: 'row',
@@ -1203,6 +1745,26 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     backgroundColor: '#333333',
   },
+  reviewFiltersRow: {
+    marginTop: 8,
+  },
+  reviewFiltersButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#999',
+  },
+  reviewFiltersButtonText: {
+    fontSize: 14,
+    color: '#555',
+    fontWeight: '500',
+    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : undefined,
+  },
   pendingSearchBlock: {
     marginBottom: 4,
   },
@@ -1210,6 +1772,16 @@ const styles = StyleSheet.create({
     marginTop: 12,
     alignItems: 'center',
     width: '100%',
+  },
+  pendingSearchButtonsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    width: '100%',
+    gap: 8,
+  },
+  pendingSearchButtonTouchable: {
+    flex: 1,
   },
   searchButtonTouchable: {
     borderRadius: 12,
@@ -1228,9 +1800,48 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  searchEditButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
   searchButtonText: {
     color: '#222B30',
     fontSize: 16,
+    fontWeight: '600',
+    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : undefined,
+  },
+  actionButtonsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 12,
+    paddingHorizontal: 0,
+    gap: 8,
+  },
+  actionButtonTouchable: {
+    flex: 1,
+    marginHorizontal: 4,
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  actionButtonInner: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  actionButtonInnerSelected: {
+    backgroundColor: '#E0F2F7',
+  },
+  actionButtonTextSelected: {
+    color: '#0D7480',
+  },
+  searchButtonTextSmall: {
+    color: '#222B30',
+    fontSize: 12,
     fontWeight: '600',
     fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : undefined,
   },

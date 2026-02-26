@@ -24,6 +24,12 @@ export interface SwellyChatResponse {
 
 export interface SwellyContinueChatRequest {
   message: string;
+  /** When adding to existing filters (Add Filter flow), send current queryFilters so backend can merge. */
+  existing_query_filters?: any;
+  adding_filters?: boolean;
+  /** Optional: preserve destination/area when merging in add-filters mode. */
+  existing_destination_country?: string | null;
+  existing_area?: string | null;
 }
 
 /** Trip-planning payload when is_finished is true (optional shape for type hints). */
@@ -407,12 +413,14 @@ class SwellyService {
    * @param chatId - The chat ID for the conversation
    * @param matchedUsers - Array of matched users to attach
    * @param destinationCountry - Destination country for the matched users
+   * @param requestData - Optional trip planning request data for action row (Add Filter / More)
    */
   async attachMatchedUsersToMessage(
     chatId: string,
     matchedUsers: any[],
-    destinationCountry: string
-  ): Promise<void> {
+    destinationCountry: string,
+    requestData?: any
+  ): Promise<{ messageIndex?: number } | void> {
     try {
       const url = this.getFunctionUrl(`/attach-matches/${chatId}`, 'trip-planning');
       const headers = await this.getAuthHeaders();
@@ -427,6 +435,7 @@ class SwellyService {
         body: JSON.stringify({
           matchedUsers,
           destinationCountry,
+          ...(requestData != null && { requestData }),
         }),
       });
 
@@ -440,10 +449,97 @@ class SwellyService {
 
       const result = await response.json();
       console.log('[SwellyService] Matched users attached successfully:', result);
+      return { messageIndex: result.messageIndex };
     } catch (error) {
       console.error('[SwellyService] Error attaching matched users to message:', error);
       // Don't throw - log error but don't block UI
       console.warn('[SwellyService] Failed to save matched users to backend, but matches are still displayed in UI');
+    }
+  }
+
+  /**
+   * Update the selected action (new_chat, add_filter, more) for a match block so it persists on restore.
+   * @param chatId - The chat ID
+   * @param messageIndex - Index of the assistant message (in backend messages array)
+   * @param selectedAction - The action the user selected
+   */
+  async updateMatchActionSelection(
+    chatId: string,
+    messageIndex: number,
+    selectedAction: 'new_chat' | 'add_filter' | 'more'
+  ): Promise<void> {
+    try {
+      const url = this.getFunctionUrl(`/update-match-action/${chatId}`, 'trip-planning');
+      const headers = await this.getAuthHeaders();
+      const response = await fetch(url, {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({ messageIndex, selectedAction }),
+      });
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.warn('[SwellyService] updateMatchActionSelection failed:', errorText);
+      }
+    } catch (error) {
+      console.warn('[SwellyService] updateMatchActionSelection error:', error);
+    }
+  }
+
+  /**
+   * Update the requestData (filters) for a match block so it persists on restore.
+   * @param chatId - The chat ID
+   * @param messageIndex - Index of the assistant message (in backend messages array)
+   * @param requestData - Updated trip planning request data (e.g. after removing a filter)
+   */
+  async updateMatchRequestData(
+    chatId: string,
+    messageIndex: number,
+    requestData: any
+  ): Promise<void> {
+    try {
+      const url = this.getFunctionUrl(`/update-match-filters/${chatId}`, 'trip-planning');
+      const headers = await this.getAuthHeaders();
+      const response = await fetch(url, {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({ messageIndex, requestData }),
+      });
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.warn('[SwellyService] updateMatchRequestData failed:', errorText);
+      }
+    } catch (error) {
+      console.warn('[SwellyService] updateMatchRequestData error:', error);
+    }
+  }
+
+  /**
+   * Update the search summary block (requestData, searchSummary, selectedAction) on the last assistant message
+   * so it persists and restores (pending search + two buttons + selection).
+   */
+  async updateSearchSummaryBlock(
+    chatId: string,
+    requestData: any,
+    searchSummary: string,
+    selectedAction: 'search' | 'continue_editing' | null,
+    messageIndex?: number
+  ): Promise<void> {
+    try {
+      const url = this.getFunctionUrl(`/update-search-summary-block/${chatId}`, 'trip-planning');
+      const headers = await this.getAuthHeaders();
+      const body: { requestData: any; searchSummary: string; selectedAction: 'search' | 'continue_editing' | null; messageIndex?: number } = { requestData, searchSummary, selectedAction };
+      if (messageIndex !== undefined) body.messageIndex = messageIndex;
+      const response = await fetch(url, {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.warn('[SwellyService] updateSearchSummaryBlock failed:', errorText);
+      }
+    } catch (error) {
+      console.warn('[SwellyService] updateSearchSummaryBlock error:', error);
     }
   }
 
