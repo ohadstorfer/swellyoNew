@@ -48,8 +48,6 @@ interface MessageMetadata {
   matchedUsers?: MatchedUser[]
   destinationCountry?: string
   matchTimestamp?: string
-  awaitingFilterDecision?: boolean
-  isFilterDecisionPrompt?: boolean
   actionRow?: {
     requestData?: any
     selectedAction?: 'new_chat' | 'add_filter' | 'more' | null
@@ -2870,21 +2868,6 @@ ${getPronounInstructions(userProfile.pronoun)}`
         console.log('[attach-matches] Message before save has metadata:', !!messageBeforeSave.metadata?.matchedUsers)
         console.log('[attach-matches] Full message object before save:', JSON.stringify(messageBeforeSave).substring(0, 300))
 
-        // Add system message asking about filters after matches are attached
-        const filterDecisionMessage: Message = {
-          role: 'assistant',
-          content: JSON.stringify({
-            return_message: "Yo! How do these matches look? If you want to find more surfers, I can keep your current filters and add to them, or we can start fresh with new ones. What do you think?",
-            is_finished: false,
-            data: null
-          }),
-          metadata: {
-            isFilterDecisionPrompt: true
-          }
-        }
-        messages.push(filterDecisionMessage)
-        console.log('[attach-matches] Added filter decision prompt message')
-        
         // Save updated messages array back to database
         console.log('[attach-matches] Saving', messages.length, 'messages to database')
         await saveChatHistory(chatId, messages, user.id, null, supabaseAdmin)

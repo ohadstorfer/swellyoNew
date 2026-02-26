@@ -119,6 +119,8 @@ interface Message {
     searchSummary: string;
     selectedAction: 'search' | 'continue_editing' | null;
   };
+  /** True when this is the "first question" message added after New Chat (filters should be cleared after this) */
+  isRestartAfterNewChat?: boolean;
 }
 
 /**
@@ -214,7 +216,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   const [filtersMenuVisible, setFiltersMenuVisible] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
 
-  // Current filters source: existingFiltersForAdd (when adding filters), pendingSearch (after search_summary), or last match message
+  // Current filters source: existingFiltersForAdd (when adding filters), pendingSearch (after search_summary), or last match message (only after the last New Chat restart)
   const { currentRequestData, filterSourceMessage, filterSource } = useMemo(() => {
     if (existingFiltersForAdd?.data) {
       return { currentRequestData: existingFiltersForAdd.data, filterSourceMessage: null as Message | null, filterSource: 'existingFiltersForAdd' as const };
@@ -222,7 +224,8 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     if (pendingSearch?.data) {
       return { currentRequestData: pendingSearch.data, filterSourceMessage: null as Message | null, filterSource: 'pendingSearch' as const };
     }
-    for (let i = messages.length - 1; i >= 0; i--) {
+    const lastRestartIndex = messages.reduce((idx, m, i) => (m.isRestartAfterNewChat ? i : idx), -1);
+    for (let i = messages.length - 1; i > lastRestartIndex; i--) {
       const msg = messages[i];
       if (msg.actionRow?.requestData) {
         return { currentRequestData: msg.actionRow.requestData, filterSourceMessage: msg, filterSource: 'message' as const };
@@ -933,6 +936,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
           text: TRIP_PLANNING_FIRST_QUESTION,
           isUser: false,
           timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+          isRestartAfterNewChat: true,
         };
         return [...updated, firstQuestionMessage];
       }
@@ -957,6 +961,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
       setPendingSearch(null);
       setIsFinished(false);
       setExistingFiltersForAdd(null);
+      setFiltersMenuVisible(false);
       setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100);
     }
     if (messageIndexForPatch != null && messageIndexForPatch >= 0 && chatId) {
