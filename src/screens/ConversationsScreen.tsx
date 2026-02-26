@@ -104,8 +104,8 @@ export default function ConversationsScreen({
   const isMVPMode = process.env.EXPO_PUBLIC_MVP_MODE === 'true';
   // Check if dev mode is enabled
   const isDevMode = process.env.EXPO_PUBLIC_DEV_MODE === 'true';
-  // Show Swelly Copy card: when LOCAL_MODE is true or in dev builds (__DEV__) so it works without env reload
-  const showSwellyCopyCard = (process.env.EXPO_PUBLIC_LOCAL_MODE === 'true' || __DEV__) && !!onSwellyPressCopy;
+  // Show Swelly Copy card: when LOCAL_MODE, __DEV__, or EXPO_PUBLIC_DEV_MODE is true (so it works in dev builds and deployed dev)
+  const showSwellyCopyCard = (process.env.EXPO_PUBLIC_LOCAL_MODE === 'true' || __DEV__ || isDevMode) && !!onSwellyPressCopy;
   
   // Survey bubble state and animations
   const [showSurveyBubble, setShowSurveyBubble] = useState(false);
@@ -1337,7 +1337,7 @@ export default function ConversationsScreen({
       <View style={styles.swellyCardWrapper}>
         {renderSwellyConversation()}
         {/* Local mode: Second Swelly button for TripPlanningChatScreenCopy (server-side matching) */}
-        {showSwellyCopyCard ? (
+        {isDevMode ? (
           <TouchableOpacity
             style={[styles.swellyContainer, styles.swellyContainerDev]}
             onPress={onSwellyPressCopy}
