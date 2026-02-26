@@ -240,6 +240,12 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   );
   const filterCount = filterDisplayList.length;
 
+  // Disable text input when Search/Edit buttons are shown and user hasn't chosen yet
+  const awaitingSearchOrEditChoice = useMemo(
+    () => messages.some(m => m.searchSummaryBlock != null && m.searchSummaryBlock.selectedAction == null),
+    [messages]
+  );
+
   // Animated conic-style border: rotation and glow on filter change
   const spinRef = useRef(new Animated.Value(0)).current;
   const glowRef = useRef(new Animated.Value(0)).current;
@@ -1320,7 +1326,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             value={inputText}
             onChangeText={setInputText}
             onSend={sendMessage}
-            disabled={isLoading}
+            disabled={isLoading || awaitingSearchOrEditChoice}
             placeholder="Type your message.."
             maxLength={500}
             primaryColor={colors.primary || '#B72DF2'}
