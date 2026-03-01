@@ -419,7 +419,8 @@ class SwellyService {
     chatId: string,
     matchedUsers: any[],
     destinationCountry: string,
-    requestData?: any
+    requestData?: any,
+    totalCount?: number
   ): Promise<{ messageIndex?: number } | void> {
     try {
       const url = this.getFunctionUrl(`/attach-matches/${chatId}`, 'trip-planning');
@@ -436,6 +437,7 @@ class SwellyService {
           matchedUsers,
           destinationCountry,
           ...(requestData != null && { requestData }),
+          ...(totalCount !== undefined && { totalCount }),
         }),
       });
 
@@ -552,7 +554,7 @@ class SwellyService {
   async findMatchingUsersServer(
     chatId: string,
     tripPlanningData: any
-  ): Promise<{ matches: MatchedUser[] }> {
+  ): Promise<{ matches: MatchedUser[]; totalCount: number }> {
     // Normalize: ensure queryFilters is set when backend sent query_filters
     const payload = tripPlanningData && typeof tripPlanningData === 'object'
       ? { ...tripPlanningData, queryFilters: tripPlanningData.queryFilters ?? tripPlanningData.query_filters ?? null }
@@ -583,8 +585,9 @@ class SwellyService {
 
     const serverMatches = data.matches || [];
     const matches: MatchedUser[] = serverMatches.map((m: any) => mapServerMatchToMatchedUser(m));
-    console.log('[SwellyServiceCopy] Server returned', matches.length, 'matches');
-    return { matches };
+    const totalCount = typeof data.totalCount === 'number' ? data.totalCount : (data.matches?.length ?? 0);
+    console.log('[SwellyServiceCopy] Server returned', matches.length, 'matches (totalCount=', totalCount, ')');
+    return { matches, totalCount };
   }
 }
 

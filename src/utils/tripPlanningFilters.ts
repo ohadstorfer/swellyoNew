@@ -24,6 +24,13 @@ function formatSurfboardType(t: string): string {
   return `a ${normalized}`;
 }
 
+/** For display in filters: if value is "United States - StateName", return "StateName"; otherwise return value. */
+function displayCountryOrState(s: string): string {
+  const v = (s || '').trim();
+  if (/^United States - /i.test(v)) return v.replace(/^United States - /i, '').trim();
+  return v;
+}
+
 /**
  * Convert queryFilters (and optional requestData fields) into a flat list of display items.
  */
@@ -36,7 +43,7 @@ export function queryFiltersToDisplayList(
     if (requestData?.destination_country) {
       items.push({
         id: 'destination_country',
-        label: `Surfed in ${requestData.destination_country}`,
+        label: `Surfed in ${displayCountryOrState(requestData.destination_country)}`,
         filterKey: 'destination_country',
         value: requestData.destination_country,
       });
@@ -57,7 +64,7 @@ export function queryFiltersToDisplayList(
       if (country != null && String(country).trim()) {
         items.push({
           id: `country_from_${String(country).trim()}`,
-          label: `Origin – ${String(country).trim()}`,
+          label: `Origin – ${displayCountryOrState(String(country).trim())}`,
           filterKey: 'country_from',
           value: country,
         });
@@ -125,7 +132,7 @@ export function queryFiltersToDisplayList(
     if (dest) {
       items.push({
         id: 'destination_days_min',
-        label: `Surfed ${dest}`,
+        label: `Surfed ${displayCountryOrState(dest)}`,
         filterKey: 'destination_days_min',
         value: queryFilters.destination_days_min,
       });
@@ -136,7 +143,7 @@ export function queryFiltersToDisplayList(
   if (requestData.destination_country && !items.some((i) => i.filterKey === 'destination_country')) {
     items.push({
       id: 'destination_country',
-      label: `Surfed in ${requestData.destination_country}`,
+      label: `Surfed in ${displayCountryOrState(requestData.destination_country)}`,
       filterKey: 'destination_country',
       value: requestData.destination_country,
     });

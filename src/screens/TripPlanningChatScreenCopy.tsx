@@ -123,6 +123,8 @@ interface Message {
     requestData: any; // trip planning request for this match (for Add Filter / More)
     selectedAction: 'new_chat' | 'add_filter' | 'more' | null;
   };
+  /** Total matching count from server for this match block (used for "3 More" visibility) */
+  matchTotalCount?: number;
   /** Backend message index (set on restore) for PATCH update-match-action */
   backendMessageIndex?: number;
   /** True when this is the search_summary bot message (shows "Review filters" button) */
@@ -249,6 +251,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     touchOffsetX?: number;
     touchOffsetY?: number;
   } | null>(null);
+  const trashProgressAnim = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     dragStateRef.current = dragState;
   }, [dragState]);
@@ -256,8 +259,9 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     if (!filtersMenuVisible) {
       setDragState(null);
       setTrashHoverProgress(0);
+      trashProgressAnim.setValue(0);
     }
-  }, [filtersMenuVisible]);
+  }, [filtersMenuVisible, trashProgressAnim]);
 
   const filterMenuAnim = useRef(new Animated.Value(0)).current;
   useEffect(() => {
@@ -297,6 +301,17 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     [currentRequestData]
   );
   const filterCount = filterDisplayList.length;
+
+  const hasUnresolvedActionRow = useMemo(
+    () =>
+      messages.some(
+        (m) =>
+          m.isMatchedUsers &&
+          m.actionRow?.requestData != null &&
+          m.actionRow?.selectedAction == null
+      ),
+    [messages]
+  );
 
 
   // Test API connection and initialize chat context on component mount
@@ -377,7 +392,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
                 if (msg.role === 'assistant') {
                   try {
                     const parsed = JSON.parse(msg.content);
-                    // Prefer search_summary only when non-empty so we never show an empty bubble
+                    // Use search_summary for display ONLY when this message's own payload contains it (never reuse another message's summary)
                     const summary = parsed.data?.search_summary;
                     const hasSummary = summary != null && String(summary).trim() !== '';
                     messageText = hasSummary ? summary : (parsed.return_message ?? msg.content);
@@ -428,6 +443,9 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
                         requestData: metadata.actionRow.requestData ?? undefined,
                         selectedAction: metadata.actionRow.selectedAction ?? null,
                       };
+                    }
+                    if (metadata.totalCount !== undefined) {
+                      restoredMessage.matchTotalCount = metadata.totalCount;
                     }
                   }
                   const searchSummaryBlock = (msg as any).metadata?.searchSummaryBlock;
@@ -562,8 +580,8 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     };
     
     try {
-      const { matches: matchedUsers } = await swellyServiceCopy.findMatchingUsersServer(currentChatId, tripPlanningData);
-      console.log('Matched users found (server):', matchedUsers.length);
+      const { matches: matchedUsers, totalCount } = await swellyServiceCopy.findMatchingUsersServer(currentChatId, tripPlanningData);
+      console.log('Matched users found (server):', matchedUsers.length, 'totalCount:', totalCount);
       const needsConfirmation = (matchedUsers as any).__needsConfirmation === true;
       const isSingleCriterion = (matchedUsers as any).__singleCriterion === true;
       if (needsConfirmation && isSingleCriterion && matchedUsers.length > 0) {
@@ -599,6 +617,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             matchedUsers: matchedUsers,
             destinationCountry: matchesDestination,
             actionRow: { requestData: tripPlanningData, selectedAction: null },
+            matchTotalCount: totalCount,
           };
           const updated = [...filtered, matchesMessage];
           const allMatchedUsers: MatchedUser[] = [];
@@ -611,7 +630,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
           });
           if (onChatStateChange) setTimeout(() => onChatStateChange(currentChatId, allMatchedUsers, latestDestination), 0);
           if (currentChatId) {
-            swellyServiceCopy.attachMatchedUsersToMessage(currentChatId, matchedUsers, matchesDestination, tripPlanningData).then(res => {
+            swellyServiceCopy.attachMatchedUsersToMessage(currentChatId, matchedUsers, matchesDestination, tripPlanningData, totalCount).then(res => {
               if (res?.messageIndex != null) {
                 setMessages(prevMsgs => prevMsgs.map(m => m.id === newMatchMessageId ? { ...m, backendMessageIndex: res!.messageIndex } : m));
               }
@@ -628,15 +647,34 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
       } else {
         analyticsService.trackSwellySearchFailed();
         const noMatchesText = 'No surfers match your criteria right now. Try adjusting your destination or filters.';
+        const matchesDestination = tripPlanningData.destination_country || '';
+        const newNoMatchMessageId = (Date.now() + 3).toString();
         setMessages(prev => {
           const filtered = prev.filter(msg => msg.text !== 'Finding the perfect surfers for you...');
-          return [...filtered, {
-            id: (Date.now() + 3).toString(),
+          const noMatchesMessage: Message = {
+            id: newNoMatchMessageId,
             text: noMatchesText,
             isUser: false,
             timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
-          }];
+            isMatchedUsers: true,
+            matchedUsers: [],
+            destinationCountry: matchesDestination,
+            actionRow: { requestData: tripPlanningData, selectedAction: null },
+            matchTotalCount: 0,
+          };
+          const updated = [...filtered, noMatchesMessage];
+          if (currentChatId) {
+            swellyServiceCopy.attachMatchedUsersToMessage(currentChatId, [], matchesDestination, tripPlanningData, 0).then(res => {
+              if (res?.messageIndex != null) {
+                setMessages(prevMsgs => prevMsgs.map(m => m.id === newNoMatchMessageId ? { ...m, backendMessageIndex: res!.messageIndex } : m));
+              }
+            }).catch(err =>
+              console.error('[TripPlanningChatScreen] Failed to save no-matches to backend:', err));
+          }
+          return updated;
         });
+        setLastMatchRequestData(null);
+        setLastMatchActionPressed(null);
       }
     } catch (error) {
       console.error('Error finding matching users:', error);
@@ -1110,12 +1148,19 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
               }
             }
             setTrashHoverProgress(progress);
+            trashProgressAnim.setValue(progress);
             return { ...prev, ghostX, ghostY };
           });
         },
         onPanResponderRelease: () => {
           const prev = dragStateRef.current;
           setTrashHoverProgress(0);
+          Animated.timing(trashProgressAnim, {
+            toValue: 0,
+            duration: 250,
+            easing: Easing.out(Easing.ease),
+            useNativeDriver: false,
+          }).start();
           setDragState(null);
           if (!prev || prev.item.id !== item.id) return;
           const tb = trashZoneBounds.current;
@@ -1133,8 +1178,8 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   }, [filterDisplayList, handleRemoveFilter]);
 
   const renderMessage = (message: Message) => {
-    // If this message has matched users, render cards instead
-    if (message.isMatchedUsers && message.matchedUsers && message.matchedUsers.length > 0) {
+    // Match-result message (has action row; matchedUsers can be empty for no-matches)
+    if (message.isMatchedUsers && Array.isArray(message.matchedUsers) && message.actionRow?.requestData != null) {
       const selectedAction = message.actionRow?.selectedAction ?? null;
       const requestData = message.actionRow?.requestData;
       const hasActionRow = requestData != null;
@@ -1162,7 +1207,8 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             </View>
           </View>
           
-          {/* Render matched user cards */}
+          {/* Render matched user cards (only when there are matches) */}
+          {message.matchedUsers.length > 0 && (
           <View style={styles.matchedUsersCards}>
             {message.matchedUsers.map((user) => (
               <MatchedUserCard
@@ -1174,6 +1220,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
               />
             ))}
           </View>
+          )}
 
           {/* Per-message action row (New Chat, Add Filter, More Matches) */}
           {hasActionRow && (
@@ -1214,7 +1261,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
                   </View>
                 </LinearGradient>
               </TouchableOpacity>
-              {(message.matchedUsers?.length ?? 0) >= 3 && (
+              {((message.matchTotalCount ?? message.matchedUsers?.length ?? 0) > 3) && (
                 <TouchableOpacity
                   activeOpacity={0.8}
                   disabled={disabled}
@@ -1385,8 +1432,8 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             value={inputText}
             onChangeText={setInputText}
             onSend={sendMessage}
-            disabled={isLoading}
-            placeholder="Type your message.."
+            disabled={isLoading || hasUnresolvedActionRow}
+            placeholder={hasUnresolvedActionRow ? 'Choose an option above to continue' : 'Type your message..'}
             maxLength={500}
             primaryColor={colors.primary || '#B72DF2'}
           />
@@ -1478,11 +1525,18 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
                   )}
                 </View>
                 <TouchableOpacity
-                  style={styles.filtersOverlayClose}
                   onPress={() => setFiltersMenuVisible(false)}
+                  activeOpacity={1}
+                  style={[styles.filtersButtonPill, styles.filtersOverlayClose]}
                   hitSlop={12}
                 >
-                  <Ionicons name="close" size={24} color="#222B30" />
+                  {filterCount > 0 && (
+                    <View style={styles.filtersButtonCountWrap}>
+                      <View style={styles.filtersButtonRedDot} />
+                      <Text style={styles.filtersButtonCountText}>{filterCount}</Text>
+                    </View>
+                  )}
+                  <Ionicons name="options-outline" size={24} color="#333" />
                 </TouchableOpacity>
               </View>
               <View style={styles.filtersOverlaySpacer} pointerEvents="none" />
@@ -1496,18 +1550,28 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
                 }}
               >
                 <Text style={styles.filtersDragZoneText}>Drag to Delete</Text>
-                <View
+                <Animated.View
                   style={[
                     styles.filtersDragZoneTrash,
                     {
-                      backgroundColor: `rgba(${Math.round(255 * (1 - trashHoverProgress))}, ${Math.round(255 * (1 - trashHoverProgress))}, ${Math.round(255 * (1 - trashHoverProgress))}, ${0.1 + 0.5 * trashHoverProgress})`,
-                      transform: [{ scale: 1 + 0.1 * trashHoverProgress }],
+                      backgroundColor: trashProgressAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: ['rgba(255,255,255,0.10)', 'rgba(0,0,0,0.60)'],
+                      }),
+                      transform: [
+                        {
+                          scale: trashProgressAnim.interpolate({
+                            inputRange: [0, 1],
+                            outputRange: [1, 1.1],
+                          }),
+                        },
+                      ],
                     },
                   ]}
                   collapsable={false}
                 >
                   <Ionicons name="trash-outline" size={40} color="#333" />
-                </View>
+                </Animated.View>
               </View>
               {dragState && (
                 <View
@@ -1886,7 +1950,7 @@ const styles = StyleSheet.create({
     fontFamily: Platform.OS === 'web' ? 'var(--Family-Body, Inter), sans-serif' : 'Inter',
     fontSize: 14,
     color: '#222B30',
-    maxWidth: 160,
+    maxWidth: 200,
   },
   filterChipPrefix: {
     fontFamily: Platform.OS === 'web' ? 'var(--Family-Body, Inter), sans-serif' : 'Inter',
