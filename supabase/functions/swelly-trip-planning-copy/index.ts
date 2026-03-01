@@ -86,14 +86,6 @@ interface MatchResultInline {
   destinations_array?: Array<{ country: string; area: string[]; time_in_days: number; time_in_text?: string }>
   match_quality?: any
 }
-const AREA_OPTIONS_INLINE = ['north', 'south', 'east', 'west', 'south-west', 'south-east', 'north-west', 'north-east'] as const
-type AreaOptionInline = typeof AREA_OPTIONS_INLINE[number]
-type MatchingIntentInline = 'surf_spots' | 'hikes' | 'stays' | 'providers' | 'equipment' | 'towns_within_area' | 'general'
-interface NormalizedDestinationInline {
-  country: string
-  area?: AreaOptionInline | AreaOptionInline[]
-  towns?: string[]
-}
 interface SurferDataInline {
   user_id: string
   name?: string
@@ -105,127 +97,6 @@ interface SurferDataInline {
   travel_experience?: number | string | null
   travel_buddies?: string | null
   travel_type?: string | null
-}
-async function normalizeAreaInline(country: string, areaInput: string | null | undefined, intent: MatchingIntentInline): Promise<AreaOptionInline[]> {
-  if (!areaInput) return []
-  if (!OPENAI_API_KEY) {
-    console.warn('[find-matches] OpenAI key not set, skip area norm')
-    return []
-  }
-  try {
-    const res = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_API_KEY}` },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [
-          { role: 'system', content: 'You are a helpful assistant that returns only valid JSON arrays. Do not include any explanatory text.' },
-          { role: 'user', content: `Given the country "${country}" and area/region/town "${areaInput}", normalize it to one or more of these fixed area options: ${AREA_OPTIONS_INLINE.join(', ')}. Return ONLY a JSON array of strings from the fixed options. Example: ["south-west"].` }
-        ],
-        temperature: 0.3,
-        max_tokens: 100,
-      }),
-    })
-    if (!res.ok) throw new Error(`OpenAI ${res.status}`)
-    const data = await res.json()
-    const content = data.choices[0]?.message?.content?.trim()
-    if (!content) return []
-    let areas: string[] = []
-    try {
-      const parsed = JSON.parse(content)
-      areas = Array.isArray(parsed) ? parsed : (parsed.areas && Array.isArray(parsed.areas) ? parsed.areas : [])
-    } catch {
-      const m = content.match(/\[.*?\]/)
-      if (m) areas = JSON.parse(m[0])
-    }
-    return areas.filter((a: string) => AREA_OPTIONS_INLINE.includes(a.toLowerCase() as AreaOptionInline)).map((a: string) => a.toLowerCase() as AreaOptionInline)
-  } catch (e) {
-    console.error('[find-matches] normalizeArea', e)
-    return []
-  }
-}
-async function extractTownsInline(country: string, areaInput: string | null | undefined, intent: MatchingIntentInline, normalizedAreas: AreaOptionInline[]): Promise<string[]> {
-  if (intent !== 'surf_spots' && intent !== 'stays' && intent !== 'providers') return []
-  if (!areaInput || !OPENAI_API_KEY) return []
-  try {
-    const res = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_API_KEY}` },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [
-          { role: 'system', content: 'You are a helpful assistant that returns only valid JSON arrays. Do not include any explanatory text.' },
-          { role: 'user', content: `Given the country "${country}", area "${areaInput}", and normalized areas ${JSON.stringify(normalizedAreas)}, extract specific town names if mentioned or relevant. Return ONLY a JSON array of town names (strings), or [] if none.` }
-        ],
-        temperature: 0.3,
-        max_tokens: 200,
-      }),
-    })
-    if (!res.ok) return []
-    const data = await res.json()
-    const content = data.choices[0]?.message?.content?.trim()
-    if (!content) return []
-    let towns: string[] = []
-    try {
-      const parsed = JSON.parse(content)
-      towns = Array.isArray(parsed) ? parsed : (parsed.towns && Array.isArray(parsed.towns) ? parsed.towns : [])
-    } catch {
-      const m = content.match(/\[.*?\]/)
-      if (m) towns = JSON.parse(m[0])
-    }
-    return towns.filter((t: any) => typeof t === 'string' && t.trim().length > 0)
-  } catch (e) {
-    console.error('[find-matches] extractTowns', e)
-    return []
-  }
-}
-function determineIntentInline(request: any): MatchingIntentInline {
-  const topics = (request.purpose?.specific_topics || []).map((t: string) => t.toLowerCase())
-  if (topics.some((t: string) => t.includes('surf spot') || t.includes('wave') || t.includes('break'))) return 'surf_spots'
-  if (topics.some((t: string) => t.includes('hike') || t.includes('trail') || t.includes('walk'))) return 'hikes'
-  if (topics.some((t: string) => t.includes('stay') || t.includes('accommodation') || t.includes('hotel') || t.includes('hostel'))) return 'stays'
-  if (topics.some((t: string) => t.includes('provider') || t.includes('shop') || t.includes('rental'))) return 'providers'
-  if (topics.some((t: string) => t.includes('equipment') || t.includes('board') || t.includes('gear'))) return 'equipment'
-  return 'general'
-}
-async function normalizeDestinationInline(request: any, intent: MatchingIntentInline): Promise<NormalizedDestinationInline> {
-  const country = request.destination_country
-  const areaInput = request.area
-  const normalizedAreas = await normalizeAreaInline(country, areaInput, intent)
-  const towns = await extractTownsInline(country, areaInput, intent, normalizedAreas)
-  return {
-    country,
-    area: normalizedAreas.length === 1 ? normalizedAreas[0] : normalizedAreas,
-    towns: towns.length > 0 ? towns : undefined,
-  }
-}
-function parseUserDestinationInline(destination: { country: string; area: string[] } | { destination_name: string } | string): { country: string; area?: AreaOptionInline[]; towns?: string[] } {
-  if (typeof destination === 'object' && 'country' in destination) {
-    const country = destination.country
-    const areas = (destination.area || []) as string[]
-    const areaParts: AreaOptionInline[] = []
-    const townParts: string[] = []
-    for (const area of areas) {
-      const lower = area.toLowerCase()
-      const matched = AREA_OPTIONS_INLINE.find(opt => lower === opt || lower.includes(opt) || opt.includes(lower))
-      if (matched) areaParts.push(matched)
-      else townParts.push(area)
-    }
-    return { country, area: areaParts.length > 0 ? areaParts : undefined, towns: townParts.length > 0 ? townParts : undefined }
-  }
-  const name = typeof destination === 'string' ? destination : (destination as any).destination_name || ''
-  const parts = name.split(',').map((p: string) => p.trim())
-  const country = parts[0] || ''
-  if (parts.length === 1) return { country }
-  const areaParts: AreaOptionInline[] = []
-  const townParts: string[] = []
-  for (let i = 1; i < parts.length; i++) {
-    const part = parts[i].toLowerCase()
-    const matched = AREA_OPTIONS_INLINE.find(a => part === a || part.includes(a) || a.includes(part))
-    if (matched) areaParts.push(matched)
-    else townParts.push(parts[i])
-  }
-  return { country, area: areaParts.length > 0 ? areaParts : undefined, towns: townParts.length > 0 ? townParts : undefined }
 }
 function hasRequestedAreaInArrayInline(userDest: any, requestedArea: string | null | undefined): boolean {
   if (!requestedArea) return false
@@ -244,25 +115,30 @@ function hasRequestedAreaInArrayInline(userDest: any, requestedArea: string | nu
   }
   return false
 }
-function destinationMatchesInline(userDest: any, norm: NormalizedDestinationInline): { countryMatch: boolean; areaMatch: boolean; townMatch: boolean; matchedAreas: AreaOptionInline[]; matchedTowns: string[] } {
-  const u = parseUserDestinationInline(userDest)
-  const requested = norm.country.split(',').map((c: string) => c.trim().toLowerCase()).filter((c: string) => c.length > 0)
-  const userCountry = u.country.toLowerCase().trim()
-  const countryMatch = requested.some((r: string) => {
-    if (userCountry === r) return true
-    if ((r === 'usa' || r === 'united states') && (userCountry.includes('united states') || userCountry.includes('usa'))) return true
-    if ((r === 'uk' || r === 'united kingdom') && (userCountry.includes('united kingdom') || /\buk\b/.test(userCountry))) return true
+function getCountryFromUserDestInline(dest: any): string {
+  if (typeof dest === 'object' && dest !== null && 'country' in dest) return (dest.country || '').trim()
+  if (typeof dest === 'object' && dest !== null && 'destination_name' in dest) {
+    const name = (dest.destination_name || '').trim()
+    const first = name.split(',')[0]
+    return (first || '').trim()
+  }
+  if (typeof dest === 'string') {
+    const first = dest.split(',')[0]
+    return (first || '').trim()
+  }
+  return ''
+}
+function countryMatchesRequestInline(requestCountry: string | null, userCountry: string): boolean {
+  if (!requestCountry || !userCountry) return false
+  const requested = requestCountry.split(',').map((c: string) => c.trim().toLowerCase()).filter((c: string) => c.length > 0)
+  const userCountryLower = userCountry.toLowerCase().trim()
+  return requested.some((r: string) => {
+    if (userCountryLower === r) return true
+    if ((r === 'usa' || r === 'united states') && (userCountryLower.includes('united states') || userCountryLower.includes('usa'))) return true
+    if ((r === 'uk' || r === 'united kingdom') && (userCountryLower.includes('united kingdom') || /\buk\b/.test(userCountryLower))) return true
     const escaped = r.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    return new RegExp('\\b' + escaped + '\\b', 'i').test(userCountry)
+    return new RegExp('\\b' + escaped + '\\b', 'i').test(userCountryLower)
   })
-  if (!countryMatch) return { countryMatch: false, areaMatch: false, townMatch: false, matchedAreas: [], matchedTowns: [] }
-  const reqAreas = Array.isArray(norm.area) ? norm.area : norm.area ? [norm.area] : []
-  const userAreas = u.area || []
-  const matchedAreas = reqAreas.filter((ra: AreaOptionInline) => userAreas.some((ua: AreaOptionInline) => ua === ra))
-  const reqTowns = norm.towns || []
-  const userTowns = u.towns || []
-  const matchedTowns = reqTowns.filter((rt: string) => userTowns.some((ut: string) => ut.toLowerCase() === rt.toLowerCase() || ut.toLowerCase().includes(rt.toLowerCase()) || rt.toLowerCase().includes(ut.toLowerCase())))
-  return { countryMatch: true, areaMatch: matchedAreas.length > 0, townMatch: matchedTowns.length > 0, matchedAreas, matchedTowns }
 }
 function getTravelExpLevelInline(t: number | string | undefined | null): number {
   if (t === undefined || t === null) return 2
@@ -307,6 +183,23 @@ const SURF_LEVEL_CATEGORY_TO_NUM: Record<string, number> = {
   advanced: 3,
   pro: 4,
 }
+const SURF_LEVEL_NUM_TO_CATEGORY: Record<number, string> = {
+  1: 'beginner',
+  2: 'intermediate',
+  3: 'advanced',
+  4: 'pro',
+}
+/** Allowed numeric levels for requested categories: single category => [that level]; multiple => levels >= min. */
+function surfLevelAllowedNumericLevelsInline(requestedCategories: string[]): number[] {
+  if (!requestedCategories?.length) return []
+  const levels = requestedCategories
+    .map((cat: string) => SURF_LEVEL_CATEGORY_TO_NUM[(cat || '').toLowerCase()])
+    .filter((n: number) => n != null && !isNaN(n))
+  if (levels.length === 0) return []
+  if (levels.length === 1) return levels
+  const minLevel = Math.min(...levels)
+  return [1, 2, 3, 4].filter((l: number) => l >= minLevel)
+}
 function countryFromMatchInline(requested: string[], userCountry: string | null | undefined): boolean {
   if (!requested?.length) return true
   if (!userCountry || typeof userCountry !== 'string') return false
@@ -346,12 +239,16 @@ function passesCriteriaInline(entry: { surfer: any; hasAreaMatch?: boolean; days
     const requested = Array.isArray(queryFilters.surf_level_category) ? queryFilters.surf_level_category : [queryFilters.surf_level_category]
     const requestedCategories = requested.map((x: string) => (x || '').toLowerCase()).filter(Boolean)
     if (requestedCategories.length > 0) {
+      const allowedNumericLevels = surfLevelAllowedNumericLevelsInline(requestedCategories)
       const userCategory = (s.surf_level_category || '').toLowerCase()
-      const userLevel = typeof s.surf_level === 'number' ? s.surf_level : 0
-      const matchByCategory = userCategory && requestedCategories.includes(userCategory)
-      const minLevel = surfLevelCategoryToMinNumericInline(requestedCategories)
-      const matchByNumeric = minLevel > 0 && userLevel >= minLevel
-      if (!matchByCategory && !matchByNumeric) return false
+      const surferNumeric = typeof s.surf_level === 'number' ? s.surf_level : null
+      const matchByCategory = !!userCategory && requestedCategories.includes(userCategory)
+      const matchByNumeric = surferNumeric != null && allowedNumericLevels.includes(surferNumeric)
+      const singleCategory = requestedCategories.length === 1
+      const pass = singleCategory
+        ? matchByCategory || (!userCategory && matchByNumeric)
+        : matchByCategory || matchByNumeric
+      if (!pass) return false
     }
   }
   if (queryFilters?.age_min !== undefined && queryFilters?.age_min !== null && typeof queryFilters.age_min === 'number') {
@@ -383,13 +280,20 @@ function getCriteriaFailureReasonInline(surfer: any, queryFilters: any): string 
     const requested = Array.isArray(queryFilters.surf_level_category) ? queryFilters.surf_level_category : [queryFilters.surf_level_category]
     const requestedCategories = requested.map((x: string) => (x || '').toLowerCase()).filter(Boolean)
     if (requestedCategories.length > 0) {
+      const allowedNumericLevels = surfLevelAllowedNumericLevelsInline(requestedCategories)
       const userCategory = (s.surf_level_category || '').toLowerCase()
-      const userLevel = typeof s.surf_level === 'number' ? s.surf_level : 0
-      const matchByCategory = userCategory && requestedCategories.includes(userCategory)
-      const minLevel = surfLevelCategoryToMinNumericInline(requestedCategories)
-      const matchByNumeric = minLevel > 0 && userLevel >= minLevel
-      if (!matchByCategory && !matchByNumeric) {
-        return `surf_level_category: surfer.surf_level_category='${s.surf_level_category ?? 'null'}' surfer.surf_level=${userLevel}, required category in [${requestedCategories.join(', ')}] or level >= ${minLevel}`
+      const surferNumeric = typeof s.surf_level === 'number' ? s.surf_level : null
+      const matchByCategory = !!userCategory && requestedCategories.includes(userCategory)
+      const matchByNumeric = surferNumeric != null && allowedNumericLevels.includes(surferNumeric)
+      const singleCategory = requestedCategories.length === 1
+      const pass = singleCategory
+        ? matchByCategory || (!userCategory && matchByNumeric)
+        : matchByCategory || matchByNumeric
+      if (!pass) {
+        const requiredDesc = singleCategory
+          ? `category '${requestedCategories[0]}' or surf_level = ${allowedNumericLevels[0] ?? '?'}`
+          : `category in [${requestedCategories.join(', ')}] or surf_level in [${allowedNumericLevels.join(', ')}]`
+        return `surf_level_category: surfer.surf_level_category='${s.surf_level_category ?? 'null'}' surfer.surf_level=${surferNumeric ?? 'null'}, required ${requiredDesc}`
       }
     }
   }
@@ -527,6 +431,10 @@ async function findMatchingUsersV3Server(request: any, requestingUserId: string,
         console.log('[find-matches]   user_id=' + (s.user_id || '?') + ':', reason ?? 'passed')
       }
     }
+    if (candidates.length > 0 && queryFilters?.surf_level_category != null) {
+      const sample = candidates[0]
+      console.log('[find-matches] surf_level filter applied; sample passed surfer: user_id=' + (sample.user_id || '?') + ' surf_level_category=' + (sample.surf_level_category ?? 'null') + ' surf_level=' + (sample.surf_level ?? 'null'))
+    }
     candidates.sort((a: any, b: any) => totalDaysInDestinationsInline(b.destinations_array) - totalDaysInDestinationsInline(a.destinations_array))
     const generalResults = candidates.map((userSurfer: any) => {
       const totalDays = totalDaysInDestinationsInline(userSurfer.destinations_array)
@@ -556,13 +464,9 @@ async function findMatchingUsersV3Server(request: any, requestingUserId: string,
     return limited
   }
 
-  // Destination path: existing logic
+  // Destination path: country match + raw area match only (no cardinal/town normalization)
   const excludedUserIds = await getPreviouslyMatchedUserIdsInline(chatId, supabaseAdmin)
   console.log('[find-matches] Destination: excluded user IDs (previously matched):', excludedUserIds?.length ?? 0)
-  const intent = determineIntentInline(request)
-  console.log('[find-matches] Intent:', intent)
-  const normalizedDest = await normalizeDestinationInline(request, intent)
-  console.log('[find-matches] Normalized destination:', JSON.stringify(normalizedDest))
   const query = buildSurferQueryInline(request, requestingUserId, excludedUserIds, supabaseAdmin)
   const { data: allSurfers, error: queryErr } = await query
   if (queryErr) throw new Error('Error querying surfers: ' + queryErr.message)
@@ -574,23 +478,26 @@ async function findMatchingUsersV3Server(request: any, requestingUserId: string,
   const filteredSurfers = filterExcludedInMemoryInline(allSurfers, excludedUserIds)
   console.log('[find-matches] Destination: after excluding previously matched:', filteredSurfers.length)
   const requestedArea = request.area || null
-  const countryMatched: Array<{ surfer: any; hasAreaMatch: boolean; daysInDestination: number; bestMatch: { countryMatch: boolean; areaMatch: boolean; townMatch: boolean; matchedAreas: any[]; matchedTowns: string[] } }> = []
+  const countryMatched: Array<{ surfer: any; hasAreaMatch: boolean; daysInDestination: number; bestMatch: { countryMatch: boolean; areaMatch: boolean; townMatch: boolean; matchedAreas: string[]; matchedTowns: string[] } }> = []
   for (const userSurfer of filteredSurfers) {
     let days = 0
-    let bestMatch: { countryMatch: boolean; areaMatch: boolean; townMatch: boolean; matchedAreas: any[]; matchedTowns: string[] } | null = null
     let hasAreaMatch = false
     if (userSurfer.destinations_array?.length) {
       for (const dest of userSurfer.destinations_array) {
-        const d = 'country' in dest ? dest : (dest as any).destination_name || ''
-        const match = destinationMatchesInline(d, normalizedDest)
-        if (match.countryMatch) {
-          days += dest.time_in_days || 0
-          if (requestedArea && hasRequestedAreaInArrayInline(dest, requestedArea)) hasAreaMatch = true
-          if (!bestMatch || (match.areaMatch && !bestMatch.areaMatch) || (match.townMatch && !bestMatch.townMatch)) bestMatch = match
-        }
+        const userCountry = getCountryFromUserDestInline(dest)
+        if (!countryMatchesRequestInline(request.destination_country, userCountry)) continue
+        days += dest.time_in_days || 0
+        if (requestedArea && hasRequestedAreaInArrayInline(dest, requestedArea)) hasAreaMatch = true
       }
     }
-    if (!bestMatch || !bestMatch.countryMatch || days === 0) continue
+    if (days === 0) continue
+    const bestMatch = {
+      countryMatch: true,
+      areaMatch: hasAreaMatch,
+      townMatch: false,
+      matchedAreas: hasAreaMatch && requestedArea ? [requestedArea] : [] as string[],
+      matchedTowns: [] as string[],
+    }
     countryMatched.push({ surfer: userSurfer, hasAreaMatch, daysInDestination: days, bestMatch })
   }
   console.log('[find-matches] Destination: after country match (destinations_array + time_in_days > 0):', countryMatched.length)
@@ -610,6 +517,10 @@ async function findMatchingUsersV3Server(request: any, requestingUserId: string,
         const reason = getCriteriaFailureReasonInline(entry.surfer, queryFilters)
         console.log('[find-matches]   user_id=' + (entry.surfer?.user_id || '?') + ':', reason ?? 'passed')
       }
+    }
+    if (afterCriteria.length > 0 && queryFilters?.surf_level_category != null) {
+      const sampleSurfer = afterCriteria[0].surfer
+      console.log('[find-matches] surf_level filter applied; sample passed surfer: user_id=' + (sampleSurfer?.user_id || '?') + ' surf_level_category=' + (sampleSurfer?.surf_level_category ?? 'null') + ' surf_level=' + (sampleSurfer?.surf_level ?? 'null'))
     }
   }
 
@@ -757,16 +668,17 @@ STEP 2 FLOW:
 4. If user gave 2+ filters total → go to STEP 4 and finish (set is_finished: true) immediately, NO follow-up questions
 5. If user gave only 1 filter → ask once "Want to add anything else (e.g. surf level, age, nationality)?" then when they respond, finish and search
 
-STEP 4 - FINISH AND SEARCH:
-When ready to search (2 filters provided, or 1 filter and user declined to add more, or 1 filter and user added something):
+STEP 4 - FINISH AND WAIT FOR DECISION:
+When you have enough information to define a clear search (2 filters provided, or 1 filter and user declined to add more, or 1 filter and user added something):
 1. Set is_finished: true
-2. Set return_message to: "Copy! Here are a few advisor options that best match what you're looking for."
+2. Set return_message to a short, friendly line that matches the intent of the upcoming search (e.g. "Sweet — I think I’ve got your surfer vibe dialed in.").
 3. Include in the "data" field: destination_country (required when user specified a destination; null when doing criteria-only general matching), area (if user specified one, else null), budget (null if not specified), destination_known (true/false), purpose (default: { purpose_type: "connect_traveler", specific_topics: [] }), user_context (optional). When matching without destination, include queryFilters with at least one criterion instead.
+4. ALWAYS set search_summary in data (see DATA STRUCTURE section) so the user sees exactly what would be searched, and your message implicitly hands control back to them to either search now or tweak filters first.
 
 IMPORTANT:
 - DO NOT use markdown formatting (no asterisks, no bold, no code blocks)
-- DO NOT say "Let me pull up some options" or "One sec!" - just set is_finished: true and return the completion message
-- Matching is by destination (country + optional area) when provided, or by criteria only (e.g. country_from, age) when the user did not specify a destination. The system finds surfers who match the filters.
+- DO NOT say "Let me pull up some options" or "One sec!" - just set is_finished: true, describe the planned search in a natural way, and let the search_summary + follow-up question handle the actual decision to search or edit.
+- Matching is by destination (country + optional area) when provided, or by criteria only (e.g. country_from, age) when the user did not specify a destination. The system will only actually search after the user clearly confirms they want to search.
 
 BE SMART ABOUT USER REQUESTS:
 - Handle typos gracefully: "uropean" → "European", "Philippins" → "Philippines"
@@ -774,15 +686,15 @@ BE SMART ABOUT USER REQUESTS:
 - Be forgiving with grammar and spelling; if unclear, ask once to clarify (especially for area/country)
 - DO NOT use markdown formatting in your responses
 
-When is_finished: true, the system will automatically find matches by destination (country + optional area) or by criteria when no destination was given. You don't need to wait or say you're looking - just finish the conversation.
+When is_finished: true, you are NOT actually running the search yourself. Instead, you are handing a complete search definition back to the system (via the data + search_summary). The system will only run the search AFTER the user answers your "search now or tweak filters first?" question and you set data.next_action based on their reply.
 
 STEP 6 - QUICK MATCH (User directly asks for surfers/matches):
 If user directly asks for surfers/matches (e.g. "send me surfers in El Salvador", "find me people who surfed in Sri Lanka", "show me matches for Costa Rica"):
 1. Extract destination from their message (country, area if mentioned)
-2. If 2 filters (country + area): set is_finished: true immediately and search
-3. If 1 filter (country only): ask once "Want to add anything else (e.g. specific area)?" then when they respond, set is_finished: true and search
-4. Use purpose: { purpose_type: "connect_traveler", specific_topics: [] } when not specified
-5. Say: "Copy! Here are a few advisor options that best match what you're looking for."
+2. If 2 filters (country + area): set is_finished: true immediately once you have enough filters, and follow STEP 4: define the search, fill data (including search_summary), and wait for the user’s decision.
+3. If 1 filter (country only): ask once "Want to add anything else (e.g. specific area)?" then when they respond and you have enough filters, set is_finished: true and follow STEP 4 (define search, set search_summary, and wait for their decision).
+4. Use purpose: { purpose_type: "connect_traveler", specific_topics: [] } when not specified.
+5. Your return_message should describe what you’re about to search for in a friendly way, but MUST NOT claim that you are already searching or that you have already found options. The actual search only happens after the user confirms via the follow-up reply.
 
 IMPORTANT: return_message should ONLY contain the friendly message text. Set is_finished: true and include the data structure in the "data" field. Do NOT include JSON in return_message.
 
@@ -800,8 +712,9 @@ DATA STRUCTURE (when is_finished: true):
     "mentioned_preferences": [],
     "mentioned_deal_breakers": []
   },
-  "queryFilters": { "country_from": ["Israel"], "surfboard_type": ["shortboard"], "surf_level_category": ["advanced", "pro"] } // Optional: include when user specified origin, board type, or level. Use exact country names and enum values.
-  "search_summary": "Short casual one-line summary of what we're searching for, shown to the user before they tap Search. REQUIRED when is_finished is true. Examples: \"Sweet so we're going for American dude that surfed Hawaii and is also a shortboarder just like you!\" or \"Got it — Israeli advanced shortboarder!\" or \"Sweet, we're going for an advanced Israeli shortboarder.\" Tone: friendly, first person, no markdown. Base it ONLY on the criteria (destination_country, area, queryFilters). Do NOT mention that there is no destination, no specific destination, or that we're going global — just describe the filters."
+  "queryFilters": { "country_from": ["Israel"], "surfboard_type": ["shortboard"], "surf_level_category": ["advanced", "pro"] }, // Optional: include when user specified origin, board type, or level. Use exact country names and enum values.
+  "search_summary": "Short casual summary of what we're searching for, shown to the user before they decide whether to search or edit filters. REQUIRED when is_finished is true. First, write a one-line friendly summary of the filters (e.g. \"Sweet so we're going for American dude that surfed Hawaii and is also a shortboarder just like you!\" or \"Got it — Israeli advanced shortboarder!\"). Then add a newline (\"\\n\") and a short question asking if they want to search now or tweak filters first (e.g. \"Are you ready for me to search now, or do you want to tweak any filters first?\"). Tone: friendly, first person, no markdown. Base it ONLY on the criteria (destination_country, area, queryFilters). Do NOT mention that there is no destination, no specific destination, or that we're going global — just describe the filters.",
+  "next_action": "search" | "edit" | "clarify" | null // Optional. For the FIRST user reply after you asked whether to search or edit: set to \"search\" when they clearly want to search now, \"edit\" when they clearly want to change/tweak filters first, or \"clarify\" when their intent is ambiguous and you are asking a follow-up question.
 }
 Do NOT include non_negotiable_criteria or prioritize_filters in the data. When is_finished is true, ALWAYS set search_summary so the user sees what will be searched. Matching is by destination (country + optional area) and, when provided, by queryFilters (country_from, surfboard_type, surf_level_category). When the user specified criteria (e.g. "Israeli", "shortboard", "advanced"), include queryFilters in data so the system can filter matches.
 For return_message and search_summary: when matching without a destination (only queryFilters), do NOT say \"no destination\", \"no specific destination\", \"going global\", or similar. Only mention the existing filters (e.g. \"Got you, bro — searching for an advanced Israeli shortboarder.\").
@@ -820,17 +733,17 @@ You MUST always return a JSON object with this structure (NO EXCEPTIONS):
     "destination_known": true | false,
     "purpose": { "purpose_type": "connect_traveler", "specific_topics": [] },
     "user_context": {},
-    "search_summary": "Short casual one-line summary of the search (REQUIRED when is_finished true)"
+    "search_summary": "Short casual summary of the search followed by a newline and a question asking if the user wants to search now or tweak filters first (REQUIRED when is_finished true)",
+    "next_action": "search" | "edit" | "clarify" | null
   }
 }
 
 CRITICAL RULES:
 - ALWAYS return valid JSON. NEVER return plain text.
-- Set is_finished: true when: (a) User gave 2 filters and you are ready to search, OR (b) User gave 1 filter and either declined to add more or added something and you are ready to search, OR (c) Quick match: user asked for surfers and you extracted at least destination_country, OR (d) User asked for surfers with only criteria (e.g. country_from, age range) and no destination — then set is_finished: true with queryFilters and no destination_country for general matching.
-- When is_finished: true, data MUST include either destination_country (and area if user specified one) OR queryFilters with at least one criterion (e.g. country_from, age_min/age_max) if matching without destination. Also include search_summary: a short, casual one-line summary of what we're searching for (e.g. "Sweet so we're going for American dude that surfed Hawaii and is also a shortboarder just like you!"). Do NOT include non_negotiable_criteria or prioritize_filters.
-- DESTINATION EXTRACTION: When user mentions ANY location, extract destination_country immediately. Correct typos ("filipins" → "Philippines"). If they mention area too, extract both. NEVER set destination_country to null if a location was mentioned.
+- Set is_finished: true when: (a) User gave 2 filters and you are ready to search, OR (b) User gave 1 filter and either declined to add more or added something and you are ready to search, OR (c) Quick match: user asked for surfers and you extracted at least destination_country, OR (d) User asked for surfers with only criteria (e.g. country_from, age range) and no destination — then set is_finished: true with queryFilters and no destination_country for general matching. "search_summary": "Short casual summary of the surfer or trip we’re about to look for, shown to the user before they decide whether to search or edit filters. REQUIRED when is_finished is true. First, write a one-line friendly description based ONLY on the criteria (destination_country, area, queryFilters), for example: \"Sweet — an Israeli surfer who’s surfed Hawaii (US) and rides a shortboard just like you.\" or \"Got it — an advanced Israeli shortboarder around your age.\" Do NOT say \"searching for\" or imply that you already started searching. Then add a newline (\"\\n\") and a short question asking if they want to search now or tweak filters first (e.g. \"Are you ready for me to search now, or do you want to tweak any filters first?\"). Tone: friendly, first person, no markdown.",- DESTINATION EXTRACTION: When user mentions ANY location, extract destination_country immediately. Correct typos ("filipins" → "Philippines"). If they mention area too, extract both. NEVER set destination_country to null if a location was mentioned.
 - return_message = conversational text only. All structured data goes in "data". No JSON or markdown in return_message.
 - When there is no destination (general match): in return_message and search_summary, describe only the filters (e.g. \"Got you, bro — searching for an advanced Israeli shortboarder.\"). Do NOT mention \"no destination\", \"no specific destination\", or \"going global\".
+- When you have already produced a search_summary that ends with a question like \"Are you ready for me to search now, or do you want to tweak any filters first?\" the VERY NEXT user reply should be interpreted as a decision:\n  - If they clearly want to SEARCH now (e.g. \"yes\", \"search\", \"send them\", \"looks good\"), set data.next_action = \"search\" and do not change the filters.\n  - If they clearly want to EDIT or CHANGE filters first (e.g. \"change the board\", \"make them older\", \"add Indo too\", \"I want to tweak the filters\"), set data.next_action = \"edit\" and describe in return_message how you'll help them edit; do NOT run matching yet.\n  - If their intent is ambiguous (e.g. \"maybe\", \"not sure\"), set data.next_action = \"clarify\" and respond with a short clarification question.\n  - On this VERY NEXT reply you are making a decision only: do NOT set data.search_summary again on this turn; only set data.next_action (and any other updated data fields) plus a short conversational return_message.
 - Example: {"return_message": "Want to add anything else?", "is_finished": false, "data": {"destination_country": "Costa Rica", "area": null, ...}}
 - Ask ONE question at a time. Be conversational.
 - For destination suggestions, consider their past destinations, preferences, and vibe
@@ -1123,6 +1036,16 @@ async function normalizeQueryFilters(queryFilters: any): Promise<any> {
   return normalized;
 }
 
+/**
+ * Ensure response data always exposes filters as queryFilters (client and find-matches expect this).
+ * If the LLM or merge put filters under query_filters, normalize once so the client receives queryFilters.
+ */
+function ensureResponseDataQueryFilters(data: any): any {
+  if (!data || typeof data !== 'object') return data
+  const q = data.queryFilters ?? data.query_filters ?? null
+  return { ...data, queryFilters: q }
+}
+
 /** Sentinel: when extracted has this for an array key, clear that filter (e.g. "any board"). */
 const QUERY_FILTER_CLEAR = '__clear__'
 
@@ -1163,12 +1086,96 @@ function mergeQueryFiltersAdding(existing: any, extracted: any): any {
 }
 
 /**
- * Use LLM to convert user's natural language request into Supabase query filters
+ * Merge existing queryFilters with extracted ones using per-category intent (add / replace / clear).
+ * Used when user is editing filters and extractor returned filterEditIntent.
+ */
+function mergeQueryFiltersEditing(
+  existing: any,
+  extracted: any,
+  intent: Record<string, 'add' | 'replace' | 'clear'>
+): any {
+  if (!existing || typeof existing !== 'object') {
+    return extracted && typeof extracted === 'object' ? { ...extracted } : {}
+  }
+  const merged = { ...existing }
+  if (!intent || typeof intent !== 'object') {
+    return mergeQueryFiltersAdding(existing, extracted)
+  }
+  const arrayKeys = ['country_from', 'surfboard_type', 'surf_level_category'] as const
+  for (const key of arrayKeys) {
+    const intentVal = intent[key]
+    if (intentVal === 'clear') {
+      delete merged[key]
+      continue
+    }
+    const ext = extracted[key]
+    if (ext === null || ext === QUERY_FILTER_CLEAR || (Array.isArray(ext) && ext.length === 0)) {
+      delete merged[key]
+      continue
+    }
+    if (intentVal === 'replace') {
+      const extractedArr = Array.isArray(ext) ? ext : (ext != null ? [ext] : [])
+      const unique = Array.from(new Set(extractedArr.map((x: any) => String(x).trim()).filter(Boolean)))
+      if (unique.length > 0) merged[key] = unique
+      else delete merged[key]
+      continue
+    }
+    // add (default)
+    const existingArr = Array.isArray(merged[key]) ? merged[key] : (merged[key] != null ? [merged[key]] : [])
+    const extractedArr = Array.isArray(ext) ? ext : (ext != null ? [ext] : [])
+    const combined = [...existingArr, ...extractedArr]
+    const unique = Array.from(new Set(combined.map((x: any) => String(x).trim()).filter(Boolean)))
+    if (unique.length > 0) merged[key] = unique
+    else delete merged[key]
+  }
+  // age: treat as replace when intent is replace or clear; otherwise add/overwrite
+  const ageIntent = intent.age_min ?? intent.age_max
+  if (ageIntent === 'clear') {
+    delete merged.age_min
+    delete merged.age_max
+  } else {
+    if (typeof extracted.age_min === 'number') merged.age_min = extracted.age_min
+    else if (extracted.age_min === null || extracted.age_min === QUERY_FILTER_CLEAR) delete merged.age_min
+    if (typeof extracted.age_max === 'number') merged.age_max = extracted.age_max
+    else if (extracted.age_max === null || extracted.age_max === QUERY_FILTER_CLEAR) delete merged.age_max
+  }
+  return merged
+}
+
+/**
+ * Merge destination strings (e.g. existing "Sri Lanka" + model "Indonesia" -> "Sri Lanka, Indonesia").
+ * Used in add-filter mode so adding another "surfed in X" updates destination_country correctly.
+ */
+function mergeDestinations(existing: string | null | undefined, ...sources: (string | null | undefined)[]): string | null {
+  const parts: string[] = []
+  const add = (s: string | null | undefined) => {
+    if (s == null || String(s).trim() === '') return
+    for (const p of String(s).split(',').map((x: string) => x.trim()).filter(Boolean)) {
+      parts.push(p)
+    }
+  }
+  add(existing)
+  for (const src of sources) add(src)
+  const seen = new Set<string>()
+  const unique: string[] = []
+  for (const p of parts) {
+    const key = p.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    unique.push(p)
+  }
+  return unique.length > 0 ? unique.join(', ') : null
+}
+
+/**
+ * Use LLM to convert user's natural language request into Supabase query filters.
+ * When existingQueryFilters is provided (edit mode), the LLM must also return filterEditIntent and intentUnclear.
  */
 async function extractQueryFilters(
   userMessage: string,
   destinationCountry: string,
-  conversationHistory: Message[]
+  conversationHistory: Message[],
+  existingQueryFilters?: any
 ): Promise<{
   supabaseFilters: {
     country_from?: string[];
@@ -1182,9 +1189,38 @@ async function extractQueryFilters(
   };
   unmappableCriteria?: string[]; // Criteria that user mentioned but can't be mapped to database fields
   explanation: string;
+  filterEditIntent?: Record<string, 'add' | 'replace' | 'clear'>; // Only when existingQueryFilters provided
+  intentUnclear?: string[]; // Only when existingQueryFilters provided and intent is ambiguous
 }> {
+  const isEditingMode = existingQueryFilters != null && typeof existingQueryFilters === 'object'
 
-  const schemaPrompt = `You are a database query expert. Analyze the user's request and determine which Supabase filters to apply.
+  const editingModePrompt = isEditingMode
+    ? `
+EDITING MODE – You are editing existing search filters. Current filters: ${JSON.stringify(existingQueryFilters)}
+
+Interpret the user's message per filter category:
+- ADD (keep existing + add): "also X", "add X", "and X" → output new value(s), set filterEditIntent for that key to "add".
+- REPLACE (only this): "only X", "just X", "change to X", "X only", "I meant X" → output new value(s), set filterEditIntent to "replace".
+- CLEAR (remove category): "any X", "no X preference", "don't care", "all X", "remove X" → output [] or omit key, set filterEditIntent to "clear".
+
+If the user names a value for a category that already has values and does NOT use clear add/replace/clear wording, set that category in "intentUnclear" and do not assume add or replace.
+
+When the user adds another "surfed in X" / "add destination X" (e.g. "add someone who surfed Indonesia"), return that country in destination_days_min.destination (use a sensible min_days if inferrable, else 1) so the backend can merge it with the existing destination.
+
+Your response MUST include:
+- "filterEditIntent": object with one key per category you touched (e.g. surfboard_type, surf_level_category, country_from): value "add" | "replace" | "clear".
+- "intentUnclear": array of category keys (e.g. ["surfboard_type"]) when intent is ambiguous; otherwise [].
+
+Examples:
+- Current surfboard_type: ["longboard"]. User: "Also shortboard" → add → surfboard_type ["longboard","shortboard"], filterEditIntent.surfboard_type "add".
+- Current surfboard_type: ["longboard"]. User: "Only shortboard" → replace → surfboard_type ["shortboard"], filterEditIntent.surfboard_type "replace".
+- Current surfboard_type: ["longboard"]. User: "Any board" → clear → omit surfboard_type or [], filterEditIntent.surfboard_type "clear".
+- Current surfboard_type: ["longboard"]. User: "Shortboard" (no also/only) → intentUnclear: ["surfboard_type"].
+
+`
+    : ''
+
+  const schemaPrompt = `${editingModePrompt}You are a database query expert. Analyze the user's request and determine which Supabase filters to apply.
 
 AVAILABLE SURFERS TABLE FIELDS (ONLY THESE CAN BE FILTERED):
 - country_from (string): Country of origin
@@ -1304,7 +1340,9 @@ Extract filters from the user's request. Return ONLY valid JSON in this format (
     }
   },
   "unmappableCriteria": ["blond", "tall"],
-  "explanation": "Brief explanation of what filters were extracted and what couldn't be mapped"
+  "explanation": "Brief explanation of what filters were extracted and what couldn't be mapped"${isEditingMode ? `,
+  "filterEditIntent": { "surfboard_type": "add" },
+  "intentUnclear": []` : ''}
 }
 
 ⚠️ CRITICAL: For country_from, ALWAYS use EXACT names from the official list above. Normalize common variations:
@@ -1492,6 +1530,10 @@ CRITICAL RULES - BE SMART AND FLEXIBLE:
       }
     }
     
+    if (isEditingMode) {
+      if (!extracted.filterEditIntent || typeof extracted.filterEditIntent !== 'object') extracted.filterEditIntent = {}
+      if (!Array.isArray(extracted.intentUnclear)) extracted.intentUnclear = []
+    }
     console.log('✅ Extracted query filters:', JSON.stringify(extracted, null, 2))
     if (extracted.unmappableCriteria && extracted.unmappableCriteria.length > 0) {
       console.log('⚠️ Unmappable criteria detected:', extracted.unmappableCriteria)
@@ -1504,7 +1546,8 @@ CRITICAL RULES - BE SMART AND FLEXIBLE:
     return {
       supabaseFilters: {},
       unmappableCriteria: [],
-      explanation: 'Failed to extract filters from user message'
+      explanation: 'Failed to extract filters from user message',
+      ...(isEditingMode ? { filterEditIntent: {}, intentUnclear: [] } : {})
     }
   }
 }
@@ -1792,6 +1835,7 @@ ${getPronounInstructions(userProfile.pronoun)}`
             destination_known: parsed.destination_known,
             purpose: parsed.purpose,
             user_context: parsed.user_context,
+            queryFilters: parsed.queryFilters ?? parsed.query_filters ?? null,
           }
         }
         
@@ -1799,7 +1843,7 @@ ${getPronounInstructions(userProfile.pronoun)}`
           chat_id: chatId,
           return_message: returnMessage,
           is_finished: parsed.is_finished || false,
-          data: tripPlanningData || null
+          data: ensureResponseDataQueryFilters(tripPlanningData) ?? null
         }
         
         console.log('Final response being sent:', JSON.stringify(parsedResponse, null, 2))
@@ -1908,9 +1952,13 @@ ${getPronounInstructions(userProfile.pronoun)}`
       // When adding filters, inject context so LLM interprets "also X" / "any X" correctly
       if (body.adding_filters && body.existing_query_filters && typeof body.existing_query_filters === 'object') {
         const filterSummary = JSON.stringify(body.existing_query_filters)
+        let addFilterContent = `The user is adding to existing search filters. Current filters: ${filterSummary}. Interpret their message as additional or broadening criteria (e.g. "also longboard" = add longboard; "any board" or "all boards" = remove board filter).`
+        if (body.existing_destination_country != null && String(body.existing_destination_country).trim() !== '') {
+          addFilterContent += ` Current destination: ${body.existing_destination_country}. If the user adds another destination (e.g. "add Indonesia", "surfed Indo too"), include ALL destinations in data.destination_country as a comma-separated string (e.g. "Sri Lanka, Indonesia").`
+        }
         messages.splice(messages.length - 1, 0, {
           role: 'system',
-          content: `The user is adding to existing search filters. Current filters: ${filterSummary}. Interpret their message as additional or broadening criteria (e.g. "also longboard" = add longboard; "any board" or "all boards" = remove board filter).`
+          content: addFilterContent
         })
       }
       
@@ -1949,7 +1997,8 @@ ${getPronounInstructions(userProfile.pronoun)}`
       
       let extractedQueryFilters: any = null
       let unmappableCriteria: string[] = []
-      
+      let filterResult: { supabaseFilters: any; unmappableCriteria?: string[]; explanation?: string; filterEditIntent?: Record<string, 'add' | 'replace' | 'clear'>; intentUnclear?: string[] } | null = null
+
       // Extract filters from current message
       try {
         // Get destination from conversation history
@@ -1995,7 +2044,8 @@ ${getPronounInstructions(userProfile.pronoun)}`
         }
         
         console.log('📍 Destination country for filter extraction:', destinationCountry)
-        const filterResult = await extractQueryFilters(body.message, destinationCountry, messages)
+        const existingForExtractor = body.adding_filters && body.existing_query_filters && typeof body.existing_query_filters === 'object' ? body.existing_query_filters : undefined
+        filterResult = await extractQueryFilters(body.message, destinationCountry, messages, existingForExtractor)
         extractedQueryFilters = filterResult.supabaseFilters
         unmappableCriteria = filterResult.unmappableCriteria || []
         console.log('✅ Extracted query filters:', JSON.stringify(extractedQueryFilters, null, 2))
@@ -2048,6 +2098,26 @@ ${getPronounInstructions(userProfile.pronoun)}`
         const unmappableMessage = `IMPORTANT: The user mentioned criteria we don't have in our database: ${unmappableCriteria.join(', ')}. Silently extract and use the criteria we DO have (country, age, surf level, board type, destination experience). DO NOT explain what we can or can't filter by - just proceed with matching.`
         // Insert before the last user message
         messages.splice(messages.length - 1, 0, { role: 'system', content: unmappableMessage })
+      }
+
+      // When editing filters, if intent is ambiguous do not merge; return a clarification question
+      const intentUnclearList = filterResult?.intentUnclear
+      if (body.adding_filters && body.existing_query_filters && Array.isArray(intentUnclearList) && intentUnclearList.length > 0) {
+        const key = intentUnclearList[0]
+        const existing = body.existing_query_filters[key]
+        const extracted = extractedQueryFilters?.[key]
+        const currentVal = Array.isArray(existing) ? existing.join(', ') : (existing ?? '')
+        const newVal = Array.isArray(extracted) ? extracted.join(', ') : (extracted ?? '')
+        const categoryLabel = key === 'surfboard_type' ? 'board type' : key === 'surf_level_category' ? 'surf level' : key === 'country_from' ? 'origin country' : key
+        const clarificationText = `Do you want to **add** ${newVal} to your current ${categoryLabel} (${currentVal}) or **replace** with only ${newVal}?`
+        const clarificationPayload = { return_message: clarificationText, is_finished: false, data: null }
+        messages.push({ role: 'assistant', content: JSON.stringify(clarificationPayload) })
+        await saveChatHistory(chatId, messages, user.id, body.conversation_id || null, supabaseAdmin)
+        console.log('🔀 Returning clarification (intentUnclear):', clarificationText)
+        return new Response(JSON.stringify(clarificationPayload), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+        })
       }
 
       // Check if user message contains a destination mention and remind LLM to extract it
@@ -2194,7 +2264,7 @@ ${getPronounInstructions(userProfile.pronoun)}`
             purpose: parsed.purpose,
             non_negotiable_criteria: normalizedNonNegotiableCriteria,
             user_context: parsed.user_context,
-            queryFilters: null,
+            queryFilters: parsed.queryFilters ?? parsed.query_filters ?? null,
             filtersFromNonNegotiableStep: false,
           }
         }
@@ -2384,12 +2454,24 @@ ${getPronounInstructions(userProfile.pronoun)}`
         // CRITICAL: Always add queryFilters if they were extracted, even if tripPlanningData already exists
         // Also populate non_negotiable_criteria.age_range from queryFilters.age_min/age_max
         if (body.adding_filters && body.existing_query_filters && typeof body.existing_query_filters === 'object') {
-          // Add-filter mode: merge existing filters (from client) with newly extracted ones (union arrays, scalars from extracted or keep existing)
-          const merged = mergeQueryFiltersAdding(body.existing_query_filters, extractedQueryFilters || {})
+          // Add-filter mode: merge existing (from client) with current message's extracted only (not accumulated)
+          const currentExtracted = filterResult?.supabaseFilters ?? extractedQueryFilters ?? {}
+          const intent = filterResult?.filterEditIntent && typeof filterResult.filterEditIntent === 'object' ? filterResult.filterEditIntent : {}
+          const hasIntent = Object.keys(intent).length > 0
+          const merged = hasIntent
+            ? mergeQueryFiltersEditing(body.existing_query_filters, currentExtracted, intent)
+            : mergeQueryFiltersAdding(body.existing_query_filters, currentExtracted)
           const normalizedQueryFilters = await normalizeQueryFilters(merged)
+          // Merge destinations so "add Indonesia" when existing is "Sri Lanka" yields "Sri Lanka, Indonesia"
+          const mergedDestination = mergeDestinations(
+            body.existing_destination_country ?? null,
+            tripPlanningData?.destination_country ?? null,
+            parsed?.data?.destination_country ?? null,
+            filterResult?.supabaseFilters?.destination_days_min?.destination ?? null
+          )
           if (!tripPlanningData) {
             tripPlanningData = {
-              destination_country: body.existing_destination_country ?? null,
+              destination_country: mergedDestination ?? body.existing_destination_country ?? null,
               area: body.existing_area ?? null,
               budget: null,
               destination_known: true,
@@ -2401,7 +2483,7 @@ ${getPronounInstructions(userProfile.pronoun)}`
             }
           } else {
             tripPlanningData.queryFilters = normalizedQueryFilters
-            if (body.existing_destination_country != null) tripPlanningData.destination_country = body.existing_destination_country
+            tripPlanningData.destination_country = mergedDestination ?? body.existing_destination_country ?? tripPlanningData.destination_country
             if (body.existing_area != null) tripPlanningData.area = body.existing_area
           }
           console.log('✅ Merged filters (add-filter mode):', JSON.stringify(normalizedQueryFilters, null, 2))
@@ -2581,10 +2663,42 @@ ${getPronounInstructions(userProfile.pronoun)}`
           }
         }
         
+        // Track when we modify tripPlanningData so we persist the normalized response (next request will use correct accumulated filters)
+        let responseNormalized = false
+        
+        // Add-filter flow: after merging filters, ensure we return "ready to search or tweak?" shape so the client shows Review filters and can run search on "send"
+        if (body.adding_filters && tripPlanningData) {
+          shouldBeFinished = true
+          if (!tripPlanningData.search_summary || String(tripPlanningData.search_summary).trim() === '') {
+            tripPlanningData.search_summary = (parsed?.data?.search_summary && String(parsed.data.search_summary).trim()) || returnMessage || 'Ready to search with your current filters.'
+          }
+          // Do not send next_action on this turn: the client must set pendingSearch and await the user's *next* message (search vs edit)
+          tripPlanningData.next_action = null
+          responseNormalized = true
+          console.log('✅ Add-filter merge: forcing is_finished and search_summary for client')
+        }
+        
+        // Decision reply: when user said "send"/"go"/"search" in reply to "search now or tweak?", ensure next_action is "search" so the client runs matches
+        const userMsgTrim = (body.message || '').trim().toLowerCase()
+        const hasSearchIntent = /\b(send|search|go|yes|yep|yeah|sure|do it|perfect|looks good|sounds good|go ahead|let'?s\s*(go|search|do)|ready|find)\b/i.test(userMsgTrim)
+        const hasEditIntent = /\b(change|edit|modify|tweak|update|remove|add|different|instead|wait|hold on|actually)\b/i.test(userMsgTrim)
+        const userWantsSearchReply = hasSearchIntent && !hasEditIntent
+        const prevAssistantIdx = messages.length - 3 // [..., prevAssistant, userMessage, newAssistant]
+        const prevAssistantContent = messages[prevAssistantIdx]?.role === 'assistant' ? messages[prevAssistantIdx].content : ''
+        const prevWasSearchOrTweak = typeof prevAssistantContent === 'string' && (
+          (prevAssistantContent.includes('search now') && (prevAssistantContent.includes('tweak') || prevAssistantContent.includes('edit'))) ||
+          prevAssistantContent.includes('search_summary')
+        )
+        if (userWantsSearchReply && prevWasSearchOrTweak && tripPlanningData && (tripPlanningData.next_action == null || tripPlanningData.next_action === undefined)) {
+          tripPlanningData.next_action = 'search'
+          responseNormalized = true
+          console.log('✅ Decision reply: user said "send"/"go" etc. — forcing next_action to "search"')
+        }
+        
         parsedResponse = {
           return_message: returnMessage,
           is_finished: shouldBeFinished,
-          data: tripPlanningData || null
+          data: ensureResponseDataQueryFilters(tripPlanningData) ?? null
         }
         
         console.log('=== FINAL RESPONSE BEING SENT (continue) ===')
@@ -2596,6 +2710,13 @@ ${getPronounInstructions(userProfile.pronoun)}`
           console.log('queryFilters:', JSON.stringify(parsedResponse.data.queryFilters, null, 2))
         }
         console.log('==========================================')
+        
+        // Persist normalized response so the next request sees correct accumulated filters (e.g. after "change to longboard" then "nothing else")
+        if (responseNormalized && messages.length > 0) {
+          messages[messages.length - 1].content = JSON.stringify(parsedResponse)
+          await saveChatHistory(chatId, messages, user.id, body.conversation_id || null, supabaseAdmin)
+          console.log('✅ Re-saved assistant message with normalized response (queryFilters/next_action)')
+        }
       } catch (parseError) {
         console.error('Error parsing JSON from ChatGPT (continue):', parseError)
         console.log('Raw message that failed to parse (continue):', assistantMessage)
@@ -2702,7 +2823,7 @@ ${getPronounInstructions(userProfile.pronoun)}`
           parsedResponse = {
             return_message: assistantMessage,
             is_finished: extractedData.destination_country ? true : false, // Only finish if we have a destination
-            data: extractedData.destination_country ? extractedData : null
+            data: extractedData.destination_country ? ensureResponseDataQueryFilters(extractedData) : null
           }
           
           console.log('✅ Extracted data from conversation history:', extractedData)
@@ -3154,7 +3275,9 @@ ${getPronounInstructions(userProfile.pronoun)}`
         // Normalize tripPlanningData to snake_case (client/LLM may send camelCase)
         const raw = body.tripPlanningData || {}
         console.log('[find-matches] Request body keys:', { chatId: body.chatId, tripPlanningDataKeys: Object.keys(raw) })
-        let queryFilters = raw.queryFilters ?? raw.query_filters ?? null
+        const rawQueryFilters = raw.queryFilters ?? raw.query_filters ?? null
+        console.log('[find-matches] Raw queryFilters (before normalize):', rawQueryFilters != null ? JSON.stringify(rawQueryFilters) : 'null')
+        let queryFilters = rawQueryFilters
         if (queryFilters && typeof queryFilters === 'object') {
           queryFilters = await normalizeQueryFilters(queryFilters)
         }
@@ -3194,6 +3317,10 @@ ${getPronounInstructions(userProfile.pronoun)}`
         })
         if (tripPlanningData.queryFilters && typeof tripPlanningData.queryFilters === 'object') {
           console.log('[find-matches] tripPlanningData.queryFilters:', JSON.stringify(tripPlanningData.queryFilters))
+          const slc = tripPlanningData.queryFilters.surf_level_category
+          console.log('[find-matches] surf_level_category present:', slc != null, 'value:', slc != null ? JSON.stringify(slc) : 'n/a')
+        } else {
+          console.log('[find-matches] surf_level_category: not present (no queryFilters or empty)')
         }
         const pathDesc = hasDestination
           ? `destination (destination_country=${tripPlanningData.destination_country})`

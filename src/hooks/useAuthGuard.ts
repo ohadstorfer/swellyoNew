@@ -515,7 +515,6 @@ export function useAuthGuard() {
         clearStaleOAuthFlags();
         // Don't check auth state if we're in the middle of an OAuth redirect (use improved detection)
         if (isOAuthCallback()) {
-          console.log('[useAuthGuard] OAuth redirect in progress, skipping focus check');
           // Clear stale flags after a delay if OAuth callback is no longer valid
           setTimeout(() => {
             try {
@@ -533,7 +532,6 @@ export function useAuthGuard() {
           return;
         }
         
-        console.log('[useAuthGuard] Window focused, re-checking auth state');
         checkAuthState();
       };
 

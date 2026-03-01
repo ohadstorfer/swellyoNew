@@ -11,8 +11,9 @@ import {
   Image,
   ImageBackground,
   Animated,
-  Modal,
+  Easing,
   Pressable,
+  PanResponder,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Path } from 'react-native-svg';
@@ -33,13 +34,26 @@ import {
   type FilterDisplayItem,
 } from '../utils/tripPlanningFilters';
 
+/** Split filter label into prefix and value for chip display (e.g. "Origin – Israel" -> prefix "Origin", value "Israel"). */
+function getLabelParts(label: string): { prefix: string; value: string } | null {
+  const sep1 = ' – ';
+  const sep2 = ' in ';
+  if (label.includes(sep1)) {
+    const i = label.lastIndexOf(sep1);
+    return { prefix: label.slice(0, i).trim(), value: label.slice(i + sep1.length).trim() };
+  }
+  if (label.includes(sep2)) {
+    const i = label.lastIndexOf(sep2);
+    return { prefix: label.slice(0, i).trim(), value: label.slice(i + sep2.length).trim() };
+  }
+  return null;
+}
+
 /** First question shown when starting or restarting trip planning (matches backend prompt). */
 const TRIP_PLANNING_FIRST_QUESTION =
   "Yo! Let's Travel! I can connect you with like minded surfers or surf travelers who have experience in specific destinations you are curious about. So, what are you looking for?";
 
-/** Follow-up when user taps "Continue Editing" after search summary. */
-const CONTINUE_EDITING_FOLLOW_UP =
-  "What would you like to change? Destination, filters, or vibe—tell me and we'll dial it in.";
+
 
 /**
  * Count how many criteria are requested (helper function for UI)
@@ -113,12 +127,7 @@ interface Message {
   backendMessageIndex?: number;
   /** True when this is the search_summary bot message (shows "Review filters" button) */
   isSearchSummary?: boolean;
-  /** Search/Edit block attached to this message (persisted and restored like actionRow) */
-  searchSummaryBlock?: {
-    requestData: any;
-    searchSummary: string;
-    selectedAction: 'search' | 'continue_editing' | null;
-  };
+
   /** True when this is the "first question" message added after New Chat (filters should be cleared after this) */
   isRestartAfterNewChat?: boolean;
 }
@@ -209,12 +218,61 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   const [pendingSingleCriterionMatches, setPendingSingleCriterionMatches] = useState<MatchedUser[] | null>(null);
   const [singleCriterionType, setSingleCriterionType] = useState<string | null>(null);
   const [pendingSearch, setPendingSearch] = useState<{ data: any; searchSummary: string } | null>(null);
-  const [pendingSearchSelectedAction, setPendingSearchSelectedAction] = useState<'search' | 'continue_editing' | null>(null);
+  const [awaitingSearchDecision, setAwaitingSearchDecision] = useState(false);
   const [lastMatchRequestData, setLastMatchRequestData] = useState<any | null>(null);
   const [lastMatchActionPressed, setLastMatchActionPressed] = useState<'new_chat' | 'add_filter' | 'more' | null>(null);
   const [existingFiltersForAdd, setExistingFiltersForAdd] = useState<{ data: any } | null>(null);
   const [filtersMenuVisible, setFiltersMenuVisible] = useState(false);
+  const [trashHoverProgress, setTrashHoverProgress] = useState(0);
   const scrollViewRef = useRef<ScrollView>(null);
+  // Drag-to-delete: ghost chip position and dragged item
+  const [dragState, setDragState] = useState<{
+    item: FilterDisplayItem;
+    ghostX: number;
+    ghostY: number;
+    chipX: number;
+    chipY: number;
+    touchOffsetX?: number;
+    touchOffsetY?: number;
+  } | null>(null);
+  const trashZoneBounds = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
+  const trashZoneRef = useRef<View | null>(null);
+  const cardBoundsRef = useRef<{ x: number; y: number; width: number; height: number }>({ x: 0, y: 0, width: 0, height: 0 });
+  const filtersMenuCardRef = useRef<View | null>(null);
+  const chipRefsMap = useRef<Record<string, View | null>>({});
+  const dragStateRef = useRef<{
+    item: FilterDisplayItem;
+    ghostX: number;
+    ghostY: number;
+    chipX: number;
+    chipY: number;
+    touchOffsetX?: number;
+    touchOffsetY?: number;
+  } | null>(null);
+  useEffect(() => {
+    dragStateRef.current = dragState;
+  }, [dragState]);
+  useEffect(() => {
+    if (!filtersMenuVisible) {
+      setDragState(null);
+      setTrashHoverProgress(0);
+    }
+  }, [filtersMenuVisible]);
+
+  const filterMenuAnim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (filtersMenuVisible) {
+      filterMenuAnim.setValue(0);
+      Animated.timing(filterMenuAnim, {
+        toValue: 1,
+        duration: 350,
+        easing: Easing.out(Easing.ease),
+        useNativeDriver: true,
+      }).start();
+    } else {
+      filterMenuAnim.setValue(0);
+    }
+  }, [filtersMenuVisible, filterMenuAnim]);
 
   // Current filters source: existingFiltersForAdd (when adding filters), pendingSearch (after search_summary), or last match message (only after the last New Chat restart)
   const { currentRequestData, filterSourceMessage, filterSource } = useMemo(() => {
@@ -240,42 +298,6 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   );
   const filterCount = filterDisplayList.length;
 
-  // Disable text input when Search/Edit buttons are shown and user hasn't chosen yet
-  const awaitingSearchOrEditChoice = useMemo(
-    () => messages.some(m => m.searchSummaryBlock != null && m.searchSummaryBlock.selectedAction == null),
-    [messages]
-  );
-
-  // Animated conic-style border: rotation and glow on filter change
-  const spinRef = useRef(new Animated.Value(0)).current;
-  const glowRef = useRef(new Animated.Value(0)).current;
-  // Border spin: continuous rotation (no iteration limit) so the gradient always sweeps
-  useEffect(() => {
-    const loop = Animated.loop(
-      Animated.timing(spinRef, {
-        toValue: 1,
-        duration: 3000,
-        useNativeDriver: true,
-      }),
-      { resetBeforeIteration: true }
-    );
-    spinRef.setValue(0);
-    loop.start();
-    return () => loop.stop();
-  }, [spinRef]);
-  const spin = spinRef.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
-  const glowOpacity = glowRef.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1] });
-  const glowScale = glowRef.interpolate({ inputRange: [0, 1], outputRange: [1, 1.08] });
-  const prevFilterCountRef = useRef(filterCount);
-  useEffect(() => {
-    if (prevFilterCountRef.current !== filterCount) {
-      prevFilterCountRef.current = filterCount;
-      Animated.sequence([
-        Animated.timing(glowRef, { toValue: 1, duration: 1000, useNativeDriver: true }),
-        Animated.timing(glowRef, { toValue: 0, duration: 4700, useNativeDriver: true }),
-      ]).start();
-    }
-  }, [filterCount, glowRef]);
 
   // Test API connection and initialize chat context on component mount
   useEffect(() => {
@@ -355,7 +377,13 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
                 if (msg.role === 'assistant') {
                   try {
                     const parsed = JSON.parse(msg.content);
-                    messageText = parsed.data?.search_summary ?? parsed.return_message ?? msg.content;
+                    // Prefer search_summary only when non-empty so we never show an empty bubble
+                    const summary = parsed.data?.search_summary;
+                    const hasSummary = summary != null && String(summary).trim() !== '';
+                    messageText = hasSummary ? summary : (parsed.return_message ?? msg.content);
+                    if (messageText == null || String(messageText).trim() === '') {
+                      messageText = msg.content;
+                    }
                   } catch {
                     // Not JSON, use as-is
                   }
@@ -405,39 +433,29 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
                   const searchSummaryBlock = (msg as any).metadata?.searchSummaryBlock;
                   if (searchSummaryBlock && searchSummaryBlock.requestData != null) {
                     restoredMessage.isSearchSummary = true;
-                    restoredMessage.searchSummaryBlock = {
-                      requestData: searchSummaryBlock.requestData,
-                      searchSummary: searchSummaryBlock.searchSummary ?? '',
-                      selectedAction: searchSummaryBlock.selectedAction ?? null,
-                    };
                   }
                 }
 
                 restoredMessages.push(restoredMessage);
               }
 
-              // Restore pending search block from last assistant message that has searchSummaryBlock
-              let lastSearchSummaryBlock: { requestData: any; searchSummary: string; selectedAction: 'search' | 'continue_editing' | null } | null = null;
+              // Restore pending search from last assistant message that has searchSummaryBlock
               for (let i = history.messages.length - 1; i >= 0; i--) {
                 const msg = history.messages[i];
                 if (msg.role === 'assistant' && (msg as any).metadata?.searchSummaryBlock) {
                   const block = (msg as any).metadata.searchSummaryBlock;
                   if (block.requestData != null) {
-                    lastSearchSummaryBlock = {
-                      requestData: block.requestData,
+                    setPendingSearch({
+                      data: block.requestData,
                       searchSummary: block.searchSummary ?? '',
-                      selectedAction: block.selectedAction ?? null,
-                    };
+                    });
+                    // If the search was never acted on, resume awaiting decision
+                    if (block.selectedAction == null) {
+                      setAwaitingSearchDecision(true);
+                    }
                     break;
                   }
                 }
-              }
-              if (lastSearchSummaryBlock) {
-                setPendingSearch({
-                  data: lastSearchSummaryBlock.requestData,
-                  searchSummary: lastSearchSummaryBlock.searchSummary,
-                });
-                setPendingSearchSelectedAction(lastSearchSummaryBlock.selectedAction);
               }
               
               console.log('[TripPlanningChatScreen] Restored', restoredMessages.length, 'messages, skippedInitialContext:', skippedInitialContext);
@@ -649,8 +667,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     };
 
     console.log('Sending message:', userMessage.text);
-    setPendingSearch(null);
-    setPendingSearchSelectedAction(null);
+    setAwaitingSearchDecision(false);
 
     // Check if user wants to see pending single criterion matches
     if (pendingSingleCriterionMatches && pendingSingleCriterionMatches.length > 0) {
@@ -753,11 +770,12 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         const continuePayload: { message: string; existing_query_filters?: any; adding_filters?: boolean; existing_destination_country?: string | null; existing_area?: string | null } = {
           message: userMessage.text,
         };
-        if (existingFiltersForAdd?.data?.queryFilters != null) {
-          continuePayload.existing_query_filters = existingFiltersForAdd.data.queryFilters;
+        const dataWithFilters = existingFiltersForAdd?.data ?? (awaitingSearchDecision && pendingSearch?.data?.queryFilters != null ? pendingSearch?.data : null);
+        if (dataWithFilters?.queryFilters != null) {
+          continuePayload.existing_query_filters = dataWithFilters.queryFilters;
           continuePayload.adding_filters = true;
-          if (existingFiltersForAdd.data.destination_country != null) continuePayload.existing_destination_country = existingFiltersForAdd.data.destination_country;
-          if (existingFiltersForAdd.data.area != null) continuePayload.existing_area = existingFiltersForAdd.data.area;
+          if (dataWithFilters.destination_country != null) continuePayload.existing_destination_country = dataWithFilters.destination_country;
+          if (dataWithFilters.area != null) continuePayload.existing_area = dataWithFilters.area;
         }
         response = await swellyServiceCopy.continueTripPlanningConversation(chatId, continuePayload);
       } else {
@@ -770,8 +788,43 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         setChatId(response.chat_id || null);
       }
 
-      // If chat is finished, add search_summary as a normal message and show Search button
-      if (response.is_finished && response.data) {
+      const hasNextAction = (response.data as any)?.next_action != null;
+      const hasSearchSummary = response.data?.search_summary != null && String(response.data.search_summary).trim() !== '';
+
+      // When awaiting a search decision and user sends a message, handle it here
+      if (awaitingSearchDecision && pendingSearch) {
+        // Keep pendingSearch in sync with server-merged filters so subsequent "search" uses correct data
+        if (response.data?.queryFilters != null) {
+          setPendingSearch({
+            data: response.data,
+            searchSummary: pendingSearch.searchSummary ?? (response.data as any)?.search_summary ?? '',
+          });
+        }
+        const msgLower = (userMessage.text || '').trim().toLowerCase();
+        const userWantsSearch = /\b(send|search|go|yes|yep|yeah|sure|do it|perfect|looks good|sounds good|go ahead|let'?s\s*(go|search|do)|ready|find)\b/i.test(msgLower) && !/\b(change|edit|modify|tweak|update|remove|add|different|instead|wait|hold on|actually)\b/i.test(msgLower);
+        const nextAction = (response.data as any)?.next_action;
+        const effectiveSearch = nextAction === 'search' || (nextAction == null && userWantsSearch);
+        if (effectiveSearch) {
+          if (chatId) {
+            const dataToSearch = response.data?.queryFilters != null ? response.data : pendingSearch.data;
+            runFindMatches(chatId, dataToSearch);
+          }
+        } else {
+          // Show the bot's response (e.g. updated summary after filter edit)
+          const botMessage: Message = {
+            id: (Date.now() + 1).toString(),
+            text: hasSearchSummary ? response.data.search_summary : response.return_message,
+            isUser: false,
+            timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+            isSearchSummary: hasSearchSummary,
+          };
+          setMessages(prev => [...prev, botMessage]);
+          if (hasSearchSummary) {
+            setAwaitingSearchDecision(true);
+          }
+        }
+      } else if (response.is_finished && response.data && !hasNextAction && !awaitingSearchDecision) {
+        // First time seeing search_summary — show as text and wait for user decision
         setIsFinished(true);
         const summaryText = response.data?.search_summary ?? 'Ready to search with your current filters.';
         const searchSummary = response.data?.search_summary ?? '';
@@ -779,53 +832,40 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
           id: (Date.now() + 1).toString(),
           text: summaryText,
           isUser: false,
-          timestamp: new Date().toLocaleTimeString('en-US', {
-            hour: '2-digit',
-            minute: '2-digit',
-            hour12: false
-          }),
+          timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
           isSearchSummary: true,
-          searchSummaryBlock: {
-            requestData: response.data,
-            searchSummary,
-            selectedAction: null,
-          },
         };
         setMessages(prev => [...prev, botMessage]);
-        setPendingSearch({
-          data: response.data,
-          searchSummary,
-        });
-        setPendingSearchSelectedAction(null);
-        if (chatId) {
-          swellyServiceCopy.updateSearchSummaryBlock(chatId, response.data, searchSummary, null).catch(err =>
-            console.warn('[TripPlanningChatScreen] Failed to persist search summary block:', err));
+        setPendingSearch({ data: response.data, searchSummary });
+        setAwaitingSearchDecision(true);
+      } else if (hasNextAction && (response.data as any)?.next_action === 'search') {
+        // Backend explicitly told us to search
+        if (chatId && response.data) {
+          runFindMatches(chatId, response.data);
         }
       } else {
         const botMessage: Message = {
           id: (Date.now() + 1).toString(),
           text: response.return_message,
           isUser: false,
-          timestamp: new Date().toLocaleTimeString('en-US', { 
-            hour: '2-digit', 
-            minute: '2-digit',
-            hour12: false 
-          }),
+          timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
         };
         setMessages(prev => [...prev, botMessage]);
       }
 
-      console.log('Response check:', { 
-        is_finished: response.is_finished, 
+      console.log('Response check:', {
+        is_finished: response.is_finished,
         has_data: !!response.data,
-        data: response.data 
+        data: response.data
       });
 
     } catch (error) {
       console.error('Error sending message:', error);
       Alert.alert('Error', 'Failed to send message. Please try again.');
     } finally {
-      setExistingFiltersForAdd(null);
+      if (!awaitingSearchDecision) {
+        setExistingFiltersForAdd(null);
+      }
       setIsLoading(false);
     }
   };
@@ -965,6 +1005,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     });
     if (action === 'new_chat') {
       setPendingSearch(null);
+      setAwaitingSearchDecision(false);
       setIsFinished(false);
       setExistingFiltersForAdd(null);
       setFiltersMenuVisible(false);
@@ -1002,6 +1043,94 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
       }
     }
   };
+
+  const chipPanResponders = useMemo(() => {
+    const map: Record<string, ReturnType<typeof PanResponder.create>> = {};
+    filterDisplayList.forEach(item => {
+      map[item.id] = PanResponder.create({
+        onMoveShouldSetPanResponderCapture: (_, g) => Math.abs(g.dy) > 8 || Math.abs(g.dx) > 8,
+        onPanResponderGrant: (evt) => {
+          const chipRef = chipRefsMap.current[item.id];
+          const cardRef = filtersMenuCardRef.current;
+          const native = evt.nativeEvent as { pageX?: number; pageY?: number; locationX?: number; locationY?: number };
+          const offsetX = native.locationX ?? 0;
+          const offsetY = native.locationY ?? 0;
+          const setGhost = (cx: number, cy: number) => {
+            const fingerX = cx + offsetX;
+            const fingerY = cy + offsetY;
+            setDragState({ item, ghostX: fingerX, ghostY: fingerY, chipX: cx, chipY: cy, touchOffsetX: offsetX, touchOffsetY: offsetY });
+          };
+          const updateCardThenSet = (cx: number, cy: number) => {
+            if (cardRef && typeof (cardRef as any).measureInWindow === 'function') {
+              (cardRef as any).measureInWindow((cardX: number, cardY: number, width?: number, height?: number) => {
+                cardBoundsRef.current = { x: cardX, y: cardY, width: width ?? 0, height: height ?? 0 };
+                setGhost(cx, cy);
+              });
+            } else {
+              setGhost(cx, cy);
+            }
+          };
+          if (chipRef && typeof (chipRef as any).measureInWindow === 'function') {
+            (chipRef as any).measureInWindow((x: number, y: number) => {
+              updateCardThenSet(x, y);
+            });
+          } else if (typeof native.pageX === 'number' && typeof native.pageY === 'number') {
+            updateCardThenSet(native.pageX - offsetX, native.pageY - offsetY);
+          }
+        },
+        onPanResponderMove: (_, g) => {
+          const CHIP_WIDTH = 150;
+          const CHIP_HEIGHT = 40;
+          setDragState(prev => {
+            if (!prev || prev.item.id !== item.id) return prev;
+            let chipLeft = prev.ghostX + g.dx - (prev.touchOffsetX ?? 0);
+            let chipTop = prev.ghostY + g.dy - (prev.touchOffsetY ?? 0);
+            const card = cardBoundsRef.current;
+            if (card.width > 0 && card.height > 0) {
+              const minX = card.x;
+              const maxX = card.x + card.width - CHIP_WIDTH;
+              const minY = card.y;
+              const maxY = card.y + card.height - CHIP_HEIGHT;
+              chipLeft = Math.max(minX, Math.min(maxX, chipLeft));
+              chipTop = Math.max(minY, Math.min(maxY, chipTop));
+            }
+            const ghostX = chipLeft + (prev.touchOffsetX ?? 0);
+            const ghostY = chipTop + (prev.touchOffsetY ?? 0);
+            const ghostCenterX = chipLeft + 60;
+            const ghostCenterY = chipTop + 18;
+            const tb = trashZoneBounds.current;
+            let progress = 0;
+            if (tb) {
+              const trashCenterY = tb.y + tb.height / 2;
+              const progressStartY = tb.y - 250;
+              if (ghostCenterY >= trashCenterY) {
+                progress = 1;
+              } else if (ghostCenterY > progressStartY) {
+                progress = Math.max(0, Math.min(1, (ghostCenterY - progressStartY) / (trashCenterY - progressStartY)));
+              }
+            }
+            setTrashHoverProgress(progress);
+            return { ...prev, ghostX, ghostY };
+          });
+        },
+        onPanResponderRelease: () => {
+          const prev = dragStateRef.current;
+          setTrashHoverProgress(0);
+          setDragState(null);
+          if (!prev || prev.item.id !== item.id) return;
+          const tb = trashZoneBounds.current;
+          const chipLeft = prev.ghostX - (prev.touchOffsetX ?? 0);
+          const chipTop = prev.ghostY - (prev.touchOffsetY ?? 0);
+          const ghostCenterX = chipLeft + 60;
+          const ghostCenterY = chipTop + 18;
+          if (tb && ghostCenterX >= tb.x && ghostCenterX <= tb.x + tb.width && ghostCenterY >= tb.y && ghostCenterY <= tb.y + tb.height) {
+            handleRemoveFilter(prev.item);
+          }
+        },
+      });
+    });
+    return map;
+  }, [filterDisplayList, handleRemoveFilter]);
 
   const renderMessage = (message: Message) => {
     // If this message has matched users, render cards instead
@@ -1112,10 +1241,6 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     }
 
     // Regular message rendering
-    const selectedSearchAction = message.searchSummaryBlock?.selectedAction ?? null;
-    const hasSearchSummaryBlock = message.searchSummaryBlock != null;
-    const searchDisabled = selectedSearchAction !== null || isLoading;
-
     return (
       <View key={message.id}>
         <View
@@ -1159,89 +1284,6 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             </View>
           </View>
         </View>
-
-        {/* Per-message Search/Edit row (same location as message, persisted via searchSummaryBlock) */}
-        {!message.isUser && hasSearchSummaryBlock && message.searchSummaryBlock && (
-          <View style={styles.pendingSearchBlock}>
-            <View style={[styles.searchButtonWrapper, styles.pendingSearchButtonsRow]}>
-              <TouchableOpacity
-                activeOpacity={0.8}
-                disabled={searchDisabled}
-                onPress={() => {
-                  if (searchDisabled) return;
-                  const block = message.searchSummaryBlock!;
-                  setMessages(prev =>
-                    prev.map(m =>
-                      m.id === message.id && m.searchSummaryBlock
-                        ? { ...m, searchSummaryBlock: { ...m.searchSummaryBlock!, selectedAction: 'continue_editing' as const } }
-                        : m
-                    )
-                  );
-                  const botMessage: Message = {
-                    id: (Date.now() + 1).toString(),
-                    text: CONTINUE_EDITING_FOLLOW_UP,
-                    isUser: false,
-                    timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
-                  };
-                  setMessages(prev => [...prev, botMessage]);
-                  if (chatId) {
-                    swellyServiceCopy.updateSearchSummaryBlock(chatId, block.requestData, block.searchSummary, 'continue_editing', message.backendMessageIndex).catch(err =>
-                      console.warn('[TripPlanningChatScreen] Failed to persist search summary selection:', err));
-                  }
-                  setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100);
-                }}
-                style={[styles.searchButtonTouchable, styles.pendingSearchButtonTouchable]}
-              >
-                <LinearGradient
-                  colors={['#05BCD3', '#DBCDBC']}
-                  locations={[0, 0.7]}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={styles.searchButtonGradientOuter}
-                >
-                  <View style={[styles.searchButtonInner, selectedSearchAction === 'continue_editing' && styles.actionButtonInnerSelected, styles.searchEditButtonContent]}>
-                    <Svg width={16} height={16} viewBox="0 -960 960 960" fill={selectedSearchAction === 'continue_editing' ? '#0D7480' : '#222B30'}>
-                      <Path d="M200-200h57l391-391-57-57-391 391v57Zm-80 80v-170l528-527q12-11 26.5-17t30.5-6q16 0 31 6t26 18l55 56q12 11 17.5 26t5.5 30q0 16-5.5 30.5T817-647L290-120H120Zm640-584-56-56 56 56Zm-141 85-28-29 57 57-29-28Z" />
-                    </Svg>
-                    <Text style={[styles.searchButtonText, selectedSearchAction === 'continue_editing' && styles.actionButtonTextSelected]}>Edit</Text>
-                  </View>
-                </LinearGradient>
-              </TouchableOpacity>
-              <TouchableOpacity
-                activeOpacity={0.8}
-                disabled={searchDisabled}
-                onPress={() => {
-                  if (!chatId || searchDisabled) return;
-                  const block = message.searchSummaryBlock!;
-                  setMessages(prev =>
-                    prev.map(m =>
-                      m.id === message.id && m.searchSummaryBlock
-                        ? { ...m, searchSummaryBlock: { ...m.searchSummaryBlock!, selectedAction: 'search' as const } }
-                        : m
-                    )
-                  );
-                  runFindMatches(chatId, block.requestData);
-                  swellyServiceCopy.updateSearchSummaryBlock(chatId, block.requestData, block.searchSummary, 'search', message.backendMessageIndex).catch(err =>
-                    console.warn('[TripPlanningChatScreen] Failed to persist search summary selection:', err));
-                }}
-                style={[styles.searchButtonTouchable, styles.pendingSearchButtonTouchable]}
-              >
-                <LinearGradient
-                  colors={['#05BCD3', '#DBCDBC']}
-                  locations={[0, 0.7]}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={styles.searchButtonGradientOuter}
-                >
-                  <View style={[styles.searchButtonInner, selectedSearchAction === 'search' && styles.actionButtonInnerSelected, styles.searchEditButtonContent]}>
-                    <Ionicons name="search" size={16} color={selectedSearchAction === 'search' ? '#0D7480' : '#222B30'} />
-                    <Text style={[styles.searchButtonText, selectedSearchAction === 'search' && styles.actionButtonTextSelected]}>Search</Text>
-                  </View>
-                </LinearGradient>
-              </TouchableOpacity>
-            </View>
-          </View>
-        )}
       </View>
     );
   };
@@ -1320,92 +1362,185 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
           </ScrollView>
         </ImageBackground>
 
+        {/* Floating filters button: 7px from top (below header), 14px from right */}
+        <View style={styles.filtersButtonFloating} pointerEvents="box-none">
+          <TouchableOpacity
+            onPress={() => setFiltersMenuVisible(true)}
+            activeOpacity={1}
+            style={styles.filtersButtonPill}
+          >
+            {filterCount > 0 && (
+              <View style={styles.filtersButtonCountWrap}>
+                <View style={styles.filtersButtonRedDot} />
+                <Text style={styles.filtersButtonCountText}>{filterCount}</Text>
+              </View>
+            )}
+            <Ionicons name="options-outline" size={24} color="#333" />
+          </TouchableOpacity>
+        </View>
+
         {/* Input Area */}
         <View style={styles.inputWrapper}>
           <ChatTextInput
             value={inputText}
             onChangeText={setInputText}
             onSend={sendMessage}
-            disabled={isLoading || awaitingSearchOrEditChoice}
+            disabled={isLoading}
             placeholder="Type your message.."
             maxLength={500}
             primaryColor={colors.primary || '#B72DF2'}
-            leftAccessory={
-              <TouchableOpacity
-                onPress={() => setFiltersMenuVisible(true)}
-                activeOpacity={0.8}
-                style={styles.filtersButtonOuter}
-              >
-                <Animated.View style={[styles.filtersButtonGlowWrap, { transform: [{ scale: glowScale }] }]}>
-                  <View style={styles.filtersButtonBorderClip}>
-                    <Animated.View
-                      style={[
-                        styles.filtersButtonGradientWrap,
-                        {
-                          transform: [{ rotate: spin }],
-                          opacity: glowOpacity,
-                        },
-                      ]}
-                    >
-                      <LinearGradient
-                        colors={['#7C3AED', '#A78BFA', '#C4B5FD', '#7C3AED', '#6D28D9']}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 1 }}
-                        style={StyleSheet.absoluteFill}
-                      />
-                    </Animated.View>
-                    <View style={styles.filtersButtonInner}>
-                      {filterCount > 0 && (
-                        <Text style={styles.filtersButtonCount}>{filterCount}</Text>
-                      )}
-                      <Svg width={28} height={28} viewBox="0 -960 960 960" fill="#222B30">
-                        <Path d="M440-120v-240h80v80h320v80H520v80h-80Zm-320-80v-80h240v80H120Zm160-160v-80H120v-80h160v-80h80v240h-80Zm160-80v-80h400v80H440Zm160-160v-240h80v80h160v80H680v80h-80Zm-480-80v-80h400v80H120Z" />
-                      </Svg>
-                    </View>
-                  </View>
-                </Animated.View>
-              </TouchableOpacity>
-            }
           />
         </View>
-      </KeyboardAvoidingView>
 
-      {/* Filters menu overlay */}
-      <Modal
-        visible={filtersMenuVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setFiltersMenuVisible(false)}
-      >
-        <Pressable style={styles.filtersMenuBackdrop} onPress={() => setFiltersMenuVisible(false)}>
-          <Pressable style={styles.filtersMenuCard} onPress={e => e.stopPropagation()}>
-            <View style={styles.filtersMenuHeader}>
-              <Text style={styles.filtersMenuTitle}>Filters</Text>
-              <TouchableOpacity onPress={() => setFiltersMenuVisible(false)} hitSlop={12}>
-                <Ionicons name="close" size={24} color="#222B30" />
-              </TouchableOpacity>
+        {/* Filter dialog: full conversation area, gradient + blur, chips at top */}
+        {filtersMenuVisible && (
+          <Animated.View
+            style={[
+              styles.filtersOverlay,
+              {
+                transform: [
+                  {
+                    translateY: filterMenuAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [12, 0],
+                    }),
+                  },
+                ],
+              },
+            ]}
+            pointerEvents="box-none"
+          >
+            <Pressable style={StyleSheet.absoluteFill} onPress={() => setFiltersMenuVisible(false)} />
+            <View
+              style={[
+                StyleSheet.absoluteFill,
+                Platform.OS === 'web' && ({ backdropFilter: 'blur(2px)', WebkitBackdropFilter: 'blur(2px)' } as any),
+              ]}
+              pointerEvents="none"
+            />
+            <LinearGradient
+              colors={[
+                'rgba(247,247,247,0)',
+                'rgba(247,247,247,0)',
+                `rgba(255,255,255,${0.9 + 0.1 * trashHoverProgress})`,
+              ]}
+              locations={[0, 0.1596, 0.9553]}
+              style={StyleSheet.absoluteFill}
+              start={{ x: 0.5, y: 1 }}
+              end={{ x: 0.5, y: 0 }}
+              pointerEvents="none"
+            />
+            <View
+              ref={filtersMenuCardRef}
+              style={styles.filtersOverlayContent}
+              onLayout={() => {
+                filtersMenuCardRef.current?.measureInWindow?.((x: number, y: number, width?: number, height?: number) => {
+                  cardBoundsRef.current = { x, y, width: width ?? 0, height: height ?? 0 };
+                });
+              }}
+              pointerEvents="box-none"
+            >
+              <View style={styles.filtersOverlayTop}>
+                <View style={styles.filtersChipsRow}>
+                  {filterDisplayList.length === 0 ? (
+                    <Text style={styles.filtersMenuEmpty}>No filters applied</Text>
+                  ) : (
+                    filterDisplayList.map(item => {
+                      const parts = getLabelParts(item.label);
+                      const pan = chipPanResponders[item.id];
+                      return (
+                        <View
+                          key={item.id}
+                          ref={r => { chipRefsMap.current[item.id] = r; }}
+                          style={[styles.filterChip, dragState?.item.id === item.id && styles.filterChipDragging]}
+                          {...(pan?.panHandlers ?? {})}
+                        >
+                          <TouchableOpacity
+                            onPress={() => handleRemoveFilter(item)}
+                            style={styles.filterChipRemove}
+                            hitSlop={8}
+                          >
+                            <Ionicons name="close" size={18} color="#7B7B7B" />
+                          </TouchableOpacity>
+                          <Text style={styles.filterChipLabel} numberOfLines={1}>
+                            {parts ? (
+                              <>
+                                <Text style={styles.filterChipPrefix}>{parts.prefix}: </Text>
+                                <Text style={styles.filterChipValue}>{parts.value}</Text>
+                              </>
+                            ) : (
+                              item.label
+                            )}
+                          </Text>
+                        </View>
+                      );
+                    })
+                  )}
+                </View>
+                <TouchableOpacity
+                  style={styles.filtersOverlayClose}
+                  onPress={() => setFiltersMenuVisible(false)}
+                  hitSlop={12}
+                >
+                  <Ionicons name="close" size={24} color="#222B30" />
+                </TouchableOpacity>
+              </View>
+              <View style={styles.filtersOverlaySpacer} pointerEvents="none" />
+              <View
+                ref={trashZoneRef}
+                style={styles.filtersDragZone}
+                onLayout={() => {
+                  trashZoneRef.current?.measureInWindow?.((x: number, y: number, width: number, height: number) => {
+                    trashZoneBounds.current = { x, y, width, height };
+                  });
+                }}
+              >
+                <Text style={styles.filtersDragZoneText}>Drag to Delete</Text>
+                <View
+                  style={[
+                    styles.filtersDragZoneTrash,
+                    {
+                      backgroundColor: `rgba(${Math.round(255 * (1 - trashHoverProgress))}, ${Math.round(255 * (1 - trashHoverProgress))}, ${Math.round(255 * (1 - trashHoverProgress))}, ${0.1 + 0.5 * trashHoverProgress})`,
+                      transform: [{ scale: 1 + 0.1 * trashHoverProgress }],
+                    },
+                  ]}
+                  collapsable={false}
+                >
+                  <Ionicons name="trash-outline" size={40} color="#333" />
+                </View>
+              </View>
+              {dragState && (
+                <View
+                  style={[
+                    styles.filterChip,
+                    styles.filterChipGhost,
+                    {
+                      position: 'absolute',
+                      left: dragState.ghostX - (dragState.touchOffsetX ?? 0) - cardBoundsRef.current.x,
+                      top: dragState.ghostY - (dragState.touchOffsetY ?? 0) - cardBoundsRef.current.y,
+                    },
+                  ]}
+                  pointerEvents="none"
+                >
+                  <Text style={styles.filterChipLabel} numberOfLines={1}>
+                    {(() => {
+                      const parts = getLabelParts(dragState.item.label);
+                      return parts ? (
+                        <>
+                          <Text style={styles.filterChipPrefix}>{parts.prefix}: </Text>
+                          <Text style={styles.filterChipValue}>{parts.value}</Text>
+                        </>
+                      ) : (
+                        dragState.item.label
+                      );
+                    })()}
+                  </Text>
+                </View>
+              )}
             </View>
-            {filterDisplayList.length === 0 ? (
-              <Text style={styles.filtersMenuEmpty}>No filters applied</Text>
-            ) : (
-              <ScrollView style={styles.filtersMenuList} keyboardShouldPersistTaps="handled">
-                {filterDisplayList.map(item => (
-                  <View key={item.id} style={styles.filtersMenuItem}>
-                    <Text style={styles.filtersMenuLabel} numberOfLines={1}>{item.label}</Text>
-                    <TouchableOpacity
-                      onPress={() => handleRemoveFilter(item)}
-                      style={styles.filtersMenuRemove}
-                      hitSlop={8}
-                    >
-                      <Ionicons name="close-circle" size={22} color="#7B7B7B" />
-                    </TouchableOpacity>
-                  </View>
-                ))}
-              </ScrollView>
-            )}
-          </Pressable>
-        </Pressable>
-      </Modal>
+          </Animated.View>
+        )}
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 };
@@ -1625,42 +1760,48 @@ const styles = StyleSheet.create({
     marginRight: 8,
     marginTop: 6,
   },
-  filtersButtonOuter: {
-    alignSelf: 'flex-start',
-    transform: [{ translateY: 6 }],
-  },
-  filtersButtonGlowWrap: {
-    // Wrapper for glow scale animation
-  },
-  filtersButtonBorderClip: {
-    overflow: 'hidden',
-    borderRadius: 14,
-    padding: 2,
-  },
-  filtersButtonGradientWrap: {
+  filtersButtonFloating: {
     position: 'absolute',
-    width: '200%',
-    height: '200%',
-    left: '-50%',
-    top: '-50%',
+    top: 7,
+    right: 14,
+    zIndex: 10,
   },
-  filtersButtonInner: {
+  filtersButtonPill: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 4,
-    backgroundColor: colors.white,
-    borderRadius: 12,
-    paddingHorizontal: 6,
+    gap: 6,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#e4e4e4',
+    borderRadius: 18,
     paddingVertical: 4,
-    minHeight: 28,
+    paddingTop: 6,
+    paddingHorizontal: 8,
+    alignSelf: 'flex-start',
   },
-  filtersButtonCount: {
+  filtersButtonCountWrap: {
+    position: 'relative',
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  filtersButtonRedDot: {
+    position: 'absolute',
+    top: 0,
+    left: 13,
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: '#E53935',
+  },
+  filtersButtonCountText: {
     fontFamily: Platform.OS === 'web' ? 'var(--Family-Body, Inter), sans-serif' : 'Inter',
     fontSize: 18,
-    fontWeight: '600',
-    color: '#222B30',
-    lineHeight: 28,
+    fontWeight: '400',
+    color: '#333',
+    lineHeight: 22,
   },
   filtersButtonRow: {
     flexDirection: 'row',
@@ -1688,61 +1829,106 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  filtersMenuBackdrop: {
+  filtersOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 100,
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    justifyContent: 'flex-end',
-    paddingHorizontal: 16,
-    paddingBottom: 120,
   },
-  filtersMenuCard: {
-    backgroundColor: colors.white,
-    borderRadius: 12,
-    maxHeight: 320,
-    paddingTop: 12,
-    paddingBottom: 12,
-  },
-  filtersMenuHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  filtersOverlayContent: {
+    flex: 1,
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingBottom: 12,
   },
-  filtersMenuTitle: {
-    fontFamily: Platform.OS === 'web' ? 'var(--Family-Body, Inter), sans-serif' : 'Inter',
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#222B30',
+  filtersOverlayTop: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingTop: 50,
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+    paddingRight: 8,
+  },
+  filtersOverlayClose: {
+    padding: 8,
+    marginLeft: 8,
+  },
+  filtersOverlaySpacer: {
+    flex: 1,
   },
   filtersMenuEmpty: {
     fontFamily: Platform.OS === 'web' ? 'var(--Family-Body, Inter), sans-serif' : 'Inter',
     fontSize: 14,
     color: '#7B7B7B',
-    paddingHorizontal: 16,
-    paddingVertical: 24,
+    paddingVertical: 8,
   },
-  filtersMenuList: {
-    maxHeight: 260,
+  filtersChipsRow: {
+    flex: 1,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 8,
+    paddingRight: 8,
   },
-  filtersMenuItem: {
+  filterChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#E4E4E4',
+    borderRadius: 32,
+    borderWidth: 1,
+    borderColor: '#CFCFCF',
+    backgroundColor: '#FFFFFF',
+    paddingVertical: 8,
+    paddingLeft: 8,
+    paddingRight: 12,
+    gap: 6,
   },
-  filtersMenuLabel: {
-    flex: 1,
+  filterChipRemove: {
+    padding: 2,
+  },
+  filterChipLabel: {
     fontFamily: Platform.OS === 'web' ? 'var(--Family-Body, Inter), sans-serif' : 'Inter',
     fontSize: 14,
     color: '#222B30',
-    marginRight: 8,
+    maxWidth: 160,
   },
-  filtersMenuRemove: {
-    padding: 4,
+  filterChipPrefix: {
+    fontFamily: Platform.OS === 'web' ? 'var(--Family-Body, Inter), sans-serif' : 'Inter',
+    fontSize: 14,
+    color: '#222B30',
+    fontWeight: '400',
+  },
+  filterChipValue: {
+    fontWeight: '700',
+  },
+  filterChipDragging: {
+    opacity: 0,
+  },
+  filterChipGhost: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  filtersDragZone: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 24,
+    minHeight: 100,
+    marginTop: 8,
+  },
+  filtersDragZoneText: {
+    fontFamily: Platform.OS === 'web' ? 'var(--Family-Body, Inter), sans-serif' : 'Inter',
+    fontSize: 14,
+    color: '#7B7B7B',
+    marginBottom: 12,
+  },
+  filtersDragZoneTrash: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    borderWidth: 2,
+    borderColor: '#333',
+    backgroundColor: 'rgba(255, 255, 255, 0.10)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   typingContainer: {
     flexDirection: 'row',
@@ -1769,6 +1955,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1,
     borderColor: '#999',
+    backgroundColor: 'rgba(255, 255, 255, 0.80)',
   },
   reviewFiltersButtonText: {
     fontSize: 14,
@@ -1776,24 +1963,12 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : undefined,
   },
-  pendingSearchBlock: {
-    marginBottom: 4,
-  },
   searchButtonWrapper: {
     marginTop: 12,
     alignItems: 'center',
     width: '100%',
   },
-  pendingSearchButtonsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    width: '100%',
-    gap: 8,
-  },
-  pendingSearchButtonTouchable: {
-    flex: 1,
-  },
+
   searchButtonTouchable: {
     borderRadius: 12,
     overflow: 'hidden',
@@ -1811,11 +1986,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  searchEditButtonContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
+
   searchButtonText: {
     color: '#222B30',
     fontSize: 16,

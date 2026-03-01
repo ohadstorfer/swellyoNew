@@ -553,6 +553,12 @@ class SwellyService {
     chatId: string,
     tripPlanningData: any
   ): Promise<{ matches: MatchedUser[] }> {
+    // Normalize: ensure queryFilters is set when backend sent query_filters
+    const payload = tripPlanningData && typeof tripPlanningData === 'object'
+      ? { ...tripPlanningData, queryFilters: tripPlanningData.queryFilters ?? tripPlanningData.query_filters ?? null }
+      : tripPlanningData;
+    console.log('[SwellyServiceCopy] find-matches payload: queryFilters present=', payload?.queryFilters != null, 'surf_level_category present=', payload?.queryFilters?.surf_level_category != null);
+
     const url = this.getFunctionUrl('/find-matches', 'trip-planning');
     const headers = await this.getAuthHeaders();
 
@@ -561,7 +567,7 @@ class SwellyService {
     const response = await fetch(url, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ chatId, tripPlanningData }),
+      body: JSON.stringify({ chatId, tripPlanningData: payload }),
     });
 
     if (!response.ok) {
