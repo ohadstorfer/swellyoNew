@@ -27,15 +27,21 @@ export interface InlineMapViewProps {
 export function InlineMapView({ htmlContent, width, height, query, onMessage }: InlineMapViewProps) {
   const webViewRef = useRef<{ injectJavaScript: (script: string) => void } | null>(null);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const sendQuery = useCallback((q: string) => {
-    const escaped = JSON.stringify(q);
-    const script = `(function(){ var w = window.__receiveQuery; if(w) w(${escaped}); })();`;
-    if (Platform.OS === 'web' && iframeRef.current?.contentWindow) {
-      iframeRef.current.contentWindow.postMessage(JSON.stringify({ type: 'SEARCH_QUERY', query: q }), '*');
-    } else if (webViewRef.current) {
-      webViewRef.current.injectJavaScript(script);
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
     }
+    debounceRef.current = setTimeout(() => {
+      const escaped = JSON.stringify(q);
+      const script = `(function(){ var w = window.__receiveQuery; if(w) w(${escaped}); })();`;
+      if (Platform.OS === 'web' && iframeRef.current?.contentWindow) {
+        iframeRef.current.contentWindow.postMessage(JSON.stringify({ type: 'SEARCH_QUERY', query: q }), '*');
+      } else if (webViewRef.current) {
+        webViewRef.current.injectJavaScript(script);
+      }
+    }, 200);
   }, []);
 
   useEffect(() => {
@@ -82,6 +88,7 @@ export function InlineMapView({ htmlContent, width, height, query, onMessage }: 
           title="Inline map"
           srcDoc={htmlContent}
           onLoad={handleLoad}
+          tabIndex={-1}
           style={{
             width,
             height,

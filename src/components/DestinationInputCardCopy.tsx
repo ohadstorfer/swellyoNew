@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo, forwardRef, useImperativeHandle } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback, forwardRef, useImperativeHandle } from 'react';
 import {
   View,
   StyleSheet,
@@ -8,10 +8,7 @@ import {
   Image,
   ImageBackground,
   ScrollView,
-  NativeSyntheticEvent,
-  NativeScrollEvent,
   PanResponder,
-  LayoutAnimation,
   Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -81,11 +78,8 @@ const TIME_UNITS: TimeUnit[] = ['days', 'weeks', 'months', 'years'];
 const UNIT_LABELS: Record<TimeUnit, string> = { days: 'Days', weeks: 'Weeks', months: 'Months', years: 'Years' };
 const UNIT_ITEM_WIDTH = 58;
 const UNIT_CAROUSEL_CONTAINER_WIDTH = 179;
-const REPEAT_SIDES = 100;
-const CENTER_CYCLE_INDEX = REPEAT_SIDES;
-const TOTAL_UNIT_ITEMS = (REPEAT_SIDES * 2 + 1) * TIME_UNITS.length;
-const CENTER_ITEM_INDEX = CENTER_CYCLE_INDEX * TIME_UNITS.length;
-const RECENTER_THRESHOLD = TIME_UNITS.length * 25;
+/** Minimum horizontal drag (px) to advance/retreat one time unit. */
+const SWIPE_THRESHOLD = 20;
 
 export const DestinationInputCardCopy = forwardRef<
   DestinationInputCardCopyRef,
@@ -114,11 +108,24 @@ export const DestinationInputCardCopy = forwardRef<
   const [timeUnit, setTimeUnit] = useState<TimeUnit>(initialTimeUnit || 'weeks');
   const unitScrollRef = useRef<ScrollView>(null);
   const placesInputRef = useRef<MultiPlaceAutocompleteInputRef>(null);
-  const scrollXRef = useRef(0);
-  const unitScrollIndexRef = useRef(CENTER_ITEM_INDEX + TIME_UNITS.indexOf(initialTimeUnit || 'weeks'));
-  const [unitScrollIndex, setUnitScrollIndex] = useState(() => CENTER_ITEM_INDEX + TIME_UNITS.indexOf(initialTimeUnit || 'weeks'));
   const onDataChangeRef = useRef(onDataChange);
-  const maxScrollX = (TOTAL_UNIT_ITEMS - 1) * UNIT_ITEM_WIDTH;
+
+  const timeUnitIndex = TIME_UNITS.indexOf(timeUnit);
+  const scrollToUnitIndex = useCallback((index: number, animated = true) => {
+    const x = index * UNIT_ITEM_WIDTH;
+    unitScrollRef.current?.scrollTo({ x, animated });
+  }, []);
+
+  /** Move selection at most one step in the given direction (-1 or 1). */
+  const stepTimeUnit = useCallback((direction: number) => {
+    if (direction === 0) return;
+    const currentIndex = TIME_UNITS.indexOf(timeUnit);
+    const nextIndex = Math.max(0, Math.min(TIME_UNITS.length - 1, currentIndex + direction));
+    if (nextIndex === currentIndex) return;
+    const newUnit = TIME_UNITS[nextIndex];
+    setTimeUnit(newUnit);
+    scrollToUnitIndex(nextIndex);
+  }, [timeUnit]);
 
   const regionCodes = useMemo(() => {
     const code = COUNTRY_TO_REGION[destination];
@@ -193,36 +200,6 @@ export const DestinationInputCardCopy = forwardRef<
     setTimeValue(final);
   };
 
-  const snapToNearestUnit = (scrollX: number) => {
-    const index = Math.round(scrollX / UNIT_ITEM_WIDTH);
-    const clampedIndex = Math.max(0, Math.min(TOTAL_UNIT_ITEMS - 1, index));
-    const unitIndex = clampedIndex % TIME_UNITS.length;
-    const newUnit = TIME_UNITS[unitIndex];
-    if (newUnit !== timeUnit) {
-      LayoutAnimation.configureNext({ duration: 220, update: { type: LayoutAnimation.Types.easeInEaseOut } });
-      setTimeUnit(newUnit);
-    }
-    const targetX = clampedIndex * UNIT_ITEM_WIDTH;
-    unitScrollRef.current?.scrollTo({ x: targetX, animated: true });
-    scrollXRef.current = targetX;
-    unitScrollIndexRef.current = clampedIndex;
-    setUnitScrollIndex(clampedIndex);
-  };
-
-  const handleScrollEnd = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    snapToNearestUnit(event.nativeEvent.contentOffset.x);
-  };
-
-  const onUnitScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const x = event.nativeEvent.contentOffset.x;
-    scrollXRef.current = x;
-    const idx = Math.round(x / UNIT_ITEM_WIDTH);
-    if (idx !== unitScrollIndexRef.current) {
-      unitScrollIndexRef.current = idx;
-      setUnitScrollIndex(idx);
-    }
-  };
-
   const unitPanResponder = useMemo(
     () =>
       PanResponder.create({
@@ -233,25 +210,18 @@ export const DestinationInputCardCopy = forwardRef<
           return Math.abs(dx) > 4;
         },
         onPanResponderGrant: () => {},
-        onPanResponderMove: (_, gestureState) => {
-          const newX = Math.max(0, Math.min(maxScrollX, scrollXRef.current - gestureState.dx));
-          unitScrollRef.current?.scrollTo({ x: newX, animated: false });
-          scrollXRef.current = newX;
-        },
-        onPanResponderRelease: () => {
-          snapToNearestUnit(scrollXRef.current);
+        onPanResponderMove: () => {},
+        onPanResponderRelease: (_, gestureState) => {
+          const { dx } = gestureState;
+          const direction = dx > SWIPE_THRESHOLD ? -1 : dx < -SWIPE_THRESHOLD ? 1 : 0;
+          stepTimeUnit(direction);
         },
       }),
-    [isReadOnly, maxScrollX, timeUnit]
+    [isReadOnly, stepTimeUnit]
   );
 
   useEffect(() => {
-    const startIndex = CENTER_ITEM_INDEX + TIME_UNITS.indexOf(timeUnit);
-    const startX = startIndex * UNIT_ITEM_WIDTH;
-    unitScrollRef.current?.scrollTo({ x: startX, animated: false });
-    scrollXRef.current = startX;
-    unitScrollIndexRef.current = startIndex;
-    setUnitScrollIndex(startIndex);
+    scrollToUnitIndex(timeUnitIndex, false);
   }, []);
 
   const screenWidth = Dimensions.get('window').width;
@@ -312,25 +282,16 @@ export const DestinationInputCardCopy = forwardRef<
                       ref={unitScrollRef}
                       horizontal
                       showsHorizontalScrollIndicator={false}
-                      scrollEventThrottle={16}
-                      decelerationRate="fast"
-                      snapToInterval={UNIT_ITEM_WIDTH}
-                      snapToAlignment="center"
-                      disableIntervalMomentum
+                      scrollEnabled={false}
                       contentContainerStyle={[
                         styles.unitCarouselContent,
                         { paddingHorizontal: (UNIT_CAROUSEL_CONTAINER_WIDTH - UNIT_ITEM_WIDTH) / 2 },
                       ]}
-                      onScroll={onUnitScroll}
-                      onMomentumScrollEnd={handleScrollEnd}
-                      onScrollEndDrag={handleScrollEnd}
-                      scrollEnabled={!isReadOnly}
                     >
-                      {Array.from({ length: TOTAL_UNIT_ITEMS }, (_, i) => {
-                        const unit = TIME_UNITS[i % TIME_UNITS.length];
-                        const isSelected = i === unitScrollIndex;
+                      {TIME_UNITS.map((unit, i) => {
+                        const isSelected = i === timeUnitIndex;
                         return (
-                          <View key={i} style={[styles.unitCarouselItem, { width: UNIT_ITEM_WIDTH }]}>
+                          <View key={unit} style={[styles.unitCarouselItem, { width: UNIT_ITEM_WIDTH }]}>
                             <Text
                               style={[
                                 styles.unitCarouselItemText,

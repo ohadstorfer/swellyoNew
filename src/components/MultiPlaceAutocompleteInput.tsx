@@ -18,6 +18,17 @@ const PLACES_AUTOCOMPLETE_URL = 'https://places.googleapis.com/v1/places:autocom
 const DEBOUNCE_MS = 300;
 const MIN_QUERY_LENGTH = 2;
 
+const DEBUG_PLACES_AUTOCOMPLETE =
+  process.env.EXPO_PUBLIC_PLACES_DEBUG === 'true' ||
+  process.env.EXPO_PUBLIC_LOCAL_MODE === 'true';
+
+function logPlacesAutocomplete(...args: any[]) {
+  if (__DEV__ || DEBUG_PLACES_AUTOCOMPLETE) {
+    // eslint-disable-next-line no-console
+    console.log('[MultiPlaceAutocompleteInput]', ...args);
+  }
+}
+
 interface MultiPlaceAutocompleteInputProps {
   value: string[];
   onChange: (places: string[]) => void;
@@ -63,6 +74,9 @@ export const MultiPlaceAutocompleteInput = forwardRef<
   const [loading, setLoading] = useState(false);
   const [dropdownVisible, setDropdownVisible] = useState(false);
   const inputRef = useRef<TextInput>(null);
+  const requestSeqRef = useRef(0);
+  const latestAppliedSeqRef = useRef(0);
+  const isMountedRef = useRef(true);
 
   useImperativeHandle(ref, () => ({
     focus: () => inputRef.current?.focus(),
@@ -71,64 +85,119 @@ export const MultiPlaceAutocompleteInput = forwardRef<
 
   const apiKey = process.env.EXPO_PUBLIC_GOOGLE_PLACES_API_KEY;
 
-  const fetchSuggestions = useCallback(async (input: string) => {
-    if (!apiKey || input.length < MIN_QUERY_LENGTH) {
-      setSuggestions([]);
-      return;
-    }
-    setLoading(true);
-    try {
-      const body: Record<string, unknown> = {
-        input,
-        includeQueryPredictions: false,
-      };
-      if (includedRegionCodes && includedRegionCodes.length > 0) {
-        body.includedRegionCodes = includedRegionCodes;
-      }
-      const res = await fetch(PLACES_AUTOCOMPLETE_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Goog-Api-Key': apiKey,
-          'X-Goog-FieldMask': 'suggestions.placePrediction.placeId,suggestions.placePrediction.text',
-        },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) {
-        const errText = await res.text();
-        console.warn('Places Autocomplete error:', res.status, errText);
+  useEffect(() => {
+    logPlacesAutocomplete('mount');
+    isMountedRef.current = true;
+    return () => {
+      logPlacesAutocomplete('unmount');
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  const fetchSuggestions = useCallback(
+    async (input: string) => {
+      if (!apiKey || input.length < MIN_QUERY_LENGTH) {
+        logPlacesAutocomplete('fetchSuggestions: skip (missing apiKey or short input)', {
+          hasApiKey: !!apiKey,
+          input,
+        });
+        if (!isMountedRef.current) return;
         setSuggestions([]);
+        setDropdownVisible(false);
         return;
       }
-      const data = await res.json();
-      const list: PlaceSuggestion[] = [];
-      for (const s of data.suggestions || []) {
-        const pred = s.placePrediction;
-        if (pred?.text?.text && pred?.placeId) {
-          list.push({ placeId: pred.placeId, text: pred.text.text });
+
+      const currentSeq = ++requestSeqRef.current;
+      logPlacesAutocomplete('fetchSuggestions: start', { input, seq: currentSeq });
+      setLoading(true);
+
+      try {
+        const body: Record<string, unknown> = {
+          input,
+          includeQueryPredictions: false,
+        };
+        if (includedRegionCodes && includedRegionCodes.length > 0) {
+          body.includedRegionCodes = includedRegionCodes;
+        }
+        const res = await fetch(PLACES_AUTOCOMPLETE_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Goog-Api-Key': apiKey,
+            'X-Goog-FieldMask': 'suggestions.placePrediction.placeId,suggestions.placePrediction.text',
+          },
+          body: JSON.stringify(body),
+        });
+
+        if (!isMountedRef.current || currentSeq < requestSeqRef.current) {
+          logPlacesAutocomplete('fetchSuggestions: response ignored (stale or unmounted)', {
+            seq: currentSeq,
+            latestSeq: requestSeqRef.current,
+          });
+          return;
+        }
+
+        if (!res.ok) {
+          const errText = await res.text();
+          logPlacesAutocomplete('fetchSuggestions: http error', {
+            status: res.status,
+            body: errText,
+          });
+          setSuggestions([]);
+          setDropdownVisible(false);
+          return;
+        }
+        const data = await res.json();
+        const list: PlaceSuggestion[] = [];
+        for (const s of data.suggestions || []) {
+          const pred = s.placePrediction;
+          if (pred?.text?.text && pred?.placeId) {
+            list.push({ placeId: pred.placeId, text: pred.text.text });
+          }
+        }
+        latestAppliedSeqRef.current = currentSeq;
+        logPlacesAutocomplete('fetchSuggestions: success', {
+          seq: currentSeq,
+          suggestionsCount: list.length,
+        });
+        setSuggestions(list);
+        setDropdownVisible(list.length > 0);
+      } catch (e) {
+        if (!isMountedRef.current || currentSeq < requestSeqRef.current) {
+          return;
+        }
+        logPlacesAutocomplete('fetchSuggestions: network error', e);
+        setSuggestions([]);
+        setDropdownVisible(false);
+      } finally {
+        if (isMountedRef.current && currentSeq === requestSeqRef.current) {
+          logPlacesAutocomplete('fetchSuggestions: finished', { seq: currentSeq });
+          setLoading(false);
         }
       }
-      setSuggestions(list);
-      setDropdownVisible(list.length > 0);
-    } catch (e) {
-      console.warn('Places Autocomplete fetch failed:', e);
-      setSuggestions([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [apiKey, includedRegionCodes]);
+    },
+    [apiKey, includedRegionCodes]
+  );
 
   useEffect(() => {
+    logPlacesAutocomplete('debouncedQuery effect', {
+      debouncedQuery,
+      length: debouncedQuery.trim().length,
+    });
     if (debouncedQuery.trim().length >= MIN_QUERY_LENGTH) {
       fetchSuggestions(debouncedQuery.trim());
     } else {
+      if (suggestions.length > 0 || dropdownVisible) {
+        logPlacesAutocomplete('debouncedQuery: clearing suggestions (below min length)');
+      }
       setSuggestions([]);
       setDropdownVisible(false);
     }
-  }, [debouncedQuery, fetchSuggestions]);
+  }, [debouncedQuery, fetchSuggestions, suggestions.length, dropdownVisible]);
 
   const handleSelect = (suggestion: PlaceSuggestion) => {
     const name = suggestion.text.trim();
+    logPlacesAutocomplete('handleSelect', { name });
     if (!name) return;
     const normalized = value.map((v) => v.toLowerCase());
     if (normalized.includes(name.toLowerCase())) return;
@@ -140,10 +209,12 @@ export const MultiPlaceAutocompleteInput = forwardRef<
   };
 
   const handleRemove = (index: number) => {
+    logPlacesAutocomplete('handleRemove', { index });
     onChange(value.filter((_, i) => i !== index));
   };
 
   const handleBlur = () => {
+    logPlacesAutocomplete('handleBlur');
     setTimeout(() => setDropdownVisible(false), 200);
   };
 
@@ -171,7 +242,13 @@ export const MultiPlaceAutocompleteInput = forwardRef<
             ref={inputRef}
             style={[styles.textInput, disabled && styles.textInputDisabled]}
             value={query}
-            onChangeText={setQuery}
+            onChangeText={(text) => {
+              logPlacesAutocomplete('onChangeText', {
+                prevQuery: query,
+                nextQuery: text,
+              });
+              setQuery(text);
+            }}
             placeholder={value.length === 0 ? placeholder : 'Add another...'}
             placeholderTextColor="#A0A0A0"
             editable={!disabled}

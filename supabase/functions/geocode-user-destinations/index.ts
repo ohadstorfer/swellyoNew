@@ -36,10 +36,62 @@ interface GeocodedRow {
   types: string[] | null
   display_name: string | null
   formatted_address: string | null
+  geo_bucket_4: string | null
+  geo_bucket_5: string | null
+  geo_bucket_6: string | null
 }
 
 const STOPWORDS = new Set(['area', 'in general', 'the', 'and', '&'])
 const GEOCODE_DELAY_MS = 120
+
+const GEOHASH_BASE32 = '0123456789bcdefghjkmnpqrstuvwxyz'
+
+function encodeGeohash(lat: number, lng: number, precision: number): string {
+  // Clamp to valid ranges
+  let latitude = Math.max(-90, Math.min(90, lat))
+  let longitude = Math.max(-180, Math.min(180, lng))
+
+  let latMin = -90.0
+  let latMax = 90.0
+  let lngMin = -180.0
+  let lngMax = 180.0
+
+  let hash = ''
+  let isEvenBit = true
+  let bit = 0
+  let ch = 0
+
+  while (hash.length < precision) {
+    if (isEvenBit) {
+      const mid = (lngMin + lngMax) / 2
+      if (longitude >= mid) {
+        ch |= 1 << (4 - bit)
+        lngMin = mid
+      } else {
+        lngMax = mid
+      }
+    } else {
+      const mid = (latMin + latMax) / 2
+      if (latitude >= mid) {
+        ch |= 1 << (4 - bit)
+        latMin = mid
+      } else {
+        latMax = mid
+      }
+    }
+
+    isEvenBit = !isEvenBit
+    if (bit < 4) {
+      bit++
+    } else {
+      hash += GEOHASH_BASE32[ch]
+      bit = 0
+      ch = 0
+    }
+  }
+
+  return hash
+}
 
 function extractPlaceNames(areaStrings: string[]): string[] {
   const seen = new Set<string>()
@@ -97,11 +149,16 @@ async function geocodePlace(
     const admin1 = getComponent(comp, 'administrative_area_level_1')
     const admin2 = getComponent(comp, 'administrative_area_level_2')
     const locality = getComponent(comp, 'locality')
+    const lat = r.geometry?.location?.lat ?? 0
+    const lng = r.geometry?.location?.lng ?? 0
+    const geo_bucket_4 = encodeGeohash(lat, lng, 4)
+    const geo_bucket_5 = encodeGeohash(lat, lng, 5)
+    const geo_bucket_6 = encodeGeohash(lat, lng, 6)
     return {
       user_id: '', // filled by caller
       place_id: r.place_id,
-      lat: r.geometry?.location?.lat ?? 0,
-      lng: r.geometry?.location?.lng ?? 0,
+      lat,
+      lng,
       country: countryVal,
       admin_level_1: admin1,
       admin_level_2: admin2,
@@ -109,6 +166,9 @@ async function geocodePlace(
       types: Array.isArray(r.types) ? r.types : null,
       display_name: placeName,
       formatted_address: r.formatted_address ?? null,
+      geo_bucket_4,
+      geo_bucket_5,
+      geo_bucket_6,
     }
   } catch (e) {
     console.warn(`Geocode failed for "${placeName}", ${country}:`, e)
@@ -249,6 +309,9 @@ serve(async (req) => {
       types: r.types,
       display_name: r.display_name,
       formatted_address: r.formatted_address,
+      geo_bucket_4: r.geo_bucket_4,
+      geo_bucket_5: r.geo_bucket_5,
+      geo_bucket_6: r.geo_bucket_6,
     }))
     const { error: insertError } = await supabaseAdmin
       .from('user_destinations')

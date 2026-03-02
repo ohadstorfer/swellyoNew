@@ -270,8 +270,17 @@ export function getMapPickerInlineHtml(
 
       var map, markers = [], placesService, autocompleteService;
       var currentPredictions = [];
+      var searchTimeoutId = null;
+      var currentSearchSeq = 0;
+      var DEBUG = true;
+      function log(msg, data) {
+        if (DEBUG && typeof console !== 'undefined' && console.log) {
+          console.log('[MapPickerHtml] ' + msg, data !== undefined ? data : '');
+        }
+      }
 
       function initMap() {
+        log('initMap');
         map = new google.maps.Map(document.getElementById('map'), {
           center: initialCenter,
           zoom: initialZoom,
@@ -286,8 +295,11 @@ export function getMapPickerInlineHtml(
         autocompleteService = new google.maps.places.AutocompleteService();
 
         window.__receiveQuery = function(q) {
-          if (typeof q === 'string' && q.trim().length >= 2) runSearch(q.trim());
-          else clearResults();
+          log('__receiveQuery', { q: q, len: typeof q === 'string' ? q.trim().length : 0 });
+          if (typeof q === 'string' && q.trim().length >= 2) scheduleSearch(q.trim());
+          else {
+            clearResults();
+          }
         };
         window.addEventListener('message', onParentMessage);
       }
@@ -299,8 +311,11 @@ export function getMapPickerInlineHtml(
         }
         if (data && data.type === 'SEARCH_QUERY') {
           var q = data.query != null ? String(data.query).trim() : '';
-          if (q.length >= 2) runSearch(q);
-          else clearResults();
+          log('onParentMessage SEARCH_QUERY', { q: q, len: q.length });
+          if (q.length >= 2) scheduleSearch(q);
+          else {
+            clearResults();
+          }
         }
       }
 
@@ -312,13 +327,31 @@ export function getMapPickerInlineHtml(
         document.getElementById('list').innerHTML = '';
       }
 
+      function scheduleSearch(query) {
+        log('scheduleSearch', { query: query });
+        if (searchTimeoutId !== null) {
+          clearTimeout(searchTimeoutId);
+        }
+        searchTimeoutId = setTimeout(function() {
+          runSearch(query);
+        }, 200);
+      }
+
       function runSearch(query) {
+        log('runSearch', { query: query, seq: currentSearchSeq + 1 });
         var req = { input: query };
         if (regionCode && regionCode.length === 2) {
           req.componentRestrictions = { country: regionCode };
         }
+        var seq = ++currentSearchSeq;
         autocompleteService.getPlacePredictions(req, function(predictions, status) {
+          log('getPlacePredictions callback', { seq: seq, currentSearchSeq: currentSearchSeq, status: status, count: predictions ? predictions.length : 0 });
+          if (seq < currentSearchSeq) {
+            log('getPlacePredictions ignored (stale)', { seq: seq });
+            return;
+          }
           if (status !== google.maps.places.PlacesServiceStatus.OK || !predictions || predictions.length === 0) {
+            log('getPlacePredictions no results', { status: status });
             clearResults();
             return;
           }
@@ -334,9 +367,11 @@ export function getMapPickerInlineHtml(
             div.onclick = function() { selectPrediction(p); };
             listEl.appendChild(div);
           });
+          log('getPlacePredictions success, fetching details for first', { placeId: predictions[0].place_id });
           placesService.getDetails(
             { placeId: predictions[0].place_id, fields: ['geometry', 'name', 'formatted_address'] },
             function(place, status) {
+              log('getDetails callback', { status: status, hasPlace: !!place });
               if (status === google.maps.places.PlacesServiceStatus.OK && place && place.geometry && place.geometry.location) {
                 var loc = place.geometry.location;
                 map.panTo({ lat: loc.lat(), lng: loc.lng() });
