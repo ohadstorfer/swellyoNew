@@ -659,121 +659,10 @@ async function callOpenAI(messages: any[]): Promise<string> {
 }
 
 /**
- * Enrich area with related names, nicknames, and nearby towns using GPT API
- * @param country - Country name (e.g., "USA", "Indonesia", "Costa Rica")
- * @param area - The primary area/town name mentioned by user
- * @param state - State name (only for USA destinations)
- * @returns Array of related area names (with the original area first)
- */
-async function enrichAreaWithRelatedNames(country: string, area: string, state?: string): Promise<string[]> {
-  if (!OPENAI_API_KEY) {
-    console.warn('OpenAI API key not configured, returning original area only')
-    return [area]
-  }
-
-  if (!area || !area.trim()) {
-    return []
-  }
-
-  try {
-    // Build location string based on whether it's USA or not
-    const locationStr = country === 'USA' && state 
-      ? `"${area}" in ${state}, USA`
-      : `"${area}" in "${country}"`
-
-    const prompt = `Given a surf destination area: ${locationStr}
-
-Your task: Research and find related names, nicknames, and nearby small towns/areas that surfers might use to refer to this location.
-
-Return a JSON object with this structure:
-{
-  "related_areas": ["area1", "area2", "area3", ...]
-}
-
-Rules:
-- Include the original area name as the FIRST item in the array
-- Add common nicknames or alternative names for this area
-- Add nearby small towns or areas that are part of the same surf region
-- Add any other ways surfers might refer to this location
-- Keep names concise (town/area names, not full descriptions)
-- Return 3-8 related names total (including the original)
-- Only include names that are actually related to this specific area
-- Do NOT include the country or state name in the areas (only city/region/beach names)
-
-Examples:
-- Input: area="San Diego" in California, USA → {
-  "related_areas": ["San Diego", "SD", "Pacific Beach", "Ocean Beach", "La Jolla", "Blacks Beach", "Windansea"]
-}
-- Input: area="Gold Coast" in "Australia" → {
-  "related_areas": ["Gold Coast", "GC", "Surfers Paradise", "Burleigh Heads", "Coolangatta", "Tweed Heads"]
-}
-- Input: area="Tamarindo" in "Costa Rica" → {
-  "related_areas": ["Tamarindo", "Tama", "Playa Tamarindo", "Langosta", "Playa Grande", "Avellanas"]
-}
-- Input: area="Weligama" in "Sri Lanka" → {
-  "related_areas": ["Weligama", "Weli", "Midigama", "Mirissa", "Polhena"]
-}
-
-Return ONLY the JSON object, no other text.`
-
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${OPENAI_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [
-          {
-            role: 'system',
-            content: 'You are a helpful assistant that returns only valid JSON objects. Do not include any explanatory text.',
-          },
-          {
-            role: 'user',
-            content: prompt,
-          },
-        ],
-        temperature: 0.3,
-        max_tokens: 300,
-        response_format: { type: 'json_object' },
-      }),
-    })
-
-    if (!response.ok) {
-      throw new Error(`OpenAI API error: ${response.status}`)
-    }
-
-    const data = await response.json()
-    const content = data.choices[0]?.message?.content?.trim()
-    
-    if (!content) {
-      throw new Error('No content in OpenAI response')
-    }
-
-    const parsed = JSON.parse(content)
-    const relatedAreas = parsed.related_areas || []
-    
-    // Ensure the original area is first, and remove duplicates
-    const uniqueAreas = [area]
-    for (const relatedArea of relatedAreas) {
-      if (relatedArea && relatedArea.toLowerCase() !== area.toLowerCase() && !uniqueAreas.some(a => a.toLowerCase() === relatedArea.toLowerCase())) {
-        uniqueAreas.push(relatedArea)
-      }
-    }
-
-    return uniqueAreas
-  } catch (error) {
-    console.error('Error enriching area with related names:', error)
-    // Fallback: return just the original area
-    return [area]
-  }
-}
-
-/**
- * Process and enrich destinations array with related area names
+ * Process destinations array: normalize format, handle legacy destination_name, deduplicate areas.
+ * Does not add LLM-generated related names; areas are user-provided only.
  * @param destinations - Array of destinations from GPT response
- * @returns Processed destinations with enriched areas
+ * @returns Processed destinations with normalized format
  */
 async function processDestinationsArray(destinations: any[]): Promise<any[]> {
   if (!destinations || !Array.isArray(destinations)) {
@@ -821,44 +710,14 @@ async function processDestinationsArray(destinations: any[]): Promise<any[]> {
       continue
     }
 
-    // Enrich ALL areas mentioned by the user
-    const allEnrichedNames: string[] = []
-    
-    // Enrich each area sequentially
-    // For USA, pass state as well for better enrichment
-    for (const area of areas) {
-      const enrichedNames = await enrichAreaWithRelatedNames(country, area, state)
-      // enrichedNames includes the original area as first item, so skip it
-      // Add all related names (excluding the original which is already in areas)
-      for (let i = 1; i < enrichedNames.length; i++) {
-        const relatedName = enrichedNames[i]
-        // Only add if it's not already in the original areas list
-        if (!areas.some(a => a.toLowerCase() === relatedName.toLowerCase())) {
-          allEnrichedNames.push(relatedName)
-        }
-      }
-    }
-    
-    // Combine: original areas first, then all enriched names
-    // Remove duplicates while preserving order (originals first, then enriched)
+    // Deduplicate areas (preserve order, user-provided only)
     const seen = new Set<string>()
     const uniqueAreas: string[] = []
-    
-    // First pass: add all original areas (preserve order)
     for (const area of areas) {
       const lower = area.toLowerCase()
       if (!seen.has(lower)) {
         seen.add(lower)
         uniqueAreas.push(area)
-      }
-    }
-    
-    // Second pass: add enriched names (excluding originals)
-    for (const enrichedName of allEnrichedNames) {
-      const lower = enrichedName.toLowerCase()
-      if (!seen.has(lower)) {
-        seen.add(lower)
-        uniqueAreas.push(enrichedName)
       }
     }
 
@@ -1018,9 +877,9 @@ serve(async (req: Request) => {
           
           // Process and enrich destinations array with related area names
           if (transformedData.destinations_array && Array.isArray(transformedData.destinations_array)) {
-            console.log('Processing destinations array for enrichment...')
+            console.log('Processing destinations array...')
             transformedData.destinations_array = await processDestinationsArray(transformedData.destinations_array)
-            console.log('Enriched destinations array:', JSON.stringify(transformedData.destinations_array, null, 2))
+            console.log('Processed destinations array:', JSON.stringify(transformedData.destinations_array, null, 2))
           }
           
           console.log('Transformed data:', JSON.stringify(transformedData, null, 2))
@@ -1151,9 +1010,9 @@ serve(async (req: Request) => {
           
           // Process and enrich destinations array with related area names
           if (transformedData.destinations_array && Array.isArray(transformedData.destinations_array)) {
-            console.log('Processing destinations array for enrichment (continue)...')
+            console.log('Processing destinations array (continue)...')
             transformedData.destinations_array = await processDestinationsArray(transformedData.destinations_array)
-            console.log('Enriched destinations array (continue):', JSON.stringify(transformedData.destinations_array, null, 2))
+            console.log('Processed destinations array (continue):', JSON.stringify(transformedData.destinations_array, null, 2))
           }
           
           console.log('Transformed data (continue):', JSON.stringify(transformedData, null, 2))

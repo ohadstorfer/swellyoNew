@@ -19,10 +19,12 @@ import { colors, spacing, typography, borderRadius } from '../styles/theme';
 import { swellyService, SwellyChatResponse } from '../services/swelly/swellyService';
 import { useOnboarding } from '../context/OnboardingContext';
 import { getImageUrl } from '../services/media/imageService';
+import { supabase, isSupabaseConfigured } from '../config/supabase';
 import { supabaseDatabaseService } from '../services/database/supabaseDatabaseService';
 import { messagingService } from '../services/messaging/messagingService';
 import { analyticsService } from '../services/analytics/analyticsService';
 import { DestinationCardsCarousel } from '../components/DestinationCardsCarousel';
+import { DestinationCardsCarouselCopy } from '../components/DestinationCardsCarouselCopy';
 import { BudgetButtonSelector } from '../components/BudgetButtonSelector';
 import { ChatTextInput } from '../components/ChatTextInput';
 
@@ -277,6 +279,14 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
             isDemoUser: isDemoUser, // Pass demo user flag from context
           });
           console.log('Swelly conversation results saved successfully');
+          // Geocode destinations in background (non-blocking)
+          if (isSupabaseConfigured() && response.data.destinations_array?.length) {
+            supabase.functions
+              .invoke('geocode-user-destinations', {
+                body: { destinations_array: response.data.destinations_array },
+              })
+              .catch((err) => console.warn('Geocode destinations failed:', err));
+          }
         } catch (error) {
           console.error('Error saving Swelly conversation results:', error);
           // Don't block the UI if saving fails, but log the error
@@ -532,6 +542,13 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
               isDemoUser: isDemoUser,
             });
             console.log('Swelly conversation results saved successfully');
+            if (isSupabaseConfigured() && response.data.destinations_array?.length) {
+              supabase.functions
+                .invoke('geocode-user-destinations', {
+                  body: { destinations_array: response.data.destinations_array },
+                })
+                .catch((err) => console.warn('Geocode destinations failed:', err));
+            }
           } catch (error) {
             console.error('Error saving Swelly conversation results:', error);
           }
@@ -590,13 +607,23 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
          destinationList.length > 0 && (
           <View style={styles.uiComponentContainer}>
             <View style={styles.destinationCarouselFullWidth}>
-              <DestinationCardsCarousel
-                destinations={destinationsSubmitted ? submittedDestinationData.map(d => d.destination) : destinationList}
-                onSubmit={handleDestinationSubmit}
-                isReadOnly={destinationsSubmitted}
-                initialData={destinationsSubmitted ? submittedDestinationData : undefined}
-                fullWidth
-              />
+              {process.env.EXPO_PUBLIC_LOCAL_MODE === 'true' ? (
+                <DestinationCardsCarouselCopy
+                  destinations={destinationsSubmitted ? submittedDestinationData.map(d => d.destination) : destinationList}
+                  onSubmit={handleDestinationSubmit}
+                  isReadOnly={destinationsSubmitted}
+                  initialData={destinationsSubmitted ? submittedDestinationData : undefined}
+                  fullWidth
+                />
+              ) : (
+                <DestinationCardsCarousel
+                  destinations={destinationsSubmitted ? submittedDestinationData.map(d => d.destination) : destinationList}
+                  onSubmit={handleDestinationSubmit}
+                  isReadOnly={destinationsSubmitted}
+                  initialData={destinationsSubmitted ? submittedDestinationData : undefined}
+                  fullWidth
+                />
+              )}
             </View>
         </View>
         )}

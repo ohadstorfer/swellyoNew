@@ -1,5 +1,7 @@
 # Destinations Enrichment Implementation
 
+> **Note:** LLM-based area enrichment has been removed. Destinations are now stored with only user-provided areas (plus format normalization and deduplication). This document is kept for historical reference.
+
 ## Overview
 Improved the onboarding process to save destinations in the new format with automatic area enrichment using GPT API.
 

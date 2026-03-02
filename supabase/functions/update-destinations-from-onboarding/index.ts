@@ -168,6 +168,25 @@ async function processSingleUser(user_id: string, supabaseAdmin: any) {
 
   console.log(`✅ Updated ${destinations_array.length} destinations for user ${user_id}`)
 
+  // Trigger geocode-user-destinations so user_destinations table is populated (backfill)
+  const geocodeSecret = Deno.env.get('GEOCODE_INTERNAL_SECRET')
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+  if (geocodeSecret && supabaseUrl && serviceRoleKey) {
+    fetch(`${supabaseUrl}/functions/v1/geocode-user-destinations`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${serviceRoleKey}`,
+        'x-internal-secret': geocodeSecret,
+      },
+      body: JSON.stringify({ user_id }),
+    })
+      .then((r) => r.json())
+      .then((data) => console.log('Geocode backfill result:', data))
+      .catch((err) => console.warn('Geocode backfill failed:', err))
+  }
+
   return new Response(
     JSON.stringify({
       success: true,
@@ -300,6 +319,23 @@ async function processBatchMode(supabaseAdmin: any) {
       }
 
       console.log(`✅ Updated ${destinations_array.length} destinations`)
+      const geocodeSecret = Deno.env.get('GEOCODE_INTERNAL_SECRET')
+      const supabaseUrl = Deno.env.get('SUPABASE_URL')
+      const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+      if (geocodeSecret && supabaseUrl && serviceRoleKey) {
+        fetch(`${supabaseUrl}/functions/v1/geocode-user-destinations`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${serviceRoleKey}`,
+            'x-internal-secret': geocodeSecret,
+          },
+          body: JSON.stringify({ user_id }),
+        })
+          .then((r) => r.json())
+          .then((data) => console.log(`Geocode backfill for ${user_id}:`, data?.inserted ?? data))
+          .catch((err) => console.warn('Geocode backfill failed:', err))
+      }
       results.push({ 
         user_id, 
         name, 
