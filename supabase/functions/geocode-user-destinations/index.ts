@@ -34,6 +34,8 @@ interface GeocodedRow {
   admin_level_2: string | null
   locality: string | null
   types: string[] | null
+  display_name: string | null
+  formatted_address: string | null
 }
 
 const STOPWORDS = new Set(['area', 'in general', 'the', 'and', '&'])
@@ -105,6 +107,8 @@ async function geocodePlace(
       admin_level_2: admin2,
       locality: locality,
       types: Array.isArray(r.types) ? r.types : null,
+      display_name: placeName,
+      formatted_address: r.formatted_address ?? null,
     }
   } catch (e) {
     console.warn(`Geocode failed for "${placeName}", ${country}:`, e)
@@ -243,6 +247,8 @@ serve(async (req) => {
       admin_level_2: r.admin_level_2,
       locality: r.locality,
       types: r.types,
+      display_name: r.display_name,
+      formatted_address: r.formatted_address,
     }))
     const { error: insertError } = await supabaseAdmin
       .from('user_destinations')

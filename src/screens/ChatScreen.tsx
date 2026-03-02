@@ -607,7 +607,7 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
          destinationList.length > 0 && (
           <View style={styles.uiComponentContainer}>
             <View style={styles.destinationCarouselFullWidth}>
-              {process.env.EXPO_PUBLIC_LOCAL_MODE === 'true' ? (
+              {(process.env.EXPO_PUBLIC_LOCAL_MODE === 'true' || process.env.EXPO_PUBLIC_DEV_MODE === 'true') ? (
                 <DestinationCardsCarouselCopy
                   destinations={destinationsSubmitted ? submittedDestinationData.map(d => d.destination) : destinationList}
                   onSubmit={handleDestinationSubmit}

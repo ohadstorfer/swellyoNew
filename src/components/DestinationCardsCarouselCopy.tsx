@@ -28,7 +28,7 @@ interface DestinationCardsCarouselCopyProps {
   initialData?: DestinationData[];
   fullWidth?: boolean;
   /** When true, use the map picker card (Google Maps) instead of text autocomplete. */
-  useMapPickerCard?: boolean;
+  useMapPickerCard?: boolean; 
 }
 
 export const DestinationCardsCarouselCopy: React.FC<DestinationCardsCarouselCopyProps> = ({

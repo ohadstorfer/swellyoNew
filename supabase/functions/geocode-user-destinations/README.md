@@ -23,6 +23,6 @@ Populates the `user_destinations` table by geocoding place names from a user's `
 
 - Extracts place names from each destination’s `area` strings (splits on comma and “ and ”, strips stopwords like “area”, “in general”).
 - Geocodes each (place name + country, and state for USA) with the Google Geocoding API.
-- Normalizes the response to `place_id`, `lat`, `lng`, `country`, `admin_level_1`, `admin_level_2`, `locality`, `types`.
+- Normalizes the response to `place_id`, `lat`, `lng`, `country`, `admin_level_1`, `admin_level_2`, `locality`, `types`, `display_name`, and `formatted_address`. `display_name` is the place name used in the geocode request; `formatted_address` is from the Geocoding API result.
 - Inserts only rows that don’t already exist for that user and `place_id` (no duplicates).
 - Uses a short delay between API calls to respect rate limits.
