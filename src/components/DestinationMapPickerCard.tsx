@@ -22,7 +22,7 @@ import {
   getCountryImageFromPexels,
 } from '../services/media/imageService';
 import { PlaceChip } from './PlaceChip';
-import { MapPopover, type MapPickerPlace, type AnchorLayout } from './MapPickerModal';
+import { MapPopover, type MapPickerPlace } from './MapPickerModal';
 import { getMapPickerInlineHtml, COUNTRY_CENTERS } from '../utils/mapPickerHtml';
 
 const DEBUG_MAP_PICKER =
@@ -117,13 +117,12 @@ export const DestinationMapPickerCard = forwardRef<
     : [];
   const [places, setPlaces] = useState<string[]>(initialPlaces);
   const [query, setQuery] = useState('');
-  const [anchorLayout, setAnchorLayout] = useState<AnchorLayout | null>(null);
+  const [inputRowHeight, setInputRowHeight] = useState(0);
   const [timeValue, setTimeValue] = useState(initialTimeValue || '2');
   const [timeUnit, setTimeUnit] = useState<TimeUnit>(initialTimeUnit || 'weeks');
   const unitScrollRef = useRef<ScrollView>(null);
   const inputRef = useRef<TextInput>(null);
   const inputRowRef = useRef<View>(null);
-  const refocusAfterMapLoadIdRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onDataChangeRef = useRef(onDataChange);
 
   const timeUnitIndex = TIME_UNITS.indexOf(timeUnit);
@@ -264,45 +263,13 @@ export const DestinationMapPickerCard = forwardRef<
       });
       setPlaces((prev) => (prev.includes(name) ? prev : [...prev, name]));
       setQuery('');
-      setAnchorLayout(null);
     }
   }, []);
 
   const showInlineMap = query.trim().length >= 2 && !!apiKey && !isReadOnly;
-  useEffect(() => {
-    logMapPicker('showInlineMap effect', {
-      query,
-      showInlineMap,
-      hasApiKey: !!apiKey,
-      isReadOnly,
-    });
-    if (!showInlineMap) {
-      setAnchorLayout(null);
-      return;
-    }
-    const id = setTimeout(() => {
-      inputRowRef.current?.measureInWindow((x, y, width, height) => {
-        logMapPicker('measureInWindow result', { x, y, width, height });
-        setAnchorLayout({ x, y, width, height });
-        // Refocus input so keystrokes keep updating query (iframe/WebView often steals focus when map loads)
-        const focusSoon = () => inputRef.current?.focus();
-        setTimeout(focusSoon, 0);
-        refocusAfterMapLoadIdRef.current = setTimeout(focusSoon, 350);
-      });
-    }, 0);
-    return () => {
-      clearTimeout(id);
-      if (refocusAfterMapLoadIdRef.current != null) {
-        clearTimeout(refocusAfterMapLoadIdRef.current);
-        refocusAfterMapLoadIdRef.current = null;
-      }
-    };
-  }, [showInlineMap]);
 
   const screenWidth = Dimensions.get('window').width;
   const cardWidth = Math.min(328, screenWidth - 62);
-  const contentWidth = cardWidth - 48;
-  const popoverHeight = 180;
 
   return (
     <View style={[styles.container, { width: cardWidth }]}>
@@ -329,63 +296,63 @@ export const DestinationMapPickerCard = forwardRef<
             <Text style={styles.destinationName}>{destination}</Text>
 
             <View style={styles.contentWithStack}>
-              <View
-                ref={inputRowRef}
-                style={[styles.inputRowWrapper, isReadOnly && styles.inputRowWrapperDisabled]}
-              >
-                <Ionicons name="location-outline" size={20} color="#A0A0A0" style={styles.inputRowIcon} />
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  style={styles.inputRowChipsScroll}
-                  contentContainerStyle={styles.inputRowChipsContent}
-                  keyboardShouldPersistTaps="handled"
+              <View style={styles.inputRowAndMapWrapper}>
+                <View
+                  ref={inputRowRef}
+                  onLayout={(e) => setInputRowHeight(e.nativeEvent.layout.height)}
+                  style={[styles.inputRowWrapper, isReadOnly && styles.inputRowWrapperDisabled]}
                 >
-                  {places.map((label, index) => (
-                    <View key={`${label}-${index}`} style={styles.chipWrap}>
-                      <PlaceChip
-                        label={label}
-                        onRemove={() => setPlaces((p) => p.filter((_, j) => j !== index))}
-                        disabled={isReadOnly}
-                      />
-                    </View>
-                  ))}
-                  <TextInput
-                    ref={inputRef}
-                    keyboardType="web-search"
-                    style={[
-                      styles.inputRowTextInput,
-                      isReadOnly && styles.inputRowTextInputDisabled,
-                      Platform.OS === 'web' && { outlineWidth: 0, borderWidth: 0 },
-                    ]}
-                    value={query}
-                    onChangeText={(text) => {
-                      logMapPicker('onChangeText', {
-                        prevQuery: query,
-                        nextQuery: text,
-                      });
-                      setQuery(text);
-                    }}
-                    placeholder={places.length === 0 ? 'City/town/surf spots...' : 'Add another...'}
-                    placeholderTextColor="#A0A0A0"
-                    editable={!isReadOnly && !!apiKey}
+                  <Ionicons name="location-outline" size={20} color="#A0A0A0" style={styles.inputRowIcon} />
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    style={styles.inputRowChipsScroll}
+                    contentContainerStyle={styles.inputRowChipsContent}
+                    keyboardShouldPersistTaps="handled"
+                  >
+                    {places.map((label, index) => (
+                      <View key={`${label}-${index}`} style={styles.chipWrap}>
+                        <PlaceChip
+                          label={label}
+                          onRemove={() => setPlaces((p) => p.filter((_, j) => j !== index))}
+                          disabled={isReadOnly}
+                        />
+                      </View>
+                    ))}
+                    <TextInput
+                      ref={inputRef}
+                      keyboardType="web-search"
+                      style={[
+                        styles.inputRowTextInput,
+                        isReadOnly && styles.inputRowTextInputDisabled,
+                        Platform.OS === 'web' && { outlineWidth: 0, borderWidth: 0 },
+                      ]}
+                      value={query}
+                      onChangeText={(text) => {
+                        logMapPicker('onChangeText', {
+                          prevQuery: query,
+                          nextQuery: text,
+                        });
+                        setQuery(text);
+                      }}
+                      placeholder={places.length === 0 ? 'City/town/surf spots...' : 'Add another...'}
+                      placeholderTextColor="#A0A0A0"
+                      editable={!isReadOnly && !!apiKey}
+                    />
+                  </ScrollView>
+                </View>
+                {showInlineMap && (
+                  <MapPopover
+                    visible
+                    inputRowHeight={inputRowHeight}
+                    htmlContent={inlineMapHtml}
+                    query={query.trim()}
+                    onMessage={handleMapSelect}
+                    onClose={() => setQuery('')}
                   />
-                </ScrollView>
-              </View>
-              {anchorLayout && (
-                <MapPopover
-                  visible
-                  anchorLayout={anchorLayout}
-                  popoverWidth={contentWidth}
-                  popoverHeight={popoverHeight}
-                  htmlContent={inlineMapHtml}
-                  query={query.trim()}
-                  onMessage={handleMapSelect}
-                  onClose={() => setAnchorLayout(null)}
-                />
-              )}
+                )}
 
-              <View style={styles.timeInputContainer}>
+                <View style={styles.timeInputContainer}>
                 <View style={styles.timeInputRow}>
                   <View style={styles.timeInputBox}>
                     <TextInput
@@ -441,21 +408,22 @@ export const DestinationMapPickerCard = forwardRef<
                   </View>
                 </View>
               </View>
-            </View>
 
-            {!isReadOnly && (onNext || onSave) && (
-              <TouchableOpacity
-                style={[
-                  onSave ? styles.saveButton : styles.nextButton,
-                  onSave && saveDisabled && styles.saveButtonDisabled,
-                ]}
-                onPress={onSave || onNext}
-                activeOpacity={0.85}
-                disabled={onSave ? saveDisabled : false}
-              >
-                <Text style={styles.nextButtonText}>{onSave ? 'Save' : 'Next'}</Text>
-              </TouchableOpacity>
-            )}
+                {!isReadOnly && (onNext || onSave) && (
+                  <TouchableOpacity
+                    style={[
+                      onSave ? styles.saveButton : styles.nextButton,
+                      onSave && saveDisabled && styles.saveButtonDisabled,
+                    ]}
+                    onPress={onSave || onNext}
+                    activeOpacity={0.85}
+                    disabled={onSave ? saveDisabled : false}
+                  >
+                    <Text style={styles.nextButtonText}>{onSave ? 'Save' : 'Next'}</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
           </View>
         </View>
       </View>
@@ -464,9 +432,10 @@ export const DestinationMapPickerCard = forwardRef<
 });
 
 const styles = StyleSheet.create({
-  container: { padding: 8, overflow: 'visible' },
-  cardOuter: { overflow: 'visible', paddingTop: 56 },
+  container: { padding: 8, overflow: 'visible', flex: 1 },
+  cardOuter: { flex: 1, overflow: 'visible', paddingTop: 56 },
   cardWrapper: {
+    flex: 1,
     borderRadius: 24,
     overflow: 'hidden',
     shadowColor: '#000',
@@ -479,6 +448,7 @@ const styles = StyleSheet.create({
   backgroundImage: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, borderRadius: 24 },
   frostedOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(255, 255, 255, 0.72)', borderRadius: 24 },
   card: {
+    flex: 1,
     borderRadius: 24,
     paddingTop: 32,
     paddingHorizontal: 24,
@@ -513,10 +483,16 @@ const styles = StyleSheet.create({
     marginBottom: 32,
   },
   contentWithStack: {
+    flex: 1,
     gap: 12,
     overflow: 'visible',
     zIndex: 10000,
     elevation: 24,
+  },
+  inputRowAndMapWrapper: {
+    flex: 1,
+    position: 'relative',
+    gap: 12,
   },
   inputRowWrapper: {
     flexDirection: 'row',

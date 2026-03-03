@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useCallback } from 'react';
+import React, { useEffect, useRef, useCallback, useState } from 'react';
 import {
   View,
   Modal,
@@ -105,7 +105,7 @@ export function InlineMapView({ htmlContent, width, height, query, onMessage }: 
     <View style={[styles.inlineMapContainer, containerStyle]}>
       {WebView && (
         <WebView
-          ref={(r) => {
+          ref={(r: { injectJavaScript: (script: string) => void } | null) => {
             webViewRef.current = r;
           }}
           source={{ html: htmlContent }}
@@ -128,18 +128,9 @@ export interface MapPickerPlace {
   lng: number;
 }
 
-export interface AnchorLayout {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
 export interface MapPopoverProps {
   visible: boolean;
-  anchorLayout: AnchorLayout;
-  popoverWidth: number;
-  popoverHeight: number;
+  inputRowHeight: number;
   htmlContent: string;
   query: string;
   onMessage: (payload: { type: string; place?: MapPickerPlace }) => void;
@@ -148,14 +139,14 @@ export interface MapPopoverProps {
 
 export function MapPopover({
   visible,
-  anchorLayout,
-  popoverWidth,
-  popoverHeight,
+  inputRowHeight,
   htmlContent,
   query,
   onMessage,
   onClose,
 }: MapPopoverProps) {
+  const [overlaySize, setOverlaySize] = useState({ width: 0, height: 0 });
+
   useEffect(() => {
     if (!visible || Platform.OS !== 'android') return;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -167,34 +158,25 @@ export function MapPopover({
 
   if (!visible) return null;
 
-  const top = anchorLayout.y + anchorLayout.height;
-
   return (
-    <Modal transparent animationType="fade" visible={visible} onRequestClose={onClose}>
-      <View style={styles.popoverWrapper}>
-        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
-        <View
-          style={[
-            styles.popoverContent,
-            {
-              left: anchorLayout.x,
-              top,
-              width: popoverWidth,
-              height: popoverHeight,
-            },
-          ]}
-          pointerEvents="box-none"
-        >
-          <InlineMapView
-            htmlContent={htmlContent}
-            width={popoverWidth}
-            height={popoverHeight}
-            query={query}
-            onMessage={onMessage}
-          />
-        </View>
-      </View>
-    </Modal>
+    <View
+      style={[styles.mapOverlay, { top: inputRowHeight }]}
+      onLayout={(e) => {
+        const { width, height } = e.nativeEvent.layout;
+        setOverlaySize((prev) => (prev.width === width && prev.height === height ? prev : { width, height }));
+      }}
+    >
+      <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+      {overlaySize.width > 0 && overlaySize.height > 0 && (
+        <InlineMapView
+          htmlContent={htmlContent}
+          width={overlaySize.width}
+          height={overlaySize.height}
+          query={query}
+          onMessage={onMessage}
+        />
+      )}
+    </View>
   );
 }
 
@@ -370,16 +352,13 @@ const styles = StyleSheet.create({
   inlineWebView: {
     borderRadius: 8,
   },
-  popoverWrapper: {
-    flex: 1,
-  },
-  popoverContent: {
+  mapOverlay: {
     position: 'absolute',
-    zIndex: 1,
-    elevation: 2,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 20,
     overflow: 'hidden',
-    borderRadius: 8,
     backgroundColor: '#fff',
-    ...(Platform.OS === 'web' && { position: 'fixed' as any }),
   },
 });
