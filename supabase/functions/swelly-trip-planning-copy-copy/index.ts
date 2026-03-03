@@ -23,6 +23,7 @@ interface MatchResult {
   match_quality?: any
 }
 
+
 const GEOHASH_BASE32 = '0123456789bcdefghjkmnpqrstuvwxyz'
 function encodeGeohash(lat: number, lng: number, precision: number): string {
   let latitude = Math.max(-90, Math.min(90, lat))
