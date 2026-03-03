@@ -300,7 +300,11 @@ export const DestinationMapPickerCard = forwardRef<
                 <View
                   ref={inputRowRef}
                   onLayout={(e) => setInputRowHeight(e.nativeEvent.layout.height)}
-                  style={[styles.inputRowWrapper, isReadOnly && styles.inputRowWrapperDisabled]}
+                  style={[
+                    styles.inputRowWrapper,
+                    isReadOnly && styles.inputRowWrapperDisabled,
+                    showInlineMap && styles.inputRowWrapperAboveOverlay,
+                  ]}
                 >
                   <Ionicons name="location-outline" size={20} color="#A0A0A0" style={styles.inputRowIcon} />
                   <ScrollView
@@ -308,7 +312,7 @@ export const DestinationMapPickerCard = forwardRef<
                     showsHorizontalScrollIndicator={false}
                     style={styles.inputRowChipsScroll}
                     contentContainerStyle={styles.inputRowChipsContent}
-                    keyboardShouldPersistTaps="handled"
+                    keyboardShouldPersistTaps="always"
                   >
                     {places.map((label, index) => (
                       <View key={`${label}-${index}`} style={styles.chipWrap}>
@@ -542,6 +546,10 @@ const styles = StyleSheet.create({
   inputRowWrapperDisabled: {
     opacity: 0.6,
     backgroundColor: '#F5F5F5',
+  },
+  inputRowWrapperAboveOverlay: {
+    zIndex: 21,
+    elevation: 21,
   },
   inputRowIcon: { marginRight: 12 },
   inputRowChipsScroll: { flex: 1, maxHeight: 56 },

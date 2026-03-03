@@ -177,6 +177,7 @@ export const DestinationCardsCarouselCopy: React.FC<DestinationCardsCarouselCopy
           ref={flatListRef}
           data={destinations}
           scrollEnabled
+          keyboardShouldPersistTaps="always"
           renderItem={({ item, index }) => {
             const cardData = destinationData[item];
             let initialTimeValue: string | undefined;
