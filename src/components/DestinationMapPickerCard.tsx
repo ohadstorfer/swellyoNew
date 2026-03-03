@@ -322,10 +322,10 @@ export const DestinationMapPickerCard = forwardRef<
                     <TextInput
                       ref={inputRef}
                       keyboardType="web-search"
+                      underlineColorAndroid="transparent"
                       style={[
                         styles.inputRowTextInput,
                         isReadOnly && styles.inputRowTextInputDisabled,
-                        Platform.OS === 'web' && { outlineWidth: 0, borderWidth: 0 },
                       ]}
                       value={query}
                       onChangeText={(text) => {
@@ -338,6 +338,21 @@ export const DestinationMapPickerCard = forwardRef<
                       placeholder={places.length === 0 ? 'City/town/surf spots...' : 'Add another...'}
                       placeholderTextColor="#A0A0A0"
                       editable={!isReadOnly && !!apiKey}
+                      {...(Platform.OS === 'web' && {
+                        // @ts-ignore - web-only outline removal for focus ring
+                        style: [
+                          styles.inputRowTextInput,
+                          isReadOnly && styles.inputRowTextInputDisabled,
+                          {
+                            outline: 'none',
+                            outlineWidth: 0,
+                            outlineStyle: 'none',
+                            outlineColor: 'transparent',
+                            borderWidth: 0,
+                            borderColor: 'transparent',
+                          },
+                        ],
+                      })}
                     />
                   </ScrollView>
                 </View>
@@ -356,6 +371,7 @@ export const DestinationMapPickerCard = forwardRef<
                 <View style={styles.timeInputRow}>
                   <View style={styles.timeInputBox}>
                     <TextInput
+                      underlineColorAndroid="transparent"
                       style={[styles.timeInput, isReadOnly && styles.inputReadOnly]}
                       value={timeValue}
                       onChangeText={handleTimeValueChange}
@@ -363,6 +379,21 @@ export const DestinationMapPickerCard = forwardRef<
                       placeholderTextColor="#A0A0A0"
                       keyboardType="numeric"
                       editable={!isReadOnly}
+                      {...(Platform.OS === 'web' && {
+                        // @ts-ignore - web-only outline removal for focus ring
+                        style: [
+                          styles.timeInput,
+                          isReadOnly && styles.inputReadOnly,
+                          {
+                            outline: 'none',
+                            outlineWidth: 0,
+                            outlineStyle: 'none',
+                            outlineColor: 'transparent',
+                            borderWidth: 0,
+                            borderColor: 'transparent',
+                          },
+                        ],
+                      })}
                     />
                   </View>
                   <View

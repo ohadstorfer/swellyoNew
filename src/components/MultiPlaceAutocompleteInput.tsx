@@ -240,6 +240,7 @@ export const MultiPlaceAutocompleteInput = forwardRef<
           ))}
           <TextInput
             ref={inputRef}
+            underlineColorAndroid="transparent"
             style={[styles.textInput, disabled && styles.textInputDisabled]}
             value={query}
             onChangeText={(text) => {
@@ -255,11 +256,18 @@ export const MultiPlaceAutocompleteInput = forwardRef<
             onFocus={() => suggestions.length > 0 && setDropdownVisible(true)}
             onBlur={handleBlur}
             {...(Platform.OS === 'web' && {
-              // @ts-ignore
+              // @ts-ignore - web-only outline removal for focus ring
               style: [
                 styles.textInput,
                 disabled && styles.textInputDisabled,
-                { outline: 'none', outlineWidth: 0, borderWidth: 0 },
+                {
+                  outline: 'none',
+                  outlineWidth: 0,
+                  outlineStyle: 'none',
+                  outlineColor: 'transparent',
+                  borderWidth: 0,
+                  borderColor: 'transparent',
+                },
               ],
             })}
           />

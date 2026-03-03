@@ -298,28 +298,25 @@ export const DestinationInputCard = forwardRef<DestinationInputCardRef, Destinat
               <Ionicons name="location-outline" size={20} color="#A0A0A0" style={styles.inputIcon} />
               <TextInput
                 ref={areasInputRef}
-                style={[styles.textInput, isReadOnly && styles.inputReadOnly]}
+                underlineColorAndroid="transparent"
+                style={[
+                  styles.textInput,
+                  isReadOnly && styles.inputReadOnly,
+                  Platform.OS === 'web' && {
+                    outline: 'none',
+                    outlineWidth: 0,
+                    outlineStyle: 'none',
+                    outlineColor: 'transparent',
+                    borderWidth: 0,
+                    borderColor: 'transparent',
+                  },
+                ]}
                 value={areas}
                 onChangeText={setAreas}
                 placeholder="City/town/surf spots..."
                 placeholderTextColor="#A0A0A0"
                 multiline={false}
                 editable={!isReadOnly}
-                {...(Platform.OS === 'web' && {
-                  // @ts-ignore
-                  style: [
-                    styles.textInput,
-                    isReadOnly && styles.inputReadOnly,
-                    {
-                      outline: 'none',
-                      outlineWidth: 0,
-                      outlineStyle: 'none',
-                      outlineColor: 'transparent',
-                      borderWidth: 0,
-                      borderColor: 'transparent',
-                    },
-                  ],
-                })}
               />
             </TouchableOpacity>
 
@@ -328,28 +325,25 @@ export const DestinationInputCard = forwardRef<DestinationInputCardRef, Destinat
               <View style={styles.timeInputRow}>
                 <View style={styles.timeInputBox}>
                   <TextInput
-                    style={[styles.timeInput, isReadOnly && styles.inputReadOnly]}
+                    underlineColorAndroid="transparent"
+                    style={[
+                      styles.timeInput,
+                      isReadOnly && styles.inputReadOnly,
+                      Platform.OS === 'web' && {
+                        outline: 'none',
+                        outlineWidth: 0,
+                        outlineStyle: 'none',
+                        outlineColor: 'transparent',
+                        borderWidth: 0,
+                        borderColor: 'transparent',
+                      },
+                    ]}
                     value={timeValue}
                     onChangeText={handleTimeValueChange}
                     placeholder="🕝 Time spent"
                     placeholderTextColor="#A0A0A0"
                     keyboardType="numeric"
                     editable={!isReadOnly}
-                    {...(Platform.OS === 'web' && {
-                      // @ts-ignore
-                      style: [
-                        styles.timeInput,
-                        isReadOnly && styles.inputReadOnly,
-                        {
-                          outline: 'none',
-                          outlineWidth: 0,
-                          outlineStyle: 'none',
-                          outlineColor: 'transparent',
-                          borderWidth: 0,
-                          borderColor: 'transparent',
-                        },
-                      ],
-                    })}
                   />
                 </View>
                 <View
