@@ -341,7 +341,7 @@ export const DestinationMapPickerCard = forwardRef<
                     />
                   </ScrollView>
                 </View>
-                {showInlineMap && (
+                {showInlineMap && inputRowHeight > 0 && (
                   <MapPopover
                     visible
                     inputRowHeight={inputRowHeight}
