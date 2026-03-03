@@ -88,12 +88,13 @@ export function InlineMapView({ htmlContent, width, height, query, onMessage }: 
           title="Inline map"
           srcDoc={htmlContent}
           onLoad={handleLoad}
-          tabIndex={-1}
+          tabIndex={0}
           style={{
             width,
             height,
             border: 'none',
             borderRadius: 8,
+            touchAction: 'pan-y',
           } as React.CSSProperties}
           sandbox="allow-scripts allow-same-origin"
         />
@@ -115,6 +116,7 @@ export function InlineMapView({ htmlContent, width, height, query, onMessage }: 
           originWhitelist={['*']}
           javaScriptEnabled
           domStorageEnabled
+          nestedScrollEnabled
         />
       )}
     </View>
@@ -166,7 +168,7 @@ export function MapPopover({
         setOverlaySize((prev) => (prev.width === width && prev.height === height ? prev : { width, height }));
       }}
     >
-      <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+      <Pressable style={[StyleSheet.absoluteFill, { pointerEvents: 'none' }]} onPress={onClose} />
       {overlaySize.width > 0 && overlaySize.height > 0 && (
         <InlineMapView
           htmlContent={htmlContent}
@@ -176,6 +178,14 @@ export function MapPopover({
           onMessage={onMessage}
         />
       )}
+      <TouchableOpacity
+        style={styles.mapOverlayCloseButton}
+        onPress={onClose}
+        activeOpacity={0.8}
+        accessibilityLabel="Close map"
+      >
+        <Text style={styles.mapOverlayCloseText}>Done</Text>
+      </TouchableOpacity>
     </View>
   );
 }
@@ -249,7 +259,7 @@ export function MapPickerModal({
         <Text style={styles.headerButtonText}>Cancel</Text>
       </TouchableOpacity>
       <Text style={styles.headerTitle}>Pick a place on map</Text>
-      <TouchableOpacity
+      {/* <TouchableOpacity
         onPress={() => {
           onDone?.();
           onCancel();
@@ -258,7 +268,7 @@ export function MapPickerModal({
         accessibilityLabel="Done"
       >
         <Text style={[styles.headerButtonText, styles.headerButtonPrimary]}>Done</Text>
-      </TouchableOpacity>
+      </TouchableOpacity> */}
     </View>
   );
 
@@ -360,5 +370,20 @@ const styles = StyleSheet.create({
     zIndex: 20,
     overflow: 'hidden',
     backgroundColor: '#fff',
+  },
+  mapOverlayCloseButton: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderRadius: 8,
+    zIndex: 25,
+  },
+  mapOverlayCloseText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '600',
   },
 });

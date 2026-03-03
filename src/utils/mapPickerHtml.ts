@@ -242,9 +242,9 @@ export function getMapPickerInlineHtml(
   <title>Map</title>
   <style>
     * { box-sizing: border-box; }
-    body { margin: 0; font-family: system-ui, sans-serif; }
+    html, body { margin: 0; height: 100%; font-family: system-ui, sans-serif; }
     #map { width: 100%; height: 100%; position: absolute; left: 0; top: 0; }
-    #list { position: absolute; left: 0; right: 0; bottom: 0; max-height: 40%; overflow-y: auto; background: #fff; box-shadow: 0 -2px 8px rgba(0,0,0,0.15); z-index: 10; }
+    #list { position: absolute; left: 0; right: 0; bottom: 0; max-height: 40%; overflow-y: auto; -webkit-overflow-scrolling: touch; background: #fff; box-shadow: 0 -2px 8px rgba(0,0,0,0.15); z-index: 10; }
     .list-item { padding: 10px 16px; border-bottom: 1px solid #eee; cursor: pointer; font-size: 14px; }
     .list-item:active { background: #f0f0f0; }
   </style>

@@ -358,7 +358,7 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     paddingTop: 32,
     paddingHorizontal: 24,
-    paddingBottom: 16,
+    paddingBottom: 0,
     minHeight: 320,
   },
   flagCircleWrapper: { position: 'absolute', top: 40, left: 0, right: 0, alignItems: 'center', zIndex: 1 },

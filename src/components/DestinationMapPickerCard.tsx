@@ -483,7 +483,7 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     paddingTop: 32,
     paddingHorizontal: 24,
-    paddingBottom: 16,
+    paddingBottom: 0,
     minHeight: 320,
   },
   flagCircleWrapper: { position: 'absolute', top: 40, left: 0, right: 0, alignItems: 'center', zIndex: 1 },
@@ -515,7 +515,7 @@ const styles = StyleSheet.create({
   },
   contentWithStack: {
     flex: 1,
-    gap: 12,
+    gap: 8,
     overflow: 'visible',
     zIndex: 10000,
     elevation: 24,
@@ -616,7 +616,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginTop: 16,
-    marginBottom: 10,
+    marginBottom: 0,
   },
   nextButtonText: {
     color: colors.white,
@@ -631,7 +631,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginTop: 16,
-    marginBottom: 10,
+    marginBottom: 0,
   },
   saveButtonDisabled: { opacity: 0.5 },
 });
