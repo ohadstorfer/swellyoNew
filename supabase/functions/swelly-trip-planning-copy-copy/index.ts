@@ -1115,11 +1115,12 @@ DATA STRUCTURE (when is_finished: true):
     "mentioned_preferences": [],
     "mentioned_deal_breakers": []
   },
-  "queryFilters": { "country_from": ["Israel"], "surfboard_type": ["shortboard"], "surf_level_category": ["advanced", "pro"] }, // Optional: include when user specified origin, board type, or level. Use exact country names and enum values.
+  "queryFilters": { "country_from": ["Israel"], "surfboard_type": ["shortboard"], "surf_level_category": ["advanced", "pro"], "age_min": 20, "age_max": 30 }, // Include when user specified origin, board type, level, or age. Use exact country names and enum values. When user says "around my age" or "same age", use USER PROFILE CONTEXT age and set age_min/age_max (e.g. age ±5).
   "search_summary": "Short casual summary of what we're searching for, shown to the user before they decide whether to search or edit filters. REQUIRED when is_finished is true. First, write a one-line friendly summary of the filters (e.g. \"Sweet so we're going for American dude that surfed Hawaii and is also a shortboarder just like you!\" or \"Got it — Israeli advanced shortboarder!\"). Then add a newline (\"\\n\") and a short question asking if they want to search now or tweak filters first (e.g. \"Are you ready for me to search now, or do you want to tweak any filters first?\"). Tone: friendly, first person, no markdown. Base it ONLY on the criteria (destination_country, area, queryFilters). Do NOT mention that there is no destination, no specific destination, or that we're going global — just describe the filters.",
   "next_action": "search" | "edit" | "clarify" | null // Optional. For the FIRST user reply after you asked whether to search or edit: set to \"search\" when they clearly want to search now, \"edit\" when they clearly want to change/tweak filters first, or \"clarify\" when their intent is ambiguous and you are asking a follow-up question.
 }
 Do NOT include non_negotiable_criteria or prioritize_filters in the data. When is_finished is true, ALWAYS set search_summary so the user sees what will be searched. Matching is by destination (country + optional area) and, when provided, by queryFilters (country_from, surfboard_type, surf_level_category). When the user specified criteria (e.g. "Israeli", "shortboard", "advanced"), include queryFilters in data so the system can filter matches.
+CRITICAL - TEXT AND DATA MUST MATCH: Every filter or criterion you mention in return_message or search_summary MUST appear in data (either destination_country/area or a corresponding key in data.queryFilters). If you say "shortboarder", "from Israel", or "around your age", the matching field must be set in data.queryFilters (or destination/area). Do not describe a criterion in text without setting it in data.
 For return_message and search_summary: when matching without a destination (only queryFilters), do NOT say \"no destination\", \"no specific destination\", \"going global\", or similar. Only mention the existing filters (e.g. \"Got you, bro — searching for an advanced Israeli shortboarder.\").
 
 RESPONSE FORMAT - CRITICAL: YOU MUST ALWAYS RETURN VALID JSON!
@@ -1491,6 +1492,127 @@ function ensureResponseDataQueryFilters(data: any): any {
   return { ...data, queryFilters: q }
 }
 
+/**
+ * Second-layer check: ensure every filter described in the text is correctly represented in the JSON.
+ * Calls a small GPT request to derive corrected queryFilters (and destination/area if relevant) from the text and current data.
+ * Returns null on any error or invalid output (caller keeps current filters).
+ */
+async function reconcileQueryFiltersFromText(
+  textMessage: string,
+  searchSummary: string | null | undefined,
+  currentData: { queryFilters?: any; destination_country?: string; area?: string },
+  userAge?: number,
+): Promise<{ queryFilters?: any; destination_country?: string; area?: string } | null> {
+  try {
+    const text = [textMessage?.trim(), searchSummary?.trim()].filter(Boolean).join('\n')
+    if (!text || text.length < 10) return null
+    if (!OPENAI_API_KEY) return null
+
+    const currentJson = JSON.stringify({
+      queryFilters: currentData.queryFilters ?? null,
+      destination_country: currentData.destination_country ?? null,
+      area: currentData.area ?? null,
+    })
+    const userAgeLine = userAge != null ? `\nCurrent user age (use for "around my age"): ${userAge}. For "around my age" set age_min: ${Math.max(0, userAge - 5)}, age_max: ${userAge + 5}.` : ''
+
+    const systemPrompt = `You are a filter checker. You will receive the exact text the user will see, and the current JSON for queryFilters and destination. Your job is to output a single JSON object that correctly represents filter criteria mentioned in the text.
+
+Rules:
+- queryFilters: object with optional keys: country_from (array of official country names), age_min (number), age_max (number), surfboard_type (array: shortboard, mid_length, longboard, soft_top), surf_level_category (string or array: beginner, intermediate, advanced, pro).
+- Use official country names (e.g. "United States" not "USA", "Israel" not "Israeli" for country_from).
+- For age: "under 20" or "13-19" → age_min: 13, age_max: 19; "over 30" → age_min: 30; "around my age" with user age given → age_min: age-5, age_max: age+5.
+- If the text describes a destination, include destination_country and optionally area.
+- Only include in queryFilters keys that are already present in the Current JSON. Do not add new keys. Only fix or fill values for existing keys so the JSON matches the text. If the text mentions a criterion that has no key in Current JSON, omit it from your output.
+- Output ONLY a valid JSON object with keys queryFilters (object), and optionally destination_country (string) and area (string). No markdown, no explanation.`
+    const userPrompt = `Text the user will see:\n${text}\n\nCurrent JSON:\n${currentJson}${userAgeLine}\n\nOutput the complete corrected JSON object (queryFilters and destination_country/area if applicable). Return only valid JSON.`
+
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        temperature: 0.2,
+        max_tokens: 500,
+      }),
+    })
+    if (!response.ok) {
+      console.warn('[reconcileQueryFiltersFromText] OpenAI request failed:', response.status)
+      return null
+    }
+    const data = await response.json()
+    let raw = data.choices?.[0]?.message?.content?.trim() || ''
+    if (!raw) return null
+    const codeBlock = raw.match(/```(?:json)?\s*([\s\S]*?)```/)
+    if (codeBlock) raw = codeBlock[1].trim()
+    const parsed = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object') return null
+    const hasQueryFilters = parsed.queryFilters && typeof parsed.queryFilters === 'object'
+    const hasDestination = parsed.destination_country && String(parsed.destination_country).trim()
+    if (!hasQueryFilters && !hasDestination) return null
+
+    const result: { queryFilters?: any; destination_country?: string; area?: string } = {}
+    if (hasQueryFilters) {
+      result.queryFilters = await normalizeQueryFilters(parsed.queryFilters)
+    }
+    if (hasDestination) {
+      result.destination_country = String(parsed.destination_country).trim()
+      result.area = parsed.area != null ? String(parsed.area).trim() : undefined
+      const forNorm = { destination_country: result.destination_country, area: result.area || null }
+      normalizeUSDestination(forNorm)
+      result.destination_country = forNorm.destination_country ?? result.destination_country
+      result.area = forNorm.area ?? result.area
+    }
+    return result
+  } catch (e) {
+    console.warn('[reconcileQueryFiltersFromText] Error:', e)
+    return null
+  }
+}
+
+/**
+ * Call GPT for a short acknowledgment after the user removes a filter in the UI.
+ * Returns plain text (one or two sentences) or null on error.
+ */
+async function getFilterRemovalAcknowledgment(requestData: any, removedFilterLabel?: string): Promise<string | null> {
+  try {
+    if (!OPENAI_API_KEY) return null
+    const json = JSON.stringify({
+      queryFilters: requestData?.queryFilters ?? null,
+      destination_country: requestData?.destination_country ?? null,
+      area: requestData?.area ?? null,
+    })
+    const removed = removedFilterLabel?.trim() || 'a filter'
+    const systemPrompt = 'You are Swelly, a friendly surfer buddy. The user just removed a filter in the app. Reply with one or two short sentences: acknowledge what was removed, list their current filters in one line, then ask if they want to search or tweak. First person, casual, no markdown. Max 2 sentences.'
+    const userPrompt = `The user removed: ${removed}. Current requestData: ${json}. Reply with a short acknowledgment and current filters.`
+
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_API_KEY}` },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
+        temperature: 0.3,
+        max_tokens: 150,
+      }),
+    })
+    if (!response.ok) return null
+    const data = await response.json()
+    let raw = data.choices?.[0]?.message?.content?.trim() || ''
+    if (!raw) return null
+    return raw.replace(/^["']|["']$/g, '').trim()
+  } catch (e) {
+    console.warn('[getFilterRemovalAcknowledgment] Error:', e)
+    return null
+  }
+}
+
 /** Sentinel: when extracted has this for an array key, clear that filter (e.g. "any board"). */
 const QUERY_FILTER_CLEAR = '__clear__'
 
@@ -1620,7 +1742,8 @@ async function extractQueryFilters(
   userMessage: string,
   destinationCountry: string,
   conversationHistory: Message[],
-  existingQueryFilters?: any
+  existingQueryFilters?: any,
+  userProfile?: { age?: number } | null
 ): Promise<{
   supabaseFilters: {
     country_from?: string[];
@@ -1638,6 +1761,9 @@ async function extractQueryFilters(
   intentUnclear?: string[]; // Only when existingQueryFilters provided and intent is ambiguous
 }> {
   const isEditingMode = existingQueryFilters != null && typeof existingQueryFilters === 'object'
+  const userAgeLine = userProfile?.age != null
+    ? `Current user's age from profile: ${userProfile.age}. When the user says "around my age" or "similar age", set age_min: ${Math.max(0, userProfile.age - 5)}, age_max: ${userProfile.age + 5} (or a sensible range).\n`
+    : ''
 
   const editingModePrompt = isEditingMode
     ? `
@@ -1736,7 +1862,7 @@ TYPO HANDLING (be smart about common mistakes - normalize to official country na
 - "Korea" / "South Korea" → "South Korea"
 
 LOGICAL INFERENCE:
-- If user says "similar age" and you know their age (e.g., 25), infer ±5 years → age_range: [20, 30]
+${userAgeLine}- If user says "similar age" and you know their age (e.g., 25), infer ±5 years → age_range: [20, 30]
 - If user says "around my age", infer ±5 years from their age
 - If user says "young" or "older", infer reasonable age ranges based on context
 - If user says "must be shortboarders" or "they will use shortboard" → surfboard_type: ["shortboard"]
@@ -2288,14 +2414,55 @@ ${getPronounInstructions(userProfile.pronoun)}`
         if (tripPlanningData && typeof tripPlanningData === 'object') {
           normalizeUSDestination(tripPlanningData)
         }
-        
+
+        // Second-layer check: reconcile text vs JSON filters (new_chat)
+        const newChatHasFilters = tripPlanningData && (() => {
+          const q = tripPlanningData.queryFilters
+          const hasQF = q && typeof q === 'object' && Object.keys(q).length > 0
+          const hasDest = tripPlanningData.destination_country && String(tripPlanningData.destination_country).trim()
+          return hasQF || !!hasDest
+        })()
+        const newChatHasText = (returnMessage?.trim() || tripPlanningData?.search_summary?.trim()) || ''
+        if (parsed.is_finished && newChatHasFilters && newChatHasText) {
+          try {
+            console.log('[reconcileQueryFiltersFromText] Running text-vs-JSON reconciliation (new_chat)')
+            const reconciled = await reconcileQueryFiltersFromText(
+              returnMessage || '',
+              tripPlanningData?.search_summary,
+              tripPlanningData,
+              userProfile?.age,
+            )
+            if (reconciled) {
+              if (reconciled.queryFilters != null) {
+                const allowedKeys = new Set(Object.keys(tripPlanningData.queryFilters || {}))
+                const filtered: Record<string, any> = {}
+                for (const key of Object.keys(reconciled.queryFilters)) {
+                  if (allowedKeys.has(key)) filtered[key] = reconciled.queryFilters[key]
+                }
+                const isEmpty = Object.keys(filtered).length === 0
+                if (!isEmpty) {
+                  tripPlanningData.queryFilters = filtered
+                  console.log('[reconcileQueryFiltersFromText] Updated queryFilters from text (new_chat); keys:', Object.keys(filtered))
+                }
+              }
+              if (reconciled.destination_country != null) {
+                tripPlanningData.destination_country = reconciled.destination_country
+                if (reconciled.area !== undefined) tripPlanningData.area = reconciled.area
+                console.log('[reconcileQueryFiltersFromText] Updated destination_country/area from text (new_chat)')
+              }
+            }
+          } catch (e) {
+            console.warn('[reconcileQueryFiltersFromText] Reconciliation failed (new_chat), keeping current filters:', e)
+          }
+        }
+
         parsedResponse = {
           chat_id: chatId,
           return_message: returnMessage,
           is_finished: parsed.is_finished || false,
           data: ensureResponseDataQueryFilters(tripPlanningData) ?? null
         }
-        
+
         console.log('Final response being sent:', JSON.stringify(parsedResponse, null, 2))
       } catch (parseError) {
         console.error('Error parsing JSON from ChatGPT:', parseError)
@@ -2495,7 +2662,7 @@ ${getPronounInstructions(userProfile.pronoun)}`
         
         console.log('📍 Destination country for filter extraction:', destinationCountry)
         const existingForExtractor = body.adding_filters && body.existing_query_filters && typeof body.existing_query_filters === 'object' ? body.existing_query_filters : undefined
-        filterResult = await extractQueryFilters(body.message, destinationCountry, messages, existingForExtractor)
+        filterResult = await extractQueryFilters(body.message, destinationCountry, messages, existingForExtractor, userProfile)
         extractedQueryFilters = filterResult.supabaseFilters
         unmappableCriteria = filterResult.unmappableCriteria || []
         console.log('✅ Extracted query filters:', JSON.stringify(extractedQueryFilters, null, 2))
@@ -2585,6 +2752,15 @@ ${getPronounInstructions(userProfile.pronoun)}`
       // Add a final reminder to return JSON format
       const jsonFormatReminder = `CRITICAL: You MUST return a valid JSON object. Your response must start with { and end with }. Do NOT return plain text. The structure must be: {"return_message": "...", "is_finished": false, "data": {...}}. If you return plain text, the system will fail!`
       messages.splice(messages.length - 1, 0, { role: 'system', content: jsonFormatReminder })
+
+      // Inject current filters so main GPT does not re-add criteria the user removed (continue only; skip when adding_filters)
+      if (!body.adding_filters && accumulatedFilters && Object.keys(accumulatedFilters).length > 0) {
+        messages.splice(messages.length - 1, 0, {
+          role: 'system',
+          content: 'Current search filters (authoritative; do not re-add criteria the user has removed): ' + JSON.stringify(accumulatedFilters)
+        })
+        console.log('📋 Injected current filters into main GPT (authoritative)')
+      }
 
       // Call OpenAI
       let assistantMessage = await callOpenAI(messages)
@@ -3002,14 +3178,25 @@ ${getPronounInstructions(userProfile.pronoun)}`
             // Normalize queryFilters before assigning to ensure country names are correct
             const normalizedQueryFilters = await normalizeQueryFilters(extractedQueryFilters);
             
-            // Merge filters: current takes precedence over accumulated
-            if (tripPlanningData.queryFilters) {
-              tripPlanningData.queryFilters = {
-                ...tripPlanningData.queryFilters,
-                ...normalizedQueryFilters, // Current filters override accumulated ones
+            // Last assistant wins: when we have accumulatedFilters (from prior assistant message), use it as base and only add extractor keys not in it; do not overlay main GPT
+            if (accumulatedFilters && Object.keys(accumulatedFilters).length > 0) {
+              tripPlanningData.queryFilters = { ...accumulatedFilters };
+              for (const key of Object.keys(normalizedQueryFilters)) {
+                if (!(key in tripPlanningData.queryFilters)) {
+                  tripPlanningData.queryFilters[key] = normalizedQueryFilters[key];
+                }
               }
+              console.log('✅ Last assistant wins: query filters from accumulated + extractor-only keys')
             } else {
-              tripPlanningData.queryFilters = normalizedQueryFilters
+              // Merge filters: main GPT wins, extractor fills gaps (extractor base, then overlay GPT)
+              if (tripPlanningData.queryFilters) {
+                tripPlanningData.queryFilters = {
+                  ...normalizedQueryFilters,
+                  ...(tripPlanningData.queryFilters || {}),
+                }
+              } else {
+                tripPlanningData.queryFilters = normalizedQueryFilters
+              }
             }
             // Update flag: if current step is non-negotiable, mark it
             if (isCriteriaStep) {
@@ -3020,11 +3207,15 @@ ${getPronounInstructions(userProfile.pronoun)}`
           console.log('Query filters being stored:', JSON.stringify(extractedQueryFilters, null, 2))
         } else if (extractedQueryFilters && Object.keys(extractedQueryFilters).length === 0) {
           console.log('⚠️ Query filters were extracted but are empty - skipping')
+        } else if (accumulatedFilters && Object.keys(accumulatedFilters).length > 0 && tripPlanningData) {
+          // User sent e.g. "search" with no new extraction; last assistant wins
+          tripPlanningData.queryFilters = { ...accumulatedFilters };
+          console.log('✅ Last assistant wins (no new extraction): query filters from accumulated only')
         }
         
         // FALLBACK: Build queryFilters from non_negotiable_criteria if queryFilters is null/empty
-        // This ensures filters are available even if AI extraction failed or returned empty
-        if (tripPlanningData && (!tripPlanningData.queryFilters || Object.keys(tripPlanningData.queryFilters).length === 0)) {
+        // Skip when we have accumulatedFilters (user had already reduced filters)
+        if (tripPlanningData && (!tripPlanningData.queryFilters || Object.keys(tripPlanningData.queryFilters).length === 0) && (!accumulatedFilters || Object.keys(accumulatedFilters).length === 0)) {
           if (tripPlanningData.non_negotiable_criteria && Object.keys(tripPlanningData.non_negotiable_criteria).length > 0) {
             console.log('🔧 Building queryFilters from non_negotiable_criteria as fallback')
             tripPlanningData.queryFilters = tripPlanningData.queryFilters || {}
@@ -3143,6 +3334,49 @@ ${getPronounInstructions(userProfile.pronoun)}`
           tripPlanningData.next_action = 'search'
           responseNormalized = true
           console.log('✅ Decision reply: user said "send"/"go" etc. — forcing next_action to "search"')
+        }
+        
+        // Second-layer check: reconcile text vs JSON filters when we have filter-describing text and queryFilters/destination
+        const hasFiltersToValidate = tripPlanningData && (() => {
+          const q = tripPlanningData.queryFilters
+          const hasQF = q && typeof q === 'object' && Object.keys(q).length > 0
+          const hasDest = tripPlanningData.destination_country && String(tripPlanningData.destination_country).trim()
+          return hasQF || !!hasDest
+        })()
+        const hasTextToValidate = (returnMessage?.trim() || tripPlanningData?.search_summary?.trim()) || ''
+        if (shouldBeFinished && hasFiltersToValidate && hasTextToValidate) {
+          try {
+            console.log('[reconcileQueryFiltersFromText] Running text-vs-JSON reconciliation (continue)')
+            const reconciled = await reconcileQueryFiltersFromText(
+              returnMessage || '',
+              tripPlanningData?.search_summary,
+              tripPlanningData,
+              userProfile?.age,
+            )
+            if (reconciled) {
+              if (reconciled.queryFilters != null) {
+                const allowedKeys = new Set(Object.keys(tripPlanningData.queryFilters || {}))
+                const filtered: Record<string, any> = {}
+                for (const key of Object.keys(reconciled.queryFilters)) {
+                  if (allowedKeys.has(key)) filtered[key] = reconciled.queryFilters[key]
+                }
+                const isEmpty = Object.keys(filtered).length === 0
+                if (!isEmpty) {
+                  tripPlanningData.queryFilters = filtered
+                  console.log('[reconcileQueryFiltersFromText] Updated queryFilters from text; keys:', Object.keys(filtered))
+                }
+              }
+              if (reconciled.destination_country != null) {
+                tripPlanningData.destination_country = reconciled.destination_country
+                if (reconciled.area !== undefined) tripPlanningData.area = reconciled.area
+                console.log('[reconcileQueryFiltersFromText] Updated destination_country/area from text')
+              }
+            } else {
+              console.log('[reconcileQueryFiltersFromText] No update (validator returned null)')
+            }
+          } catch (e) {
+            console.warn('[reconcileQueryFiltersFromText] Reconciliation failed, keeping current filters:', e)
+          }
         }
         
         parsedResponse = {
@@ -3629,6 +3863,73 @@ ${getPronounInstructions(userProfile.pronoun)}`
         console.error('Error updating search summary block:', error)
         return new Response(
           JSON.stringify({ error: 'Failed to update search summary block', details: error instanceof Error ? error.message : String(error) }),
+          { status: 500, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } }
+        )
+      }
+    }
+
+    // Route: PATCH /acknowledge-filter-removal/:chat_id
+    const ackRemovalMatch = path.match(/acknowledge-filter-removal\/([a-f0-9-]{36})/i)
+    if (ackRemovalMatch && req.method === 'PATCH') {
+      const chatId = ackRemovalMatch[1]
+      const body: { messageIndex?: number; requestData: any; removedFilterLabel?: string; context: 'message' | 'pending_search' } = await req.json().catch(() => ({} as any))
+      if (!chatId) {
+        return new Response(JSON.stringify({ error: 'Missing chat_id' }), { status: 400, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } })
+      }
+      if (body.requestData === undefined) {
+        return new Response(JSON.stringify({ error: 'Missing requestData' }), { status: 400, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } })
+      }
+      const context = body.context === 'pending_search' ? 'pending_search' : 'message'
+      try {
+        let messages = await getChatHistory(chatId, supabaseAdmin)
+        if (messages.length === 0) {
+          return new Response(JSON.stringify({ error: 'Chat not found' }), { status: 404, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } })
+        }
+        if (context === 'message' && typeof body.messageIndex === 'number' && body.messageIndex >= 0 && body.messageIndex < messages.length) {
+          const msg = messages[body.messageIndex] as any
+          if (!msg.metadata) msg.metadata = {}
+          if (!msg.metadata.actionRow) msg.metadata.actionRow = { requestData: null, selectedAction: null }
+          msg.metadata.actionRow.requestData = body.requestData
+        }
+        if (context === 'pending_search') {
+          let lastIdx = -1
+          for (let i = messages.length - 1; i >= 0; i--) {
+            if (messages[i].role === 'assistant') { lastIdx = i; break }
+          }
+          if (lastIdx >= 0) {
+            const msg = messages[lastIdx] as any
+            if (!msg.metadata) msg.metadata = {}
+            if (!msg.metadata.searchSummaryBlock) msg.metadata.searchSummaryBlock = { requestData: null, searchSummary: '', selectedAction: null }
+            msg.metadata.searchSummaryBlock.requestData = body.requestData
+          }
+        }
+        const summaryText = await getFilterRemovalAcknowledgment(body.requestData, body.removedFilterLabel)
+        const text = summaryText || 'Got it — filters updated. Want to search or tweak?'
+        const payload = {
+          return_message: text,
+          is_finished: true,
+          data: {
+            queryFilters: body.requestData?.queryFilters ?? null,
+            destination_country: body.requestData?.destination_country ?? null,
+            area: body.requestData?.area ?? null,
+            search_summary: text,
+          },
+        }
+        messages.push({ role: 'assistant', content: JSON.stringify(payload) })
+        await saveChatHistory(chatId, messages, user.id, null, supabaseAdmin)
+        const now = new Date()
+        const timestamp = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
+        const newMessage = {
+          id: crypto.randomUUID(),
+          text: text,
+          isUser: false,
+          timestamp,
+        }
+        return new Response(JSON.stringify({ success: true, newMessage }), { status: 200, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } })
+      } catch (err) {
+        console.error('acknowledge-filter-removal error:', err)
+        return new Response(
+          JSON.stringify({ error: 'Failed to acknowledge filter removal', details: err instanceof Error ? err.message : String(err) }),
           { status: 500, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } }
         )
       }

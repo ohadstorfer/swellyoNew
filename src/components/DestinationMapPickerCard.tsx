@@ -222,10 +222,27 @@ export const DestinationMapPickerCard = forwardRef<
   }, [destination]);
 
   const handleTimeValueChange = (text: string) => {
-    const cleanedText = text.replace(/[^0-9.]/g, '');
+    // Allow only numbers and a single decimal point
+    let cleanedText = text.replace(/[^0-9.]/g, '');
     const parts = cleanedText.split('.');
-    const final = parts.length > 2 ? `${parts[0]}.${parts[1]}` : cleanedText;
-    setTimeValue(final);
+
+    if (parts.length > 2) {
+      // More than one decimal point, keep only the first part and first decimal
+      cleanedText = `${parts[0]}.${parts[1]}`;
+    }
+
+    // If there's a decimal point with digits after it, only allow ".5"
+    if (cleanedText.includes('.')) {
+      const [integerPart, decimalPart] = cleanedText.split('.');
+      if (decimalPart && decimalPart.length > 0) {
+        // If user types anything after decimal, replace with "5"
+        // Examples: "2.8" -> "2.5", "2.832" -> "2.5", "2.55" -> "2.5"
+        cleanedText = `${integerPart}.5`;
+      }
+      // If decimalPart is empty (user just typed "."), allow it temporarily
+    }
+
+    setTimeValue(cleanedText);
   };
 
   const unitPanResponder = useMemo(
@@ -381,7 +398,7 @@ export const DestinationMapPickerCard = forwardRef<
                       onChangeText={handleTimeValueChange}
                       placeholder="🕝 Time spent"
                       placeholderTextColor="#A0A0A0"
-                      keyboardType="numeric"
+                      keyboardType="decimal-pad"
                       editable={!isReadOnly}
                       {...(Platform.OS === 'web' && {
                         // @ts-ignore - web-only outline removal for focus ring

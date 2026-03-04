@@ -546,6 +546,38 @@ class SwellyService {
   }
 
   /**
+   * Acknowledge filter removal: persist new filters, get GPT summary, and return the new message for the client to append.
+   */
+  async acknowledgeFilterRemoval(
+    chatId: string,
+    payload: {
+      messageIndex?: number;
+      requestData: any;
+      removedFilterLabel?: string;
+      context: 'message' | 'pending_search';
+    }
+  ): Promise<{ success: boolean; newMessage?: { id: string; text: string; isUser: boolean; timestamp: string } }> {
+    try {
+      const url = this.getFunctionUrl(`/acknowledge-filter-removal/${chatId}`, 'trip-planning');
+      const headers = await this.getAuthHeaders();
+      const response = await fetch(url, {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify(payload),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        console.warn('[SwellyServiceCopy] acknowledgeFilterRemoval failed:', response.status, data);
+        return { success: false };
+      }
+      return { success: true, newMessage: data.newMessage };
+    } catch (error) {
+      console.warn('[SwellyServiceCopy] acknowledgeFilterRemoval error:', error);
+      return { success: false };
+    }
+  }
+
+  /**
    * Run matching on the server (Copy flow only). POSTs to /find-matches on the Copy edge.
    * @param chatId - Trip planning chat ID
    * @param tripPlanningData - Extracted data from Swelly response (destination_country, area, queryFilters, etc.)

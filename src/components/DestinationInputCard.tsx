@@ -180,12 +180,12 @@ export const DestinationInputCard = forwardRef<DestinationInputCardRef, Destinat
     // Allow only numbers and a single decimal point
     let cleanedText = text.replace(/[^0-9.]/g, '');
     const parts = cleanedText.split('.');
-    
+
     if (parts.length > 2) {
       // More than one decimal point, keep only the first part and first decimal
       cleanedText = `${parts[0]}.${parts[1]}`;
     }
-    
+
     // If there's a decimal point with digits after it, only allow ".5"
     if (cleanedText.includes('.')) {
       const [integerPart, decimalPart] = cleanedText.split('.');
@@ -196,7 +196,7 @@ export const DestinationInputCard = forwardRef<DestinationInputCardRef, Destinat
       }
       // If decimalPart is empty (user just typed "."), allow it temporarily
     }
-    
+
     setTimeValue(cleanedText);
   };
 
@@ -342,7 +342,7 @@ export const DestinationInputCard = forwardRef<DestinationInputCardRef, Destinat
                     onChangeText={handleTimeValueChange}
                     placeholder="🕝 Time spent"
                     placeholderTextColor="#A0A0A0"
-                    keyboardType="numeric"
+                    keyboardType="decimal-pad"
                     editable={!isReadOnly}
                   />
                 </View>

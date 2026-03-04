@@ -225,6 +225,8 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   const [lastMatchActionPressed, setLastMatchActionPressed] = useState<'new_chat' | 'add_filter' | 'more' | null>(null);
   const [existingFiltersForAdd, setExistingFiltersForAdd] = useState<{ data: any } | null>(null);
   const [filtersMenuVisible, setFiltersMenuVisible] = useState(false);
+  const [isAwaitingFilterRemovalResponse, setAwaitingFilterRemovalResponse] = useState(false);
+  const [messageIdsUnblockedByFilterDeletion, setMessageIdsUnblockedByFilterDeletion] = useState<Record<string, true>>({});
   const [trashHoverProgress, setTrashHoverProgress] = useState(0);
   const scrollViewRef = useRef<ScrollView>(null);
   // Drag-to-delete: ghost chip position and dragged item
@@ -308,9 +310,10 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         (m) =>
           m.isMatchedUsers &&
           m.actionRow?.requestData != null &&
-          m.actionRow?.selectedAction == null
+          m.actionRow?.selectedAction == null &&
+          !messageIdsUnblockedByFilterDeletion[m.id]
       ),
-    [messages]
+    [messages, messageIdsUnblockedByFilterDeletion]
   );
 
 
@@ -1064,6 +1067,21 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     }
     if (filterSource === 'pendingSearch' && pendingSearch) {
       setPendingSearch({ data: nextRequestData, searchSummary: pendingSearch.searchSummary ?? '' });
+      if (chatId) {
+        setFiltersMenuVisible(false);
+        setAwaitingFilterRemovalResponse(true);
+        swellyServiceCopy.acknowledgeFilterRemoval(chatId, {
+          requestData: nextRequestData,
+          removedFilterLabel: item.label,
+          context: 'pending_search',
+        }).then(res => {
+          setAwaitingFilterRemovalResponse(false);
+          if (res.success && res.newMessage) {
+            setMessages(prev => [...prev, { ...res.newMessage!, id: res.newMessage!.id, text: res.newMessage!.text, isUser: false, timestamp: res.newMessage!.timestamp }]);
+            setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100);
+          }
+        }).catch(() => setAwaitingFilterRemovalResponse(false));
+      }
       return;
     }
     if (filterSource === 'message' && filterSourceMessage?.id) {
@@ -1076,8 +1094,23 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
       );
       const backendIndex = filterSourceMessage.backendMessageIndex;
       if (chatId != null && typeof backendIndex === 'number' && backendIndex >= 0) {
+        setFiltersMenuVisible(false);
+        setAwaitingFilterRemovalResponse(true);
         swellyServiceCopy.updateMatchRequestData(chatId, backendIndex, nextRequestData).catch(err =>
           console.warn('[TripPlanningChatScreen] Failed to persist filter removal:', err));
+        swellyServiceCopy.acknowledgeFilterRemoval(chatId, {
+          messageIndex: backendIndex,
+          requestData: nextRequestData,
+          removedFilterLabel: item.label,
+          context: 'message',
+        }).then(res => {
+          setAwaitingFilterRemovalResponse(false);
+          if (res.success && res.newMessage) {
+            setMessages(prev => [...prev, { ...res.newMessage!, id: res.newMessage!.id, text: res.newMessage!.text, isUser: false, timestamp: res.newMessage!.timestamp }]);
+            setMessageIdsUnblockedByFilterDeletion(prev => ({ ...prev, [filterSourceMessage.id]: true }));
+            setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100);
+          }
+        }).catch(() => setAwaitingFilterRemovalResponse(false));
       }
     }
   };
@@ -1397,7 +1430,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             showsVerticalScrollIndicator={false}
           >
             {messages.map(renderMessage)}
-            {(isLoading || isInitializing) && (
+            {(isLoading || isInitializing || isAwaitingFilterRemovalResponse) && (
               <View style={[styles.messageContainer, styles.botMessageContainer]}>
                 <View style={[styles.messageBubble, styles.botMessageBubble]}>
                   <View style={styles.messageTextContainer}>
@@ -1432,7 +1465,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             value={inputText}
             onChangeText={setInputText}
             onSend={sendMessage}
-            disabled={isLoading || hasUnresolvedActionRow}
+            disabled={isLoading || hasUnresolvedActionRow || isAwaitingFilterRemovalResponse}
             placeholder={hasUnresolvedActionRow ? 'Choose an option above to continue' : 'Type your message..'}
             maxLength={500}
             primaryColor={colors.primary || '#B72DF2'}
