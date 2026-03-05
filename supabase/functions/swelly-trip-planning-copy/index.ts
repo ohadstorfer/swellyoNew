@@ -1793,6 +1793,16 @@ async function getChatHistory(chatId: string, supabaseAdmin: any): Promise<Messa
   } else {
     console.log('[getChatHistory] No messages with matched users metadata found')
   }
+  // Debug: actionRow.requestData per message (for filter-removal debugging)
+  console.log('[getChatHistory] Total messages:', messages.length)
+  messages.forEach((msg: any, idx: number) => {
+    const ar = msg.metadata?.actionRow?.requestData
+    if (ar != null) {
+      const qf = ar?.queryFilters
+      const qfKeys = qf && typeof qf === 'object' ? Object.keys(qf).join(',') : 'n/a'
+      console.log('[getChatHistory] msg', idx, 'role=', msg.role, 'actionRow.requestData: queryFilters keys=[' + qfKeys + '] destination_country=', ar?.destination_country, 'area=', ar?.area)
+    }
+  })
   
   return messages
 }
@@ -2287,18 +2297,35 @@ ${getPronounInstructions(userProfile.pronoun)}`
         // Continue without filters - fallback to existing logic
       }
       
-      // Also check previous messages for accumulated filters
-      // Merge filters from previous messages with current ones
+      // Also check previous messages for accumulated filters (prefer metadata.actionRow.requestData so manual filter removal is respected)
       let accumulatedFilters: any = null
+      let accumulatedFromMessage: 'metadata' | 'content' | null = null
       try {
-        // Look for filters in previous assistant responses
+        const startIdx = Math.max(0, messages.length - 2)
+        console.log('[accumulatedFilters] Scanning messages from index', startIdx, 'down to 0 (total messages:', messages.length, ')')
         for (let i = messages.length - 2; i >= 0; i--) {
           if (messages[i].role === 'assistant') {
+            const msg = messages[i] as any
+            const meta = msg.metadata
+            const actionRow = meta?.actionRow
+            const requestData = actionRow?.requestData
+            const fromMetadata = requestData?.queryFilters
+            console.log('[accumulatedFilters] msg i=' + i + ' hasMetadata=' + !!meta + ' hasActionRow=' + !!actionRow + ' hasRequestData=' + !!requestData + ' queryFilters=' + (fromMetadata === undefined ? 'undefined' : typeof fromMetadata))
+            if (fromMetadata !== undefined && fromMetadata !== null) console.log('[accumulatedFilters] msg i=' + i + ' queryFilters value:', JSON.stringify(fromMetadata))
+            // Prefer metadata: use requestData.queryFilters if present (object = filters; null = user cleared them)
+            if (requestData != null && typeof requestData === 'object' && 'queryFilters' in requestData) {
+              accumulatedFilters = typeof fromMetadata === 'object' && fromMetadata !== null ? fromMetadata : null
+              accumulatedFromMessage = 'metadata'
+              console.log('[accumulatedFilters] Using filters from metadata (msg i=' + i + '):', accumulatedFilters == null ? 'null' : JSON.stringify(accumulatedFilters, null, 2))
+              break
+            }
             try {
-              const prevParsed = JSON.parse(messages[i].content)
-              if (prevParsed.data?.queryFilters) {
-                accumulatedFilters = prevParsed.data.queryFilters
-                console.log('📦 Found accumulated filters from previous message:', JSON.stringify(accumulatedFilters, null, 2))
+              const prevParsed = JSON.parse(msg.content)
+              // Content: accept explicit queryFilters including null (ack after filter removal)
+              if (prevParsed.data && 'queryFilters' in prevParsed.data) {
+                accumulatedFilters = prevParsed.data.queryFilters ?? null
+                accumulatedFromMessage = 'content'
+                console.log('[accumulatedFilters] Using filters from content (msg i=' + i + '):', accumulatedFilters == null ? 'null' : JSON.stringify(accumulatedFilters, null, 2))
                 break
               }
             } catch (e) {
@@ -2306,11 +2333,13 @@ ${getPronounInstructions(userProfile.pronoun)}`
             }
           }
         }
+        console.log('[accumulatedFilters] After loop: accumulatedFilters=' + (accumulatedFilters ? JSON.stringify(accumulatedFilters) : 'null') + ' source=' + accumulatedFromMessage)
       } catch (error) {
-        console.error('Error checking for accumulated filters:', error)
+        console.error('[accumulatedFilters] Error:', error)
       }
       
       // Merge current filters with accumulated filters (current takes precedence)
+      console.log('[accumulatedFilters] Before merge: extractedQueryFilters=' + (extractedQueryFilters ? JSON.stringify(extractedQueryFilters) : 'null') + ' accumulatedFilters=' + (accumulatedFilters ? JSON.stringify(accumulatedFilters) : 'null'))
       if (accumulatedFilters && extractedQueryFilters) {
         extractedQueryFilters = {
           ...accumulatedFilters,
@@ -2320,6 +2349,9 @@ ${getPronounInstructions(userProfile.pronoun)}`
       } else if (accumulatedFilters && !extractedQueryFilters) {
         extractedQueryFilters = accumulatedFilters
         console.log('📦 Using accumulated filters only:', JSON.stringify(extractedQueryFilters, null, 2))
+      } else if (accumulatedFilters === null && accumulatedFromMessage != null) {
+        extractedQueryFilters = null
+        console.log('📦 Cleared filters (user removed filters in previous message)')
       }
 
       // If we detected unmappable criteria, add a system message to inform the LLM
@@ -2826,8 +2858,8 @@ ${getPronounInstructions(userProfile.pronoun)}`
         }
         
         // FALLBACK: Build queryFilters from non_negotiable_criteria if queryFilters is null/empty
-        // Skip when we have accumulatedFilters (user had already reduced filters)
-        if (tripPlanningData && (!tripPlanningData.queryFilters || Object.keys(tripPlanningData.queryFilters).length === 0) && (!accumulatedFilters || Object.keys(accumulatedFilters).length === 0)) {
+        // Skip when we have accumulatedFilters (user had already reduced filters) or user explicitly cleared (ack message had queryFilters: null)
+        if (tripPlanningData && (!tripPlanningData.queryFilters || Object.keys(tripPlanningData.queryFilters).length === 0) && (!accumulatedFilters || Object.keys(accumulatedFilters).length === 0) && !(accumulatedFromMessage != null && accumulatedFilters === null)) {
           if (tripPlanningData.non_negotiable_criteria && Object.keys(tripPlanningData.non_negotiable_criteria).length > 0) {
             console.log('🔧 Building queryFilters from non_negotiable_criteria as fallback')
             tripPlanningData.queryFilters = tripPlanningData.queryFilters || {}
@@ -3485,6 +3517,8 @@ ${getPronounInstructions(userProfile.pronoun)}`
     if (ackRemovalMatch && req.method === 'PATCH') {
       const chatId = ackRemovalMatch[1]
       const body: { messageIndex?: number; requestData: any; removedFilterLabel?: string; context: 'message' | 'pending_search' } = await req.json().catch(() => ({} as any))
+      const qfKeys = body.requestData?.queryFilters && typeof body.requestData.queryFilters === 'object' ? Object.keys(body.requestData.queryFilters).join(',') : 'n/a'
+      console.log('[ack-filter-removal] body: chatId=', chatId, 'context=', body.context, 'messageIndex=', body.messageIndex, 'removedLabel=', body.removedFilterLabel, 'requestData.queryFilters keys=[' + qfKeys + '] destination_country=', body.requestData?.destination_country)
       if (!chatId) {
         return new Response(JSON.stringify({ error: 'Missing chat_id' }), { status: 400, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } })
       }
@@ -3497,11 +3531,15 @@ ${getPronounInstructions(userProfile.pronoun)}`
         if (messages.length === 0) {
           return new Response(JSON.stringify({ error: 'Chat not found' }), { status: 404, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } })
         }
+        console.log('[ack-filter-removal] loaded messages.length=', messages.length)
         if (context === 'message' && typeof body.messageIndex === 'number' && body.messageIndex >= 0 && body.messageIndex < messages.length) {
           const msg = messages[body.messageIndex] as any
           if (!msg.metadata) msg.metadata = {}
           if (!msg.metadata.actionRow) msg.metadata.actionRow = { requestData: null, selectedAction: null }
           msg.metadata.actionRow.requestData = body.requestData
+          console.log('[ack-filter-removal] updated message at index', body.messageIndex, 'with new requestData (queryFilters keys=[' + qfKeys + '])')
+        } else if (context === 'message') {
+          console.log('[ack-filter-removal] skipped message update: context=message but messageIndex invalid or missing', body.messageIndex, 'messages.length=', messages.length)
         }
         if (context === 'pending_search') {
           let lastIdx = -1
@@ -3513,7 +3551,21 @@ ${getPronounInstructions(userProfile.pronoun)}`
             if (!msg.metadata) msg.metadata = {}
             if (!msg.metadata.searchSummaryBlock) msg.metadata.searchSummaryBlock = { requestData: null, searchSummary: '', selectedAction: null }
             msg.metadata.searchSummaryBlock.requestData = body.requestData
+            console.log('[ack-filter-removal] pending_search: updated searchSummaryBlock at index', lastIdx)
           }
+          // Also update the match message's actionRow so "3 More" and restore use the same reduced filters
+          let matchIdx = -1
+          for (let i = messages.length - 1; i >= 0; i--) {
+            const msg = messages[i] as any
+            if (msg.role === 'assistant' && (msg.metadata?.actionRow?.requestData != null || msg.metadata?.matchedUsers)) {
+              if (!msg.metadata) msg.metadata = {}
+              if (!msg.metadata.actionRow) msg.metadata.actionRow = { requestData: null, selectedAction: null }
+              msg.metadata.actionRow.requestData = body.requestData
+              matchIdx = i
+              break
+            }
+          }
+          console.log('[ack-filter-removal] pending_search: updated match message actionRow at index', matchIdx >= 0 ? matchIdx : 'none')
         }
         const summaryText = await getFilterRemovalAcknowledgment(body.requestData, body.removedFilterLabel)
         const text = summaryText || 'Got it — filters updated. Want to search or tweak?'
@@ -3528,7 +3580,9 @@ ${getPronounInstructions(userProfile.pronoun)}`
           },
         }
         messages.push({ role: 'assistant', content: JSON.stringify(payload) })
+        console.log('[ack-filter-removal] saving history: messages.length=', messages.length, 'new ack message at index', messages.length - 1)
         await saveChatHistory(chatId, messages, user.id, null, supabaseAdmin)
+        console.log('[ack-filter-removal] save completed')
         const now = new Date()
         const timestamp = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
         const newMessage = {

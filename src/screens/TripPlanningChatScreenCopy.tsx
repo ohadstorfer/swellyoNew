@@ -316,6 +316,20 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     [messages, messageIdsUnblockedByFilterDeletion]
   );
 
+  // Ref to the message id that is currently blocking the input (so we can unblock it when filter removal succeeds from pendingSearch context)
+  const unresolvedActionRowMessageIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    const lastRestartIndex = messages.reduce((idx, m, i) => (m.isRestartAfterNewChat ? i : idx), -1);
+    let id: string | null = null;
+    for (let i = messages.length - 1; i > lastRestartIndex; i--) {
+      const m = messages[i];
+      if (m.isMatchedUsers && m.actionRow?.requestData != null && m.actionRow?.selectedAction == null && !messageIdsUnblockedByFilterDeletion[m.id]) {
+        id = m.id;
+        break;
+      }
+    }
+    unresolvedActionRowMessageIdRef.current = id;
+  }, [messages, messageIdsUnblockedByFilterDeletion]);
 
   // Test API connection and initialize chat context on component mount
   useEffect(() => {
@@ -807,7 +821,6 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
       
       if (chatId) {
         // Continue existing chat
-        console.log('Continuing chat with ID:', chatId);
         const continuePayload: { message: string; existing_query_filters?: any; adding_filters?: boolean; existing_destination_country?: string | null; existing_area?: string | null } = {
           message: userMessage.text,
         };
@@ -818,6 +831,9 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
           if (dataWithFilters.destination_country != null) continuePayload.existing_destination_country = dataWithFilters.destination_country;
           if (dataWithFilters.area != null) continuePayload.existing_area = dataWithFilters.area;
         }
+        const hasExistingFilters = continuePayload.existing_query_filters != null;
+        const efKeys = hasExistingFilters && typeof continuePayload.existing_query_filters === 'object' ? Object.keys(continuePayload.existing_query_filters).join(',') : 'n/a';
+        console.log('[continue] chatId=', chatId, 'message=', (userMessage.text || '').slice(0, 40), 'hasExistingQueryFilters=', hasExistingFilters, 'existing_query_filters keys=[' + efKeys + ']');
         response = await swellyServiceCopy.continueTripPlanningConversation(chatId, continuePayload);
       } else {
         // This shouldn't happen since we initialize chat on mount, but fallback just in case
@@ -1061,24 +1077,41 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   const handleRemoveFilter = (item: FilterDisplayItem) => {
     if (!currentRequestData) return;
     const nextRequestData = removeFilterFromRequestData(currentRequestData, item);
+    const qfKeys = nextRequestData?.queryFilters && typeof nextRequestData.queryFilters === 'object' ? Object.keys(nextRequestData.queryFilters).join(',') : 'n/a';
+    console.log('[filter-removal] filterSource=', filterSource, 'removedLabel=', item.label, 'nextRequestData.queryFilters keys=[' + qfKeys + '] destination_country=', nextRequestData?.destination_country);
     if (filterSource === 'existingFiltersForAdd') {
       setExistingFiltersForAdd({ data: nextRequestData });
       return;
     }
     if (filterSource === 'pendingSearch' && pendingSearch) {
       setPendingSearch({ data: nextRequestData, searchSummary: pendingSearch.searchSummary ?? '' });
+      const matchMessageId = unresolvedActionRowMessageIdRef.current;
+      if (matchMessageId) {
+        setMessages(prev =>
+          prev.map(m =>
+            m.id === matchMessageId && m.actionRow
+              ? { ...m, actionRow: { ...m.actionRow, requestData: nextRequestData } }
+              : m
+          )
+        );
+      }
       if (chatId) {
         setFiltersMenuVisible(false);
         setAwaitingFilterRemovalResponse(true);
+        console.log('[filter-removal] calling acknowledgeFilterRemoval context=pending_search chatId=', chatId);
         swellyServiceCopy.acknowledgeFilterRemoval(chatId, {
           requestData: nextRequestData,
           removedFilterLabel: item.label,
           context: 'pending_search',
         }).then(res => {
           setAwaitingFilterRemovalResponse(false);
-          if (res.success && res.newMessage) {
-            setMessages(prev => [...prev, { ...res.newMessage!, id: res.newMessage!.id, text: res.newMessage!.text, isUser: false, timestamp: res.newMessage!.timestamp }]);
-            setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100);
+          if (res.success) {
+            const idToUnblock = unresolvedActionRowMessageIdRef.current;
+            if (idToUnblock) setMessageIdsUnblockedByFilterDeletion(prev => ({ ...prev, [idToUnblock]: true }));
+            if (res.newMessage) {
+              setMessages(prev => [...prev, { ...res.newMessage!, id: res.newMessage!.id, text: res.newMessage!.text, isUser: false, timestamp: res.newMessage!.timestamp }]);
+              setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100);
+            }
           }
         }).catch(() => setAwaitingFilterRemovalResponse(false));
       }
@@ -1096,6 +1129,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
       if (chatId != null && typeof backendIndex === 'number' && backendIndex >= 0) {
         setFiltersMenuVisible(false);
         setAwaitingFilterRemovalResponse(true);
+        console.log('[filter-removal] calling acknowledgeFilterRemoval context=message chatId=', chatId, 'messageIndex=', backendIndex);
         swellyServiceCopy.updateMatchRequestData(chatId, backendIndex, nextRequestData).catch(err =>
           console.warn('[TripPlanningChatScreen] Failed to persist filter removal:', err));
         swellyServiceCopy.acknowledgeFilterRemoval(chatId, {
@@ -1105,12 +1139,17 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
           context: 'message',
         }).then(res => {
           setAwaitingFilterRemovalResponse(false);
-          if (res.success && res.newMessage) {
-            setMessages(prev => [...prev, { ...res.newMessage!, id: res.newMessage!.id, text: res.newMessage!.text, isUser: false, timestamp: res.newMessage!.timestamp }]);
+          if (res.success) {
             setMessageIdsUnblockedByFilterDeletion(prev => ({ ...prev, [filterSourceMessage.id]: true }));
-            setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100);
+            if (res.newMessage) {
+              setMessages(prev => [...prev, { ...res.newMessage!, id: res.newMessage!.id, text: res.newMessage!.text, isUser: false, timestamp: res.newMessage!.timestamp }]);
+              setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100);
+            }
           }
         }).catch(() => setAwaitingFilterRemovalResponse(false));
+      } else {
+        console.warn('[filter-removal] NOT calling backend: context=message but backendMessageIndex missing or invalid', { backendIndex, chatId: chatId != null });
+        setMessageIdsUnblockedByFilterDeletion(prev => ({ ...prev, [filterSourceMessage.id]: true }));
       }
     }
   };

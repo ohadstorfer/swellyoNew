@@ -558,6 +558,8 @@ class SwellyService {
     }
   ): Promise<{ success: boolean; newMessage?: { id: string; text: string; isUser: boolean; timestamp: string } }> {
     try {
+      const qfKeys = payload.requestData?.queryFilters && typeof payload.requestData.queryFilters === 'object' ? Object.keys(payload.requestData.queryFilters).join(',') : 'n/a';
+      console.log('[SwellyServiceCopy] acknowledgeFilterRemoval request: chatId=', chatId, 'context=', payload.context, 'messageIndex=', payload.messageIndex, 'queryFilters keys=[' + qfKeys + ']');
       const url = this.getFunctionUrl(`/acknowledge-filter-removal/${chatId}`, 'trip-planning');
       const headers = await this.getAuthHeaders();
       const response = await fetch(url, {
@@ -570,6 +572,7 @@ class SwellyService {
         console.warn('[SwellyServiceCopy] acknowledgeFilterRemoval failed:', response.status, data);
         return { success: false };
       }
+      console.log('[SwellyServiceCopy] acknowledgeFilterRemoval success: newMessage=', !!data.newMessage);
       return { success: true, newMessage: data.newMessage };
     } catch (error) {
       console.warn('[SwellyServiceCopy] acknowledgeFilterRemoval error:', error);

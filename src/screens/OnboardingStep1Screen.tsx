@@ -46,6 +46,8 @@ export interface OnboardingData {
   travelExperience: number;
   profilePicture?: string;
   pronouns?: string;
+  /** Selected surf journey option ids from welcome step (e.g. 'share_wisdom', 'find_crew', 'plan_trip', 'just_waves') */
+  surfJourney?: string[];
 }
 
 const BOARD_TYPES: BoardType[] = [

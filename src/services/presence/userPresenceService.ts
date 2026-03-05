@@ -170,17 +170,14 @@ class UserPresenceService {
           this.notifyAllSubscribers();
         })
         .on('presence', { event: 'join' }, ({ key }: any) => {
-          console.log('[UserPresenceService] User joined presence:', key);
           this.notifySubscribersForUser(key, true);
         })
         .on('presence', { event: 'leave' }, ({ key }: any) => {
-          console.log('[UserPresenceService] User left presence:', key);
           this.notifySubscribersForUser(key, false);
         })
         .subscribe((status: string) => {
           this.presenceChannelHealthy = status === 'SUBSCRIBED';
           if (status === 'SUBSCRIBED') {
-            console.log('[UserPresenceService] Presence channel subscribed');
           } else {
             console.warn('[UserPresenceService] Presence channel unhealthy:', status);
           }
@@ -398,7 +395,6 @@ class UserPresenceService {
         }
       });
     } else {
-      console.log(`[UserPresenceService] No subscribers for user ${userId}`);
     }
   }
 

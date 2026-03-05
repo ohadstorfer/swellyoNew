@@ -1200,6 +1200,7 @@ export const AppContent: React.FC = () => {
         onNext={() => {
           setCurrentStep(1);
         }}
+        updateFormData={updateFormData}
         onBack={async () => {
           // Prevent multiple simultaneous logout calls
           if (isLoggingOutRef.current) {
