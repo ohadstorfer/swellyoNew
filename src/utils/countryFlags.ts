@@ -216,14 +216,26 @@ const COUNTRY_TO_ISO: { [key: string]: string } = {
   'lebanon': 'lb',
 };
 
+// US state name to flagcdn ISO 3166-2 code (checked before COUNTRY_TO_ISO so "California" gets state flag)
+const STATE_TO_ISO: { [key: string]: string } = {
+  'california': 'us-ca',
+  'hawaii': 'us-hi',
+};
+
 /**
  * Get country ISO code from country name
- * Handles variations, typos, and alternative names
+ * Handles variations, typos, and alternative names.
+ * US states (e.g. California, Hawaii) are checked first for state flag URLs.
  */
 function getCountryISO(countryName?: string): string | null {
   if (!countryName) return null;
   
   const normalized = countryName.toLowerCase().trim();
+  
+  // US state flags first (so "California" -> us-ca, not us)
+  if (STATE_TO_ISO[normalized]) {
+    return STATE_TO_ISO[normalized];
+  }
   
   // Direct match
   if (COUNTRY_TO_ISO[normalized]) {

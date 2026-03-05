@@ -792,6 +792,14 @@ The user prefers not to be addressed with gender-specific terms. Avoid calling t
   return ''
 }
 
+function buildCurrentDataSystemMessage(currentData: {
+  destination_country: string | null;
+  area: string | null;
+  queryFilters: Record<string, unknown> | null;
+}): string {
+  return `Current data for this turn (authoritative): ${JSON.stringify(currentData)}.\n\nCRITICAL: Do not change or add any filter, destination, area, or other criterion that is not explicitly mentioned in the user's current message below. Only update or add what the user asked for in this message. Leave everything else unchanged from the current data.`;
+}
+
 async function callOpenAI(messages: Message[]): Promise<string> {
   if (!OPENAI_API_KEY) {
     throw new Error('OPENAI_API_KEY is not set')
@@ -1138,6 +1146,13 @@ Rules:
 - Output ONLY a valid JSON object with keys queryFilters (object), and optionally destination_country (string) and area (string). No markdown, no explanation.`
     const userPrompt = `Text the user will see:\n${text}\n\nCurrent JSON:\n${currentJson}${userAgeLine}\n\nOutput the complete corrected JSON object (queryFilters and destination_country/area if applicable). Return only valid JSON.`
 
+    const currentDataForTurn = {
+      destination_country: currentData.destination_country ?? null,
+      area: currentData.area ?? null,
+      queryFilters: currentData.queryFilters != null && typeof currentData.queryFilters === 'object' ? currentData.queryFilters as Record<string, unknown> : null,
+    }
+    const currentDataSystemMessage = buildCurrentDataSystemMessage(currentDataForTurn)
+
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -1147,6 +1162,7 @@ Rules:
       body: JSON.stringify({
         model: 'gpt-4o-mini',
         messages: [
+          { role: 'system', content: currentDataSystemMessage },
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },
         ],
@@ -1201,7 +1217,7 @@ async function getFilterRemovalAcknowledgment(requestData: any, removedFilterLab
       area: requestData?.area ?? null,
     })
     const removed = removedFilterLabel?.trim() || 'a filter'
-    const systemPrompt = 'You are Swelly, a friendly surfer buddy. The user just removed a filter in the app. Reply with one or two short sentences: acknowledge what was removed, list their current filters in one line, then ask if they want to search or tweak. First person, casual, no markdown. Max 2 sentences.'
+    const systemPrompt = 'You are Swelly, a friendly surfer buddy. The user just removed a filter in the app. Reply with one or two short sentences: acknowledge what was removed, list their current filters in one line, then ask if they want to search or tweak. First person, casual, no markdown. Max 2 sentences. Do not add or change any filter; only acknowledge the removal and list the current filters.'
     const userPrompt = `The user removed: ${removed}. Current requestData: ${json}. Reply with a short acknowledgment and current filters.`
 
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -1403,7 +1419,7 @@ Examples:
 `
     : ''
 
-  const schemaPrompt = `${editingModePrompt}You are a database query expert. Analyze the user's request and determine which Supabase filters to apply.
+  const schemaPrompt = `${editingModePrompt}You are a database query expert. Analyze the user's request and determine which Supabase filters to apply. Only extract criteria explicitly mentioned in the current user message; do not infer or add criteria from elsewhere.
 
 AVAILABLE SURFERS TABLE FIELDS (ONLY THESE CAN BE FILTERED):
 - country_from (string): Country of origin
@@ -1962,6 +1978,10 @@ ${getPronounInstructions(userProfile.pronoun)}`
       const jsonFormatReminder = `CRITICAL: You MUST return a valid JSON object. Your response must start with { and end with }. Do NOT return plain text.`
       messages.splice(messages.length - 1, 0, { role: 'system', content: jsonFormatReminder })
 
+      // Attach current data and "do not change/add" rule (new chat: empty state)
+      const currentDataForGPT = { destination_country: null as string | null, area: null as string | null, queryFilters: null as Record<string, unknown> | null }
+      messages.splice(messages.length - 1, 0, { role: 'system', content: buildCurrentDataSystemMessage(currentDataForGPT) })
+
       // Call OpenAI
       let assistantMessage = await callOpenAI(messages)
       
@@ -2397,14 +2417,28 @@ ${getPronounInstructions(userProfile.pronoun)}`
       const jsonFormatReminder = `CRITICAL: You MUST return a valid JSON object. Your response must start with { and end with }. Do NOT return plain text. The structure must be: {"return_message": "...", "is_finished": false, "data": {...}}. If you return plain text, the system will fail!`
       messages.splice(messages.length - 1, 0, { role: 'system', content: jsonFormatReminder })
 
-      // Inject current filters so main GPT does not re-add criteria the user removed (continue only; skip when adding_filters)
-      if (!body.adding_filters && accumulatedFilters && Object.keys(accumulatedFilters).length > 0) {
-        messages.splice(messages.length - 1, 0, {
-          role: 'system',
-          content: 'Current search filters (authoritative; do not re-add criteria the user has removed): ' + JSON.stringify(accumulatedFilters)
-        })
-        console.log('📋 Injected current filters into main GPT (authoritative)')
+      // Build current data from last assistant message + merged filters; attach to every prompt with "do not change/add" rule
+      let continueDestination: string | null = null
+      let continueArea: string | null = null
+      for (let i = messages.length - 2; i >= 0; i--) {
+        if (messages[i].role === 'assistant') {
+          try {
+            const prevParsed = JSON.parse(messages[i].content)
+            if (prevParsed.data) {
+              if (prevParsed.data.destination_country != null) continueDestination = prevParsed.data.destination_country
+              if (prevParsed.data.area != null) continueArea = prevParsed.data.area
+            }
+            break
+          } catch (_e) { /* not JSON */ }
+        }
       }
+      const currentDataForGPTContinue = {
+        destination_country: continueDestination,
+        area: continueArea,
+        queryFilters: extractedQueryFilters && typeof extractedQueryFilters === 'object' ? extractedQueryFilters as Record<string, unknown> : null
+      }
+      messages.splice(messages.length - 1, 0, { role: 'system', content: buildCurrentDataSystemMessage(currentDataForGPTContinue) })
+      console.log('📋 Injected current data + do-not-change/add rule into main GPT')
 
       // Call OpenAI
       let assistantMessage = await callOpenAI(messages)

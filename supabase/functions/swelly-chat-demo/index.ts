@@ -80,7 +80,8 @@ IMPORTANT: All questions must feel natural and conversational, like a friend ask
 1. DESTINATIONS_ARRAY (past trips): Ask "What are the TOP 3 destinations you know best?" - The user will respond with destination names (e.g., "Nica, El Salvador, Hawaii"). After the user provides their destination list, you must:
    - Extract the destination names from their response
    - Set ui_hints.show_destination_cards to true
-   - Set ui_hints.destinations to an array of the extracted destination names
+   - Set ui_hints.destinations to an array of the extracted destination names (these are the LABELS shown on each destination card)
+   - CARD LABELS RULE: For US destinations where the user says Hawaii or California (or cities/areas in those states), put "Hawaii" or "California" alone in ui_hints.destinations—NOT "USA" or "USA (California)". So the card shows "California" or "Hawaii". The final destinations_array still uses country: "USA", state: "California"/"Hawaii" for storage.
    - The frontend will then show input cards for each destination where the user can enter areas and time spent
    - When the user submits the destination cards data, you will receive structured data with areas and time_in_days/time_in_text already formatted
    - YOU must:
@@ -172,7 +173,7 @@ Response format: Always return JSON with this structure:
 }
 
 UI_HINTS RULES:
-- When user provides destination list (e.g., "Nica, El Salvador, Hawaii"), set ui_hints.show_destination_cards = true and ui_hints.destinations = ["Nicaragua", "El Salvador", "Hawaii"] (normalize country names)
+- When user provides destination list (e.g., "Nica, El Salvador, Hawaii"), set ui_hints.show_destination_cards = true and ui_hints.destinations = ["Nicaragua", "El Salvador", "Hawaii"] (normalize country names). For US states: use "California" or "Hawaii" in ui_hints.destinations when the user says they surfed there—never "USA" or "USA (California)" for the card label.
 - When asking budget question, set ui_hints.show_budget_buttons = true
 - When not showing UI components, set both flags to false and destinations to empty array
 
@@ -214,7 +215,7 @@ I'd say, San Diego, south county, Sri lanka in kabalana ahangama midigama and to
     "data": null,
     "ui_hints": {
         "show_destination_cards": true,
-        "destinations": ["USA (California)", "Sri Lanka", "Maldives"],
+        "destinations": ["California", "Sri Lanka", "Maldives"],
         "show_budget_buttons": false
     }
 }

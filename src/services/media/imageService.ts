@@ -42,6 +42,7 @@ const getCountryImageFileName = (countryName: string): string | null => {
     'fiji': 'Fiji',
     'france': 'France',
     'hawaii': 'Hawaii',
+    'california': 'California',
     'indonesia': 'Indonesia',
     'japan': 'Japan',
     'maldives': 'Maldives',
