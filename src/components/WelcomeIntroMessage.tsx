@@ -19,7 +19,7 @@ export const WelcomeIntroMessage: React.FC = () => {
         </View>
         <View style={styles.avatarContainer}>
           <Image
-            source={{ uri: getImageUrl('/Swelly Shaper.png') }}
+            source={{ uri: getImageUrl('/Swelly welcome message.png') }}
             style={styles.avatarImage}
             resizeMode="cover"
           />
@@ -59,7 +59,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '400',
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
-    lineHeight: 15,
+    lineHeight: 22,
     color: '#000000',
   },
   avatarContainer: {

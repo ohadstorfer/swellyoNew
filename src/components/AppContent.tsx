@@ -15,6 +15,7 @@ import { ProfileScreen } from '../screens/ProfileScreen';
 import { DirectMessageScreen } from '../screens/DirectMessageScreen';
 import { SwellyShaperScreen } from '../screens/SwellyShaperScreen';
 import { ConversationLoadingScreen } from '../components/ConversationLoadingScreen';
+import { WelcomeToLineupOverlay } from '../components/WelcomeToLineupOverlay';
 import { messagingService } from '../services/messaging/messagingService';
 import { supabaseAuthService } from '../services/auth/supabaseAuthService';
 import { useOnboarding } from '../context/OnboardingContext';
@@ -623,6 +624,8 @@ export const AppContent: React.FC = () => {
   } | null>(null);
   const [currentUserAvatar, setCurrentUserAvatar] = useState<string | null>(null);
   const [currentUserName, setCurrentUserName] = useState<string>('User');
+  const [showWelcomeToLineupOverlay, setShowWelcomeToLineupOverlay] = useState(false);
+  const welcomeOverlayTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleChatComplete = async () => {
     console.log('[AppContent] handleChatComplete called');
@@ -665,6 +668,34 @@ export const AppContent: React.FC = () => {
     setProfileFromSwellyShaper(false); // Reset flag if it was set
     setProfileFromOnboardingChat(false); // Reset so next profile open uses normal header
   };
+
+  const handleSaveAndGoToConversations = useCallback(() => {
+    handleProfileBack();
+    if (welcomeOverlayTimeoutRef.current) {
+      clearTimeout(welcomeOverlayTimeoutRef.current);
+      welcomeOverlayTimeoutRef.current = null;
+    }
+    welcomeOverlayTimeoutRef.current = setTimeout(() => {
+      welcomeOverlayTimeoutRef.current = null;
+      setShowWelcomeToLineupOverlay(true);
+    }, 3000);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (welcomeOverlayTimeoutRef.current) {
+        clearTimeout(welcomeOverlayTimeoutRef.current);
+        welcomeOverlayTimeoutRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (showProfile && welcomeOverlayTimeoutRef.current) {
+      clearTimeout(welcomeOverlayTimeoutRef.current);
+      welcomeOverlayTimeoutRef.current = null;
+    }
+  }, [showProfile]);
 
   const handleSwellyShaperBack = () => {
     // Navigate back from Swelly Shaper to profile
@@ -1085,6 +1116,7 @@ export const AppContent: React.FC = () => {
           userId={viewingUserId ?? undefined}
           onMessage={handleStartConversation}
           fromOnboardingChat={profileFromOnboardingChat}
+          onSaveAndGoToConversations={handleSaveAndGoToConversations}
           onEdit={() => {
             // When clicking edit (from onboarding profile), open Swelly Shaper without resetting fromOnboardingChat
             setShowProfile(false);
@@ -1182,14 +1214,20 @@ export const AppContent: React.FC = () => {
     }
     
     return (
-      <ConversationsScreen
-        onConversationPress={handleConversationPress}
-        onSwellyPress={handleSwellyPress}
-        onSwellyPressCopy={handleSwellyPressCopy}
-        onProfilePress={handleProfilePress}
-        onViewUserProfile={handleViewUserProfile}
-        onSwellyShaperViewProfile={handleSwellyShaperViewProfile}
-      />
+      <>
+        <ConversationsScreen
+          onConversationPress={handleConversationPress}
+          onSwellyPress={handleSwellyPress}
+          onSwellyPressCopy={handleSwellyPressCopy}
+          onProfilePress={handleProfilePress}
+          onViewUserProfile={handleViewUserProfile}
+          onSwellyShaperViewProfile={handleSwellyShaperViewProfile}
+        />
+        <WelcomeToLineupOverlay
+          visible={showWelcomeToLineupOverlay}
+          onNext={() => setShowWelcomeToLineupOverlay(false)}
+        />
+      </>
     );
   }
 

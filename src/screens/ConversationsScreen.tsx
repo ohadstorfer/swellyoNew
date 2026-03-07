@@ -1171,7 +1171,7 @@ export default function ConversationsScreen({
                 style={styles.headerAvatar}
                 showLoadingIndicator={false}
               />
-              <Text style={styles.headerTitle}>Hello {headerDisplayName}</Text>
+              <Text style={styles.headerTitle}>Yo {headerDisplayName} !</Text>
             </>
           )}
         </TouchableOpacity>
@@ -1284,7 +1284,7 @@ export default function ConversationsScreen({
                       Connect with surfers who match your {'\n'}
                       style, experience, and travel interests. {'\n'}
                       {'\n'}
-                      GLooking for advice about a destination? {'\n'}
+                      Looking for advice about a destination? {'\n'}
                       Swelly can introduce you to surfers{'\n'}
                       who know it best. 
                       {'\n'}

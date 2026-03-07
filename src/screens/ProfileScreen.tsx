@@ -35,7 +35,6 @@ import { useScreenDimensions } from '../utils/responsive';
 import { updateCachedUserProfilePhoto } from '../utils/userProfileCache';
 import { useOnboarding } from '../context/OnboardingContext';
 import { calculateAgeFromDOB } from '../utils/ageCalculation';
-import { WelcomeToLineupOverlay } from '../components/WelcomeToLineupOverlay';
 
 interface ProfileScreenProps {
   onBack?: () => void;
@@ -44,6 +43,7 @@ interface ProfileScreenProps {
   onContinueEdit?: () => void; // Callback when "continue edit" button is clicked
   onEdit?: () => void; // Callback when edit button is clicked
   fromOnboardingChat?: boolean; // When true, show Edit (left) + Save (right) header buttons
+  onSaveAndGoToConversations?: () => void; // When Save is pressed from onboarding profile: navigate to conversations and schedule welcome overlay
 }
 
 // Board type mapping
@@ -799,7 +799,7 @@ const PlusIcon: React.FC<{ size?: number }> = ({ size = 40 }) => {
   );
 };
 
-export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, onMessage, onContinueEdit, onEdit, fromOnboardingChat = false }) => {
+export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, onMessage, onContinueEdit, onEdit, fromOnboardingChat = false, onSaveAndGoToConversations }) => {
   // Get onboarding context for logout
   const { resetOnboarding, setUser, setCurrentStep, setIsDemoUser } = useOnboarding();
   
@@ -834,7 +834,6 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [isUploadingVideo, setIsUploadingVideo] = useState(false);
   const [showVideoUploadModal, setShowVideoUploadModal] = useState(false);
-  const [showWelcomeToLineupOverlay, setShowWelcomeToLineupOverlay] = useState(false);
   const [videoUploadError, setVideoUploadError] = useState<string | null>(null);
   const [uploadFailureError, setUploadFailureError] = useState<string | null>(null);
   const [retryVideoData, setRetryVideoData] = useState<{ uri: string; mimeType?: string } | null>(null);
@@ -1807,7 +1806,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
                 <Text style={styles.onboardingPillButtonText}>Edit</Text>
               </View>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.onboardingPillButtonRight} onPress={() => setShowWelcomeToLineupOverlay(true)}>
+            <TouchableOpacity style={styles.onboardingPillButtonRight} onPress={() => onSaveAndGoToConversations?.() ?? onBack?.()}>
               <View style={styles.onboardingPillButtonContainer}>
                 <OnboardingSaveIcon />
                 <Text style={styles.onboardingPillButtonText}>Save</Text>
@@ -2238,10 +2237,6 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
         </View>
       </ScrollView>
       </ImageBackground>
-      <WelcomeToLineupOverlay
-        visible={showWelcomeToLineupOverlay}
-        onNext={onBack!}
-      />
     </SafeAreaView>
   );
 };
