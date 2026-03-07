@@ -68,7 +68,7 @@ export const SwellyShaperScreen: React.FC<SwellyShaperScreenProps> = ({ onBack, 
         // Always add static welcome message - this is just UI, not part of the conversation
         initialMessages.push({
           id: 'welcome',
-          text: "Let's shape that profile! Let me know what you would like to edit!",
+          text: "Yo! Welcome to the shaping bay! This is where we edit your profile! You can always access Swelly shaper through the main menu! Let me know what you would like to edit!",
           isUser: false,
           timestamp: new Date().toISOString(),
         });
@@ -143,7 +143,7 @@ export const SwellyShaperScreen: React.FC<SwellyShaperScreenProps> = ({ onBack, 
         // Set static welcome message even on error
         setMessages([{
           id: 'welcome',
-          text: "Let's shape that profile! Let me know what you would like to edit!",
+          text: "Yo! Welcome to the shaping bay! This is where we edit your profile! You can always access Swelly shaper through the main menu! Let me know what you would like to edit!",
           isUser: false,
           timestamp: new Date().toISOString(),
         }]);
@@ -319,7 +319,7 @@ export const SwellyShaperScreen: React.FC<SwellyShaperScreenProps> = ({ onBack, 
       return (
         <View key={message.id} style={styles.botMessageContainer}>
           <View style={styles.botMessageBubble}>
-            <Text style={styles.botMessageText}>Let's shape that profile! Let me know what you would like to edit!</Text>
+            <Text style={styles.botMessageText}>Yo! Welcome to the shaping bay! This is where we edit your profile! You can always access Swelly shaper through the main menu! Let me know what you would like to edit!</Text>
             <View style={styles.botMessageImageContainer}>
               <Image
                 source={{ uri: getImageUrl('/Swelly Shaper.png') }}

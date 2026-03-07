@@ -16,6 +16,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Text } from './Text';
 import { colors, spacing } from '../styles/theme';
 import { getCountryFlag } from '../utils/countryFlags';
+import { getDisplayLabelAndFlagKey } from '../utils/destinationDisplay';
 import {
   getCountryImageFromStorage,
   getCountryImageFallback,
@@ -145,7 +146,14 @@ export const DestinationMapPickerCard = forwardRef<
     [timeUnit, scrollToUnitIndex]
   );
 
-  const regionCode = useMemo(() => COUNTRY_TO_REGION[destination], [destination]);
+  const { displayLabel, flagKey } = useMemo(
+    () => getDisplayLabelAndFlagKey(destination),
+    [destination]
+  );
+  const regionCode = useMemo(() => {
+    if (flagKey === 'California' || flagKey === 'Hawaii') return 'us';
+    return COUNTRY_TO_REGION[destination];
+  }, [destination, flagKey]);
   const apiKey = process.env.EXPO_PUBLIC_GOOGLE_PLACES_API_KEY;
   const countryCenter = useMemo(() => (regionCode ? COUNTRY_CENTERS[regionCode] : undefined), [regionCode]);
   const inlineMapHtml = useMemo(
@@ -205,17 +213,17 @@ export const DestinationMapPickerCard = forwardRef<
 
   const [countryImageFailed, setCountryImageFailed] = useState(false);
   const [pexelsImageUrl, setPexelsImageUrl] = useState<string | null>(null);
-  const countryImageUrl = getCountryImageFromStorage(destination);
-  const countryFlagUrl = getCountryFlag(destination);
+  const countryImageUrl = getCountryImageFromStorage(flagKey);
+  const countryFlagUrl = getCountryFlag(flagKey);
   const handleBucketImageError = async () => {
     setCountryImageFailed(true);
-    const url = await getCountryImageFromPexels(destination);
+    const url = await getCountryImageFromPexels(flagKey);
     if (url) setPexelsImageUrl(url);
   };
   const backgroundUri =
     (!countryImageFailed && countryImageUrl) || pexelsImageUrl
       ? (countryImageFailed ? pexelsImageUrl! : countryImageUrl!)
-      : countryFlagUrl || getCountryImageFallback(destination);
+      : countryFlagUrl || getCountryImageFallback(flagKey);
   useEffect(() => {
     setCountryImageFailed(false);
     setPexelsImageUrl(null);
@@ -310,7 +318,7 @@ export const DestinationMapPickerCard = forwardRef<
             <View style={styles.frostedOverlay} />
           </ImageBackground>
           <View style={styles.card}>
-            <Text style={styles.destinationName}>{destination}</Text>
+            <Text style={styles.destinationName}>{displayLabel}</Text>
 
             <View style={styles.contentWithStack}>
               <View style={styles.inputRowAndMapWrapper}>

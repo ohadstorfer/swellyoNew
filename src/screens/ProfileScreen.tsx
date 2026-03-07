@@ -35,6 +35,7 @@ import { useScreenDimensions } from '../utils/responsive';
 import { updateCachedUserProfilePhoto } from '../utils/userProfileCache';
 import { useOnboarding } from '../context/OnboardingContext';
 import { calculateAgeFromDOB } from '../utils/ageCalculation';
+import { WelcomeToLineupOverlay } from '../components/WelcomeToLineupOverlay';
 
 interface ProfileScreenProps {
   onBack?: () => void;
@@ -833,6 +834,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [isUploadingVideo, setIsUploadingVideo] = useState(false);
   const [showVideoUploadModal, setShowVideoUploadModal] = useState(false);
+  const [showWelcomeToLineupOverlay, setShowWelcomeToLineupOverlay] = useState(false);
   const [videoUploadError, setVideoUploadError] = useState<string | null>(null);
   const [uploadFailureError, setUploadFailureError] = useState<string | null>(null);
   const [retryVideoData, setRetryVideoData] = useState<{ uri: string; mimeType?: string } | null>(null);
@@ -1803,9 +1805,9 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
               <View style={styles.onboardingPillButtonContainer}>
                 <OnboardingBackArrowIcon />
                 <Text style={styles.onboardingPillButtonText}>Edit</Text>
-              </View>mp
+              </View>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.onboardingPillButtonRight} onPress={onBack}>
+            <TouchableOpacity style={styles.onboardingPillButtonRight} onPress={() => setShowWelcomeToLineupOverlay(true)}>
               <View style={styles.onboardingPillButtonContainer}>
                 <OnboardingSaveIcon />
                 <Text style={styles.onboardingPillButtonText}>Save</Text>
@@ -2236,6 +2238,10 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
         </View>
       </ScrollView>
       </ImageBackground>
+      <WelcomeToLineupOverlay
+        visible={showWelcomeToLineupOverlay}
+        onNext={onBack!}
+      />
     </SafeAreaView>
   );
 };

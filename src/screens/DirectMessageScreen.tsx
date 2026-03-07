@@ -36,6 +36,7 @@ import { avatarCacheService } from '../services/media/avatarCacheService';
 import { FullscreenImageViewer } from '../components/FullscreenImageViewer';
 import { ImagePreviewModal } from '../components/ImagePreviewModal';
 import { ChatTextInput, ChatTextInputRef } from '../components/ChatTextInput';
+import { WelcomeIntroMessage } from '../components/WelcomeIntroMessage';
 
 interface DirectMessageScreenProps {
   conversationId?: string; // Optional: undefined for pending conversations (will be created on first message)
@@ -1906,12 +1907,8 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             // Show skeletons only when fetching AND no messages
             <MessageListSkeleton count={5} />
           ) : messages.length === 0 && !isFetchingMessages ? (
-            <View style={styles.emptyContainer}>
-              <Text style={styles.emptyText}>
-                {currentConversationId 
-                  ? 'No messages yet. Say hi! 👋' 
-                  : 'Start the conversation by sending a message!'}
-              </Text>
+            <View style={styles.emptyContainerWelcome}>
+              <WelcomeIntroMessage />
             </View>
           ) : (
             <>
@@ -2256,6 +2253,11 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  emptyContainerWelcome: {
+    flex: 1,
+    alignItems: 'center',
+    paddingTop: 12,
   },
   emptyText: {
     ...typography.body,

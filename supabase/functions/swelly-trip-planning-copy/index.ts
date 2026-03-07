@@ -129,14 +129,24 @@ function getCountryFromUserDestInline(dest: any): string {
   }
   return ''
 }
-function countryMatchesRequestInline(requestCountry: string | null, userCountry: string): boolean {
+function countryMatchesRequestInline(requestCountry: string | null, userCountry: string, userState?: string | null): boolean {
   if (!requestCountry || !userCountry) return false
   const requested = requestCountry.split(',').map((c: string) => c.trim().toLowerCase()).filter((c: string) => c.length > 0)
   const userCountryLower = userCountry.toLowerCase().trim()
+  const userStateLower = userState != null ? String(userState).toLowerCase().trim() : undefined
   return requested.some((r: string) => {
     if (userCountryLower === r) return true
     if ((r === 'usa' || r === 'united states') && (userCountryLower.includes('united states') || userCountryLower.includes('usa'))) return true
     if ((r === 'uk' || r === 'united kingdom') && (userCountryLower.includes('united kingdom') || /\buk\b/.test(userCountryLower))) return true
+    const usStatePrefix = 'united states - '
+    if (r.startsWith(usStatePrefix)) {
+      const requestedState = r.slice(usStatePrefix.length).trim()
+      const isUSUser = userCountryLower.includes('united states') || userCountryLower === 'usa'
+      if (isUSUser && requestedState.length > 0 && userStateLower) {
+        if (userStateLower === requestedState) return true
+        if (userStateLower.includes(requestedState) || requestedState.includes(userStateLower)) return true
+      }
+    }
     const escaped = r.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     return new RegExp('\\b' + escaped + '\\b', 'i').test(userCountryLower)
   })
@@ -486,7 +496,8 @@ async function findMatchingUsersV3Server(request: any, requestingUserId: string,
     if (userSurfer.destinations_array?.length) {
       for (const dest of userSurfer.destinations_array) {
         const userCountry = getCountryFromUserDestInline(dest)
-        if (!countryMatchesRequestInline(request.destination_country, userCountry)) continue
+        const userState = typeof dest === 'object' && dest !== null && 'state' in dest ? (dest as any).state : undefined
+        if (!countryMatchesRequestInline(request.destination_country, userCountry, userState)) continue
         days += dest.time_in_days || 0
         if (requestedArea && hasRequestedAreaInArrayInline(dest, requestedArea)) hasAreaMatch = true
       }
@@ -572,9 +583,9 @@ CRITICAL: Be smart and flexible when understanding user requests:
 CONVERSATION FLOW:
 
 STEP 1 - ENTRY POINT:
-ALWAYS start with this exact question in your FIRST response: "Yo! Let’s Travel! I can connect you with like minded surfers or surf travelers who have experience in specific destinations you are curious about. So, what are you looking for?"
+ALWAYS start with this exact question in your FIRST response — and use ONLY this sentence, no additions: "Yo! Let’s get you connected! So what are we looking for today?" Do NOT add any other sentence after it (e.g. do not add "Do you want surfers who've surfed a specific destination..." or "or just surfers that match your vibe...").
 
-When the first message in the conversation (new_chat) is vague or just a greeting, respond with STEP 1's question. If the user's first message clearly asks for surfers or matches and includes criteria (e.g. origin, board type, level) and/or a destination, treat it as their real request: extract what you can (destination if mentioned, criteria if mentioned) and only ask for what is missing (e.g. if they did not mention a destination, ask: "Which destination do you want to connect with surfers who've been there? (e.g. El Salvador, Costa Rica)"). Do not repeat STEP 1 when they already gave a direct request.
+When the first message in the conversation (new_chat) is vague or just a greeting, respond with STEP 1's question only (the single sentence above). If the user's first message clearly asks for surfers or matches and includes criteria (e.g. origin, board type, level) and/or a destination, treat it as their real request: extract what you can (destination if mentioned, criteria if mentioned) and only ask for what is missing (e.g. if they did not mention a destination, ask: "Which destination do you want to connect with surfers who've been there? (e.g. El Salvador, Costa Rica)"). Do not repeat STEP 1 when they already gave a direct request.
 
 INTERPRET USER RESPONSE (be smart and natural):
 - If user directly asks for surfers/matches/people (e.g., "send me surfers", "find me people", "show me matches", "who surfed in [place]") → They want matches NOW → Go to STEP 6 (Quick Match)
@@ -689,6 +700,7 @@ When you have enough information to define a clear search (2 filters provided, o
 2. Set return_message to a short, friendly line that matches the intent of the upcoming search (e.g. "Sweet — I think I’ve got your surfer vibe dialed in.").
 3. Include in the "data" field: destination_country (required when user specified a destination; null when doing criteria-only general matching), area (if user specified one, else null), budget (null if not specified), destination_known (true/false), purpose (default: { purpose_type: "connect_traveler", specific_topics: [] }), user_context (optional). When matching without destination, include queryFilters with at least one criterion instead.
 4. ALWAYS set search_summary in data (see DATA STRUCTURE section) so the user sees exactly what would be searched, and your message implicitly hands control back to them to either search now or tweak filters first.
+5. Do NOT set is_finished: true when you have no destination_country and no meaningful queryFilters (no country_from, surfboard_type, surf_level_category, or age). In that case set is_finished: false and in your reply explain we can filter by: destination they surfed, origin, age, surf level, board type — and ask for at least one so we can search.
 
 IMPORTANT:
 - DO NOT use markdown formatting (no asterisks, no bold, no code blocks)
@@ -756,6 +768,7 @@ You MUST always return a JSON object with this structure (NO EXCEPTIONS):
 
 CRITICAL RULES:
 - ALWAYS return valid JSON. NEVER return plain text.
+- REMOVE ALL FILTERS: When the user says they want to remove all filters, clear all, wipe the slate, start fresh, or reset filters, you MUST set in the response data: queryFilters: null, destination_country: null, and area: null. Do not keep any previous destination or criteria. Example: User says "remove all filters" → data: { ..., queryFilters: null, destination_country: null, area: null, ... }.
 - Set is_finished: true when: (a) User gave 2+ filters and you are ready to search, OR (b) User gave 1 filter — set is_finished: true in the SAME turn with search_summary (do not ask a separate "add anything else?" message), OR (c) Quick match: user asked for surfers and you extracted at least destination_country, OR (d) User asked for surfers with only criteria (e.g. country_from, age range) and no destination — then set is_finished: true with queryFilters and no destination_country for general matching. "search_summary": "Short casual summary of the surfer or trip we’re about to look for, shown to the user before they decide whether to search or edit filters. REQUIRED when is_finished is true. First, write a one-line friendly description based ONLY on the criteria (destination_country, area, queryFilters), for example: \"Sweet — an Israeli surfer who’s surfed Hawaii (US) and rides a shortboard just like you.\" or \"Got it — an advanced Israeli shortboarder around your age.\" Do NOT say \"searching for\" or imply that you already started searching. Then add a newline (\"\\n\") and a short question asking if they want to search now or tweak filters first (e.g. \"Are you ready for me to search now, or do you want to tweak any filters first?\"). Tone: friendly, first person, no markdown.",- DESTINATION EXTRACTION: When user mentions ANY location, extract destination_country immediately. Correct typos ("filipins" → "Philippines"). If they mention area too, extract both. NEVER set destination_country to null if a location was mentioned.
 - return_message = conversational text only. All structured data goes in "data". No JSON or markdown in return_message.
 - When there is no destination (general match): in return_message and search_summary, describe only the filters (e.g. \"Got you, bro — searching for an advanced Israeli shortboarder.\"). Do NOT mention \"no destination\", \"no specific destination\", or \"going global\".
@@ -1970,7 +1983,7 @@ ${getPronounInstructions(userProfile.pronoun)}`
       const messages: Message[] = [
         { role: 'system', content: systemPrompt },
         // First message: if user already gave a clear request (surfers/matches + criteria or destination), treat it as real request and only ask for what is missing (e.g. destination). Otherwise use STEP 1.
-        { role: 'system', content: 'This is the FIRST message in a NEW conversation. If the user\'s message clearly asks for surfers or matches and includes criteria (e.g. "Israeli", "shortboard", "advanced") and/or a destination (e.g. "El Salvador"), treat it as their real request: extract destination if mentioned, extract criteria if mentioned, and only ask for what is missing (e.g. "Which destination do you want to connect with surfers who\'ve been there? (e.g. El Salvador, Costa Rica)"). If their message is vague or just a greeting, respond with STEP 1\'s question: "Yo! Let\'s Travel! I can connect you with like minded surfers or surf travelers who have experience in specific destinations you are curious about. So, what are you looking for?"' },
+        { role: 'system', content: 'This is the FIRST message in a NEW conversation. If the user\'s message clearly asks for surfers or matches and includes criteria (e.g. "Israeli", "shortboard", "advanced") and/or a destination (e.g. "El Salvador"), treat it as their real request: extract destination if mentioned, extract criteria if mentioned, and only ask for what is missing (e.g. "Which destination do you want to connect with surfers who\'ve been there? (e.g. El Salvador, Costa Rica)"). If their message is vague or just a greeting, respond with ONLY this exact sentence and nothing else: "Yo! Let\'s get you connected! So what are we looking for today?" Do not add any other sentence or question after it.' },
         { role: 'user', content: body.message }
       ]
 
@@ -2358,6 +2371,15 @@ ${getPronounInstructions(userProfile.pronoun)}`
         console.error('[accumulatedFilters] Error:', error)
       }
       
+      // Detect "remove all filters" / "clear all" etc. so we don't re-apply accumulated filters
+      const userMessageNorm = (body.message || '').trim().toLowerCase()
+      const removeAllPhrases = ['remove all filters', 'clear all', 'clear all filters', 'wipe', 'wipe the slate', 'reset', 'reset filters', 'start fresh', 'remove everything', 'clear everything', 'wipe the slate clean']
+      const userRequestedRemoveAll = removeAllPhrases.some(phrase => userMessageNorm.includes(phrase))
+      if (userRequestedRemoveAll) {
+        extractedQueryFilters = null
+        console.log('📦 User requested remove all filters – extractedQueryFilters set to null, will not re-apply accumulated')
+      }
+
       // Merge current filters with accumulated filters (current takes precedence)
       console.log('[accumulatedFilters] Before merge: extractedQueryFilters=' + (extractedQueryFilters ? JSON.stringify(extractedQueryFilters) : 'null') + ' accumulatedFilters=' + (accumulatedFilters ? JSON.stringify(accumulatedFilters) : 'null'))
       if (accumulatedFilters && extractedQueryFilters) {
@@ -2366,7 +2388,7 @@ ${getPronounInstructions(userProfile.pronoun)}`
           ...extractedQueryFilters, // Current filters override accumulated ones
         }
         console.log('🔄 Merged filters (accumulated + current):', JSON.stringify(extractedQueryFilters, null, 2))
-      } else if (accumulatedFilters && !extractedQueryFilters) {
+      } else if (accumulatedFilters && !extractedQueryFilters && !userRequestedRemoveAll) {
         extractedQueryFilters = accumulatedFilters
         console.log('📦 Using accumulated filters only:', JSON.stringify(extractedQueryFilters, null, 2))
       } else if (accumulatedFilters === null && accumulatedFromMessage != null) {
@@ -2570,6 +2592,16 @@ ${getPronounInstructions(userProfile.pronoun)}`
             user_context: parsed.user_context,
             queryFilters: parsed.queryFilters ?? parsed.query_filters ?? null,
             filtersFromNonNegotiableStep: false,
+          }
+        }
+        
+        // Optional: when user said remove all and parsed has null/empty queryFilters, ensure destination/area are cleared
+        if (userRequestedRemoveAll && tripPlanningData) {
+          const qf = parsed.data?.queryFilters ?? parsed.queryFilters
+          if (qf == null || (typeof qf === 'object' && Object.keys(qf).length === 0)) {
+            tripPlanningData.destination_country = null
+            tripPlanningData.area = null
+            console.log('📦 Cleared destination_country and area (remove-all intent, parsed queryFilters empty)')
           }
         }
         
@@ -3429,6 +3461,10 @@ ${getPronounInstructions(userProfile.pronoun)}`
         if (!msg.metadata) msg.metadata = {}
         if (!msg.metadata.actionRow) msg.metadata.actionRow = { requestData: null, selectedAction: null }
         msg.metadata.actionRow.selectedAction = body.selectedAction
+        if (body.selectedAction === 'new_chat') {
+          msg.metadata.actionRow.requestData = { queryFilters: null, destination_country: null, area: null }
+          console.log('[update-match-action] New Chat: cleared requestData on message', i)
+        }
         await saveChatHistory(chatId, messages, user.id, null, supabaseAdmin)
         return new Response(JSON.stringify({ success: true }), { status: 200, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } })
       } catch (error) {

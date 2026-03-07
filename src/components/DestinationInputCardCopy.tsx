@@ -16,6 +16,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Text } from './Text';
 import { colors, spacing } from '../styles/theme';
 import { getCountryFlag } from '../utils/countryFlags';
+import { getDisplayLabelAndFlagKey } from '../utils/destinationDisplay';
 import {
   getCountryImageFromStorage,
   getCountryImageFallback,
@@ -127,10 +128,18 @@ export const DestinationInputCardCopy = forwardRef<
     scrollToUnitIndex(nextIndex);
   }, [timeUnit]);
 
+  const { displayLabel, flagKey } = useMemo(
+    () => getDisplayLabelAndFlagKey(destination),
+    [destination]
+  );
+
   const regionCodes = useMemo(() => {
+    if (flagKey === 'California' || flagKey === 'Hawaii') {
+      return ['us'];
+    }
     const code = COUNTRY_TO_REGION[destination];
     return code ? [code] : undefined;
-  }, [destination]);
+  }, [destination, flagKey]);
 
   useImperativeHandle(ref, () => ({
     focusAreaInput: () => placesInputRef.current?.focus(),
@@ -177,17 +186,17 @@ export const DestinationInputCardCopy = forwardRef<
 
   const [countryImageFailed, setCountryImageFailed] = useState(false);
   const [pexelsImageUrl, setPexelsImageUrl] = useState<string | null>(null);
-  const countryImageUrl = getCountryImageFromStorage(destination);
-  const countryFlagUrl = getCountryFlag(destination);
+  const countryImageUrl = getCountryImageFromStorage(flagKey);
+  const countryFlagUrl = getCountryFlag(flagKey);
   const handleBucketImageError = async () => {
     setCountryImageFailed(true);
-    const url = await getCountryImageFromPexels(destination);
+    const url = await getCountryImageFromPexels(flagKey);
     if (url) setPexelsImageUrl(url);
   };
   const backgroundUri =
     (!countryImageFailed && countryImageUrl) || pexelsImageUrl
       ? (countryImageFailed ? pexelsImageUrl! : countryImageUrl!)
-      : countryFlagUrl || getCountryImageFallback(destination);
+      : countryFlagUrl || getCountryImageFallback(flagKey);
   useEffect(() => {
     setCountryImageFailed(false);
     setPexelsImageUrl(null);
@@ -266,7 +275,7 @@ export const DestinationInputCardCopy = forwardRef<
             <View style={styles.frostedOverlay} />
           </ImageBackground>
           <View style={styles.card}>
-            <Text style={styles.destinationName}>{destination}</Text>
+            <Text style={styles.destinationName}>{displayLabel}</Text>
 
             <View style={styles.contentWithStack}>
               <MultiPlaceAutocompleteInput

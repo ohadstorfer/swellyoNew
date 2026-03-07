@@ -274,15 +274,16 @@ export const OnboardingStep1Screen: React.FC<OnboardingStep1ScreenProps> = ({
         {/* Title */}
         <View style={[styles.titleContainer, isDesktop && styles.titleContainerDesktop]}>
           <Text style={styles.title}>
-            Nice to meet you, {initialData.nickname || 'User'}!
+          What is your style?
           </Text>
         </View>
 
         {/* Subtitle */}
         <View style={[styles.subtitleContainer, isDesktop && styles.subtitleContainerDesktop]}>
-          <Text style={styles.subtitle}>What is your choice style?</Text>
+          <Text style={styles.subtitle}>Pick your go-to board.</Text>
           <Text style={styles.description}>
-            Select one... you can add more later!
+            Select one... 
+            you can add more to your quiver later!
           </Text>
         </View>
 

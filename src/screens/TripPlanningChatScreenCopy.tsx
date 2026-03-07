@@ -53,6 +53,21 @@ function getLabelParts(label: string): { prefix: string; value: string } | null 
 const TRIP_PLANNING_FIRST_QUESTION =
   "Yo! Let's Travel! I can connect you with like minded surfers or surf travelers who have experience in specific destinations you are curious about. So, what are you looking for?";
 
+/** True if we have at least one filter required for find-matches (matches backend validation). */
+function hasSearchableFilters(data: any): boolean {
+  if (!data || typeof data !== 'object') return false;
+  const dest = data.destination_country != null ? String(data.destination_country).trim() : '';
+  if (dest !== '') return true;
+  const q = data.queryFilters;
+  if (!q || typeof q !== 'object') return false;
+  if (q.country_from && Array.isArray(q.country_from) && q.country_from.length > 0) return true;
+  if (q.surfboard_type && Array.isArray(q.surfboard_type) && q.surfboard_type.length > 0) return true;
+  if (q.surf_level_category != null) return true;
+  if (typeof q.age_min === 'number') return true;
+  if (typeof q.age_max === 'number') return true;
+  return false;
+}
+
 
 
 /**
@@ -864,7 +879,17 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         if (effectiveSearch) {
           if (chatId) {
             const dataToSearch = response.data?.queryFilters != null ? response.data : pendingSearch.data;
-            runFindMatches(chatId, dataToSearch);
+            if (hasSearchableFilters(dataToSearch)) {
+              runFindMatches(chatId, dataToSearch);
+            } else {
+              const noFilterMsg: Message = {
+                id: (Date.now() + 1).toString(),
+                text: "Add at least one filter (destination, origin, surf level, or board type) so I can search.",
+                isUser: false,
+                timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+              };
+              setMessages(prev => [...prev, noFilterMsg]);
+            }
           }
         } else {
           // Show the bot's response (e.g. updated summary after filter edit)
@@ -881,24 +906,45 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
           }
         }
       } else if (response.is_finished && response.data && !hasNextAction && !awaitingSearchDecision) {
-        // First time seeing search_summary — show as text and wait for user decision
-        setIsFinished(true);
-        const summaryText = response.data?.search_summary ?? 'Ready to search with your current filters.';
-        const searchSummary = response.data?.search_summary ?? '';
-        const botMessage: Message = {
-          id: (Date.now() + 1).toString(),
-          text: summaryText,
-          isUser: false,
-          timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
-          isSearchSummary: true,
-        };
-        setMessages(prev => [...prev, botMessage]);
-        setPendingSearch({ data: response.data, searchSummary });
-        setAwaitingSearchDecision(true);
+        if (hasSearchableFilters(response.data)) {
+          // First time seeing search_summary — show as text and wait for user decision
+          setIsFinished(true);
+          const summaryText = response.data?.search_summary ?? 'Ready to search with your current filters.';
+          const searchSummary = response.data?.search_summary ?? '';
+          const botMessage: Message = {
+            id: (Date.now() + 1).toString(),
+            text: summaryText,
+            isUser: false,
+            timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+            isSearchSummary: true,
+          };
+          setMessages(prev => [...prev, botMessage]);
+          setPendingSearch({ data: response.data, searchSummary });
+          setAwaitingSearchDecision(true);
+        } else {
+          // No filters: show return_message only, do not enter search-or-edit mode
+          const botMessage: Message = {
+            id: (Date.now() + 1).toString(),
+            text: response.return_message ?? 'Add at least one filter (destination, origin, surf level, or board type) so I can search.',
+            isUser: false,
+            timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+          };
+          setMessages(prev => [...prev, botMessage]);
+        }
       } else if (hasNextAction && (response.data as any)?.next_action === 'search') {
         // Backend explicitly told us to search
         if (chatId && response.data) {
-          runFindMatches(chatId, response.data);
+          if (hasSearchableFilters(response.data)) {
+            runFindMatches(chatId, response.data);
+          } else {
+            const noFilterMsg: Message = {
+              id: (Date.now() + 1).toString(),
+              text: "Add at least one filter (destination, origin, surf level, or board type) so I can search.",
+              isUser: false,
+              timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+            };
+            setMessages(prev => [...prev, noFilterMsg]);
+          }
         }
       } else {
         const botMessage: Message = {

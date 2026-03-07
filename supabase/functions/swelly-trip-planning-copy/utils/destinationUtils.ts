@@ -310,15 +310,17 @@ export async function normalizeDestination(
  * Extract destination hierarchy from user's destinations_array
  */
 export function parseUserDestination(
-  destination: { country: string; area: string[] } | { destination_name: string } | string
+  destination: { country: string; area?: string[]; state?: string } | { destination_name: string } | string
 ): {
   country: string;
+  state?: string;
   area?: AreaOption[];
   towns?: string[];
 } {
-  // Handle new structure: {country, area[]}
+  // Handle new structure: {country, state?, area[]}
   if (typeof destination === 'object' && 'country' in destination) {
     const country = destination.country;
+    const state = (destination as any).state != null ? String((destination as any).state).trim() : undefined;
     const areas = destination.area || [];
     
     const areaParts: AreaOption[] = [];
@@ -341,6 +343,7 @@ export function parseUserDestination(
 
     return {
       country,
+      state: state && state.length > 0 ? state : undefined,
       area: areaParts.length > 0 ? areaParts : undefined,
       towns: townParts.length > 0 ? townParts : undefined,
     };
@@ -448,6 +451,8 @@ export function destinationMatches(
   
   const userCountryLower = userDest.country.toLowerCase().trim();
   
+  const userStateLower = userDest.state != null ? userDest.state.toLowerCase().trim() : undefined;
+
   const countryMatch = requestedCountries.some(reqCountry => {
     if (userCountryLower === reqCountry) {
       return true;
@@ -466,6 +471,18 @@ export function destinationMatches(
     if ((reqCountry === 'uk' || reqCountry === 'united kingdom') && 
         (userCountryLower.includes('united kingdom') || /\buk\b/.test(userCountryLower))) {
       return true;
+    }
+
+    // US state format: "united states - hawaii" / "united states - california" – match when user has country USA and same state
+    const usStatePrefix = 'united states - ';
+    if (reqCountry.startsWith(usStatePrefix)) {
+      const requestedState = reqCountry.slice(usStatePrefix.length).trim();
+      const isUSUser = userCountryLower.includes('united states') || userCountryLower === 'usa';
+      if (isUSUser && requestedState.length > 0) {
+        if (userStateLower === requestedState) return true;
+        if (userStateLower && userStateLower.includes(requestedState)) return true;
+        if (userStateLower && requestedState.includes(userStateLower)) return true;
+      }
     }
     
     return false;

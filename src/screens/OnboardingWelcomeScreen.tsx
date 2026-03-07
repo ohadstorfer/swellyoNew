@@ -111,7 +111,7 @@ export const OnboardingWelcomeScreen: React.FC<OnboardingWelcomeScreenProps> = (
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Step header: back, Step 1/4, progress bar */}
+      {/* Step header: 16px above the title block (second headline) */}
       <View style={styles.stepHeader}>
         <View style={styles.stepHeaderRow}>
           {onBack ? (
@@ -125,7 +125,7 @@ export const OnboardingWelcomeScreen: React.FC<OnboardingWelcomeScreenProps> = (
           ) : (
             <View style={styles.backPlaceholder} />
           )}
-          
+
         </View>
  
       </View>
@@ -142,13 +142,15 @@ export const OnboardingWelcomeScreen: React.FC<OnboardingWelcomeScreenProps> = (
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        {/* Greeting */}
-        <Text style={styles.greeting}>
-          {displayName ? `Yo ${displayName}!` : 'Yo!'}
-        </Text>
-
         {/* Title block */}
         <View style={styles.headerTitle}>
+        <Text
+              style={styles.greetingHeader}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+            >
+              {displayName ? `Yo ${displayName}!` : 'Yo!'}
+            </Text>
           <Text style={styles.title}>What's your surf journey?</Text>
           <Text style={styles.subtitle}>Pick at least two!</Text>
         </View>
@@ -224,21 +226,43 @@ const styles = StyleSheet.create({
   stepHeader: {
     paddingHorizontal: 16,
     paddingTop: 8,
-    paddingBottom: 16,
+    paddingBottom: 0,
     gap: 8,
   },
   stepHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    height: 24,
+    minHeight: 29,
+    position: 'relative',
   },
   backButton: {
     width: 60,
     alignItems: 'flex-start',
+    justifyContent: 'center',
+    zIndex: 1,
   },
   backPlaceholder: {
     width: 60,
+    minHeight: 29,
+    zIndex: 1,
+  },
+  greetingHeaderWrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  greetingHeader: {
+    fontFamily: Platform.OS === 'web' ? 'var(--Family-Headings, Montserrat), sans-serif' : 'Montserrat',
+    fontWeight: '700',
+    fontSize: 24,
+    lineHeight: 28.8,
+    color: colors.brandTeal,
+    textAlign: 'center',
   },
   skipPlaceholder: {
     width: 60,
@@ -266,20 +290,14 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingHorizontal: 16,
+    paddingTop: 12,
     paddingBottom: 24,
     alignItems: 'center',
-  },
-  greeting: {
-    fontFamily: Platform.OS === 'web' ? 'var(--Family-Headings, Montserrat), sans-serif' : 'Montserrat',
-    fontWeight: '700',
-    fontSize: 24,
-    lineHeight: 28.8,
-    color: colors.brandTeal,
-    textAlign: 'center',
   },
   headerTitle: {
     alignItems: 'center',
     gap: 8,
+    marginBottom: 24,
   },
   title: {
     fontFamily: Platform.OS === 'web' ? 'var(--Family-Headings, Montserrat), sans-serif' : 'Montserrat',
@@ -378,6 +396,7 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     color: colors.textSecondary,
     textAlign: 'center',
+    marginTop: 8,
   },
   buttonContainer: {
     paddingHorizontal: 24,

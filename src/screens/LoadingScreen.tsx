@@ -10,10 +10,14 @@ import {
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../components/Text';
-import { colors, spacing } from '../styles/theme';
+import { colors, spacing, borderRadius } from '../styles/theme';
 import { useOnboarding } from '../context/OnboardingContext';
-import { getVideoUrl } from '../services/media/videoService';
+import { useScreenDimensions } from '../utils/responsive';
+import { getLoadingVideoUrl } from '../services/media/videoService';
 import { getVideoPreloadStatus, waitForVideoReady } from '../services/media/videoPreloadService';
+
+const ACCENT_PURPLE = '#b72df2';
+const REFERENCE_HEIGHT = 812;
 
 interface LoadingScreenProps {
   onComplete: () => void;
@@ -25,13 +29,11 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
   onBack,
 }) => {
   const { setCurrentStep, formData } = useOnboarding();
-
-  // Check if we should display the name
-  const userName = formData.nickname || '';
+  const userName = formData?.nickname || '';
   const shouldShowName = userName && userName.trim() !== '' && userName.toLowerCase() !== 'user';
 
-  // Get video URL using the utility function
-  const videoUrl = getVideoUrl('/Loading 4 to 5.mp4');
+  // Get video URL from Supabase loading_video bucket
+  const videoUrl = getLoadingVideoUrl();
 
   // Check if video is preloaded - initialize loading state based on preload status
   const isVideoPreloaded = React.useMemo(() => {
@@ -141,11 +143,14 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
             // Resume playback after buffering
             try {
               if (player && typeof player.play === 'function') {
-                player.play().catch((err: any) => {
-                  if (__DEV__ && err.name !== 'NotAllowedError') {
-                    console.warn('[LoadingScreen] Error resuming after buffer:', err);
-                  }
-                });
+                const playResult: unknown = player.play();
+                if (playResult != null && typeof (playResult as { catch?: (fn: (e: any) => void) => void }).catch === 'function') {
+                  (playResult as Promise<unknown>).catch((err: any) => {
+                    if (__DEV__ && err.name !== 'NotAllowedError') {
+                      console.warn('[LoadingScreen] Error resuming after buffer:', err);
+                    }
+                  });
+                }
               }
             } catch (error) {
               if (__DEV__) {
@@ -579,96 +584,96 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
     }
   };
 
+  const { height: screenHeight } = useScreenDimensions();
+  const spacingScale = Math.min(1.2, Math.max(0.55, screenHeight / REFERENCE_HEIGHT));
+  const v = (base: number) => Math.round(base * spacingScale);
+  const headerGap = v(12);
+  const afterHeader = v(24);
+  const bottomBlockPaddingH = spacing.lg;
+  const subtitleToButtonGap =
+    screenHeight >= REFERENCE_HEIGHT * 0.85
+      ? 48
+      : Math.max(16, Math.round(48 * spacingScale));
+  const buttonBottom = v(24);
+  // Video: use most of the middle area (Figma sequence ~232x375 portrait). Size by screen height so it dominates.
+  const VIDEO_ASPECT = 232 / 375;
+  const videoHeight = Math.round(Math.min(screenHeight * 0.48, 440));
+  const videoWidth = Math.round(videoHeight * VIDEO_ASPECT);
+
   return (
     <SafeAreaView style={styles.container}>
-      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={handleBack} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color="#222B30" />
+          <Ionicons name="arrow-back" size={24} color="#212121" />
         </TouchableOpacity>
+        <View style={styles.skipButton} />
+      </View>
 
-        
-
-        <View style={styles.skipButton}>
-          {/* Skip button is hidden in this step */}
+      {/* Header: Meet Swelly! + Your Guide into the Swellyo Lineup */}
+      <View style={[styles.headerBlock, { paddingHorizontal: bottomBlockPaddingH, paddingTop: afterHeader, gap: headerGap }]}>
+        <Text style={styles.headline}>Meet Swelly!</Text>
+        <View style={styles.headerTitleWrap}>
+          <Text style={styles.headerTitle}>
+            Your Guide into the{'\n'}Swellyo Lineup
+          </Text>
         </View>
       </View>
 
-     
-
-      {/* Main Content */}
-      <View style={styles.content}>
-        {/* Title */}
-        <View style={styles.titleContainer}>
-          <Text style={styles.title}>Moving you to the next stage....</Text>
-        </View>
-
-        {/* Video */}
-        <View style={styles.videoContainer}>
-          <View 
+      {/* Middle: video centered vertically between "Your Guide..." and bottom text */}
+      <View style={styles.videoMiddle}>
+        <View style={[styles.videoContainer, { width: videoWidth, height: videoHeight }]}>
+          <View
             style={styles.videoWrapper}
             {...(Platform.OS === 'web' && {
-              // Prevent default touch behaviors on web (especially iOS Safari)
-              onTouchStart: (e: any) => {
-                e.preventDefault();
-                e.stopPropagation();
-              },
-              onTouchMove: (e: any) => {
-                e.preventDefault();
-                e.stopPropagation();
-              },
-              onTouchEnd: (e: any) => {
-                e.preventDefault();
-                e.stopPropagation();
-              },
+              onTouchStart: (e: any) => { e.preventDefault(); e.stopPropagation(); },
+              onTouchMove: (e: any) => { e.preventDefault(); e.stopPropagation(); },
+              onTouchEnd: (e: any) => { e.preventDefault(); e.stopPropagation(); },
             } as any)}
           >
             <View style={styles.videoPlayerContainer} pointerEvents="none">
               <VideoView
                 player={player}
                 style={styles.video}
-                contentFit="cover"
+                contentFit="contain"
                 nativeControls={false}
                 allowsFullscreen={false}
                 allowsPictureInPicture={false}
                 {...(Platform.OS === 'web' && {
-                  // Web-specific props to prevent controls
                   controls: false,
                   disablePictureInPicture: true,
                 } as any)}
               />
             </View>
-            
-            {/* Transparent overlay to prevent video interactions on iOS Safari */}
-            <View 
+            <View
               style={styles.videoOverlay}
               {...(Platform.OS === 'web' && {
-                // Prevent default touch behaviors on web (especially iOS Safari)
-                onTouchStart: (e: any) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                },
-                onTouchMove: (e: any) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                },
-                onTouchEnd: (e: any) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                },
+                onTouchStart: (e: any) => { e.preventDefault(); e.stopPropagation(); },
+                onTouchMove: (e: any) => { e.preventDefault(); e.stopPropagation(); },
+                onTouchEnd: (e: any) => { e.preventDefault(); e.stopPropagation(); },
               } as any)}
             />
           </View>
         </View>
+      </View>
 
-        {/* Text Container - 28px below video */}
-        <View style={styles.textContainer}>
-          {shouldShowName && (
-            <Text style={styles.greeting}>Alright, {userName}!</Text>
-          )}
-          <Text style={styles.subtitle}>Community powered travel{'\n'}starts with you!</Text>
+      {/* Bottom: "Alright, name!" + body text aligned to Drop In! button */}
+      <View style={[styles.bottomBlock, { paddingHorizontal: bottomBlockPaddingH, paddingBottom: buttonBottom }]}>
+        <View style={[styles.textContainer, { gap: v(4) }]}>
+          <Text style={styles.greeting}>
+            {shouldShowName ? `Alright, ${userName}!` : 'Alright!'}
+          </Text>
+          <Text style={styles.subtitle}>
+            Swelly will help finish shaping your surf travel profile so we can connect you with the right surfers, destinations, and travel experiences.
+          </Text>
         </View>
-        
+        <View style={{ height: subtitleToButtonGap }} />
+        <TouchableOpacity
+          style={styles.ctaButton}
+          onPress={onComplete}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.ctaButtonText}>Drop In!</Text>
+        </TouchableOpacity>
       </View>
     </SafeAreaView>
   );
@@ -691,90 +696,98 @@ const styles = StyleSheet.create({
     width: 60,
     alignItems: 'flex-start',
   },
-  stepText: {
-    fontSize: 12,
-    fontWeight: '400',
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
-    color: colors.textPrimary,
-    textAlign: 'center',
-    lineHeight: 15,
-  },
   skipButton: {
     width: 60,
     alignItems: 'flex-end',
   },
-  progressContainer: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
+  headerBlock: {
     alignItems: 'center',
+    width: '100%',
   },
-  progressBar: {
-    width: 237,
-    height: 4,
-    backgroundColor: colors.progressBackground,
-    borderRadius: 8,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    backgroundColor: colors.progressFill,
-    borderRadius: 8,
-  },
-  content: {
+  videoMiddle: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: spacing.lg,
+    minHeight: 250,
+    zIndex: 0,
+  },
+  bottomBlock: {
+    alignItems: 'center',
+    width: '100%',
+    flexShrink: 0,
     backgroundColor: colors.backgroundGray,
+    zIndex: 2,
+    paddingTop: 12,
   },
-  textContainer: {
-    width: 393,
-    height: 72,
-    paddingLeft: 15,
-    justifyContent: 'flex-end',
-    alignItems: 'center',
-    marginTop: 28,
-  },
-  titleContainer: {
-    marginTop: 36,
-    alignItems: 'center',
-    gap: 4,
-  },
-  greeting: {
-    fontSize: 22,
+  headline: {
+    fontSize: 24,
     fontWeight: '700',
     fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat',
-    color: colors.textPrimary,
+    color: ACCENT_PURPLE,
     textAlign: 'center',
-    lineHeight: 32,
-    width: 350,
+    lineHeight: 28.8,
+  },
+  headerTitleWrap: {
+    alignItems: 'center',
+    width: '100%',
+    maxWidth: 345,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat',
+    color: '#212121',
+    textAlign: 'center',
+    lineHeight: 24,
+  },
+  textContainer: {
+    alignItems: 'center',
+    width: '100%',
+    maxWidth: 357,
+  },
+  greeting: {
+    fontSize: 18,
+    fontWeight: '700',
+    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat',
+    color: Platform.OS === 'web' ? 'var(--Text-primary, #333)' : colors.textPrimary,
+    textAlign: 'center',
+    lineHeight: 24,
+    width: '100%',
   },
   subtitle: {
-    fontSize: 20,
+    fontSize: 16,
     fontWeight: '400',
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     color: colors.textSecondary,
     textAlign: 'center',
-    lineHeight: 24,
-    width: 351,
+    lineHeight: 22,
+    width: '100%',
   },
-  title: {
-    fontSize: 24,
+  ctaButton: {
+    backgroundColor: '#212121',
+    minWidth: 150,
+    maxWidth: 330,
+    width: '100%',
+    height: 56,
+    borderRadius: borderRadius.full,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  ctaButtonText: {
+    fontSize: 18,
     fontWeight: '700',
     fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat',
-    color: colors.brandTeal,
-    textAlign: 'center',
-    lineHeight: 28.8,
-    width: 350,
+    color: colors.white,
+    lineHeight: 24,
   },
   videoContainer: {
-    width: 295,
-    height: 294,
     borderRadius: 0,
     overflow: 'hidden',
-    backgroundColor: colors.backgroundGray, // Match container background to prevent flash
+    backgroundColor: colors.backgroundGray,
     position: 'relative',
     zIndex: 1,
+    alignSelf: 'center',
   },
   videoWrapper: {
     width: '100%',

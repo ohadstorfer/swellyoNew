@@ -1281,13 +1281,14 @@ export default function ConversationsScreen({
                         },
                       ]}
                     >
-                      Let Swelly know where you are headed{'\n'}
-                      for the next surf adventure!{'\n'}
+                      Connect with surfers who match your {'\n'}
+                      style, experience, and travel interests. {'\n'}
                       {'\n'}
-                      Get connected to travelers who have{'\n'}
-                      deeper knowledge about the destination.{'\n'}
+                      GLooking for advice about a destination? {'\n'}
+                      Swelly can introduce you to surfers{'\n'}
+                      who know it best. 
                       {'\n'}
-                      Give and receive advice!
+                      Just ask Swelly!
                     </Animated.Text>
                     <Animated.View 
                       style={[

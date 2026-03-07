@@ -20,6 +20,8 @@ import Constants from 'expo-constants';
 // This should match EXPO_PUBLIC_SUPABASE_URL in your .env file
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL?.trim() || '';
 const SURF_LEVEL_VIDEOS_BUCKET = 'surf-level-videos';
+const LOADING_VIDEO_BUCKET = 'loading_video';
+const LOADING_VIDEO_PATH = 'Loadingvideo.mp4';
 
 if (!SUPABASE_URL) {
   console.error('[videoService] EXPO_PUBLIC_SUPABASE_URL is not set. Video URLs will not work correctly.');
@@ -50,6 +52,18 @@ export const getSurfLevelVideoFromStorage = (bucketPath: string): string => {
     console.log('[getSurfLevelVideoFromStorage] Generated URL:', url);
   }
   
+  return url;
+};
+
+/**
+ * Get the public URL for the loading screen video (Supabase storage, loading_video bucket)
+ */
+export const getLoadingVideoUrl = (): string => {
+  const encodedPath = encodeURIComponent(LOADING_VIDEO_PATH);
+  const url = `${SUPABASE_URL}/storage/v1/object/public/${LOADING_VIDEO_BUCKET}/${encodedPath}`;
+  if (__DEV__) {
+    console.log('[getLoadingVideoUrl] URL:', url);
+  }
   return url;
 };
 

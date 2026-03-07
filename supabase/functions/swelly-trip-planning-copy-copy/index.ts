@@ -960,7 +960,7 @@ CRITICAL: Be smart and flexible when understanding user requests:
 CONVERSATION FLOW:
 
 STEP 1 - ENTRY POINT:
-ALWAYS start with this exact question in your FIRST response: "Yo! Let’s Travel! I can connect you with like minded surfers or surf travelers who have experience in specific destinations you are curious about. So, what are you looking for?"
+ALWAYS start with this exact question in your FIRST response: Yo! Let’s get you connected! So what are we looking for today? "
 
 When the first message in the conversation (new_chat) is vague or just a greeting, respond with STEP 1's question. If the user's first message clearly asks for surfers or matches and includes criteria (e.g. origin, board type, level) and/or a destination, treat it as their real request: extract what you can (destination if mentioned, criteria if mentioned) and only ask for what is missing (e.g. if they did not mention a destination, ask: "Which destination do you want to connect with surfers who've been there? (e.g. El Salvador, Costa Rica)"). Do not repeat STEP 1 when they already gave a direct request.
 
@@ -1144,6 +1144,7 @@ You MUST always return a JSON object with this structure (NO EXCEPTIONS):
 
 CRITICAL RULES:
 - ALWAYS return valid JSON. NEVER return plain text.
+- REMOVE ALL FILTERS: When the user says they want to remove all filters, clear all, wipe the slate, start fresh, or reset filters, you MUST set in the response data: queryFilters: null, destination_country: null, and area: null. Do not keep any previous destination or criteria. Example: User says "remove all filters" → data: { ..., queryFilters: null, destination_country: null, area: null, ... }.
 - Set is_finished: true when: (a) User gave 2+ filters and you are ready to search, OR (b) User gave 1 filter — set is_finished: true in the SAME turn with search_summary (do not ask a separate "add anything else?" message), OR (c) Quick match: user asked for surfers and you extracted at least destination_country, OR (d) User asked for surfers with only criteria (e.g. country_from, age range) and no destination — then set is_finished: true with queryFilters and no destination_country for general matching. "search_summary": "Short casual summary of the surfer or trip we’re about to look for, shown to the user before they decide whether to search or edit filters. REQUIRED when is_finished is true. First, write a one-line friendly description based ONLY on the criteria (destination_country, area, queryFilters), for example: \"Sweet — an Israeli surfer who’s surfed Hawaii (US) and rides a shortboard just like you.\" or \"Got it — an advanced Israeli shortboarder around your age.\" Do NOT say \"searching for\" or imply that you already started searching. Then add a newline (\"\\n\") and a short question asking if they want to search now or tweak filters first (e.g. \"Are you ready for me to search now, or do you want to tweak any filters first?\"). Tone: friendly, first person, no markdown.",- DESTINATION EXTRACTION: When user mentions ANY location, extract destination_country immediately. Correct typos ("filipins" → "Philippines"). If they mention area too, extract both. NEVER set destination_country to null if a location was mentioned.
 - return_message = conversational text only. All structured data goes in "data". No JSON or markdown in return_message.
 - When there is no destination (general match): in return_message and search_summary, describe only the filters (e.g. \"Got you, bro — searching for an advanced Israeli shortboarder.\"). Do NOT mention \"no destination\", \"no specific destination\", or \"going global\".
@@ -2746,6 +2747,15 @@ ${getPronounInstructions(userProfile.pronoun)}`
         console.error('[accumulatedFilters] Error:', error)
       }
       
+      // Detect "remove all filters" / "clear all" etc. so we don't re-apply accumulated filters
+      const userMessageNorm = (body.message || '').trim().toLowerCase()
+      const removeAllPhrases = ['remove all filters', 'clear all', 'clear all filters', 'wipe', 'wipe the slate', 'reset', 'reset filters', 'start fresh', 'remove everything', 'clear everything', 'wipe the slate clean']
+      const userRequestedRemoveAll = removeAllPhrases.some(phrase => userMessageNorm.includes(phrase))
+      if (userRequestedRemoveAll) {
+        extractedQueryFilters = null
+        console.log('📦 User requested remove all filters – extractedQueryFilters set to null, will not re-apply accumulated')
+      }
+
       // Merge current filters with accumulated filters (current takes precedence)
       console.log('[accumulatedFilters] Before merge: extractedQueryFilters=' + (extractedQueryFilters ? JSON.stringify(extractedQueryFilters) : 'null') + ' accumulatedFilters=' + (accumulatedFilters ? JSON.stringify(accumulatedFilters) : 'null'))
       if (accumulatedFilters && extractedQueryFilters) {
@@ -2754,7 +2764,7 @@ ${getPronounInstructions(userProfile.pronoun)}`
           ...extractedQueryFilters, // Current filters override accumulated ones
         }
         console.log('🔄 Merged filters (accumulated + current):', JSON.stringify(extractedQueryFilters, null, 2))
-      } else if (accumulatedFilters && !extractedQueryFilters) {
+      } else if (accumulatedFilters && !extractedQueryFilters && !userRequestedRemoveAll) {
         extractedQueryFilters = accumulatedFilters
         console.log('📦 Using accumulated filters only:', JSON.stringify(extractedQueryFilters, null, 2))
       } else if (accumulatedFilters === null && accumulatedFromMessage != null) {
@@ -2958,6 +2968,16 @@ ${getPronounInstructions(userProfile.pronoun)}`
             user_context: parsed.user_context,
             queryFilters: parsed.queryFilters ?? parsed.query_filters ?? null,
             filtersFromNonNegotiableStep: false,
+          }
+        }
+        
+        // Optional: when user said remove all and parsed has null/empty queryFilters, ensure destination/area are cleared
+        if (userRequestedRemoveAll && tripPlanningData) {
+          const qf = parsed.data?.queryFilters ?? parsed.queryFilters
+          if (qf == null || (typeof qf === 'object' && Object.keys(qf).length === 0)) {
+            tripPlanningData.destination_country = null
+            tripPlanningData.area = null
+            console.log('📦 Cleared destination_country and area (remove-all intent, parsed queryFilters empty)')
           }
         }
         
@@ -3817,6 +3837,10 @@ ${getPronounInstructions(userProfile.pronoun)}`
         if (!msg.metadata) msg.metadata = {}
         if (!msg.metadata.actionRow) msg.metadata.actionRow = { requestData: null, selectedAction: null }
         msg.metadata.actionRow.selectedAction = body.selectedAction
+        if (body.selectedAction === 'new_chat') {
+          msg.metadata.actionRow.requestData = { queryFilters: null, destination_country: null, area: null }
+          console.log('[update-match-action] New Chat: cleared requestData on message', i)
+        }
         await saveChatHistory(chatId, messages, user.id, null, supabaseAdmin)
         return new Response(JSON.stringify({ success: true }), { status: 200, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } })
       } catch (error) {

@@ -540,7 +540,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
 
             {/* Tagline */}
             <RNText style={styles.tagline}>
-              Join The Current
+            Connect | Travel | Surf | Share
             </RNText>
           </View>
 

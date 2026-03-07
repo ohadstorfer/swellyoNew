@@ -77,6 +77,11 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
   const [budgetSubmitted, setBudgetSubmitted] = useState(false);
   const [budgetButtonsMessageId, setBudgetButtonsMessageId] = useState<string | null>(null);
 
+  // Initial welcome: show typing bubble after 1s, then second message after 2s more
+  const [showInitialTypingBubble, setShowInitialTypingBubble] = useState(false);
+  const initialTypingTimeout1Ref = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const initialTypingTimeout2Ref = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Calculate progress based on conversation length
   // Estimate: typical conversation is 6-10 message pairs (12-20 messages total)
   // Progress increases with each message exchange
@@ -122,35 +127,39 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
         console.log('Chat initialized with response:', response);
         const newChatId = response.chat_id || null;
         setChatId(newChatId);
-        
-        // Set the first message from Swelly's response
+
+        const nickname = formData.nickname || 'Jake';
         const firstMessage: Message = {
           id: '1',
-          text: response.return_message,
+          text: `Yo ${nickname}! Swelly here! Stoked to have you in the community 🌊! Time to get your profile as dialed as your favorite board!`,
           isUser: false,
-          timestamp: new Date().toLocaleTimeString('en-US', { 
-            hour: '2-digit', 
+          timestamp: new Date().toLocaleTimeString('en-US', {
+            hour: '2-digit',
             minute: '2-digit',
-            hour12: false 
+            hour12: false,
           }),
         };
-        
-        // Handle UI hints from initial response
-        if (response.ui_hints) {
-          firstMessage.ui_hints = response.ui_hints;
-          if (response.ui_hints.show_destination_cards && response.ui_hints.destinations) {
-            setShowDestinationCards(true);
-            setDestinationList(response.ui_hints.destinations);
-            setDestinationCardsMessageId(firstMessage.id);
-          }
-          if (response.ui_hints.show_budget_buttons) {
-            setShowBudgetButtons(true);
-            setBudgetButtonsMessageId(firstMessage.id);
-          }
-        }
-        
         setMessages([firstMessage]);
-        
+        setIsInitializing(false);
+
+        // After 1s show typing bubble; after 3s total hide it and append second message
+        initialTypingTimeout1Ref.current = setTimeout(() => {
+          setShowInitialTypingBubble(true);
+        }, 1000);
+        initialTypingTimeout2Ref.current = setTimeout(() => {
+          setShowInitialTypingBubble(false);
+          const secondMessage: Message = {
+            id: '2',
+            text: "Let's start with destinations, what are the TOP 3 you know best? They don't have to be surf trips, just places you've surfed and spent some time at.",
+            isUser: false,
+            timestamp: new Date().toLocaleTimeString('en-US', {
+              hour: '2-digit',
+              minute: '2-digit',
+              hour12: false,
+            }),
+          };
+          setMessages(prev => [...prev, secondMessage]);
+        }, 3000);
       } catch (error) {
         console.error('API health check or chat initialization failed:', error);
         Alert.alert(
@@ -162,8 +171,18 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
         setIsInitializing(false);
       }
     };
-    
+
     initializeChat();
+    return () => {
+      if (initialTypingTimeout1Ref.current) {
+        clearTimeout(initialTypingTimeout1Ref.current);
+        initialTypingTimeout1Ref.current = null;
+      }
+      if (initialTypingTimeout2Ref.current) {
+        clearTimeout(initialTypingTimeout2Ref.current);
+        initialTypingTimeout2Ref.current = null;
+      }
+    };
   }, [formData]); // Re-run if formData changes
 
   const sendMessage = async () => {
@@ -349,7 +368,7 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages, isInitializing, isLoading]);
+  }, [messages, isInitializing, isLoading, showInitialTypingBubble]);
 
   // Typing animation component
   const TypingIndicator = () => {
@@ -714,7 +733,7 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
           keyboardShouldPersistTaps="handled"
         >
           {messages.map(renderMessage)}
-          {(isLoading || isInitializing) && (
+          {(isLoading || isInitializing || showInitialTypingBubble) && (
             <View style={[styles.messageContainer, styles.botMessageContainer]}>
               <View style={[styles.messageBubble, styles.botMessageBubble]}>
                 <View style={styles.messageTextContainer}>
@@ -732,7 +751,7 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
             value={inputText}
             onChangeText={setInputText}
             onSend={sendMessage}
-            disabled={isLoading}
+            disabled={isLoading || isInitializing}
             placeholder="Type your message.."
             maxLength={500}
             primaryColor={colors.primary || '#B72DF2'}
