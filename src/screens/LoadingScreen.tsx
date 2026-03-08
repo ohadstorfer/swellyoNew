@@ -553,29 +553,6 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
     }
   }, [videoUrl, player]);
 
-  useEffect(() => {
-    // Auto-navigate to step 5 after video completes or timeout
-    const timer = setTimeout(() => {
-      onComplete();
-    }, 5000); // 5 second timeout as fallback
-
-    return () => clearTimeout(timer);
-  }, [onComplete]);
-
-  // Listen for video end
-  useEffect(() => {
-    if (!player) return;
-    
-    const subscription = player.addListener('playToEnd', () => {
-      console.log('Video ended, navigating to next step');
-      onComplete();
-    });
-
-    return () => {
-      subscription.remove();
-    };
-  }, [player, onComplete]);
-
   const handleBack = () => {
     if (onBack) {
       onBack();
