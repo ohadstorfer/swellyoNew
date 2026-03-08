@@ -6,7 +6,7 @@ import {
   Dimensions,
   Platform,
 } from 'react-native';
-import { DestinationInputCard, type DestinationInputCardRef } from './DestinationInputCard';
+import { DestinationInputCard, type DestinationInputCardRef, type SwipeExcludeZoneRect } from './DestinationInputCard';
 import { spacing } from '../styles/theme';
 
 const FOCUS_NEXT_INPUT_DELAY_MS = 380;
@@ -39,10 +39,19 @@ export const DestinationCardsCarousel: React.FC<DestinationCardsCarouselProps> =
   const [currentIndex, setCurrentIndex] = useState(0);
   const currentIndexRef = useRef(0);
   currentIndexRef.current = currentIndex;
-  // Index at gesture start so swipe threshold is relative to where the user started, not viewability.
   const scrollStartIndexRef = useRef(0);
   const itemWidthRef = useRef(0);
   const destinationsLengthRef = useRef(0);
+  const touchStartX = useRef<number | null>(null);
+  const touchStartY = useRef<number | null>(null);
+  const touchStartTime = useRef<number | null>(null);
+  const lockedScrollOffset = useRef<number | null>(null);
+  const isGestureActive = useRef(false);
+  const hasHandledScrollEnd = useRef(false);
+  const flatListWebRef = useRef<any>(null);
+  const excludeZonesByIndexRef = useRef<Record<number, { timeUnit: SwipeExcludeZoneRect; areaInput: SwipeExcludeZoneRect }>>({});
+  const isPointInRect = (px: number, py: number, r: SwipeExcludeZoneRect) =>
+    r.width > 0 && r.height > 0 && px >= r.x && px <= r.x + r.width && py >= r.y && py <= r.y + r.height;
 
   // Initialize destination data from initialData if provided (read-only mode)
   const initializeDestinationData = (): Record<string, DestinationData> => {
@@ -126,9 +135,112 @@ export const DestinationCardsCarousel: React.FC<DestinationCardsCarouselProps> =
     }
   };
 
-  // Use native horizontal scroll only (no PanResponder). Vertical gestures then go to the parent
-  // chat ScrollView, so scrolling up/down over the cards works. directionalLockEnabled on the
-  // FlatList lets the system assign vertical = parent, horizontal = carousel.
+  const getScrollOffsetForIndex = (index: number) => index * itemWidth;
+
+  const handleTouchStart = useCallback(
+    (event: any) => {
+      const touch = event.nativeEvent?.touches?.[0] || event.nativeEvent || event;
+      const pageX = touch.pageX ?? touch.clientX ?? touch.x;
+      const pageY = touch.pageY ?? touch.clientY ?? touch.y;
+      if (pageX === undefined || pageY === undefined) return;
+      if (Platform.OS === 'web') {
+        const target = event.nativeEvent?.target ?? event.target;
+        if (target?.closest?.('[data-swipe-exclude]')) return;
+      }
+      const viewportX = touch.clientX ?? touch.pageX ?? touch.x;
+      const viewportY = touch.clientY ?? touch.pageY ?? touch.y;
+      const zones = excludeZonesByIndexRef.current[currentIndexRef.current];
+      if (zones) {
+        if (isPointInRect(viewportX, viewportY, zones.timeUnit)) return;
+      } else {
+        return;
+      }
+      touchStartX.current = pageX;
+      touchStartY.current = pageY;
+      touchStartTime.current = Date.now();
+      isGestureActive.current = true;
+      hasHandledScrollEnd.current = false;
+      scrollStartIndexRef.current = currentIndexRef.current;
+      lockedScrollOffset.current = getScrollOffsetForIndex(currentIndexRef.current);
+      if (Platform.OS === 'web' && flatListWebRef.current) {
+        flatListWebRef.current.style.overflow = 'hidden';
+        if (lockedScrollOffset.current !== null) {
+          flatListWebRef.current.scrollLeft = lockedScrollOffset.current;
+        }
+      }
+      if (flatListRef.current && lockedScrollOffset.current !== null) {
+        flatListRef.current.scrollToOffset({
+          offset: lockedScrollOffset.current,
+          animated: false,
+        });
+      }
+    },
+    [itemWidth]
+  );
+
+  const handleTouchEnd = useCallback(
+    (event: any) => {
+      if (!isGestureActive.current || touchStartX.current === null || touchStartTime.current === null) return;
+      const touch = event.nativeEvent?.changedTouches?.[0] || event.nativeEvent || event;
+      const endX = touch.pageX ?? touch.clientX ?? touch.x;
+      const endY = touch.pageY ?? touch.clientY ?? touch.y;
+      if (endX === undefined || endY === undefined) {
+        touchStartX.current = null;
+        touchStartY.current = null;
+        touchStartTime.current = null;
+        isGestureActive.current = false;
+        return;
+      }
+      const deltaX = endX - touchStartX.current;
+      const deltaY = endY - (touchStartY.current ?? 0);
+      const deltaTime = Date.now() - touchStartTime.current;
+      touchStartX.current = null;
+      touchStartY.current = null;
+      touchStartTime.current = null;
+      isGestureActive.current = false;
+      if (hasHandledScrollEnd.current) return;
+      const isHorizontalSwipe = Math.abs(deltaX) > Math.abs(deltaY);
+      const minSwipeDistance = 5;
+      const maxSwipeTime = 1000;
+      if (isHorizontalSwipe && Math.abs(deltaX) > minSwipeDistance && deltaTime < maxSwipeTime) {
+        const start = scrollStartIndexRef.current;
+        let targetIndex = start;
+        if (deltaX < 0) targetIndex = Math.min(destinations.length - 1, start + 1);
+        else targetIndex = Math.max(0, start - 1);
+        targetIndex = Math.max(0, Math.min(destinations.length - 1, targetIndex));
+        hasHandledScrollEnd.current = true;
+        const targetOffset = getScrollOffsetForIndex(targetIndex);
+        currentIndexRef.current = targetIndex;
+        setCurrentIndex(targetIndex);
+        flatListRef.current?.scrollToOffset({ offset: targetOffset, animated: true });
+        if (targetIndex > start) {
+          setTimeout(() => {
+            cardRefsMap.current[targetIndex]?.focusAreaInput?.();
+          }, FOCUS_NEXT_INPUT_DELAY_MS);
+        }
+        if (Platform.OS === 'web' && flatListWebRef.current) {
+          setTimeout(() => {
+            flatListWebRef.current.style.overflow = 'auto';
+          }, 300);
+        }
+      }
+      setTimeout(() => { hasHandledScrollEnd.current = false; }, 350);
+    },
+    [destinations.length, itemWidth]
+  );
+
+  const handleTouchCancel = useCallback(() => {
+    touchStartX.current = null;
+    touchStartY.current = null;
+    touchStartTime.current = null;
+    isGestureActive.current = false;
+    lockedScrollOffset.current = null;
+    hasHandledScrollEnd.current = false;
+    if (Platform.OS === 'web' && flatListWebRef.current) {
+      flatListWebRef.current.style.overflow = 'auto';
+    }
+  }, []);
+
   const handleScrollEnd = useCallback(
     (event: any) => {
       if (destinations.length === 0) return;
@@ -142,6 +254,8 @@ export const DestinationCardsCarousel: React.FC<DestinationCardsCarouselProps> =
       } else if (offsetX < curOffset - threshold && cur > 0) {
         targetIndex = cur - 1;
       }
+      targetIndex = Math.max(cur - 1, Math.min(cur + 1, targetIndex));
+      targetIndex = Math.max(0, Math.min(destinations.length - 1, targetIndex));
       if (targetIndex !== cur) {
         flatListRef.current?.scrollToOffset({
           offset: targetIndex * itemWidth,
@@ -193,13 +307,49 @@ export const DestinationCardsCarousel: React.FC<DestinationCardsCarouselProps> =
     <View style={{ width: PEEK }} />
   ) : undefined;
 
+  const onSwipeExcludeZonesLayout = useCallback(
+    (index: number, zones: { timeUnit: SwipeExcludeZoneRect; areaInput: SwipeExcludeZoneRect }) => {
+      excludeZonesByIndexRef.current[index] = zones;
+    },
+    []
+  );
+
+  const setFlatListRef = useCallback((node: FlatList | null) => {
+    (flatListRef as React.MutableRefObject<FlatList | null>).current = node;
+    if (Platform.OS === 'web' && node && typeof (node as any).getScrollableNode === 'function') {
+      flatListWebRef.current = (node as any).getScrollableNode();
+    } else {
+      flatListWebRef.current = null;
+    }
+  }, []);
+
   return (
     <View style={styles.container}>
-      <View style={styles.carouselContainer}>
+      <View
+        style={styles.carouselContainer}
+        {...({
+          onTouchStartCapture: handleTouchStart,
+          onTouchMoveCapture: () => {
+            if (isGestureActive.current && lockedScrollOffset.current != null) {
+              flatListRef.current?.scrollToOffset({
+                offset: lockedScrollOffset.current,
+                animated: false,
+              });
+              if (Platform.OS === 'web' && flatListWebRef.current) {
+                flatListWebRef.current.scrollLeft = lockedScrollOffset.current;
+              }
+            }
+          },
+          onTouchEndCapture: handleTouchEnd,
+          onTouchCancelCapture: handleTouchCancel,
+        } as any)}
+      >
         <FlatList
-          ref={flatListRef}
+          ref={setFlatListRef}
           data={destinations}
-          scrollEnabled
+          scrollEnabled={false}
+          disableIntervalMomentum
+          decelerationRate={0}
           renderItem={({ item, index }) => {
             const cardData = destinationData[item];
             // Parse timeInText to extract value and unit
@@ -235,6 +385,8 @@ export const DestinationCardsCarousel: React.FC<DestinationCardsCarouselProps> =
                   initialAreas={cardData?.areas.join(', ')}
                   initialTimeValue={initialTimeValue}
                   initialTimeUnit={initialTimeUnit}
+                  onSwipeExcludeZonesLayout={onSwipeExcludeZonesLayout}
+                  isCurrentCard={index === currentIndex}
                 />
               </View>
             );
@@ -246,7 +398,6 @@ export const DestinationCardsCarousel: React.FC<DestinationCardsCarouselProps> =
           snapToInterval={itemWidth}
           snapToOffsets={snapToOffsets}
           snapToAlignment="start"
-          decelerationRate="fast"
           onScrollBeginDrag={() => { scrollStartIndexRef.current = currentIndexRef.current; }}
           onScrollEndDrag={handleScrollEnd}
           onMomentumScrollEnd={handleScrollEnd}

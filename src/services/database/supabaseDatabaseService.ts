@@ -39,7 +39,7 @@ export interface SupabaseSurfer {
   // Swelly conversation results
   onboarding_summary_text?: string; // text, nullable
   destinations_array?: Array<{ country: string; state?: string; area: string[]; time_in_days: number; time_in_text?: string }>; // jsonb, nullable
-  travel_type?: 'budget' | 'mid' | 'high'; // text, nullable
+  travel_type?: 'budget' | 'mid' | 'high' | 'premium'; // text, nullable
   travel_buddies?: 'solo' | '2' | 'crew'; // text, nullable
   lifestyle_keywords?: string[]; // text[], nullable
   wave_type_keywords?: string[]; // text[], nullable
@@ -217,7 +217,7 @@ class SupabaseDatabaseService {
     onboardingSummaryText?: string;
     finishedOnboarding?: boolean; // Whether user has completed onboarding
     destinationsArray?: Array<{ country: string; area: string[]; time_in_days: number; time_in_text?: string }>;
-    travelType?: 'budget' | 'mid' | 'high';
+    travelType?: 'budget' | 'mid' | 'high' | 'premium';
     travelBuddies?: 'solo' | '2' | 'crew';
     lifestyleKeywords?: string[];
     waveTypeKeywords?: string[];
@@ -774,7 +774,7 @@ class SupabaseDatabaseService {
   async saveSurfTripPlan(tripPlanData: {
     destinations?: string[];
     timeInDays?: number;
-    travelType?: 'budget' | 'mid' | 'high';
+    travelType?: 'budget' | 'mid' | 'high' | 'premium';
     travelBuddies?: 'solo' | '2' | 'crew';
     lifestyleKeywords?: string[];
     waveTypeKeywords?: string[];

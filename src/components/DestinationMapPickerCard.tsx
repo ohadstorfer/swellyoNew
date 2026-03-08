@@ -25,6 +25,7 @@ import {
 import { PlaceChip } from './PlaceChip';
 import { MapPopover, type MapPickerPlace } from './MapPickerModal';
 import { getMapPickerInlineHtml, COUNTRY_CENTERS } from '../utils/mapPickerHtml';
+import type { SwipeExcludeZoneRect } from './DestinationInputCard';
 
 const DEBUG_MAP_PICKER =
   process.env.EXPO_PUBLIC_MAP_PICKER_DEBUG === 'true' ||
@@ -79,6 +80,11 @@ interface DestinationMapPickerCardProps {
   initialAreas?: string;
   initialTimeValue?: string;
   initialTimeUnit?: TimeUnit;
+  onSwipeExcludeZonesLayout?: (
+    index: number,
+    zones: { timeUnit: SwipeExcludeZoneRect; areaInput: SwipeExcludeZoneRect }
+  ) => void;
+  isCurrentCard?: boolean;
 }
 
 export interface DestinationMapPickerCardRef {
@@ -93,6 +99,22 @@ const UNIT_ITEM_WIDTH = 58;
 const UNIT_CAROUSEL_CONTAINER_WIDTH = 179;
 /** Minimum horizontal drag (px) to advance/retreat one time unit. */
 const SWIPE_THRESHOLD = 20;
+
+/** Saved place: identified by placeId, shown by displayLabel (e.g. formatted_address or name). */
+interface SavedPlace {
+  placeId: string;
+  displayLabel: string;
+}
+
+function parseInitialPlaces(initialAreas: string | undefined): SavedPlace[] {
+  if (!initialAreas || !initialAreas.trim()) return [];
+  const delimiter = initialAreas.includes('\n') ? '\n' : /[,\n]/;
+  return initialAreas
+    .split(delimiter)
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((displayLabel) => ({ placeId: '', displayLabel }));
+}
 
 export const DestinationMapPickerCard = forwardRef<
   DestinationMapPickerCardRef,
@@ -110,13 +132,12 @@ export const DestinationMapPickerCard = forwardRef<
     initialAreas,
     initialTimeValue,
     initialTimeUnit,
+    onSwipeExcludeZonesLayout,
+    isCurrentCard,
   },
   ref
 ) {
-  const initialPlaces = initialAreas
-    ? initialAreas.split(/[,\n]/).map((a) => a.trim()).filter(Boolean)
-    : [];
-  const [places, setPlaces] = useState<string[]>(initialPlaces);
+  const [places, setPlaces] = useState<SavedPlace[]>(() => parseInitialPlaces(initialAreas));
   const [query, setQuery] = useState('');
   const [inputRowHeight, setInputRowHeight] = useState(0);
   const [timeValue, setTimeValue] = useState(initialTimeValue || '2');
@@ -124,7 +145,39 @@ export const DestinationMapPickerCard = forwardRef<
   const unitScrollRef = useRef<ScrollView>(null);
   const inputRef = useRef<TextInput>(null);
   const inputRowRef = useRef<View>(null);
+  const unitSelectorWrapperRef = useRef<View>(null);
   const onDataChangeRef = useRef(onDataChange);
+
+  const doMeasureAndReport = useCallback(() => {
+    if (!onSwipeExcludeZonesLayout || currentIndex == null) return;
+    const idx = currentIndex;
+    let timeRect: SwipeExcludeZoneRect | null = null;
+    let areaRect: SwipeExcludeZoneRect | null = null;
+    const tryReport = () => {
+      if (timeRect && areaRect) {
+        onSwipeExcludeZonesLayout(idx, { timeUnit: timeRect, areaInput: areaRect });
+      }
+    };
+    unitSelectorWrapperRef.current?.measureInWindow?.((x, y, w, h) => {
+      timeRect = { x, y, width: w, height: h };
+      tryReport();
+    });
+    inputRowRef.current?.measureInWindow?.((x, y, w, h) => {
+      areaRect = { x, y, width: w, height: h };
+      tryReport();
+    });
+  }, [onSwipeExcludeZonesLayout, currentIndex]);
+
+  const reportExcludeZones = useCallback(() => {
+    setTimeout(() => doMeasureAndReport(), 0);
+  }, [doMeasureAndReport]);
+
+  useEffect(() => {
+    if (isCurrentCard) {
+      const id = setTimeout(() => doMeasureAndReport(), 0);
+      return () => clearTimeout(id);
+    }
+  }, [isCurrentCard, doMeasureAndReport]);
 
   const timeUnitIndex = TIME_UNITS.indexOf(timeUnit);
   const scrollToUnitIndex = useCallback((index: number, animated = true) => {
@@ -204,7 +257,7 @@ export const DestinationMapPickerCard = forwardRef<
 
     if (!isReadOnly) {
       onDataChangeRef.current({
-        areas: places,
+        areas: places.map((p) => p.displayLabel),
         timeInDays,
         timeInText,
       });
@@ -279,14 +332,22 @@ export const DestinationMapPickerCard = forwardRef<
 
   const handleMapSelect = useCallback((payload: { type: string; place?: MapPickerPlace }) => {
     if (payload.type === 'PLACE_SELECTED' && payload.place) {
-      const name = payload.place.name;
+      const place = payload.place;
+      const displayLabel = place.formatted_address?.trim() || place.name;
       logMapPicker('handleMapSelect PLACE_SELECTED', {
-        name,
-        placeId: payload.place.placeId,
-        lat: payload.place.lat,
-        lng: payload.place.lng,
+        name: place.name,
+        placeId: place.placeId,
+        lat: place.lat,
+        lng: place.lng,
       });
-      setPlaces((prev) => (prev.includes(name) ? prev : [...prev, name]));
+      setPlaces((prev) => {
+        if (place.placeId) {
+          if (prev.some((p) => p.placeId === place.placeId)) return prev;
+        } else {
+          if (prev.some((p) => p.displayLabel === displayLabel)) return prev;
+        }
+        return [...prev, { placeId: place.placeId || '', displayLabel }];
+      });
       setQuery('');
     }
   }, []);
@@ -324,7 +385,10 @@ export const DestinationMapPickerCard = forwardRef<
               <View style={styles.inputRowAndMapWrapper}>
                 <View
                   ref={inputRowRef}
-                  onLayout={(e) => setInputRowHeight(e.nativeEvent.layout.height)}
+                  onLayout={(e) => {
+                    setInputRowHeight(e.nativeEvent.layout.height);
+                    reportExcludeZones();
+                  }}
                   style={[
                     styles.inputRowWrapper,
                     isReadOnly && styles.inputRowWrapperDisabled,
@@ -339,11 +403,11 @@ export const DestinationMapPickerCard = forwardRef<
                     contentContainerStyle={styles.inputRowChipsContent}
                     keyboardShouldPersistTaps="always"
                   >
-                    {places.map((label, index) => (
-                      <View key={`${label}-${index}`} style={styles.chipWrap}>
+                    {places.map((p, index) => (
+                      <View key={p.placeId || `${p.displayLabel}-${index}`} style={styles.chipWrap}>
                         <PlaceChip
-                          label={label}
-                          onRemove={() => setPlaces((p) => p.filter((_, j) => j !== index))}
+                          label={p.displayLabel}
+                          onRemove={() => setPlaces((prev) => prev.filter((_, j) => j !== index))}
                           disabled={isReadOnly}
                         />
                       </View>
@@ -396,7 +460,10 @@ export const DestinationMapPickerCard = forwardRef<
                   />
                 )}
 
-                <View style={styles.timeInputContainer}>
+                <View
+                  style={styles.timeInputContainer}
+                  {...(Platform.OS === 'web' && { dataSet: { swipeExclude: 'true' } } as any)}
+                >
                 <View style={styles.timeInputRow}>
                   <View style={styles.timeInputBox}>
                     <TextInput
@@ -426,6 +493,8 @@ export const DestinationMapPickerCard = forwardRef<
                     />
                   </View>
                   <View
+                    ref={unitSelectorWrapperRef}
+                    onLayout={reportExcludeZones}
                     style={[styles.unitCarouselContainer, isReadOnly && styles.unitCarouselReadOnly]}
                     {...unitPanResponder.panHandlers}
                   >

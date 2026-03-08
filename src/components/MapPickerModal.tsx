@@ -128,6 +128,7 @@ export interface MapPickerPlace {
   placeId: string;
   lat: number;
   lng: number;
+  formatted_address?: string;
 }
 
 export interface MapPopoverProps {

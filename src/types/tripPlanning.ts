@@ -130,10 +130,11 @@ export interface TripPlanningResponse {
 /**
  * Budget level mapping from travel_type to numeric budget
  */
-export const BUDGET_MAP: Record<string, 1 | 2 | 3> = {
+export const BUDGET_MAP: Record<string, 1 | 2 | 3 | 4> = {
   'budget': 1,
   'mid': 2,
   'high': 3,
+  'premium': 4,
 };
 
 /**

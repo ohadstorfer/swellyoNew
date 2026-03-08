@@ -173,7 +173,7 @@ When is_finished is true, the data object MUST have this exact structure:
     {"country": "CountryName", "area": ["Area1", "Area2"], "time_in_days": number, "time_in_text": "X days/weeks/months/years"},
     ...
   ],
-  "travel_type": "budget" | "mid" | "high",
+  "travel_type": "budget" | "mid" | "high" | "premium",
   "travel_buddies": "solo" | "2" | "crew",
   "lifestyle_keywords": ["keyword1", "keyword2", ...],
   "wave_type_keywords": ["keyword1", "keyword2", ...],
@@ -369,6 +369,8 @@ function transformSwellyData(data: any): any {
       result.travel_type = 'mid'
     } else if (travelStyle.includes('high') || travelStyle.includes('luxury')) {
       result.travel_type = 'high'
+    } else if (travelStyle.includes('premium')) {
+      result.travel_type = 'premium'
     }
 
     // Extract travel_buddies

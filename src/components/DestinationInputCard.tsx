@@ -22,6 +22,8 @@ import {
   getCountryImageFromPexels,
 } from '../services/media/imageService';
 
+export type SwipeExcludeZoneRect = { x: number; y: number; width: number; height: number };
+
 interface DestinationInputCardProps {
   destination: string;
   onDataChange: (data: {
@@ -38,6 +40,13 @@ interface DestinationInputCardProps {
   initialAreas?: string;
   initialTimeValue?: string;
   initialTimeUnit?: TimeUnit;
+  /** Called with window rects for time-unit and area inputs so the carousel can avoid starting swipe when touch is on them. */
+  onSwipeExcludeZonesLayout?: (
+    index: number,
+    zones: { timeUnit: SwipeExcludeZoneRect; areaInput: SwipeExcludeZoneRect }
+  ) => void;
+  /** When true, this card is the one currently centered; used to re-measure exclude zones after scroll. */
+  isCurrentCard?: boolean;
 }
 
 export interface DestinationInputCardRef {
@@ -66,6 +75,8 @@ export const DestinationInputCard = forwardRef<DestinationInputCardRef, Destinat
     initialAreas,
     initialTimeValue,
     initialTimeUnit,
+    onSwipeExcludeZonesLayout,
+    isCurrentCard,
   },
   ref
 ) {
@@ -75,7 +86,39 @@ export const DestinationInputCard = forwardRef<DestinationInputCardRef, Destinat
   const unitScrollRef = useRef<ScrollView>(null);
   const areasInputRef = useRef<TextInput>(null);
   const unitSelectorWrapperRef = useRef<View>(null);
+  const areaInputZoneRef = useRef<View>(null);
   const dragStartRef = useRef<{ clientX: number } | null>(null);
+
+  const doMeasureAndReport = useCallback(() => {
+    if (!onSwipeExcludeZonesLayout || currentIndex == null) return;
+    const idx = currentIndex;
+    let timeRect: SwipeExcludeZoneRect | null = null;
+    let areaRect: SwipeExcludeZoneRect | null = null;
+    const tryReport = () => {
+      if (timeRect && areaRect) {
+        onSwipeExcludeZonesLayout(idx, { timeUnit: timeRect, areaInput: areaRect });
+      }
+    };
+    unitSelectorWrapperRef.current?.measureInWindow?.((x, y, w, h) => {
+      timeRect = { x, y, width: w, height: h };
+      tryReport();
+    });
+    areaInputZoneRef.current?.measureInWindow?.((x, y, w, h) => {
+      areaRect = { x, y, width: w, height: h };
+      tryReport();
+    });
+  }, [onSwipeExcludeZonesLayout, currentIndex]);
+
+  const reportExcludeZones = useCallback(() => {
+    setTimeout(() => doMeasureAndReport(), 0);
+  }, [doMeasureAndReport]);
+
+  useEffect(() => {
+    if (isCurrentCard) {
+      const id = setTimeout(() => doMeasureAndReport(), 0);
+      return () => clearTimeout(id);
+    }
+  }, [isCurrentCard, doMeasureAndReport]);
 
   useImperativeHandle(ref, () => ({
     focusAreaInput: () => areasInputRef.current?.focus?.(),
@@ -294,9 +337,10 @@ export const DestinationInputCard = forwardRef<DestinationInputCardRef, Destinat
           {/* Input Fields */}
           <View style={styles.content}>
             {/* Areas Input */}
-            <TouchableOpacity style={styles.inputContainer} activeOpacity={1} disabled={isReadOnly}>
-              <Ionicons name="location-outline" size={20} color="#A0A0A0" style={styles.inputIcon} />
-              <TextInput
+            <View ref={areaInputZoneRef} onLayout={reportExcludeZones} collapsable={false}>
+              <TouchableOpacity style={styles.inputContainer} activeOpacity={1} disabled={isReadOnly}>
+                <Ionicons name="location-outline" size={20} color="#A0A0A0" style={styles.inputIcon} />
+                <TextInput
                 ref={areasInputRef}
                 underlineColorAndroid="transparent"
                 style={[
@@ -318,10 +362,14 @@ export const DestinationInputCard = forwardRef<DestinationInputCardRef, Destinat
                 multiline={false}
                 editable={!isReadOnly}
               />
-            </TouchableOpacity>
+              </TouchableOpacity>
+            </View>
 
-            {/* Time Input */}
-            <View style={styles.timeInputContainer}>
+            {/* Time Input — only this section blocks carousel swipe (data-swipe-exclude on web) */}
+            <View
+              style={styles.timeInputContainer}
+              {...(Platform.OS === 'web' && { dataSet: { swipeExclude: 'true' } } as any)}
+            >
               <View style={styles.timeInputRow}>
                 <View style={styles.timeInputBox}>
                   <TextInput
@@ -348,6 +396,7 @@ export const DestinationInputCard = forwardRef<DestinationInputCardRef, Destinat
                 </View>
                 <View
                   ref={unitSelectorWrapperRef}
+                  onLayout={reportExcludeZones}
                   style={[styles.unitCarouselContainer, isReadOnly && styles.unitCarouselReadOnly]}
                   accessibilityRole="adjustable"
                   accessibilityLabel="Time unit"

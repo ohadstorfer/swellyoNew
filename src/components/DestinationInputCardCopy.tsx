@@ -23,6 +23,7 @@ import {
   getCountryImageFromPexels,
 } from '../services/media/imageService';
 import { MultiPlaceAutocompleteInput, type MultiPlaceAutocompleteInputRef } from './MultiPlaceAutocompleteInput';
+import type { SwipeExcludeZoneRect } from './DestinationInputCard';
 
 /** Country name (as shown in UI) to CLDR 2-letter region code for Places API bias. */
 const COUNTRY_TO_REGION: Record<string, string> = {
@@ -67,6 +68,11 @@ interface DestinationInputCardCopyProps {
   initialAreas?: string;
   initialTimeValue?: string;
   initialTimeUnit?: TimeUnit;
+  onSwipeExcludeZonesLayout?: (
+    index: number,
+    zones: { timeUnit: SwipeExcludeZoneRect; areaInput: SwipeExcludeZoneRect }
+  ) => void;
+  isCurrentCard?: boolean;
 }
 
 export interface DestinationInputCardCopyRef {
@@ -98,6 +104,8 @@ export const DestinationInputCardCopy = forwardRef<
     initialAreas,
     initialTimeValue,
     initialTimeUnit,
+    onSwipeExcludeZonesLayout,
+    isCurrentCard,
   },
   ref
 ) {
@@ -109,7 +117,40 @@ export const DestinationInputCardCopy = forwardRef<
   const [timeUnit, setTimeUnit] = useState<TimeUnit>(initialTimeUnit || 'weeks');
   const unitScrollRef = useRef<ScrollView>(null);
   const placesInputRef = useRef<MultiPlaceAutocompleteInputRef>(null);
+  const unitSelectorWrapperRef = useRef<View>(null);
+  const areaInputZoneRef = useRef<View>(null);
   const onDataChangeRef = useRef(onDataChange);
+
+  const doMeasureAndReport = useCallback(() => {
+    if (!onSwipeExcludeZonesLayout || currentIndex == null) return;
+    const idx = currentIndex;
+    let timeRect: SwipeExcludeZoneRect | null = null;
+    let areaRect: SwipeExcludeZoneRect | null = null;
+    const tryReport = () => {
+      if (timeRect && areaRect) {
+        onSwipeExcludeZonesLayout(idx, { timeUnit: timeRect, areaInput: areaRect });
+      }
+    };
+    unitSelectorWrapperRef.current?.measureInWindow?.((x, y, w, h) => {
+      timeRect = { x, y, width: w, height: h };
+      tryReport();
+    });
+    areaInputZoneRef.current?.measureInWindow?.((x, y, w, h) => {
+      areaRect = { x, y, width: w, height: h };
+      tryReport();
+    });
+  }, [onSwipeExcludeZonesLayout, currentIndex]);
+
+  const reportExcludeZones = useCallback(() => {
+    setTimeout(() => doMeasureAndReport(), 0);
+  }, [doMeasureAndReport]);
+
+  useEffect(() => {
+    if (isCurrentCard) {
+      const id = setTimeout(() => doMeasureAndReport(), 0);
+      return () => clearTimeout(id);
+    }
+  }, [isCurrentCard, doMeasureAndReport]);
 
   const timeUnitIndex = TIME_UNITS.indexOf(timeUnit);
   const scrollToUnitIndex = useCallback((index: number, animated = true) => {
@@ -278,16 +319,21 @@ export const DestinationInputCardCopy = forwardRef<
             <Text style={styles.destinationName}>{displayLabel}</Text>
 
             <View style={styles.contentWithStack}>
-              <MultiPlaceAutocompleteInput
-                ref={placesInputRef}
-                value={places}
-                onChange={setPlaces}
-                placeholder="City/town/surf spots..."
-                disabled={isReadOnly}
-                includedRegionCodes={regionCodes}
-              />
+              <View ref={areaInputZoneRef} onLayout={reportExcludeZones} collapsable={false}>
+                <MultiPlaceAutocompleteInput
+                  ref={placesInputRef}
+                  value={places}
+                  onChange={setPlaces}
+                  placeholder="City/town/surf spots..."
+                  disabled={isReadOnly}
+                  includedRegionCodes={regionCodes}
+                />
+              </View>
 
-              <View style={styles.timeInputContainer}>
+              <View
+                style={styles.timeInputContainer}
+                {...(Platform.OS === 'web' && { dataSet: { swipeExclude: 'true' } } as any)}
+              >
                 <View style={styles.timeInputRow}>
                   <View style={styles.timeInputBox}>
                     <TextInput
@@ -301,6 +347,8 @@ export const DestinationInputCardCopy = forwardRef<
                     />
                   </View>
                   <View
+                    ref={unitSelectorWrapperRef}
+                    onLayout={reportExcludeZones}
                     style={[styles.unitCarouselContainer, isReadOnly && styles.unitCarouselReadOnly]}
                     {...unitPanResponder.panHandlers}
                   >

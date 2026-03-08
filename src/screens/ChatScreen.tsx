@@ -25,7 +25,7 @@ import { messagingService } from '../services/messaging/messagingService';
 import { analyticsService } from '../services/analytics/analyticsService';
 import { DestinationCardsCarousel } from '../components/DestinationCardsCarousel';
 import { DestinationCardsCarouselCopy } from '../components/DestinationCardsCarouselCopy';
-import { BudgetButtonSelector } from '../components/BudgetButtonSelector';
+import { BudgetCardsCarousel, type BudgetOption } from '../components/BudgetCardsCarousel';
 import { ChatTextInput } from '../components/ChatTextInput';
 
 interface Message {
@@ -71,9 +71,9 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
   }>>([]);
   const [destinationCardsMessageId, setDestinationCardsMessageId] = useState<string | null>(null);
   
-  // State for budget buttons
+  // State for budget cards carousel
   const [showBudgetButtons, setShowBudgetButtons] = useState(false);
-  const [selectedBudget, setSelectedBudget] = useState<'budget' | 'mid' | 'high' | null>(null);
+  const [selectedBudget, setSelectedBudget] = useState<BudgetOption | null>(null);
   const [budgetSubmitted, setBudgetSubmitted] = useState(false);
   const [budgetButtonsMessageId, setBudgetButtonsMessageId] = useState<string | null>(null);
 
@@ -499,7 +499,7 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
   };
 
   // Handler for budget selection
-  const handleBudgetSelect = async (budget: 'budget' | 'mid' | 'high') => {
+  const handleBudgetSelect = async (budget: BudgetOption) => {
     setSelectedBudget(budget);
     setBudgetSubmitted(true);
     
@@ -647,15 +647,17 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
         </View>
         )}
         
-        {/* Render budget buttons if this is the message that originally requested them */}
+        {/* Render budget cards carousel if this is the message that originally requested them */}
         {!message.isUser && 
          message.id === budgetButtonsMessageId && (
           <View style={styles.uiComponentContainer}>
-            <BudgetButtonSelector 
-              onSelect={handleBudgetSelect}
-              isReadOnly={budgetSubmitted}
-              initialSelection={budgetSubmitted && selectedBudget ? selectedBudget : undefined}
-            />
+            <View style={styles.destinationCarouselFullWidth}>
+              <BudgetCardsCarousel
+                onSelect={handleBudgetSelect}
+                isReadOnly={budgetSubmitted}
+                initialSelection={budgetSubmitted && selectedBudget ? selectedBudget : undefined}
+              />
+            </View>
           </View>
         )}
       </View>

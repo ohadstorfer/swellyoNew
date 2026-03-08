@@ -403,7 +403,7 @@ export function getMapPickerInlineHtml(
         }
         send({
           type: 'PLACE_SELECTED',
-          place: { name: name, placeId: place.place_id || '', lat: lat, lng: lng }
+          place: { name: name, placeId: place.place_id || '', lat: lat, lng: lng, formatted_address: place.formatted_address || '' }
         });
       }
 

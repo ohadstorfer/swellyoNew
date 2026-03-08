@@ -522,6 +522,11 @@ const getLifestyleImageFileName = (lifestyleKeyword: string): string | null => {
   return fileName;
 };
 
+/** Bucket filenames that don't match PascalCase; key = getLifestyleImageFileName output, value = actual bucket filename. */
+const LIFESTYLE_BUCKET_FILENAME_OVERRIDE: { [baseName: string]: string } = {
+  SpinFishing: 'Spin_Fishing.jpg',
+};
+
 /**
  * Get the public URL for a lifestyle image stored in Supabase storage
  * Tries multiple extensions (.jpg, .png, .webp) since format is auto-detected
@@ -539,12 +544,8 @@ export const getLifestyleImageFromStorage = (lifestyleKeyword: string): string |
   if (!baseFileName) {
     return null;
   }
-  
-  // Try .jpg first (most common), then .png, then .webp
-  // For now, return .jpg URL - if it doesn't exist, onError will trigger Pexels fetch
-  // Alternative: Could check all three, but that requires multiple API calls
-  // Better to let Image component's onError handle 404s
-  const fileName = `${baseFileName}.jpg`;
+
+  const fileName = LIFESTYLE_BUCKET_FILENAME_OVERRIDE[baseFileName] ?? `${baseFileName}.jpg`;
   const encodedFileName = encodeURIComponent(fileName);
   const url = `${SUPABASE_URL}/storage/v1/object/public/${LIFESTYLE_IMAGES_BUCKET}/${encodedFileName}`;
   
