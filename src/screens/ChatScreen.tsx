@@ -1,9 +1,8 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   View,
   StyleSheet,
   SafeAreaView,
-  ScrollView,
   TouchableOpacity,
   Alert,
   KeyboardAvoidingView,
@@ -13,6 +12,7 @@ import {
   Animated,
   Dimensions,
 } from 'react-native';
+import { ScrollView, Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../components/Text';
 import { colors, spacing, typography, borderRadius } from '../styles/theme';
@@ -58,6 +58,8 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
   const [isFinished, setIsFinished] = useState(false);
   const [onboardingStartTime] = useState<number>(Date.now()); // Track when onboarding chat started
   const scrollViewRef = useRef<ScrollView>(null);
+  const scrollNativeGestureRef = useRef<any>(null);
+  const scrollNativeGesture = useMemo(() => Gesture.Native().withRef(scrollNativeGestureRef), []);
   
   // State for destination cards
   const [showDestinationCards, setShowDestinationCards] = useState(false);
@@ -633,6 +635,7 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
                   isReadOnly={destinationsSubmitted}
                   initialData={destinationsSubmitted ? submittedDestinationData : undefined}
                   fullWidth
+                  parentScrollNativeRef={scrollNativeGestureRef}
                 />
               ) : (
                 <DestinationCardsCarousel
@@ -641,6 +644,7 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
                   isReadOnly={destinationsSubmitted}
                   initialData={destinationsSubmitted ? submittedDestinationData : undefined}
                   fullWidth
+                  parentScrollNativeRef={scrollNativeGestureRef}
                 />
               )}
             </View>
@@ -656,6 +660,7 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
                 onSelect={handleBudgetSelect}
                 isReadOnly={budgetSubmitted}
                 initialSelection={budgetSubmitted && selectedBudget ? selectedBudget : undefined}
+                parentScrollNativeRef={scrollNativeGestureRef}
               />
             </View>
           </View>
@@ -725,26 +730,28 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
           style={styles.backgroundImage}
           resizeMode="cover"
       >
-        <ScrollView
-          ref={scrollViewRef}
-          style={styles.messagesList}
-          contentContainerStyle={styles.messagesContent}
-          showsVerticalScrollIndicator={false}
-          nestedScrollEnabled
-          directionalLockEnabled
-          keyboardShouldPersistTaps="handled"
-        >
-          {messages.map(renderMessage)}
-          {(isLoading || isInitializing || showInitialTypingBubble) && (
-            <View style={[styles.messageContainer, styles.botMessageContainer]}>
-              <View style={[styles.messageBubble, styles.botMessageBubble]}>
-                <View style={styles.messageTextContainer}>
-                  <TypingIndicator />
+        <GestureDetector gesture={scrollNativeGesture}>
+          <ScrollView
+            ref={scrollViewRef}
+            style={styles.messagesList}
+            contentContainerStyle={styles.messagesContent}
+            showsVerticalScrollIndicator={false}
+            nestedScrollEnabled
+            directionalLockEnabled
+            keyboardShouldPersistTaps="handled"
+          >
+            {messages.map(renderMessage)}
+            {(isLoading || isInitializing || showInitialTypingBubble) && (
+              <View style={[styles.messageContainer, styles.botMessageContainer]}>
+                <View style={[styles.messageBubble, styles.botMessageBubble]}>
+                  <View style={styles.messageTextContainer}>
+                    <TypingIndicator />
+                  </View>
                 </View>
               </View>
-            </View>
-          )}
-        </ScrollView>
+            )}
+          </ScrollView>
+        </GestureDetector>
         </ImageBackground>
 
         {/* Input Area */}

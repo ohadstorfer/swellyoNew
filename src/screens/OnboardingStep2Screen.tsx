@@ -17,7 +17,7 @@ import { OnboardingData } from './OnboardingStep1Screen';
 import { getSurfLevelVideoFromStorage } from '../services/media/videoService';
 import { getImageUrl } from '../services/media/imageService';
 import { useIsDesktopWeb, useScreenDimensions, responsiveWidth, getScreenWidth } from '../utils/responsive';
-import { getVideoPreloadStatus, waitForVideoReady } from '../services/media/videoPreloadService';
+import { getVideoPreloadStatus, waitForVideoReady, getPlaybackUrl } from '../services/media/videoPreloadService';
 
 interface OnboardingStep2ScreenProps {
   onNext: (data: OnboardingData) => void;
@@ -89,12 +89,13 @@ const getSurfLevelVideos = (boardType: number): VideoLevel[] => {
       const storagePath = `${boardFolder}/${video.videoFileName}`;
       const thumbnailPath = `/surf level/${boardFolder}/${video.thumbnailFileName}`;
       
-      // Use cached URL if available
+      // Use cached URL if available; on Safari use blob URL when preloaded for instant playback
       let videoUrl: string;
       if (videoUrlCache.has(storagePath)) {
         videoUrl = videoUrlCache.get(storagePath)!;
       } else {
-        videoUrl = getSurfLevelVideoFromStorage(storagePath);
+        const originalUrl = getSurfLevelVideoFromStorage(storagePath);
+        videoUrl = getPlaybackUrl(originalUrl);
         videoUrlCache.set(storagePath, videoUrl);
       }
       
@@ -260,7 +261,8 @@ export const OnboardingStep2Screen: React.FC<OnboardingStep2ScreenProps> = ({
     const firstVideo = surfLevelVideos[0];
     if (!firstVideo?.videoUrl) return true;
     
-    // Check if first video is preloaded synchronously
+    // Blob URL = Safari preload in memory, ready for instant playback
+    if (firstVideo.videoUrl.startsWith('blob:')) return false;
     const preloadStatus = getVideoPreloadStatus(firstVideo.videoUrl);
     const isPreloaded = preloadStatus?.ready === true;
     
@@ -282,15 +284,17 @@ export const OnboardingStep2Screen: React.FC<OnboardingStep2ScreenProps> = ({
     const firstVideo = surfLevelVideos[0];
     if (!firstVideo?.videoUrl) return;
     
-    // Check if first video is preloaded (double-check in case status changed)
+    if (firstVideo.videoUrl.startsWith('blob:')) {
+      setIsMainVideoLoading(false);
+      return;
+    }
     const preloadStatus = getVideoPreloadStatus(firstVideo.videoUrl);
     if (preloadStatus?.ready) {
       if (__DEV__) {
         console.log('[OnboardingStep2] First video is preloaded and ready');
       }
-      setIsMainVideoLoading(false); // Skip loading state
+      setIsMainVideoLoading(false);
     } else {
-      // Wait for video to be ready (shorter timeout for faster feedback)
       waitForVideoReady(firstVideo.videoUrl, 500)
         .then((ready: boolean) => {
           if (ready) {

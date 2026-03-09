@@ -7,6 +7,7 @@ import {
   Platform,
   TouchableOpacity,
   Image,
+  PanResponder,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Text } from './Text';
@@ -103,6 +104,8 @@ interface BudgetCardsCarouselProps {
   isReadOnly?: boolean;
   initialSelection?: BudgetOption;
   onCenteredCardChange?: (budget: BudgetOption, index: number) => void;
+  /** Ref to parent ScrollView native gesture so vertical scroll can run simultaneously with horizontal pan. */
+  parentScrollNativeRef?: React.RefObject<unknown> | null;
 }
 
 export const BudgetCardsCarousel: React.FC<BudgetCardsCarouselProps> = ({
@@ -110,6 +113,7 @@ export const BudgetCardsCarousel: React.FC<BudgetCardsCarouselProps> = ({
   isReadOnly = false,
   initialSelection,
   onCenteredCardChange,
+  parentScrollNativeRef,
 }) => {
   const [selectedBudget, setSelectedBudget] = useState<BudgetOption | null>(initialSelection ?? null);
   const [centeredIndex, setCenteredIndex] = useState(0);
@@ -156,78 +160,72 @@ export const BudgetCardsCarousel: React.FC<BudgetCardsCarouselProps> = ({
 
   const getScrollOffsetForIndex = getCenterOffsetForIndex;
 
-  // BoardCarousel-style: touch handlers so list doesn't scroll during drag; on release move exactly one card
-  const touchStartX = useRef<number | null>(null);
-  const touchStartY = useRef<number | null>(null);
-  const touchStartTime = useRef<number | null>(null);
+  // PanResponder: horizontal-only so vertical scroll passes to parent; on release move exactly one card
+  const DIRECTION_THRESHOLD = 10;
   const centeredIndexAtDragStartRef = useRef(0);
   const lockedScrollOffset = useRef<number | null>(null);
   const isGestureActive = useRef(false);
   const hasHandledScrollEnd = useRef(false);
   const flatListWebRef = useRef<any>(null);
 
-  const handleTouchStart = useCallback(
-    (event: any) => {
-      const touch = event.nativeEvent?.touches?.[0] || event.nativeEvent || event;
-      const pageX = touch.pageX ?? touch.clientX ?? touch.x;
-      const pageY = touch.pageY ?? touch.clientY ?? touch.y;
-      if (pageX === undefined || pageY === undefined) return;
+  const performLock = useCallback(() => {
+    lockedScrollOffset.current = getScrollOffsetForIndex(centeredIndexRef.current);
+    if (Platform.OS === 'web' && flatListWebRef.current) {
+      flatListWebRef.current.style.overflow = 'hidden';
+      if (lockedScrollOffset.current !== null) {
+        flatListWebRef.current.scrollLeft = lockedScrollOffset.current;
+      }
+    }
+    if (flatListRef.current && lockedScrollOffset.current !== null) {
+      flatListRef.current.scrollToOffset({
+        offset: lockedScrollOffset.current,
+        animated: false,
+      });
+    }
+  }, [getScrollOffsetForIndex]);
 
-      touchStartX.current = pageX;
-      touchStartY.current = pageY;
-      touchStartTime.current = Date.now();
+  const carouselPanResponder = useMemo(() => PanResponder.create({
+    onStartShouldSetPanResponder: () => false,
+    onMoveShouldSetPanResponder: (_, gestureState) => {
+      const { dx, dy } = gestureState;
+      return Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > DIRECTION_THRESHOLD;
+    },
+    onPanResponderGrant: () => {
       isGestureActive.current = true;
-      hasHandledScrollEnd.current = false;
       centeredIndexAtDragStartRef.current = centeredIndexRef.current;
-      lockedScrollOffset.current = getScrollOffsetForIndex(centeredIndexRef.current);
-
-      if (Platform.OS === 'web' && flatListWebRef.current) {
-        flatListWebRef.current.style.overflow = 'hidden';
-        if (lockedScrollOffset.current !== null) {
+      performLock();
+    },
+    onPanResponderMove: () => {
+      if (lockedScrollOffset.current !== null) {
+        if (Platform.OS === 'web' && flatListWebRef.current) {
           flatListWebRef.current.scrollLeft = lockedScrollOffset.current;
+        } else if (flatListRef.current) {
+          flatListRef.current.scrollToOffset({
+            offset: lockedScrollOffset.current,
+            animated: false,
+          });
         }
       }
-      if (flatListRef.current && lockedScrollOffset.current !== null) {
-        flatListRef.current.scrollToOffset({
-          offset: lockedScrollOffset.current,
-          animated: false,
-        });
-      }
     },
-    [getScrollOffsetForIndex]
-  );
-
-  const handleTouchEnd = useCallback(
-    (event: any) => {
-      if (!isGestureActive.current || touchStartX.current === null || touchStartTime.current === null) return;
-
-      const touch = event.nativeEvent?.changedTouches?.[0] || event.nativeEvent || event;
-      const endX = touch.pageX ?? touch.clientX ?? touch.x;
-      const endY = touch.pageY ?? touch.clientY ?? touch.y;
-      if (endX === undefined || endY === undefined) {
-        touchStartX.current = null;
-        touchStartY.current = null;
-        touchStartTime.current = null;
-        isGestureActive.current = false;
+    onPanResponderTerminationRequest: () => false,
+    onPanResponderRelease: (_, gestureState) => {
+      const hadLock = isGestureActive.current;
+      isGestureActive.current = false;
+      if (!hadLock) return;
+      if (hasHandledScrollEnd.current) {
+        if (Platform.OS === 'web' && flatListWebRef.current) {
+          flatListWebRef.current.style.overflow = 'auto';
+        }
         return;
       }
-
-      const deltaX = endX - touchStartX.current;
-      const deltaY = endY - (touchStartY.current ?? 0);
-      const deltaTime = Date.now() - touchStartTime.current;
-      touchStartX.current = null;
-      touchStartY.current = null;
-      touchStartTime.current = null;
-      isGestureActive.current = false;
-
-      if (hasHandledScrollEnd.current) return;
       hasHandledScrollEnd.current = true;
-
+      const deltaX = gestureState.dx;
+      const deltaY = gestureState.dy;
       const isHorizontalSwipe = Math.abs(deltaX) > Math.abs(deltaY);
       const minSwipeDistance = 5;
-      const maxSwipeTime = 1000;
 
-      if (isHorizontalSwipe && Math.abs(deltaX) > minSwipeDistance && deltaTime < maxSwipeTime) {
+      const didSwipe = isHorizontalSwipe && Math.abs(deltaX) > minSwipeDistance;
+      if (didSwipe) {
         let targetIndex = centeredIndexAtDragStartRef.current;
         if (deltaX < 0) targetIndex = Math.min(BUDGET_ITEMS.length - 1, centeredIndexAtDragStartRef.current + 1);
         else targetIndex = Math.max(0, centeredIndexAtDragStartRef.current - 1);
@@ -238,29 +236,24 @@ export const BudgetCardsCarousel: React.FC<BudgetCardsCarouselProps> = ({
         lastReportedCenteredIndexRef.current = targetIndex;
         setCenteredIndex(targetIndex);
         flatListRef.current?.scrollToOffset({ offset: targetOffset, animated: true });
-
-        if (Platform.OS === 'web' && flatListWebRef.current) {
-          setTimeout(() => {
-            flatListWebRef.current.style.overflow = 'auto';
-          }, 300);
-        }
+      }
+      if (hadLock && Platform.OS === 'web' && flatListWebRef.current) {
+        setTimeout(() => {
+          flatListWebRef.current.style.overflow = 'auto';
+        }, didSwipe ? 300 : 0);
       }
       setTimeout(() => { hasHandledScrollEnd.current = false; }, 350);
     },
-    [getScrollOffsetForIndex]
-  );
-
-  const handleTouchCancel = useCallback(() => {
-    touchStartX.current = null;
-    touchStartY.current = null;
-    touchStartTime.current = null;
-    isGestureActive.current = false;
-    lockedScrollOffset.current = null;
-    hasHandledScrollEnd.current = false;
-    if (Platform.OS === 'web' && flatListWebRef.current) {
-      flatListWebRef.current.style.overflow = 'auto';
-    }
-  }, []);
+    onPanResponderTerminate: () => {
+      const hadLock = isGestureActive.current;
+      isGestureActive.current = false;
+      lockedScrollOffset.current = null;
+      hasHandledScrollEnd.current = false;
+      if (hadLock && Platform.OS === 'web' && flatListWebRef.current) {
+        flatListWebRef.current.style.overflow = 'auto';
+      }
+    },
+  }), [performLock, getScrollOffsetForIndex]);
 
   // Clamp to real cards only (list indices 1..NUM_REAL) so we never snap to phantom
   const scrollOffsetToRealIndex = useCallback(
@@ -340,24 +333,9 @@ export const BudgetCardsCarousel: React.FC<BudgetCardsCarouselProps> = ({
 
   return (
     <View style={styles.container}>
-      <View
-        style={styles.carouselContainer}
-        onTouchStart={handleTouchStart}
-        onTouchMove={(e) => {
-          if (!isGestureActive.current || lockedScrollOffset.current === null) return;
-          if (Platform.OS === 'web' && flatListWebRef.current) {
-            flatListWebRef.current.scrollLeft = lockedScrollOffset.current;
-          } else if (flatListRef.current) {
-            flatListRef.current.scrollToOffset({
-              offset: lockedScrollOffset.current,
-              animated: false,
-            });
-          }
-        }}
-        onTouchEnd={handleTouchEnd}
-        onTouchCancel={handleTouchCancel}
-      >
-        <FlatList
+      <View style={styles.carouselContainer}>
+        <View {...carouselPanResponder.panHandlers}>
+          <FlatList
           ref={(r) => {
             flatListRef.current = r;
             if (Platform.OS === 'web' && r && typeof (r as any).getScrollableNode === 'function') {
@@ -454,6 +432,7 @@ export const BudgetCardsCarousel: React.FC<BudgetCardsCarouselProps> = ({
             );
           }}
         />
+        </View>
       </View>
     </View>
   );

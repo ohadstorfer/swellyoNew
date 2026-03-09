@@ -79,6 +79,12 @@ function generateEmailTemplate(data: EmailTemplateData, appUrl: string = 'https:
   <meta name="supported-color-schemes" content="dark">
   <title>New Message${isMultiple ? 's' : ''} from ${sender.name}</title>
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,800;1,900&display=swap" rel="stylesheet">
+  <style type="text/css">
+    @media (prefers-color-scheme: light) {
+      .header-brand { color: #FFF !important; }
+      .btn-cta { color: #FFF !important; }
+    }
+  </style>
 </head>
 <body style="margin: 0; padding: 0; font-family: Montserrat, -apple-system, BlinkMacSystemFont, sans-serif; background-color: #0d0d0d; color-scheme: dark;">
   <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: #0d0d0d;">
@@ -88,7 +94,7 @@ function generateEmailTemplate(data: EmailTemplateData, appUrl: string = 'https:
           <!-- Header -->
           <tr>
             <td style="border-radius: 15px 15px 0 0; background: linear-gradient(90deg, #05BCD3 0.01%, #DBCDBC 125.83%); padding: 28px 24px; text-align: center;">
-              <h1 style="margin: 0; color: #FFF; text-align: center; font-family: Montserrat, sans-serif; font-size: 32px; font-style: italic; font-weight: 900; line-height: 120%;">
+              <h1 class="header-brand" style="margin: 0; color: #FFF; text-align: center; font-family: Montserrat, sans-serif; font-size: 32px; font-style: italic; font-weight: 900; line-height: 120%;">
                 SWELLYO
               </h1>
             </td>
@@ -121,7 +127,7 @@ function generateEmailTemplate(data: EmailTemplateData, appUrl: string = 'https:
               <table role="presentation" style="margin: 0 auto; border-collapse: collapse;">
                 <tr>
                   <td align="center">
-                    <a href="${conversationUrl}" style="display: inline-block; padding: 14px 32px; background: linear-gradient(90deg, #06BCD3 0%, #AECAC1 100%); color: #FFF; text-decoration: none; border-radius: 8px; font-family: Montserrat, sans-serif; font-size: 16px; font-weight: 700; text-align: center;">
+                    <a href="${conversationUrl}" class="btn-cta" style="display: inline-block; padding: 14px 32px; background: linear-gradient(90deg, #06BCD3 0%, #AECAC1 100%); color: #FFF; text-decoration: none; border-radius: 8px; font-family: Montserrat, sans-serif; font-size: 16px; font-weight: 700; text-align: center;">
                       Go To Swellyo
                     </a>
                   </td>

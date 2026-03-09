@@ -273,8 +273,8 @@ export const DestinationInputCardCopy = forwardRef<
         onStartShouldSetPanResponder: () => false,
         onMoveShouldSetPanResponderCapture: (_, gestureState) => {
           if (isReadOnly) return false;
-          const { dx } = gestureState;
-          return Math.abs(dx) > 4;
+          const { dx, dy } = gestureState;
+          return Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 4;
         },
         onPanResponderGrant: () => {},
         onPanResponderMove: () => {},

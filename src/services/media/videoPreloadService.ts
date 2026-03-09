@@ -44,6 +44,8 @@ export interface VideoPreloadResult {
 const preloadStatusMap = new Map<string, VideoPreloadStatus>();
 const hiddenVideoElements = new Map<string, HTMLVideoElement>();
 const preloadLinks = new Map<string, HTMLLinkElement>(); // Track preload link elements
+/** Safari: original URL -> blob URL for instant playback (no second network request) */
+const blobUrlMap = new Map<string, string>();
 const HAVE_CURRENT_DATA = 2; // Less strict - video can play (Best Practice)
 const HAVE_FUTURE_DATA = 3; // More strict - video can play through
 
@@ -83,6 +85,19 @@ const addPreloadLink = (url: string, priority: 'high' | 'normal' = 'normal'): vo
   }
 };
 
+/**
+ * Returns true when the browser needs the Safari preload workaround. Safari (iOS and
+ * desktop) often does not load video from off-screen elements with only preload="auto";
+ * we must use in-viewport styling and play() to force loading for immediate playback.
+ */
+const needsSafariPreloadWorkaround = (): boolean => {
+  if (typeof navigator === 'undefined' || !navigator.userAgent) return false;
+  const ua = navigator.userAgent;
+  const isIOS = /iPhone|iPad|iPod/i.test(ua);
+  const isSafariDesktop = ua.includes('Safari') && !ua.includes('Chrome');
+  return isIOS || isSafariDesktop;
+};
+
 const preloadVideoWeb = async (url: string, priority: 'high' | 'normal' = 'normal'): Promise<VideoPreloadStatus> => {
   if (typeof document === 'undefined') return { url, ready: false, error: new Error('Document not available') };
   const existingStatus = preloadStatusMap.get(url);
@@ -117,6 +132,31 @@ const preloadVideoWeb = async (url: string, priority: 'high' | 'normal' = 'norma
   }
   
   try {
+    const useSafariWorkaround = needsSafariPreloadWorkaround();
+
+    // Safari: fetch + blob URL so the player uses in-memory URL = instant playback (no second request)
+    if (useSafariWorkaround) {
+      try {
+        const response = await fetch(url, { cache: 'force-cache' });
+        if (!response.ok) throw new Error(`Fetch failed: ${response.statusText}`);
+        const blob = await response.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        blobUrlMap.set(url, blobUrl);
+        const status: VideoPreloadStatus = { url, ready: true };
+        preloadStatusMap.set(url, status);
+        if (__DEV__) {
+          console.log(`[videoPreloadService] Safari blob preload ready: ${url}`);
+        }
+        return status;
+      } catch (fetchErr) {
+        if (__DEV__) {
+          console.warn('[videoPreloadService] Safari fetch+blob failed, falling back to video element:', fetchErr);
+        }
+        preloadStatusMap.delete(url);
+        // Fall through to hidden-video path below
+      }
+    }
+
     // Add browser-level preload hint (Best Practice: Signal browser early)
     addPreloadLink(url, priority);
     
@@ -127,6 +167,8 @@ const preloadVideoWeb = async (url: string, priority: 'high' | 'normal' = 'norma
     video.preload = 'auto';
     video.muted = true;
     video.playsInline = true;
+    video.setAttribute('playsinline', 'playsinline');
+    video.setAttribute('webkit-playsinline', 'webkit-playsinline');
     video.src = url;
     
     // Use fetchpriority for high priority videos (Best Practice)
@@ -134,14 +176,33 @@ const preloadVideoWeb = async (url: string, priority: 'high' | 'normal' = 'norma
       (video as any).fetchPriority = 'high';
     }
     
-    video.style.position = 'absolute';
-    video.style.left = '-9999px';
-    video.style.width = '1px';
-    video.style.height = '1px';
-    video.style.opacity = '0';
-    video.style.pointerEvents = 'none';
+    if (useSafariWorkaround) {
+      video.style.position = 'fixed';
+      video.style.left = '0';
+      video.style.top = '0';
+      video.style.width = '1px';
+      video.style.height = '1px';
+      video.style.opacity = '0';
+      video.style.zIndex = '-1';
+      video.style.pointerEvents = 'none';
+    } else {
+      video.style.position = 'absolute';
+      video.style.left = '-9999px';
+      video.style.width = '1px';
+      video.style.height = '1px';
+      video.style.opacity = '0';
+      video.style.pointerEvents = 'none';
+    }
     hiddenVideoElements.set(url, video);
     document.body.appendChild(video);
+
+    if (useSafariWorkaround) {
+      video.play().catch((err: unknown) => {
+        if (__DEV__) {
+          console.warn('[videoPreloadService] Safari workaround play() failed (non-fatal):', err);
+        }
+      });
+    }
     
     const readyPromise = new Promise<VideoPreloadStatus>((resolve) => {
       let isResolved = false;
@@ -151,6 +212,10 @@ const preloadVideoWeb = async (url: string, priority: 'high' | 'normal' = 'norma
         // Best Practice: Use HAVE_CURRENT_DATA (2) for faster readiness
         if (video.readyState >= HAVE_CURRENT_DATA) {
           isResolved = true;
+          if (useSafariWorkaround) {
+            video.pause();
+            video.currentTime = 0;
+          }
           const status: VideoPreloadStatus = { url, ready: true, readyState: video.readyState };
           preloadStatusMap.set(url, status);
           if (__DEV__) {
@@ -308,6 +373,14 @@ export const getVideoPreloadStatus = (url: string): VideoPreloadStatus | null =>
   return preloadStatusMap.get(url) || null;
 };
 
+/**
+ * Returns the best URL for immediate playback. On Safari, when we preloaded via fetch+blob,
+ * returns the blob URL (in-memory) so the player starts instantly; otherwise returns the original URL.
+ */
+export const getPlaybackUrl = (originalUrl: string): string => {
+  return blobUrlMap.get(originalUrl) || originalUrl;
+};
+
 // Check if preload is currently in progress for a URL
 export const isPreloadInProgress = (url: string): boolean => {
   const status = preloadStatusMap.get(url);
@@ -366,10 +439,18 @@ export const clearPreloadCache = (): void => {
   if (Platform.OS === 'web' && typeof document !== 'undefined') {
     hiddenVideoElements.forEach((video) => { if (video.parentNode) video.parentNode.removeChild(video); });
     hiddenVideoElements.clear();
-    
+
     // Remove preload link elements
     preloadLinks.forEach((link) => { if (link.parentNode) link.parentNode.removeChild(link); });
     preloadLinks.clear();
+
+    // Revoke Safari blob URLs to avoid memory leaks
+    blobUrlMap.forEach((blobUrl) => {
+      try {
+        URL.revokeObjectURL(blobUrl);
+      } catch (_) {}
+    });
+    blobUrlMap.clear();
   }
   preloadStatusMap.clear();
 };

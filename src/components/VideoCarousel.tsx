@@ -207,6 +207,7 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
   // Check preload status synchronously to initialize loading state correctly
   const initialLoadingState = React.useMemo(() => {
     if (!selectedVideo?.videoUrl) return true;
+    if (selectedVideo.videoUrl.startsWith('blob:')) return false; // Safari blob = instant
     const preloadStatus = getVideoPreloadStatus(selectedVideo.videoUrl);
     const isPreloaded = preloadStatus?.ready === true;
     if (__DEV__ && isPreloaded) {
@@ -335,6 +336,7 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
   // Check preload status before initializing to optimize playback
   const isVideoPreloaded = React.useMemo(() => {
     if (!selectedVideo?.videoUrl) return false;
+    if (selectedVideo.videoUrl.startsWith('blob:')) return true; // Safari blob = instant
     const preloadStatus = getVideoPreloadStatus(selectedVideo.videoUrl);
     return preloadStatus?.ready === true;
   }, [selectedVideo?.videoUrl]);
@@ -518,7 +520,10 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
       return;
     }
     
-    // Check if video is preloaded - if so, skip loading state
+    if (selectedVideo.videoUrl.startsWith('blob:')) {
+      setIsVideoLoading(false);
+      return;
+    }
     const preloadStatus = getVideoPreloadStatus(selectedVideo.videoUrl);
     if (preloadStatus?.ready) {
       if (__DEV__) {
@@ -872,8 +877,7 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
       }
       
       // Check if video is preloaded - if so, we can skip loading state or reduce it
-      const preloadStatus = getVideoPreloadStatus(videoUrl);
-      const isPreloaded = preloadStatus?.ready === true;
+      const isPreloaded = videoUrl.startsWith('blob:') || getVideoPreloadStatus(videoUrl)?.ready === true;
       
       // Only set loading state if video is not preloaded
       // For preloaded videos, replaceAsync should be very fast
