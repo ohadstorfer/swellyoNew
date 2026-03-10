@@ -739,7 +739,7 @@ DATA STRUCTURE (when is_finished: true):
     "mentioned_preferences": [],
     "mentioned_deal_breakers": []
   },
-  "queryFilters": { "country_from": ["Israel"], "surfboard_type": ["shortboard"], "surf_level_category": ["advanced", "pro"], "age_min": 20, "age_max": 30 }, // Include when user specified origin, board type, level, or age. Use exact country names and enum values. When user says "around my age" or "same age", use USER PROFILE CONTEXT age and set age_min/age_max (e.g. age ±5).
+  "queryFilters": { "country_from": ["Israel"], "surfboard_type": ["shortboard"], "surf_level_category": ["advanced", "pro"], "age_min": 20, "age_max": 30 }, // Include when user specified origin, board type, level, or age. Use exact country names and enum values. When user says "around my age" or "same age", use USER PROFILE CONTEXT age and set age_min/age_max (e.g. age ±5). For a specific age (e.g. "25"), set age_min: 25, age_max: 25.
   "search_summary": "Short casual summary of what we're searching for, shown to the user before they decide whether to search or edit filters. REQUIRED when is_finished is true. First, write a one-line friendly summary of the filters (e.g. \"Sweet so we're going for American dude that surfed Hawaii and is also a shortboarder just like you!\" or \"Got it — Israeli advanced shortboarder!\"). Then add a newline (\"\\n\") and a short question asking if they want to search now or tweak filters first (e.g. \"Are you ready for me to search now, or do you want to tweak any filters first?\"). Tone: friendly, first person, no markdown. Base it ONLY on the criteria (destination_country, area, queryFilters). Do NOT mention that there is no destination, no specific destination, or that we're going global — just describe the filters.",
   "next_action": "search" | "edit" | "clarify" | null // Optional. For the FIRST user reply after you asked whether to search or edit: set to \"search\" when they clearly want to search now, \"edit\" when they clearly want to change/tweak filters first, or \"clarify\" when their intent is ambiguous and you are asking a follow-up question.
 }
@@ -1112,6 +1112,28 @@ async function normalizeQueryFilters(queryFilters: any): Promise<any> {
     }
   }
 
+  // Normalize single age or age_range into age_min/age_max (filtering only uses age_min/age_max)
+  if (typeof normalized.age === 'number' && (normalized.age_min === undefined || normalized.age_max === undefined)) {
+    normalized.age_min = normalized.age;
+    normalized.age_max = normalized.age;
+    delete normalized.age;
+    console.log(`✅ Normalized queryFilters: single age → age_min/age_max: ${normalized.age_min}`);
+  }
+  if (Array.isArray(normalized.age_range) && normalized.age_range.length > 0) {
+    const nums = normalized.age_range.filter((x: unknown) => typeof x === 'number') as number[];
+    if (nums.length === 2) {
+      normalized.age_min = Math.min(nums[0], nums[1]);
+      normalized.age_max = Math.max(nums[0], nums[1]);
+    } else if (nums.length === 1) {
+      normalized.age_min = nums[0];
+      normalized.age_max = nums[0];
+    }
+    if (nums.length >= 1) {
+      delete normalized.age_range;
+      console.log(`✅ Normalized queryFilters: age_range → age_min=${normalized.age_min}, age_max=${normalized.age_max}`);
+    }
+  }
+
   return normalized;
 }
 
@@ -1153,7 +1175,7 @@ async function reconcileQueryFiltersFromText(
 Rules:
 - queryFilters: object with optional keys: country_from (array of official country names), age_min (number), age_max (number), surfboard_type (array: shortboard, mid_length, longboard, soft_top), surf_level_category (string or array: beginner, intermediate, advanced, pro).
 - Use official country names (e.g. "United States" not "USA", "Israel" not "Israeli" for country_from).
-- For age: "under 20" or "13-19" → age_min: 13, age_max: 19; "over 30" → age_min: 30; "around my age" with user age given → age_min: age-5, age_max: age+5.
+- For age: "under 20" or "13-19" → age_min: 13, age_max: 19; "over 30" → age_min: 30; single age (e.g. "25") → age_min: X, age_max: X (same number); "around my age" with user age given → age_min: age-5, age_max: age+5.
 - If the text describes a destination, include destination_country and optionally area.
 - Only include in queryFilters keys that are already present in the Current JSON. Do not add new keys. Only fix or fill values for existing keys so the JSON matches the text. If the text mentions a criterion that has no key in Current JSON, omit it from your output.
 - Output ONLY a valid JSON object with keys queryFilters (object), and optionally destination_country (string) and area (string). No markdown, no explanation.`
@@ -1456,7 +1478,7 @@ ${OFFICIAL_COUNTRIES.map(c => `    - "${c}"`).join('\n')}
     - User says "San Diego, California" → destination_country: "United States - California", area: "San Diego", country_from: NOT SET
     - User says "I want surfers from the USA" → country_from: ["United States"] (normalized from "USA" to "United States")
     - User says "I want to go to Costa Rica and connect with surfers from Israel" → destination_country: "Costa Rica", country_from: ["Israel"]
-- age (integer): Age in years (0+)
+- age_min (number), age_max (number): Use BOTH for any age filter. For a single specific age X (e.g. "25 years old", "someone who is 25") set age_min: X, age_max: X. For ranges use age_min and age_max (e.g. 18-30 → age_min: 18, age_max: 30).
 - surfboard_type (enum): 'shortboard', 'mid_length', 'longboard', 'soft_top' (valid values in database)
   * "midlength" or "mid length" → 'mid_length'
   * "longboard" or "long board" → 'longboard'
@@ -1503,7 +1525,8 @@ TYPO HANDLING (be smart about common mistakes - normalize to official country na
 - "Korea" / "South Korea" → "South Korea"
 
 LOGICAL INFERENCE:
-${userAgeLine}- If user says "similar age" and you know their age (e.g., 25), infer ±5 years → age_range: [20, 30]
+${userAgeLine}- If user says "similar age" and you know their age (e.g., 25), infer ±5 years → age_min: 20, age_max: 30
+- If user says a specific age (e.g. "25", "someone who is 25", "25 years old") → age_min: 25, age_max: 25
 - If user says "around my age", infer ±5 years from their age
 - If user says "young" or "older", infer reasonable age ranges based on context
 - If user says "must be shortboarders" or "they will use shortboard" → surfboard_type: ["shortboard"]
@@ -1610,6 +1633,7 @@ CRITICAL RULES - BE SMART AND FLEXIBLE:
    - "pro" → surf_level_category: "pro" (REQUIRES surfboard_type to be specified)
 
 4. NORMALIZATION RULES:
+   - Specific age: "25 years old" or "someone who is 25" or "age 25" → age_min: 25, age_max: 25
    - Age ranges: "18-30" or "between 18 and 30" → age_min: 18, age_max: 30
    - Age ranges: "over 25" or "above 25" → age_min: 25
    - Age ranges: "under 30" or "below 30" → age_max: 30

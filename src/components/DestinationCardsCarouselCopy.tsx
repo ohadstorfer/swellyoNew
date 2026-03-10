@@ -1,11 +1,10 @@
-import React, { useState, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import {
   View,
   StyleSheet,
   FlatList,
   Dimensions,
   Platform,
-  PanResponder,
 } from 'react-native';
 import { type SwipeExcludeZoneRect } from './DestinationInputCard';
 import { DestinationInputCardCopy, type DestinationInputCardCopyRef } from './DestinationInputCardCopy';
@@ -13,7 +12,6 @@ import { DestinationMapPickerCard, type DestinationMapPickerCardRef } from './De
 import { spacing } from '../styles/theme';
 
 const FOCUS_NEXT_INPUT_DELAY_MS = 380;
-const DIRECTION_THRESHOLD = 10;
 type TimeUnit = 'days' | 'weeks' | 'months' | 'years';
 
 interface DestinationData {
@@ -33,6 +31,8 @@ interface DestinationCardsCarouselCopyProps {
   useMapPickerCard?: boolean;
   /** Ref to parent ScrollView native gesture so vertical scroll can run simultaneously with horizontal pan. */
   parentScrollNativeRef?: React.RefObject<unknown> | null;
+  /** Parent scroll gesture (kept for API compatibility, unused with native scroll). */
+  parentScrollGesture?: unknown;
 }
 
 export const DestinationCardsCarouselCopy: React.FC<DestinationCardsCarouselCopyProps> = ({
@@ -43,22 +43,15 @@ export const DestinationCardsCarouselCopy: React.FC<DestinationCardsCarouselCopy
   fullWidth = false,
   useMapPickerCard = true,
   parentScrollNativeRef,
+  parentScrollGesture,
 }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const currentIndexRef = useRef(0);
   currentIndexRef.current = currentIndex;
-  const scrollStartIndexRef = useRef(0);
   const itemWidthRef = useRef(0);
   const destinationsLengthRef = useRef(0);
-  const lockedScrollOffset = useRef<number | null>(null);
-  const isGestureActive = useRef(false);
-  const hasHandledScrollEnd = useRef(false);
   const flatListWebRef = useRef<any>(null);
   const excludeZonesByIndexRef = useRef<Record<number, { timeUnit: SwipeExcludeZoneRect; areaInput: SwipeExcludeZoneRect }>>({});
-  const touchStartInExcludeZoneRef = useRef(false);
-  const webSwipeExcludeRef = useRef(false);
-  const isPointInRect = (px: number, py: number, r: SwipeExcludeZoneRect) =>
-    r.width > 0 && r.height > 0 && px >= r.x && px <= r.x + r.width && py >= r.y && py <= r.y + r.height;
 
   const initializeDestinationData = (): Record<string, DestinationData> => {
     if (initialData && initialData.length > 0) {
@@ -130,139 +123,21 @@ export const DestinationCardsCarouselCopy: React.FC<DestinationCardsCarouselCopy
     }
   };
 
-  const getScrollOffsetForIndex = (index: number) => index * itemWidth;
-
-  const performLock = useCallback(() => {
-    lockedScrollOffset.current = getScrollOffsetForIndex(currentIndexRef.current);
-    if (Platform.OS === 'web' && flatListWebRef.current) {
-      flatListWebRef.current.style.overflow = 'hidden';
-      if (lockedScrollOffset.current !== null) {
-        flatListWebRef.current.scrollLeft = lockedScrollOffset.current;
-      }
-    }
-    if (flatListRef.current && lockedScrollOffset.current !== null) {
-      flatListRef.current.scrollToOffset({
-        offset: lockedScrollOffset.current,
-        animated: false,
-      });
-    }
-  }, [itemWidth]);
-
-  const carouselPanResponder = useMemo(() => PanResponder.create({
-    onStartShouldSetPanResponder: () => false,
-    onMoveShouldSetPanResponder: (evt, gestureState) => {
-      // Check exclude zones (time-unit picker)
-      const fromWeb = Platform.OS === 'web' && webSwipeExcludeRef.current;
-      let inExclude = fromWeb;
-      if (!inExclude) {
-        const zones = excludeZonesByIndexRef.current[currentIndexRef.current];
-        if (zones) {
-          inExclude = isPointInRect(evt.nativeEvent.pageX, evt.nativeEvent.pageY, zones.timeUnit);
-        }
-      }
-      if (inExclude) return false;
-      const { dx, dy } = gestureState;
-      return Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > DIRECTION_THRESHOLD;
-    },
-    onPanResponderGrant: () => {
-      scrollStartIndexRef.current = currentIndexRef.current;
-      isGestureActive.current = true;
-      performLock();
-    },
-    onPanResponderMove: () => {
-      if (lockedScrollOffset.current != null) {
-        flatListRef.current?.scrollToOffset({
-          offset: lockedScrollOffset.current,
-          animated: false,
-        });
-        if (Platform.OS === 'web' && flatListWebRef.current) {
-          flatListWebRef.current.scrollLeft = lockedScrollOffset.current;
-        }
-      }
-    },
-    onPanResponderTerminationRequest: () => false,
-    onPanResponderRelease: (_, gestureState) => {
-      const hadLock = isGestureActive.current;
-      isGestureActive.current = false;
-      if (!hadLock) return;
-      if (hasHandledScrollEnd.current) {
-        if (Platform.OS === 'web' && flatListWebRef.current) {
-          flatListWebRef.current.style.overflow = 'auto';
-        }
-        return;
-      }
-      const deltaX = gestureState.dx;
-      const deltaY = gestureState.dy;
-      const isHorizontalSwipe = Math.abs(deltaX) > Math.abs(deltaY);
-      const minSwipeDistance = 5;
-      if (isHorizontalSwipe && Math.abs(deltaX) > minSwipeDistance) {
-        const start = scrollStartIndexRef.current;
-        let targetIndex = start;
-        if (deltaX < 0) targetIndex = Math.min(destinations.length - 1, start + 1);
-        else targetIndex = Math.max(0, start - 1);
-        targetIndex = Math.max(0, Math.min(destinations.length - 1, targetIndex));
-        hasHandledScrollEnd.current = true;
-        const targetOffset = getScrollOffsetForIndex(targetIndex);
-        currentIndexRef.current = targetIndex;
-        setCurrentIndex(targetIndex);
-        flatListRef.current?.scrollToOffset({ offset: targetOffset, animated: true });
-        if (targetIndex > start) {
-          setTimeout(() => {
-            cardRefsMap.current[targetIndex]?.focusAreaInput?.();
-          }, FOCUS_NEXT_INPUT_DELAY_MS);
-        }
-        if (Platform.OS === 'web' && flatListWebRef.current) {
-          setTimeout(() => {
-            flatListWebRef.current.style.overflow = 'auto';
-          }, 300);
-        }
-      } else if (Platform.OS === 'web' && flatListWebRef.current) {
-        flatListWebRef.current.style.overflow = 'auto';
-      }
-      setTimeout(() => { hasHandledScrollEnd.current = false; }, 350);
-    },
-    onPanResponderTerminate: () => {
-      const hadLock = isGestureActive.current;
-      isGestureActive.current = false;
-      touchStartInExcludeZoneRef.current = false;
-      webSwipeExcludeRef.current = false;
-      lockedScrollOffset.current = null;
-      hasHandledScrollEnd.current = false;
-      if (hadLock && Platform.OS === 'web' && flatListWebRef.current) {
-        flatListWebRef.current.style.overflow = 'auto';
-      }
-    },
-  }), [performLock, destinations.length, itemWidth]);
-
-  const handleWebTouchStartCapture = useCallback((event: any) => {
-    if (Platform.OS !== 'web') return;
-    const target = event.nativeEvent?.target ?? event.target;
-    webSwipeExcludeRef.current = !!target?.closest?.('[data-swipe-exclude]');
-  }, []);
-
   const handleScrollEnd = useCallback(
     (event: any) => {
       if (destinations.length === 0) return;
       const offsetX = event?.nativeEvent?.contentOffset?.x ?? 0;
-      const cur = scrollStartIndexRef.current;
-      const curOffset = cur * itemWidth;
-      const threshold = itemWidth * 0.25;
-      let targetIndex = cur;
-      if (offsetX > curOffset + threshold && cur + 1 < destinations.length) {
-        targetIndex = cur + 1;
-      } else if (offsetX < curOffset - threshold && cur > 0) {
-        targetIndex = cur - 1;
-      }
-      targetIndex = Math.max(cur - 1, Math.min(cur + 1, targetIndex));
-      targetIndex = Math.max(0, Math.min(destinations.length - 1, targetIndex));
-      if (targetIndex !== cur) {
-        flatListRef.current?.scrollToOffset({
-          offset: targetIndex * itemWidth,
-          animated: true,
-        });
-        currentIndexRef.current = targetIndex;
-        setCurrentIndex(targetIndex);
-      }
+      const nearestIndex = Math.max(
+        0,
+        Math.min(destinations.length - 1, Math.round(offsetX / itemWidth))
+      );
+      const targetOffset = nearestIndex * itemWidth;
+      flatListRef.current?.scrollToOffset({
+        offset: targetOffset,
+        animated: true,
+      });
+      currentIndexRef.current = nearestIndex;
+      setCurrentIndex(nearestIndex);
     },
     [destinations.length, itemWidth]
   );
@@ -314,17 +189,11 @@ export const DestinationCardsCarouselCopy: React.FC<DestinationCardsCarouselCopy
 
   return (
     <View style={styles.container}>
-      <View
-        style={styles.carouselContainer}
-        {...(Platform.OS === 'web' && { onTouchStartCapture: handleWebTouchStartCapture } as any)}
-      >
-        <View {...carouselPanResponder.panHandlers}>
-          <FlatList
+      <View style={styles.carouselContainer}>
+        <FlatList
           ref={setFlatListRef}
           data={destinations}
-          scrollEnabled={false}
-          disableIntervalMomentum
-          decelerationRate={0}
+          scrollEnabled
           keyboardShouldPersistTaps="always"
           renderItem={({ item, index }) => {
             const cardData = destinationData[item];
@@ -390,9 +259,6 @@ export const DestinationCardsCarouselCopy: React.FC<DestinationCardsCarouselCopy
           snapToInterval={itemWidth}
           snapToOffsets={snapToOffsets}
           snapToAlignment="start"
-          onScrollBeginDrag={() => {
-            scrollStartIndexRef.current = currentIndexRef.current;
-          }}
           onScrollEndDrag={handleScrollEnd}
           onMomentumScrollEnd={handleScrollEnd}
           onViewableItemsChanged={onViewableItemsChanged}
@@ -419,7 +285,6 @@ export const DestinationCardsCarouselCopy: React.FC<DestinationCardsCarouselCopy
             scrollEventThrottle: 16,
           })}
         />
-        </View>
       </View>
     </View>
   );

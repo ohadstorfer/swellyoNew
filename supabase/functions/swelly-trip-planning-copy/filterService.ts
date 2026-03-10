@@ -33,36 +33,56 @@ export function buildSurferQuery(
 }
 
 export function applyQueryFilters(query: any, queryFilters: any): any {
-  console.log('[filterService] Applying query filters:', JSON.stringify(queryFilters, null, 2));
-
-  if (queryFilters.country_from && Array.isArray(queryFilters.country_from) && queryFilters.country_from.length > 0) {
-    query = query.in('country_from', queryFilters.country_from);
-    console.log(`[filterService]   - Filtering by country_from: ${queryFilters.country_from.join(', ')}`);
+  if (!queryFilters || typeof queryFilters !== 'object') return query;
+  const q = { ...queryFilters };
+  // Normalize single age or age_range into age_min/age_max (filtering only uses age_min/age_max)
+  if (typeof q.age === 'number' && (q.age_min === undefined || q.age_max === undefined)) {
+    q.age_min = q.age;
+    q.age_max = q.age;
+    delete q.age;
+  }
+  if (Array.isArray(q.age_range) && q.age_range.length > 0) {
+    const nums = q.age_range.filter((x: unknown) => typeof x === 'number') as number[];
+    if (nums.length === 2) {
+      q.age_min = Math.min(nums[0], nums[1]);
+      q.age_max = Math.max(nums[0], nums[1]);
+    } else if (nums.length === 1) {
+      q.age_min = nums[0];
+      q.age_max = nums[0];
+    }
+    delete q.age_range;
   }
 
-  if (queryFilters.age_min !== undefined && queryFilters.age_min !== null && typeof queryFilters.age_min === 'number') {
-    query = query.gte('age', queryFilters.age_min);
-    console.log(`[filterService]   - Filtering by age_min: ${queryFilters.age_min}`);
-  }
-  if (queryFilters.age_max !== undefined && queryFilters.age_max !== null && typeof queryFilters.age_max === 'number') {
-    query = query.lte('age', queryFilters.age_max);
-    console.log(`[filterService]   - Filtering by age_max: ${queryFilters.age_max}`);
+  console.log('[filterService] Applying query filters:', JSON.stringify(q, null, 2));
+
+  if (q.country_from && Array.isArray(q.country_from) && q.country_from.length > 0) {
+    query = query.in('country_from', q.country_from);
+    console.log(`[filterService]   - Filtering by country_from: ${q.country_from.join(', ')}`);
   }
 
-  if (queryFilters.surfboard_type) {
-    const surfboardTypes = Array.isArray(queryFilters.surfboard_type)
-      ? queryFilters.surfboard_type
-      : [queryFilters.surfboard_type];
+  if (q.age_min !== undefined && q.age_min !== null && typeof q.age_min === 'number') {
+    query = query.gte('age', q.age_min);
+    console.log(`[filterService]   - Filtering by age_min: ${q.age_min}`);
+  }
+  if (q.age_max !== undefined && q.age_max !== null && typeof q.age_max === 'number') {
+    query = query.lte('age', q.age_max);
+    console.log(`[filterService]   - Filtering by age_max: ${q.age_max}`);
+  }
+
+  if (q.surfboard_type) {
+    const surfboardTypes = Array.isArray(q.surfboard_type)
+      ? q.surfboard_type
+      : [q.surfboard_type];
     if (surfboardTypes.length > 0) {
       query = query.in('surfboard_type', surfboardTypes);
       console.log(`[filterService]   - Filtering by surfboard_type: ${surfboardTypes.join(', ')}`);
     }
   }
 
-  if (queryFilters.surf_level_category) {
-    const surfLevelCategories = Array.isArray(queryFilters.surf_level_category)
-      ? queryFilters.surf_level_category
-      : [queryFilters.surf_level_category];
+  if (q.surf_level_category) {
+    const surfLevelCategories = Array.isArray(q.surf_level_category)
+      ? q.surf_level_category
+      : [q.surf_level_category];
 
     if (surfLevelCategories.length > 0) {
       if (surfLevelCategories.length === 1) {
@@ -74,14 +94,14 @@ export function applyQueryFilters(query: any, queryFilters: any): any {
       }
     }
   }
-  else if (queryFilters.surf_level_min !== undefined || queryFilters.surf_level_max !== undefined) {
-    if (queryFilters.surf_level_min !== undefined && queryFilters.surf_level_min !== null && typeof queryFilters.surf_level_min === 'number') {
-      query = query.gte('surf_level', queryFilters.surf_level_min);
-      console.log(`[filterService]   - Filtering by surf_level_min: ${queryFilters.surf_level_min}`);
+  else if (q.surf_level_min !== undefined || q.surf_level_max !== undefined) {
+    if (q.surf_level_min !== undefined && q.surf_level_min !== null && typeof q.surf_level_min === 'number') {
+      query = query.gte('surf_level', q.surf_level_min);
+      console.log(`[filterService]   - Filtering by surf_level_min: ${q.surf_level_min}`);
     }
-    if (queryFilters.surf_level_max !== undefined && queryFilters.surf_level_max !== null && typeof queryFilters.surf_level_max === 'number') {
-      query = query.lte('surf_level', queryFilters.surf_level_max);
-      console.log(`[filterService]   - Filtering by surf_level_max: ${queryFilters.surf_level_max}`);
+    if (q.surf_level_max !== undefined && q.surf_level_max !== null && typeof q.surf_level_max === 'number') {
+      query = query.lte('surf_level', q.surf_level_max);
+      console.log(`[filterService]   - Filtering by surf_level_max: ${q.surf_level_max}`);
     }
   }
 

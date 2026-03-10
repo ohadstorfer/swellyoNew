@@ -72,17 +72,25 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
     timeInText: string;
   }>>([]);
   const [destinationCardsMessageId, setDestinationCardsMessageId] = useState<string | null>(null);
+  const [pendingDestinationUiHints, setPendingDestinationUiHints] = useState<{
+    messageId: string;
+    destinations: string[];
+  } | null>(null);
   
   // State for budget cards carousel
   const [showBudgetButtons, setShowBudgetButtons] = useState(false);
   const [selectedBudget, setSelectedBudget] = useState<BudgetOption | null>(null);
   const [budgetSubmitted, setBudgetSubmitted] = useState(false);
   const [budgetButtonsMessageId, setBudgetButtonsMessageId] = useState<string | null>(null);
+  const [pendingBudgetUiHints, setPendingBudgetUiHints] = useState<{
+    messageId: string;
+  } | null>(null);
 
   // Initial welcome: show typing bubble after 1s, then second message after 2s more
   const [showInitialTypingBubble, setShowInitialTypingBubble] = useState(false);
   const initialTypingTimeout1Ref = useRef<ReturnType<typeof setTimeout> | null>(null);
   const initialTypingTimeout2Ref = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [isUiDelayLoading, setIsUiDelayLoading] = useState(false);
 
   // Calculate progress based on conversation length
   // Estimate: typical conversation is 6-10 message pairs (12-20 messages total)
@@ -239,20 +247,24 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
       // Handle UI hints from response
       if (response.ui_hints) {
         botMessage.ui_hints = response.ui_hints;
-        
-        // Handle destination cards
-        if (response.ui_hints.show_destination_cards && response.ui_hints.destinations) {
-          setShowDestinationCards(true);
-          setDestinationList(response.ui_hints.destinations);
-          setDestinationCardsMessageId(botMessage.id);
+
+        // Queue destination cards to show after a short typing delay
+        setPendingDestinationUiHints(null);
+        if (response.ui_hints.show_destination_cards && response.ui_hints.destinations?.length) {
+          setPendingDestinationUiHints({
+            messageId: botMessage.id,
+            destinations: response.ui_hints.destinations,
+          });
         } else {
           setShowDestinationCards(false);
         }
-        
-        // Handle budget buttons
+
+        // Queue budget buttons to show after a short typing delay
+        setPendingBudgetUiHints(null);
         if (response.ui_hints.show_budget_buttons) {
-          setShowBudgetButtons(true);
-          setBudgetButtonsMessageId(botMessage.id);
+          setPendingBudgetUiHints({
+            messageId: botMessage.id,
+          });
         } else {
           setShowBudgetButtons(false);
         }
@@ -260,6 +272,8 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
         // Reset UI hints if not present
         setShowDestinationCards(false);
         setShowBudgetButtons(false);
+        setPendingDestinationUiHints(null);
+        setPendingBudgetUiHints(null);
       }
 
       setMessages(prev => [...prev, botMessage]);
@@ -371,6 +385,40 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
   useEffect(() => {
     scrollToBottom();
   }, [messages, isInitializing, isLoading, showInitialTypingBubble]);
+
+  // Delay rendering of destination/budget cards to show typing indicator first
+  useEffect(() => {
+    if (!pendingDestinationUiHints && !pendingBudgetUiHints) {
+      return;
+    }
+
+    setIsUiDelayLoading(true);
+
+    const timeoutId = setTimeout(() => {
+      if (pendingDestinationUiHints) {
+        setShowDestinationCards(true);
+        setDestinationList(pendingDestinationUiHints.destinations);
+        setDestinationCardsMessageId(pendingDestinationUiHints.messageId);
+        setPendingDestinationUiHints(null);
+      }
+
+      if (pendingBudgetUiHints) {
+        setShowBudgetButtons(true);
+        setBudgetButtonsMessageId(pendingBudgetUiHints.messageId);
+        setPendingBudgetUiHints(null);
+      }
+
+      // After cards are rendered, scroll to the bottom of the chat
+      scrollToBottom();
+
+      setIsUiDelayLoading(false);
+    }, 3000);
+
+    return () => {
+      clearTimeout(timeoutId);
+      setIsUiDelayLoading(false);
+    };
+  }, [pendingDestinationUiHints, pendingBudgetUiHints]);
 
   // Typing animation component
   const TypingIndicator = () => {
@@ -484,9 +532,14 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
         
         if (response.ui_hints) {
           botMessage.ui_hints = response.ui_hints;
+          // Queue budget buttons to show after a short typing delay
+          setPendingBudgetUiHints(null);
           if (response.ui_hints.show_budget_buttons) {
-            setShowBudgetButtons(true);
-            setBudgetButtonsMessageId(botMessage.id);
+            setPendingBudgetUiHints({
+              messageId: botMessage.id,
+            });
+          } else {
+            setShowBudgetButtons(false);
           }
         }
         
@@ -530,6 +583,25 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
         
         if (response.ui_hints) {
           botMessage.ui_hints = response.ui_hints;
+          // Queue destination/budget UI hints to show after a short typing delay
+          setPendingDestinationUiHints(null);
+          if (response.ui_hints.show_destination_cards && response.ui_hints.destinations?.length) {
+            setPendingDestinationUiHints({
+              messageId: botMessage.id,
+              destinations: response.ui_hints.destinations,
+            });
+          } else {
+            setShowDestinationCards(false);
+          }
+
+          setPendingBudgetUiHints(null);
+          if (response.ui_hints.show_budget_buttons) {
+            setPendingBudgetUiHints({
+              messageId: botMessage.id,
+            });
+          } else {
+            setShowBudgetButtons(false);
+          }
         }
         
         setMessages(prev => [...prev, botMessage]);
@@ -636,6 +708,7 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
                   initialData={destinationsSubmitted ? submittedDestinationData : undefined}
                   fullWidth
                   parentScrollNativeRef={scrollNativeGestureRef}
+                  parentScrollGesture={scrollNativeGesture}
                 />
               ) : (
                 <DestinationCardsCarousel
@@ -741,7 +814,7 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
             keyboardShouldPersistTaps="handled"
           >
             {messages.map(renderMessage)}
-            {(isLoading || isInitializing || showInitialTypingBubble) && (
+            {(isLoading || isInitializing || showInitialTypingBubble || isUiDelayLoading) && (
               <View style={[styles.messageContainer, styles.botMessageContainer]}>
                 <View style={[styles.messageBubble, styles.botMessageBubble]}>
                   <View style={styles.messageTextContainer}>
@@ -1024,7 +1097,7 @@ const styles = StyleSheet.create({
   },
   uiComponentContainer: {
     paddingHorizontal: spacing.md,
-    paddingTop: spacing.sm,
+    paddingTop: 0,
     paddingBottom: spacing.md,
   },
   destinationCarouselFullWidth: {

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   View,
   StyleSheet,
@@ -7,7 +7,6 @@ import {
   Platform,
   TouchableOpacity,
   Image,
-  PanResponder,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Text } from './Text';
@@ -68,15 +67,13 @@ const BUDGET_ITEMS: { value: BudgetOption; imagePath: string; label: string }[] 
 ];
 
 const NUM_REAL = BUDGET_ITEMS.length;
-const PHANTOM_LEAD = 1; // one phantom at start so first real card is at list index 1
-const LIST_LENGTH = PHANTOM_LEAD + NUM_REAL + 1; // phantom + 4 cards + phantom
 
 // Figma structured cards – same layout, different copy and coin image
 const STRUCTURED_CARDS: Record<BudgetOption, { title: string; tagline: string; description: string; coinImagePath: string }> = {
   budget: {
     title: 'Barefoot Mode',
     tagline: 'Light, simple, flexible.',
-    description: 'Hostels, shared boards, sunrise sessions, counting waves not coins.',
+    description: 'Hostels, cheap local food, shared boards, counting sessions not coins.',
     coinImagePath: '/budget/low_budget.png',
   },
   mid: {
@@ -88,7 +85,7 @@ const STRUCTURED_CARDS: Record<BudgetOption, { title: string; tagline: string; d
   high: {
     title: 'Premium Swell',
     tagline: 'Smooth rides all around.',
-    description: 'Quality boards, ocean-view rooms, private transfers to the break.',
+    description: 'Quality boards, ocean-view rooms, and the chef’s special.',
     coinImagePath: '/budget/high_budget.png',
   },
   premium: {
@@ -127,14 +124,13 @@ export const BudgetCardsCarousel: React.FC<BudgetCardsCarouselProps> = ({
   const CARD_GAP = 27;
   const cardWidth = Math.min(258, screenWidth - 2 * PEEK - CARD_GAP);
   const itemWidth = cardWidth + CARD_GAP;
-  const contentWidth = 2 * PEEK + LIST_LENGTH * itemWidth;
+  const contentWidth = 2 * PEEK + NUM_REAL * itemWidth;
   const maxScroll = Math.max(0, contentWidth - screenWidth);
 
-  // Real cards live at list indices 1..NUM_REAL; phantom at 0 and LIST_LENGTH-1. Center offset for real index i (0..3).
+  // Center offset for card at list index i (0..NUM_REAL-1).
   const getCenterOffsetForIndex = useCallback(
     (realIndex: number) => {
-      const listIndex = PHANTOM_LEAD + realIndex;
-      const raw = PEEK + listIndex * itemWidth + cardWidth / 2 - screenWidth / 2;
+      const raw = PEEK + realIndex * itemWidth + cardWidth / 2 - screenWidth / 2;
       return Math.max(0, Math.min(maxScroll, raw));
     },
     [itemWidth, cardWidth, screenWidth, maxScroll]
@@ -142,11 +138,7 @@ export const BudgetCardsCarousel: React.FC<BudgetCardsCarouselProps> = ({
 
   const snapToOffsets = BUDGET_ITEMS.map((_, i) => getCenterOffsetForIndex(i));
 
-  // Data: phantom, ...real cards, phantom. User can only snap to real cards (indices 1..4).
-  const carouselData = useMemo(
-    () => [{ phantom: true as const }, ...BUDGET_ITEMS, { phantom: true as const }],
-    []
-  );
+  const carouselData = BUDGET_ITEMS;
 
   // Select button on card = submit: call onSelect directly (no separate Submit button)
   const handleCardPress = useCallback(
@@ -160,115 +152,17 @@ export const BudgetCardsCarousel: React.FC<BudgetCardsCarouselProps> = ({
 
   const getScrollOffsetForIndex = getCenterOffsetForIndex;
 
-  // PanResponder: horizontal-only so vertical scroll passes to parent; on release move exactly one card
-  const DIRECTION_THRESHOLD = 10;
-  const centeredIndexAtDragStartRef = useRef(0);
-  const lockedScrollOffset = useRef<number | null>(null);
-  const isGestureActive = useRef(false);
-  const hasHandledScrollEnd = useRef(false);
-  const flatListWebRef = useRef<any>(null);
-
-  const performLock = useCallback(() => {
-    lockedScrollOffset.current = getScrollOffsetForIndex(centeredIndexRef.current);
-    if (Platform.OS === 'web' && flatListWebRef.current) {
-      flatListWebRef.current.style.overflow = 'hidden';
-      if (lockedScrollOffset.current !== null) {
-        flatListWebRef.current.scrollLeft = lockedScrollOffset.current;
-      }
-    }
-    if (flatListRef.current && lockedScrollOffset.current !== null) {
-      flatListRef.current.scrollToOffset({
-        offset: lockedScrollOffset.current,
-        animated: false,
-      });
-    }
-  }, [getScrollOffsetForIndex]);
-
-  const carouselPanResponder = useMemo(() => PanResponder.create({
-    onStartShouldSetPanResponder: () => false,
-    onMoveShouldSetPanResponder: (_, gestureState) => {
-      const { dx, dy } = gestureState;
-      return Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > DIRECTION_THRESHOLD;
-    },
-    onPanResponderGrant: () => {
-      isGestureActive.current = true;
-      centeredIndexAtDragStartRef.current = centeredIndexRef.current;
-      performLock();
-    },
-    onPanResponderMove: () => {
-      if (lockedScrollOffset.current !== null) {
-        if (Platform.OS === 'web' && flatListWebRef.current) {
-          flatListWebRef.current.scrollLeft = lockedScrollOffset.current;
-        } else if (flatListRef.current) {
-          flatListRef.current.scrollToOffset({
-            offset: lockedScrollOffset.current,
-            animated: false,
-          });
-        }
-      }
-    },
-    onPanResponderTerminationRequest: () => false,
-    onPanResponderRelease: (_, gestureState) => {
-      const hadLock = isGestureActive.current;
-      isGestureActive.current = false;
-      if (!hadLock) return;
-      if (hasHandledScrollEnd.current) {
-        if (Platform.OS === 'web' && flatListWebRef.current) {
-          flatListWebRef.current.style.overflow = 'auto';
-        }
-        return;
-      }
-      hasHandledScrollEnd.current = true;
-      const deltaX = gestureState.dx;
-      const deltaY = gestureState.dy;
-      const isHorizontalSwipe = Math.abs(deltaX) > Math.abs(deltaY);
-      const minSwipeDistance = 5;
-
-      const didSwipe = isHorizontalSwipe && Math.abs(deltaX) > minSwipeDistance;
-      if (didSwipe) {
-        let targetIndex = centeredIndexAtDragStartRef.current;
-        if (deltaX < 0) targetIndex = Math.min(BUDGET_ITEMS.length - 1, centeredIndexAtDragStartRef.current + 1);
-        else targetIndex = Math.max(0, centeredIndexAtDragStartRef.current - 1);
-        targetIndex = Math.max(0, Math.min(BUDGET_ITEMS.length - 1, targetIndex));
-
-        const targetOffset = getScrollOffsetForIndex(targetIndex);
-        centeredIndexRef.current = targetIndex;
-        lastReportedCenteredIndexRef.current = targetIndex;
-        setCenteredIndex(targetIndex);
-        flatListRef.current?.scrollToOffset({ offset: targetOffset, animated: true });
-      }
-      if (hadLock && Platform.OS === 'web' && flatListWebRef.current) {
-        setTimeout(() => {
-          flatListWebRef.current.style.overflow = 'auto';
-        }, didSwipe ? 300 : 0);
-      }
-      setTimeout(() => { hasHandledScrollEnd.current = false; }, 350);
-    },
-    onPanResponderTerminate: () => {
-      const hadLock = isGestureActive.current;
-      isGestureActive.current = false;
-      lockedScrollOffset.current = null;
-      hasHandledScrollEnd.current = false;
-      if (hadLock && Platform.OS === 'web' && flatListWebRef.current) {
-        flatListWebRef.current.style.overflow = 'auto';
-      }
-    },
-  }), [performLock, getScrollOffsetForIndex]);
-
-  // Clamp to real cards only (list indices 1..NUM_REAL) so we never snap to phantom
   const scrollOffsetToRealIndex = useCallback(
     (offsetX: number) => {
       const centerInContent = offsetX + screenWidth / 2;
       const rawListIndex = (centerInContent - PEEK - cardWidth / 2) / itemWidth;
-      const listIndex = Math.max(PHANTOM_LEAD, Math.min(PHANTOM_LEAD + NUM_REAL - 1, Math.round(rawListIndex)));
-      return listIndex - PHANTOM_LEAD;
+      return Math.max(0, Math.min(NUM_REAL - 1, Math.round(rawListIndex)));
     },
     [screenWidth, cardWidth, itemWidth]
   );
 
   const handleScrollEnd = useCallback(
     (event: { nativeEvent: { contentOffset: { x: number } } }) => {
-      if (hasHandledScrollEnd.current) return;
       const offsetX = event?.nativeEvent?.contentOffset?.x ?? 0;
       const targetIndex = scrollOffsetToRealIndex(offsetX);
       const targetOffset = getScrollOffsetForIndex(targetIndex);
@@ -276,8 +170,6 @@ export const BudgetCardsCarousel: React.FC<BudgetCardsCarouselProps> = ({
       centeredIndexRef.current = targetIndex;
       lastReportedCenteredIndexRef.current = targetIndex;
       setCenteredIndex(targetIndex);
-      hasHandledScrollEnd.current = true;
-      setTimeout(() => { hasHandledScrollEnd.current = false; }, 350);
     },
     [getScrollOffsetForIndex, scrollOffsetToRealIndex]
   );
@@ -286,8 +178,8 @@ export const BudgetCardsCarousel: React.FC<BudgetCardsCarouselProps> = ({
     ({ viewableItems }: { viewableItems: Array<{ index: number | null }> }) => {
       if (viewableItems.length > 0) {
         const listIndex = viewableItems[0].index;
-        if (listIndex !== null && listIndex !== undefined && listIndex >= PHANTOM_LEAD && listIndex < PHANTOM_LEAD + NUM_REAL) {
-          setCenteredIndex(listIndex - PHANTOM_LEAD);
+        if (listIndex !== null && listIndex !== undefined && listIndex >= 0 && listIndex < NUM_REAL) {
+          setCenteredIndex(listIndex);
         }
       }
     }
@@ -334,29 +226,18 @@ export const BudgetCardsCarousel: React.FC<BudgetCardsCarouselProps> = ({
   return (
     <View style={styles.container}>
       <View style={styles.carouselContainer}>
-        <View {...carouselPanResponder.panHandlers}>
-          <FlatList
-          ref={(r) => {
-            flatListRef.current = r;
-            if (Platform.OS === 'web' && r && typeof (r as any).getScrollableNode === 'function') {
-              flatListWebRef.current = (r as any).getScrollableNode();
-            }
-          }}
+        <FlatList
+          ref={(r) => { flatListRef.current = r; }}
           data={carouselData}
-          keyExtractor={(item, index) => ('phantom' in item && item.phantom) ? (index === 0 ? 'phantom-start' : 'phantom-end') : (item as typeof BUDGET_ITEMS[number]).value}
+          keyExtractor={(item) => item.value}
           horizontal
-          scrollEnabled={false}
+          scrollEnabled
           directionalLockEnabled
           showsHorizontalScrollIndicator={false}
           snapToInterval={itemWidth}
           snapToOffsets={snapToOffsets}
           snapToAlignment="start"
-          decelerationRate={0}
-          disableIntervalMomentum={true}
           onScroll={handleScroll}
-          onScrollBeginDrag={() => {
-            centeredIndexAtDragStartRef.current = centeredIndexRef.current;
-          }}
           onScrollEndDrag={handleScrollEnd}
           onMomentumScrollEnd={handleScrollEnd}
           onViewableItemsChanged={onViewableItemsChanged}
@@ -364,20 +245,19 @@ export const BudgetCardsCarousel: React.FC<BudgetCardsCarouselProps> = ({
           contentContainerStyle={[styles.carouselContent, { paddingHorizontal: PEEK }]}
           getItemLayout={(_, index) => ({
             length: itemWidth,
-            offset: PEEK + itemWidth * index,
+            offset: PEEK + index * itemWidth,
             index,
           })}
           ListFooterComponent={<View style={{ width: PEEK }} />}
-          renderItem={({ item, index: listIndex }) => {
-            if ('phantom' in item && item.phantom) {
-              return (
-                <View
-                  style={[styles.cardWrapper, styles.phantomCard, { width: cardWidth, height: CARD_HEIGHT, marginRight: CARD_GAP }]}
-                  pointerEvents="none"
-                />
-              );
-            }
-            const budgetItem = item as typeof BUDGET_ITEMS[number];
+          {...(Platform.OS === 'web' && {
+            style: {
+              overflowX: 'auto' as any,
+              overflowY: 'hidden' as any,
+              WebkitOverflowScrolling: 'touch' as any,
+            } as any,
+            scrollEventThrottle: 16,
+          })}
+          renderItem={({ item: budgetItem }) => {
             const gradient = BUDGET_GRADIENTS[budgetItem.value];
             const structuredCard = STRUCTURED_CARDS[budgetItem.value];
 
@@ -432,7 +312,6 @@ export const BudgetCardsCarousel: React.FC<BudgetCardsCarouselProps> = ({
             );
           }}
         />
-        </View>
       </View>
     </View>
   );
@@ -453,10 +332,6 @@ const styles = StyleSheet.create({
   },
   cardWrapper: {
     overflow: 'hidden',
-  },
-  phantomCard: {
-    opacity: 0,
-    backgroundColor: 'transparent',
   },
   cardOuterTouchable: {
     overflow: 'hidden',

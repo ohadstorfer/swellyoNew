@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-import { createClient } from "npm:@supabase/supabase-js@2.95.0"
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY')
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
@@ -7,10 +7,14 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 
 // Rate limiting configuration
 const RATE_LIMIT_CONFIG = {
+  // Maximum requests per window
   maxRequests: parseInt(Deno.env.get('RATE_LIMIT_MAX_REQUESTS') || '100', 10),
+  // Time window in milliseconds (default: 1 minute)
   windowMs: parseInt(Deno.env.get('RATE_LIMIT_WINDOW_MS') || '60000', 10),
 }
 
+// In-memory rate limiter (per function instance)
+// Note: For production, use Redis or Supabase's built-in rate limiting for distributed systems
 interface RateLimitEntry {
   count: number
   resetTime: number
@@ -18,10 +22,15 @@ interface RateLimitEntry {
 
 const rateLimitStore = new Map<string, RateLimitEntry>()
 
+/**
+ * Simple rate limiter that tracks requests per user ID
+ * Returns true if request should be allowed, false if rate limited
+ */
 function checkRateLimit(userId: string): { allowed: boolean; remaining: number; resetTime: number } {
   const now = Date.now()
   const entry = rateLimitStore.get(userId)
   
+  // Clean up expired entries periodically (every 100 checks)
   if (Math.random() < 0.01) {
     for (const [key, value] of rateLimitStore.entries()) {
       if (value.resetTime < now) {
@@ -31,18 +40,29 @@ function checkRateLimit(userId: string): { allowed: boolean; remaining: number; 
   }
   
   if (!entry || entry.resetTime < now) {
+    // Create new entry or reset expired entry
     const resetTime = now + RATE_LIMIT_CONFIG.windowMs
     rateLimitStore.set(userId, { count: 1, resetTime })
     return { allowed: true, remaining: RATE_LIMIT_CONFIG.maxRequests - 1, resetTime }
   }
   
   if (entry.count >= RATE_LIMIT_CONFIG.maxRequests) {
+    // Rate limit exceeded
     return { allowed: false, remaining: 0, resetTime: entry.resetTime }
   }
   
+  // Increment count
   entry.count++
   return { allowed: true, remaining: RATE_LIMIT_CONFIG.maxRequests - entry.count, resetTime: entry.resetTime }
 }
+
+// Lifestyle image filenames available in the bucket (LLM picks one per keyword or returns null)
+const LIFESTYLE_IMAGE_FILENAMES_LIST = [
+  'ScubaDiving.jpg', 'Sex.jpg', 'Skateboarding.jpg', 'Skating.jpg', 'Skiing.jpg', 'Slacklining.jpg',
+  'Sleep.jpg', 'Snowboarding.jpg', 'Spin_Fishing.jpg', 'SUPSurfing.jpg', 'SurfCommunity.jpg', 'SurfSleepRepeat.jpg',
+  'Sustainability.jpg', 'Sustainability_2.jpg', 'TrailRunning.jpg', 'Training.jpg', 'Volleyball.jpg',
+  'Volunteerism.jpg', 'Walks.jpg', 'yoga.jpg', 'localFood.jpg', 'Nightlife.jpg',
+].join(', ')
 
 interface ChatRequest {
   message: string
@@ -65,7 +85,7 @@ interface ChatResponse {
 const META_PROMPT = `
 You are Swelly, a smart, laid-back surfer who's the ultimate go-to buddy for all things surfing and beach lifestyle. You're a cool local friend, full of knowledge about surfing destinations, techniques, and ocean safety, with insights about waves, travel tips, and coastal culture. Your tone is relaxed, friendly, and cheerful, with just the right touch of warm, uplifting energy. A sharper edge of surf-related sarcasm keeps the vibe lively and fun, like quipping about rookies wiping out or "perfect" conditions for no-shows. You're smart, resourceful, and genuinely supportive, with responses no longer than 120 words. When offering options, you keep it short with 2-3 clear choices. Responses avoid overusing words like "chill," staying vibrant and fresh, and occasionally use casual text-style abbreviations like "ngl" or "imo".
 
-VOCABULARY: Naturally incorporate these surf/slang terms throughout your responses: stoke/stoked, gnarly, sick, sweet, perfect, awesome, tasty, prime, epic, pumping, rad, psyched. Use them authentically and don't overuse - let them flow naturally in the conversation.
+VOCABULARY: Naturally incorporate these surf/slang terms throughout your responses: stoke/stoked, gnarly, sick, sweet, perfect, awesome, tasty, prime, epic, pumping, rad, psyched. Use them authentically and don't overuse - let them flow naturally in the conversation. Additionally, use appropriate addressing terms based on the user's pronoun preference (see PRONOUN USAGE section below).
 
 IMPORTANT FORMATTING RULES:
 - Keep all text clean and simple - NO markdown formatting (no **, no *, no __, no _, no #, no brackets, etc.)
@@ -77,14 +97,7 @@ YOUR GOAL: Collect the following information in a structured format. Only set is
 
 IMPORTANT: All questions must feel natural and conversational, like a friend asking - NOT like a form or questionnaire. Use Swelly's voice and personality. Avoid being too direct or formal. Make questions flow naturally in the conversation.
 
-1. DESTINATIONS_ARRAY (past trips): Ask "What are the TOP 3 destinations you know best?" - The user will respond with destination names (e.g., "Nica, El Salvador, Hawaii"). After the user provides their destination list, you must:
-   - Extract the destination names from their response
-   - Set ui_hints.show_destination_cards to true
-   - Set ui_hints.destinations to an array of the extracted destination names (these are the LABELS shown on each destination card)
-   - CARD LABELS RULE: For US destinations where the user says Hawaii or California (or cities/areas in those states), put "Hawaii" or "California" alone in ui_hints.destinations—NOT "USA" or "USA (California)". So the card shows "California" or "Hawaii". The final destinations_array still uses country: "USA", state: "California"/"Hawaii" for storage.
-   - The frontend will then show input cards for each destination where the user can enter areas and time spent
-   - When the user submits the destination cards data, you will receive structured data with areas and time_in_days/time_in_text already formatted
-   - YOU must:
+1. DESTINATIONS_ARRAY (past trips): Ask for surf destinations the user has visited, and ask for how long they stayed at each (e.g., "3 weeks", "2 months", "6 months"). YOU must:
    - Convert their response to approximate days (1 week = 7 days, 1 month = 30 days, 1 year = 365 days) and save as time_in_days
    - Extract the ORIGINAL time expression from the user's input and save as time_in_text
    - CRITICAL FORMATTING RULES FOR time_in_text:
@@ -140,24 +153,23 @@ IMPORTANT: All questions must feel natural and conversational, like a friend ask
        - USA: [{"country": "USA", "state": "StateName", "area": ["City/Region"], "time_in_days": number, "time_in_text": "X days/weeks/months/years"}]
        - Other: [{"country": "CountryName", "area": ["Region/City"], "time_in_days": number, "time_in_text": "X days/weeks/months/years"}]
 
-2. TRAVEL_TYPE: Ask "What is your budget style?" in a natural, Swelly-style way. After asking this question, you must:
-   - Set ui_hints.show_budget_buttons to true
-   - The frontend will show 3 card buttons: "Budget", "Mid", "High"
-   - When the user selects a button, you will receive {"travel_type": "budget"} (or "mid"/"high")
-   - Extract one of: "budget", "mid", or "high"
+2. TRAVEL_TYPE: Ask about their travel budget level in a natural, Swelly-style way. Must extract one of: "budget", "mid", or "high". Example: "Are you on a budget shredder, mid-range for a good amount of comfort, or looking to treat yourself well, no matter the cost?" - Keep it conversational and in Swelly's voice, not too direct.
 
 3. TRAVEL_BUDDIES: Ask about who they travel with in a natural, Swelly-style way. Must extract one of: "solo" (travels alone), "2" (travels with 1 friend/partner), or "crew" (travels with a group). Example: "Do you usually roll solo, with a buddy or partner, or with a crew?" - Keep it conversational and in Swelly's voice, not too direct.
 
-4. LIFESTYLE_KEYWORDS: Ask about their lifestyle interests and activities outside of surfing. Extract keywords like: remote-work, party, nightlife, culture, local culture, nature, sustainability, volleyball, climbing, yoga, diving, fishing, art, music, food, exploring, adventure, mobility, etc. Return as an array of keywords.
+4. WAVE_TYPE_KEYWORDS: Ask about their wave preferences - size, type, conditions, etc. Extract keywords like: barrels, big waves, fast waves, small waves, mellow, reef, sand, beach break, point break, crowd preferences, etc. Return as an array of keywords.
 
-5. ONBOARDING_SUMMARY_TEXT: Generate a brief 2-3 sentence summary of their travel preferences and lifestyle based on all the information collected.
+5. LIFESTYLE_KEYWORDS: Ask about their lifestyle interests and activities outside of surfing. Extract keywords like: remote-work, party, nightlife, culture, local culture, nature, sustainability, volleyball, climbing, yoga, diving, fishing, art, music, food, exploring, adventure, mobility, etc. Return as an array of keywords.
+
+6. ONBOARDING_SUMMARY_TEXT: Generate a brief 2-3 sentence summary of their travel preferences and lifestyle based on all the information collected.
 
 IMPORTANT COLLECTION STRATEGY:
-- Ask for TOP 3 destinations FIRST using the question "What are the TOP 3 destinations you know best?" - After user responds, set ui_hints to show destination cards
-- Ask for travel budget style using "What is your budget style?" - After asking, set ui_hints to show budget buttons
+- Ask for PAST destinations FIRST, and ask how long they stayed (e.g., "3 weeks", "2 months") - YOU convert to days. Do not mention the connvertion in your question. Keep questions natural and in Swelly's voice.
+- Ask for travel budget level (budget/mid/high) in a conversational, Swelly-style way - not too direct. Make it sound like a friend asking, not a form.
 - Ask for travel companions (solo/2/crew) in a conversational, Swelly-style way - not too direct. Make it sound natural.
+- Ask for wave preferences and extract specific keywords - keep it conversational
 - Ask for lifestyle interests and extract specific keywords - keep it conversational
-- Only finish when you have all 5 pieces of information (destinations_array, travel_type, travel_buddies, lifestyle_keywords, onboarding_summary_text)
+- Only finish when you have all 6 pieces of information
 - ALL questions should feel natural and in Swelly's voice - avoid sounding like a questionnaire or form. Be conversational and friendly.
 
 Response format: Always return JSON with this structure:
@@ -165,17 +177,13 @@ Response format: Always return JSON with this structure:
   "return_message": "Your conversational message here",
   "is_finished": false,
   "data": null,
-  "ui_hints": {
-    "show_destination_cards": false,
-    "destinations": [],
-    "show_budget_buttons": false
-  }
+  "ui_hints": { "show_destination_cards": true, "destinations": ["San Diego", "Bali", "Costa Rica", "Sri Lanka", "Portugal"] }  // optional - include when relevant (see UI HINTS below)
 }
 
-UI_HINTS RULES:
-- When user provides destination list (e.g., "Nica, El Salvador, Hawaii"), set ui_hints.show_destination_cards = true and ui_hints.destinations = ["Nicaragua", "El Salvador", "Hawaii"] (normalize country names). For US states: use "California" or "Hawaii" in ui_hints.destinations when the user says they surfed there—never "USA" or "USA (California)" for the card label.
-- When asking budget question, set ui_hints.show_budget_buttons = true
-- When not showing UI components, set both flags to false and destinations to empty array
+UI HINTS (optional): Include "ui_hints" to show interactive UI in the app:
+- When you are asking for the user's TOP destinations (first time or before they have given structured destinations), set: "ui_hints": { "show_destination_cards": true, "destinations": ["San Diego", "Bali", "Costa Rica", "Sri Lanka", "Portugal", "Mexico", "Indonesia", "Australia"] } so the user can tap suggested destinations. Use a short list of popular surf destinations (3-8 names).
+- When you are asking for travel budget (budget/mid/high), set: "ui_hints": { "show_budget_buttons": true }.
+- When not asking for destinations or budget, omit ui_hints or set to {}.
 
 When is_finished is true, the data object MUST have this exact structure:
 {
@@ -184,78 +192,57 @@ When is_finished is true, the data object MUST have this exact structure:
     {"country": "CountryName", "area": ["Area1", "Area2"], "time_in_days": number, "time_in_text": "X days/weeks/months/years"},
     ...
   ],
-  "travel_type": "budget" | "mid" | "high",
+  "travel_type": "budget" | "mid" | "high" | "premium",
   "travel_buddies": "solo" | "2" | "crew",
   "lifestyle_keywords": ["keyword1", "keyword2", ...],
+  "lifestyle_keyword_images": {"keyword1": "ExactFilename.jpg" | null, "keyword2": null, ...},
+  "wave_type_keywords": ["keyword1", "keyword2", ...],
   "onboarding_summary_text": "A brief 2-3 sentence summary of the user's travel preferences and lifestyle"
 }
+
+LIFESTYLE IMAGES: For each entry in lifestyle_keywords, you MUST set lifestyle_keyword_images[keyword] to ONE of these exact filenames if it fits the keyword, or null if none fit. Use ONLY these filenames: ${LIFESTYLE_IMAGE_FILENAMES_LIST}. Examples: "party"/"parties"/"nightlife" -> "Nightlife.jpg", "yoga" -> "yoga.jpg", "local food" -> "localFood.jpg", "volleyball" -> "Volleyball.jpg", "sustainability" -> "Sustainability.jpg" or "Sustainability_2.jpg", "climbing" -> null if no match. Every key in lifestyle_keyword_images must be exactly the same as in lifestyle_keywords (one entry per keyword).
+
 NOTE: For USA destinations, the "state" field is REQUIRED. For non-USA destinations, DO NOT include a "state" field.
-NOTE: wave_type_keywords has been removed - do NOT include it in the data structure.
 
 Example conversation flow:
 Given context - 23 years old, Israeli, 8-10 surf trips, Charging surfer
 
 {
-    "return_message": "What are the TOP 3 destinations you know best?",
+    "return_message": "Which 2-3 surf zones you'd say you really know inside-out? Like towns or areas you've actually lived/surfed enough to call your stomping grounds abroad?",
     "is_finished": false,
     "data": null,
-    "ui_hints": {
-        "show_destination_cards": false,
-        "destinations": [],
-        "show_budget_buttons": false
-    }
+    "ui_hints": { "show_destination_cards": true, "destinations": ["San Diego", "Bali", "Costa Rica", "Sri Lanka", "Portugal", "Mexico", "Indonesia"] }
 }
 
 User said:
 I'd say, San Diego, south county, Sri lanka in kabalana ahangama midigama and towns around, Maldives at thulusdhoo and himmafushi
 
 {
-    "return_message": "Solid list bro, that's some tasty variety 🌊🔥 Now I'll need some details about each spot - areas you surfed and how long you spent there.",
+    "return_message": "Solid list bro, that's some tasty variety 🌊🔥
+How much time did you actually spend at each spot? Like for San Diego, Sri Lanka, and Maldives - how many days, weeks, or months total? This helps me understand your experience level at each place.",
     "is_finished": false,
-    "data": null,
-    "ui_hints": {
-        "show_destination_cards": true,
-        "destinations": ["California", "Sri Lanka", "Maldives"],
-        "show_budget_buttons": false
-    }
+    "data": null
 }
 
-User submitted destination cards with structured data:
-{
-    "destinations_data": [
-        {"country": "USA", "state": "California", "area": ["San Diego", "South County"], "time_in_days": 210, "time_in_text": "7 months"},
-        {"country": "Sri Lanka", "area": ["Ahangama", "Kabalana", "Midigama"], "time_in_days": 60, "time_in_text": "2 months"},
-        {"country": "Maldives", "area": ["Thulusdhoo", "Himmafushi"], "time_in_days": 30, "time_in_text": "1 month"}
-    ]
-}
+User said:
+SD - 3 weeks once, then 7 months. known a lot of locals. was this year. sri lanka - twice for a month each- winter 2023 and 2024, knows a bunch of locals. maldives 1 month
 
 {
     "return_message": "Nice résumé, dude 👌 That's deep roots, esp. with SD locals.
-Next up—what's your budget style?",
+Next up—what's your travel budget vibe? Are you on a budget shredder, mid-range for a good amount of comfort, or looking to treat yourself well, no matter the cost?",
     "is_finished": false,
     "data": null,
-    "ui_hints": {
-        "show_destination_cards": false,
-        "destinations": [],
-        "show_budget_buttons": true
-    }
+    "ui_hints": { "show_budget_buttons": true }
 }
 
-User selected budget button:
-{
-    "travel_type": "budget"
-}
+User said:
+budget
 
 {
     "return_message": "Got it bro 🤙 budget shredder.
 Do you usually roll solo, with a buddy or partner, or with a crew?",
     "is_finished": false,
-    "data": null,
-    "ui_hints": {
-        "show_destination_cards": false,
-        "destinations": [],
-        "show_budget_buttons": false
-    }
+    "data": null
 }
 
 User said:
@@ -263,14 +250,18 @@ usually just me or one friend, not a big group
 
 {
     "return_message": "Perfect, so mostly solo or with one friend 🤙
-Last piece, bro—outside the surf: any general trip must-do's or lifestyle things? (Like sustainability, local food, art, diving, community stuff, yoga, fishing, etc). What makes a trip feel complete for you?",
+Now wave-wise—what's your sweet spot? Talking size, reef vs sand, crowds, comfort with barrels vs mellower peelers. What kinda setups really fire you up?",
     "is_finished": false,
-    "data": null,
-    "ui_hints": {
-        "show_destination_cards": false,
-        "destinations": [],
-        "show_budget_buttons": false
-    }
+    "data": null
+}
+
+User said:
+barrels and hard fast big waves. rather no crowd, but can surf crowds. reef and sand both work
+
+{
+    "return_message": "Hell yeah, charger vibes 🏄‍♂️💥 hunting barrels, power, and less crowd if possible, but not afraid of a packed lineup. Last piece, bro—outside the surf: any general trip must-do's or lifestyle things? (Like sustainability, local food, art, diving, community stuff, yoga, fishing, etc). What makes a trip feel complete for you?",
+    "is_finished": false,
+    "data": null
 }
 
 User said:
@@ -288,7 +279,9 @@ support sustainabilty, not too much on it. doing valley ball and climbing. love 
         "travel_type": "budget",
         "travel_buddies": "2",
         "lifestyle_keywords": ["remote-work", "party", "local culture", "nature", "sustainability", "volleyball", "climbing", "exploring", "mobility"],
-        "onboarding_summary_text": "Budget traveler who typically travels solo or with one friend. Enjoys remote work, party scene, local culture, nature exploration, sustainability, volleyball, climbing, and mobility work."
+        "lifestyle_keyword_images": {"remote-work": null, "party": "Nightlife.jpg", "local culture": null, "nature": null, "sustainability": "Sustainability.jpg", "volleyball": "Volleyball.jpg", "climbing": null, "exploring": null, "mobility": null},
+        "wave_type_keywords": ["barrels", "big waves", "fast waves", "low crowd", "reef", "sand"],
+        "onboarding_summary_text": "Budget traveler who typically travels solo or with one friend. Prefers barrels and big/fast waves, comfortable on both reef and sand breaks. Enjoys remote work, party scene, local culture, nature exploration, sustainability, volleyball, climbing, and mobility work."
     }
 }
 
@@ -319,29 +312,51 @@ CRITICAL RULES FOR DESTINATIONS:
   * User says "Bali" → country: "Indonesia", area: ["Bali"] (non-US, no state field)
 - Always prefer the user's original wording (weeks/months/years) over converting to days in time_in_text, BUT for durations ≥ 1 year, always round to years/half-years
 - Ask travel_type and travel_buddies as separate, direct questions
-- Extract specific keywords for lifestyle_keywords - don't use vague descriptions
-- Only set is_finished: true when you have ALL 5 pieces of information (destinations_array, travel_type, travel_buddies, lifestyle_keywords, onboarding_summary_text)
+- Extract specific keywords for lifestyle_keywords and wave_type_keywords - don't use vague descriptions
+- Only set is_finished: true when you have ALL 6 pieces of information
 - Always return JSON format, even when is_finished is false
 - NEVER use markdown formatting in return_message - keep text clean and simple, no **, no *, no __, no _, no #, no brackets or any formatting codes
 `
+
+/**
+ * Get pronoun-aware vocabulary terms based on user's pronoun preference
+ */
+function getPronounVocabulary(pronoun: string): string {
+  const pronounLower = pronoun?.toLowerCase() || ''
+  
+  if (pronounLower === 'bro') {
+    return 'Addressing terms: "bro", "dude", "homie", "mate"'
+  } else if (pronounLower === 'sis') {
+    return 'Addressing terms: "sis", "girl", "chica", "fam"'
+  } else if (pronounLower === 'name only' || pronounLower === 'neither') {
+    return 'Addressing terms: "shredder", "surfer" (neutral terms only)'
+  }
+  
+  // Default: no specific addressing terms
+  return ''
+}
 
 /**
  * Get pronoun usage instructions based on user's pronoun preference
  */
 function getPronounInstructions(pronoun: string, userName?: string): string {
   const pronounLower = pronoun?.toLowerCase() || ''
+  const vocabularyTerms = getPronounVocabulary(pronoun)
   
   if (pronounLower === 'bro') {
     return `PRONOUN USAGE:
 The user selected "Bro" - address them using diverse masculine terms: "bro", "dude", "homie", "mate", and their name "${userName || '[name]'}". Use all these terms diversibly throughout the conversation - don't repeat the same term consecutively. Mix it up naturally. When talking about them or referring to them, use "he", "him", "his".
+VOCABULARY INTEGRATION: Naturally incorporate the addressing terms (${vocabularyTerms}) along with surf/slang terms in your responses.
 IMPORTANT: Do NOT use feminine terms like "sis", "she", "her", or any other feminine pronouns or casual terms. Only use masculine terms and he/him pronouns.`
   } else if (pronounLower === 'sis') {
     return `PRONOUN USAGE:
 The user selected "Sis" - address them using diverse feminine terms: "sis", "girl", "chica", "fam", and their name "${userName || '[name]'}". Use all these terms diversibly throughout the conversation - don't repeat the same term consecutively. Mix it up naturally. When talking about them or referring to them, use "she", "her", "hers".
+VOCABULARY INTEGRATION: Naturally incorporate the addressing terms (${vocabularyTerms}) along with surf/slang terms in your responses.
 IMPORTANT: Do NOT use masculine terms like "bro", "dude", "man", "he", "him", or any other masculine pronouns or casual terms. Only use feminine terms and she/her pronouns.`
   } else if (pronounLower === 'name only' || pronounLower === 'neither') {
     return `PRONOUN USAGE:
-The user selected "Name Only" - use their name "${userName || '[name]'}" once every 3 messages. For other messages, use neutral terms like "shredder", "surfer", or just keep it neutral without gender-specific terms. Avoid calling them "bro", "dude", "sis", "man", or any other gender-specific terms.`
+The user selected "Name Only" - use their name "${userName || '[name]'}" once every 3 messages. For other messages, use neutral terms like "shredder", "surfer", or just keep it neutral without gender-specific terms. Avoid calling them "bro", "dude", "sis", "man", or any other gender-specific terms.
+VOCABULARY INTEGRATION: Use neutral addressing terms (${vocabularyTerms}) along with surf/slang terms in your responses.`
   }
   
   // Default: no specific instructions
@@ -354,7 +369,7 @@ The user selected "Name Only" - use their name "${userName || '[name]'}" once ev
  * and new structured format
  */
 function transformSwellyData(data: any): any {
-  // If data already has the new structure, return as-is
+  // If data already has the new structure, return as-is (including lifestyle_keyword_images if present)
   if (data.destinations_array && data.travel_type && data.travel_buddies) {
     return data
   }
@@ -380,6 +395,8 @@ function transformSwellyData(data: any): any {
       result.travel_type = 'mid'
     } else if (travelStyle.includes('high') || travelStyle.includes('luxury')) {
       result.travel_type = 'high'
+    } else if (travelStyle.includes('premium')) {
+      result.travel_type = 'premium'
     }
 
     // Extract travel_buddies
@@ -406,8 +423,21 @@ function transformSwellyData(data: any): any {
   } else if (data.lifestyle_keywords) {
     result.lifestyle_keywords = data.lifestyle_keywords
   }
+  if (data.lifestyle_keyword_images != null) {
+    result.lifestyle_keyword_images = data.lifestyle_keyword_images
+  }
 
-  // wave_type_keywords has been removed - do not extract or include it
+  // Extract wave type keywords from surf_pref
+  if (data.surf_pref) {
+    const surfPref = data.surf_pref.toLowerCase()
+    result.wave_type_keywords = extractKeywords(surfPref, [
+      'barrels', 'barrel', 'big waves', 'big', 'fast waves', 'fast', 'power',
+      'small waves', 'small', 'mellow', 'peelers', 'reef', 'sand', 'beach break',
+      'point break', 'crowd', 'crowds', 'uncrowded', 'empty'
+    ])
+  } else if (data.wave_type_keywords) {
+    result.wave_type_keywords = data.wave_type_keywords
+  }
 
   // Create onboarding summary text
   if (data.onboarding_summary_text) {
@@ -626,7 +656,7 @@ async function callOpenAI(messages: any[]): Promise<string> {
     // Use a model that supports JSON mode
     // gpt-4 (base) doesn't support response_format: json_object
     // Options: gpt-4o, gpt-4-turbo, gpt-4-0125-preview, gpt-3.5-turbo-1106
-    model: 'gpt-4o',
+    model: 'gpt-5.2',
     messages: messages,
     temperature: 0.7,
     max_completion_tokens: 1000,
@@ -818,7 +848,7 @@ serve(async (req: Request) => {
     const url = new URL(req.url)
     const path = url.pathname
 
-    // Route: POST /swelly-chat-demo/new_chat
+    // Route: POST /swelly-chat/new_chat
     if (path.endsWith('/new_chat') && req.method === 'POST') {
       const body: ChatRequest = await req.json()
       
@@ -891,11 +921,7 @@ serve(async (req: Request) => {
           return_message: parsed.return_message || assistantMessage,
           is_finished: parsed.is_finished || false,
           data: transformedData,
-          ui_hints: parsed.ui_hints || {
-            show_destination_cards: false,
-            destinations: [],
-            show_budget_buttons: false
-          }
+          ...(parsed.ui_hints && { ui_hints: parsed.ui_hints })
         }
         
         console.log('Final response being sent:', JSON.stringify(parsedResponse, null, 2))
@@ -906,12 +932,7 @@ serve(async (req: Request) => {
           chat_id: chatId,
           return_message: assistantMessage,
           is_finished: false,
-          data: null,
-          ui_hints: {
-            show_destination_cards: false,
-            destinations: [],
-            show_budget_buttons: false
-          }
+          data: null
         }
       }
 
@@ -927,7 +948,7 @@ serve(async (req: Request) => {
       )
     }
 
-    // Route: POST /swelly-chat-demo/continue/:chat_id
+    // Route: POST /swelly-chat/continue/:chat_id
     if (path.includes('/continue/') && req.method === 'POST') {
       const chatId = path.split('/continue/')[1]
       const body: ChatRequest = await req.json()
@@ -1023,11 +1044,7 @@ serve(async (req: Request) => {
           return_message: parsed.return_message || assistantMessage,
           is_finished: parsed.is_finished || false,
           data: transformedData,
-          ui_hints: parsed.ui_hints || {
-            show_destination_cards: false,
-            destinations: [],
-            show_budget_buttons: false
-          }
+          ...(parsed.ui_hints && { ui_hints: parsed.ui_hints })
         }
         
         console.log('Final response being sent (continue):', JSON.stringify(parsedResponse, null, 2))
@@ -1037,12 +1054,7 @@ serve(async (req: Request) => {
         parsedResponse = {
           return_message: assistantMessage,
           is_finished: false,
-          data: null,
-          ui_hints: {
-            show_destination_cards: false,
-            destinations: [],
-            show_budget_buttons: false
-          }
+          data: null
         }
       }
 
@@ -1058,7 +1070,7 @@ serve(async (req: Request) => {
       )
     }
 
-    // Route: GET /swelly-chat-demo/:chat_id
+    // Route: GET /swelly-chat/:chat_id
     const chatIdMatch = path.match(/\/([^/]+)$/)
     if (chatIdMatch && req.method === 'GET' && !path.endsWith('/health')) {
       const chatId = chatIdMatch[1]
@@ -1104,7 +1116,7 @@ serve(async (req: Request) => {
     }
 
     // Health check
-    if (path.endsWith('/health') || path === '/swelly-chat-demo' || path.endsWith('/swelly-chat-demo')) {
+    if (path.endsWith('/health') || path === '/swelly-chat' || path.endsWith('/swelly-chat')) {
       return new Response(
         JSON.stringify({ status: 'healthy', message: 'Swelly API is running' }),
         {
@@ -1143,4 +1155,6 @@ serve(async (req: Request) => {
     )
   }
 })
+
+
 
