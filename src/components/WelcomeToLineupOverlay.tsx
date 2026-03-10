@@ -79,7 +79,7 @@ export const WelcomeToLineupOverlay: React.FC<WelcomeToLineupOverlayProps> = ({
               </View>
               <Text style={styles.blockHeading}>Drop into The Lineup!</Text>
               <Text style={styles.blockBody}>
-                This is your home base to chat with like minded surfers. Better connections, peer advice & community drive travel!
+                This is your home base to chat with like minded surfers. Better connections, peer advice & community driven travel!
               </Text>
             </View>
 

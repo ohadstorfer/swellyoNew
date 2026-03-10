@@ -251,8 +251,7 @@ export const ConversationLoadingScreen: React.FC<ConversationLoadingScreenProps>
       {/* Top Text - "Let's drop in with Swelly!" */}
       <View style={styles.topTextContainer}>
         <Text style={styles.topTitleText}>
-          Let's drop in{"\n"}
-          with Swelly!
+         Nice Match
         </Text>
       </View>
 
