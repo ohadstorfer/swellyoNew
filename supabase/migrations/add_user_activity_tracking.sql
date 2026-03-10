@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS public.user_activity (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+
 -- Index for efficient lookups
 CREATE INDEX IF NOT EXISTS idx_user_activity_last_seen 
   ON user_activity(last_seen_at);
