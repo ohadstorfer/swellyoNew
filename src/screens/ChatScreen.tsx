@@ -18,7 +18,7 @@ import { Text } from '../components/Text';
 import { colors, spacing, typography, borderRadius } from '../styles/theme';
 import { swellyService, SwellyChatResponse } from '../services/swelly/swellyService';
 import { useOnboarding } from '../context/OnboardingContext';
-import { getImageUrl, getLifestyleImageBucketUrlForFilename, resolveLifestyleKeywordToImageUrl, LIFESTYLE_BUCKET_IMAGE_FILENAMES } from '../services/media/imageService';
+import { getImageUrl, getLifestyleImageBucketUrlForFilename, resolveLifestyleKeywordToImageUrl, LIFESTYLE_BUCKET_IMAGE_FILENAMES, getLifestyleImageFromStorage } from '../services/media/imageService';
 import { supabase, isSupabaseConfigured } from '../config/supabase';
 import { supabaseDatabaseService } from '../services/database/supabaseDatabaseService';
 import { messagingService } from '../services/messaging/messagingService';
@@ -315,6 +315,9 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
               url = getLifestyleImageBucketUrlForFilename(filename);
             } else {
               url = await resolveLifestyleKeywordToImageUrl(keyword);
+              if (!url) {
+                url = getLifestyleImageFromStorage(keyword);
+              }
             }
             if (url) lifestyleImageUrls[keyword] = url;
           }
@@ -325,6 +328,7 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
             travelBuddies: response.data.travel_buddies,
             lifestyleKeywords: response.data.lifestyle_keywords,
             lifestyleImageUrls: Object.keys(lifestyleImageUrls).length ? lifestyleImageUrls : null,
+            finishedOnboarding: true,
             isDemoUser: isDemoUser, // Pass demo user flag from context
           });
           console.log('Swelly conversation results saved successfully');
@@ -650,6 +654,9 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
                 url = getLifestyleImageBucketUrlForFilename(filename);
               } else {
                 url = await resolveLifestyleKeywordToImageUrl(keyword);
+                if (!url) {
+                  url = getLifestyleImageFromStorage(keyword);
+                }
               }
               if (url) lifestyleImageUrls[keyword] = url;
             }
@@ -660,6 +667,7 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
               travelBuddies: response.data.travel_buddies,
               lifestyleKeywords: response.data.lifestyle_keywords,
               lifestyleImageUrls: Object.keys(lifestyleImageUrls).length ? lifestyleImageUrls : null,
+              finishedOnboarding: true,
               isDemoUser: isDemoUser,
             });
             console.log('Swelly conversation results saved successfully');

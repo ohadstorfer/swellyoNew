@@ -591,50 +591,59 @@ const getLifestyleImagePlaceholder = (lifestyleKeyword: string): string => {
 };
 
 /**
- * Get a lifestyle image from Pexels API (optional, requires API key)
- * Uses the ORIGINAL keyword text for search (better results than normalized)
- * Pexels can handle variations like "Yoga training" better than just "yoga"
- * 
+ * Get a lifestyle image via the lifestyle-image-query edge function.
+ * The edge function uses GPT to build a Pexels search phrase from the keyword, then returns the best photo URL.
+ *
  * @param lifestyleKeyword - The original lifestyle keyword (can be any text)
  * @returns Pexels image URL or null
  */
 export const getLifestyleImageFromPexels = async (lifestyleKeyword: string): Promise<string | null> => {
   if (!lifestyleKeyword) return null;
-  
-  const PEXELS_API_KEY = process.env.EXPO_PUBLIC_PEXELS_API_KEY;
-  if (!PEXELS_API_KEY) {
+  if (!SUPABASE_URL) {
+    if (__DEV__) {
+      console.warn('[getLifestyleImageFromPexels] SUPABASE_URL is not set');
+    }
     return null;
   }
-  
+
   try {
-    // Use original keyword for Pexels search (better results)
-    // Pexels can handle phrases like "Yoga training" better than normalized "yoga"
-    const searchQuery = lifestyleKeyword.trim();
-    const encodedQuery = encodeURIComponent(searchQuery);
-    
-    // Pexels API endpoint - use square orientation for lifestyle icons
-    const apiUrl = `https://api.pexels.com/v1/search?query=${encodedQuery}&per_page=1&orientation=square`;
-    
-    const response = await fetch(apiUrl, {
-      headers: {
-        'Authorization': PEXELS_API_KEY,
-      },
-    });
-    
-    if (response.ok) {
-      const data = await response.json();
-      if (data.photos && data.photos.length > 0) {
-        // Return medium size (350x350, good for square lifestyle icons)
-        return data.photos[0].src.medium || data.photos[0].src.small || data.photos[0].src.tiny;
-      }
+    const anonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+    if (!anonKey) return null;
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'apikey': anonKey,
+    };
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.access_token) {
+      headers['Authorization'] = `Bearer ${session.access_token}`;
     }
+
+    const url = `${SUPABASE_URL}/functions/v1/lifestyle-image-query`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ keyword: lifestyleKeyword.trim() }),
+    });
+
+    if (!response.ok) {
+      if (__DEV__) {
+        console.warn('[getLifestyleImageFromPexels] Edge function error:', response.status);
+      }
+      return null;
+    }
+
+    const data = await response.json();
+    if (data?.has_result && data?.pexels_url) {
+      return data.pexels_url;
+    }
+    return null;
   } catch (error) {
     if (__DEV__) {
-      console.warn('[getLifestyleImageFromPexels] Error fetching from Pexels:', error);
+      console.warn('[getLifestyleImageFromPexels] Error calling lifestyle-image-query:', error);
     }
+    return null;
   }
-  
-  return null;
 };
 
 /**
