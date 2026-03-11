@@ -1258,11 +1258,11 @@ export const AppContent: React.FC = () => {
     );
   }
 
-  // Show onboarding chat screen if we're on step 5 (Swelly chat)
+  // Show onboarding chat screen if we're on step 5 (Swelly chat). Service uses copy edge when LOCAL_MODE.
   if (currentStep === 5) {
     return (
-      <OnboardingChatScreen 
-        onChatComplete={handleChatComplete} 
+      <OnboardingChatScreen
+        onChatComplete={handleChatComplete}
       />
     );
   }

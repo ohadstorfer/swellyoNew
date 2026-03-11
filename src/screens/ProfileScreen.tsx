@@ -919,6 +919,8 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
   // Track which countries have failed bucket loads (so we know to use Pexels)
   const [failedBucketCountries, setFailedBucketCountries] = useState<Set<string>>(new Set());
   
+  // Track which lifestyle keywords have failed saved-URL load (so we try bucket next)
+  const [failedSavedLifestyles, setFailedSavedLifestyles] = useState<Set<string>>(new Set());
   // Track which lifestyle keywords have failed bucket loads (so we know to use Pexels)
   const [failedBucketLifestyles, setFailedBucketLifestyles] = useState<Set<string>>(new Set());
   const [pexelsLifestyleImages, setPexelsLifestyleImages] = useState<{ [keyword: string]: string | null }>({});
@@ -969,7 +971,10 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
       
       setProfileData(surferData);
       setLoading(false);
-      
+      // Reset lifestyle image failure state when profile changes (don't inherit previous user's failures)
+      setFailedSavedLifestyles(new Set());
+      setFailedBucketLifestyles(new Set());
+
       // Preload surf level video for other users (non-blocking)
       if (userId && surferData) {
         const defaultVideoUrl = getSurfLevelVideoUrl(
@@ -2005,21 +2010,28 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
                   contentContainerStyle={styles.lifestyleContainer}
                 >
                 {lifestyleKeywords.slice(0, 6).map((keyword, index) => {
-                  const lifestyleImageUrl = getLifestyleImageFromStorage(keyword);
+                  const rawSaved = profileData.lifestyle_image_urls?.[keyword];
+                  const savedUrl = (typeof rawSaved === 'string' && rawSaved.trim() !== '') ? rawSaved.trim() : null;
+                  const bucketUrl = getLifestyleImageFromStorage(keyword);
                   const pexelsImageUrl = pexelsLifestyleImages[keyword] || null;
-                  const hasFailedBucket = failedBucketLifestyles.has(keyword);
+                  const useSavedUrl = savedUrl && !failedSavedLifestyles.has(keyword);
+                  const useBucketUrl = bucketUrl && !failedBucketLifestyles.has(keyword);
+                  const displayUrl = useSavedUrl ? savedUrl : (useBucketUrl ? bucketUrl : null);
+                  const isShowingSavedUrl = !!useSavedUrl && displayUrl === savedUrl;
                   const iconName = LIFESTYLE_ICON_MAP[keyword.toLowerCase()] || 'ellipse-outline';
-                  
-                  // Handler for when bucket image fails to load (404)
+
+                  const handleSavedUrlError = () => {
+                    if (__DEV__) {
+                      console.warn(`[ProfileScreen] Lifestyle saved URL failed to load for ${keyword}, trying bucket`);
+                    }
+                    setFailedSavedLifestyles((prev) => new Set(prev).add(keyword));
+                  };
+
                   const handleBucketImageError = async () => {
                     if (__DEV__) {
-                      console.warn(`[ProfileScreen] Lifestyle bucket image failed to load: ${lifestyleImageUrl}, trying Pexels`);
+                      console.warn(`[ProfileScreen] Lifestyle bucket image failed to load: ${bucketUrl}, trying Pexels`);
                     }
-                    
-                    // Mark this lifestyle as having failed bucket load
                     setFailedBucketLifestyles((prev) => new Set(prev).add(keyword));
-                    
-                    // If we don't have Pexels image yet, fetch it
                     if (!pexelsImageUrl) {
                       const pexelsUrl = await getLifestyleImageFromPexels(keyword);
                       if (pexelsUrl) {
@@ -2027,8 +2039,6 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
                           ...prev,
                           [keyword]: pexelsUrl,
                         }));
-                        
-                        // Upload to storage for next time (non-blocking)
                         uploadLifestyleImageToStorage(keyword, pexelsUrl)
                           .then((storageUrl) => {
                             if (storageUrl && __DEV__) {
@@ -2041,21 +2051,19 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
                       }
                     }
                   };
-                  
+
                   return (
                     <View key={index} style={styles.lifestyleItem}>
                       <View style={styles.lifestyleImageContainer}>
-                        {!hasFailedBucket && lifestyleImageUrl ? (
-                          // Try bucket first (fastest if image exists)
+                        {displayUrl ? (
                           <Image
-                            key={`bucket-${keyword}`}
-                            source={{ uri: lifestyleImageUrl }}
+                            key={`${isShowingSavedUrl ? 'saved' : 'bucket'}-${keyword}`}
+                            source={{ uri: displayUrl }}
                             style={styles.lifestyleImage}
                             resizeMode="cover"
-                            onError={handleBucketImageError}
+                            onError={isShowingSavedUrl ? handleSavedUrlError : handleBucketImageError}
                           />
                         ) : pexelsImageUrl ? (
-                          // Use Pexels image if bucket failed
                           <Image
                             key={`pexels-${keyword}`}
                             source={{ uri: pexelsImageUrl }}
@@ -2065,11 +2073,9 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
                               if (__DEV__) {
                                 console.warn(`[ProfileScreen] Pexels lifestyle image failed to load: ${pexelsImageUrl}`);
                               }
-                              // Fallback to icon if Pexels also fails
                             }}
                           />
                         ) : (
-                          // Fallback to icon if no images available
                           <View style={styles.lifestyleImagePlaceholder}>
                             <Ionicons name={iconName as any} size={24} color="#222B30" />
                           </View>

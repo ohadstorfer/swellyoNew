@@ -56,7 +56,7 @@ function checkRateLimit(userId: string): { allowed: boolean; remaining: number; 
   return { allowed: true, remaining: RATE_LIMIT_CONFIG.maxRequests - entry.count, resetTime: entry.resetTime }
 }
 
-// Lifestyle image filenames in the bucket. Must match app imageService LIFESTYLE_BUCKET_IMAGE_FILENAMES.
+// Lifestyle image filenames available in the bucket (LLM picks one per keyword or returns null). Must match app imageService LIFESTYLE_BUCKET_IMAGE_FILENAMES.
 const LIFESTYLE_IMAGE_FILENAMES = new Set([
   'ScubaDiving.jpg', 'Sex.jpg', 'Skateboarding.jpg', 'Skating.jpg', 'Skiing.jpg', 'Slacklining.jpg',
   'Sleep.jpg', 'Snowboarding.jpg', 'Spin_Fishing.jpg', 'SUPSurfing.jpg', 'SurfCommunity.jpg', 'SurfSleepRepeat.jpg',
@@ -76,6 +76,11 @@ interface ChatResponse {
   return_message: string
   is_finished: boolean
   data?: any
+  ui_hints?: {
+    show_destination_cards?: boolean
+    destinations?: string[]
+    show_budget_buttons?: boolean
+  }
 }
 
 const META_PROMPT = `
@@ -155,7 +160,7 @@ IMPORTANT: All questions must feel natural and conversational, like a friend ask
 
 4. WAVE_TYPE_KEYWORDS: Ask about their wave preferences - size, type, conditions, etc. Extract keywords like: barrels, big waves, fast waves, small waves, mellow, reef, sand, beach break, point break, crowd preferences, etc. Return as an array of keywords.
 
-5. LIFESTYLE_KEYWORDS: Ask about their lifestyle interests and activities outside of surfing. Extract keywords like: remote-work, party, nightlife, culture, local culture, nature, sustainability, volleyball, climbing, yoga,spearfishing, diving, fishing, art, music, food, exploring, adventure, mobility, etc. Return as an array of keywords.
+5. LIFESTYLE_KEYWORDS: Ask about their lifestyle interests and activities outside of surfing. Extract keywords like: remote-work, party, nightlife, culture, local culture, nature, sustainability, volleyball, climbing, yoga, diving, fishing, art, music, food, exploring, adventure, mobility, etc. Return as an array of keywords.
 
 6. ONBOARDING_SUMMARY_TEXT: Generate a brief 2-3 sentence summary of their travel preferences and lifestyle based on all the information collected.
 
@@ -172,8 +177,14 @@ Response format: Always return JSON with this structure:
 {
   "return_message": "Your conversational message here",
   "is_finished": false,
-  "data": null
+  "data": null,
+  "ui_hints": { "show_destination_cards": true, "destinations": ["San Diego", "Bali", "Costa Rica", "Sri Lanka", "Portugal"] }  // optional - include when relevant (see UI HINTS below)
 }
+
+UI HINTS (optional): Include "ui_hints" to show interactive UI in the app:
+- When you are asking for the user's TOP destinations (first time or before they have given structured destinations), set: "ui_hints": { "show_destination_cards": true, "destinations": ["San Diego", "Bali", "Costa Rica", "Sri Lanka", "Portugal", "Mexico", "Indonesia", "Australia"] } so the user can tap suggested destinations. Use a short list of popular surf destinations (3-8 names).
+- When you are asking for travel budget (budget/mid/high), set: "ui_hints": { "show_budget_buttons": true }.
+- When not asking for destinations or budget, omit ui_hints or set to {}.
 
 When is_finished is true, the data object MUST have this exact structure:
 {
@@ -190,7 +201,7 @@ When is_finished is true, the data object MUST have this exact structure:
   "onboarding_summary_text": "A brief 2-3 sentence summary of the user's travel preferences and lifestyle"
 }
 
-LIFESTYLE IMAGES: We have existing images in our bucket. For each entry in lifestyle_keywords, try to match the user's lifestyle text or interests to ONE of these exact filenames (use ONLY these): ${LIFESTYLE_IMAGE_FILENAMES_LIST}. Examples: party/nightlife -> "Nightlife.jpg", yoga -> "yoga.jpg", local food -> "localFood.jpg", volleyball -> "Volleyball.jpg", sustainability -> "Sustainability.jpg" or "Sustainability_2.jpg", climbing -> null if no match. Also match indirect phrases: e.g. going out/bars/parties → Nightlife.jpg; stretching/wellness → yoga.jpg; foodie/local cuisine/street food → localFood.jpg; eco/green/environment → Sustainability.jpg; diving/snorkeling → ScubaDiving.jpg; fishing/angling → Spin_Fishing.jpg; trail running/trails → TrailRunning.jpg; giving back/volunteer → Volunteerism.jpg; walking/strolls → Walks.jpg; fitness/gym/workout → Training.jpg; community/locals/surf crew → SurfCommunity.jpg; climbing/bouldering/art/music → null. Set lifestyle_keyword_images[keyword] to the filename if it fits, or null if none fit. Every key in lifestyle_keyword_images must match lifestyle_keywords exactly (one entry per keyword). When you return a filename we use the existing bucket image; when you return null the app will fetch from Pexels and save to the bucket. User experience is unchanged; this only optimizes which images we use.
+LIFESTYLE IMAGES: For each entry in lifestyle_keywords, you MUST set lifestyle_keyword_images[keyword] to ONE of these exact filenames if it fits the keyword, or null if none fit. Use ONLY these filenames: ${LIFESTYLE_IMAGE_FILENAMES_LIST}. Examples: "party"/"parties"/"nightlife" -> "Nightlife.jpg", "yoga" -> "yoga.jpg", "local food" -> "localFood.jpg", "volleyball" -> "Volleyball.jpg", "sustainability" -> "Sustainability.jpg" or "Sustainability_2.jpg", "climbing" -> null if no match. Every key in lifestyle_keyword_images must be exactly the same as in lifestyle_keywords (one entry per keyword).
 
 NOTE: For USA destinations, the "state" field is REQUIRED. For non-USA destinations, DO NOT include a "state" field.
 
@@ -200,7 +211,8 @@ Given context - 23 years old, Israeli, 8-10 surf trips, Charging surfer
 {
     "return_message": "Which 2-3 surf zones you'd say you really know inside-out? Like towns or areas you've actually lived/surfed enough to call your stomping grounds abroad?",
     "is_finished": false,
-    "data": null
+    "data": null,
+    "ui_hints": { "show_destination_cards": true, "destinations": ["San Diego", "Bali", "Costa Rica", "Sri Lanka", "Portugal", "Mexico", "Indonesia"] }
 }
 
 User said:
@@ -220,7 +232,8 @@ SD - 3 weeks once, then 7 months. known a lot of locals. was this year. sri lank
     "return_message": "Nice résumé, dude 👌 That's deep roots, esp. with SD locals.
 Next up—what's your travel budget vibe? Are you on a budget shredder, mid-range for a good amount of comfort, or looking to treat yourself well, no matter the cost?",
     "is_finished": false,
-    "data": null
+    "data": null,
+    "ui_hints": { "show_budget_buttons": true }
 }
 
 User said:
@@ -352,7 +365,7 @@ VOCABULARY INTEGRATION: Use neutral addressing terms (${vocabularyTerms}) along 
 }
 
 /**
- * Ensure lifestyle_keyword_images exists and is valid: one entry per lifestyle_keyword,
+ * Ensure lifestyle_keyword_images exists and is valid for the app: one entry per lifestyle_keyword,
  * values are either a string from LIFESTYLE_IMAGE_FILENAMES or null. Mutates data in place.
  */
 function ensureLifestyleKeywordImages(data: any): void {
@@ -372,7 +385,7 @@ function ensureLifestyleKeywordImages(data: any): void {
  * and new structured format
  */
 function transformSwellyData(data: any): any {
-  // If data already has the new structure, return as-is (may include lifestyle_keyword_images)
+  // If data already has the new structure, return as-is (including lifestyle_keyword_images if present)
   if (data.destinations_array && data.travel_type && data.travel_buddies) {
     return data
   }
@@ -909,22 +922,23 @@ serve(async (req: Request) => {
           console.log('Conversation finished. Original data:', JSON.stringify(parsed.data, null, 2))
           transformedData = transformSwellyData(parsed.data)
           ensureLifestyleKeywordImages(transformedData)
-
+          
           // Process and enrich destinations array with related area names
           if (transformedData.destinations_array && Array.isArray(transformedData.destinations_array)) {
             console.log('Processing destinations array...')
             transformedData.destinations_array = await processDestinationsArray(transformedData.destinations_array)
             console.log('Processed destinations array:', JSON.stringify(transformedData.destinations_array, null, 2))
           }
-
+          
           console.log('Transformed data:', JSON.stringify(transformedData, null, 2))
         }
-
+        
         parsedResponse = {
           chat_id: chatId,
           return_message: parsed.return_message || assistantMessage,
           is_finished: parsed.is_finished || false,
-          data: transformedData
+          data: transformedData,
+          ...(parsed.ui_hints && { ui_hints: parsed.ui_hints })
         }
         
         console.log('Final response being sent:', JSON.stringify(parsedResponse, null, 2))
@@ -1033,21 +1047,22 @@ serve(async (req: Request) => {
           console.log('Conversation finished (continue). Original data:', JSON.stringify(parsed.data, null, 2))
           transformedData = transformSwellyData(parsed.data)
           ensureLifestyleKeywordImages(transformedData)
-
+          
           // Process and enrich destinations array with related area names
           if (transformedData.destinations_array && Array.isArray(transformedData.destinations_array)) {
             console.log('Processing destinations array (continue)...')
             transformedData.destinations_array = await processDestinationsArray(transformedData.destinations_array)
             console.log('Processed destinations array (continue):', JSON.stringify(transformedData.destinations_array, null, 2))
           }
-
+          
           console.log('Transformed data (continue):', JSON.stringify(transformedData, null, 2))
         }
-
+        
         parsedResponse = {
           return_message: parsed.return_message || assistantMessage,
           is_finished: parsed.is_finished || false,
-          data: transformedData
+          data: transformedData,
+          ...(parsed.ui_hints && { ui_hints: parsed.ui_hints })
         }
         
         console.log('Final response being sent (continue):', JSON.stringify(parsedResponse, null, 2))

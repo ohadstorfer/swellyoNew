@@ -18,7 +18,7 @@ import { Text } from '../components/Text';
 import { colors, spacing, typography, borderRadius } from '../styles/theme';
 import { swellyService, SwellyChatResponse } from '../services/swelly/swellyService';
 import { useOnboarding } from '../context/OnboardingContext';
-import { getImageUrl } from '../services/media/imageService';
+import { getImageUrl, getLifestyleImageBucketUrlForFilename, resolveLifestyleKeywordToImageUrl, LIFESTYLE_BUCKET_IMAGE_FILENAMES } from '../services/media/imageService';
 import { supabase, isSupabaseConfigured } from '../config/supabase';
 import { supabaseDatabaseService } from '../services/database/supabaseDatabaseService';
 import { messagingService } from '../services/messaging/messagingService';
@@ -302,15 +302,29 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
         };
         setMessages(prev => [...prev, creatingProfileMessage]);
         
-        // Save Swelly conversation results to surfers table
+        // Save Swelly conversation results to surfers table (with lifestyle image URLs when returned by copy edge)
         try {
           console.log('Saving Swelly conversation results to database:', response.data);
+          const lifestyle_keywords = response.data.lifestyle_keywords || [];
+          const lifestyle_keyword_images = response.data.lifestyle_keyword_images || {};
+          const lifestyleImageUrls: Record<string, string> = {};
+          for (const keyword of lifestyle_keywords) {
+            const filename = lifestyle_keyword_images[keyword];
+            let url: string | null = null;
+            if (filename && typeof filename === 'string' && LIFESTYLE_BUCKET_IMAGE_FILENAMES.has(filename)) {
+              url = getLifestyleImageBucketUrlForFilename(filename);
+            } else {
+              url = await resolveLifestyleKeywordToImageUrl(keyword);
+            }
+            if (url) lifestyleImageUrls[keyword] = url;
+          }
           await supabaseDatabaseService.saveSurfer({
             onboardingSummaryText: response.data.onboarding_summary_text,
             destinationsArray: response.data.destinations_array,
             travelType: response.data.travel_type,
             travelBuddies: response.data.travel_buddies,
             lifestyleKeywords: response.data.lifestyle_keywords,
+            lifestyleImageUrls: Object.keys(lifestyleImageUrls).length ? lifestyleImageUrls : null,
             isDemoUser: isDemoUser, // Pass demo user flag from context
           });
           console.log('Swelly conversation results saved successfully');
@@ -623,15 +637,29 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
           };
           setMessages(prev => [...prev, creatingProfileMessage]);
           
-          // Save Swelly conversation results to surfers table
+          // Save Swelly conversation results to surfers table (with lifestyle image URLs when returned by copy edge)
           try {
             console.log('Saving Swelly conversation results to database:', response.data);
+            const lifestyle_keywords = response.data.lifestyle_keywords || [];
+            const lifestyle_keyword_images = response.data.lifestyle_keyword_images || {};
+            const lifestyleImageUrls: Record<string, string> = {};
+            for (const keyword of lifestyle_keywords) {
+              const filename = lifestyle_keyword_images[keyword];
+              let url: string | null = null;
+              if (filename && typeof filename === 'string' && LIFESTYLE_BUCKET_IMAGE_FILENAMES.has(filename)) {
+                url = getLifestyleImageBucketUrlForFilename(filename);
+              } else {
+                url = await resolveLifestyleKeywordToImageUrl(keyword);
+              }
+              if (url) lifestyleImageUrls[keyword] = url;
+            }
             await supabaseDatabaseService.saveSurfer({
               onboardingSummaryText: response.data.onboarding_summary_text,
               destinationsArray: response.data.destinations_array,
               travelType: response.data.travel_type,
               travelBuddies: response.data.travel_buddies,
               lifestyleKeywords: response.data.lifestyle_keywords,
+              lifestyleImageUrls: Object.keys(lifestyleImageUrls).length ? lifestyleImageUrls : null,
               isDemoUser: isDemoUser,
             });
             console.log('Swelly conversation results saved successfully');

@@ -58,7 +58,7 @@ class SwellyService {
       throw new Error('EXPO_PUBLIC_SUPABASE_URL is not set');
     }
     
-    // Use swelly-chat-demo if in dev mode, otherwise use swelly-chat
+    // Dev: demo; prod: swelly-chat (same flow in local mode)
     const isDevMode = process.env.EXPO_PUBLIC_DEV_MODE === 'true';
     const chatFunctionName = isDevMode ? 'swelly-chat-demo' : 'swelly-chat';
     const functionName = conversationType === 'trip-planning' ? 'swelly-trip-planning' : chatFunctionName;

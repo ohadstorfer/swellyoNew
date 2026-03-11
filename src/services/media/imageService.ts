@@ -15,6 +15,14 @@ const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL?.trim() || '';
 const COUNTRIES_BUCKET = 'Countries';
 const LIFESTYLE_IMAGES_BUCKET = 'lifestyle-images';
 
+/** Known lifestyle image filenames in the bucket (LLM returns one of these or null). Must match swelly-chat-demo-copy list. */
+export const LIFESTYLE_BUCKET_IMAGE_FILENAMES = new Set([
+  'ScubaDiving.jpg', 'Sex.jpg', 'Skateboarding.jpg', 'Skating.jpg', 'Skiing.jpg', 'Slacklining.jpg',
+  'Sleep.jpg', 'Snowboarding.jpg', 'Spin_Fishing.jpg', 'SUPSurfing.jpg', 'SurfCommunity.jpg', 'SurfSleepRepeat.jpg',
+  'Sustainability.jpg', 'Sustainability_2.jpg', 'TrailRunning.jpg', 'Training.jpg', 'Volleyball.jpg',
+  'Volunteerism.jpg', 'Walks.jpg', 'yoga.jpg', 'localFood.jpg', 'Nightlife.jpg',
+]);
+
 /**
  * Map country names to their image filenames in the Countries bucket
  * Handles variations like "Brazil.jpg", "Brazil2.jpg", etc.
@@ -525,6 +533,9 @@ const getLifestyleImageFileName = (lifestyleKeyword: string): string | null => {
 /** Bucket filenames that don't match PascalCase; key = getLifestyleImageFileName output, value = actual bucket filename. */
 const LIFESTYLE_BUCKET_FILENAME_OVERRIDE: { [baseName: string]: string } = {
   SpinFishing: 'Spin_Fishing.jpg',
+  Yoga: 'yoga.jpg',
+  LocalFood: 'localFood.jpg',
+  Spearfishing: 'spearfishing.jpeg',
 };
 
 /**
@@ -745,5 +756,27 @@ export const uploadLifestyleImageToStorage = async (
     }
     return null;
   }
+};
+
+/**
+ * Return public bucket URL for a known lifestyle image filename (from LLM lifestyle_keyword_images).
+ * Returns null if filename is not in the allowed set.
+ */
+export const getLifestyleImageBucketUrlForFilename = (bucketFilename: string): string | null => {
+  if (!bucketFilename || !SUPABASE_URL) return null;
+  const trimmed = bucketFilename.trim();
+  if (!LIFESTYLE_BUCKET_IMAGE_FILENAMES.has(trimmed)) return null;
+  const path = `${LIFESTYLE_IMAGES_BUCKET}/${encodeURIComponent(trimmed)}`;
+  return `${SUPABASE_URL}/storage/v1/object/public/${path}`;
+};
+
+/**
+ * Resolve a lifestyle keyword to an image URL when the LLM did not return a bucket filename.
+ * Fetches from Pexels, uploads to bucket, returns the bucket URL or null.
+ */
+export const resolveLifestyleKeywordToImageUrl = async (keyword: string): Promise<string | null> => {
+  const imageUrl = await getLifestyleImageFromPexels(keyword);
+  if (!imageUrl) return null;
+  return uploadLifestyleImageToStorage(keyword, imageUrl);
 };
 

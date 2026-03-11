@@ -42,6 +42,7 @@ export interface SupabaseSurfer {
   travel_type?: 'budget' | 'mid' | 'high' | 'premium'; // text, nullable
   travel_buddies?: 'solo' | '2' | 'crew'; // text, nullable
   lifestyle_keywords?: string[]; // text[], nullable
+  lifestyle_image_urls?: Record<string, string> | null; // jsonb, nullable - keyword -> image URL
   wave_type_keywords?: string[]; // text[], nullable
   is_demo_user?: boolean; // boolean, default false
   finished_onboarding?: boolean; // boolean, default false
@@ -220,6 +221,7 @@ class SupabaseDatabaseService {
     travelType?: 'budget' | 'mid' | 'high' | 'premium';
     travelBuddies?: 'solo' | '2' | 'crew';
     lifestyleKeywords?: string[];
+    lifestyleImageUrls?: Record<string, string> | null;
     waveTypeKeywords?: string[];
     isDemoUser?: boolean; // Whether this is a demo user
   }): Promise<SupabaseSurfer> {
@@ -376,6 +378,7 @@ class SupabaseDatabaseService {
         travel_type: surferData.travelType,
         travel_buddies: surferData.travelBuddies,
         lifestyle_keywords: surferData.lifestyleKeywords,
+        ...(surferData.lifestyleImageUrls !== undefined && { lifestyle_image_urls: surferData.lifestyleImageUrls ?? null }),
         wave_type_keywords: surferData.waveTypeKeywords,
         is_demo_user: surferData.isDemoUser ?? false, // Set is_demo_user flag
       };
@@ -556,7 +559,7 @@ class SupabaseDatabaseService {
       // destinations_map does NOT exist - only destinations_array exists
       const { data, error } = await supabase
         .from('surfers')
-        .select('user_id, name, age, pronoun, country_from, surfboard_type, surf_level, surf_level_description, surf_level_category, travel_experience, bio, profile_image_url, profile_video_url, destinations_array, lifestyle_keywords, wave_type_keywords, travel_buddies, created_at, updated_at, finished_onboarding')
+        .select('user_id, name, age, pronoun, country_from, surfboard_type, surf_level, surf_level_description, surf_level_category, travel_experience, bio, profile_image_url, profile_video_url, destinations_array, lifestyle_keywords, lifestyle_image_urls, wave_type_keywords, travel_buddies, created_at, updated_at, finished_onboarding')
         .eq('user_id', userId)
         .single();
 
