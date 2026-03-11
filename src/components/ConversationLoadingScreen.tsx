@@ -242,8 +242,8 @@ export const ConversationLoadingScreen: React.FC<ConversationLoadingScreenProps>
   
   const textSet2 = {
     line1: 'Get connected!',
-    line2: 'Authentic profiles create',
-    line3: 'authentic connections.',
+    line2: 'You Found Someone',
+    line3: 'In the Lineup',
   };
 
   return (
@@ -251,7 +251,8 @@ export const ConversationLoadingScreen: React.FC<ConversationLoadingScreenProps>
       {/* Top Text - "Let's drop in with Swelly!" */}
       <View style={styles.topTextContainer}>
         <Text style={styles.topTitleText}>
-         Nice Match
+          Nice Match{"\n"}
+          You Made a Connection
         </Text>
       </View>
 
