@@ -1834,7 +1834,7 @@ const styles = StyleSheet.create({
   profilePictureContainer: {
     alignItems: 'center',
     gap: 24,
-    paddingTop: 16,
+    paddingTop: 2,
     width: '100%',
   },
   textContainer: {

@@ -624,7 +624,7 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
       </View>
 
       {/* Header: Meet Swelly! + Your Guide into the Swellyo Lineup */}
-      <View style={[styles.headerBlock, { paddingHorizontal: bottomBlockPaddingH, paddingTop: afterHeader, gap: headerGap }]}>
+      <View style={[styles.headerBlock, { paddingHorizontal: bottomBlockPaddingH, gap: headerGap, paddingTop: 0 }]}>
         <Text style={styles.headline}>Meet Swelly!</Text>
         <View style={styles.headerTitleWrap}>
           <Text style={styles.headerTitle}>
