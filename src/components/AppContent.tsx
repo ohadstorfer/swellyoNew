@@ -131,10 +131,9 @@ export const AppContent: React.FC = () => {
     }
   }, [currentStep]);
   
-  // Check if MVP, dev, and local modes are enabled
+  // Check if MVP and demo modes are enabled
   const isMVPMode = process.env.EXPO_PUBLIC_MVP_MODE === 'true';
-  const isDevMode = process.env.EXPO_PUBLIC_DEV_MODE === 'true';
-  const isLocalMode = process.env.EXPO_PUBLIC_LOCAL_MODE === 'true';
+  const isDemoMode = process.env.EXPO_PUBLIC_DEMO_MODE === 'true';
 
   // Helper function to stop checking auth after minimum duration
   const stopCheckingAuth = useCallback(() => {
@@ -1278,8 +1277,8 @@ export const AppContent: React.FC = () => {
   // Note: currentStep === 0 shows OnboardingWelcomeScreen (handled above)
   // This handles: initial load, or when user hasn't started onboarding yet
   // Auth guard ensures unauthenticated users are redirected here
-  // Demo button should be visible in dev or local mode, but not in MVP mode
-  const showDemoButton = (isDevMode || isLocalMode) && !isMVPMode;
+  // Demo button visible only when EXPO_PUBLIC_DEMO_MODE is true
+  const showDemoButton = isDemoMode;
   return (
     <WelcomeScreen
       onGetStarted={handleGetStarted}
