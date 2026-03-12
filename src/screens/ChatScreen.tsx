@@ -195,6 +195,67 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
     };
   }, [formData]); // Re-run if formData changes
 
+  /**
+   * Save onboarding result immediately (sync-only lifestyle URLs), then enrich
+   * missing lifestyle image URLs in background and patch. Ensures user data
+   * is never dropped due to Pexels/upload timing or failures.
+   */
+  const saveOnboardingResultAndEnrichImages = async (
+    data: NonNullable<SwellyChatResponse['data']>,
+    isDemoUser: boolean
+  ): Promise<void> => {
+    const lifestyle_keywords = data.lifestyle_keywords || [];
+    const lifestyle_keyword_images = data.lifestyle_keyword_images || {};
+    const syncUrls: Record<string, string> = {};
+    for (const keyword of lifestyle_keywords) {
+      const filename = lifestyle_keyword_images[keyword];
+      let url: string | null = null;
+      if (filename && typeof filename === 'string' && LIFESTYLE_BUCKET_IMAGE_FILENAMES.has(filename)) {
+        url = getLifestyleImageBucketUrlForFilename(filename);
+      } else {
+        url = getLifestyleImageFromStorage(keyword);
+      }
+      if (url) syncUrls[keyword] = url;
+    }
+
+    // First, save core onboarding data and any sync-only lifestyle image URLs
+    await supabaseDatabaseService.saveSurfer({
+      onboardingSummaryText: data.onboarding_summary_text,
+      destinationsArray: data.destinations_array,
+      travelType: data.travel_type,
+      travelBuddies: data.travel_buddies,
+      lifestyleKeywords: data.lifestyle_keywords,
+      lifestyleImageUrls: Object.keys(syncUrls).length ? syncUrls : null,
+      finishedOnboarding: true,
+      isDemoUser,
+    });
+    console.log('Swelly conversation results saved successfully');
+
+    // Then, resolve remaining lifestyle images (including Pexels) before returning,
+    // so the profile only appears after all URLs are ready.
+    const missingKeywords = lifestyle_keywords.filter((k: string) => !syncUrls[k]);
+    if (missingKeywords.length === 0) return;
+
+    try {
+      const results = await Promise.allSettled(
+        missingKeywords.map(async (keyword: string) => {
+          const url = (await resolveLifestyleKeywordToImageUrl(keyword)) || getLifestyleImageFromStorage(keyword);
+          return { keyword, url };
+        })
+      );
+      const fullMap: Record<string, string> = { ...syncUrls };
+      for (const result of results) {
+        if (result.status === 'fulfilled' && result.value.url) {
+          fullMap[result.value.keyword] = result.value.url;
+        }
+      }
+      await supabaseDatabaseService.updateSurferLifestyleImageUrls(fullMap);
+      console.log('Lifestyle image URLs enriched and saved');
+    } catch (err) {
+      console.warn('Lifestyle image enrichment failed (profile will show with partial images):', err);
+    }
+  };
+
   const sendMessage = async () => {
     if (!inputText.trim() || isLoading) return;
 
@@ -302,37 +363,8 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
         };
         setMessages(prev => [...prev, creatingProfileMessage]);
         
-        // Save Swelly conversation results to surfers table (with lifestyle image URLs when returned by copy edge)
         try {
-          console.log('Saving Swelly conversation results to database:', response.data);
-          const lifestyle_keywords = response.data.lifestyle_keywords || [];
-          const lifestyle_keyword_images = response.data.lifestyle_keyword_images || {};
-          const lifestyleImageUrls: Record<string, string> = {};
-          for (const keyword of lifestyle_keywords) {
-            const filename = lifestyle_keyword_images[keyword];
-            let url: string | null = null;
-            if (filename && typeof filename === 'string' && LIFESTYLE_BUCKET_IMAGE_FILENAMES.has(filename)) {
-              url = getLifestyleImageBucketUrlForFilename(filename);
-            } else {
-              url = await resolveLifestyleKeywordToImageUrl(keyword);
-              if (!url) {
-                url = getLifestyleImageFromStorage(keyword);
-              }
-            }
-            if (url) lifestyleImageUrls[keyword] = url;
-          }
-          await supabaseDatabaseService.saveSurfer({
-            onboardingSummaryText: response.data.onboarding_summary_text,
-            destinationsArray: response.data.destinations_array,
-            travelType: response.data.travel_type,
-            travelBuddies: response.data.travel_buddies,
-            lifestyleKeywords: response.data.lifestyle_keywords,
-            lifestyleImageUrls: Object.keys(lifestyleImageUrls).length ? lifestyleImageUrls : null,
-            finishedOnboarding: true,
-            isDemoUser: isDemoUser, // Pass demo user flag from context
-          });
-          console.log('Swelly conversation results saved successfully');
-          // Geocode destinations in background (non-blocking)
+          await saveOnboardingResultAndEnrichImages(response.data, isDemoUser);
           if (isSupabaseConfigured() && response.data.destinations_array?.length) {
             supabase.functions
               .invoke('geocode-user-destinations', {
@@ -342,7 +374,6 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
           }
         } catch (error) {
           console.error('Error saving Swelly conversation results:', error);
-          // Don't block the UI if saving fails, but log the error
         }
 
         // Save surf trip plan to surf_trip_plans table if provided
@@ -628,7 +659,6 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
         if (response.is_finished && response.data) {
           setIsFinished(true);
           
-          // Show "creating profile..." message
           const creatingProfileMessage: Message = {
             id: (Date.now() + 2).toString(),
             text: 'Creating your profile...',
@@ -641,36 +671,8 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
           };
           setMessages(prev => [...prev, creatingProfileMessage]);
           
-          // Save Swelly conversation results to surfers table (with lifestyle image URLs when returned by copy edge)
           try {
-            console.log('Saving Swelly conversation results to database:', response.data);
-            const lifestyle_keywords = response.data.lifestyle_keywords || [];
-            const lifestyle_keyword_images = response.data.lifestyle_keyword_images || {};
-            const lifestyleImageUrls: Record<string, string> = {};
-            for (const keyword of lifestyle_keywords) {
-              const filename = lifestyle_keyword_images[keyword];
-              let url: string | null = null;
-              if (filename && typeof filename === 'string' && LIFESTYLE_BUCKET_IMAGE_FILENAMES.has(filename)) {
-                url = getLifestyleImageBucketUrlForFilename(filename);
-              } else {
-                url = await resolveLifestyleKeywordToImageUrl(keyword);
-                if (!url) {
-                  url = getLifestyleImageFromStorage(keyword);
-                }
-              }
-              if (url) lifestyleImageUrls[keyword] = url;
-            }
-            await supabaseDatabaseService.saveSurfer({
-              onboardingSummaryText: response.data.onboarding_summary_text,
-              destinationsArray: response.data.destinations_array,
-              travelType: response.data.travel_type,
-              travelBuddies: response.data.travel_buddies,
-              lifestyleKeywords: response.data.lifestyle_keywords,
-              lifestyleImageUrls: Object.keys(lifestyleImageUrls).length ? lifestyleImageUrls : null,
-              finishedOnboarding: true,
-              isDemoUser: isDemoUser,
-            });
-            console.log('Swelly conversation results saved successfully');
+            await saveOnboardingResultAndEnrichImages(response.data, isDemoUser);
             if (isSupabaseConfigured() && response.data.destinations_array?.length) {
               supabase.functions
                 .invoke('geocode-user-destinations', {
@@ -682,7 +684,6 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
             console.error('Error saving Swelly conversation results:', error);
           }
           
-          // Navigate to profile screen after a short delay
           setTimeout(() => {
             const durationSeconds = (Date.now() - onboardingStartTime) / 1000;
             analyticsService.trackOnboardingStep2Completed(durationSeconds);

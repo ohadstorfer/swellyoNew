@@ -439,6 +439,21 @@ class SupabaseDatabaseService {
   }
 
   /**
+   * Update only lifestyle_image_urls for the current user's surfer row.
+   * Used after background enrichment so we don't send a full payload that could clear other columns.
+   */
+  async updateSurferLifestyleImageUrls(lifestyleImageUrls: Record<string, string> | null): Promise<void> {
+    if (!isSupabaseConfigured()) return;
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) return;
+    const { error } = await supabase
+      .from('surfers')
+      .update({ lifestyle_image_urls: lifestyleImageUrls })
+      .eq('user_id', user.id);
+    if (error) console.warn('updateSurferLifestyleImageUrls failed:', error);
+  }
+
+  /**
    * Save complete onboarding data (both user and surfer)
    * Maps onboarding data to the actual database schema
    */

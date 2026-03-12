@@ -26,6 +26,7 @@ import { PlaceChip } from './PlaceChip';
 import { MapPopover, type MapPickerPlace } from './MapPickerModal';
 import { getMapPickerInlineHtml, COUNTRY_CENTERS } from '../utils/mapPickerHtml';
 import type { SwipeExcludeZoneRect } from './DestinationInputCard';
+import { normalizeMapPickerPlace } from '../utils/googlePlaceNormalizer';
 
 const DEBUG_MAP_PICKER =
   process.env.EXPO_PUBLIC_MAP_PICKER_DEBUG === 'true' ||
@@ -334,20 +335,41 @@ export const DestinationMapPickerCard = forwardRef<
     if (payload.type === 'PLACE_SELECTED' && payload.place) {
       const place = payload.place;
       const displayLabel = place.formatted_address?.trim() || place.name;
+
+      const normalized = normalizeMapPickerPlace(place);
+
       logMapPicker('handleMapSelect PLACE_SELECTED', {
         name: place.name,
         placeId: place.placeId,
         lat: place.lat,
         lng: place.lng,
+        normalized,
       });
+
       setPlaces((prev) => {
+        let next = prev;
         if (place.placeId) {
-          if (prev.some((p) => p.placeId === place.placeId)) return prev;
+          if (!next.some((p) => p.placeId === place.placeId)) {
+            next = [...next, { placeId: place.placeId || '', displayLabel }];
+          }
         } else {
-          if (prev.some((p) => p.displayLabel === displayLabel)) return prev;
+          if (!next.some((p) => p.displayLabel === displayLabel)) {
+            next = [...next, { placeId: place.placeId || '', displayLabel }];
+          }
         }
-        return [...prev, { placeId: place.placeId || '', displayLabel }];
+
+        const existingLabels = new Set(next.map((p) => p.displayLabel.toLowerCase()));
+        const extraLabels = normalized.area.filter(
+          (part) => !existingLabels.has(part.toLowerCase())
+        );
+
+        if (extraLabels.length === 0) return next;
+        return [
+          ...next,
+          ...extraLabels.map((label) => ({ placeId: '', displayLabel: label })),
+        ];
       });
+
       setQuery('');
     }
   }, []);
@@ -431,21 +453,6 @@ export const DestinationMapPickerCard = forwardRef<
                       placeholder={places.length === 0 ? 'City/town/surf spots...' : 'Add another...'}
                       placeholderTextColor="#A0A0A0"
                       editable={!isReadOnly && !!apiKey}
-                      {...(Platform.OS === 'web' && {
-                        // @ts-ignore - web-only outline removal for focus ring
-                        style: [
-                          styles.inputRowTextInput,
-                          isReadOnly && styles.inputRowTextInputDisabled,
-                          {
-                            outline: 'none',
-                            outlineWidth: 0,
-                            outlineStyle: 'none',
-                            outlineColor: 'transparent',
-                            borderWidth: 0,
-                            borderColor: 'transparent',
-                          },
-                        ],
-                      })}
                     />
                   </ScrollView>
                 </View>
@@ -475,21 +482,6 @@ export const DestinationMapPickerCard = forwardRef<
                       placeholderTextColor="#A0A0A0"
                       keyboardType="decimal-pad"
                       editable={!isReadOnly}
-                      {...(Platform.OS === 'web' && {
-                        // @ts-ignore - web-only outline removal for focus ring
-                        style: [
-                          styles.timeInput,
-                          isReadOnly && styles.inputReadOnly,
-                          {
-                            outline: 'none',
-                            outlineWidth: 0,
-                            outlineStyle: 'none',
-                            outlineColor: 'transparent',
-                            borderWidth: 0,
-                            borderColor: 'transparent',
-                          },
-                        ],
-                      })}
                     />
                   </View>
                   <View
