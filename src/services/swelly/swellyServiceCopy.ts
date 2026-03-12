@@ -71,7 +71,9 @@ class SwellyService {
     
     // Copy flow: use "swelly-trip-planning-copy" edge for all trip-planning (and health when used from Copy screen)
     const isDevMode = process.env.EXPO_PUBLIC_DEV_MODE === 'true';
-    const chatFunctionName = isDevMode ? 'swelly-chat-demo' : 'swelly-chat';
+    const isMvpMode = process.env.EXPO_PUBLIC_MVP_MODE === 'true';
+    const isDevLikeMode = isDevMode || isMvpMode;
+    const chatFunctionName = isDevLikeMode ? 'swelly-chat-demo' : 'swelly-chat';
     const functionName = conversationType === 'trip-planning' ? 'swelly-trip-planning-copy' : chatFunctionName;
     return `${supabaseUrl}/functions/v1/${functionName}${endpoint}`;
   }

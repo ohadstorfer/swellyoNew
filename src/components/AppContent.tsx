@@ -605,11 +605,16 @@ export const AppContent: React.FC = () => {
 
   const handleSwellyPress = () => {
     // Navigate to Swelly trip planning chat from conversations page
-    setShowTripPlanningChat(true);
+    // In MVP mode, use the copy/server-side matching flow
+    if (isMVPMode) {
+      setShowTripPlanningChatCopy(true);
+    } else {
+      setShowTripPlanningChat(true);
+    }
   };
 
   const handleSwellyPressCopy = () => {
-    // Navigate to Swelly trip planning chat copy (dev mode) from conversations page
+    // Navigate to Swelly trip planning chat copy from conversations page
     setShowTripPlanningChatCopy(true);
   };
 

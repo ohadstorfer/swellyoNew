@@ -23,7 +23,6 @@ import { supabase, isSupabaseConfigured } from '../config/supabase';
 import { supabaseDatabaseService } from '../services/database/supabaseDatabaseService';
 import { messagingService } from '../services/messaging/messagingService';
 import { analyticsService } from '../services/analytics/analyticsService';
-import { DestinationCardsCarousel } from '../components/DestinationCardsCarousel';
 import { DestinationCardsCarouselCopy } from '../components/DestinationCardsCarouselCopy';
 import { BudgetCardsCarousel, type BudgetOption } from '../components/BudgetCardsCarousel';
 import { ChatTextInput } from '../components/ChatTextInput';
@@ -737,26 +736,15 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
          destinationList.length > 0 && (
           <View style={styles.uiComponentContainer}>
             <View style={styles.destinationCarouselFullWidth}>
-              {(process.env.EXPO_PUBLIC_LOCAL_MODE === 'true' || process.env.EXPO_PUBLIC_DEV_MODE === 'true') ? (
-                <DestinationCardsCarouselCopy
-                  destinations={destinationsSubmitted ? submittedDestinationData.map(d => d.destination) : destinationList}
-                  onSubmit={handleDestinationSubmit}
-                  isReadOnly={destinationsSubmitted}
-                  initialData={destinationsSubmitted ? submittedDestinationData : undefined}
-                  fullWidth
-                  parentScrollNativeRef={scrollNativeGestureRef}
-                  parentScrollGesture={scrollNativeGesture}
-                />
-              ) : (
-                <DestinationCardsCarousel
-                  destinations={destinationsSubmitted ? submittedDestinationData.map(d => d.destination) : destinationList}
-                  onSubmit={handleDestinationSubmit}
-                  isReadOnly={destinationsSubmitted}
-                  initialData={destinationsSubmitted ? submittedDestinationData : undefined}
-                  fullWidth
-                  parentScrollNativeRef={scrollNativeGestureRef}
-                />
-              )}
+              <DestinationCardsCarouselCopy
+                destinations={destinationsSubmitted ? submittedDestinationData.map(d => d.destination) : destinationList}
+                onSubmit={handleDestinationSubmit}
+                isReadOnly={destinationsSubmitted}
+                initialData={destinationsSubmitted ? submittedDestinationData : undefined}
+                fullWidth
+                parentScrollNativeRef={scrollNativeGestureRef}
+                parentScrollGesture={scrollNativeGesture}
+              />
             </View>
         </View>
         )}

@@ -58,9 +58,11 @@ class SwellyService {
       throw new Error('EXPO_PUBLIC_SUPABASE_URL is not set');
     }
     
-    // Dev: demo; prod: swelly-chat (same flow in local mode)
+    // Dev/MVP: demo; prod: swelly-chat (same flow in local mode)
     const isDevMode = process.env.EXPO_PUBLIC_DEV_MODE === 'true';
-    const chatFunctionName = isDevMode ? 'swelly-chat-demo' : 'swelly-chat';
+    const isMvpMode = process.env.EXPO_PUBLIC_MVP_MODE === 'true';
+    const isDevLikeMode = isDevMode || isMvpMode;
+    const chatFunctionName = isDevLikeMode ? 'swelly-chat-demo' : 'swelly-chat';
     const functionName = conversationType === 'trip-planning' ? 'swelly-trip-planning' : chatFunctionName;
     return `${supabaseUrl}/functions/v1/${functionName}${endpoint}`;
   }

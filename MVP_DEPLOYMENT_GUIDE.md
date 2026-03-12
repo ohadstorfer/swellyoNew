@@ -9,8 +9,12 @@ The MVP version stops after the onboarding process (including the Swelly onboard
 ## Implementation
 
 The MVP mode is controlled by the `EXPO_PUBLIC_MVP_MODE` environment variable:
-- When set to `"true"`: Shows thank you screen after onboarding
-- When not set or `"false"`: Normal app behavior (shows full app after onboarding)
+- When set to `"true"`:
+  - Uses the `swelly-chat-demo` Supabase Edge Function for the Swelly onboarding chat (same as dev/demo).
+  - Uses the copy-based Swelly trip-planning flow and destination cards UI (same behavior as the current dev/copy flow).
+  - Shows the thank you screen after onboarding instead of the full app.
+- When not set or `"false"`:
+  - Normal app behavior (shows full app after onboarding).
 
 ## Deployment Steps
 

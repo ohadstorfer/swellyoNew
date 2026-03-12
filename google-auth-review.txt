@@ -1,0 +1,254 @@
+Google Sign-In / Sign-Up Flow – Deep Review
+===========================================
+
+Scope
+-----
+This review covers the Google-based login/sign-up flow wired through:
+- src/services/auth/supabaseAuthService.ts
+- src/services/auth/authService.ts
+- src/screens/WelcomeScreen.tsx
+- src/components/AppContent.tsx
+- src/hooks/useAuthGuard.ts
+- src/utils/userConversion.ts
+- src/context/OnboardingContext.tsx
+- src/utils/logout.ts
+
+High-Level Architecture
+-----------------------
+- Supabase is the primary auth backend when configured, with Google as the OAuth provider.
+- Legacy “direct Google OAuth + local DB” still exists as a fallback when Supabase is NOT configured.
+- The main user-facing entry point is `WelcomeScreen`:
+  - Handles an ongoing OAuth return (Supabase or legacy).
+  - Provides a “Continue with Google” CTA which calls `authService.signInWithGoogle()`.
+- `AppContent` orchestrates onboarding/conversations and:
+  - Restores sessions (via `OnboardingContext`).
+  - Enforces authentication via `useAuthGuard`.
+  - Shows `WelcomeScreen` when the user is unauthenticated.
+- Logout is centralized in `performLogout`, which in turn calls `authService.signOut()` (and thus Supabase sign-out when configured).
+
+End-to-End Google Login / Sign-Up Flow (Supabase Path)
+------------------------------------------------------
+WEB:
+1. User presses “Continue with Google” on `WelcomeScreen`.
+2. `WelcomeScreen.handleGoogleSignIn`:
+   - Optionally logs the user out via `performLogout` if there’s an existing session (demo or regular).
+   - Starts a 3s timeout to detect if browser redirect is blocked.
+   - Calls `authService.signInWithGoogle()`.
+3. `authService.signInWithGoogle()`:
+   - If Supabase is configured:
+     - Logs “Using Supabase for Google OAuth”.
+     - Calls `supabaseAuthService.signInWithGoogle()`.
+   - Else falls back to legacy GIS/expo-auth-session flows (see fallback section).
+4. `supabaseAuthService.signInWithGoogle()`:
+   - Uses an `ongoingLogins` Map to prevent concurrent logins.
+   - On web:
+     - Sets `oauth_redirecting` + timestamp in sessionStorage/localStorage BEFORE calling `supabase.auth.signOut()`, to prevent the auth guard from treating mandatory pre-login SIGNED_OUT events as a real logout.
+     - Signs out any existing Supabase session (best practice before a new OAuth).
+     - Calls `signInWithGoogleWeb()`.
+   - On mobile:
+     - Calls `signInWithGoogleMobile()` (Supabase + expo-auth-session).
+5. `supabaseAuthService.signInWithGoogleWeb()`:
+   - Logs start of web OAuth.
+   - Sets `oauth_redirecting` flags + timestamp early for robustness.
+   - Attempts `supabase.auth.getSession()` with a 3s timeout to detect existing valid sessions and avoid redundant redirects.
+   - If it (correctly) detected an existing session, it would convert that user and return (see bug below).
+   - If no existing session, it inspects `window.location.hash` for `access_token`/`refresh_token` or `error`:
+     - On error:
+       - Clears the oauth flags.
+       - Cleans the URL.
+       - Emits detailed, human-focused error messages; including special treatment for “server_error” with likely Supabase DB misconfiguration hints and for “access_denied” (user cancel).
+     - On access_token:
+       - Clears oauth flags.
+       - Waits briefly, calls `supabase.auth.getSession()` to obtain the session, converts, and returns.
+   - If neither session nor access token is present:
+     - Builds redirect URL as `window.location.origin + window.location.pathname`.
+     - Calls `supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo, queryParams: { access_type: 'offline', prompt: 'consent' } } })`.
+     - Validates `data.url` and redirects with `window.location.replace(data.url)`.
+     - Returns a never-resolving promise so that the app effectively “hands over” to the browser redirect.
+6. On OAuth return:
+   - Supabase JS parses the fragment and creates a session.
+   - Two layers can process it:
+     a) `WelcomeScreen` effect:
+        - On mount, looks for `access_token` in `location.hash` (Supabase return).
+        - If found:
+          - Calls `supabase.auth.getUser()`, converts with `convertSupabaseUserToAppUser`, updates OnboardingContext user, updates onboarding form defaults, identifies the user in analytics, cleans URL hash, checks onboarding completion, and navigates to onboarding only if not complete.
+     b) `OnboardingContext.restoreSession` + `useAuthGuard`:
+        - Independently attempt to restore a valid session and set user context.
+7. Once user is set and onboarding is either pending or complete:
+   - `AppContent` decides whether to:
+     - Show onboarding screens (if not complete), or
+     - Show Conversations/home (if complete and session verified).
+
+MOBILE (Supabase):
+1. User presses “Continue with Google” on `WelcomeScreen` (Platform ≠ web).
+2. `authService.signInWithGoogle()` falls through to `signInWithGoogleMobile()` (legacy) or, if Supabase configured, uses `supabaseAuthService.signInWithGoogle()` which calls `signInWithGoogleMobile()`:
+   - Uses `supabase.auth.signInWithOAuth` with a redirect URI from `AuthSession.makeRedirectUri`.
+   - Opens the returned URL in a browser via `WebBrowser.openAuthSessionAsync`.
+   - When the browser returns, parses the URL fragment for tokens, calls `supabase.auth.setSession`, and converts the user.
+3. Onboarding and home routing behaves the same as web.
+
+Demo User Path (Non-Google)
+---------------------------
+- `supabaseAuthService.createDemoUser()`:
+  - Tries `supabase.auth.signInAnonymously()` first; if available, it saves the user in the DB as “Demo User”.
+  - If not available, it falls back to email+password sign-up with a random password and then signs in.
+  - Ensures a valid Supabase session, saves a profile record, then converts user.
+- `AppContent.handleDemoChat` uses that to create a demo user, marks `isDemoUser = true`, clears onboarding data, and jumps into onboarding.
+- This is correctly separated from Google OAuth and doesn’t impact the core login/signup Google flow.
+
+Strengths and Best-Practice Compliance
+--------------------------------------
+1. **Supabase-first, legacy fallback design**
+   - `authService.signInWithGoogle()` chooses Supabase when configured, but still supports the old GIS/expo-auth-session flow for non-Supabase environments. This is a good, backwards-compatible migration path.
+
+2. **Robust protection against auth guard interference during OAuth**
+   - `supabaseAuthService.signInWithGoogle()` sets `oauth_redirecting` + timestamps BEFORE signing out any existing session.
+   - `useAuthGuard`:
+     - Inspects URL parameters and flags to detect OAuth callbacks.
+     - Ignores SIGNED_OUT events that occur during an OAuth login flow (pre-login sign-out).
+     - Clears stale flags after timeouts to avoid “stuck in redirecting” scenarios.
+   - This pattern strongly reduces race-condition risks where the guard could wrongly log the user out or redirect them to welcome in the middle of OAuth.
+
+3. **Session restoration and validation is multi-layered and resilient**
+   - `OnboardingContext.restoreSession`:
+     - Runs on app start, with configurable timeouts and exponential backoff.
+     - Uses Supabase’s session to restore the app user, prefill onboarding data, and fire background profile video preloads.
+   - `useAuthGuard`:
+     - Sits on top of Supabase’s `onAuthStateChange`.
+     - Validates sessions, re-hydrates users when they exist in Supabase but not in context, and logs users out when sessions disappear or can’t be verified.
+     - Listens for storage events to sync multi-tab state.
+   - `AppContent` performs an extra session validation before showing conversations to ensure that `isComplete && user != null` also has a valid Supabase session.
+
+4. **Careful redirect handling and user feedback**
+   - A 3s timeout in `WelcomeScreen.handleGoogleSignIn` detects when `window.location.replace()` doesn’t cause a visible redirect (e.g. popup/redirect blockers) and surfaces a human-readable alert rather than leaving the spinner stuck indefinitely.
+   - Different error types from OAuth (server_error, access_denied, redirect blocked, DB errors) are mapped to specific alerts with actionable guidance.
+
+5. **Concurrency and re-entrancy protections**
+   - `SupabaseAuthService` uses `ongoingLogins` Map keyed by `'current_login'` to deduplicate concurrent sign-in attempts and return the same promise to all callers.
+   - Logout has a global `logoutInProgress` flag to prevent overlapping logouts.
+   - Various navigation and logout handlers use refs (`isNavigatingRef`, `isLoggingOutRef`) to avoid double navigation or double-logout on fast repeated taps.
+
+6. **Data model and profile creation**
+   - The Supabase flow centralizes profile creation in `getOrCreateUserProfile`:
+     - Saves user into a `users` table via `supabaseDatabaseService.saveUser`.
+     - Ensures a `surfers` record exists or is updated with a reasonable default name and avatar from Google.
+     - Treats surfer creation failures as non-fatal, logging warnings but not blocking auth.
+   - `convertSupabaseUserToAppUser` (in utils) provides a consistent transformation from Supabase `auth.users` to legacy `databaseService.User`, including deterministic numeric IDs derived from the UUID, which is important for backward compatibility with older user IDs.
+
+7. **Logout layering and safety**
+   - `performLogout` separates concerns:
+     - Layer 1: Infra (presence, authService.signOut()) with timeouts and aborts.
+     - Layer 2: App state reset (onboarding, user, demo flags) with timeouts.
+     - Layer 3: Navigation to `STEP_WELCOME`.
+     - Finally: analytics reset and logout registry (cache clearing).
+   - Timeouts and extensive error catching ensure that no single failure blocks logout or causes the app to get stuck.
+
+Key Issues, Risks, and Recommendations
+--------------------------------------
+1. **Bug: existing session detection in `signInWithGoogleWeb` is ineffective**
+   - Code pattern:
+     - `const result = await supabase.auth.getSession();`
+     - `existingSession = result; sessionCheckError = result.error;`
+     - Later: `if (!sessionCheckError && existingSession?.session?.user) { ... }`
+   - `supabase.auth.getSession()` actually returns `{ data: { session }, error }`, so `existingSession.session` is always `undefined` – the code never sees the existing session, and will always proceed to the OAuth flow.
+   - **Risk**:
+     - Users who already have a valid session won’t benefit from a fast-path; they’ll be pushed into another OAuth round-trip unnecessarily.
+   - **Recommendation**:
+     - Fix the property access to use the data wrapper:
+       - Derive `const { data, error } = await supabase.auth.getSession();`
+       - Check `if (!error && data?.session?.user) { ... }`.
+     - Or keep `result` but use `result.data.session`.
+
+2. **Duplication and divergence between user conversion utilities**
+   - `supabaseAuthService.convertSupabaseUserToAppUser` and `utils/userConversion.convertSupabaseUserToAppUser` both perform similar work but:
+     - They produce different types:
+       - Auth service’s `User` (string `id`, `createdAt`/`updatedAt` as strings, `photo`) vs
+       - Database service `User` (numeric `id`).
+     - They use different `googleId` sources:
+       - Supabase auth service: `app_metadata.provider_id || supabaseUser.id`.
+       - Utility: `user_metadata.sub || supabaseUser.id`.
+   - **Risk**:
+     - Inconsistent Google IDs between parts of the app (e.g., analytics vs DB).
+     - Harder to reason about which “User” type is being used where.
+   - **Recommendation**:
+     - Consolidate conversion into a single, well-documented module:
+       - One canonical converter from `SupabaseUser` to a core app user model.
+       - Explicitly define how `googleId` is computed (prefer one source, with tests).
+     - If two shapes are necessary (auth-layer User vs DB-layer User), build them via a single shared lower-level converter to avoid drift.
+
+3. **Double handling of Supabase OAuth return**
+   - OAuth return is processed in:
+     - `WelcomeScreen` effect (looking for `access_token` in hash), and
+     - `OnboardingContext.restoreSession` / `useAuthGuard`.
+   - **Risk**:
+     - Logic complexity and potential for subtle race conditions or double analytics identifications (some of this is already mitigated by logs and defensive coding).
+   - **Recommendation**:
+     - Choose a single, canonical layer to handle OAuth returns:
+       - Either the auth service (preferred) + `useAuthGuard`/OnboardingContext, OR
+       - `WelcomeScreen` only.
+     - For best practice, keep “who sets the user on OAuth return” in one place (e.g., session restoration + auth guard) and make the welcome screen a thin view.
+
+4. **Legacy non-Supabase Google flows add complexity**
+   - When Supabase is NOT configured, `authService.signInWithGoogle()`:
+     - On web: injects the Google Identity Services script, uses client-side `google.accounts.id.prompt`, decodes JWT manually, and saves the user to a local DB.
+     - On mobile: runs a raw OAuth code grant against Google and manually exchanges code for tokens and userinfo.
+   - **Risk**:
+     - Two different Google OAuth implementations in the same app can drift apart over time, and the legacy paths are less standard than the Supabase-managed flow.
+   - **Recommendation**:
+     - If possible, plan to fully deprecate and remove the legacy flows once all environments are Supabase-backed.
+     - In the meantime:
+       - Ensure tests cover both code paths.
+       - Keep error messages consistent between legacy and Supabase flows.
+
+5. **Potential stale oauth_redirecting flags**
+   - `supabaseAuthService` sets oauth flags in both sessionStorage and localStorage.
+   - Clearing occurs in:
+     - Supabase OAuth error and return handling branches.
+     - Some error blocks in `WelcomeScreen.handleGoogleSignIn`.
+   - `useAuthGuard.clearStaleOAuthFlags` also exists and runs on startup/focus:
+     - Clears flags older than 1 minute with no OAuth URL params.
+   - **Risk**:
+     - Edge cases where redirect is blocked at the browser level before any Supabase redirect URL or error is seen may leave flags around for up to 1 minute, which could cause the guard to overly trust the “redirecting” state.
+   - **Recommendation**:
+     - Tighten the lifetime for oauth flags (e.g., 30–45 seconds) or tie them directly to visible flow (button press + no URL movement).
+     - Consider centralizing flag management in one module (e.g., an `oauthState` helper) used both by `supabaseAuthService` and `useAuthGuard`.
+
+6. **Type and UX consistency**
+   - Different places construct user display names with slightly different fallbacks (metadata.full_name vs nickname vs email prefix).
+   - Error messages are generally good, but some flows treat `error.message` strings literally (e.g. checking for certain substrings) which can be brittle if upstream libraries change messages.
+   - **Recommendations**:
+     - Extract a shared “displayName” helper with a unified priority order and reuse it across:
+       - Auth return handlers.
+       - Analytics identification.
+       - Profile-related code.
+     - Where possible, match errors via structured fields (error codes) rather than message substrings (particularly for Supabase and Google APIs).
+
+7. **Testing and monitoring gaps (process, not code)**
+   - The code demonstrates awareness of many edge cases (time-outs, blocked redirects, session restoration, token refresh retries), but long-term reliability depends on coverage.
+   - **Recommended test scenarios**:
+     - Web:
+       - Valid new sign-in with Supabase configured.
+       - Returning user with valid Supabase session clicking “Continue with Google” (ensure no unnecessary redirect after the existing-session bug is fixed).
+       - OAuth redirect blocked (e.g., strict browser settings) – ensure the timeout alert appears and the UI is usable.
+       - Supabase DB trigger or RLS causing a “Database error” on sign-up – ensure DB-specific alert shows and the app doesn’t get into a broken state.
+       - Multi-tab auth changes: sign-in/out in one tab propagates correctly to another.
+     - Mobile:
+       - Normal sign-in via Supabase + expo-auth-session.
+       - User cancels in the browser and returns.
+     - Session expiry:
+       - Expired/invalid refresh tokens leading to TOKEN_REFRESHED-without-session events and verifying the retry logic + logout path.
+
+Overall Assessment
+------------------
+- The Google login/sign-up flow is **thoughtful and robust**, with strong attention to:
+  - Race conditions between OAuth redirects and auth guards.
+  - Session restoration and multi-tab behaviour.
+  - Clear user-facing error messages.
+  - Clean separation between infrastructure (Supabase), app state, and navigation/logging.
+- The main technical gap is the **existing session detection bug** in `signInWithGoogleWeb` and the **duplicated conversion logic**, both of which are fixable and will increase reliability and maintainability.
+- After addressing:
+  - The existing-session bug,
+  - Conversion/ID source consolidation,
+  - And (optionally) simplifying legacy flows and centralizing OAuth-return handling,
+the Google auth flow should be in excellent shape with respect to best practices, consistency, and reliability.
+

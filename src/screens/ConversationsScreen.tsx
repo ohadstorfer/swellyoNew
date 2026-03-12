@@ -962,7 +962,7 @@ export default function ConversationsScreen({
     return (
       <TouchableOpacity
         style={styles.swellyContainer}
-        onPress={onSwellyPress}
+        onPress={onSwellyPressCopy || onSwellyPress}
       >
         <View style={styles.conversationContent}>
           {/* Swelly avatar with ellipse design - matching ChatScreen */}
@@ -1337,41 +1337,6 @@ export default function ConversationsScreen({
       {/* Swelly conversation card - positioned at bottom */}
       <View style={styles.swellyCardWrapper}>
         {renderSwellyConversation()}
-        {/* Local mode: Second Swelly button for TripPlanningChatScreenCopy (server-side matching) */}
-        {isDevMode ? (
-          <TouchableOpacity
-            style={[styles.swellyContainer, styles.swellyContainerDev]}
-            onPress={onSwellyPressCopy}
-          >
-            <View style={styles.conversationContent}>
-              <View style={styles.swellyAvatarContainer}>
-                <View style={styles.swellyAvatarRing}>
-                  <Image
-                    source={{ uri: getImageUrl('/Ellipse 11.svg') }}
-                    style={styles.swellyEllipseBackground}
-                    resizeMode="contain"
-                  />
-                  <View style={styles.swellyAvatarImageContainer}>
-                    <Image
-                      source={{ uri: getImageUrl('/Swelly avatar onboarding.png') }}
-                      style={styles.swellyAvatarImage}
-                      resizeMode="cover"
-                    />
-                  </View>
-                </View>
-              </View>
-              <View style={styles.swellyTextContainer}>
-                <Text style={styles.swellyName}>Swelly (Copy)</Text>
-                <Text style={[
-                  styles.swellyLastMessage,
-                  Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
-                ]} numberOfLines={1}>
-                  Test server-side matching
-                </Text>
-              </View>
-            </View>
-          </TouchableOpacity>
-        ) : null}
       </View>
 
       {/* Menu Modal */}

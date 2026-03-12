@@ -142,7 +142,7 @@ class SupabaseAuthService {
         });
         
         const result = await Promise.race([sessionPromise, timeoutPromise]) as Awaited<ReturnType<typeof supabase.auth.getSession>>;
-        existingSession = result;
+        existingSession = result?.data?.session;
         sessionCheckError = result.error;
         console.log('getSession() completed, session exists:', !!result?.data?.session);
       } catch (timeoutError: any) {
@@ -151,7 +151,7 @@ class SupabaseAuthService {
         sessionCheckError = timeoutError;
       }
       
-      if (!sessionCheckError && existingSession?.session?.user) {
+      if (!sessionCheckError && existingSession?.user) {
         // Clear flags since we found existing session - no redirect needed
         try {
           sessionStorage.removeItem('oauth_redirecting');
@@ -162,7 +162,7 @@ class SupabaseAuthService {
           // Ignore
         }
         console.log('Found existing Supabase session, using it');
-        return this.convertSupabaseUserToAppUser(existingSession.session.user);
+        return this.convertSupabaseUserToAppUser(existingSession.user);
       }
       
       console.log('No existing session found, proceeding with OAuth flow');
