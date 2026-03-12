@@ -15,6 +15,8 @@ export interface SwellyChatResponse {
   return_message: string;
   is_finished: boolean;
   data?: any;
+  /** Backend array index of the assistant message just added (for PATCH calls). */
+  message_index?: number;
   ui_hints?: {
     show_destination_cards?: boolean;
     destinations?: string[];
@@ -44,6 +46,8 @@ export interface SwellyContinueChatResponse {
   return_message: string;
   is_finished: boolean;
   data?: any;
+  /** Backend array index of the assistant message just added (for PATCH calls). */
+  message_index?: number;
   ui_hints?: {
     show_destination_cards?: boolean;
     destinations?: string[];

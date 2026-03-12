@@ -68,7 +68,7 @@ export const SwellyShaperScreen: React.FC<SwellyShaperScreenProps> = ({ onBack, 
         // Always add static welcome message - this is just UI, not part of the conversation
         initialMessages.push({
           id: 'welcome',
-          text: "Yo! Welcome to the shaping bay! This is where we edit your profile! You can always access Swelly shaper through the main menu! Let me know what you would like to edit!",
+          text: "Yo! Welcome to the shaping bay! This is where we edit your profile! Let me know what you would like to edit!",
           isUser: false,
           timestamp: new Date().toISOString(),
         });
@@ -143,7 +143,7 @@ export const SwellyShaperScreen: React.FC<SwellyShaperScreenProps> = ({ onBack, 
         // Set static welcome message even on error
         setMessages([{
           id: 'welcome',
-          text: "Yo! Welcome to the shaping bay! This is where we edit your profile! You can always access Swelly shaper through the main menu! Let me know what you would like to edit!",
+          text: "Yo! Welcome to the shaping bay! This is where we edit your profile! Let me know what you would like to edit!",
           isUser: false,
           timestamp: new Date().toISOString(),
         }]);
@@ -315,11 +315,11 @@ export const SwellyShaperScreen: React.FC<SwellyShaperScreenProps> = ({ onBack, 
     const isWelcomeMessage = message.id === 'welcome';
 
     if (isWelcomeMessage) {
-      // Welcome message with profile image on the right - always shows static text
+      // Welcome card: original design (pill bubble, smaller text, image on right) — only this card; conversation messages use normal bot styles below
       return (
         <View key={message.id} style={styles.botMessageContainer}>
           <View style={styles.botMessageBubble}>
-            <Text style={styles.botMessageText}>Yo! Welcome to the shaping bay! This is where we edit your profile! You can always access Swelly shaper through the main menu! Let me know what you would like to edit!</Text>
+            <Text style={styles.botMessageText}>Yo! Welcome to the shaping bay! This is where we edit your profile! Let me know what you would like to edit!</Text>
             <View style={styles.botMessageImageContainer}>
               <Image
                 source={{ uri: getImageUrl('/Swelly Shaper.png') }}
@@ -633,17 +633,15 @@ const styles = StyleSheet.create({
     paddingLeft: 24,
     paddingRight: 8,
     overflow: 'visible',
-    // Flexbox properties matching CSS
     flexDirection: 'row',
     justifyContent: 'flex-end',
     alignItems: 'flex-end',
-    
   },
   botMessageText: {
-    fontSize: 12,
+    fontSize: 15,
     fontWeight: '400',
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
-    lineHeight: 15,
+    lineHeight: 22,
     color: '#333333',
     alignSelf: 'center',
     flex: 1,

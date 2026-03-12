@@ -827,10 +827,10 @@ async function callOpenAI(messages: Message[]): Promise<string> {
       'Authorization': `Bearer ${OPENAI_API_KEY}`,
     },
     body: JSON.stringify({
-      model: 'gpt-5.2',
+      model: 'gpt-4o-mini',
       messages: messages,
-      temperature: 0.7,
-      max_completion_tokens: 1000, 
+      temperature: 0.2,
+      max_completion_tokens: 600, 
       response_format: { type: 'json_object' },
     }),
   })
@@ -1663,7 +1663,30 @@ CRITICAL RULES - BE SMART AND FLEXIBLE:
 
   let llmResponse = ''
   try {
-    llmResponse = await callOpenAI(messages)
+    // Use gpt-4o-mini for filter extraction (faster, sufficient for structured JSON) to reduce latency
+    if (!OPENAI_API_KEY) {
+      throw new Error('OPENAI_API_KEY is not set')
+    }
+    const extractRes = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages,
+        temperature: 0.2,
+        max_tokens: 600,
+        response_format: { type: 'json_object' },
+      }),
+    })
+    if (!extractRes.ok) {
+      const errText = await extractRes.text()
+      throw new Error(`OpenAI API error: ${extractRes.status} - ${errText}`)
+    }
+    const extractData = await extractRes.json()
+    llmResponse = extractData.choices?.[0]?.message?.content || ''
     
     // Parse JSON response
     let jsonString = llmResponse
@@ -1837,7 +1860,8 @@ async function getChatHistory(chatId: string, supabaseAdmin: any): Promise<Messa
   }
 
   const messages = data?.messages || []
-  
+  // Order is intentional (chronological append order). Do not reorder; GET and PATCH callers rely on array index.
+
   // Debug: Check if any messages have metadata
   const messagesWithMetadata = messages.filter((msg: any) => msg.metadata?.matchedUsers)
   if (messagesWithMetadata.length > 0) {
@@ -2156,8 +2180,9 @@ ${getPronounInstructions(userProfile.pronoun)}`
         }
       }
 
+      const responsePayload = { ...parsedResponse, message_index: messages.length - 1 }
       return new Response(
-        JSON.stringify(parsedResponse),
+        JSON.stringify(responsePayload),
         {
           status: 200,
           headers: {
@@ -2186,9 +2211,24 @@ ${getPronounInstructions(userProfile.pronoun)}`
         )
       }
 
-      // Get existing chat history
-      let messages = await getChatHistory(chatId, supabaseAdmin)
-      
+      // Get chat history and user profile in parallel (saves one round-trip)
+      const [historyMessages, profileResult] = await Promise.all([
+        getChatHistory(chatId, supabaseAdmin),
+        (async () => {
+          try {
+            const { data, error } = await supabaseAdmin
+              .from('surfers')
+              .select('country_from, surf_level, age, surfboard_type, travel_experience')
+              .eq('user_id', user.id)
+              .single()
+            return { data, error }
+          } catch (e) {
+            return { data: null, error: e }
+          }
+        })(),
+      ])
+      let messages = historyMessages
+
       if (messages.length === 0) {
         return new Response(
           JSON.stringify({ error: 'Chat not found' }),
@@ -2202,22 +2242,11 @@ ${getPronounInstructions(userProfile.pronoun)}`
         )
       }
 
-      // Get user's surfer profile for destination discovery flow
+      // User profile for destination discovery flow (already fetched above)
       let userProfile: any = null
-      try {
-        const { data: surferData, error: surferError } = await supabaseAdmin
-          .from('surfers')
-          .select('country_from, surf_level, age, surfboard_type, travel_experience')
-          .eq('user_id', user.id)
-          .single()
-        
-        if (!surferError && surferData) {
-          userProfile = surferData
-          console.log('✅ Fetched user profile for destination discovery:', userProfile)
-        }
-      } catch (error) {
-        console.error('Error fetching user profile:', error)
-        // Continue without profile - not critical
+      if (!profileResult.error && profileResult.data) {
+        userProfile = profileResult.data
+        console.log('✅ Fetched user profile for destination discovery:', userProfile)
       }
 
       // Add user profile context to messages if available (for destination discovery flow)
@@ -2272,16 +2301,16 @@ ${getPronounInstructions(userProfile.pronoun)}`
       
       const hasStep2aDestinationMention = step2aDestinationKeywords.some(keyword => currentUserMessageLower.includes(keyword))
       
-      if (hasStep2aDestinationMention) {
-        // Check if we're still in STEP 1 or early in conversation
-        const assistantMessages = messages.filter(m => m.role === 'assistant')
-        const isEarlyConversation = assistantMessages.length <= 2
+      // if (hasStep2aDestinationMention) {
+      //   // Check if we're still in STEP 1 or early in conversation
+      //   const assistantMessages = messages.filter(m => m.role === 'assistant')
+      //   const isEarlyConversation = assistantMessages.length <= 2
         
-        if (isEarlyConversation) {
-          const step2Reminder = `CRITICAL: The user just mentioned a destination (${body.message}). Extract the destination_country immediately, ask about area if needed, then go to STEP 3 (Clarify Purpose).`
-          messages.splice(messages.length - 1, 0, { role: 'system', content: step2Reminder })
-        }
-      }
+      //   if (isEarlyConversation) {
+      //     const step2Reminder = `CRITICAL: The user just mentioned a destination (${body.message}). Extract the destination_country immediately, ask about area if needed, then go to STEP 3 (Clarify Purpose).`
+      //     messages.splice(messages.length - 1, 0, { role: 'system', content: step2Reminder })
+      //   }
+      // }
       
       // ALWAYS extract query filters from user messages throughout the conversation
       // This allows filtering by any criteria mentioned at any point
@@ -2491,12 +2520,24 @@ ${getPronounInstructions(userProfile.pronoun)}`
       // Call OpenAI
       let assistantMessage = await callOpenAI(messages)
       
-      // Check if response is plain text (not JSON) and retry with stronger enforcement
-      const isPlainText = !assistantMessage.trim().startsWith('{') && !assistantMessage.includes('```json')
-      if (isPlainText) {
+      // If response looks like plain text, try to extract embedded JSON before retrying (avoids extra LLM call)
+      const looksPlainText = !assistantMessage.trim().startsWith('{') && !assistantMessage.includes('```json')
+      if (looksPlainText) {
+        const jsonBlock = assistantMessage.match(/\{[\s\S]*"is_finished"[\s\S]*\}/)
+        if (jsonBlock) {
+          try {
+            const cleaned = jsonBlock[0].replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '')
+            JSON.parse(cleaned)
+            assistantMessage = jsonBlock[0]
+          } catch (_) {
+            // Fall through to retry
+          }
+        }
+      }
+      const stillNeedsRetry = looksPlainText && !assistantMessage.trim().startsWith('{')
+      if (stillNeedsRetry) {
         console.log('⚠️ LLM returned plain text instead of JSON - retrying with JSON enforcement...')
         console.log('Plain text response:', assistantMessage.substring(0, 200))
-        // Add a stronger system message and retry
         const strongJsonEnforcement = `ERROR: You returned plain text instead of JSON. This is a CRITICAL ERROR. You MUST return a JSON object. Your response MUST be valid JSON starting with { and ending with }. Example: {"return_message": "Your text here", "is_finished": false, "data": {"destination_country": "Philippines", "area": "Siargao", "budget": null, "destination_known": true, "purpose": {"purpose_type": "connect_traveler", "specific_topics": []}, "user_context": {}}}. Return ONLY the JSON object, nothing else.`
         messages.push({ role: 'system', content: strongJsonEnforcement })
         assistantMessage = await callOpenAI(messages)
@@ -3258,8 +3299,9 @@ ${getPronounInstructions(userProfile.pronoun)}`
         }
       }
 
+      const responsePayload = { ...parsedResponse, message_index: messages.length - 1 }
       return new Response(
-        JSON.stringify(parsedResponse),
+        JSON.stringify(responsePayload),
         {
           status: 200,
           headers: {

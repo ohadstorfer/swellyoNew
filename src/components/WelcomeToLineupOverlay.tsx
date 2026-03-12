@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import {
   View,
   StyleSheet,
@@ -40,9 +40,116 @@ export const WelcomeToLineupOverlay: React.FC<WelcomeToLineupOverlayProps> = ({
     if (p) {
       p.loop = true;
       p.muted = true;
-      p.play();
     }
   });
+
+  // Autoplay when overlay is visible: replaceAsync then wait for ready then play (match onboarding step 2 / LoadingScreen)
+  useEffect(() => {
+    if (!visible || !videoUrl || !player) return;
+
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      const setPlaysInline = () => {
+        const videoElements = document.querySelectorAll('video');
+        videoElements.forEach((videoElement: HTMLVideoElement) => {
+          videoElement.setAttribute('playsinline', 'true');
+          videoElement.setAttribute('webkit-playsinline', 'true');
+          videoElement.setAttribute('x5-playsinline', 'true');
+          videoElement.playsInline = true;
+        });
+      };
+      setPlaysInline();
+      setTimeout(setPlaysInline, 50);
+    }
+
+    const replacePromise = player.replaceAsync(videoUrl);
+    if (replacePromise && typeof replacePromise.then === 'function') {
+      replacePromise.then(() => {
+        if (!player) return;
+        player.loop = true;
+        player.muted = true;
+
+        if (Platform.OS === 'web' && typeof document !== 'undefined') {
+          const setPlaysInline = () => {
+            const videoElements = document.querySelectorAll('video');
+            videoElements.forEach((videoElement: HTMLVideoElement) => {
+              videoElement.setAttribute('playsinline', 'true');
+              videoElement.setAttribute('webkit-playsinline', 'true');
+              videoElement.setAttribute('x5-playsinline', 'true');
+              videoElement.playsInline = true;
+            });
+          };
+          setPlaysInline();
+          setTimeout(setPlaysInline, 50);
+        }
+
+        const waitForVideoReady = (): Promise<void> => {
+          return new Promise<void>((resolve) => {
+            if (Platform.OS === 'web' && typeof document !== 'undefined') {
+              const findVideoElement = () => {
+                const videoElements = document.querySelectorAll('video');
+                return Array.from(videoElements).find((video: HTMLVideoElement) => {
+                  return video.src === videoUrl || video.currentSrc === videoUrl;
+                }) as HTMLVideoElement | undefined;
+              };
+              const videoElement = findVideoElement();
+              if (videoElement) {
+                const HAVE_CURRENT_DATA = 2;
+                if (videoElement.readyState >= HAVE_CURRENT_DATA) {
+                  resolve();
+                } else {
+                  const canPlayHandler = () => resolve();
+                  videoElement.addEventListener('canplay', canPlayHandler, { once: true });
+                  setTimeout(() => {
+                    videoElement.removeEventListener('canplay', canPlayHandler);
+                    resolve();
+                  }, 500);
+                }
+              } else {
+                resolve();
+              }
+            } else {
+              resolve();
+            }
+          });
+        };
+
+        waitForVideoReady().then(() => {
+          if (!player) return;
+          player.loop = true;
+          player.muted = true;
+          const playPromise = player.play();
+          if (playPromise !== undefined && typeof (playPromise as Promise<unknown>).catch === 'function') {
+            (playPromise as Promise<void>).then(() => {
+              if (__DEV__) {
+                console.log('[WelcomeToLineupOverlay] Video playing successfully after replaceAsync');
+              }
+            }).catch((playError: unknown) => {
+              const err = playError as { name?: string; message?: string };
+              if (err.name !== 'NotAllowedError') {
+                if (__DEV__) {
+                  console.warn('[WelcomeToLineupOverlay] Play failed, retrying...', err.message);
+                }
+                setTimeout(() => {
+                  if (player) {
+                    const retryPlayResult = player.play();
+                    if (retryPlayResult !== undefined && typeof (retryPlayResult as Promise<unknown>).then === 'function') {
+                      (retryPlayResult as Promise<void>).catch((retryError: unknown) => {
+                        if (__DEV__ && (retryError as { name?: string }).name !== 'NotAllowedError') {
+                          console.warn('[WelcomeToLineupOverlay] Play retry failed:', (retryError as Error).message);
+                        }
+                      });
+                    }
+                  }
+                }, 200);
+              }
+            });
+          }
+        });
+      }).catch((error: unknown) => {
+        console.error('[WelcomeToLineupOverlay] Error replacing video:', error, 'URL:', videoUrl);
+      });
+    }
+  }, [visible, videoUrl, player]);
 
   return (
     <Modal

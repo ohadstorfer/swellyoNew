@@ -314,7 +314,11 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
         videoElement.setAttribute('playsinline', 'true');
         videoElement.setAttribute('webkit-playsinline', 'true');
         videoElement.setAttribute('x5-playsinline', 'true'); // For some Android browsers
-        
+        // Set property for Safari (align with WelcomeToLineupOverlay)
+        (videoElement as HTMLVideoElement).playsInline = true;
+        // Set autoplay attribute for Safari/web (align with BackgroundVideo)
+        videoElement.setAttribute('autoplay', 'true');
+
         // Prevent fullscreen
         videoElement.setAttribute('disablePictureInPicture', 'true');
         
@@ -377,6 +381,39 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
       }
     };
   }, [videoUrl]);
+
+  // Retry play when tab becomes visible (Safari often allows autoplay after focus)
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined' || !player || !videoUrl) return;
+
+    const setPlaysInlineAndPlay = () => {
+      const videoElements = document.querySelectorAll('video');
+      videoElements.forEach((el) => {
+        el.setAttribute('playsinline', 'true');
+        el.setAttribute('webkit-playsinline', 'true');
+        el.setAttribute('x5-playsinline', 'true');
+        el.setAttribute('autoplay', 'true');
+        (el as HTMLVideoElement).playsInline = true;
+      });
+      player.muted = true;
+      const playPromise = player.play();
+      if (playPromise != null && typeof (playPromise as Promise<unknown>).catch === 'function') {
+        (playPromise as Promise<void>).catch((err: { name?: string }) => {
+          if (err.name !== 'NotAllowedError') {
+            setTimeout(() => {
+              if (player) player.play();
+            }, 200);
+          }
+        });
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (!document.hidden) setPlaysInlineAndPlay();
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [player, videoUrl]);
 
   // Update player source when video changes OR on initial mount
   // This ensures replaceAsync is called on initial mount for the first video

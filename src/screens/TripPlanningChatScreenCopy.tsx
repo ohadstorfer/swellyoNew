@@ -568,6 +568,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         }
         
         // Set the first message from Swelly's response
+        const backendMessageIndex = typeof response.message_index === 'number' && response.message_index >= 0 ? response.message_index : undefined;
         setMessages([
           {
             id: '1',
@@ -578,6 +579,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
               minute: '2-digit',
               hour12: false 
             }),
+            ...(backendMessageIndex !== undefined && { backendMessageIndex }),
           }
         ]);
         
@@ -893,12 +895,14 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
           }
         } else {
           // Show the bot's response (e.g. updated summary after filter edit)
+          const backendMessageIndex = typeof response.message_index === 'number' && response.message_index >= 0 ? response.message_index : undefined;
           const botMessage: Message = {
             id: (Date.now() + 1).toString(),
             text: hasSearchSummary ? response.data.search_summary : response.return_message,
             isUser: false,
             timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
             isSearchSummary: hasSearchSummary,
+            ...(backendMessageIndex !== undefined && { backendMessageIndex }),
           };
           setMessages(prev => [...prev, botMessage]);
           if (hasSearchSummary) {
@@ -911,23 +915,27 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
           setIsFinished(true);
           const summaryText = response.data?.search_summary ?? 'Ready to search with your current filters.';
           const searchSummary = response.data?.search_summary ?? '';
+          const backendMessageIndex = typeof response.message_index === 'number' && response.message_index >= 0 ? response.message_index : undefined;
           const botMessage: Message = {
             id: (Date.now() + 1).toString(),
             text: summaryText,
             isUser: false,
             timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
             isSearchSummary: true,
+            ...(backendMessageIndex !== undefined && { backendMessageIndex }),
           };
           setMessages(prev => [...prev, botMessage]);
           setPendingSearch({ data: response.data, searchSummary });
           setAwaitingSearchDecision(true);
         } else {
           // No filters: show return_message only, do not enter search-or-edit mode
+          const backendMessageIndex = typeof response.message_index === 'number' && response.message_index >= 0 ? response.message_index : undefined;
           const botMessage: Message = {
             id: (Date.now() + 1).toString(),
             text: response.return_message ?? 'Add at least one filter (destination, origin, surf level, or board type) so I can search.',
             isUser: false,
             timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+            ...(backendMessageIndex !== undefined && { backendMessageIndex }),
           };
           setMessages(prev => [...prev, botMessage]);
         }
@@ -947,11 +955,13 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
           }
         }
       } else {
+        const backendMessageIndex = typeof response.message_index === 'number' && response.message_index >= 0 ? response.message_index : undefined;
         const botMessage: Message = {
           id: (Date.now() + 1).toString(),
           text: response.return_message,
           isUser: false,
           timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+          ...(backendMessageIndex !== undefined && { backendMessageIndex }),
         };
         setMessages(prev => [...prev, botMessage]);
       }
@@ -1078,7 +1088,11 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
       );
       const msg = updated.find(m => m.id === messageId);
       const requestData = msg?.actionRow?.requestData;
-      messageIndexForPatch = msg?.backendMessageIndex ?? prev.findIndex(m => m.id === messageId);
+      const backendIdx = msg?.backendMessageIndex;
+      messageIndexForPatch = typeof backendIdx === 'number' && backendIdx >= 0 ? backendIdx : null;
+      if (messageIndexForPatch == null && (msg?.actionRow != null || msg?.isMatchedUsers)) {
+        console.warn('[TripPlanningChatScreen] handleMatchAction: missing backendMessageIndex for message', messageId, '- PATCH will be skipped');
+      }
       if (action === 'new_chat') {
         const firstQuestionMessage: Message = {
           id: (Date.now() + 1).toString(),
