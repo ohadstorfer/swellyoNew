@@ -37,7 +37,7 @@ export const AppContent: React.FC = () => {
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const authCheckStartTime = useRef<number>(Date.now());
   const stopTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const minLoadingDuration = 3000; // 3 seconds minimum
+  const minLoadingDuration = 0; // No artificial delay — branded loading shows during session restoration
   
   // Refs to prevent race conditions from multiple rapid clicks
   const isNavigatingRef = useRef(false);
@@ -952,12 +952,13 @@ export const AppContent: React.FC = () => {
   // Wait for session restoration to complete before rendering
   // This prevents premature redirects before we know if user has a valid session
   if (isRestoringSession) {
-    console.log('[AppContent] Waiting for session restoration...');
-    // Show a minimal loading state instead of null to prevent white screen
+    // Show the branded loading experience (background video + spinning logo)
+    // instead of a white screen while restoring the session
     return (
-      <View style={{ flex: 1, backgroundColor: '#FFFFFF', justifyContent: 'center', alignItems: 'center' }}>
-        {/* Minimal loading indicator - prevents white screen */}
-      </View>
+      <WelcomeScreen
+        onGetStarted={handleGetStarted}
+        isCheckingAuth={true}
+      />
     );
   }
 
