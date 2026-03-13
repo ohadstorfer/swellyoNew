@@ -831,6 +831,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
   const [authChecking, setAuthChecking] = useState(false);
   const [profileNotFound, setProfileNotFound] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const currentUserIdRef = useRef<string | null>(null);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [isUploadingVideo, setIsUploadingVideo] = useState(false);
   const [showVideoUploadModal, setShowVideoUploadModal] = useState(false);
@@ -951,6 +952,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
         
         targetUserId = user.id;
         setCurrentUserId(user.id);
+        currentUserIdRef.current = user.id;
         setAuthChecking(false);
       }
 
@@ -1003,7 +1005,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
   };
 
   const pickImage = async () => {
-    if (!currentUserId) {
+    if (!currentUserIdRef.current) {
       Alert.alert('Error', 'You must be logged in to upload a profile image.');
       return;
     }
@@ -1065,13 +1067,14 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
   };
 
   const uploadAndUpdateProfile = async (imageUri: string) => {
-    if (!currentUserId) return;
+    const uid = currentUserIdRef.current;
+    if (!uid) return;
 
     setIsUploadingImage(true);
     try {
       // Upload image to storage
-      const result = await uploadProfileImage(imageUri, currentUserId);
-      
+      const result = await uploadProfileImage(imageUri, uid);
+
       if (result.success && result.url) {
         // Update profile with new image URL
         await supabaseDatabaseService.saveSurfer({
@@ -1079,9 +1082,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
         });
 
         // Update cached profile image for conversation screen header
-        if (currentUserId) {
-          await updateCachedUserProfilePhoto(result.url, currentUserId);
-        }
+        await updateCachedUserProfilePhoto(result.url, uid);
 
         // Reload profile data to show new image
         await loadProfileData();

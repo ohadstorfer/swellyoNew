@@ -15,12 +15,20 @@ const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL?.trim() || '';
 const COUNTRIES_BUCKET = 'Countries';
 const LIFESTYLE_IMAGES_BUCKET = 'lifestyle-images';
 
-/** Known lifestyle image filenames in the bucket (LLM returns one of these or null). Must match swelly-chat-demo-copy list. */
+/** Known lifestyle image filenames in the bucket (LLM returns one of these or null). Must match swelly-chat / swelly-chat-demo-copy list. */
 export const LIFESTYLE_BUCKET_IMAGE_FILENAMES = new Set([
-  'ScubaDiving.jpg', 'Sex.jpg', 'Skateboarding.jpg', 'Skating.jpg', 'Skiing.jpg', 'Slacklining.jpg',
-  'Sleep.jpg', 'Snowboarding.jpg', 'Spin_Fishing.jpg', 'SUPSurfing.jpg', 'SurfCommunity.jpg', 'SurfSleepRepeat.jpg',
-  'Sustainability.jpg', 'Sustainability_2.jpg', 'TrailRunning.jpg', 'Training.jpg', 'Volleyball.jpg',
-  'Volunteerism.jpg', 'Walks.jpg', 'yoga.jpg', 'localFood.jpg', 'Nightlife.jpg',
+  'Adventure_Explore.jpg', 'Backpacking.jpg', 'Baseball_Softball.jpg', 'Basketball.jpg', 'Beach_Cleanup.jpg',
+  'Breathe_Work.jpg', 'Calisthenics_Body_Weight.jpg', 'Coffee.jpg', 'Cold_Plunges_Ice_Bath.jpg', 'Concerts_Festivals.jpg',
+  'Coral_Reef_Conservation.jpg', 'Craft_Beer.jpg', 'Cycling_Triathlon.jpg', 'Dance.jpg', 'Dirt_Biking_Motocross.jpg',
+  'Dirtbiking.jpg', 'Fly_Fishing.jpg', 'Football.jpg', 'Free_Diving.jpg', 'Gym_Fitness_Workout_Crossfit.jpg',
+  'Ice_Hockey.jpg', 'Ice_Skating.jpg', 'Jetskiing.jpg', 'Kayaking.jpg', 'Kite_Surfing.jpg', 'Live_Music.jpg',
+  'Local_Culture.jpg', 'Local_Food.jpg', 'Longboard(skate).jpg', 'Martial_Arts.jpg', 'Mindfullness_Meditation.jpg',
+  'Mobility_Training_Stretching.jpg', 'Mountain_Biking.jpg', 'Music_Festivals.jpg', 'Nature.jpg', 'Nature_Conservation.jpg',
+  'Ocean_Conservation.jpg', 'Overlanding_Van_Life.jpg', 'Paragliding.jpg', 'Pickleball.jpg', 'Pilates.jpg', 'Pingpong.jpg',
+  'Playing_Music.jpg', 'Pool_Billiards_Snooker.jpg', 'Rugby.jpg', 'SUP_Surfing.jpg', 'Safari_Wild_Animal.jpg', 'Scuba_Diving.jpg',
+  'Skydiving.jpg', 'Snorkeling.jpg', 'Snowmobiling.jpg', 'Soccer.jpg', 'Spear_Fishing.jpg', 'Spin_Fishing.jpg',
+  'Swimming.jpg', 'Tennis.jpg', 'Travel.jpg', 'Volleyball.jpg', 'Whale_Watching_Dolphin_Watching.jpg', 'Wildlifle_Conservation.jpg',
+  'Wind_Surfing.jpg', 'Wing_Foiling.jpg', 'Yoga.jpg',
 ]);
 
 /**
@@ -532,10 +540,46 @@ const getLifestyleImageFileName = (lifestyleKeyword: string): string | null => {
 
 /** Bucket filenames that don't match PascalCase; key = getLifestyleImageFileName output, value = actual bucket filename. */
 const LIFESTYLE_BUCKET_FILENAME_OVERRIDE: { [baseName: string]: string } = {
+  AdventureExplore: 'Adventure_Explore.jpg',
+  BaseballSoftball: 'Baseball_Softball.jpg',
+  BeachCleanup: 'Beach_Cleanup.jpg',
+  BreatheWork: 'Breathe_Work.jpg',
+  CalisthenicsBodyWeight: 'Calisthenics_Body_Weight.jpg',
+  ColdPlungesIceBath: 'Cold_Plunges_Ice_Bath.jpg',
+  ConcertsFestivals: 'Concerts_Festivals.jpg',
+  CoralReefConservation: 'Coral_Reef_Conservation.jpg',
+  CraftBeer: 'Craft_Beer.jpg',
+  CyclingTriathlon: 'Cycling_Triathlon.jpg',
+  DirtBikingMotocross: 'Dirt_Biking_Motocross.jpg',
+  FlyFishing: 'Fly_Fishing.jpg',
+  FreeDiving: 'Free_Diving.jpg',
+  GymFitnessWorkoutCrossfit: 'Gym_Fitness_Workout_Crossfit.jpg',
+  IceHockey: 'Ice_Hockey.jpg',
+  IceSkating: 'Ice_Skating.jpg',
+  KiteSurfing: 'Kite_Surfing.jpg',
+  LiveMusic: 'Live_Music.jpg',
+  LocalCulture: 'Local_Culture.jpg',
+  LocalFood: 'Local_Food.jpg',
+  LongboardSkate: 'Longboard(skate).jpg',
+  MartialArts: 'Martial_Arts.jpg',
+  MindfullnessMeditation: 'Mindfullness_Meditation.jpg',
+  MobilityTrainingStretching: 'Mobility_Training_Stretching.jpg',
+  MountainBiking: 'Mountain_Biking.jpg',
+  MusicFestivals: 'Music_Festivals.jpg',
+  NatureConservation: 'Nature_Conservation.jpg',
+  OceanConservation: 'Ocean_Conservation.jpg',
+  OverlandingVanLife: 'Overlanding_Van_Life.jpg',
+  PlayingMusic: 'Playing_Music.jpg',
+  PoolBilliardsSnooker: 'Pool_Billiards_Snooker.jpg',
+  SupSurfing: 'SUP_Surfing.jpg',
+  SafariWildAnimal: 'Safari_Wild_Animal.jpg',
+  ScubaDiving: 'Scuba_Diving.jpg',
+  SpearFishing: 'Spear_Fishing.jpg',
   SpinFishing: 'Spin_Fishing.jpg',
-  Yoga: 'yoga.jpg',
-  LocalFood: 'localFood.jpg',
-  Spearfishing: 'spearfishing.jpeg',
+  WhaleWatchingDolphinWatching: 'Whale_Watching_Dolphin_Watching.jpg',
+  WildlifleConservation: 'Wildlifle_Conservation.jpg',
+  WindSurfing: 'Wind_Surfing.jpg',
+  WingFoiling: 'Wing_Foiling.jpg',
 };
 
 /**

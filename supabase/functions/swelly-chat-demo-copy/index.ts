@@ -58,10 +58,18 @@ function checkRateLimit(userId: string): { allowed: boolean; remaining: number; 
 
 // Lifestyle image filenames available in the bucket (LLM picks one per keyword or returns null). Must match app imageService LIFESTYLE_BUCKET_IMAGE_FILENAMES.
 const LIFESTYLE_IMAGE_FILENAMES = new Set([
-  'ScubaDiving.jpg', 'Sex.jpg', 'Skateboarding.jpg', 'Skating.jpg', 'Skiing.jpg', 'Slacklining.jpg',
-  'Sleep.jpg', 'Snowboarding.jpg', 'Spin_Fishing.jpg', 'SUPSurfing.jpg', 'SurfCommunity.jpg', 'SurfSleepRepeat.jpg',
-  'Sustainability.jpg', 'Sustainability_2.jpg', 'TrailRunning.jpg', 'Training.jpg', 'Volleyball.jpg',
-  'Volunteerism.jpg', 'Walks.jpg', 'yoga.jpg', 'localFood.jpg', 'Nightlife.jpg',
+  'Adventure_Explore.jpg', 'Backpacking.jpg', 'Baseball_Softball.jpg', 'Basketball.jpg', 'Beach_Cleanup.jpg',
+  'Breathe_Work.jpg', 'Calisthenics_Body_Weight.jpg', 'Coffee.jpg', 'Cold_Plunges_Ice_Bath.jpg', 'Concerts_Festivals.jpg',
+  'Coral_Reef_Conservation.jpg', 'Craft_Beer.jpg', 'Cycling_Triathlon.jpg', 'Dance.jpg', 'Dirt_Biking_Motocross.jpg',
+  'Dirtbiking.jpg', 'Fly_Fishing.jpg', 'Football.jpg', 'Free_Diving.jpg', 'Gym_Fitness_Workout_Crossfit.jpg',
+  'Ice_Hockey.jpg', 'Ice_Skating.jpg', 'Jetskiing.jpg', 'Kayaking.jpg', 'Kite_Surfing.jpg', 'Live_Music.jpg',
+  'Local_Culture.jpg', 'Local_Food.jpg', 'Longboard(skate).jpg', 'Martial_Arts.jpg', 'Mindfullness_Meditation.jpg',
+  'Mobility_Training_Stretching.jpg', 'Mountain_Biking.jpg', 'Music_Festivals.jpg', 'Nature.jpg', 'Nature_Conservation.jpg',
+  'Ocean_Conservation.jpg', 'Overlanding_Van_Life.jpg', 'Paragliding.jpg', 'Pickleball.jpg', 'Pilates.jpg', 'Pingpong.jpg',
+  'Playing_Music.jpg', 'Pool_Billiards_Snooker.jpg', 'Rugby.jpg', 'SUP_Surfing.jpg', 'Safari_Wild_Animal.jpg', 'Scuba_Diving.jpg',
+  'Skydiving.jpg', 'Snorkeling.jpg', 'Snowmobiling.jpg', 'Soccer.jpg', 'Spear_Fishing.jpg', 'Spin_Fishing.jpg',
+  'Swimming.jpg', 'Tennis.jpg', 'Travel.jpg', 'Volleyball.jpg', 'Whale_Watching_Dolphin_Watching.jpg', 'Wildlifle_Conservation.jpg',
+  'Wind_Surfing.jpg', 'Wing_Foiling.jpg', 'yoga.jpg',
 ])
 const LIFESTYLE_IMAGE_FILENAMES_LIST = [...LIFESTYLE_IMAGE_FILENAMES].join(', ')
 

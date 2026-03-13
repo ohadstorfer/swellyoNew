@@ -2433,6 +2433,10 @@ ${getPronounInstructions(userProfile.pronoun)}`
         }
       }
 
+      // Snapshot messages before injecting system messages — extractQueryFilters
+      // uses .slice(-5) and must not see the injected helper instructions.
+      const messagesForExtractor = [...messages]
+
       // --- Inject system messages for the main LLM (none depend on extraction) ---
 
       // Check if user message contains a destination mention and remind LLM to extract it
@@ -2467,7 +2471,7 @@ ${getPronounInstructions(userProfile.pronoun)}`
         // Call 1: Extract structured filters from user message
         (async () => {
           try {
-            const result = await extractQueryFilters(body.message, destinationCountry, messages, existingForExtractor, userProfile)
+            const result = await extractQueryFilters(body.message, destinationCountry, messagesForExtractor, existingForExtractor, userProfile)
             return { success: true as const, result }
           } catch (error) {
             console.error('❌ Error extracting query filters:', error)
