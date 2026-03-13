@@ -655,6 +655,7 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     paddingVertical: 4,
     paddingHorizontal: 0,
+    outlineStyle: 'none',
   },
   inputRowTextInputDisabled: { color: '#999' },
   timeInputContainer: { width: '100%' },
@@ -679,6 +680,7 @@ const styles = StyleSheet.create({
     fontWeight: '400',
     color: colors.textPrimary,
     lineHeight: 22,
+    outlineStyle: 'none',
   },
   inputReadOnly: { opacity: 0.6, backgroundColor: '#F5F5F5' },
   unitCarouselContainer: {

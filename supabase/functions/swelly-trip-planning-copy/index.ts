@@ -2315,77 +2315,63 @@ ${getPronounInstructions(userProfile.pronoun)}`
       // ALWAYS extract query filters from user messages throughout the conversation
       // This allows filtering by any criteria mentioned at any point
       const lastAssistantMessage = messages.filter(m => m.role === 'assistant').pop()?.content || ''
-      const isCriteriaStep = lastAssistantMessage.toLowerCase().includes('non-negotiable') || 
+      const isCriteriaStep = lastAssistantMessage.toLowerCase().includes('non-negotiable') ||
                              lastAssistantMessage.toLowerCase().includes('parameters') ||
                              lastAssistantMessage.toLowerCase().includes('criteria')
-      
+
       console.log('🔍 Extracting query filters from user message (always):', body.message)
       console.log('Is criteria step?', isCriteriaStep)
-      
+
       let extractedQueryFilters: any = null
       let unmappableCriteria: string[] = []
       let filterResult: { supabaseFilters: any; unmappableCriteria?: string[]; explanation?: string; filterEditIntent?: Record<string, 'add' | 'replace' | 'clear'>; intentUnclear?: string[] } | null = null
 
-      // Extract filters from current message
-      try {
-        // Get destination from conversation history
-        let destinationCountry = ''
-        for (let i = messages.length - 1; i >= 0; i--) {
-          if (messages[i].role === 'assistant') {
-            try {
-              const parsed = JSON.parse(messages[i].content)
-              if (parsed.data?.destination_country) {
-                destinationCountry = parsed.data.destination_country
-                break
-              }
-            } catch (e) {
-              // Not JSON, continue
+      // --- PRE-COMPUTATION: everything that does NOT depend on filter extraction ---
+
+      // Get destination from conversation history (needed by both extractQueryFilters and main LLM)
+      let destinationCountry = ''
+      for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i].role === 'assistant') {
+          try {
+            const parsed = JSON.parse(messages[i].content)
+            if (parsed.data?.destination_country) {
+              destinationCountry = parsed.data.destination_country
+              break
             }
+          } catch (e) {
+            // Not JSON, continue
           }
         }
-        
-        // Also check user messages for destination mentions
-        if (!destinationCountry) {
-          for (let i = messages.length - 1; i >= 0; i--) {
-            if (messages[i].role === 'user') {
-              const userMsg = messages[i].content
-              const userMsgLower = userMsg.toLowerCase()
-              
-              // Check for Philippines first (handle typos)
-              if (userMsgLower.includes('philippines') || userMsgLower.includes('philippins') || userMsgLower.includes('filipins') || userMsgLower.includes('filipines')) {
-                destinationCountry = 'Philippines'
-                break
-              }
-              
-              // Check other countries
-              const countries = ['el salvador', 'sri lanka', 'costa rica', 'indonesia', 'portugal', 'spain', 'france', 'brazil', 'australia', 'nicaragua', 'panama', 'mexico', 'peru', 'chile']
-              for (const country of countries) {
-                if (userMsgLower.includes(country)) {
-                  destinationCountry = country.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
-                  break
-                }
-              }
-              if (destinationCountry) break
-            }
-          }
-        }
-        
-        console.log('📍 Destination country for filter extraction:', destinationCountry)
-        const existingForExtractor = body.adding_filters && body.existing_query_filters && typeof body.existing_query_filters === 'object' ? body.existing_query_filters : undefined
-        filterResult = await extractQueryFilters(body.message, destinationCountry, messages, existingForExtractor, userProfile)
-        extractedQueryFilters = filterResult.supabaseFilters
-        unmappableCriteria = filterResult.unmappableCriteria || []
-        console.log('✅ Extracted query filters:', JSON.stringify(extractedQueryFilters, null, 2))
-        console.log('✅ Filter extraction explanation:', filterResult.explanation)
-        if (unmappableCriteria.length > 0) {
-          console.log('⚠️ Unmappable criteria found:', unmappableCriteria)
-        }
-      } catch (error) {
-        console.error('❌ Error extracting query filters:', error)
-        // Continue without filters - fallback to existing logic
       }
-      
-      // Also check previous messages for accumulated filters (prefer metadata.actionRow.requestData so manual filter removal is respected)
+      // Also check user messages for destination mentions
+      if (!destinationCountry) {
+        for (let i = messages.length - 1; i >= 0; i--) {
+          if (messages[i].role === 'user') {
+            const userMsg = messages[i].content
+            const userMsgLower = userMsg.toLowerCase()
+
+            // Check for Philippines first (handle typos)
+            if (userMsgLower.includes('philippines') || userMsgLower.includes('philippins') || userMsgLower.includes('filipins') || userMsgLower.includes('filipines')) {
+              destinationCountry = 'Philippines'
+              break
+            }
+
+            // Check other countries
+            const countries = ['el salvador', 'sri lanka', 'costa rica', 'indonesia', 'portugal', 'spain', 'france', 'brazil', 'australia', 'nicaragua', 'panama', 'mexico', 'peru', 'chile']
+            for (const country of countries) {
+              if (userMsgLower.includes(country)) {
+                destinationCountry = country.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
+                break
+              }
+            }
+            if (destinationCountry) break
+          }
+        }
+      }
+      console.log('📍 Destination country for filter extraction:', destinationCountry)
+      const existingForExtractor = body.adding_filters && body.existing_query_filters && typeof body.existing_query_filters === 'object' ? body.existing_query_filters : undefined
+
+      // Compute accumulated filters from previous messages (does NOT depend on extraction)
       let accumulatedFilters: any = null
       let accumulatedFromMessage: 'metadata' | 'content' | null = null
       try {
@@ -2425,11 +2411,85 @@ ${getPronounInstructions(userProfile.pronoun)}`
       } catch (error) {
         console.error('[accumulatedFilters] Error:', error)
       }
-      
+
       // Detect "remove all filters" / "clear all" etc. so we don't re-apply accumulated filters
       const userMessageNorm = (body.message || '').trim().toLowerCase()
       const removeAllPhrases = ['remove all filters', 'clear all', 'clear all filters', 'wipe', 'wipe the slate', 'reset', 'reset filters', 'start fresh', 'remove everything', 'clear everything', 'wipe the slate clean']
       const userRequestedRemoveAll = removeAllPhrases.some(phrase => userMessageNorm.includes(phrase))
+
+      // Compute continueDestination/continueArea from last assistant message (does NOT depend on extraction)
+      let continueDestination: string | null = null
+      let continueArea: string | null = null
+      for (let i = messages.length - 2; i >= 0; i--) {
+        if (messages[i].role === 'assistant') {
+          try {
+            const prevParsed = JSON.parse(messages[i].content)
+            if (prevParsed.data) {
+              if (prevParsed.data.destination_country != null) continueDestination = prevParsed.data.destination_country
+              if (prevParsed.data.area != null) continueArea = prevParsed.data.area
+            }
+            break
+          } catch (_e) { /* not JSON */ }
+        }
+      }
+
+      // --- Inject system messages for the main LLM (none depend on extraction) ---
+
+      // Check if user message contains a destination mention and remind LLM to extract it
+      const userMessageLower = body.message.toLowerCase()
+      const destinationKeywords = ['philippines', 'philippins', 'filipins', 'filipines', 'siargao', 'el salvador', 'costa rica', 'sri lanka', 'indonesia', 'portugal', 'spain', 'france', 'brazil', 'australia', 'nicaragua', 'panama', 'mexico', 'peru', 'chile', 'bali', 'tamarindo', 'pavones', 'el tunco']
+      const hasDestinationMention = destinationKeywords.some(keyword => userMessageLower.includes(keyword))
+
+      if (hasDestinationMention) {
+        const destinationReminder = `CRITICAL REMINDER: The user just mentioned a destination location. You MUST extract destination_country in your response's "data" field. If they mentioned both area and country (e.g., "Siargao, filipins"), extract BOTH: destination_country: "Philippines", area: "Siargao". Correct typos automatically - "filipins" means "Philippines". NEVER set destination_country to null if a location was mentioned!`
+        messages.splice(messages.length - 1, 0, { role: 'system', content: destinationReminder })
+        console.log('📍 Added destination extraction reminder for LLM')
+      }
+
+      // Add a final reminder to return JSON format
+      const jsonFormatReminder = `CRITICAL: You MUST return a valid JSON object. Your response must start with { and end with }. Do NOT return plain text. The structure must be: {"return_message": "...", "is_finished": false, "data": {...}}. If you return plain text, the system will fail!`
+      messages.splice(messages.length - 1, 0, { role: 'system', content: jsonFormatReminder })
+
+      // Static unmappable criteria guidance (replaces the dynamic injection that depended on extraction results)
+      messages.splice(messages.length - 1, 0, { role: 'system', content: 'If the user mentions any criteria that cannot be mapped to database fields (physical appearance, personality traits, etc.), silently proceed with the criteria you CAN handle (country, age, surf level, board type, destination experience). Do not explain filtering limitations.' })
+
+      // Build current data with accumulated filters (not yet-extracted ones — those get merged in post-processing)
+      const currentDataForGPTContinue = {
+        destination_country: continueDestination,
+        area: continueArea,
+        queryFilters: accumulatedFilters && typeof accumulatedFilters === 'object' ? accumulatedFilters as Record<string, unknown> : null
+      }
+      messages.splice(messages.length - 1, 0, { role: 'system', content: buildCurrentDataSystemMessage(currentDataForGPTContinue) })
+      console.log('📋 Injected current data + do-not-change/add rule into main GPT')
+
+      // --- PARALLEL LLM CALLS: extractQueryFilters + main callOpenAI ---
+      const [filterExtractionSettled, mainLLMResult] = await Promise.all([
+        // Call 1: Extract structured filters from user message
+        (async () => {
+          try {
+            const result = await extractQueryFilters(body.message, destinationCountry, messages, existingForExtractor, userProfile)
+            return { success: true as const, result }
+          } catch (error) {
+            console.error('❌ Error extracting query filters:', error)
+            return { success: false as const, result: null }
+          }
+        })(),
+        // Call 2: Main conversational LLM
+        callOpenAI(messages),
+      ])
+
+      // --- POST-PROCESS filter extraction results ---
+      if (filterExtractionSettled.success && filterExtractionSettled.result) {
+        filterResult = filterExtractionSettled.result
+        extractedQueryFilters = filterResult.supabaseFilters
+        unmappableCriteria = filterResult.unmappableCriteria || []
+        console.log('✅ Extracted query filters:', JSON.stringify(extractedQueryFilters, null, 2))
+        console.log('✅ Filter extraction explanation:', filterResult.explanation)
+        if (unmappableCriteria.length > 0) {
+          console.log('⚠️ Unmappable criteria found:', unmappableCriteria)
+        }
+      }
+
       if (userRequestedRemoveAll) {
         extractedQueryFilters = null
         console.log('📦 User requested remove all filters – extractedQueryFilters set to null, will not re-apply accumulated')
@@ -2451,14 +2511,8 @@ ${getPronounInstructions(userProfile.pronoun)}`
         console.log('📦 Cleared filters (user removed filters in previous message)')
       }
 
-      // If we detected unmappable criteria, add a system message to inform the LLM
-      if (unmappableCriteria.length > 0) {
-        const unmappableMessage = `IMPORTANT: The user mentioned criteria we don't have in our database: ${unmappableCriteria.join(', ')}. Silently extract and use the criteria we DO have (country, age, surf level, board type, destination experience). DO NOT explain what we can or can't filter by - just proceed with matching.`
-        // Insert before the last user message
-        messages.splice(messages.length - 1, 0, { role: 'system', content: unmappableMessage })
-      }
-
       // When editing filters, if intent is ambiguous do not merge; return a clarification question
+      // (discards the main LLM result — acceptable since this is a rare path)
       const intentUnclearList = filterResult?.intentUnclear
       if (body.adding_filters && body.existing_query_filters && Array.isArray(intentUnclearList) && intentUnclearList.length > 0) {
         const key = intentUnclearList[0]
@@ -2478,47 +2532,8 @@ ${getPronounInstructions(userProfile.pronoun)}`
         })
       }
 
-      // Check if user message contains a destination mention and remind LLM to extract it
-      const userMessageLower = body.message.toLowerCase()
-      const destinationKeywords = ['philippines', 'philippins', 'filipins', 'filipines', 'siargao', 'el salvador', 'costa rica', 'sri lanka', 'indonesia', 'portugal', 'spain', 'france', 'brazil', 'australia', 'nicaragua', 'panama', 'mexico', 'peru', 'chile', 'bali', 'tamarindo', 'pavones', 'el tunco']
-      const hasDestinationMention = destinationKeywords.some(keyword => userMessageLower.includes(keyword))
-      
-      if (hasDestinationMention) {
-        const destinationReminder = `CRITICAL REMINDER: The user just mentioned a destination location. You MUST extract destination_country in your response's "data" field. If they mentioned both area and country (e.g., "Siargao, filipins"), extract BOTH: destination_country: "Philippines", area: "Siargao". Correct typos automatically - "filipins" means "Philippines". NEVER set destination_country to null if a location was mentioned!`
-        // Insert before the last user message
-        messages.splice(messages.length - 1, 0, { role: 'system', content: destinationReminder })
-        console.log('📍 Added destination extraction reminder for LLM')
-      }
-
-      // Add a final reminder to return JSON format
-      const jsonFormatReminder = `CRITICAL: You MUST return a valid JSON object. Your response must start with { and end with }. Do NOT return plain text. The structure must be: {"return_message": "...", "is_finished": false, "data": {...}}. If you return plain text, the system will fail!`
-      messages.splice(messages.length - 1, 0, { role: 'system', content: jsonFormatReminder })
-
-      // Build current data from last assistant message + merged filters; attach to every prompt with "do not change/add" rule
-      let continueDestination: string | null = null
-      let continueArea: string | null = null
-      for (let i = messages.length - 2; i >= 0; i--) {
-        if (messages[i].role === 'assistant') {
-          try {
-            const prevParsed = JSON.parse(messages[i].content)
-            if (prevParsed.data) {
-              if (prevParsed.data.destination_country != null) continueDestination = prevParsed.data.destination_country
-              if (prevParsed.data.area != null) continueArea = prevParsed.data.area
-            }
-            break
-          } catch (_e) { /* not JSON */ }
-        }
-      }
-      const currentDataForGPTContinue = {
-        destination_country: continueDestination,
-        area: continueArea,
-        queryFilters: extractedQueryFilters && typeof extractedQueryFilters === 'object' ? extractedQueryFilters as Record<string, unknown> : null
-      }
-      messages.splice(messages.length - 1, 0, { role: 'system', content: buildCurrentDataSystemMessage(currentDataForGPTContinue) })
-      console.log('📋 Injected current data + do-not-change/add rule into main GPT')
-
-      // Call OpenAI
-      let assistantMessage = await callOpenAI(messages)
+      // --- Use the main LLM result ---
+      let assistantMessage = mainLLMResult
       
       // If response looks like plain text, try to extract embedded JSON before retrying (avoids extra LLM call)
       const looksPlainText = !assistantMessage.trim().startsWith('{') && !assistantMessage.includes('```json')
