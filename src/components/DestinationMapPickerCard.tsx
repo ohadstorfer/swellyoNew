@@ -334,8 +334,6 @@ export const DestinationMapPickerCard = forwardRef<
   const handleMapSelect = useCallback((payload: { type: string; place?: MapPickerPlace }) => {
     if (payload.type === 'PLACE_SELECTED' && payload.place) {
       const place = payload.place;
-      const displayLabel = place.formatted_address?.trim() || place.name;
-
       const normalized = normalizeMapPickerPlace(place);
 
       logMapPicker('handleMapSelect PLACE_SELECTED', {
@@ -347,26 +345,26 @@ export const DestinationMapPickerCard = forwardRef<
       });
 
       setPlaces((prev) => {
-        let next = prev;
-        if (place.placeId) {
-          if (!next.some((p) => p.placeId === place.placeId)) {
-            next = [...next, { placeId: place.placeId || '', displayLabel }];
-          }
-        } else {
-          if (!next.some((p) => p.displayLabel === displayLabel)) {
-            next = [...next, { placeId: place.placeId || '', displayLabel }];
-          }
-        }
+        const existingLabels = new Set(prev.map((p) => p.displayLabel.toLowerCase()));
+        const existingPlaceIds = new Set(prev.filter((p) => p.placeId).map((p) => p.placeId));
 
-        const existingLabels = new Set(next.map((p) => p.displayLabel.toLowerCase()));
-        const extraLabels = normalized.area.filter(
+        // Skip entirely if we already have this placeId
+        if (place.placeId && existingPlaceIds.has(place.placeId)) return prev;
+
+        // Only add the normalized area parts (not the raw formatted_address)
+        const newLabels = normalized.area.filter(
           (part) => !existingLabels.has(part.toLowerCase())
         );
 
-        if (extraLabels.length === 0) return next;
+        if (newLabels.length === 0) return prev;
+
         return [
-          ...next,
-          ...extraLabels.map((label) => ({ placeId: '', displayLabel: label })),
+          ...prev,
+          // First label gets the placeId so duplicate-by-id check works next time
+          ...newLabels.map((label, i) => ({
+            placeId: i === 0 ? (place.placeId || '') : '',
+            displayLabel: label,
+          })),
         ];
       });
 
