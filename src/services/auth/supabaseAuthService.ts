@@ -22,7 +22,9 @@ class SupabaseAuthService {
 
   /**
    * Sign in with Google using Supabase OAuth
-   * Prevents concurrent login attempts for the same user
+   * Prevents concurrent login attempts for the same user.
+   * Supabase automatically replaces the existing session on new sign-in — no
+   * pre-login signOut is needed.
    */
   async signInWithGoogle(): Promise<User> {
     if (!isSupabaseConfigured()) {
@@ -30,10 +32,9 @@ class SupabaseAuthService {
     }
 
     // Check if there's already an ongoing login attempt
-    // Use a generic key since we don't know the user ID yet
     const loginKey = 'current_login';
     const ongoingLogin = this.ongoingLogins.get(loginKey);
-    
+
     if (ongoingLogin) {
       console.log('[SupabaseAuthService] Login already in progress, returning existing promise');
       return ongoingLogin;
@@ -42,35 +43,6 @@ class SupabaseAuthService {
     // Create new login promise
     const loginPromise = (async () => {
       try {
-        // Set OAuth redirecting flag IMMEDIATELY to prevent auth guard from interfering
-        // This must happen BEFORE signOut() to prevent SIGNED_OUT event from triggering logout
-        if (Platform.OS === 'web' && typeof window !== 'undefined') {
-          const timestamp = Date.now().toString();
-          try {
-            sessionStorage.setItem('oauth_redirecting', 'true');
-            sessionStorage.setItem('oauth_timestamp', timestamp);
-            localStorage.setItem('oauth_redirecting', 'true');
-            localStorage.setItem('oauth_timestamp', timestamp);
-            console.log('[SupabaseAuthService] Set oauth_redirecting flag before signOut to prevent auth guard interference');
-          } catch (e) {
-            console.warn('[SupabaseAuthService] Could not set oauth_redirecting flag:', e);
-          }
-        }
-        
-        // Invalidate existing session before starting new login
-        try {
-          const { error: signOutError } = await supabase.auth.signOut();
-          if (signOutError) {
-            console.warn('[SupabaseAuthService] Error signing out existing session:', signOutError);
-            // Continue with login even if sign out fails
-          } else {
-            console.log('[SupabaseAuthService] Invalidated existing session before new login');
-          }
-        } catch (signOutError) {
-          console.warn('[SupabaseAuthService] Error during session invalidation:', signOutError);
-          // Continue with login
-        }
-
         let result: User;
         if (Platform.OS === 'web') {
           result = await this.signInWithGoogleWeb();
@@ -78,28 +50,26 @@ class SupabaseAuthService {
           result = await this.signInWithGoogleMobile();
         }
 
-        // After successful login, invalidate any other sessions for this user
-        // (Supabase handles this automatically, but we log it)
         console.log('[SupabaseAuthService] Login successful, new session created');
-        
         return result;
       } catch (error: any) {
         console.error('Error signing in with Google:', error);
         throw new Error('Sign in failed: ' + (error.message || String(error)));
       } finally {
-        // Clean up the ongoing login tracking
         this.ongoingLogins.delete(loginKey);
       }
     })();
 
-    // Store the promise to prevent concurrent attempts
     this.ongoingLogins.set(loginKey, loginPromise);
-    
     return loginPromise;
   }
 
   /**
-   * Web implementation using Supabase OAuth
+   * Web implementation using Supabase OAuth (PKCE flow).
+   *
+   * With `flowType: 'pkce'` and `detectSessionInUrl: true`, the Supabase client
+   * automatically intercepts the `?code=` param on page load and exchanges it
+   * for a session. So after redirect, we just need to call getSession().
    */
   private async signInWithGoogleWeb(): Promise<User> {
     if (Platform.OS !== 'web' || typeof window === 'undefined') {
@@ -107,112 +77,44 @@ class SupabaseAuthService {
     }
 
     try {
-      console.log('Starting Supabase Google OAuth for web...');
-      
-      // Set flag IMMEDIATELY at the start to prevent useAuthGuard from interfering
-      // during getSession() and the entire OAuth flow
-      // Use both sessionStorage and localStorage for robustness
-      const timestamp = Date.now().toString();
-      try {
-        sessionStorage.setItem('oauth_redirecting', 'true');
-        sessionStorage.setItem('oauth_timestamp', timestamp);
-        console.log('Set oauth_redirecting flag early to prevent auth guard interference');
-      } catch (e) {
-        console.warn('Could not set oauth_redirecting flag in sessionStorage:', e);
-      }
-      
-      // Also set in localStorage as fallback (survives page reloads)
-      try {
-        localStorage.setItem('oauth_redirecting', 'true');
-        localStorage.setItem('oauth_timestamp', timestamp);
-      } catch (e) {
-        console.warn('Could not set oauth_redirecting flag in localStorage:', e);
-      }
-      
-      // First, check if we already have a valid session
-      // Add timeout to prevent hanging
-      console.log('Checking for existing session...');
-      let existingSession: any = null;
-      let sessionCheckError: any = null;
-      
-      try {
-        const sessionPromise = supabase.auth.getSession();
-        const timeoutPromise = new Promise<never>((_, reject) => {
-          setTimeout(() => reject(new Error('getSession() timeout after 3 seconds')), 3000);
-        });
-        
-        const result = await Promise.race([sessionPromise, timeoutPromise]) as Awaited<ReturnType<typeof supabase.auth.getSession>>;
-        existingSession = result?.data?.session;
-        sessionCheckError = result.error;
-        console.log('getSession() completed, session exists:', !!result?.data?.session);
-      } catch (timeoutError: any) {
-        console.warn('getSession() timed out or failed:', timeoutError?.message || timeoutError);
-        // Continue with OAuth flow if getSession() fails or times out
-        sessionCheckError = timeoutError;
-      }
-      
-      if (!sessionCheckError && existingSession?.user) {
-        // Clear flags since we found existing session - no redirect needed
-        try {
-          sessionStorage.removeItem('oauth_redirecting');
-          sessionStorage.removeItem('oauth_timestamp');
-          localStorage.removeItem('oauth_redirecting');
-          localStorage.removeItem('oauth_timestamp');
-        } catch (e) {
-          // Ignore
-        }
-        console.log('Found existing Supabase session, using it');
-        return this.convertSupabaseUserToAppUser(existingSession.user);
-      }
-      
-      console.log('No existing session found, proceeding with OAuth flow');
-      
-      // Check if we're returning from OAuth redirect
-      const hashParams = new URLSearchParams(window.location.hash.substring(1));
-      const accessToken = hashParams.get('access_token');
-      const refreshToken = hashParams.get('refresh_token');
-      const errorParam = hashParams.get('error');
-      const errorDescription = hashParams.get('error_description');
+      // 1. Check if a session already exists (e.g. detectSessionInUrl processed a PKCE code,
+      //    or the user is already logged in).
+      const { data: { session: existingSession } } = await supabase.auth.getSession();
 
-      if (errorParam) {
-        // Clear the oauth_redirecting flags since OAuth failed
-        try {
-          sessionStorage.removeItem('oauth_redirecting');
-          sessionStorage.removeItem('oauth_timestamp');
-          localStorage.removeItem('oauth_redirecting');
-          localStorage.removeItem('oauth_timestamp');
-        } catch (e) {
-          // Ignore if storage not available
-        }
-        
-        // Clean up the error from URL
-        if (window.history && window.location) {
+      if (existingSession?.user) {
+        // Clean up OAuth params from URL if present
+        if (window.location.search.includes('code=') || window.location.hash.includes('access_token')) {
           window.history.replaceState({}, document.title, window.location.pathname);
         }
-        
-        // Provide more helpful error messages
+        console.log('[SupabaseAuthService] Found existing session, using it');
+        return this.convertSupabaseUserToAppUser(existingSession.user);
+      }
+
+      // 2. Check for OAuth error return in URL
+      const urlParams = new URLSearchParams(window.location.search);
+      const hashParams = new URLSearchParams(window.location.hash.substring(1));
+      const errorParam = urlParams.get('error') || hashParams.get('error');
+      const errorDescription = urlParams.get('error_description') || hashParams.get('error_description');
+
+      if (errorParam) {
+        window.history.replaceState({}, document.title, window.location.pathname);
+
         let errorMessage = `OAuth error: ${errorParam}`;
         if (errorDescription) {
           errorMessage += ` - ${errorDescription}`;
         }
-        
-        // Add specific guidance for common errors
+
         if (errorParam === 'server_error') {
           if (errorDescription && errorDescription.includes('Database error')) {
-            errorMessage = 'Database Error: ' + errorDescription;
-            errorMessage += '\n\nThis error occurs when Supabase tries to automatically create a user record in your database.\n' +
+            errorMessage = 'Database Error: ' + errorDescription +
+              '\n\nThis error occurs when Supabase tries to automatically create a user record.\n' +
               'Common causes:\n' +
-              '1. Database trigger or function is failing when creating user records\n' +
+              '1. Database trigger or function is failing\n' +
               '2. Missing required columns in the users table\n' +
-              '3. Row Level Security (RLS) policies preventing user creation\n' +
-              '4. Database constraints or foreign key violations\n\n' +
-              'To fix:\n' +
-              '1. Check your Supabase database for triggers/functions on auth.users\n' +
-              '2. Verify the users table schema matches what the trigger expects\n' +
-              '3. Check RLS policies on the users table\n' +
-              '4. Review Supabase logs for detailed error information';
+              '3. Row Level Security (RLS) policies preventing user creation\n\n' +
+              'Check your Supabase logs for details.';
           } else {
-            errorMessage += '\n\nThis usually indicates a configuration issue. Please check:\n' +
+            errorMessage += '\n\nPlease check:\n' +
               '1. Supabase redirect URLs are correctly configured\n' +
               '2. Google OAuth credentials are properly set up in Supabase\n' +
               '3. The redirect URL matches your current domain';
@@ -220,124 +122,34 @@ class SupabaseAuthService {
         } else if (errorParam === 'access_denied') {
           errorMessage += '\n\nYou cancelled the sign-in process.';
         }
-        
+
         throw new Error(errorMessage);
       }
 
-      if (accessToken) {
-        // We're returning from OAuth, get the session
-        console.log('Detected OAuth redirect, processing session...');
-        
-        // Clear the oauth_redirecting flags since we're processing the return
-        try {
-          sessionStorage.removeItem('oauth_redirecting');
-          sessionStorage.removeItem('oauth_timestamp');
-          localStorage.removeItem('oauth_redirecting');
-          localStorage.removeItem('oauth_timestamp');
-        } catch (e) {
-          // Ignore if storage not available
-        }
-        
-        // Wait a bit for Supabase to process the session
-        await new Promise(resolve => setTimeout(resolve, 100));
-        
-        const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-        
-        if (sessionError) {
-          throw sessionError;
-        }
-
-        if (sessionData.session && sessionData.session.user) {
-          // Clean up the URL after successful auth
-          if (window.history && window.location) {
-            window.history.replaceState({}, document.title, window.location.pathname);
-          }
-          return this.convertSupabaseUserToAppUser(sessionData.session.user);
-        }
-      }
-
-      // No access token found and no existing session, initiate OAuth flow
-      console.log('No existing session found, initiating Google OAuth flow...');
-      
-      // Get the current URL without hash/query params for redirect
+      // 3. No session and no error — initiate the OAuth redirect
       const redirectUrl = window.location.origin + window.location.pathname;
-      console.log('OAuth redirect URL:', redirectUrl);
-      
+
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
           redirectTo: redirectUrl,
-          queryParams: {
-            access_type: 'offline',
-            prompt: 'consent',
-          },
         },
       });
 
       if (error) {
-        console.error('Error initiating OAuth:', error);
         throw new Error(`Failed to initiate Google sign-in: ${error.message}`);
       }
 
       if (!data?.url) {
-        console.error('No OAuth URL in response. Data:', JSON.stringify(data, null, 2));
         throw new Error('OAuth URL not returned from Supabase. Please check your Supabase configuration.');
       }
 
-      console.log('OAuth URL received:', data.url.substring(0, 100) + '...');
-      
-      // Flags were already set at the start of the function, no need to set again
-      // Actually perform the redirect to Google OAuth
-      console.log('Redirecting to Google OAuth...', data.url.substring(0, 100) + '...');
-      
-      if (!window.location) {
-        // Clear flag if redirect fails
-        try {
-          sessionStorage.removeItem('oauth_redirecting');
-          sessionStorage.removeItem('oauth_timestamp');
-          localStorage.removeItem('oauth_redirecting');
-          localStorage.removeItem('oauth_timestamp');
-        } catch (e) {
-          // Ignore
-        }
-        throw new Error('window.location is not available');
-      }
-      
-      // Perform redirect using replace() for more reliable redirects
-      try {
-        // Use replace() instead of href to avoid adding to history and ensure redirect
-        // Note: After this call, if redirect works, we'll navigate away and code execution stops
-        // If redirect is blocked, we'll remain on this page and the timeout in WelcomeScreen will detect it
-        window.location.replace(data.url);
-        console.log('Redirect initiated successfully');
-        
-        // Note: We don't check if redirect worked here because:
-        // 1. If redirect works, we navigate away and this code doesn't execute
-        // 2. If redirect is blocked, we stay on the page but checking immediately might give false positives
-        // 3. The timeout in WelcomeScreen will detect if redirect was blocked after a reasonable delay
-      } catch (redirectError: any) {
-        // Clear flag if redirect fails
-        try {
-          sessionStorage.removeItem('oauth_redirecting');
-          sessionStorage.removeItem('oauth_timestamp');
-          localStorage.removeItem('oauth_redirecting');
-          localStorage.removeItem('oauth_timestamp');
-        } catch (e) {
-          // Ignore
-        }
-        
-        // If it's our custom error, throw it as-is
-        if (redirectError.message && redirectError.message.includes('Redirect to Google OAuth was blocked')) {
-          throw redirectError;
-        }
-        
-        console.error('Failed to redirect:', redirectError);
-        throw new Error(`Failed to redirect to OAuth URL: ${redirectError instanceof Error ? redirectError.message : String(redirectError)}`);
-      }
-      
-      // This promise never resolves because we're redirecting
-      // The function will be called again when the user returns from OAuth
-      return new Promise(() => {}); // Never resolves, redirect happens
+      // Redirect to Google. After the user authenticates, Google redirects back
+      // with ?code=... which detectSessionInUrl processes on page reload.
+      window.location.replace(data.url);
+
+      // This promise never resolves because we're navigating away
+      return new Promise(() => {});
     } catch (error: any) {
       console.error('Error in web Google OAuth:', error);
       throw error;
@@ -345,26 +157,26 @@ class SupabaseAuthService {
   }
 
   /**
-   * Mobile implementation using Supabase OAuth with expo-auth-session
+   * Mobile implementation using Supabase OAuth with expo-auth-session (PKCE flow).
+   *
+   * With PKCE, the redirect URL contains a `code` query parameter (not tokens
+   * in the hash). We exchange the code for a session using
+   * `supabase.auth.exchangeCodeForSession(code)`.
    */
   private async signInWithGoogleMobile(): Promise<User> {
     try {
       console.log('Starting Supabase Google OAuth for mobile...');
 
-      // Get the redirect URI
       const redirectUri = AuthSession.makeRedirectUri({});
 
-      console.log('Redirect URI:', redirectUri);
+      if (__DEV__) {
+        console.log('Redirect URI:', redirectUri);
+      }
 
-      // Start OAuth flow with Supabase
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
           redirectTo: redirectUri,
-          queryParams: {
-            access_type: 'offline',
-            prompt: 'consent',
-          },
         },
       });
 
@@ -376,7 +188,6 @@ class SupabaseAuthService {
         throw new Error('No OAuth URL returned from Supabase');
       }
 
-      // Open the OAuth URL in browser
       const result = await WebBrowser.openAuthSessionAsync(
         data.url,
         redirectUri
@@ -387,18 +198,13 @@ class SupabaseAuthService {
       }
 
       if (result.type === 'success' && result.url) {
-        // Parse the URL to get the access token
         const url = new URL(result.url);
-        const hashParams = new URLSearchParams(url.hash.substring(1));
-        const accessToken = hashParams.get('access_token');
-        const refreshToken = hashParams.get('refresh_token');
 
-        if (accessToken) {
-          // Set the session manually
-          const { data: sessionData, error: sessionError } = await supabase.auth.setSession({
-            access_token: accessToken,
-            refresh_token: refreshToken || '',
-          });
+        // PKCE flow: exchange the authorization code for a session
+        const code = url.searchParams.get('code');
+        if (code) {
+          const { data: sessionData, error: sessionError } =
+            await supabase.auth.exchangeCodeForSession(code);
 
           if (sessionError) {
             throw sessionError;
@@ -407,6 +213,12 @@ class SupabaseAuthService {
           if (sessionData.session) {
             return this.convertSupabaseUserToAppUser(sessionData.session.user);
           }
+        }
+
+        // Fallback: session may have been established via another mechanism
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          return this.convertSupabaseUserToAppUser(session.user);
         }
       }
 

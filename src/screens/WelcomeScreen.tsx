@@ -112,35 +112,38 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
     const checkAuthState = async () => {
       // Check if we're returning from OAuth (for Supabase web flow)
       if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location) {
-        // Check for Supabase OAuth return (access_token in hash)
+        // PKCE flow: detectSessionInUrl exchanges the ?code= param automatically.
+        // Check for either code in query params (PKCE) or access_token in hash (legacy).
+        const urlParams = new URLSearchParams(window.location.search);
         const hashParams = new URLSearchParams(window.location.hash.substring(1));
-        const accessToken = hashParams.get('access_token');
-        
-        if (accessToken && isSupabaseConfigured()) {
-          console.log('Detected Supabase OAuth return, processing session...');
+        const hasOAuthReturn = urlParams.get('code') || hashParams.get('access_token');
+
+        if (hasOAuthReturn && isSupabaseConfigured()) {
+          console.log('Detected Supabase OAuth return (PKCE), processing session...');
           try {
             setIsLoading(true);
-            // Get the raw Supabase user from session
+            // With PKCE + detectSessionInUrl, the Supabase client already exchanged
+            // the code for a session. getUser() validates against the Supabase server.
             const { supabase } = await import('../config/supabase');
             const { data: { user: rawSupabaseUser }, error } = await supabase.auth.getUser();
-            
+
             if (error || !rawSupabaseUser) {
               console.error('Failed to get user from OAuth session:', error);
               throw new Error('Failed to get user from session');
             }
-            
+
             console.log('Supabase OAuth return successful, converting user:', rawSupabaseUser.id);
-            
+
             // Convert Supabase user to app user format using utility
             const { convertSupabaseUserToAppUser } = await import('../utils/userConversion');
             const legacyUser = convertSupabaseUserToAppUser(rawSupabaseUser);
-            
+
             setUser(legacyUser);
             updateFormData({
               nickname: legacyUser.nickname,
               userEmail: legacyUser.email,
             });
-            
+
             // Identify user with PostHog after OAuth return
             const { analyticsService } = await import('../services/analytics/analyticsService');
             const userId = legacyUser.id.toString();
@@ -152,10 +155,10 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
             };
             analyticsService.identify(userId, userProperties);
             console.log('[WelcomeScreen] User identified with PostHog after OAuth return:', userId);
-            
-            // Clean up the URL hash
+
+            // Clean up the URL (both query params and hash)
             window.history.replaceState({}, document.title, window.location.pathname);
-            
+
             // Check if user has finished onboarding before navigating
             const hasFinishedOnboarding = await checkOnboardingStatus();
             if (!hasFinishedOnboarding) {
@@ -173,8 +176,8 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
         }
 
         // Check for legacy OAuth return (code in query params)
-        const urlParams = new URLSearchParams(window.location.search);
-        const code = urlParams.get('code');
+        const legacyUrlParams = new URLSearchParams(window.location.search);
+        const code = legacyUrlParams.get('code');
         
         if (code && !isSupabaseConfigured()) {
           console.log('Detected legacy OAuth return with code, processing...');
@@ -241,39 +244,8 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
     try {
       setIsLoading(true);
       
-      // Check if there's any existing user session and log out first
-      const hasExistingSession = user !== null || isDemoUser;
-      
-      if (hasExistingSession) {
-        console.log('Existing user session detected, logging out before Google sign-in...');
-        try {
-          // Use centralized logout function to ensure all state is cleared
-          const { performLogout } = await import('../utils/logout');
-          const logoutResult = await performLogout({
-            resetOnboarding,
-            setUser,
-            setCurrentStep: (step: number) => {
-              // Don't navigate yet, we'll navigate after sign-in
-              // But still update the step internally if needed
-              if (step === -1) {
-                // WelcomeScreen is already showing, no need to navigate
-              }
-            },
-            setIsDemoUser,
-          });
-          
-          if (logoutResult.success) {
-            console.log('User logged out successfully before new sign-in');
-          } else {
-            console.error('Error during logout before sign-in:', logoutResult.error);
-            // Continue with sign-in even if logout fails
-          }
-        } catch (logoutError) {
-          console.error('Error logging out user:', logoutError);
-          // Continue with Google sign-in even if logout fails
-        }
-      }
-      
+      // Supabase automatically replaces the existing session on new sign-in,
+      // so no pre-login signOut is needed.
       console.log('Starting Google Sign-In process...');
       
       // Store current URL to detect if redirect happens
@@ -289,9 +261,9 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
           // Only check if we're still on the same page if loading state is still active
           // (If redirect worked, we'd be on Google's page or back with OAuth params)
           if (isLoading && currentUrlBeforeRedirect && typeof window !== 'undefined') {
-            const hashParams = new URLSearchParams(window.location.hash.substring(1));
             const urlParams = new URLSearchParams(window.location.search);
-            const isOAuthReturn = hashParams.get('access_token') || hashParams.get('refresh_token') || urlParams.get('code');
+            const hashParams = new URLSearchParams(window.location.hash.substring(1));
+            const isOAuthReturn = urlParams.get('code') || hashParams.get('access_token') || hashParams.get('refresh_token');
             
             // Only show error if we're definitely still on the same page AND not in OAuth return
             // AND loading state is still active (meaning redirect didn't happen)
@@ -421,15 +393,6 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
       // Clear timeout on error
       if (redirectTimeout) {
         clearTimeout(redirectTimeout);
-      }
-      
-      // Clear oauth_redirecting flag on error
-      if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        try {
-          sessionStorage.removeItem('oauth_redirecting');
-        } catch (e) {
-          // Ignore if sessionStorage not available
-        }
       }
       
       console.error('Google Sign-In Error:', error);
