@@ -52,7 +52,7 @@ export interface SupabaseSurfer {
 
 // Legacy User interface for backward compatibility
 export interface User {
-  id: number;
+  id: string;
   email: string;
   nickname: string;
   googleId: string;
@@ -714,11 +714,8 @@ class SupabaseDatabaseService {
    * Convert Supabase user to legacy User format for backward compatibility
    */
   private convertToLegacyUser(supabaseUser: SupabaseUser, googleId: string, nickname: string = ''): User {
-    // Convert UUID to number (hash the UUID)
-    const idNumber = parseInt(supabaseUser.id.replace(/-/g, '').substring(0, 15), 16) || Date.now();
-    
     return {
-      id: idNumber,
+      id: supabaseUser.id,
       email: supabaseUser.email,
       nickname: nickname || '',
       googleId: googleId,

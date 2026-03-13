@@ -87,39 +87,40 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           setTimeout(() => reject(new Error(`Session restoration timeout after ${timeoutMs}ms`)), timeoutMs);
         });
         
-        // Attempt to get session with timeout
-        const sessionPromise = supabase.auth.getSession();
-        const { data: { session }, error: sessionError } = await Promise.race([
-          sessionPromise,
+        // Use getUser() instead of getSession() to validate the JWT server-side.
+        // getSession() only reads from local storage and doesn't verify the token.
+        const userPromise = supabase.auth.getUser();
+        const { data: { user: authUser }, error: userError } = await Promise.race([
+          userPromise,
           timeoutPromise,
         ]) as any;
-        
-        // Success - process session
-        if (sessionError) {
-          throw sessionError;
+
+        // Success - process user
+        if (userError) {
+          throw userError;
         }
-        
-        if (session?.user) {
-          console.log('[OnboardingContext] Session found, restoring user:', session.user.id);
-          
+
+        if (authUser) {
+          console.log('[OnboardingContext] Valid session found, restoring user:', authUser.id);
+
           // Convert Supabase user to app user format
           const { convertSupabaseUserToAppUser } = await import('../utils/userConversion');
-          const appUser = convertSupabaseUserToAppUser(session.user);
-          
+          const appUser = convertSupabaseUserToAppUser(authUser);
+
           setUser(appUser);
           console.log('[OnboardingContext] User restored from session:', appUser.id);
-          
+
           // Also update form data with user info
           setFormData(prev => ({
             ...prev,
             nickname: appUser.nickname,
             userEmail: appUser.email,
           }));
-          
+
           // Preload profile video in background (non-blocking) - use auth UUID for surfers table lookup
-          if (session.user?.id) {
+          if (authUser.id) {
             const { preloadProfileVideo } = await import('../services/media/videoPreloadService');
-            preloadProfileVideo(session.user.id, 'high')
+            preloadProfileVideo(authUser.id, 'high')
               .then(result => {
                 if (__DEV__) {
                   console.log(`[OnboardingContext] Profile video preload completed: ready=${result?.ready}`);
@@ -129,14 +130,14 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
                 console.warn('[OnboardingContext] Profile video preload failed (non-blocking):', err);
               });
           }
-          
+
           // Success - exit retry loop
           setIsRestoringSession(false);
           console.log('[OnboardingContext] Session restoration complete');
           return;
         } else {
-          // No session found - not an error, just no session
-          console.log('[OnboardingContext] No session found');
+          // No valid session found
+          console.log('[OnboardingContext] No valid session found');
           setIsRestoringSession(false);
           return;
         }
@@ -244,18 +245,24 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         const isOnSwellyChatRoute = Platform.OS === 'web' && typeof window !== 'undefined' && window.location &&
           ((window.location.pathname || '').includes('swelly_chat') || (window.location.hash || '').includes('swelly_chat'));
         
-        // Load user data if available; prefer nickname from formData for header display
+        // Load user data if available; prefer nickname from formData for header display.
+        // Skip if restoreSession already set user from Supabase (prevents stale cached IDs).
         const hasUser = parsed.user !== null && parsed.user !== undefined;
-        if (hasUser) {
+        if (hasUser && user === null) {
           const formNickname = parsed.formData?.nickname;
           const useFormNickname =
             typeof formNickname === 'string' &&
             formNickname.trim() !== '' &&
             formNickname !== 'User';
+          // Ensure cached user id is a string (migration from old numeric IDs)
+          const cachedUser = parsed.user;
+          if (typeof cachedUser.id === 'number') {
+            cachedUser.id = String(cachedUser.id);
+          }
           setUser(
             useFormNickname
-              ? { ...parsed.user, nickname: formNickname.trim() }
-              : parsed.user
+              ? { ...cachedUser, nickname: formNickname.trim() }
+              : cachedUser
           );
         }
         

@@ -29,15 +29,13 @@ export function useAuthGuard() {
     }
 
     try {
+      // PKCE flow only returns ?code= in query params, not tokens in hash.
       const urlParams = new URLSearchParams(window.location.search);
-      const hashParams = new URLSearchParams(window.location.hash.substring(1));
       const code = urlParams.get('code');
-      const accessToken = hashParams.get('access_token');
-      const refreshToken = hashParams.get('refresh_token');
-      const errorParam = hashParams.get('error') || urlParams.get('error');
-      const type = hashParams.get('type') || urlParams.get('type');
+      const errorParam = urlParams.get('error');
+      const type = urlParams.get('type');
 
-      return !!(code || accessToken || refreshToken || (errorParam && type === 'recovery'));
+      return !!(code || (errorParam && type === 'recovery'));
     } catch (error) {
       console.warn('[useAuthGuard] Error checking OAuth callback:', error);
       return false;

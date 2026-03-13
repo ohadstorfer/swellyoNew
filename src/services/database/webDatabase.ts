@@ -12,7 +12,7 @@ class WebDatabaseService {
       
       const now = new Date().toISOString();
       const user: User = {
-        id: existingUserIndex >= 0 ? users[existingUserIndex].id : Date.now(),
+        id: existingUserIndex >= 0 ? users[existingUserIndex].id : String(Date.now()),
         ...userData,
         createdAt: existingUserIndex >= 0 ? users[existingUserIndex].createdAt : now,
         updatedAt: now,

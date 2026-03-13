@@ -168,13 +168,11 @@ export const AppContent: React.FC = () => {
       return;
     }
 
-    // Check for OAuth return indicators
-    const hashParams = new URLSearchParams(window.location.hash.substring(1));
+    // Check for OAuth return indicators (PKCE flow returns ?code= in query params)
     const urlParams = new URLSearchParams(window.location.search);
-    const accessToken = hashParams.get('access_token');
     const code = urlParams.get('code');
 
-    if (accessToken || code) {
+    if (code) {
       // OAuth return detected - keep checking, let WelcomeScreen's checkAuthState handle it
       // The user effect below will stop checking when user is set (with minimum duration)
       // Also set a maximum timeout in case auth fails
@@ -255,7 +253,7 @@ export const AppContent: React.FC = () => {
       
       // Set demo user in context
       setUser({
-        id: parseInt(demoUser.id.replace(/-/g, '').substring(0, 15), 16) || Date.now(),
+        id: demoUser.id,
         email: demoUser.email,
         nickname: demoUser.nickname,
         googleId: demoUser.googleId || demoUser.id,

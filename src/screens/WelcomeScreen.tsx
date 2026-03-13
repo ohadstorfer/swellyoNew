@@ -63,7 +63,7 @@ const GoogleIcon: React.FC = () => {
 export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDemoChat, isCheckingAuth = false }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [isDemoLoading, setIsDemoLoading] = useState(false);
-  const { setUser, updateFormData, checkOnboardingStatus, isComplete, isDemoUser, setIsDemoUser, resetOnboarding, setCurrentStep, user } = useOnboarding();
+  const { setUser, updateFormData, checkOnboardingStatus } = useOnboarding();
   
   // Use responsive hook for accurate mobile detection
   const isMobile = useIsMobile();
@@ -113,10 +113,8 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
       // Check if we're returning from OAuth (for Supabase web flow)
       if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location) {
         // PKCE flow: detectSessionInUrl exchanges the ?code= param automatically.
-        // Check for either code in query params (PKCE) or access_token in hash (legacy).
         const urlParams = new URLSearchParams(window.location.search);
-        const hashParams = new URLSearchParams(window.location.hash.substring(1));
-        const hasOAuthReturn = urlParams.get('code') || hashParams.get('access_token');
+        const hasOAuthReturn = urlParams.get('code');
 
         if (hasOAuthReturn && isSupabaseConfigured()) {
           console.log('Detected Supabase OAuth return (PKCE), processing session...');
@@ -262,8 +260,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
           // (If redirect worked, we'd be on Google's page or back with OAuth params)
           if (isLoading && currentUrlBeforeRedirect && typeof window !== 'undefined') {
             const urlParams = new URLSearchParams(window.location.search);
-            const hashParams = new URLSearchParams(window.location.hash.substring(1));
-            const isOAuthReturn = urlParams.get('code') || hashParams.get('access_token') || hashParams.get('refresh_token');
+            const isOAuthReturn = urlParams.get('code');
             
             // Only show error if we're definitely still on the same page AND not in OAuth return
             // AND loading state is still active (meaning redirect didn't happen)

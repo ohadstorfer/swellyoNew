@@ -82,19 +82,18 @@ class SupabaseAuthService {
       const { data: { session: existingSession } } = await supabase.auth.getSession();
 
       if (existingSession?.user) {
-        // Clean up OAuth params from URL if present
-        if (window.location.search.includes('code=') || window.location.hash.includes('access_token')) {
+        // Clean up OAuth params from URL if present (PKCE uses ?code= in query params)
+        if (window.location.search.includes('code=')) {
           window.history.replaceState({}, document.title, window.location.pathname);
         }
         console.log('[SupabaseAuthService] Found existing session, using it');
         return this.convertSupabaseUserToAppUser(existingSession.user);
       }
 
-      // 2. Check for OAuth error return in URL
+      // 2. Check for OAuth error return in URL (PKCE uses query params)
       const urlParams = new URLSearchParams(window.location.search);
-      const hashParams = new URLSearchParams(window.location.hash.substring(1));
-      const errorParam = urlParams.get('error') || hashParams.get('error');
-      const errorDescription = urlParams.get('error_description') || hashParams.get('error_description');
+      const errorParam = urlParams.get('error');
+      const errorDescription = urlParams.get('error_description');
 
       if (errorParam) {
         window.history.replaceState({}, document.title, window.location.pathname);
@@ -133,6 +132,9 @@ class SupabaseAuthService {
         provider: 'google',
         options: {
           redirectTo: redirectUrl,
+          queryParams: {
+            prompt: 'select_account',
+          },
         },
       });
 
@@ -177,6 +179,9 @@ class SupabaseAuthService {
         provider: 'google',
         options: {
           redirectTo: redirectUri,
+          queryParams: {
+            prompt: 'select_account',
+          },
         },
       });
 
