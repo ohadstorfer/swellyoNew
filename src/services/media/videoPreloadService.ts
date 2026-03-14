@@ -435,6 +435,43 @@ export const waitForAllVideosReadyForBoardType = async (
   });
 };
 
+/**
+ * Returns true if the first video for the given board type is preloaded and ready.
+ */
+export const isFirstVideoReadyForBoardType = (boardType: number): boolean => {
+  if (boardType === 3) return true;
+  const urls = getVideoUrlsForBoardType(boardType);
+  if (urls.length === 0) return true;
+  return preloadStatusMap.get(urls[0])?.ready === true;
+};
+
+/**
+ * Polls until the first video for the board type is ready or timeout is reached.
+ * Resolves with true when ready, false on timeout.
+ */
+export const waitForFirstVideoReadyForBoardType = async (
+  boardType: number,
+  timeoutMs: number = 15000
+): Promise<boolean> => {
+  if (isFirstVideoReadyForBoardType(boardType)) return true;
+  const intervalMs = 250;
+  const startTime = Date.now();
+  return new Promise((resolve) => {
+    const check = () => {
+      if (isFirstVideoReadyForBoardType(boardType)) {
+        resolve(true);
+        return;
+      }
+      if (Date.now() - startTime >= timeoutMs) {
+        resolve(false);
+        return;
+      }
+      setTimeout(check, intervalMs);
+    };
+    setTimeout(check, intervalMs);
+  });
+};
+
 export const clearPreloadCache = (): void => {
   if (Platform.OS === 'web' && typeof document !== 'undefined') {
     hiddenVideoElements.forEach((video) => { if (video.parentNode) video.parentNode.removeChild(video); });

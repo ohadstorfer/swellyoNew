@@ -21,7 +21,7 @@ import { supabaseAuthService } from '../services/auth/supabaseAuthService';
 import { useOnboarding } from '../context/OnboardingContext';
 import { analyticsService } from '../services/analytics/analyticsService';
 import { useAuthGuard } from '../hooks/useAuthGuard';
-import { areAllVideosReadyForBoardType, waitForAllVideosReadyForBoardType, getVideoPreloadStatus, waitForVideoReady, preloadLoadingVideo, getLoadingVideoUrl } from '../services/media/videoPreloadService';
+import { isFirstVideoReadyForBoardType, waitForFirstVideoReadyForBoardType, getVideoPreloadStatus, waitForVideoReady, preloadLoadingVideo, getLoadingVideoUrl } from '../services/media/videoPreloadService';
 import { STEP_WELCOME } from '../constants/onboardingSteps';
 
 export const AppContent: React.FC = () => {
@@ -307,21 +307,21 @@ export const AppContent: React.FC = () => {
         updateFormData({ surfLevel: 3 });
         setCurrentStep(3); // Go directly to step 3 (travel experience)
       } else {
-        // For board types with videos (0, 1, 2): navigate only when all videos are ready (or after timeout).
-        if (areAllVideosReadyForBoardType(data.boardType)) {
+        // For board types with videos (0, 1, 2): navigate when first video is ready (rest load in background).
+        if (isFirstVideoReadyForBoardType(data.boardType)) {
           if (__DEV__) {
-            console.log('[AppContent] All videos preloaded for board type', data.boardType, ', navigating to step 2');
+            console.log('[AppContent] First video preloaded for board type', data.boardType, ', navigating to step 2');
           }
           setCurrentStep(2);
         } else {
           if (__DEV__) {
-            console.log('[AppContent] Waiting for all videos to be ready before navigating to step 2...');
+            console.log('[AppContent] Waiting for first video to be ready before navigating to step 2...');
           }
-          const allReady = await waitForAllVideosReadyForBoardType(data.boardType, 15000);
+          const firstReady = await waitForFirstVideoReadyForBoardType(data.boardType, 15000);
           if (__DEV__) {
-            console.log('[AppContent] All videos ready:', allReady, ', navigating to step 2');
+            console.log('[AppContent] First video ready:', firstReady, ', navigating to step 2');
           }
-          if (!allReady) {
+          if (!firstReady) {
             console.warn('[AppContent] Navigate to step 2 despite timeout (videos will load normally)');
           }
           setCurrentStep(2);
