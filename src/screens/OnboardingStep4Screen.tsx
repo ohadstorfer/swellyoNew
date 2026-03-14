@@ -667,8 +667,17 @@ const DateOfBirthField: React.FC<DateOfBirthFieldProps> = ({
   const maxDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
   const minDate = new Date(today.getFullYear() - 120, today.getMonth(), today.getDate());
 
-  // Convert ISO string to Date object for picker
-  const dateValue = value ? new Date(value + 'T00:00:00Z') : new Date(2000, 0, 1);
+  // Parse ISO date (YYYY-MM-DD) as local calendar date to avoid timezone shift (e.g. Jan 1 UTC → Dec 31 in UTC+2)
+  const parseISODateLocal = (iso: string): Date | null => {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+    if (!match) return null;
+    const [, y, m, d] = match;
+    const date = new Date(parseInt(y, 10), parseInt(m, 10) - 1, parseInt(d, 10));
+    return isNaN(date.getTime()) ? null : date;
+  };
+
+  const defaultPickerDate = new Date(today.getFullYear() - 18, 0, 1); // Jan 1, 18 years ago
+  const dateValue = value ? (parseISODateLocal(value) ?? defaultPickerDate) : defaultPickerDate;
 
   // Format date for display
   const displayValue = hasValue ? formatDateOfBirth(value) : (placeholder || label);
@@ -719,50 +728,49 @@ const DateOfBirthField: React.FC<DateOfBirthFieldProps> = ({
     const webMonthScrollRef = useRef<ScrollView>(null);
     const webDayScrollRef = useRef<ScrollView>(null);
     const webYearScrollRef = useRef<ScrollView>(null);
-    
+    const monthScrollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const dayScrollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const yearScrollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const isSnapping = useRef(false);
+    const ITEM_HEIGHT = 40;
+
     // Helper function to snap scroll to center an item at a given index
     const snapToItem = (scrollViewRef: React.RefObject<ScrollView | null>, index: number) => {
       if (scrollViewRef.current) {
-        const itemHeight = 40;
-        const scrollY = index * itemHeight;
+        isSnapping.current = true;
+        const scrollY = index * ITEM_HEIGHT;
         scrollViewRef.current.scrollTo({ y: scrollY, animated: true });
+        // Clear snapping flag after animation completes
+        setTimeout(() => { isSnapping.current = false; }, 350);
       }
     };
 
     // Helper function to find the nearest item index based on scroll position
     const getNearestItemIndex = (scrollY: number, totalItems: number): number => {
-      const itemHeight = 40;
-      const nearestIndex = Math.round(scrollY / itemHeight);
+      const nearestIndex = Math.round(scrollY / ITEM_HEIGHT);
       return Math.max(0, Math.min(nearestIndex, totalItems - 1));
-    };
-
-    // Helper function to find the nearest item index based on scroll position and snap to it
-    const snapToNearestItem = (scrollViewRef: React.RefObject<ScrollView | null>, scrollY: number, totalItems: number) => {
-      if (scrollViewRef.current) {
-        const clampedIndex = getNearestItemIndex(scrollY, totalItems);
-        snapToItem(scrollViewRef, clampedIndex);
-        return clampedIndex;
-      }
-      return -1;
     };
 
     // Initialize temp date when modal opens and scroll to selected values
     React.useEffect(() => {
       if (showPicker) {
-        const initialDate = value ? new Date(value + 'T00:00:00Z') : new Date(2000, 0, 1);
+        const currentYear = new Date().getFullYear();
+        const initialDate = value ? (parseISODateLocal(value) ?? new Date(currentYear - 18, 0, 1)) : new Date(currentYear - 18, 0, 1);
         setWebTempDate(initialDate);
         
         // Scroll to selected values after a short delay to ensure DOM is ready
         setTimeout(() => {
+          isSnapping.current = true;
           const monthIndex = initialDate.getMonth();
           const dayIndex = initialDate.getDate() - 1;
           const currentYear = new Date().getFullYear();
           const yearIndex = currentYear - initialDate.getFullYear();
-          
-          snapToItem(webMonthScrollRef, monthIndex);
-          snapToItem(webDayScrollRef, dayIndex);
-          snapToItem(webYearScrollRef, yearIndex);
-        }, 100);
+
+          webMonthScrollRef.current?.scrollTo({ y: monthIndex * ITEM_HEIGHT, animated: false });
+          webDayScrollRef.current?.scrollTo({ y: dayIndex * ITEM_HEIGHT, animated: false });
+          webYearScrollRef.current?.scrollTo({ y: yearIndex * ITEM_HEIGHT, animated: false });
+          setTimeout(() => { isSnapping.current = false; }, 100);
+        }, 200);
       }
     }, [showPicker, value]);
 
@@ -780,8 +788,8 @@ const DateOfBirthField: React.FC<DateOfBirthFieldProps> = ({
       setShowPicker(false);
     };
 
-    // Generate month, day, year arrays
-    const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    // Generate month, day, year arrays (short month names per Figma)
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     const currentYear = new Date().getFullYear();
     const years = Array.from({ length: 121 }, (_, i) => currentYear - i); // Last 120 years
     const daysInMonth = new Date(webTempDate.getFullYear(), webTempDate.getMonth() + 1, 0).getDate();
@@ -831,12 +839,12 @@ const DateOfBirthField: React.FC<DateOfBirthFieldProps> = ({
               >
                 {/* Modal header */}
                 <View style={styles.datePickerHeader as any}>
-                  <Text style={styles.datePickerTitle as any}>Select date of birth</Text>
+                  <Text style={styles.datePickerTitle as any}>What's your date of birth?</Text>
                 </View>
 
-                {/* Custom calendar picker with scrollable columns */}
+                {/* Custom calendar picker with scrollable columns - Figma wheel style */}
                 <View style={styles.webDatePickerContainer as any}>
-                  {/* Selection indicator overlay */}
+                  {/* Selection highlight band (subtle) */}
                   <View style={styles.webDatePickerSelectionIndicator as any} pointerEvents="none" />
                   
                   {/* Month selector */}
@@ -847,49 +855,24 @@ const DateOfBirthField: React.FC<DateOfBirthFieldProps> = ({
                       contentContainerStyle={styles.webDatePickerScrollContent as any}
                       showsVerticalScrollIndicator={false}
                       onScroll={(e) => {
+                        if (isSnapping.current) return;
                         const scrollY = e.nativeEvent.contentOffset.y;
-                        const selectedIndex = getNearestItemIndex(scrollY, months.length);
-                        if (selectedIndex >= 0 && selectedIndex < months.length && webTempDate.getMonth() !== selectedIndex) {
-                          const newDate = new Date(webTempDate);
-                          newDate.setMonth(selectedIndex);
-                          const maxDay = new Date(newDate.getFullYear(), newDate.getMonth() + 1, 0).getDate();
-                          if (newDate.getDate() > maxDay) {
-                            newDate.setDate(maxDay);
+                        if (monthScrollTimer.current) clearTimeout(monthScrollTimer.current);
+                        monthScrollTimer.current = setTimeout(() => {
+                          const selectedIndex = getNearestItemIndex(scrollY, months.length);
+                          snapToItem(webMonthScrollRef, selectedIndex);
+                          if (selectedIndex >= 0 && selectedIndex < months.length) {
+                            setWebTempDate(prev => {
+                              if (prev.getMonth() === selectedIndex) return prev;
+                              const newDate = new Date(prev);
+                              newDate.setMonth(selectedIndex);
+                              const maxDay = new Date(newDate.getFullYear(), newDate.getMonth() + 1, 0).getDate();
+                              if (newDate.getDate() > maxDay) newDate.setDate(maxDay);
+                              snapToItem(webDayScrollRef, newDate.getDate() - 1);
+                              return newDate;
+                            });
                           }
-                          setWebTempDate(newDate);
-                          // Update day scroll if needed
-                          snapToItem(webDayScrollRef, newDate.getDate() - 1);
-                        }
-                      }}
-                      onScrollEndDrag={(e) => {
-                        const scrollY = e.nativeEvent.contentOffset.y;
-                        const selectedIndex = snapToNearestItem(webMonthScrollRef, scrollY, months.length);
-                        if (selectedIndex >= 0 && selectedIndex < months.length) {
-                          const newDate = new Date(webTempDate);
-                          newDate.setMonth(selectedIndex);
-                          const maxDay = new Date(newDate.getFullYear(), newDate.getMonth() + 1, 0).getDate();
-                          if (newDate.getDate() > maxDay) {
-                            newDate.setDate(maxDay);
-                          }
-                          setWebTempDate(newDate);
-                          // Update day scroll if needed
-                          snapToItem(webDayScrollRef, newDate.getDate() - 1);
-                        }
-                      }}
-                      onMomentumScrollEnd={(e) => {
-                        const scrollY = e.nativeEvent.contentOffset.y;
-                        const selectedIndex = snapToNearestItem(webMonthScrollRef, scrollY, months.length);
-                        if (selectedIndex >= 0 && selectedIndex < months.length) {
-                          const newDate = new Date(webTempDate);
-                          newDate.setMonth(selectedIndex);
-                          const maxDay = new Date(newDate.getFullYear(), newDate.getMonth() + 1, 0).getDate();
-                          if (newDate.getDate() > maxDay) {
-                            newDate.setDate(maxDay);
-                          }
-                          setWebTempDate(newDate);
-                          // Update day scroll if needed
-                          snapToItem(webDayScrollRef, newDate.getDate() - 1);
-                        }
+                        }, 150);
                       }}
                       scrollEventThrottle={16}
                     >
@@ -934,31 +917,21 @@ const DateOfBirthField: React.FC<DateOfBirthFieldProps> = ({
                       contentContainerStyle={styles.webDatePickerScrollContent as any}
                       showsVerticalScrollIndicator={false}
                       onScroll={(e) => {
+                        if (isSnapping.current) return;
                         const scrollY = e.nativeEvent.contentOffset.y;
-                        const selectedIndex = getNearestItemIndex(scrollY, days.length);
-                        if (selectedIndex >= 0 && selectedIndex < days.length && webTempDate.getDate() !== days[selectedIndex]) {
-                          const newDate = new Date(webTempDate);
-                          newDate.setDate(days[selectedIndex]);
-                          setWebTempDate(newDate);
-                        }
-                      }}
-                      onScrollEndDrag={(e) => {
-                        const scrollY = e.nativeEvent.contentOffset.y;
-                        const selectedIndex = snapToNearestItem(webDayScrollRef, scrollY, days.length);
-                        if (selectedIndex >= 0 && selectedIndex < days.length) {
-                          const newDate = new Date(webTempDate);
-                          newDate.setDate(days[selectedIndex]);
-                          setWebTempDate(newDate);
-                        }
-                      }}
-                      onMomentumScrollEnd={(e) => {
-                        const scrollY = e.nativeEvent.contentOffset.y;
-                        const selectedIndex = snapToNearestItem(webDayScrollRef, scrollY, days.length);
-                        if (selectedIndex >= 0 && selectedIndex < days.length) {
-                          const newDate = new Date(webTempDate);
-                          newDate.setDate(days[selectedIndex]);
-                          setWebTempDate(newDate);
-                        }
+                        if (dayScrollTimer.current) clearTimeout(dayScrollTimer.current);
+                        dayScrollTimer.current = setTimeout(() => {
+                          const selectedIndex = getNearestItemIndex(scrollY, days.length);
+                          snapToItem(webDayScrollRef, selectedIndex);
+                          if (selectedIndex >= 0 && selectedIndex < days.length) {
+                            setWebTempDate(prev => {
+                              if (prev.getDate() === days[selectedIndex]) return prev;
+                              const newDate = new Date(prev);
+                              newDate.setDate(days[selectedIndex]);
+                              return newDate;
+                            });
+                          }
+                        }, 150);
                       }}
                       scrollEventThrottle={16}
                     >
@@ -998,52 +971,24 @@ const DateOfBirthField: React.FC<DateOfBirthFieldProps> = ({
                       contentContainerStyle={styles.webDatePickerScrollContent as any}
                       showsVerticalScrollIndicator={false}
                       onScroll={(e) => {
+                        if (isSnapping.current) return;
                         const scrollY = e.nativeEvent.contentOffset.y;
-                        const selectedIndex = getNearestItemIndex(scrollY, years.length);
-                        if (selectedIndex >= 0 && selectedIndex < years.length && webTempDate.getFullYear() !== years[selectedIndex]) {
-                          const newDate = new Date(webTempDate);
-                          newDate.setFullYear(years[selectedIndex]);
-                          // Adjust day if needed (e.g., Feb 29 in non-leap year)
-                          const maxDay = new Date(newDate.getFullYear(), newDate.getMonth() + 1, 0).getDate();
-                          if (newDate.getDate() > maxDay) {
-                            newDate.setDate(maxDay);
+                        if (yearScrollTimer.current) clearTimeout(yearScrollTimer.current);
+                        yearScrollTimer.current = setTimeout(() => {
+                          const selectedIndex = getNearestItemIndex(scrollY, years.length);
+                          snapToItem(webYearScrollRef, selectedIndex);
+                          if (selectedIndex >= 0 && selectedIndex < years.length) {
+                            setWebTempDate(prev => {
+                              if (prev.getFullYear() === years[selectedIndex]) return prev;
+                              const newDate = new Date(prev);
+                              newDate.setFullYear(years[selectedIndex]);
+                              const maxDay = new Date(newDate.getFullYear(), newDate.getMonth() + 1, 0).getDate();
+                              if (newDate.getDate() > maxDay) newDate.setDate(maxDay);
+                              snapToItem(webDayScrollRef, newDate.getDate() - 1);
+                              return newDate;
+                            });
                           }
-                          setWebTempDate(newDate);
-                          // Update day scroll if needed
-                          snapToItem(webDayScrollRef, newDate.getDate() - 1);
-                        }
-                      }}
-                      onScrollEndDrag={(e) => {
-                        const scrollY = e.nativeEvent.contentOffset.y;
-                        const selectedIndex = snapToNearestItem(webYearScrollRef, scrollY, years.length);
-                        if (selectedIndex >= 0 && selectedIndex < years.length) {
-                          const newDate = new Date(webTempDate);
-                          newDate.setFullYear(years[selectedIndex]);
-                          // Adjust day if needed (e.g., Feb 29 in non-leap year)
-                          const maxDay = new Date(newDate.getFullYear(), newDate.getMonth() + 1, 0).getDate();
-                          if (newDate.getDate() > maxDay) {
-                            newDate.setDate(maxDay);
-                          }
-                          setWebTempDate(newDate);
-                          // Update day scroll if needed
-                          snapToItem(webDayScrollRef, newDate.getDate() - 1);
-                        }
-                      }}
-                      onMomentumScrollEnd={(e) => {
-                        const scrollY = e.nativeEvent.contentOffset.y;
-                        const selectedIndex = snapToNearestItem(webYearScrollRef, scrollY, years.length);
-                        if (selectedIndex >= 0 && selectedIndex < years.length) {
-                          const newDate = new Date(webTempDate);
-                          newDate.setFullYear(years[selectedIndex]);
-                          // Adjust day if needed (e.g., Feb 29 in non-leap year)
-                          const maxDay = new Date(newDate.getFullYear(), newDate.getMonth() + 1, 0).getDate();
-                          if (newDate.getDate() > maxDay) {
-                            newDate.setDate(maxDay);
-                          }
-                          setWebTempDate(newDate);
-                          // Update day scroll if needed
-                          snapToItem(webDayScrollRef, newDate.getDate() - 1);
-                        }
+                        }, 150);
                       }}
                       scrollEventThrottle={16}
                     >
@@ -1083,17 +1028,17 @@ const DateOfBirthField: React.FC<DateOfBirthFieldProps> = ({
                   </View>
                 </View>
 
-                {/* Action buttons */}
+                {/* Action buttons - Figma: Cancel (gray) | Confirm (teal) */}
                 <View style={styles.datePickerActions as any}>
                   <TouchableOpacity
-                    style={styles.datePickerButton as any}
+                    style={styles.datePickerCancelButton as any}
                     onPress={handleWebCancel}
                     activeOpacity={0.7}
                   >
                     <Text style={styles.datePickerCancelText as any}>Cancel</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
-                    style={styles.datePickerButton as any}
+                    style={styles.datePickerConfirmButton as any}
                     onPress={handleWebConfirm}
                     activeOpacity={0.7}
                   >
@@ -1165,7 +1110,7 @@ const DateOfBirthField: React.FC<DateOfBirthFieldProps> = ({
             >
               {/* Modal header */}
               <View style={styles.datePickerHeader as any}>
-                <Text style={styles.datePickerTitle as any}>Select date</Text>
+                <Text style={styles.datePickerTitle as any}>What's your date of birth?</Text>
               </View>
 
               {/* Date picker */}
@@ -1181,17 +1126,17 @@ const DateOfBirthField: React.FC<DateOfBirthFieldProps> = ({
                 />
               </View>
 
-              {/* Action buttons */}
+              {/* Action buttons - Figma: Cancel (gray) | Confirm (teal) */}
               <View style={styles.datePickerActions as any}>
                 <TouchableOpacity
-                  style={styles.datePickerButton as any}
+                  style={styles.datePickerCancelButton as any}
                   onPress={handleCancel}
                   activeOpacity={0.7}
                 >
                   <Text style={styles.datePickerCancelText as any}>Cancel</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={styles.datePickerButton as any}
+                  style={styles.datePickerConfirmButton as any}
                   onPress={handleConfirm}
                   activeOpacity={0.7}
                 >
@@ -2196,25 +2141,25 @@ const styles = StyleSheet.create({
   },
   datePickerModal: {
     backgroundColor: colors.white || '#FFFFFF',
-    borderRadius: 12,
+    borderRadius: 24,
     width: '90%',
     maxWidth: 400,
     overflow: 'hidden',
     ...(Platform.OS === 'web' && {
-      boxShadow: '0 4px 20px rgba(0, 0, 0, 0.15)',
+      boxShadow: '0 2px 16px rgba(89, 110, 124, 0.15)',
     }),
   },
   datePickerHeader: {
-    padding: spacing.lg,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E0E0E0',
+    paddingVertical: spacing.lg,
+    paddingHorizontal: spacing.lg,
     alignItems: 'center',
   },
   datePickerTitle: {
-    fontSize: 18,
-    fontWeight: '600',
+    fontSize: 22,
+    fontWeight: '700',
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
-    color: colors.textPrimary || '#333333',
+    color: colors.textPrimary || '#000000',
+    lineHeight: 28,
   },
   datePickerContainer: {
     padding: spacing.md,
@@ -2226,58 +2171,63 @@ const styles = StyleSheet.create({
   },
   datePickerActions: {
     flexDirection: 'row',
-    justifyContent: 'flex-end',
     padding: spacing.lg,
-    borderTopWidth: 1,
-    borderTopColor: '#E0E0E0',
-    gap: spacing.lg,
+    gap: spacing.sm,
   },
-  datePickerButton: {
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
+  datePickerCancelButton: {
+    flex: 1,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    backgroundColor: '#E8E8E8',
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  datePickerConfirmButton: {
+    flex: 1,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    backgroundColor: colors.brandTealLight || '#00A2B6',
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   datePickerCancelText: {
     fontSize: 16,
-    fontWeight: '400',
+    fontWeight: '600',
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
-    color: colors.textSecondary || '#666666',
+    color: colors.textPrimary || '#000000',
   },
   datePickerConfirmText: {
     fontSize: 16,
     fontWeight: '600',
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
-    color: colors.textPrimary || '#333333',
+    color: colors.white || '#FFFFFF',
   },
   // Web date picker styles
   webDatePickerContainer: {
     flexDirection: 'row',
-    height: 300,
-    paddingVertical: 0,
-    borderTopWidth: 1,
-    borderBottomWidth: 1,
-    borderColor: '#E0E0E0',
+    height: 280,
+    paddingVertical: spacing.md,
     position: 'relative',
   },
   webDatePickerColumn: {
     flex: 1,
     height: '100%',
-    borderRightWidth: 1,
-    borderRightColor: '#F0F0F0',
     position: 'relative',
     overflow: 'hidden',
+    zIndex: 1,
   },
   webDatePickerSelectionIndicator: {
     position: 'absolute',
     top: '50%',
-    left: 0,
-    right: 0,
+    left: 8,
+    right: 8,
     height: 40,
     marginTop: -20,
-    backgroundColor: 'rgba(0, 162, 182, 0.1)',
-    borderTopWidth: 1,
-    borderBottomWidth: 1,
-    borderColor: '#00A2B6',
-    zIndex: 1,
+    backgroundColor: colors.brandTealLight || '#00A2B6',
+    borderRadius: 4,
+    zIndex: 0,
     pointerEvents: 'none',
   },
   webDatePickerScroll: {
@@ -2285,7 +2235,7 @@ const styles = StyleSheet.create({
     height: '100%',
   },
   webDatePickerScrollContent: {
-    paddingVertical: 130, // Center padding to show selected item in middle
+    paddingVertical: 104, // (visibleHeight - itemHeight) / 2 = (248 - 40) / 2, aligns snapped item with fixed teal band
     alignItems: 'center',
     paddingHorizontal: spacing.sm,
   },
@@ -2294,24 +2244,25 @@ const styles = StyleSheet.create({
     width: '100%',
     justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: spacing.xs,
-    minWidth: 80,
+    paddingVertical: 10,
+    minWidth: 64,
+    borderRadius: 4,
   },
   webDatePickerItemSelected: {
     backgroundColor: 'transparent',
   },
   webDatePickerItemText: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '400',
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
-    color: colors.textSecondary || '#999999',
-    lineHeight: 24,
+    color: colors.textPrimary || '#333333',
+    lineHeight: 15,
   },
   webDatePickerItemTextSelected: {
-    fontSize: 22,
-    fontWeight: '600',
+    fontSize: 18,
+    fontWeight: '700',
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
-    color: colors.textPrimary || '#333333',
-    lineHeight: 28,
+    color: colors.white || '#FFFFFF',
+    lineHeight: 22,
   },
 });
