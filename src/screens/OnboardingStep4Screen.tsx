@@ -43,6 +43,7 @@ interface FieldProps {
   style?: any;
   keyboardType?: 'default' | 'numeric' | 'number-pad' | 'phone-pad';
   numericOnly?: boolean;
+  error?: boolean;
 }
 
 interface CountryFieldProps {
@@ -53,6 +54,7 @@ interface CountryFieldProps {
   width?: number;
   style?: any;
   onOpen?: () => void;
+  error?: boolean;
 }
 
 // Check Icon Component
@@ -91,11 +93,12 @@ const Field: React.FC<FieldProps> = ({
   style,
   keyboardType = 'default',
   numericOnly = false,
+  error,
 }) => {
   const [isFocused, setIsFocused] = useState(false);
   const inputRef = useRef<any>(null);
   const hasValue = value.trim().length > 0;
-  const showCheck = hasValue && !isFocused;
+  const showCheck = hasValue && !isFocused && !error;
 
   const handleContainerPress = () => {
     if (inputRef.current) {
@@ -121,7 +124,7 @@ const Field: React.FC<FieldProps> = ({
 
   return (
     <TouchableOpacity
-      style={[styles.fieldContainer, width && { width }, style]}
+      style={[styles.fieldContainer, width && { width }, style, error && styles.fieldError]}
       activeOpacity={1}
       onPress={handleContainerPress}
     >
@@ -443,10 +446,11 @@ const CountryField: React.FC<CountryFieldProps> = ({
   width,
   style,
   onOpen,
+  error,
 }) => {
   const [countryCode, setCountryCode] = useState<any>('US');
   const hasValue = value.trim().length > 0;
-  const showCheck = hasValue;
+  const showCheck = hasValue && !error;
 
   // Try to find country code from country name
   const getCountryCodeFromName = (countryName: string): string => {
@@ -497,7 +501,7 @@ const CountryField: React.FC<CountryFieldProps> = ({
     return (
       <>
         <TouchableOpacity
-          style={[styles.fieldContainer, width && { width }, style]}
+          style={[styles.fieldContainer, width && { width }, style, error && styles.fieldError]}
           activeOpacity={0.7}
           onPress={() => onOpen?.()}
         >
@@ -525,7 +529,7 @@ const CountryField: React.FC<CountryFieldProps> = ({
     // Fallback if CountryPicker is not available
     return (
       <TouchableOpacity
-        style={[styles.fieldContainer, width && { width }, style]}
+        style={[styles.fieldContainer, width && { width }, style, error && styles.fieldError]}
         activeOpacity={0.7}
       >
         <PencilIcon size={24} />
@@ -549,7 +553,7 @@ const CountryField: React.FC<CountryFieldProps> = ({
   return (
     <>
       <TouchableOpacity
-        style={[styles.fieldContainer, width && { width }, style]}
+        style={[styles.fieldContainer, width && { width }, style, error && styles.fieldError]}
         activeOpacity={0.7}
         onPress={() => onOpen?.()}
       >
@@ -581,6 +585,7 @@ interface PronounFieldProps {
   width?: number;
   style?: any;
   onOpen?: () => void;
+  error?: boolean;
 }
 
 const PRONOUN_OPTIONS = ['Bro', 'Sis', 'Name Only'];
@@ -593,9 +598,10 @@ const PronounField: React.FC<PronounFieldProps> = ({
   width,
   style,
   onOpen,
+  error,
 }) => {
   const hasValue = value.trim().length > 0;
-  const showCheck = hasValue;
+  const showCheck = hasValue && !error;
 
   // Get display text from value
   const getDisplayText = (val: string): string => {
@@ -612,7 +618,7 @@ const PronounField: React.FC<PronounFieldProps> = ({
   return (
     <>
       <TouchableOpacity
-        style={[styles.fieldContainer, width && { width }, style]}
+        style={[styles.fieldContainer, width && { width }, style, error && styles.fieldError]}
         activeOpacity={0.7}
         onPress={() => onOpen?.()}
       >
@@ -1192,6 +1198,9 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
     initialData.dateOfBirth || ''
   );
   const [dateOfBirthError, setDateOfBirthError] = useState<string>('');
+  const [nameError, setNameError] = useState(false);
+  const [locationError, setLocationError] = useState(false);
+  const [pronounError, setPronounError] = useState(false);
   const [pronoun, setPronoun] = useState<string>(initialData.pronouns || '');
   const [isUploading, setIsUploading] = useState(false);
   
@@ -1251,18 +1260,26 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
   const keyboardAwareScrollViewRef = useRef<any>(null);
 
   const handleNext = async () => {
-    // Validate date of birth before proceeding
+    // Validate all required fields at once so user sees all errors
+    let hasError = false;
+    if (!name.trim()) { setNameError(true); hasError = true; }
+    if (!location.trim()) { setLocationError(true); hasError = true; }
+    if (!pronoun.trim()) { setPronounError(true); hasError = true; }
+
+    // Validate date of birth
     if (!dateOfBirth || dateOfBirth.trim() === '') {
       setDateOfBirthError('Date of birth is required');
-      return;
+      hasError = true;
+    } else {
+      const { isValidDateOfBirth } = await import('../utils/ageCalculation');
+      const validation = isValidDateOfBirth(dateOfBirth);
+      if (!validation.valid) {
+        setDateOfBirthError(validation.error || 'Invalid date of birth');
+        hasError = true;
+      }
     }
 
-    const { isValidDateOfBirth } = await import('../utils/ageCalculation');
-    const validation = isValidDateOfBirth(dateOfBirth);
-    if (!validation.valid) {
-      setDateOfBirthError(validation.error || 'Invalid date of birth');
-      return;
-    }
+    if (hasError) return;
 
     setDateOfBirthError('');
 
@@ -1412,10 +1429,12 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
               value={name}
               onChangeText={(text) => {
                 setName(text);
+                setNameError(false);
                 updateFormData({ nickname: text });
               }}
               placeholder="Nickname*"
                   width={357}
+              error={nameError}
             />
 
             <View style={styles.rowContainer}>
@@ -1424,12 +1443,14 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
                 value={location}
                 onSelect={(countryName) => {
                   setLocation(countryName);
+                  setLocationError(false);
                   updateFormData({ location: countryName });
                   setActiveModal(null);
                 }}
                 placeholder="Where are you from?*"
                 width={212}
                 onOpen={() => setActiveModal('country')}
+                error={locationError}
               />
               <DateOfBirthField
                 label="Age"
@@ -1463,12 +1484,14 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
               value={pronoun}
               onSelect={(selectedPronoun) => {
                 setPronoun(selectedPronoun);
+                setPronounError(false);
                 updateFormData({ pronouns: selectedPronoun });
                 setActiveModal(null);
               }}
               placeholder="How should we address you?*"
               width={357}
               onOpen={() => setActiveModal('pronoun')}
+              error={pronounError}
             />
             </View>
           </View>
@@ -1549,6 +1572,7 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
                 ]}
                 onPress={() => {
                   setLocation(country);
+                  setLocationError(false);
                   updateFormData({ location: country });
                   setActiveModal(null);
                   setCountrySearchQuery('');
@@ -1611,6 +1635,7 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
                   onPress={() => {
                     const optionValue = option.toLowerCase();
                     setPronoun(optionValue);
+                    setPronounError(false);
                     updateFormData({ pronouns: optionValue });
                     setActiveModal(null);
                   }}
