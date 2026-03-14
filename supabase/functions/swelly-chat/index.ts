@@ -56,20 +56,23 @@ function checkRateLimit(userId: string): { allowed: boolean; remaining: number; 
   return { allowed: true, remaining: RATE_LIMIT_CONFIG.maxRequests - entry.count, resetTime: entry.resetTime }
 }
 
-// Lifestyle image filenames in the bucket. Must match app imageService LIFESTYLE_BUCKET_IMAGE_FILENAMES.
+// Lifestyle image filenames in the lifestyle-thumbnails bucket. Must match app imageService LIFESTYLE_BUCKET_IMAGE_FILENAMES.
 const LIFESTYLE_IMAGE_FILENAMES = new Set([
   'Adventure_Explore.jpg', 'Backpacking.jpg', 'Baseball_Softball.jpg', 'Basketball.jpg', 'Beach_Cleanup.jpg',
   'Breathe_Work.jpg', 'Calisthenics_Body_Weight.jpg', 'Coffee.jpg', 'Cold_Plunges_Ice_Bath.jpg', 'Concerts_Festivals.jpg',
-  'Coral_Reef_Conservation.jpg', 'Craft_Beer.jpg', 'Cycling_Triathlon.jpg', 'Dance.jpg', 'Dirt_Biking_Motocross.jpg',
-  'Dirtbiking.jpg', 'Fly_Fishing.jpg', 'Football.jpg', 'Free_Diving.jpg', 'Gym_Fitness_Workout_Crossfit.jpg',
-  'Ice_Hockey.jpg', 'Ice_Skating.jpg', 'Jetskiing.jpg', 'Kayaking.jpg', 'Kite_Surfing.jpg', 'Live_Music.jpg',
+  'Coral_Reef_Conservation.jpg', 'Craft_Beer.jpg', 'Cycling_Triathlon.jpg', 'Dance.jpg', 'Dart.jpg',
+  'Dirt_Biking_Motocross.jpg', 'Dirtbiking.jpg', 'Fishing.jpg', 'Fly_Fishing.jpg', 'Football.jpg',
+  'Free_Diving.jpg', 'Golf.jpg', 'Gym_Fitness_Workout_Crossfit.jpg', 'Hiking.jpg', 'Ice_Hockey.jpg',
+  'Ice_Skating.jpg', 'Jetskiing.jpg', 'Kayaking.jpg', 'Kite_Surfing.jpg', 'Live_Music.jpg',
   'Local_Culture.jpg', 'Local_Food.jpg', 'Longboard(skate).jpg', 'Martial_Arts.jpg', 'Mindfullness_Meditation.jpg',
   'Mobility_Training_Stretching.jpg', 'Mountain_Biking.jpg', 'Music_Festivals.jpg', 'Nature.jpg', 'Nature_Conservation.jpg',
-  'Ocean_Conservation.jpg', 'Overlanding_Van_Life.jpg', 'Paragliding.jpg', 'Pickleball.jpg', 'Pilates.jpg', 'Pingpong.jpg',
-  'Playing_Music.jpg', 'Pool_Billiards_Snooker.jpg', 'Rugby.jpg', 'SUP_Surfing.jpg', 'Safari_Wild_Animal.jpg', 'Scuba_Diving.jpg',
-  'Skydiving.jpg', 'Snorkeling.jpg', 'Snowmobiling.jpg', 'Soccer.jpg', 'Spear_Fishing.jpg', 'Spin_Fishing.jpg',
-  'Swimming.jpg', 'Tennis.jpg', 'Travel.jpg', 'Volleyball.jpg', 'Whale_Watching_Dolphin_Watching.jpg', 'Wildlifle_Conservation.jpg',
-  'Wind_Surfing.jpg', 'Wing_Foiling.jpg', 'yoga.jpg',
+  'Nightlife.jpg', 'Ocean_Conservation.jpg', 'Overlanding_Van_Life.jpg', 'Paragliding.jpg', 'Photography.jpg',
+  'Pickleball.jpg', 'Pilates.jpg', 'Pingpong.jpg', 'Playing_Music.jpg', 'Pool_Billiards_Snooker.jpg',
+  'Reading.jpg', 'Rock_Climbing.jpg', 'Rugby.jpg', 'Running.jpg', 'SUP_Surfing.jpg', 'Safari_Wild_Animal.jpg',
+  'Sailing.jpg', 'Scuba_Diving.jpg', 'Skateboarding.jpg', 'Skiing_Snowboarding.jpg', 'Skydiving.jpg',
+  'Snorkeling.jpg', 'Snowmobiling.jpg', 'Soccer.jpg', 'Spear_Fishing.jpg', 'Spin_Fishing.jpg',
+  'Swimming.jpg', 'Tennis.jpg', 'Travel.jpg', 'Volleyball.jpg', 'Wakeboarding_Waterskiing.jpg',
+  'Whale_Watching_Dolphin_Watching.jpg', 'Wildlife_Conservation.jpg', 'Wind_Surfing.jpg', 'Wing_Foiling.jpg', 'Yoga.jpg',
 ])
 const LIFESTYLE_IMAGE_FILENAMES_LIST = [...LIFESTYLE_IMAGE_FILENAMES].join(', ')
 
@@ -193,12 +196,9 @@ When is_finished is true, the data object MUST have this exact structure:
   "travel_type": "budget" | "mid" | "high" | "premium",
   "travel_buddies": "solo" | "2" | "crew",
   "lifestyle_keywords": ["keyword1", "keyword2", ...],
-  "lifestyle_keyword_images": {"keyword1": "ExactFilename.jpg" | null, "keyword2": null, ...},
   "wave_type_keywords": ["keyword1", "keyword2", ...],
   "onboarding_summary_text": "A brief 2-3 sentence summary of the user's travel preferences and lifestyle"
 }
-
-LIFESTYLE IMAGES: We have existing images in our bucket. For each entry in lifestyle_keywords, try to match the user's lifestyle text or interests to ONE of these exact filenames (use ONLY these): ${LIFESTYLE_IMAGE_FILENAMES_LIST}. Examples: party/nightlife -> "Nightlife.jpg", yoga -> "yoga.jpg", local food -> "localFood.jpg", volleyball -> "Volleyball.jpg", sustainability -> "Sustainability.jpg" or "Sustainability_2.jpg", climbing -> null if no match. Also match indirect phrases: e.g. going out/bars/parties → Nightlife.jpg; stretching/wellness → yoga.jpg; foodie/local cuisine/street food → localFood.jpg; eco/green/environment → Sustainability.jpg; diving/snorkeling → ScubaDiving.jpg; fishing/angling → Spin_Fishing.jpg; trail running/trails → TrailRunning.jpg; giving back/volunteer → Volunteerism.jpg; walking/strolls → Walks.jpg; fitness/gym/workout → Training.jpg; community/locals/surf crew → SurfCommunity.jpg; climbing/bouldering/art/music → null. Set lifestyle_keyword_images[keyword] to the filename if it fits, or null if none fit. Every key in lifestyle_keyword_images must match lifestyle_keywords exactly (one entry per keyword). When you return a filename we use the existing bucket image; when you return null the app will fetch from Pexels and save to the bucket. User experience is unchanged; this only optimizes which images we use.
 
 NOTE: For USA destinations, the "state" field is REQUIRED. For non-USA destinations, DO NOT include a "state" field.
 
@@ -275,7 +275,6 @@ support sustainabilty, not too much on it. doing valley ball and climbing. love 
         "travel_type": "budget",
         "travel_buddies": "2",
         "lifestyle_keywords": ["remote-work", "party", "local culture", "nature", "sustainability", "volleyball", "climbing", "exploring", "mobility"],
-        "lifestyle_keyword_images": {"remote-work": null, "party": "Nightlife.jpg", "local culture": null, "nature": null, "sustainability": "Sustainability.jpg", "volleyball": "Volleyball.jpg", "climbing": null, "exploring": null, "mobility": null},
         "wave_type_keywords": ["barrels", "big waves", "fast waves", "low crowd", "reef", "sand"],
         "onboarding_summary_text": "Budget traveler who typically travels solo or with one friend. Prefers barrels and big/fast waves, comfortable on both reef and sand breaks. Enjoys remote work, party scene, local culture, nature exploration, sustainability, volleyball, climbing, and mobility work."
     }
@@ -360,18 +359,144 @@ VOCABULARY INTEGRATION: Use neutral addressing terms (${vocabularyTerms}) along 
 }
 
 /**
- * Ensure lifestyle_keyword_images exists and is valid: one entry per lifestyle_keyword,
- * values are either a string from LIFESTYLE_IMAGE_FILENAMES or null. Mutates data in place.
+ * Match lifestyle keywords to image filenames via a separate focused LLM call.
+ * Returns a mapping of each keyword to a bucket filename or null.
  */
-function ensureLifestyleKeywordImages(data: any): void {
-  if (!data || !Array.isArray(data.lifestyle_keywords)) return
-  const allowed = LIFESTYLE_IMAGE_FILENAMES
-  const images: Record<string, string | null> = data.lifestyle_keyword_images && typeof data.lifestyle_keyword_images === 'object' ? { ...data.lifestyle_keyword_images } : {}
-  for (const keyword of data.lifestyle_keywords) {
-    const v = images[keyword]
-    images[keyword] = (typeof v === 'string' && allowed.has(v)) ? v : null
+async function matchLifestyleKeywordsToImages(
+  lifestyleKeywords: string[],
+  contextText?: string
+): Promise<Record<string, string | null>> {
+  if (!lifestyleKeywords.length) return {}
+
+  const prompt = `You are an image matcher. Given lifestyle keywords, match each to the BEST image filename from the list below. Return a JSON object mapping each keyword to a filename or null.
+
+IMAGE FILES (use EXACTLY these names):
+${LIFESTYLE_IMAGE_FILENAMES_LIST}
+
+MATCHING EXAMPLES:
+- Adventure_Explore.jpg: adventure, exploring, exploration, backpacking trips, thrill seeking
+- Backpacking.jpg: backpacking, backpacker, travel with backpack, hostel hopping
+- Baseball_Softball.jpg: baseball, softball, batting, pitching
+- Basketball.jpg: basketball, hoops, shooting baskets, pickup games
+- Beach_Cleanup.jpg: beach cleanup, coastal cleanup, beach volunteering, ocean cleanup
+- Breathe_Work.jpg: breathwork, breathing exercises, breathe work, pranayama, wim hof breathing
+- Calisthenics_Body_Weight.jpg: calisthenics, bodyweight training, pullups, pushups, street workout
+- Coffee.jpg: coffee, coffee shops, barista, espresso, cafe culture
+- Cold_Plunges_Ice_Bath.jpg: cold plunge, ice bath, cold water therapy, cold exposure
+- Concerts_Festivals.jpg: concerts, live shows, music events, festival going
+- Coral_Reef_Conservation.jpg: coral reef, reef conservation, reef restoration, marine biology
+- Craft_Beer.jpg: craft beer, brewery, beer tasting, microbrewery, brewing
+- Cycling_Triathlon.jpg: cycling, triathlon, road biking, bike racing, ironman
+- Dance.jpg: dancing, dance, salsa, bachata, hip hop dance, ballroom
+- Dart.jpg: darts, dart throwing, pub games
+- Dirt_Biking_Motocross.jpg: dirt biking, motocross, enduro, off-road motorcycle
+- Fishing.jpg: fishing, angling, catching fish
+- Fly_Fishing.jpg: fly fishing, fly casting, river fishing, trout fishing
+- Football.jpg: football, american football, NFL, throwing football
+- Free_Diving.jpg: freediving, free diving, breath hold diving, apnea
+- Golf.jpg: golf, golfing, driving range, putting
+- Gym_Fitness_Workout_Crossfit.jpg: gym, fitness, workout, crossfit, weight training, lifting, exercise, working out, strength training
+- Hiking.jpg: hiking, trekking, trail walking, hill walking, mountain walking
+- Ice_Hockey.jpg: ice hockey, hockey, skating rink, puck
+- Ice_Skating.jpg: ice skating, figure skating, skating rink
+- Jetskiing.jpg: jet ski, jetski, jetskiing, water scooter
+- Kayaking.jpg: kayaking, kayak, paddling, canoeing, sea kayak
+- Kite_Surfing.jpg: kitesurfing, kite surfing, kite boarding, kiteboarding
+- Live_Music.jpg: live music, live bands, jam sessions, open mic
+- Local_Culture.jpg: local culture, cultural experiences, cultural immersion, traditions, heritage, cultural exploration
+- Local_Food.jpg: local food, street food, local cuisine, foodie, food tours, culinary experiences, cooking
+- Longboard(skate).jpg: longboarding, longboard skating, cruising, carving
+- Martial_Arts.jpg: martial arts, karate, judo, taekwondo, MMA, boxing, muay thai, jiu jitsu, BJJ
+- Mindfullness_Meditation.jpg: mindfulness, meditation, mindful practice, zen, contemplation
+- Mobility_Training_Stretching.jpg: mobility, stretching, flexibility, foam rolling, recovery, mobility training
+- Mountain_Biking.jpg: mountain biking, MTB, trail riding, downhill biking
+- Music_Festivals.jpg: music festivals, festival, coachella, burning man, festival season
+- Nature.jpg: nature, outdoors, wilderness, forests, natural beauty, parks, scenery
+- Nature_Conservation.jpg: nature conservation, environmental conservation, conservation, eco, sustainability, green living, environment
+- Nightlife.jpg: nightlife, parties, partying, going out, clubs, clubbing, bars, nightclub, bar hopping
+- Ocean_Conservation.jpg: ocean conservation, marine conservation, save the ocean, ocean cleanup
+- Overlanding_Van_Life.jpg: overlanding, van life, camper van, road trip, RV, living in a van
+- Paragliding.jpg: paragliding, paraglide, hang gliding
+- Photography.jpg: photography, photo, camera, landscape photography, street photography
+- Pickleball.jpg: pickleball, paddle sport
+- Pilates.jpg: pilates, reformer pilates, mat pilates
+- Pingpong.jpg: ping pong, table tennis, pingpong
+- Playing_Music.jpg: playing music, guitar, piano, drums, musical instrument, musician, jamming
+- Pool_Billiards_Snooker.jpg: pool, billiards, snooker, shooting pool
+- Reading.jpg: reading, books, book club, literature
+- Rock_Climbing.jpg: rock climbing, climbing, bouldering, sport climbing, indoor climbing
+- Rugby.jpg: rugby, rugby union, rugby league
+- Running.jpg: running, jogging, trail running, marathon, sprinting, 5K
+- SUP_Surfing.jpg: SUP, stand up paddle, paddle boarding, SUP surfing
+- Safari_Wild_Animal.jpg: safari, wild animals, wildlife watching, game drive, big five
+- Sailing.jpg: sailing, sailboat, yachting, catamaran
+- Scuba_Diving.jpg: scuba diving, diving, scuba, underwater diving
+- Skateboarding.jpg: skateboarding, skating, skatepark, street skating, kickflip
+- Skiing_Snowboarding.jpg: skiing, snowboarding, snow sports, ski resort, powder, slopes
+- Skydiving.jpg: skydiving, sky diving, parachuting, base jumping
+- Snorkeling.jpg: snorkeling, snorkel, reef snorkeling
+- Snowmobiling.jpg: snowmobiling, snowmobile, snow machine
+- Soccer.jpg: soccer, football (non-US), futbol, pickup soccer
+- Spear_Fishing.jpg: spear fishing, spearfishing, underwater hunting
+- Spin_Fishing.jpg: spin fishing, shore fishing, surf fishing, beach fishing
+- Swimming.jpg: swimming, swim, laps, pool swimming, open water swimming
+- Tennis.jpg: tennis, tennis court, racket sport
+- Travel.jpg: travel, traveling, wanderlust, globetrotting, world travel, sightseeing
+- Volleyball.jpg: volleyball, beach volleyball, indoor volleyball, spike
+- Wakeboarding_Waterskiing.jpg: wakeboarding, water skiing, waterskiing, wake surfing
+- Whale_Watching_Dolphin_Watching.jpg: whale watching, dolphin watching, marine life, whale tour
+- Wildlife_Conservation.jpg: wildlife conservation, animal conservation, endangered species, wildlife protection
+- Wind_Surfing.jpg: windsurfing, wind surfing, sailboarding
+- Wing_Foiling.jpg: wing foiling, wing surf, foil surfing, hydrofoil
+- Yoga.jpg: yoga, yoga practice, vinyasa, ashtanga, hot yoga, yoga retreat
+
+RULES:
+1. Match each keyword to the SINGLE BEST image. Always try to find a match.
+2. Only return null if the keyword is truly unrelated to ANY image (very rare).
+3. Return ONLY valid JSON: {"keyword1": "Filename.jpg", "keyword2": null, ...}
+
+Keywords to match: ${JSON.stringify(lifestyleKeywords)}
+${contextText ? `\nContext from conversation: "${contextText}"` : ''}`
+
+  try {
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0,
+        response_format: { type: 'json_object' },
+      }),
+    })
+
+    if (!response.ok) {
+      console.error('[matchLifestyleKeywordsToImages] OpenAI API error:', response.status)
+      return Object.fromEntries(lifestyleKeywords.map(k => [k, null]))
+    }
+
+    const result = await response.json()
+    const content = result.choices?.[0]?.message?.content
+    if (!content) {
+      return Object.fromEntries(lifestyleKeywords.map(k => [k, null]))
+    }
+
+    const parsed = JSON.parse(content)
+    // Validate: ensure all values are either valid filenames or null
+    const validated: Record<string, string | null> = {}
+    for (const keyword of lifestyleKeywords) {
+      const filename = parsed[keyword]
+      validated[keyword] = (typeof filename === 'string' && LIFESTYLE_IMAGE_FILENAMES.has(filename))
+        ? filename : null
+    }
+    return validated
+  } catch (error) {
+    console.error('[matchLifestyleKeywordsToImages] Error:', error)
+    return Object.fromEntries(lifestyleKeywords.map(k => [k, null]))
   }
-  data.lifestyle_keyword_images = images
 }
 
 /**
@@ -916,7 +1041,16 @@ serve(async (req: Request) => {
         if (parsed.is_finished && parsed.data) {
           console.log('Conversation finished. Original data:', JSON.stringify(parsed.data, null, 2))
           transformedData = transformSwellyData(parsed.data)
-          ensureLifestyleKeywordImages(transformedData)
+
+          // Match lifestyle keywords to image filenames via separate LLM call
+          if (transformedData.lifestyle_keywords?.length) {
+            transformedData.lifestyle_keyword_images = await matchLifestyleKeywordsToImages(
+              transformedData.lifestyle_keywords,
+              body.message
+            )
+          } else {
+            transformedData.lifestyle_keyword_images = {}
+          }
 
           // Process and enrich destinations array with related area names
           if (transformedData.destinations_array && Array.isArray(transformedData.destinations_array)) {
@@ -1040,7 +1174,16 @@ serve(async (req: Request) => {
         if (parsed.is_finished && parsed.data) {
           console.log('Conversation finished (continue). Original data:', JSON.stringify(parsed.data, null, 2))
           transformedData = transformSwellyData(parsed.data)
-          ensureLifestyleKeywordImages(transformedData)
+
+          // Match lifestyle keywords to image filenames via separate LLM call
+          if (transformedData.lifestyle_keywords?.length) {
+            transformedData.lifestyle_keyword_images = await matchLifestyleKeywordsToImages(
+              transformedData.lifestyle_keywords,
+              body.message
+            )
+          } else {
+            transformedData.lifestyle_keyword_images = {}
+          }
 
           // Process and enrich destinations array with related area names
           if (transformedData.destinations_array && Array.isArray(transformedData.destinations_array)) {

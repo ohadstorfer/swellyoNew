@@ -105,6 +105,8 @@ const SWIPE_THRESHOLD = 20;
 interface SavedPlace {
   placeId: string;
   displayLabel: string;
+  /** All area parts from the normalized address — kept for the data layer. */
+  areaParts?: string[];
 }
 
 function parseInitialPlaces(initialAreas: string | undefined): SavedPlace[] {
@@ -258,7 +260,7 @@ export const DestinationMapPickerCard = forwardRef<
 
     if (!isReadOnly) {
       onDataChangeRef.current({
-        areas: places.map((p) => p.displayLabel),
+        areas: places.flatMap((p) => p.areaParts && p.areaParts.length > 0 ? p.areaParts : [p.displayLabel]),
         timeInDays,
         timeInText,
       });
@@ -345,26 +347,26 @@ export const DestinationMapPickerCard = forwardRef<
       });
 
       setPlaces((prev) => {
-        const existingLabels = new Set(prev.map((p) => p.displayLabel.toLowerCase()));
         const existingPlaceIds = new Set(prev.filter((p) => p.placeId).map((p) => p.placeId));
 
         // Skip entirely if we already have this placeId
         if (place.placeId && existingPlaceIds.has(place.placeId)) return prev;
 
-        // Only add the normalized area parts (not the raw formatted_address)
-        const newLabels = normalized.area.filter(
-          (part) => !existingLabels.has(part.toLowerCase())
-        );
+        // Use the place name as the single display label; keep all area parts for data
+        const mainName = (place.name || normalized.area[0] || '').trim();
+        if (!mainName) return prev;
 
-        if (newLabels.length === 0) return prev;
+        // Skip if we already show this name
+        const existingLabels = new Set(prev.map((p) => p.displayLabel.toLowerCase()));
+        if (existingLabels.has(mainName.toLowerCase())) return prev;
 
         return [
           ...prev,
-          // First label gets the placeId so duplicate-by-id check works next time
-          ...newLabels.map((label, i) => ({
-            placeId: i === 0 ? (place.placeId || '') : '',
-            displayLabel: label,
-          })),
+          {
+            placeId: place.placeId || '',
+            displayLabel: mainName,
+            areaParts: normalized.area,
+          },
         ];
       });
 

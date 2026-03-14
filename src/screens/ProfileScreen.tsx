@@ -21,7 +21,7 @@ import { Text as RNText } from 'react-native';
 import { colors, spacing, typography } from '../styles/theme';
 import { supabaseDatabaseService, SupabaseSurfer } from '../services/database/supabaseDatabaseService';
 import { supabase } from '../config/supabase';
-import { getImageUrl, getCountryImageFromStorage, getCountryImageFallback, getCountryImageFromPexels, getLifestyleImageFromStorage, getLifestyleImageFromPexels, uploadLifestyleImageToStorage, uploadCountryImageToStorage } from '../services/media/imageService';
+import { getImageUrl, getCountryImageFromStorage, getCountryImageFallback, getCountryImageFromPexels, getLifestyleImageFromPexels, uploadCountryImageToStorage } from '../services/media/imageService';
 import { getSurfLevelVideoFromStorage } from '../services/media/videoService';
 import { getVideoPreloadStatus } from '../services/media/videoPreloadService';
 import { getCountryFlag } from '../utils/countryFlags';
@@ -920,10 +920,8 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
   // Track which countries have failed bucket loads (so we know to use Pexels)
   const [failedBucketCountries, setFailedBucketCountries] = useState<Set<string>>(new Set());
   
-  // Track which lifestyle keywords have failed saved-URL load (so we try bucket next)
+  // Track which lifestyle keywords have failed saved-URL load (so we try Pexels)
   const [failedSavedLifestyles, setFailedSavedLifestyles] = useState<Set<string>>(new Set());
-  // Track which lifestyle keywords have failed bucket loads (so we know to use Pexels)
-  const [failedBucketLifestyles, setFailedBucketLifestyles] = useState<Set<string>>(new Set());
   const [pexelsLifestyleImages, setPexelsLifestyleImages] = useState<{ [keyword: string]: string | null }>({});
 
 
@@ -975,7 +973,6 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
       setLoading(false);
       // Reset lifestyle image failure state when profile changes (don't inherit previous user's failures)
       setFailedSavedLifestyles(new Set());
-      setFailedBucketLifestyles(new Set());
 
       // Preload surf level video for other users (non-blocking)
       if (userId && surferData) {
@@ -2013,26 +2010,15 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
                 {lifestyleKeywords.slice(0, 6).map((keyword, index) => {
                   const rawSaved = profileData.lifestyle_image_urls?.[keyword];
                   const savedUrl = (typeof rawSaved === 'string' && rawSaved.trim() !== '') ? rawSaved.trim() : null;
-                  const bucketUrl = getLifestyleImageFromStorage(keyword);
                   const pexelsImageUrl = pexelsLifestyleImages[keyword] || null;
                   const useSavedUrl = savedUrl && !failedSavedLifestyles.has(keyword);
-                  const useBucketUrl = bucketUrl && !failedBucketLifestyles.has(keyword);
-                  const displayUrl = useSavedUrl ? savedUrl : (useBucketUrl ? bucketUrl : null);
-                  const isShowingSavedUrl = !!useSavedUrl && displayUrl === savedUrl;
                   const iconName = LIFESTYLE_ICON_MAP[keyword.toLowerCase()] || 'ellipse-outline';
 
-                  const handleSavedUrlError = () => {
+                  const handleSavedUrlError = async () => {
                     if (__DEV__) {
-                      console.warn(`[ProfileScreen] Lifestyle saved URL failed to load for ${keyword}, trying bucket`);
+                      console.warn(`[ProfileScreen] Lifestyle saved URL failed to load for ${keyword}, trying Pexels`);
                     }
                     setFailedSavedLifestyles((prev) => new Set(prev).add(keyword));
-                  };
-
-                  const handleBucketImageError = async () => {
-                    if (__DEV__) {
-                      console.warn(`[ProfileScreen] Lifestyle bucket image failed to load: ${bucketUrl}, trying Pexels`);
-                    }
-                    setFailedBucketLifestyles((prev) => new Set(prev).add(keyword));
                     if (!pexelsImageUrl) {
                       const pexelsUrl = await getLifestyleImageFromPexels(keyword);
                       if (pexelsUrl) {
@@ -2040,15 +2026,6 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
                           ...prev,
                           [keyword]: pexelsUrl,
                         }));
-                        uploadLifestyleImageToStorage(keyword, pexelsUrl)
-                          .then((storageUrl) => {
-                            if (storageUrl && __DEV__) {
-                              console.log(`[ProfileScreen] Lifestyle image uploaded to storage: ${keyword} -> ${storageUrl}`);
-                            }
-                          })
-                          .catch((err) => {
-                            console.warn(`[ProfileScreen] Failed to upload lifestyle image to storage:`, err);
-                          });
                       }
                     }
                   };
@@ -2056,13 +2033,13 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
                   return (
                     <View key={index} style={styles.lifestyleItem}>
                       <View style={styles.lifestyleImageContainer}>
-                        {displayUrl ? (
+                        {useSavedUrl ? (
                           <Image
-                            key={`${isShowingSavedUrl ? 'saved' : 'bucket'}-${keyword}`}
-                            source={{ uri: displayUrl }}
+                            key={`saved-${keyword}`}
+                            source={{ uri: savedUrl }}
                             style={styles.lifestyleImage}
                             resizeMode="cover"
-                            onError={isShowingSavedUrl ? handleSavedUrlError : handleBucketImageError}
+                            onError={handleSavedUrlError}
                           />
                         ) : pexelsImageUrl ? (
                           <Image

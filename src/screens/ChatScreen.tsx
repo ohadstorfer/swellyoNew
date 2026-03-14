@@ -18,7 +18,7 @@ import { Text } from '../components/Text';
 import { colors, spacing, typography, borderRadius } from '../styles/theme';
 import { swellyService, SwellyChatResponse } from '../services/swelly/swellyService';
 import { useOnboarding } from '../context/OnboardingContext';
-import { getImageUrl, getLifestyleImageBucketUrlForFilename, resolveLifestyleKeywordToImageUrl, LIFESTYLE_BUCKET_IMAGE_FILENAMES, getLifestyleImageFromStorage } from '../services/media/imageService';
+import { getImageUrl, getLifestyleImageBucketUrlForFilename, getLifestyleImageFromPexels } from '../services/media/imageService';
 import { supabase, isSupabaseConfigured } from '../config/supabase';
 import { supabaseDatabaseService } from '../services/database/supabaseDatabaseService';
 import { messagingService } from '../services/messaging/messagingService';
@@ -195,9 +195,8 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
   }, [formData]); // Re-run if formData changes
 
   /**
-   * Save onboarding result immediately (sync-only lifestyle URLs), then enrich
-   * missing lifestyle image URLs in background and patch. Ensures user data
-   * is never dropped due to Pexels/upload timing or failures.
+   * Save onboarding result with server-provided lifestyle image filenames,
+   * then enrich any missing keywords via Pexels fallback.
    */
   const saveOnboardingResultAndEnrichImages = async (
     data: NonNullable<SwellyChatResponse['data']>,
@@ -205,53 +204,57 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
   ): Promise<void> => {
     const lifestyle_keywords = data.lifestyle_keywords || [];
     const lifestyle_keyword_images = data.lifestyle_keyword_images || {};
-    const syncUrls: Record<string, string> = {};
+
+    // Build URLs from server-provided filenames
+    const imageUrls: Record<string, string> = {};
+    const missingKeywords: string[] = [];
+
     for (const keyword of lifestyle_keywords) {
       const filename = lifestyle_keyword_images[keyword];
-      let url: string | null = null;
-      if (filename && typeof filename === 'string' && LIFESTYLE_BUCKET_IMAGE_FILENAMES.has(filename)) {
-        url = getLifestyleImageBucketUrlForFilename(filename);
-      } else {
-        url = getLifestyleImageFromStorage(keyword);
+      if (filename && typeof filename === 'string') {
+        const url = getLifestyleImageBucketUrlForFilename(filename);
+        if (url) {
+          imageUrls[keyword] = url;
+          continue;
+        }
       }
-      if (url) syncUrls[keyword] = url;
+      missingKeywords.push(keyword);
     }
 
-    // First, save core onboarding data and any sync-only lifestyle image URLs
+    // Save core data with whatever URLs we have
     await supabaseDatabaseService.saveSurfer({
       onboardingSummaryText: data.onboarding_summary_text,
       destinationsArray: data.destinations_array,
       travelType: data.travel_type,
       travelBuddies: data.travel_buddies,
       lifestyleKeywords: data.lifestyle_keywords,
-      lifestyleImageUrls: Object.keys(syncUrls).length ? syncUrls : null,
+      lifestyleImageUrls: Object.keys(imageUrls).length ? imageUrls : null,
       finishedOnboarding: true,
       isDemoUser,
     });
     console.log('Swelly conversation results saved successfully');
 
-    // Then, resolve remaining lifestyle images (including Pexels) before returning,
-    // so the profile only appears after all URLs are ready.
-    const missingKeywords = lifestyle_keywords.filter((k: string) => !syncUrls[k]);
+    // Resolve missing keywords via Pexels (fallback)
     if (missingKeywords.length === 0) return;
-
     try {
       const results = await Promise.allSettled(
         missingKeywords.map(async (keyword: string) => {
-          const url = (await resolveLifestyleKeywordToImageUrl(keyword)) || getLifestyleImageFromStorage(keyword);
+          const url = await getLifestyleImageFromPexels(keyword);
           return { keyword, url };
         })
       );
-      const fullMap: Record<string, string> = { ...syncUrls };
+      const fullMap: Record<string, string> = { ...imageUrls };
       for (const result of results) {
         if (result.status === 'fulfilled' && result.value.url) {
           fullMap[result.value.keyword] = result.value.url;
         }
       }
-      await supabaseDatabaseService.updateSurferLifestyleImageUrls(fullMap);
+      if (Object.keys(fullMap).length > Object.keys(imageUrls).length) {
+        await supabaseDatabaseService.updateSurferLifestyleImageUrls(fullMap);
+      }
       console.log('Lifestyle image URLs enriched and saved');
     } catch (err) {
-      console.warn('Lifestyle image enrichment failed (profile will show with partial images):', err);
+      console.warn('Lifestyle image enrichment failed:', err);
     }
   };
 
