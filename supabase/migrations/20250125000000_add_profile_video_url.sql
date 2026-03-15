@@ -7,3 +7,4 @@ ADD COLUMN IF NOT EXISTS profile_video_url varchar(2048);
 -- Add comment for documentation
 COMMENT ON COLUMN surfers.profile_video_url IS 'URL to user-uploaded custom surf level video stored in profile-surf-videos bucket';
 
+ 
