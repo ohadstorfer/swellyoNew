@@ -1354,63 +1354,45 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
           </View>
           )}
 
-          {/* Per-message action row (New Chat, Add Filter, More Matches) */}
+          {/* Per-message action row (New Chat, Filters, More Matches) */}
           {hasActionRow && (
             <View style={styles.actionButtonsRow}>
               <TouchableOpacity
                 activeOpacity={0.8}
                 disabled={disabled}
                 onPress={() => handleMatchAction(message.id, 'new_chat')}
-                style={styles.actionButtonTouchable}
+                style={[styles.actionButtonNew, selectedAction === 'new_chat' && styles.actionButtonInnerSelected]}
               >
-                <LinearGradient
-                  colors={['#05BCD3', '#DBCDBC']}
-                  locations={[0, 0.7]}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={styles.searchButtonGradientOuter}
-                >
-                  <View style={[styles.actionButtonInner, selectedAction === 'new_chat' && styles.actionButtonInnerSelected]}>
-                    <Text style={[styles.searchButtonTextSmall, selectedAction === 'new_chat' && styles.actionButtonTextSelected]}>New Chat</Text>
-                  </View>
-                </LinearGradient>
+                <Svg width={20} height={20} viewBox="0 0 22 22" fill="none">
+                  <Path d="M9.16602 3.33344H5.66602C4.26588 3.33344 3.56582 3.33344 3.03104 3.60593C2.56063 3.84561 2.17818 4.22806 1.9385 4.69847C1.66602 5.23324 1.66602 5.93331 1.66602 7.33344V14.3334C1.66602 15.7336 1.66602 16.4336 1.9385 16.9684C2.17818 17.4388 2.56063 17.8213 3.03104 18.061C3.56582 18.3334 4.26588 18.3334 5.66602 18.3334H12.666C14.0661 18.3334 14.7662 18.3334 15.301 18.061C15.7714 17.8213 16.1538 17.4388 16.3935 16.9684C16.666 16.4336 16.666 15.7336 16.666 14.3334V10.8334M6.66599 13.3334H8.06145C8.4691 13.3334 8.67292 13.3334 8.86474 13.2874C9.0348 13.2466 9.19737 13.1792 9.34649 13.0878C9.51468 12.9848 9.65881 12.8406 9.94706 12.5524L17.916 4.58344C18.6064 3.89309 18.6064 2.7738 17.916 2.08344C17.2257 1.39309 16.1064 1.39308 15.416 2.08344L7.44704 10.0524C7.15879 10.3406 7.01466 10.4848 6.91159 10.653C6.82021 10.8021 6.75287 10.9647 6.71204 11.1347C6.66599 11.3265 6.66599 11.5304 6.66599 11.938V13.3334Z" stroke="#333333" strokeLinecap="round" strokeLinejoin="round" />
+                </Svg>
+                <Text style={[styles.actionButtonTextNew, selectedAction === 'new_chat' && styles.actionButtonTextSelected]}>New Chat</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 activeOpacity={0.8}
                 disabled={disabled}
                 onPress={() => handleMatchAction(message.id, 'add_filter')}
-                style={styles.actionButtonTouchable}
+                style={[styles.actionButtonNew, selectedAction === 'add_filter' && styles.actionButtonInnerSelected]}
               >
-                <LinearGradient
-                  colors={['#05BCD3', '#DBCDBC']}
-                  locations={[0, 0.7]}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={styles.searchButtonGradientOuter}
-                >
-                  <View style={[styles.actionButtonInner, selectedAction === 'add_filter' && styles.actionButtonInnerSelected]}>
-                    <Text style={[styles.searchButtonTextSmall, selectedAction === 'add_filter' && styles.actionButtonTextSelected]}>Add Filter</Text>
-                  </View>
-                </LinearGradient>
+                <Svg width={16} height={16} viewBox="0 0 16 16" fill="none">
+                  <Path d="M2 4H14M4 8H12M6 12H10" stroke="#333333" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
+                </Svg>
+                <Text style={[styles.actionButtonTextNew, selectedAction === 'add_filter' && styles.actionButtonTextSelected]}>Filters</Text>
               </TouchableOpacity>
               {((message.matchTotalCount ?? message.matchedUsers?.length ?? 0) > 3) && (
                 <TouchableOpacity
                   activeOpacity={0.8}
                   disabled={disabled}
                   onPress={() => handleMatchAction(message.id, 'more')}
-                  style={styles.actionButtonTouchable}
+                  style={[styles.actionButtonNew, selectedAction === 'more' && styles.actionButtonInnerSelected]}
                 >
-                  <LinearGradient
-                    colors={['#05BCD3', '#DBCDBC']}
-                    locations={[0, 0.7]}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0 }}
-                    style={styles.searchButtonGradientOuter}
-                  >
-                    <View style={[styles.actionButtonInner, selectedAction === 'more' && styles.actionButtonInnerSelected]}>
-                      <Text style={[styles.searchButtonTextSmall, selectedAction === 'more' && styles.actionButtonTextSelected]}>3 More</Text>
-                    </View>
-                  </LinearGradient>
+                  <Svg width={16} height={16} viewBox="0 0 16 16" fill="none">
+                    <Path d="M10.667 14V12.667C10.667 11.96 10.386 11.281 9.886 10.781C9.386 10.281 8.707 10 8 10H4C3.293 10 2.614 10.281 2.114 10.781C1.614 11.281 1.333 11.96 1.333 12.667V14" stroke="#333333" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
+                    <Path d="M6 7.333C7.473 7.333 8.667 6.14 8.667 4.667C8.667 3.194 7.473 2 6 2C4.527 2 3.333 3.194 3.333 4.667C3.333 6.14 4.527 7.333 6 7.333Z" stroke="#333333" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
+                    <Path d="M14.667 14V12.667C14.667 12.088 14.477 11.525 14.125 11.067C13.774 10.609 13.281 10.281 12.727 10.133" stroke="#333333" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
+                    <Path d="M10.727 2.133C11.281 2.281 11.774 2.609 12.125 3.067C12.477 3.525 12.667 4.088 12.667 4.667C12.667 5.245 12.477 5.808 12.125 6.267C11.774 6.725 11.281 7.052 10.727 7.2" stroke="#333333" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
+                  </Svg>
+                  <Text style={[styles.actionButtonTextNew, selectedAction === 'more' && styles.actionButtonTextSelected]}>3 More</Text>
                 </TouchableOpacity>
               )}
             </View>
@@ -2210,21 +2192,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: 12,
     paddingHorizontal: 0,
-    gap: 8,
+    gap: 6,
   },
-  actionButtonTouchable: {
+  actionButtonNew: {
     flex: 1,
-    marginHorizontal: 4,
-    borderRadius: 12,
-    overflow: 'hidden',
-  },
-  actionButtonInner: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 8,
-    alignItems: 'center',
+    height: 42,
+    paddingHorizontal: 10,
     justifyContent: 'center',
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 5,
+    borderRadius: 32,
+    borderWidth: 1,
+    borderColor: '#E4E4E4',
+    backgroundColor: 'rgba(255, 255, 255, 0.20)',
+  },
+  actionButtonTextNew: {
+    color: '#222B30',
+    fontSize: 12,
+    fontWeight: '600',
+    flexShrink: 0,
+    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : undefined,
   },
   actionButtonInnerSelected: {
     backgroundColor: '#E0F2F7',
