@@ -14,7 +14,6 @@ import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Circle } from 'react-native-svg';
 import { Text } from './Text';
 import { spacing } from '../styles/theme';
-import { getVideoPreloadStatus } from '../services/media/videoPreloadService';
 
 const getScreenWidth = () => Dimensions.get('window').width;
 
@@ -80,19 +79,6 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
     return videos.find(v => v.id === selectedVideoId) || videos[0];
   }, [videos, selectedVideoId]);
   
-  // Check preload status synchronously to initialize loading state correctly
-  const initialLoadingState = React.useMemo(() => {
-    if (!selectedVideo?.videoUrl) return true;
-    if (selectedVideo.videoUrl.startsWith('blob:')) return false; // Safari blob = instant
-    const preloadStatus = getVideoPreloadStatus(selectedVideo.videoUrl);
-    const isPreloaded = preloadStatus?.ready === true;
-    if (__DEV__ && isPreloaded) {
-      console.log('[VideoCarousel] Video is preloaded on mount, skipping loading state');
-    }
-    return !isPreloaded;
-  }, [selectedVideo?.videoUrl]);
-  
-  const [isVideoLoading, setIsVideoLoading] = useState(initialLoadingState);
   
   // Calculate video dimensions based on available height
   // Maintain aspect ratio while fitting available space
@@ -149,14 +135,18 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
   
   const videoDimensions = getVideoDimensions();
 
-  // --- Two-player crossfade setup ---
-  const activeSlotRef = useRef<'A' | 'B'>('A');
-  const fadeAnimA = useRef(new Animated.Value(1)).current;
-  const fadeAnimB = useRef(new Animated.Value(0)).current;
+  // --- Single player + thumbnail overlay ---
   const currentPlayPromiseRef = useRef<Promise<void> | null>(null);
-  const isInitialMountRef = useRef(true);
+  const thumbnailFadeAnim = useRef(new Animated.Value(1)).current; // Start visible
+  const prevSelectedVideoIdRef = useRef(selectedVideoId);
 
-  const playerA = useVideoPlayer(
+  // Show thumbnail synchronously during render when video changes — before any paint
+  if (prevSelectedVideoIdRef.current !== selectedVideoId) {
+    thumbnailFadeAnim.setValue(1);
+    prevSelectedVideoIdRef.current = selectedVideoId;
+  }
+
+  const mainPlayer = useVideoPlayer(
     selectedVideo.videoUrl || null,
     (player: any) => {
       if (player) {
@@ -165,46 +155,6 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
       }
     }
   );
-
-  const playerB = useVideoPlayer(
-    null as any,
-    (player: any) => {
-      if (player) {
-        player.loop = true;
-        player.muted = true;
-      }
-    }
-  );
-
-  // Helper to get player/fade by slot
-  const getSlotPlayer = (slot: 'A' | 'B') => slot === 'A' ? playerA : playerB;
-  const getSlotFade = (slot: 'A' | 'B') => slot === 'A' ? fadeAnimA : fadeAnimB;
-
-  // Web: wait for a video element with given URL to reach readyState >= 2
-  const waitForVideoElementReady = (url: string): Promise<void> => {
-    return new Promise<void>((resolve) => {
-      if (Platform.OS !== 'web' || typeof document === 'undefined') { resolve(); return; }
-      const find = () => {
-        const vids = document.querySelectorAll('video');
-        return Array.from(vids).find((v: HTMLVideoElement) =>
-          v.src === url || v.currentSrc === url
-        ) as HTMLVideoElement | undefined;
-      };
-      const tryResolve = (el: HTMLVideoElement | undefined) => {
-        if (el && el.readyState >= 2) { resolve(); return true; }
-        if (el) {
-          const handler = () => resolve();
-          el.addEventListener('canplay', handler, { once: true });
-          setTimeout(() => { el.removeEventListener('canplay', handler); resolve(); }, 500);
-          return true;
-        }
-        return false;
-      };
-      if (tryResolve(find())) return;
-      // Element not yet in DOM — retry after a tick
-      setTimeout(() => { if (!tryResolve(find())) resolve(); }, 100);
-    });
-  };
 
   // Web: inject CSS to hide video controls & set playsInline (runs once)
   useEffect(() => {
@@ -264,7 +214,7 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
     return () => observer.disconnect();
   }, []);
 
-  // Helper: set playsInline on all video elements (used before replaceAsync)
+  // Helper: set playsInline on all video elements
   const ensurePlaysInline = () => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') return;
     document.querySelectorAll('video').forEach((el: HTMLVideoElement) => {
@@ -275,118 +225,84 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
     });
   };
 
-  // Helper: load a video into a player, wait for ready, and start playing
-  const loadAndPlay = async (player: any, videoUrl: string): Promise<void> => {
-    ensurePlaysInline();
-
-    // Cancel any pending play promise
-    if (currentPlayPromiseRef.current) {
-      currentPlayPromiseRef.current.catch(() => {});
-      currentPlayPromiseRef.current = null;
-    }
-
-    const replacePromise = player.replaceAsync(videoUrl);
-    if (replacePromise && typeof replacePromise.then === 'function') {
-      await replacePromise;
-    }
-
-    player.loop = true;
-    player.muted = true;
-
-    ensurePlaysInline();
-
-    // Wait for the video element to be ready on web
-    await waitForVideoElementReady(videoUrl);
-
-    player.loop = true;
-    player.muted = true;
-
-    const playPromise = player.play();
-    if (playPromise !== undefined) {
-      currentPlayPromiseRef.current = playPromise as Promise<void>;
-      try {
-        await playPromise;
-      } catch (e: any) {
-        // Retry once on non-autoplay errors
-        if (e.name !== 'NotAllowedError') {
-          if (__DEV__) console.warn('[VideoCarousel] Play failed, retrying:', e.message);
-          try {
-            const retry = player.play();
-            if (retry) await retry;
-          } catch (_retryErr) { /* give up */ }
-        }
-      }
-    }
-  };
-
-  // Main crossfade effect: runs on every video URL change
+  // Main effect: on video change, show thumbnail immediately, load video, fade thumbnail out when playing
   useEffect(() => {
     const videoUrl = selectedVideo.videoUrl;
-    if (!videoUrl || !playerA || !playerB) return;
+    if (!videoUrl || !mainPlayer) return;
 
     let cancelled = false;
 
     const performSwitch = async () => {
-      if (isInitialMountRef.current) {
-        // --- Initial mount: load into playerA, no crossfade ---
-        isInitialMountRef.current = false;
-        fadeAnimA.setValue(1);
-        fadeAnimB.setValue(0);
-        activeSlotRef.current = 'A';
+      // Thumbnail is already visible (set synchronously during render)
+      ensurePlaysInline();
 
-        try {
-          await loadAndPlay(playerA, videoUrl);
-        } catch (err: any) {
-          if (__DEV__) console.warn('[VideoCarousel] Initial load error:', err.message);
-        }
-        if (!cancelled) setIsVideoLoading(false);
-        return;
+      // Cancel any pending play promise
+      if (currentPlayPromiseRef.current) {
+        currentPlayPromiseRef.current.catch(() => {});
+        currentPlayPromiseRef.current = null;
       }
-
-      // --- Subsequent switches: crossfade ---
-      const outSlot = activeSlotRef.current;
-      const inSlot: 'A' | 'B' = outSlot === 'A' ? 'B' : 'A';
-      const incomingPlayer = getSlotPlayer(inSlot);
-      const incomingFade = getSlotFade(inSlot);
-      const outgoingFade = getSlotFade(outSlot);
-      const outgoingPlayer = getSlotPlayer(outSlot);
-
-      // Ensure incoming layer starts invisible
-      incomingFade.setValue(0);
 
       try {
-        await loadAndPlay(incomingPlayer, videoUrl);
+        const replacePromise = mainPlayer.replaceAsync(videoUrl);
+        if (replacePromise && typeof replacePromise.then === 'function') {
+          await replacePromise;
+        }
         if (cancelled) return;
 
-        // Crossfade: fade in incoming, fade out outgoing
-        Animated.parallel([
-          Animated.timing(incomingFade, {
-            toValue: 1,
-            duration: 300,
-            easing: Easing.ease,
-            useNativeDriver: false,
-          }),
-          Animated.timing(outgoingFade, {
-            toValue: 0,
-            duration: 300,
-            easing: Easing.ease,
-            useNativeDriver: false,
-          }),
-        ]).start(() => {
-          // After crossfade completes, pause the outgoing player
-          try { outgoingPlayer.pause(); } catch (_) {}
-          activeSlotRef.current = inSlot;
-        });
+        mainPlayer.loop = true;
+        mainPlayer.muted = true;
+        ensurePlaysInline();
+
+        const playPromise = mainPlayer.play();
+        if (playPromise !== undefined) {
+          currentPlayPromiseRef.current = playPromise as Promise<void>;
+          try {
+            await playPromise;
+          } catch (e: any) {
+            if (e.name !== 'NotAllowedError') {
+              try { const r = mainPlayer.play() as any; if (r && r.then) await r; } catch (_) {}
+            }
+          }
+        }
+        if (cancelled) return;
+
+        // Wait for first frame on web (Safari needs this)
+        if (Platform.OS === 'web' && typeof document !== 'undefined') {
+          await new Promise<void>((resolve) => {
+            const vids = document.querySelectorAll('video');
+            const el = Array.from(vids).find((v: HTMLVideoElement) =>
+              v.src === videoUrl || v.currentSrc === videoUrl
+            ) as HTMLVideoElement | undefined;
+            if (el && el.currentTime > 0) { resolve(); return; }
+            if (el) {
+              const h = () => resolve();
+              el.addEventListener('timeupdate', h, { once: true });
+              setTimeout(() => { el.removeEventListener('timeupdate', h); resolve(); }, 400);
+            } else {
+              if (typeof requestAnimationFrame !== 'undefined') {
+                requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+              } else { setTimeout(resolve, 50); }
+            }
+          });
+        }
+        if (cancelled) return;
+
+        // Video is playing — fade out thumbnail to reveal video
+
+        Animated.timing(thumbnailFadeAnim, {
+          toValue: 0,
+          duration: 300,
+          easing: Easing.ease,
+          useNativeDriver: false,
+        }).start();
       } catch (error: any) {
-        if (__DEV__) console.error('[VideoCarousel] Crossfade error:', error);
+        if (__DEV__) console.error('[VideoCarousel] Video switch error:', error);
       }
-      if (!cancelled) setIsVideoLoading(false);
     };
 
     performSwitch();
-
     return () => { cancelled = true; };
-  }, [selectedVideo.videoUrl, playerA, playerB]);
+  }, [selectedVideo.videoUrl, mainPlayer]);
 
   // Initialize/reinitialize carousel animated values when videos change
   if (carouselAnimsRef.current.length !== videos.length || prevVideosLengthRef.current !== videos.length) {
@@ -470,6 +386,41 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
     isCarouselFirstRender.current = false;
   }, [selectedVideoId, videos]);
 
+  // Swipe gesture: one swipe = one thumbnail step (left or right)
+  // Uses direct touch events instead of PanResponder for reliable web support
+  const swipeTouchStartX = useRef(0);
+  const swipeHandledRef = useRef(false);
+  const videosRef = useRef(videos);
+  videosRef.current = videos;
+  const selectedVideoIdRef = useRef(selectedVideoId);
+  selectedVideoIdRef.current = selectedVideoId;
+  const onVideoSelectRef = useRef(onVideoSelect);
+  onVideoSelectRef.current = onVideoSelect;
+
+  const handleSwipeTouchStart = (e: any) => {
+    const touch = e.nativeEvent?.touches?.[0] || e.nativeEvent;
+    swipeTouchStartX.current = touch.pageX ?? touch.clientX ?? 0;
+    swipeHandledRef.current = false;
+  };
+  const handleSwipeTouchMove = (e: any) => {
+    if (swipeHandledRef.current) return;
+    const touch = e.nativeEvent?.touches?.[0] || e.nativeEvent;
+    const currentX = touch.pageX ?? touch.clientX ?? 0;
+    const dx = currentX - swipeTouchStartX.current;
+    if (Math.abs(dx) >= 20) {
+      swipeHandledRef.current = true;
+      const vids = videosRef.current;
+      const selId = selectedVideoIdRef.current;
+      const selectedIndex = vids.findIndex(v => v.id === selId);
+      if (selectedIndex < 0) return;
+      // Swipe left (dx < 0) → next, swipe right (dx > 0) → previous
+      const nextIndex = dx < 0
+        ? (selectedIndex + 1) % vids.length
+        : (selectedIndex - 1 + vids.length) % vids.length;
+      onVideoSelectRef.current(vids[nextIndex]);
+    }
+  };
+
   const renderDots = () => {
     const selectedIndex = videos.findIndex(v => v.id === selectedVideoId);
     return (
@@ -510,14 +461,11 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
             },
           } as any)}
         >
-          {/* Video Layer A */}
-          <Animated.View
-            style={[styles.mainVideo, { opacity: fadeAnimA }]}
-            pointerEvents="none"
-          >
+          {/* Video player */}
+          <View style={styles.mainVideo} pointerEvents="none">
             <View style={styles.videoPlayerContainer} pointerEvents="none">
               <VideoView
-                player={playerA}
+                player={mainPlayer}
                 style={styles.videoPlayer}
                 contentFit="cover"
                 nativeControls={false}
@@ -529,41 +477,23 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
                 } as any)}
               />
             </View>
-          </Animated.View>
+          </View>
 
-          {/* Video Layer B (absolute overlay for crossfade) */}
-          <Animated.View
-            style={[
-              styles.mainVideo,
-              { opacity: fadeAnimB, position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 1 },
-            ]}
-            pointerEvents="none"
-          >
-            <View style={styles.videoPlayerContainer} pointerEvents="none">
-              <VideoView
-                player={playerB}
-                style={styles.videoPlayer}
-                contentFit="cover"
-                nativeControls={false}
-                allowsFullscreen={false}
-                allowsPictureInPicture={false}
-                {...(Platform.OS === 'web' && {
-                  controls: false,
-                  disablePictureInPicture: true,
-                } as any)}
-              />
-            </View>
-          </Animated.View>
-
-          {/* Thumbnail fallback during initial load */}
-          {isVideoLoading && selectedVideo.thumbnailUrl ? (
-            <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 2 }}>
+          {/* Thumbnail overlay — always rendered, shown instantly on switch, fades out when video plays */}
+          {selectedVideo.thumbnailUrl ? (
+            <Animated.View
+              style={{
+                position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+                zIndex: 1, opacity: thumbnailFadeAnim,
+              }}
+              pointerEvents="none"
+            >
               <Image
                 source={{ uri: selectedVideo.thumbnailUrl }}
                 style={styles.videoPlayer}
                 resizeMode="cover"
               />
-            </View>
+            </Animated.View>
           ) : null}
           
           {/* Transparent overlay to prevent video interactions on iOS Safari */}
@@ -632,6 +562,8 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
             }
           }}
           collapsable={false}
+          onTouchStart={handleSwipeTouchStart}
+          onTouchMove={handleSwipeTouchMove}
         >
           {containerWidth > 0 && videos.map((video, idx) => {
             const anim = carouselAnimsRef.current[idx];
