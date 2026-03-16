@@ -252,6 +252,41 @@ class SwellyService {
   }
 
   /**
+   * Get the latest trip planning chat for the current user.
+   * Returns the most recent chat_id or null if none exists.
+   */
+  async getLatestTripPlanningChat(): Promise<{ chat_id: string } | null> {
+    try {
+      const url = this.getFunctionUrl('/latest', 'trip-planning');
+      const headers = await this.getAuthHeaders();
+
+      console.log('[SwellyService] Getting latest trip planning chat:', url);
+
+      const response = await fetch(url, {
+        method: 'GET',
+        headers,
+      });
+
+      if (response.status === 404) {
+        return null;
+      }
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[SwellyService] Error response:', errorText);
+        throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+      }
+
+      const result = await response.json();
+      console.log('[SwellyService] Latest trip planning chat:', result);
+      return result;
+    } catch (error) {
+      console.error('[SwellyService] Error getting latest trip planning chat:', error);
+      return null;
+    }
+  }
+
+  /**
    * Check if the Swelly API is healthy and available (Copy flow uses trip-planning-copy edge)
    * @returns Health check response
    */
@@ -475,7 +510,7 @@ class SwellyService {
     chatId: string,
     messageIndex: number,
     selectedAction: 'new_chat' | 'add_filter' | 'more'
-  ): Promise<void> {
+  ): Promise<{ appendedMessageIndex?: number } | void> {
     try {
       const url = this.getFunctionUrl(`/update-match-action/${chatId}`, 'trip-planning');
       const headers = await this.getAuthHeaders();
@@ -487,7 +522,10 @@ class SwellyService {
       if (!response.ok) {
         const errorText = await response.text();
         console.warn('[SwellyService] updateMatchActionSelection failed:', errorText);
+        return;
       }
+      const result = await response.json();
+      return { appendedMessageIndex: result.appendedMessageIndex };
     } catch (error) {
       console.warn('[SwellyService] updateMatchActionSelection error:', error);
     }

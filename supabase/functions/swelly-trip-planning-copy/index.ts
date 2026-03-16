@@ -58,6 +58,9 @@ interface MessageMetadata {
     searchSummary?: string
     selectedAction?: 'search' | 'continue_editing' | null
   }
+  isRestartAfterNewChat?: boolean
+  isAddFilterPrompt?: boolean
+  existingFiltersData?: any
 }
 
 interface Message {
@@ -65,6 +68,10 @@ interface Message {
   content: string
   metadata?: MessageMetadata
 }
+
+/** First question shown when starting or restarting trip planning. */
+const TRIP_PLANNING_FIRST_QUESTION_TEXT =
+  "Yo! Let's Travel! I can connect you with like minded surfers or surf travelers who have experience in specific destinations you are curious about. So, what are you looking for?"
 
 // === INLINED find-matches: full LLM destination utils, no local imports ===
 interface MatchResultInline {
@@ -2273,6 +2280,35 @@ ${getPronounInstructions(userProfile.pronoun)}`
         messages.splice(0, 1, { role: 'system', content: TRIP_PLANNING_PROMPT + '\n\n' + profileContext })
       }
 
+      // Self-healing: ensure synthetic messages exist if a match action was taken but the PATCH
+      // hasn't completed yet (race condition between updateMatchActionSelection and user typing)
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const actionRow = messages[i].metadata?.actionRow
+        if (actionRow?.selectedAction && messages[i].metadata?.matchedUsers) {
+          const hasSyntheticAfter = messages.slice(i + 1).some(
+            m => m.metadata?.isRestartAfterNewChat || m.metadata?.isAddFilterPrompt
+          )
+          if (!hasSyntheticAfter) {
+            if (actionRow.selectedAction === 'new_chat') {
+              messages.splice(i + 1, 0, {
+                role: 'assistant',
+                content: TRIP_PLANNING_FIRST_QUESTION_TEXT,
+                metadata: { isRestartAfterNewChat: true }
+              })
+              console.log('[continueConversation] Self-heal: inserted missing restart message after index', i)
+            } else if (actionRow.selectedAction === 'add_filter') {
+              messages.splice(i + 1, 0, {
+                role: 'assistant',
+                content: "Great! We can add some filters to your search. What would you like to add? For example: board type, surf level, destinations they've surfed, age, or country of origin.",
+                metadata: { isAddFilterPrompt: true, existingFiltersData: actionRow.requestData ?? null }
+              })
+              console.log('[continueConversation] Self-heal: inserted missing add-filter message after index', i)
+            }
+          }
+          break // only check the most recent match action
+        }
+      }
+
       // Add new user message
       messages.push({ role: 'user', content: body.message })
       
@@ -2433,9 +2469,13 @@ ${getPronounInstructions(userProfile.pronoun)}`
         }
       }
 
+      // Filter out synthetic display-only messages (restart markers, add-filter prompts) — they would confuse GPT
+      const isSyntheticMessage = (m: any) => m.metadata?.isRestartAfterNewChat || m.metadata?.isAddFilterPrompt
+      const messagesWithoutSynthetic = messages.filter(m => !isSyntheticMessage(m))
+
       // Snapshot messages before injecting system messages — extractQueryFilters
       // uses .slice(-5) and must not see the injected helper instructions.
-      const messagesForExtractor = [...messages]
+      const messagesForExtractor = [...messagesWithoutSynthetic]
 
       // --- Inject system messages for the main LLM (none depend on extraction) ---
 
@@ -2467,6 +2507,8 @@ ${getPronounInstructions(userProfile.pronoun)}`
       console.log('📋 Injected current data + do-not-change/add rule into main GPT')
 
       // --- PARALLEL LLM CALLS: extractQueryFilters + main callOpenAI ---
+      // Filter synthetic display-only messages from the messages array used for OpenAI
+      const messagesForOpenAI = messages.filter(m => !isSyntheticMessage(m))
       const [filterExtractionSettled, mainLLMResult] = await Promise.all([
         // Call 1: Extract structured filters from user message
         (async () => {
@@ -2479,7 +2521,7 @@ ${getPronounInstructions(userProfile.pronoun)}`
           }
         })(),
         // Call 2: Main conversational LLM
-        callOpenAI(messages),
+        callOpenAI(messagesForOpenAI),
       ])
 
       // --- POST-PROCESS filter extraction results ---
@@ -2559,7 +2601,7 @@ ${getPronounInstructions(userProfile.pronoun)}`
         console.log('Plain text response:', assistantMessage.substring(0, 200))
         const strongJsonEnforcement = `ERROR: You returned plain text instead of JSON. This is a CRITICAL ERROR. You MUST return a JSON object. Your response MUST be valid JSON starting with { and ending with }. Example: {"return_message": "Your text here", "is_finished": false, "data": {"destination_country": "Philippines", "area": "Siargao", "budget": null, "destination_known": true, "purpose": {"purpose_type": "connect_traveler", "specific_topics": []}, "user_context": {}}}. Return ONLY the JSON object, nothing else.`
         messages.push({ role: 'system', content: strongJsonEnforcement })
-        assistantMessage = await callOpenAI(messages)
+        assistantMessage = await callOpenAI(messages.filter(m => !isSyntheticMessage(m)))
         console.log('Retry response:', assistantMessage.substring(0, 200))
       }
       
@@ -3396,9 +3438,15 @@ ${getPronounInstructions(userProfile.pronoun)}`
         // Find the most recent assistant message that doesn't already have matched users metadata
         // This ensures we attach to the message that just finished and triggered the matching
         // If a message already has metadata, it means matches were already attached, so skip it
+        // Also skip synthetic messages (restart markers, add-filter prompts)
         let targetAssistantIndex = -1
         for (let i = messages.length - 1; i >= 0; i--) {
           if (messages[i].role === 'assistant') {
+            // Skip synthetic display-only messages
+            if (messages[i].metadata?.isRestartAfterNewChat || messages[i].metadata?.isAddFilterPrompt) {
+              console.log('[attach-matches] Skipping synthetic message at index', i)
+              continue
+            }
             // Skip if this message already has matched users metadata
             if (messages[i].metadata?.matchedUsers) {
               console.log('[attach-matches] Skipping assistant message at index', i, '- already has matched users metadata')
@@ -3422,7 +3470,7 @@ ${getPronounInstructions(userProfile.pronoun)}`
         // This handles edge cases where the message format might be different
         if (targetAssistantIndex === -1) {
           for (let i = messages.length - 1; i >= 0; i--) {
-            if (messages[i].role === 'assistant' && !messages[i].metadata?.matchedUsers) {
+            if (messages[i].role === 'assistant' && !messages[i].metadata?.matchedUsers && !messages[i].metadata?.isRestartAfterNewChat && !messages[i].metadata?.isAddFilterPrompt) {
               targetAssistantIndex = i
               console.log('[attach-matches] Using fallback - last assistant message without metadata at index:', i)
               break
@@ -3430,17 +3478,30 @@ ${getPronounInstructions(userProfile.pronoun)}`
           }
         }
 
+        // Last resort: all assistant messages already have matchedUsers (e.g. "More" action).
+        // Append a new placeholder assistant message to hold this match batch.
+        // Also mark the previous match message with selectedAction: 'more' (handles the race
+        // with updateMatchActionSelection — both ops write to the same messages array).
         if (targetAssistantIndex === -1) {
-          return new Response(
-            JSON.stringify({ error: 'No assistant message found to attach matches to' }),
-            { 
-              status: 404, 
-              headers: { 
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-              } 
+          // Mark the most recent match message as 'more' so its action buttons are disabled on restore
+          for (let j = messages.length - 1; j >= 0; j--) {
+            if (messages[j].metadata?.matchedUsers && messages[j].metadata?.actionRow) {
+              if (!messages[j].metadata!.actionRow!.selectedAction) {
+                messages[j].metadata!.actionRow!.selectedAction = 'more'
+                console.log('[attach-matches] Marked previous match message at index', j, 'with selectedAction: more')
+              }
+              break
             }
-          )
+          }
+          const matchCount = body.matchedUsers?.length ?? 0
+          const placeholderContent = JSON.stringify({
+            return_message: `Found ${matchCount} more match${matchCount !== 1 ? 'es' : ''} for you!`,
+            is_finished: true,
+            data: { destination_country: body.destinationCountry || null }
+          })
+          messages.push({ role: 'assistant', content: placeholderContent, metadata: {} })
+          targetAssistantIndex = messages.length - 1
+          console.log('[attach-matches] All assistant messages have metadata - appended placeholder at index:', targetAssistantIndex)
         }
 
         // Attach metadata to the target assistant message
@@ -3548,12 +3609,31 @@ ${getPronounInstructions(userProfile.pronoun)}`
         if (!msg.metadata) msg.metadata = {}
         if (!msg.metadata.actionRow) msg.metadata.actionRow = { requestData: null, selectedAction: null }
         msg.metadata.actionRow.selectedAction = body.selectedAction
+        let appendedMessageIndex: number | undefined = undefined
         if (body.selectedAction === 'new_chat') {
           msg.metadata.actionRow.requestData = { queryFilters: null, destination_country: null, area: null }
           console.log('[update-match-action] New Chat: cleared requestData on message', i)
+          // Append synthetic restart message so it restores after refresh
+          messages.push({
+            role: 'assistant',
+            content: TRIP_PLANNING_FIRST_QUESTION_TEXT,
+            metadata: { isRestartAfterNewChat: true }
+          })
+          appendedMessageIndex = messages.length - 1
+          console.log('[update-match-action] Appended restart message at index', appendedMessageIndex)
+        }
+        if (body.selectedAction === 'add_filter') {
+          const existingFilters = msg.metadata.actionRow?.requestData ?? null
+          messages.push({
+            role: 'assistant',
+            content: "Great! We can add some filters to your search. What would you like to add? For example: board type, surf level, destinations they've surfed, age, or country of origin.",
+            metadata: { isAddFilterPrompt: true, existingFiltersData: existingFilters }
+          })
+          appendedMessageIndex = messages.length - 1
+          console.log('[update-match-action] Appended add-filter prompt at index', appendedMessageIndex)
         }
         await saveChatHistory(chatId, messages, user.id, null, supabaseAdmin)
-        return new Response(JSON.stringify({ success: true }), { status: 200, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } })
+        return new Response(JSON.stringify({ success: true, appendedMessageIndex }), { status: 200, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } })
       } catch (error) {
         console.error('Error updating match action:', error)
         return new Response(
@@ -3753,6 +3833,38 @@ ${getPronounInstructions(userProfile.pronoun)}`
         console.error('acknowledge-filter-removal error:', err)
         return new Response(
           JSON.stringify({ error: 'Failed to acknowledge filter removal', details: err instanceof Error ? err.message : String(err) }),
+          { status: 500, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } }
+        )
+      }
+    }
+
+    // Route: GET /swelly-trip-planning/latest — return the user's most recent trip-planning chat
+    if (path.endsWith('/latest') && req.method === 'GET') {
+      try {
+        const { data, error } = await supabaseAdmin
+          .from('swelly_chat_history')
+          .select('chat_id')
+          .eq('user_id', user.id)
+          .eq('conversation_type', 'trip-planning')
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .single()
+
+        if (error || !data) {
+          return new Response(
+            JSON.stringify({ error: 'No trip planning chat found' }),
+            { status: 404, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } }
+          )
+        }
+
+        return new Response(
+          JSON.stringify({ chat_id: data.chat_id }),
+          { status: 200, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } }
+        )
+      } catch (err) {
+        console.error('latest chat error:', err)
+        return new Response(
+          JSON.stringify({ error: 'Failed to fetch latest chat', details: err instanceof Error ? err.message : String(err) }),
           { status: 500, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } }
         )
       }

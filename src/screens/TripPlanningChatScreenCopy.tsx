@@ -14,6 +14,7 @@ import {
   Easing,
   Pressable,
   PanResponder,
+  Modal,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Path } from 'react-native-svg';
@@ -243,6 +244,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   const [isAwaitingFilterRemovalResponse, setAwaitingFilterRemovalResponse] = useState(false);
   const [messageIdsUnblockedByFilterDeletion, setMessageIdsUnblockedByFilterDeletion] = useState<Record<string, true>>({});
   const [trashHoverProgress, setTrashHoverProgress] = useState(0);
+  const [showNewChatModal, setShowNewChatModal] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
   // Drag-to-delete: ghost chip position and dragged item
   const [dragState, setDragState] = useState<{
@@ -463,26 +465,52 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
                     console.log('[TripPlanningChatScreen] Assistant message has no metadata, messageTextPreview:', messageText.substring(0, 50));
                   }
 
-                  if ((msg as any).metadata?.matchedUsers) {
-                    const metadata = (msg as any).metadata;
+                  const metadata = (msg as any).metadata;
+                  const searchSummaryBlock = metadata?.searchSummaryBlock;
+                  const hasMatchedUsers = metadata?.matchedUsers && metadata.matchedUsers.length > 0;
+                  const hasSearchSummary = searchSummaryBlock && searchSummaryBlock.requestData != null;
+
+                  if (hasMatchedUsers) {
                     console.log('[TripPlanningChatScreen] Found matched users in message metadata - count:', metadata.matchedUsers.length);
                     console.log('[TripPlanningChatScreen] Message text preview:', messageText.substring(0, 50));
-                    restoredMessage.isMatchedUsers = true;
-                    restoredMessage.matchedUsers = metadata.matchedUsers;
-                    restoredMessage.destinationCountry = metadata.destinationCountry;
-                    if (metadata.actionRow) {
-                      restoredMessage.actionRow = {
+
+                    // If this message also has a search summary, mark the base message as search summary only
+                    if (hasSearchSummary) {
+                      restoredMessage.isSearchSummary = true;
+                    }
+
+                    // Create a SEPARATE matched users message
+                    const matchCount = metadata.matchedUsers.length;
+                    const matchesMessage: Message = {
+                      id: String(messageId++),
+                      text: `Found ${matchCount} awesome match${matchCount > 1 ? 'es' : ''} for you!`,
+                      isUser: false,
+                      timestamp: restoredMessage.timestamp,
+                      isMatchedUsers: true,
+                      matchedUsers: metadata.matchedUsers,
+                      destinationCountry: metadata.destinationCountry,
+                      actionRow: metadata.actionRow ? {
                         requestData: metadata.actionRow.requestData ?? undefined,
                         selectedAction: metadata.actionRow.selectedAction ?? null,
-                      };
-                    }
-                    if (metadata.totalCount !== undefined) {
-                      restoredMessage.matchTotalCount = metadata.totalCount;
-                    }
+                      } : undefined,
+                      matchTotalCount: metadata.totalCount,
+                      backendMessageIndex: i,
+                    };
+
+                    // Push search summary (or base) message first, then matches message
+                    restoredMessages.push(restoredMessage);
+                    restoredMessages.push(matchesMessage);
+                    continue; // Skip the default push at end of loop
                   }
-                  const searchSummaryBlock = (msg as any).metadata?.searchSummaryBlock;
-                  if (searchSummaryBlock && searchSummaryBlock.requestData != null) {
+
+                  // Search summary only (no matched users)
+                  if (hasSearchSummary) {
                     restoredMessage.isSearchSummary = true;
+                  }
+
+                  // Restore restart-after-new-chat marker
+                  if (metadata?.isRestartAfterNewChat) {
+                    restoredMessage.isRestartAfterNewChat = true;
                   }
                 }
 
@@ -508,14 +536,47 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
                 }
               }
               
+              // Restore existingFiltersForAdd from last add-filter prompt (if not superseded by restart or match)
+              for (let i = history.messages.length - 1; i >= 0; i--) {
+                const meta = (history.messages[i] as any).metadata;
+                if (meta?.isAddFilterPrompt && meta?.existingFiltersData) {
+                  const hasLaterRestart = history.messages.slice(i + 1).some(
+                    (m: any) => m.metadata?.isRestartAfterNewChat
+                  );
+                  const hasLaterMatch = history.messages.slice(i + 1).some(
+                    (m: any) => m.metadata?.matchedUsers?.length > 0
+                  );
+                  if (!hasLaterRestart && !hasLaterMatch) {
+                    setExistingFiltersForAdd({ data: meta.existingFiltersData });
+                    setIsFinished(false);
+                  }
+                  break;
+                }
+              }
+
               console.log('[TripPlanningChatScreen] Restored', restoredMessages.length, 'messages, skippedInitialContext:', skippedInitialContext);
-              
+
               // Check if any messages have matched users to determine if finished
               const hasMatchedUsers = restoredMessages.some(msg => msg.isMatchedUsers && msg.matchedUsers && msg.matchedUsers.length > 0);
               if (hasMatchedUsers) {
                 setIsFinished(true);
               }
-              
+
+              // Sync parent state with aggregated matched users and destination from restored messages
+              if (onChatStateChange) {
+                const allRestoredMatchedUsers: any[] = [];
+                let latestRestoredDestination = '';
+                for (const msg of restoredMessages) {
+                  if (msg.isMatchedUsers && msg.matchedUsers && msg.matchedUsers.length > 0) {
+                    allRestoredMatchedUsers.push(...msg.matchedUsers);
+                    if (msg.destinationCountry) {
+                      latestRestoredDestination = msg.destinationCountry;
+                    }
+                  }
+                }
+                onChatStateChange(persistedChatId, allRestoredMatchedUsers, latestRestoredDestination);
+              }
+
               setMessages(restoredMessages);
               setIsInitializing(false);
               return; // Exit early, we've restored the conversation
@@ -1080,6 +1141,10 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
 
   const handleMatchAction = (messageId: string, action: 'new_chat' | 'add_filter' | 'more') => {
     let messageIndexForPatch: number | null = null;
+    // Pre-generate ID for synthetic message so we can reference it in the .then() callback
+    const syntheticMessageId = (action === 'new_chat' || action === 'add_filter')
+      ? (Date.now() + 1).toString()
+      : null;
     setMessages(prev => {
       const updated = prev.map(m =>
         m.id === messageId && m.actionRow
@@ -1095,7 +1160,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
       }
       if (action === 'new_chat') {
         const firstQuestionMessage: Message = {
-          id: (Date.now() + 1).toString(),
+          id: syntheticMessageId!,
           text: TRIP_PLANNING_FIRST_QUESTION,
           isUser: false,
           timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
@@ -1107,7 +1172,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         setIsFinished(false);
         setExistingFiltersForAdd({ data: { ...requestData } });
         const addFilterBotMessage: Message = {
-          id: (Date.now() + 1).toString(),
+          id: syntheticMessageId!,
           text: "Great! We can add some filters to your search. What would you like to add? For example: board type, surf level, destinations they've surfed, age, or country of origin.",
           isUser: false,
           timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
@@ -1128,9 +1193,85 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
       setFiltersMenuVisible(false);
       setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100);
     }
-    if (messageIndexForPatch != null && messageIndexForPatch >= 0 && chatId) {
-      swellyServiceCopy.updateMatchActionSelection(chatId, messageIndexForPatch, action).catch(err =>
-        console.warn('[TripPlanningChatScreen] Failed to persist action selection:', err));
+    // For 'more' action, skip the separate PATCH — attach-matches handles both
+    // the selectedAction marking and the placeholder append atomically, avoiding race conditions.
+    if (action !== 'more' && messageIndexForPatch != null && messageIndexForPatch >= 0 && chatId) {
+      swellyServiceCopy.updateMatchActionSelection(chatId, messageIndexForPatch, action)
+        .then(result => {
+          if (result?.appendedMessageIndex != null && syntheticMessageId) {
+            setMessages(prev => prev.map(m =>
+              m.id === syntheticMessageId && m.backendMessageIndex == null
+                ? { ...m, backendMessageIndex: result.appendedMessageIndex }
+                : m
+            ));
+          }
+        })
+        .catch(err => console.warn('[TripPlanningChatScreen] Failed to persist action selection:', err));
+    }
+  };
+
+  const handleStartNewChat = async () => {
+    setShowNewChatModal(false);
+    // Reset all conversation state
+    setMessages([]);
+    setIsLoading(true);
+    setIsInitializing(true);
+    setIsFinished(false);
+    setMatchedUsers([]);
+    setDestinationCountry('');
+    setPendingSingleCriterionMatches(null);
+    setSingleCriterionType(null);
+    setPendingSearch(null);
+    setAwaitingSearchDecision(false);
+    setLastMatchRequestData(null);
+    setLastMatchActionPressed(null);
+    setExistingFiltersForAdd(null);
+    setFiltersMenuVisible(false);
+    setAwaitingFilterRemovalResponse(false);
+    setMessageIdsUnblockedByFilterDeletion({});
+
+    try {
+      // Build context message same as initial mount
+      const boardTypeNames: Record<number, string> = { 0: 'shortboard', 1: 'longboard', 2: 'funboard', 3: 'fish', 4: 'gun', 5: 'SUP' };
+      const contextParts: string[] = [];
+      if (formData.age) contextParts.push(`${formData.age} years old`);
+      if (formData.country) contextParts.push(`from ${formData.country}`);
+      if (formData.boardType !== undefined) contextParts.push(`surfing ${boardTypeNames[formData.boardType] || 'surfboard'}`);
+      if (formData.surfLevel !== undefined) {
+        const levelNames = ['beginner', 'beginner-intermediate', 'intermediate', 'intermediate-advanced', 'advanced'];
+        contextParts.push(`${levelNames[formData.surfLevel] || 'intermediate'} level`);
+      }
+      const contextMessage = contextParts.length > 0
+        ? `Hi! ${contextParts.join(', ')}. I'm looking to connect with surfers.`
+        : "Hi! I'm looking to connect with surfers.";
+
+      const response = await swellyServiceCopy.startTripPlanningConversation({ message: contextMessage });
+      const newChatId = response.chat_id || null;
+      setChatId(newChatId);
+
+      if (onChatStateChange) {
+        onChatStateChange(newChatId, [], '');
+      }
+
+      const backendMessageIndex = typeof response.message_index === 'number' && response.message_index >= 0 ? response.message_index : undefined;
+      setMessages([{
+        id: Date.now().toString(),
+        text: response.return_message,
+        isUser: false,
+        timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+        ...(backendMessageIndex !== undefined && { backendMessageIndex }),
+      }]);
+    } catch (error) {
+      console.error('Failed to start new chat:', error);
+      setMessages([{
+        id: Date.now().toString(),
+        text: TRIP_PLANNING_FIRST_QUESTION,
+        isUser: false,
+        timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+      }]);
+    } finally {
+      setIsLoading(false);
+      setIsInitializing(false);
     }
   };
 
@@ -1357,6 +1498,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
           {/* Per-message action row (New Chat, Filters, More Matches) */}
           {hasActionRow && (
             <View style={styles.actionButtonsRow}>
+              {/* New Chat button — hidden for now
               <TouchableOpacity
                 activeOpacity={0.8}
                 disabled={disabled}
@@ -1368,6 +1510,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
                 </Svg>
                 <Text style={[styles.actionButtonTextNew, selectedAction === 'new_chat' && styles.actionButtonTextSelected]}>New Chat</Text>
               </TouchableOpacity>
+              */}
               <TouchableOpacity
                 activeOpacity={0.8}
                 disabled={disabled}
@@ -1487,9 +1630,11 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             <Text style={styles.profileTagline}>Let's grow your surf travel community!</Text>
           </View>
           
-          {/* <TouchableOpacity style={styles.menuButton}>
-            <Ionicons name="ellipsis-vertical" size={24} color="#222B30" />
-          </TouchableOpacity> */}
+          <TouchableOpacity style={styles.editButton} onPress={() => setShowNewChatModal(true)}>
+            <Svg width={18} height={18} viewBox="0 0 18 18" fill="none">
+              <Path d="M8 2.26777H4.5C3.09987 2.26777 2.3998 2.26777 1.86502 2.54025C1.39462 2.77994 1.01217 3.16239 0.772484 3.63279C0.5 4.16757 0.5 4.86764 0.5 6.26777V13.2678C0.5 14.6679 0.5 15.368 0.772484 15.9027C1.01217 16.3731 1.39462 16.7556 1.86502 16.9953C2.3998 17.2678 3.09987 17.2678 4.5 17.2678H11.5C12.9001 17.2678 13.6002 17.2678 14.135 16.9953C14.6054 16.7556 14.9878 16.3731 15.2275 15.9027C15.5 15.368 15.5 14.6679 15.5 13.2678V9.76777M5.49998 12.2678H6.89543C7.30308 12.2678 7.50691 12.2678 7.69872 12.2217C7.86878 12.1809 8.03135 12.1135 8.18047 12.0222C8.34867 11.9191 8.4928 11.775 8.78105 11.4867L16.75 3.51777C17.4404 2.82741 17.4404 1.70812 16.75 1.01777C16.0596 0.327412 14.9404 0.327411 14.25 1.01777L6.28103 8.98672C5.99277 9.27497 5.84865 9.4191 5.74558 9.58729C5.6542 9.73641 5.58686 9.89899 5.54603 10.069C5.49998 10.2609 5.49998 10.4647 5.49998 10.8723V12.2678Z" stroke="#7B7B7B" strokeLinecap="round" strokeLinejoin="round" />
+            </Svg>
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -1734,6 +1879,56 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
           </Animated.View>
         )}
       </KeyboardAvoidingView>
+      {/* New Chat Confirmation Modal */}
+      <Modal
+        visible={showNewChatModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowNewChatModal(false)}
+      >
+        <Pressable style={styles.modalOverlay} onPress={() => setShowNewChatModal(false)}>
+          <Pressable style={styles.modalContent} onPress={(e) => e.stopPropagation()}>
+            {/* Top row: trash icon + close button */}
+            <View style={styles.modalTopRow}>
+              <View style={styles.modalTrashIcon}>
+                <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
+                  <Path d="M16 6V5.2C16 4.0799 16 3.51984 15.782 3.09202C15.5903 2.71569 15.2843 2.40973 14.908 2.21799C14.4802 2 13.9201 2 12.8 2H11.2C10.0799 2 9.51984 2 9.09202 2.21799C8.71569 2.40973 8.40973 2.71569 8.21799 3.09202C8 3.51984 8 4.0799 8 5.2V6M10 11.5V16.5M14 11.5V16.5M3 6H21M19 6V17.2C19 18.8802 19 19.7202 18.673 20.362C18.3854 20.9265 17.9265 21.3854 17.362 21.673C16.7202 22 15.8802 22 14.2 22H9.8C8.11984 22 7.27976 22 6.63803 21.673C6.07354 21.3854 5.6146 20.9265 5.32698 20.362C5 19.7202 5 18.8802 5 17.2V6" stroke="#D92D20" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
+                </Svg>
+              </View>
+              <TouchableOpacity style={styles.modalCloseButton} onPress={() => setShowNewChatModal(false)}>
+                <Ionicons name="close" size={24} color="#333" />
+              </TouchableOpacity>
+            </View>
+
+            {/* Swelly avatar bubble */}
+            <View style={styles.modalAvatarBubble}>
+              <Image
+                source={{ uri: getImageUrl('/Swelly avatar onboarding.png') }}
+                style={styles.modalAvatarImage}
+                resizeMode="cover"
+              />
+            </View>
+
+            {/* Title */}
+            <Text style={styles.modalTitle}>Start a new chat?</Text>
+
+            {/* Description */}
+            <Text style={styles.modalDescription}>
+              Starting a new chat will permanently delete your current conversation with Swelly and all the progress within it.{'\n'}This action cannot be undone.
+            </Text>
+
+            {/* Buttons */}
+            <View style={styles.modalButtonRow}>
+              <TouchableOpacity style={styles.modalKeepButton} onPress={() => setShowNewChatModal(false)}>
+                <Text style={styles.modalKeepButtonText}>Keep this chat</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.modalStartButton} onPress={handleStartNewChat}>
+                <Text style={styles.modalStartButtonText}>Start new chat</Text>
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -1837,9 +2032,11 @@ const styles = StyleSheet.create({
     lineHeight: 15,
     color: '#868686',
   },
-  menuButton: {
-    width: 24,
-    height: 24,
+  editButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 102,
+    backgroundColor: colors.white,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -2188,7 +2385,7 @@ const styles = StyleSheet.create({
   },
   actionButtonsRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    justifyContent: 'center',
     alignItems: 'center',
     marginTop: 12,
     paddingHorizontal: 0,
@@ -2225,5 +2422,122 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : undefined,
+  },
+  // New Chat Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  modalContent: {
+    backgroundColor: colors.white,
+    borderRadius: 24,
+    paddingTop: 16,
+    paddingBottom: 24,
+    paddingHorizontal: 16,
+    width: '100%',
+    alignItems: 'center',
+  },
+  modalTopRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    width: '100%',
+    marginBottom: 12,
+  },
+  modalTrashIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 28,
+    backgroundColor: '#FEE4E2',
+    borderWidth: 8,
+    borderColor: '#FEF3F2',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalCloseButton: {
+    padding: 10,
+    borderRadius: 8,
+  },
+  modalAvatarBubble: {
+    width: 79,
+    height: 86,
+    borderRadius: 40,
+    borderWidth: 1,
+    borderColor: '#B72DF2',
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
+    ...Platform.select({
+      ios: {
+        shadowColor: 'rgba(183, 45, 242, 0.24)',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 1,
+        shadowRadius: 14,
+      },
+      android: { elevation: 4 },
+    }),
+  },
+  modalAvatarImage: {
+    width: 75,
+    height: 82,
+    borderRadius: 37,
+  },
+  modalTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : undefined,
+    lineHeight: 32,
+    color: '#333',
+    marginBottom: 16,
+  },
+  modalDescription: {
+    fontSize: 18,
+    fontWeight: '400',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    lineHeight: 22,
+    color: '#A0A0A0',
+    textAlign: 'center',
+    marginBottom: 32,
+  },
+  modalButtonRow: {
+    flexDirection: 'row',
+    gap: 13,
+    width: '100%',
+  },
+  modalKeepButton: {
+    flex: 1,
+    backgroundColor: '#EEEEEE',
+    borderRadius: 8,
+    paddingVertical: 16,
+    paddingHorizontal: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalKeepButtonText: {
+    fontSize: 18,
+    fontWeight: '700',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    lineHeight: 22,
+    color: '#333',
+  },
+  modalStartButton: {
+    flex: 1,
+    backgroundColor: '#00A2B6',
+    borderRadius: 8,
+    paddingVertical: 16,
+    paddingHorizontal: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalStartButtonText: {
+    fontSize: 18,
+    fontWeight: '700',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    lineHeight: 22,
+    color: colors.white,
   },
 });

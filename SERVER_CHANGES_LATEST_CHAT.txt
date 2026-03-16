@@ -1,0 +1,40 @@
+Server-Side Changes Required: GET /latest endpoint for trip-planning edge
+=====================================================================
+
+Purpose: After a browser refresh, the client has no tripPlanningChatId in memory.
+The client now calls GET /latest on the trip-planning edge to retrieve the user's
+most recent trip-planning chat ID before opening the chat screen.
+
+Endpoint
+--------
+  Route:   GET /latest
+  Edge:    swelly-trip-planning-copy (same edge that handles /:chatId, /new_chat, etc.)
+  Auth:    Same auth as existing routes (extract user_id from auth token)
+
+Behavior
+--------
+  1. Verify auth, extract user_id.
+  2. Query:
+       SELECT chat_id
+       FROM swelly_chat_history
+       WHERE user_id = $1
+         AND conversation_type = 'trip-planning'
+       ORDER BY updated_at DESC
+       LIMIT 1
+  3. If a row is found, return:  { "chat_id": "<uuid>" }  with status 200.
+  4. If no rows found, return status 404 (empty body or { "error": "not found" }).
+
+Prerequisites
+-------------
+  - Ensure swelly_chat_history has the column: conversation_type TEXT
+    (it should already exist per DATABASE_CHANGES.md).
+  - Ensure an index exists for efficient lookup:
+      CREATE INDEX IF NOT EXISTS idx_swelly_chat_history_user_type_updated
+      ON swelly_chat_history (user_id, conversation_type, updated_at DESC);
+
+Important
+---------
+  - Make sure the route is registered BEFORE the /:chatId route so that
+    "latest" is not interpreted as a chatId parameter.
+  - The client treats any non-200 response (including 404) as "no existing chat"
+    and will start a new conversation as before.

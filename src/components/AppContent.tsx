@@ -23,6 +23,7 @@ import { analyticsService } from '../services/analytics/analyticsService';
 import { useAuthGuard } from '../hooks/useAuthGuard';
 import { isFirstVideoReadyForBoardType, waitForFirstVideoReadyForBoardType, getVideoPreloadStatus, waitForVideoReady, preloadLoadingVideo, getLoadingVideoUrl } from '../services/media/videoPreloadService';
 import { STEP_WELCOME } from '../constants/onboardingSteps';
+import { swellyServiceCopy } from '../services/swelly/swellyServiceCopy';
 
 export const AppContent: React.FC = () => {
   const { currentStep, formData, setCurrentStep, updateFormData, saveStepToSupabase, isComplete, markOnboardingComplete, isDemoUser, setIsDemoUser, setUser, resetOnboarding, user, isRestoringSession } = useOnboarding();
@@ -602,18 +603,32 @@ export const AppContent: React.FC = () => {
     console.log('Conversation pressed:', conversationId);
   };
 
-  const handleSwellyPress = () => {
+  const restoreLatestChatIfNeeded = async () => {
+    if (tripPlanningChatId) return; // Already have a chat
+    try {
+      const latest = await swellyServiceCopy.getLatestTripPlanningChat();
+      if (latest?.chat_id) {
+        setTripPlanningChatId(latest.chat_id);
+      }
+    } catch (e) {
+      console.error('Failed to fetch latest trip planning chat:', e);
+    }
+  };
+
+  const handleSwellyPress = async () => {
     // Navigate to Swelly trip planning chat from conversations page
     // In MVP mode, use the copy/server-side matching flow
     if (isMVPMode) {
+      await restoreLatestChatIfNeeded();
       setShowTripPlanningChatCopy(true);
     } else {
       setShowTripPlanningChat(true);
     }
   };
 
-  const handleSwellyPressCopy = () => {
+  const handleSwellyPressCopy = async () => {
     // Navigate to Swelly trip planning chat copy from conversations page
+    await restoreLatestChatIfNeeded();
     setShowTripPlanningChatCopy(true);
   };
 

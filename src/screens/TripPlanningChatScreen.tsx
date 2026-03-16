@@ -13,6 +13,7 @@ import {
   Animated,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import Svg, { Path } from 'react-native-svg';
 import { Text } from '../components/Text';
 import { colors, spacing } from '../styles/theme';
 import { swellyService, SwellyChatResponse } from '../services/swelly/swellyService';
@@ -1223,9 +1224,11 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             <Text style={styles.profileTagline}>Let’s grow your surf travel community!</Text>
           </View>
           
-          {/* <TouchableOpacity style={styles.menuButton}>
-            <Ionicons name="ellipsis-vertical" size={24} color="#222B30" />
-          </TouchableOpacity> */}
+          <TouchableOpacity style={styles.editButton}>
+            <Svg width={18} height={18} viewBox="0 0 18 18" fill="none">
+              <Path d="M8 2.26777H4.5C3.09987 2.26777 2.3998 2.26777 1.86502 2.54025C1.39462 2.77994 1.01217 3.16239 0.772484 3.63279C0.5 4.16757 0.5 4.86764 0.5 6.26777V13.2678C0.5 14.6679 0.5 15.368 0.772484 15.9027C1.01217 16.3731 1.39462 16.7556 1.86502 16.9953C2.3998 17.2678 3.09987 17.2678 4.5 17.2678H11.5C12.9001 17.2678 13.6002 17.2678 14.135 16.9953C14.6054 16.7556 14.9878 16.3731 15.2275 15.9027C15.5 15.368 15.5 14.6679 15.5 13.2678V9.76777M5.49998 12.2678H6.89543C7.30308 12.2678 7.50691 12.2678 7.69872 12.2217C7.86878 12.1809 8.03135 12.1135 8.18047 12.0222C8.34867 11.9191 8.4928 11.775 8.78105 11.4867L16.75 3.51777C17.4404 2.82741 17.4404 1.70812 16.75 1.01777C16.0596 0.327412 14.9404 0.327411 14.25 1.01777L6.28103 8.98672C5.99277 9.27497 5.84865 9.4191 5.74558 9.58729C5.6542 9.73641 5.58686 9.89899 5.54603 10.069C5.49998 10.2609 5.49998 10.4647 5.49998 10.8723V12.2678Z" stroke="#7B7B7B" strokeLinecap="round" strokeLinejoin="round" />
+            </Svg>
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -1380,9 +1383,11 @@ const styles = StyleSheet.create({
     lineHeight: 15,
     color: '#868686',
   },
-  menuButton: {
-    width: 24,
-    height: 24,
+  editButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 102,
+    backgroundColor: colors.white,
     justifyContent: 'center',
     alignItems: 'center',
   },
