@@ -49,9 +49,9 @@ interface ProfileScreenProps {
 // Board type mapping
 const BOARD_TYPE_MAP: { [key: string]: { name: string; imageUrl: string } } = {
   'shortboard': { name: 'Short Board', imageUrl: 'https://api.builder.io/api/v1/image/assets/TEMP/9761796f6e2272f3cacf14c4fc9342525bb54ff8?width=371' },
-  'midlength': { name: 'Mid-length', imageUrl: 'https://api.builder.io/api/v1/image/assets/TEMP/377f67727b21485479e873ed3d93c57611722f74?width=371' },
+  'mid_length': { name: 'Mid-length', imageUrl: 'https://api.builder.io/api/v1/image/assets/TEMP/377f67727b21485479e873ed3d93c57611722f74?width=371' },
   'longboard': { name: 'Long Board', imageUrl: 'https://api.builder.io/api/v1/image/assets/TEMP/4692a28e8ac444a82eec1f691f5f008c8a9bbc8e?width=371' },
-  'softtop': { name: 'Soft Top', imageUrl: 'https://api.builder.io/api/v1/image/assets/TEMP/1d104557a7a5ea05c3b36931c1ee56fd01a6d426?width=371' },
+  'soft_top': { name: 'Soft Top', imageUrl: 'https://api.builder.io/api/v1/image/assets/TEMP/1d104557a7a5ea05c3b36931c1ee56fd01a6d426?width=371' },
 };
 
 // Surf level mapping (1-5 to display names)

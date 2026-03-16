@@ -462,7 +462,7 @@ function buildSearchSpecInline(request: any, queryFilters: any, hasDestination: 
 /** Max number of matches returned per request; "More" returns the next batch (previously matched are excluded). */
 const MATCHES_PAGE_SIZE = 3
 
-async function findMatchingUsersV3Server(request: any, requestingUserId: string, chatId: string, supabaseAdmin: any): Promise<{ results: MatchResultInline[]; totalCount: number }> {
+async function findMatchingUsersV3Server(request: any, requestingUserId: string, chatId: string, supabaseAdmin: any, excludePrevious: boolean = false): Promise<{ results: MatchResultInline[]; totalCount: number }> {
   const hasDestination = request.destination_country && String(request.destination_country).trim() !== ''
   const queryFilters = request.queryFilters || null
 
@@ -475,7 +475,7 @@ async function findMatchingUsersV3Server(request: any, requestingUserId: string,
     if (!hasMeaningfulQueryFiltersInline(queryFilters)) {
       throw new Error('Either destination_country or at least one query filter (e.g. country_from, age_min/age_max, surfboard_type, surf_level_category) is required for matching.')
     }
-    const excludedUserIds = await getPreviouslyMatchedUserIdsInline(chatId, supabaseAdmin)
+    const excludedUserIds = excludePrevious ? await getPreviouslyMatchedUserIdsInline(chatId, supabaseAdmin) : []
     console.log('[find-matches] General match (no destination). Excluded user IDs:', excludedUserIds?.length ?? 0)
     const query = buildSurferQueryInline(request, requestingUserId, excludedUserIds, supabaseAdmin)
     const { data: allSurfers, error: queryErr } = await query
@@ -546,8 +546,8 @@ async function findMatchingUsersV3Server(request: any, requestingUserId: string,
   }
 
   // Destination path: country match + raw area match only (no cardinal/town normalization)
-  const excludedUserIds = await getPreviouslyMatchedUserIdsInline(chatId, supabaseAdmin)
-  console.log('[find-matches] Destination: excluded user IDs (previously matched):', excludedUserIds?.length ?? 0)
+  const excludedUserIds = excludePrevious ? await getPreviouslyMatchedUserIdsInline(chatId, supabaseAdmin) : []
+  console.log('[find-matches] Destination: excluded user IDs (previously matched):', excludedUserIds?.length ?? 0, 'excludePrevious:', excludePrevious)
   const query = buildSurferQueryInline(request, requestingUserId, excludedUserIds, supabaseAdmin)
   const { data: allSurfers, error: queryErr } = await query
   if (queryErr) throw new Error('Error querying surfers: ' + queryErr.message)
@@ -4170,7 +4170,7 @@ ${getPronounInstructions(userProfile.pronoun)}`
     // Route: POST /swelly-trip-planning/find-matches
     if (path.endsWith('/find-matches') && req.method === 'POST') {
       try {
-        const body: { chatId: string; tripPlanningData: any } = await req.json()
+        const body: { chatId: string; tripPlanningData: any; excludePrevious?: boolean } = await req.json()
 
         if (!body.chatId) {
           return new Response(
@@ -4255,12 +4255,14 @@ ${getPronounInstructions(userProfile.pronoun)}`
         console.log('[find-matches] Path:', pathDesc)
 
         // Run server-side matching (same behaviour as main flow, matching on server)
-        console.log('[find-matches] Starting server-side matching for chat:', body.chatId)
+        const excludePrevious = body.excludePrevious === true
+        console.log('[find-matches] Starting server-side matching for chat:', body.chatId, 'excludePrevious:', excludePrevious)
         const { results: matches, totalCount } = await findMatchingUsersV3Server(
           tripPlanningData,
           user.id,
           body.chatId,
-          supabaseAdmin
+          supabaseAdmin,
+          excludePrevious
         )
 
         // Save matches to database

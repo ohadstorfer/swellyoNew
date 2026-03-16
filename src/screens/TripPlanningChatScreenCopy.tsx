@@ -706,7 +706,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     initializeChat();
   }, [formData]); // Re-run if formData changes
 
-  const runFindMatches = async (currentChatId: string, tripPlanningData: any) => {
+  const runFindMatches = async (currentChatId: string, tripPlanningData: any, excludePrevious: boolean = false) => {
     if (!currentChatId) return;
     setIsLoading(true);
     const requestData = {
@@ -720,9 +720,9 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
       queryFilters: tripPlanningData.queryFilters || null,
       filtersFromNonNegotiableStep: tripPlanningData.filtersFromNonNegotiableStep || false,
     };
-    
+
     try {
-      const { matches: matchedUsers, totalCount } = await svc.findMatchingUsersServer(currentChatId, tripPlanningData);
+      const { matches: matchedUsers, totalCount } = await svc.findMatchingUsersServer(currentChatId, tripPlanningData, excludePrevious);
       console.log('Matched users found (server):', matchedUsers.length, 'totalCount:', totalCount);
       const needsConfirmation = (matchedUsers as any).__needsConfirmation === true;
       const isSingleCriterion = (matchedUsers as any).__singleCriterion === true;
@@ -1227,7 +1227,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         return [...updated, addFilterBotMessage];
       }
       if (action === 'more' && chatId && requestData != null) {
-        runFindMatches(chatId, requestData);
+        runFindMatches(chatId, requestData, true);
         return updated;
       }
       return updated;

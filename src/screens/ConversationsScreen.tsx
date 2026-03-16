@@ -1336,7 +1336,7 @@ export default function ConversationsScreen({
 
       {/* Swelly conversation card - positioned at bottom */}
       <View style={styles.swellyCardWrapper}>
-        {showSwellyCopyCard && (
+        {/* {showSwellyCopyCard && (
           <TouchableOpacity
             style={[styles.swellyContainer, { marginBottom: 4, borderColor: '#00BCD4' }]}
             onPress={onSwellyPressCopy}
@@ -1369,7 +1369,7 @@ export default function ConversationsScreen({
               </View>
             </View>
           </TouchableOpacity>
-        )}
+        )} */}
         {renderSwellyConversation()}
       </View>
 

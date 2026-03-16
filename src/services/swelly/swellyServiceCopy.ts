@@ -668,7 +668,8 @@ export class SwellyService {
    */
   async findMatchingUsersServer(
     chatId: string,
-    tripPlanningData: any
+    tripPlanningData: any,
+    excludePrevious: boolean = false
   ): Promise<{ matches: MatchedUser[]; totalCount: number }> {
     // Normalize: ensure queryFilters is set when backend sent query_filters
     const payload = tripPlanningData && typeof tripPlanningData === 'object'
@@ -684,7 +685,7 @@ export class SwellyService {
     const response = await fetch(url, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ chatId, tripPlanningData: payload }),
+      body: JSON.stringify({ chatId, tripPlanningData: payload, excludePrevious }),
     });
 
     if (!response.ok) {
