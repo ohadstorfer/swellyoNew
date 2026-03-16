@@ -4048,6 +4048,38 @@ ${getPronounInstructions(userProfile.pronoun)}`
       }
     }
 
+    // Route: GET /swelly-trip-planning/latest — return the user's most recent trip-planning chat
+    if (path.endsWith('/latest') && req.method === 'GET') {
+      try {
+        const { data, error } = await supabaseAdmin
+          .from('swelly_chat_history')
+          .select('chat_id, updated_at')
+          .eq('user_id', user.id)
+          .eq('conversation_type', 'trip-planning')
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .single()
+
+        if (error || !data) {
+          return new Response(
+            JSON.stringify({ error: 'No trip planning chat found' }),
+            { status: 404, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } }
+          )
+        }
+
+        return new Response(
+          JSON.stringify({ chat_id: data.chat_id, updated_at: data.updated_at }),
+          { status: 200, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } }
+        )
+      } catch (err) {
+        console.error('latest chat error:', err)
+        return new Response(
+          JSON.stringify({ error: 'Failed to fetch latest chat', details: err instanceof Error ? err.message : String(err) }),
+          { status: 500, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } }
+        )
+      }
+    }
+
     // Route: GET /swelly-trip-planning/:chat_id
     const chatIdMatch = path.match(/\/([^/]+)$/)
     if (chatIdMatch && req.method === 'GET' && !path.endsWith('/health')) {

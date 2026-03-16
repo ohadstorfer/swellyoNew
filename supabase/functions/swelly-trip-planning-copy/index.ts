@@ -4062,7 +4062,7 @@ ${getPronounInstructions(userProfile.pronoun)}`
       try {
         const { data, error } = await supabaseAdmin
           .from('swelly_chat_history')
-          .select('chat_id')
+          .select('chat_id, updated_at')
           .eq('user_id', user.id)
           .eq('conversation_type', 'trip-planning')
           .order('updated_at', { ascending: false })
@@ -4077,7 +4077,7 @@ ${getPronounInstructions(userProfile.pronoun)}`
         }
 
         return new Response(
-          JSON.stringify({ chat_id: data.chat_id }),
+          JSON.stringify({ chat_id: data.chat_id, updated_at: data.updated_at }),
           { status: 200, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } }
         )
       } catch (err) {

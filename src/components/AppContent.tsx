@@ -608,6 +608,15 @@ export const AppContent: React.FC = () => {
     try {
       const latest = await swellyServiceCopy.getLatestTripPlanningChat();
       if (latest?.chat_id) {
+        // Don't restore chats older than 1 week
+        if (latest.updated_at) {
+          const chatDate = new Date(latest.updated_at);
+          const oneWeekAgo = new Date();
+          oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+          if (chatDate < oneWeekAgo) {
+            return;
+          }
+        }
         setTripPlanningChatId(latest.chat_id);
       }
     } catch (e) {

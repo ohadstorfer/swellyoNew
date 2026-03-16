@@ -43,6 +43,7 @@
     "react-async-hook": "^4.0.0",
     "react-day-picker": "^9.13.0",
     "react-dom": "19.1.0",
+    "react-easy-crop": "^5.5.6",
     "react-native": "0.81.5",
     "react-native-country-picker-modal": "^2.0.0",
     "react-native-emoji-selector": "^0.2.0",

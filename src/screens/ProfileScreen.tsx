@@ -35,6 +35,7 @@ import { useScreenDimensions } from '../utils/responsive';
 import { updateCachedUserProfilePhoto } from '../utils/userProfileCache';
 import { useOnboarding } from '../context/OnboardingContext';
 import { calculateAgeFromDOB } from '../utils/ageCalculation';
+import AvatarCropModal from '../components/AvatarCropModal';
 
 interface ProfileScreenProps {
   onBack?: () => void;
@@ -834,6 +835,8 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
   const currentUserIdRef = useRef<string | null>(null);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [isUploadingVideo, setIsUploadingVideo] = useState(false);
+  const [cropModalVisible, setCropModalVisible] = useState(false);
+  const [rawImageUri, setRawImageUri] = useState<string>('');
   const [showVideoUploadModal, setShowVideoUploadModal] = useState(false);
   const [videoUploadError, setVideoUploadError] = useState<string | null>(null);
   const [uploadFailureError, setUploadFailureError] = useState<string | null>(null);
@@ -1019,7 +1022,8 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
             const reader = new FileReader();
             reader.onload = async (event: any) => {
               const imageUri = event.target.result;
-              await uploadAndUpdateProfile(imageUri);
+              setRawImageUri(imageUri);
+              setCropModalVisible(true);
             };
             reader.readAsDataURL(file);
           }
@@ -1548,6 +1552,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
   };
 
   return (
+    <>
     <SafeAreaView style={styles.container}>
       <ImageBackground
         source={{ uri: getImageUrl('/chat background.png') }}
@@ -2222,6 +2227,18 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
       </ScrollView>
       </ImageBackground>
     </SafeAreaView>
+    {Platform.OS === 'web' && (
+      <AvatarCropModal
+        visible={cropModalVisible}
+        imageUri={rawImageUri}
+        onConfirm={async (croppedUri) => {
+          setCropModalVisible(false);
+          await uploadAndUpdateProfile(croppedUri);
+        }}
+        onCancel={() => setCropModalVisible(false)}
+      />
+    )}
+    </>
   );
 };
 

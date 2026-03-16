@@ -261,7 +261,7 @@ export class SwellyService {
    * Get the latest trip planning chat for the current user.
    * Returns the most recent chat_id or null if none exists.
    */
-  async getLatestTripPlanningChat(): Promise<{ chat_id: string } | null> {
+  async getLatestTripPlanningChat(): Promise<{ chat_id: string; updated_at?: string } | null> {
     try {
       const url = this.getFunctionUrl('/latest', 'trip-planning');
       const headers = await this.getAuthHeaders();

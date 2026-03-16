@@ -1,7 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
 import {
   View,
-  FlatList,
   Image,
   Dimensions,
   StyleSheet,
@@ -14,8 +13,8 @@ import { useVideoPlayer, VideoView } from 'expo-video';
 import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Circle } from 'react-native-svg';
 import { Text } from './Text';
-import { colors, spacing } from '../styles/theme';
-import { getVideoPreloadStatus, waitForVideoReady } from '../services/media/videoPreloadService';
+import { spacing } from '../styles/theme';
+import { getVideoPreloadStatus } from '../services/media/videoPreloadService';
 
 const getScreenWidth = () => Dimensions.get('window').width;
 
@@ -33,152 +32,24 @@ export interface VideoLevel {
   videoUrl?: string;
 }
 
-// Animated Thumbnail Component
-interface AnimatedThumbnailProps {
-  item: VideoLevel;
-  isActive: boolean;
-  selectedVideoId: number;
-  videos: VideoLevel[];
-  onPress: () => void;
-  baseStyle: any;
-  activeStyle: any;
-  imageStyle: any;
-  borderStyle: any;
-}
+// Carousel animation constants
+const INACTIVE_WIDTH = 98;
+const INACTIVE_HEIGHT = 66;
+const ACTIVE_WIDTH = 118;
+const ACTIVE_HEIGHT = 80;
+const CAROUSEL_GAP = isDesktopWeb() ? 12 : 4;
+const ITEM_SLOT_WIDTH = ACTIVE_WIDTH + CAROUSEL_GAP;
+const ANIMATION_DURATION = 350;
 
-const AnimatedThumbnail: React.FC<AnimatedThumbnailProps> = ({ 
-  item, 
-  isActive, 
-  selectedVideoId,
-  videos,
-  onPress, 
-  baseStyle,
-  activeStyle,
-  imageStyle,
-  borderStyle,
-}) => {
-  const opacity = useRef(new Animated.Value(isActive ? 1 : 0.5)).current;
-  const translateX = useRef(new Animated.Value(0)).current;
-  const prevSelectedId = useRef(selectedVideoId);
-  const isInitialMount = useRef(true);
-  
-  // Slide animation when selectedVideoId changes (Figma Smart Animate style)
-  useEffect(() => {
-    // Skip animation on initial mount
-    if (isInitialMount.current) {
-      isInitialMount.current = false;
-      prevSelectedId.current = selectedVideoId;
-      return;
-    }
-    
-    // Only animate if selectedVideoId actually changed
-    if (prevSelectedId.current === selectedVideoId) {
-      return;
-    }
-    
-    const currentIndex = videos.findIndex(v => v.id === selectedVideoId);
-    const prevIndex = videos.findIndex(v => v.id === prevSelectedId.current);
-    const itemIndex = videos.findIndex(v => v.id === item.id);
-    
-    // Determine slide direction based on movement
-    let slideDirection = 0;
-    if (currentIndex !== prevIndex && currentIndex !== -1 && prevIndex !== -1) {
-      // Moving forward (right) - new active slides in from right, old active slides out to left
-      if (currentIndex > prevIndex) {
-        if (itemIndex === currentIndex) {
-          // New active item - slide in from right
-          slideDirection = 60;
-        } else if (itemIndex === prevIndex) {
-          // Old active item - slide out to left
-          slideDirection = -60;
-        }
-      } 
-      // Moving backward (left) - new active slides in from left, old active slides out to right
-      else if (currentIndex < prevIndex) {
-        if (itemIndex === currentIndex) {
-          // New active item - slide in from left
-          slideDirection = -60;
-        } else if (itemIndex === prevIndex) {
-          // Old active item - slide out to right
-          slideDirection = 60;
-        }
-      }
-    }
-    
-    // Set initial values before animation
-    if (slideDirection !== 0) {
-      translateX.setValue(slideDirection);
-    }
-    opacity.setValue(isActive ? 0.4 : 0.3);
-    
-    // Animate with ease-in curve, 350ms duration (matching Figma Smart Animate)
-    Animated.parallel([
-      Animated.timing(opacity, {
-        toValue: isActive ? 1 : 0.5,
-        duration: 350,
-        easing: Easing.in(Easing.ease),
-        useNativeDriver: false,
-      }),
-      Animated.timing(translateX, {
-        toValue: 0,
-        duration: 350,
-        easing: Easing.in(Easing.ease),
-        useNativeDriver: false,
-      }),
-    ]).start();
-    
-    prevSelectedId.current = selectedVideoId;
-  }, [selectedVideoId, isActive, item.id, videos]);
-  
-  return (
-    <TouchableOpacity
-      onPress={onPress}
-      activeOpacity={0.8}
-    >
-      <Animated.View
-        style={[
-          baseStyle,
-          isActive && activeStyle,
-          {
-            opacity,
-            transform: [{ translateX }],
-          },
-        ]}
-      >
-        {/* Active: gradient border (90deg #05BCD3 → #DBCDBC 70%); inactive: plain wrapper */}
-        {isActive ? (
-          <View style={styles.thumbnailImageWrapper}>
-            <LinearGradient
-              colors={['#05BCD3', '#DBCDBC']}
-              locations={[0, 0.7]}
-              start={{ x: 0, y: 0.5 }}
-              end={{ x: 1, y: 0.5 }}
-              style={styles.activeGradientBorder}
-            />
-            <View style={styles.activeGradientInner}>
-              {item.thumbnailUrl ? (
-                <Image
-                  source={{ uri: item.thumbnailUrl }}
-                  style={imageStyle}
-                  resizeMode="cover"
-                />
-              ) : null}
-            </View>
-          </View>
-        ) : (
-          <View style={styles.thumbnailImageWrapper}>
-            {item.thumbnailUrl ? (
-              <Image
-                source={{ uri: item.thumbnailUrl }}
-                style={imageStyle}
-                resizeMode="cover"
-              />
-            ) : null}
-          </View>
-        )}
-      </Animated.View>
-    </TouchableOpacity>
-  );
+// Compute circular slot offset with wraparound
+// Returns the shortest-path offset from selectedIdx to itemIdx
+const circularSlot = (itemIdx: number, selectedIdx: number, total: number): number => {
+  let diff = itemIdx - selectedIdx;
+  if (diff > total / 2) diff -= total;
+  if (diff < -total / 2) diff += total;
+  // For even total where |diff| == total/2, prefer positive
+  if (diff === -total / 2) diff = Math.abs(diff);
+  return diff;
 };
 
 interface VideoCarouselProps {
@@ -194,10 +65,15 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
   onVideoSelect,
   availableVideoHeight,
 }) => {
-  const flatListRef = useRef<FlatList<VideoLevel>>(null);
   const [containerWidth, setContainerWidth] = useState(0);
-  const fadeAnim = useRef(new Animated.Value(1)).current;
-  const thumbnailFadeAnim = useRef(new Animated.Value(1)).current;
+  const carouselAnimsRef = useRef<{
+    translateX: Animated.Value;
+    width: Animated.Value;
+    height: Animated.Value;
+    opacity: Animated.Value;
+  }[]>([]);
+  const isCarouselFirstRender = useRef(true);
+  const prevVideosLengthRef = useRef(0);
   
   // Get the selected video directly from selectedVideoId
   const selectedVideo = React.useMemo(() => {
@@ -273,917 +149,326 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
   
   const videoDimensions = getVideoDimensions();
 
-  // Reorder videos array so selected item is in the middle
-  // On desktop: [2ndPrev, prev, selected, next, 2ndNext] (5 items)
-  // On mobile: [prev, selected, next] (3 items - hide 2nd prev/next)
-  const reorderedVideos = React.useMemo(() => {
-    if (videos.length === 0) return [];
-    
-    const selectedIndex = videos.findIndex(v => v.id === selectedVideoId);
-    if (selectedIndex < 0) return videos;
-    
-    const reordered: VideoLevel[] = [];
-    
-    // Helper function to get index with wrapping
-    const getWrappedIndex = (index: number, length: number): number => {
-      if (index < 0) return length + index;
-      if (index >= length) return index - length;
-      return index;
-    };
-    
-    // On mobile, only show 3 items (prev, selected, next)
-    // On desktop, show 5 items (2ndPrev, prev, selected, next, 2ndNext)
-    const showOuterItems = true;
-    
-    if (showOuterItems) {
-      // Desktop: Show 5 items
-      // Get 2nd previous item (wrapping around if needed)
-      const secondPrevIndex = getWrappedIndex(selectedIndex - 2, videos.length);
-      reordered.push(videos[secondPrevIndex]);
-    }
-    
-    // Get previous item (or last if selected is first)
-    const prevIndex = getWrappedIndex(selectedIndex - 1, videos.length);
-    reordered.push(videos[prevIndex]);
-    
-    // Add selected item in the middle
-    reordered.push(videos[selectedIndex]);
-    
-    // Get next item (or first if selected is last)
-    const nextIndex = getWrappedIndex(selectedIndex + 1, videos.length);
-    reordered.push(videos[nextIndex]);
-    
-    if (showOuterItems) {
-      // Desktop: Show 2nd next item
-      // Get 2nd next item (wrapping around if needed)
-      const secondNextIndex = getWrappedIndex(selectedIndex + 2, videos.length);
-      reordered.push(videos[secondNextIndex]);
-    }
-    
-    return reordered;
-  }, [videos, selectedVideoId]);
-
-  // The selected item is always at index 2 in the reordered array (middle of 5 items)
-  // Array structure: [0: 2ndPrev, 1: Prev, 2: Selected, 3: Next, 4: 2ndNext]
-  const centerIndex = 2;
-
-  // Track current play promise to cancel before replaceAsync (fixes AbortError)
+  // --- Two-player crossfade setup ---
+  const activeSlotRef = useRef<'A' | 'B'>('A');
+  const fadeAnimA = useRef(new Animated.Value(1)).current;
+  const fadeAnimB = useRef(new Animated.Value(0)).current;
   const currentPlayPromiseRef = useRef<Promise<void> | null>(null);
-  // Track if this is the first mount to ensure replaceAsync runs on initial mount
   const isInitialMountRef = useRef(true);
 
-  // Create video player for main video
-  // Check preload status before initializing to optimize playback
-  const isVideoPreloaded = React.useMemo(() => {
-    if (!selectedVideo?.videoUrl) return false;
-    if (selectedVideo.videoUrl.startsWith('blob:')) return true; // Safari blob = instant
-    const preloadStatus = getVideoPreloadStatus(selectedVideo.videoUrl);
-    return preloadStatus?.ready === true;
-  }, [selectedVideo?.videoUrl]);
-  
-  const mainVideoPlayer = useVideoPlayer(
+  const playerA = useVideoPlayer(
     selectedVideo.videoUrl || null,
     (player: any) => {
-      if (__DEV__) {
-        console.log('[VideoCarousel] Video player initialized with URL:', selectedVideo.videoUrl, 'Preloaded:', isVideoPreloaded);
-      }
-      if (player && selectedVideo.videoUrl) {
-        try {
-          // Set properties required for autoplay
-          // DO NOT attempt play here - wait for replaceAsync to complete
-          player.loop = true;
-          player.muted = true;
-          
-          if (__DEV__) {
-            console.log('[VideoCarousel] Player properties set, waiting for replaceAsync before playing');
-          }
-        } catch (error) {
-          console.error('[VideoCarousel] Error initializing video player:', error);
-        }
+      if (player) {
+        player.loop = true;
+        player.muted = true;
       }
     }
   );
-  
-  // Comprehensive error handling and buffering detection (Best Practice: pauseWhenBuffering equivalent)
-  useEffect(() => {
-    if (!mainVideoPlayer || !selectedVideo.videoUrl) return;
-    
-    let isMounted = true;
-    
-    // Listen for status changes to detect errors and buffering
-    const handleStatusChange = (status: any) => {
-      if (!isMounted || !mainVideoPlayer) return;
-      
-      // Best Practice: Handle buffering (pauseWhenBuffering equivalent)
-      if (status?.isBuffering || status?.status === 'buffering') {
-        if (__DEV__) {
-          console.log('[VideoCarousel] Video is buffering, pausing playback');
-        }
-        // Pause when buffering to prevent choppy playback
-        try {
-          mainVideoPlayer.pause();
-        } catch (error) {
-          if (__DEV__) {
-            console.warn('[VideoCarousel] Error pausing during buffer:', error);
-          }
-        }
-      }
-      
-      // Handle errors
-      if (status?.error) {
-        console.error('[VideoCarousel] Video player error:', status.error, 'URL:', selectedVideo.videoUrl);
-        setIsVideoLoading(false);
-      }
-      
-      // Handle ready state
-      if (status?.status === 'readyToPlay' || status?.isReadyToPlay) {
-        if (__DEV__) {
-          console.log('[VideoCarousel] Video readyToPlay status detected');
-        }
-        setIsVideoLoading(false);
-      }
-    };
-    
-    // Listen for video errors on web
-    if (Platform.OS === 'web' && typeof document !== 'undefined') {
-      const findVideoElement = () => {
-        const videoElements = document.querySelectorAll('video');
-        return Array.from(videoElements).find((video: HTMLVideoElement) => {
-          return video.src === selectedVideo.videoUrl || video.currentSrc === selectedVideo.videoUrl;
-        }) as HTMLVideoElement | undefined;
-      };
-      
-      const setupErrorHandling = () => {
-        const videoElement = findVideoElement();
-        if (videoElement) {
-          const handleError = (e: Event) => {
-            const error = videoElement.error;
-            if (error) {
-              const errorMessage = `Video error: code ${error.code}, message: ${error.message}`;
-              console.error('[VideoCarousel] HTML5 video error:', errorMessage, 'URL:', selectedVideo.videoUrl);
-              setIsVideoLoading(false);
-            }
-          };
-          
-          const handleWaiting = () => {
-            if (__DEV__) {
-              console.log('[VideoCarousel] Video waiting for data (buffering)');
-            }
-            // Best Practice: Pause when buffering
-            try {
-              if (mainVideoPlayer && typeof mainVideoPlayer.pause === 'function') {
-                mainVideoPlayer.pause();
-              }
-            } catch (error) {
-              if (__DEV__) {
-                console.warn('[VideoCarousel] Error pausing during wait:', error);
-              }
-            }
-          };
-          
-          const handleCanPlay = () => {
-            if (__DEV__) {
-              console.log('[VideoCarousel] Video can play again, resuming');
-            }
-            // Resume playback after buffering
-            try {
-              if (mainVideoPlayer && typeof mainVideoPlayer.play === 'function') {
-                const playResult = mainVideoPlayer.play();
-                if (playResult !== undefined && typeof (playResult as any).catch === 'function') {
-                  (playResult as any).catch((err: any) => {
-                    if (__DEV__ && err.name !== 'NotAllowedError') {
-                      console.warn('[VideoCarousel] Error resuming after buffer:', err);
-                    }
-                  });
-                }
-              }
-            } catch (error) {
-              if (__DEV__) {
-                console.warn('[VideoCarousel] Error resuming playback:', error);
-              }
-            }
-          };
-          
-          videoElement.addEventListener('error', handleError, { once: false });
-          videoElement.addEventListener('waiting', handleWaiting, { once: false });
-          videoElement.addEventListener('canplay', handleCanPlay, { once: false });
-          
-          return () => {
-            videoElement.removeEventListener('error', handleError);
-            videoElement.removeEventListener('waiting', handleWaiting);
-            videoElement.removeEventListener('canplay', handleCanPlay);
-          };
-        }
-        return () => {};
-      };
-      
-      const cleanup = setupErrorHandling();
-      setTimeout(() => {
-        const delayedCleanup = setupErrorHandling();
-        return () => {
-          cleanup();
-          delayedCleanup();
-        };
-      }, 100);
-      
-      return () => {
-        cleanup();
-      };
-    }
-    
-    // Listen for expo-video status changes (native and web)
-    try {
-      if (mainVideoPlayer.addListener) {
-        const subscription = mainVideoPlayer.addListener('statusChange', handleStatusChange);
-        return () => {
-          isMounted = false;
-          if (subscription && typeof subscription.remove === 'function') {
-            subscription.remove();
-          }
-        };
-      }
-    } catch (error) {
-      if (__DEV__) {
-        console.warn('[VideoCarousel] Player listeners not available:', error);
+
+  const playerB = useVideoPlayer(
+    null as any,
+    (player: any) => {
+      if (player) {
+        player.loop = true;
+        player.muted = true;
       }
     }
-    
-    return () => {
-      isMounted = false;
-    };
-  }, [mainVideoPlayer, selectedVideo.videoUrl]);
+  );
 
-  // Track video loading state and check preload status
-  useEffect(() => {
-    if (!mainVideoPlayer || !selectedVideo.videoUrl) {
-      setIsVideoLoading(true);
-      return;
-    }
-    
-    if (selectedVideo.videoUrl.startsWith('blob:')) {
-      setIsVideoLoading(false);
-      return;
-    }
-    const preloadStatus = getVideoPreloadStatus(selectedVideo.videoUrl);
-    if (preloadStatus?.ready) {
-      if (__DEV__) {
-        console.log('[VideoCarousel] Video is preloaded and ready:', selectedVideo.videoUrl);
-      }
-      setIsVideoLoading(false);
-      return;
-    }
-    
-    // Reset loading state when video changes (only if not preloaded)
-    setIsVideoLoading(true);
-    
-    // Wait for video to be ready if it's being preloaded (shorter timeout for faster feedback)
-    waitForVideoReady(selectedVideo.videoUrl, 500)
-      .then((ready: boolean) => {
-        if (ready) {
-          if (__DEV__) {
-            console.log('[VideoCarousel] Video became ready:', selectedVideo.videoUrl);
-          }
-          setIsVideoLoading(false);
-        }
-      });
-    
-    // For web, listen to video element events for immediate playback
-    if (Platform.OS === 'web' && typeof document !== 'undefined') {
-      const handleCanPlay = () => {
-        setIsVideoLoading(false);
+  // Helper to get player/fade by slot
+  const getSlotPlayer = (slot: 'A' | 'B') => slot === 'A' ? playerA : playerB;
+  const getSlotFade = (slot: 'A' | 'B') => slot === 'A' ? fadeAnimA : fadeAnimB;
+
+  // Web: wait for a video element with given URL to reach readyState >= 2
+  const waitForVideoElementReady = (url: string): Promise<void> => {
+    return new Promise<void>((resolve) => {
+      if (Platform.OS !== 'web' || typeof document === 'undefined') { resolve(); return; }
+      const find = () => {
+        const vids = document.querySelectorAll('video');
+        return Array.from(vids).find((v: HTMLVideoElement) =>
+          v.src === url || v.currentSrc === url
+        ) as HTMLVideoElement | undefined;
       };
-      
-      // Use a more specific selector or wait for the video element to be created
-      const findVideoElement = () => {
-        const videoElements = document.querySelectorAll('video');
-        return Array.from(videoElements).find((video: HTMLVideoElement) => {
-          return video.src === selectedVideo.videoUrl || video.currentSrc === selectedVideo.videoUrl;
-        }) as HTMLVideoElement | undefined;
-      };
-      
-      // Try immediately and after a short delay (video element might not be ready yet)
-      const videoElement = findVideoElement();
-      if (videoElement) {
-        videoElement.addEventListener('canplay', handleCanPlay, { once: true });
-      }
-      
-      // Also try after a delay in case video element is created later
-      const timeoutId = setTimeout(() => {
-        const delayedVideoElement = findVideoElement();
-        if (delayedVideoElement) {
-          delayedVideoElement.addEventListener('canplay', handleCanPlay, { once: true });
+      const tryResolve = (el: HTMLVideoElement | undefined) => {
+        if (el && el.readyState >= 2) { resolve(); return true; }
+        if (el) {
+          const handler = () => resolve();
+          el.addEventListener('canplay', handler, { once: true });
+          setTimeout(() => { el.removeEventListener('canplay', handler); resolve(); }, 500);
+          return true;
         }
-      }, 100);
-      
-      return () => {
-        clearTimeout(timeoutId);
-        const cleanupElement = findVideoElement();
-        if (cleanupElement) {
-          cleanupElement.removeEventListener('canplay', handleCanPlay);
-        }
+        return false;
       };
-    }
-    
-    // For native, assume loaded after replaceAsync completes
-    // This is handled in the replaceAsync promise
-  }, [mainVideoPlayer, selectedVideo.videoUrl]);
-
-  // Robust autoplay implementation - tries multiple times and handles all cases
-  // Also sets playsInline for iOS Safari to prevent fullscreen
-  useEffect(() => {
-    if (!mainVideoPlayer || !selectedVideo.videoUrl) return;
-
-    let isMounted = true;
-    let hasPlayed = false;
-
-    // For web, ensure playsInline is set on the underlying video element (iOS Safari)
-    // Also prevent all video interactions and hide controls
-    if (Platform.OS === 'web' && typeof document !== 'undefined') {
-      // Inject global CSS to hide all video controls
-      const injectControlHidingCSS = () => {
-        const styleId = 'video-carousel-hide-controls';
-        if (document.getElementById(styleId)) return; // Already injected
-        
-        const style = document.createElement('style');
-        style.id = styleId;
-        style.textContent = `
-          /* Hide all video controls */
-          video::-webkit-media-controls {
-            display: none !important;
-            opacity: 0 !important;
-            visibility: hidden !important;
-            pointer-events: none !important;
-          }
-          video::-webkit-media-controls-enclosure {
-            display: none !important;
-            opacity: 0 !important;
-            visibility: hidden !important;
-            pointer-events: none !important;
-          }
-          video::-webkit-media-controls-panel {
-            display: none !important;
-            opacity: 0 !important;
-            visibility: hidden !important;
-            pointer-events: none !important;
-          }
-          video::-webkit-media-controls-play-button {
-            display: none !important;
-            opacity: 0 !important;
-            visibility: hidden !important;
-            pointer-events: none !important;
-          }
-          video::-webkit-media-controls-start-playback-button {
-            display: none !important;
-            opacity: 0 !important;
-            visibility: hidden !important;
-            pointer-events: none !important;
-          }
-          video::-webkit-media-controls-timeline {
-            display: none !important;
-            opacity: 0 !important;
-            visibility: hidden !important;
-            pointer-events: none !important;
-          }
-          video::-webkit-media-controls-current-time-display {
-            display: none !important;
-            opacity: 0 !important;
-            visibility: hidden !important;
-            pointer-events: none !important;
-          }
-          video::-webkit-media-controls-time-remaining-display {
-            display: none !important;
-            opacity: 0 !important;
-            visibility: hidden !important;
-            pointer-events: none !important;
-          }
-          video::-webkit-media-controls-mute-button {
-            display: none !important;
-            opacity: 0 !important;
-            visibility: hidden !important;
-            pointer-events: none !important;
-          }
-          video::-webkit-media-controls-volume-slider {
-            display: none !important;
-            opacity: 0 !important;
-            visibility: hidden !important;
-            pointer-events: none !important;
-          }
-          video::-webkit-media-controls-fullscreen-button {
-            display: none !important;
-            opacity: 0 !important;
-            visibility: hidden !important;
-            pointer-events: none !important;
-          }
-          /* Hide controls for all browsers */
-          video::--webkit-media-controls {
-            display: none !important;
-          }
-          /* Ensure video has no controls attribute */
-          video[controls] {
-            -webkit-appearance: none !important;
-          }
-        `;
-        document.head.appendChild(style);
-      };
-      
-      // Inject CSS immediately
-      injectControlHidingCSS();
-      
-      // Find the video element and set playsInline attribute
-      const setPlaysInline = () => {
-        // Find all video elements (there might be multiple)
-        const videoElements = document.querySelectorAll('video');
-        videoElements.forEach((videoElement) => {
-          // Remove controls attribute completely (not just set to false)
-          videoElement.removeAttribute('controls');
-          videoElement.controls = false;
-          
-          // Set playsInline attributes for iOS Safari
-          videoElement.setAttribute('playsinline', 'true');
-          videoElement.setAttribute('webkit-playsinline', 'true');
-          videoElement.setAttribute('x5-playsinline', 'true'); // For some Android browsers
-          
-          // Prevent fullscreen
-          videoElement.setAttribute('disablePictureInPicture', 'true');
-          
-          // Prevent video interactions via event listeners
-          const preventInteraction = (e: Event) => {
-            e.preventDefault();
-            e.stopPropagation();
-            e.stopImmediatePropagation();
-          };
-          
-          videoElement.addEventListener('touchstart', preventInteraction, { passive: false });
-          videoElement.addEventListener('touchend', preventInteraction, { passive: false });
-          videoElement.addEventListener('touchmove', preventInteraction, { passive: false });
-          videoElement.addEventListener('click', preventInteraction, { passive: false });
-          videoElement.addEventListener('dblclick', preventInteraction, { passive: false });
-          
-          // Prevent context menu
-          videoElement.addEventListener('contextmenu', preventInteraction, { passive: false });
-          
-          // Set CSS to prevent interactions and hide controls
-          (videoElement.style as any).pointerEvents = 'none';
-          (videoElement.style as any).userSelect = 'none';
-          (videoElement.style as any).WebkitUserSelect = 'none';
-          (videoElement.style as any).touchAction = 'none';
-          (videoElement.style as any).WebkitTouchCallout = 'none';
-          
-          // Force hide controls with inline styles
-          (videoElement.style as any).WebkitAppearance = 'none';
-          (videoElement.style as any).appearance = 'none';
-        });
-      };
-      
-      // Try immediately and after delays (video element might not be ready)
-      setPlaysInline();
-      setTimeout(setPlaysInline, 100);
-      setTimeout(setPlaysInline, 500);
-      setTimeout(setPlaysInline, 1000);
-      
-      // Also listen for new video elements being added
-      const observer = new MutationObserver(() => {
-        setPlaysInline();
-      });
-      
-      observer.observe(document.body, {
-        childList: true,
-        subtree: true,
-      });
-      
-      return () => {
-        observer.disconnect();
-      };
-    }
-
-    // Function to attempt playing the video
-    const attemptPlay = async () => {
-      if (!isMounted || !mainVideoPlayer || hasPlayed) return;
-
-      try {
-        // Ensure properties are set before playing
-        mainVideoPlayer.loop = true;
-        mainVideoPlayer.muted = true;
-
-        // Play and handle promise
-        const playPromise = mainVideoPlayer.play();
-        if (playPromise !== undefined) {
-          await playPromise;
-          hasPlayed = true;
-          setIsVideoLoading(false);
-          if (__DEV__) {
-            console.log('[VideoCarousel] Video playing successfully');
-          }
-        }
-      } catch (error: any) {
-        // Silently handle autoplay restrictions - will retry
-        if (__DEV__ && error.name !== 'NotAllowedError') {
-          console.warn('[VideoCarousel] Play attempt failed:', error.message);
-        }
-        hasPlayed = false;
-      }
-    };
-
-    // Try to play immediately
-    attemptPlay();
-
-    // Multiple retries with shorter intervals for faster playback
-    const retryTimeouts: ReturnType<typeof setTimeout>[] = [];
-    [50, 100, 200].forEach((delay) => {
-      const timeout = setTimeout(() => {
-        if (!hasPlayed) {
-          attemptPlay();
-        }
-      }, delay);
-      retryTimeouts.push(timeout);
+      if (tryResolve(find())) return;
+      // Element not yet in DOM — retry after a tick
+      setTimeout(() => { if (!tryResolve(find())) resolve(); }, 100);
     });
+  };
 
-    // For web, listen for canplay event for immediate playback when video is ready
-    let canPlayHandler: (() => void) | null = null;
-    if (Platform.OS === 'web' && typeof document !== 'undefined') {
-      const findVideoElement = () => {
-        const videoElements = document.querySelectorAll('video');
-        return Array.from(videoElements).find((video: HTMLVideoElement) => {
-          return video.src === selectedVideo.videoUrl || video.currentSrc === selectedVideo.videoUrl;
-        }) as HTMLVideoElement | undefined;
-      };
-
-      canPlayHandler = () => {
-        if (!hasPlayed && isMounted) {
-          attemptPlay();
-        }
-      };
-
-      // Try to find video element and add canplay listener
-      const setupCanPlayListener = () => {
-        const videoElement = findVideoElement();
-        if (videoElement) {
-          videoElement.addEventListener('canplay', canPlayHandler!, { once: true });
-          // Also try canplaythrough for more reliable ready state
-          videoElement.addEventListener('canplaythrough', canPlayHandler!, { once: true });
-        }
-      };
-
-      // Try immediately and after delays
-      setupCanPlayListener();
-      setTimeout(setupCanPlayListener, 50);
-      setTimeout(setupCanPlayListener, 100);
-      setTimeout(setupCanPlayListener, 200);
-    }
-
-    // For web, also try on visibility change (when tab becomes visible)
-    let visibilityHandler: (() => void) | null = null;
-    if (Platform.OS === 'web' && typeof document !== 'undefined') {
-      visibilityHandler = () => {
-        if (document.visibilityState === 'visible' && !hasPlayed) {
-          attemptPlay();
-        }
-      };
-      document.addEventListener('visibilitychange', visibilityHandler);
-    }
-
-    return () => {
-      isMounted = false;
-      retryTimeouts.forEach(timeout => clearTimeout(timeout));
-      if (canPlayHandler && Platform.OS === 'web' && typeof document !== 'undefined') {
-        const videoElement = document.querySelector('video') as HTMLVideoElement | null;
-        if (videoElement) {
-          videoElement.removeEventListener('canplay', canPlayHandler);
-          videoElement.removeEventListener('canplaythrough', canPlayHandler);
-        }
-      }
-      if (visibilityHandler && typeof document !== 'undefined') {
-        document.removeEventListener('visibilitychange', visibilityHandler);
-      }
-    };
-  }, [mainVideoPlayer, selectedVideo.videoUrl]);
-
-  // Update player source when video changes OR on initial mount
-  // This ensures replaceAsync is called on initial mount for the first video
+  // Web: inject CSS to hide video controls & set playsInline (runs once)
   useEffect(() => {
-    if (selectedVideo.videoUrl && mainVideoPlayer) {
-      const videoUrl = selectedVideo.videoUrl;
-      const isInitialMount = isInitialMountRef.current;
-      
-      if (__DEV__) {
-        console.log('[VideoCarousel] Replacing video URL:', videoUrl, 'for video:', selectedVideo.name, 'Initial mount:', isInitialMount);
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+
+    const styleId = 'video-carousel-hide-controls';
+    if (!document.getElementById(styleId)) {
+      const style = document.createElement('style');
+      style.id = styleId;
+      style.textContent = `
+        video::-webkit-media-controls,
+        video::-webkit-media-controls-enclosure,
+        video::-webkit-media-controls-panel,
+        video::-webkit-media-controls-play-button,
+        video::-webkit-media-controls-start-playback-button,
+        video::-webkit-media-controls-timeline,
+        video::-webkit-media-controls-current-time-display,
+        video::-webkit-media-controls-time-remaining-display,
+        video::-webkit-media-controls-mute-button,
+        video::-webkit-media-controls-volume-slider,
+        video::-webkit-media-controls-fullscreen-button {
+          display: none !important;
+          opacity: 0 !important;
+          visibility: hidden !important;
+          pointer-events: none !important;
+        }
+        video::--webkit-media-controls { display: none !important; }
+        video[controls] { -webkit-appearance: none !important; }
+      `;
+      document.head.appendChild(style);
+    }
+
+    const applyVideoAttrs = () => {
+      document.querySelectorAll('video').forEach((el) => {
+        el.removeAttribute('controls');
+        el.controls = false;
+        el.setAttribute('playsinline', 'true');
+        el.setAttribute('webkit-playsinline', 'true');
+        el.setAttribute('x5-playsinline', 'true');
+        el.setAttribute('disablePictureInPicture', 'true');
+        const s = el.style as any;
+        s.pointerEvents = 'none';
+        s.userSelect = 'none';
+        s.WebkitUserSelect = 'none';
+        s.touchAction = 'none';
+        s.WebkitTouchCallout = 'none';
+        s.WebkitAppearance = 'none';
+        s.appearance = 'none';
+      });
+    };
+    applyVideoAttrs();
+    setTimeout(applyVideoAttrs, 100);
+    setTimeout(applyVideoAttrs, 500);
+
+    const observer = new MutationObserver(applyVideoAttrs);
+    observer.observe(document.body, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, []);
+
+  // Helper: set playsInline on all video elements (used before replaceAsync)
+  const ensurePlaysInline = () => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+    document.querySelectorAll('video').forEach((el: HTMLVideoElement) => {
+      el.setAttribute('playsinline', 'true');
+      el.setAttribute('webkit-playsinline', 'true');
+      el.setAttribute('x5-playsinline', 'true');
+      el.playsInline = true;
+    });
+  };
+
+  // Helper: load a video into a player, wait for ready, and start playing
+  const loadAndPlay = async (player: any, videoUrl: string): Promise<void> => {
+    ensurePlaysInline();
+
+    // Cancel any pending play promise
+    if (currentPlayPromiseRef.current) {
+      currentPlayPromiseRef.current.catch(() => {});
+      currentPlayPromiseRef.current = null;
+    }
+
+    const replacePromise = player.replaceAsync(videoUrl);
+    if (replacePromise && typeof replacePromise.then === 'function') {
+      await replacePromise;
+    }
+
+    player.loop = true;
+    player.muted = true;
+
+    ensurePlaysInline();
+
+    // Wait for the video element to be ready on web
+    await waitForVideoElementReady(videoUrl);
+
+    player.loop = true;
+    player.muted = true;
+
+    const playPromise = player.play();
+    if (playPromise !== undefined) {
+      currentPlayPromiseRef.current = playPromise as Promise<void>;
+      try {
+        await playPromise;
+      } catch (e: any) {
+        // Retry once on non-autoplay errors
+        if (e.name !== 'NotAllowedError') {
+          if (__DEV__) console.warn('[VideoCarousel] Play failed, retrying:', e.message);
+          try {
+            const retry = player.play();
+            if (retry) await retry;
+          } catch (_retryErr) { /* give up */ }
+        }
       }
-      
-      if (!videoUrl) {
-        console.warn('No video URL provided for:', selectedVideo.name);
-        setIsVideoLoading(false);
+    }
+  };
+
+  // Main crossfade effect: runs on every video URL change
+  useEffect(() => {
+    const videoUrl = selectedVideo.videoUrl;
+    if (!videoUrl || !playerA || !playerB) return;
+
+    let cancelled = false;
+
+    const performSwitch = async () => {
+      if (isInitialMountRef.current) {
+        // --- Initial mount: load into playerA, no crossfade ---
         isInitialMountRef.current = false;
+        fadeAnimA.setValue(1);
+        fadeAnimB.setValue(0);
+        activeSlotRef.current = 'A';
+
+        try {
+          await loadAndPlay(playerA, videoUrl);
+        } catch (err: any) {
+          if (__DEV__) console.warn('[VideoCarousel] Initial load error:', err.message);
+        }
+        if (!cancelled) setIsVideoLoading(false);
         return;
       }
-      
-      // Check if video is preloaded - if so, we can skip loading state or reduce it
-      const isPreloaded = videoUrl.startsWith('blob:') || getVideoPreloadStatus(videoUrl)?.ready === true;
-      
-      // Only set loading state if video is not preloaded
-      // For preloaded videos, replaceAsync should be very fast
-      if (!isPreloaded) {
-        setIsVideoLoading(true);
-      } else if (__DEV__) {
-        console.log('[VideoCarousel] Video is preloaded, replaceAsync should be fast');
-      }
-      
-      // FIX: Cancel previous play() promise before replaceAsync to prevent AbortError
-      if (currentPlayPromiseRef.current) {
-        currentPlayPromiseRef.current.catch(() => {
-          // Ignore cancellation errors
-        });
-        currentPlayPromiseRef.current = null;
-      }
-      
-      // Set playsInline attributes before replaceAsync (critical for iOS Safari)
-      if (Platform.OS === 'web' && typeof document !== 'undefined') {
-        const setPlaysInline = () => {
-          const videoElements = document.querySelectorAll('video');
-          videoElements.forEach((videoElement: HTMLVideoElement) => {
-            videoElement.setAttribute('playsinline', 'true');
-            videoElement.setAttribute('webkit-playsinline', 'true');
-            videoElement.setAttribute('x5-playsinline', 'true');
-            videoElement.playsInline = true;
-          });
-        };
-        setPlaysInline();
-        // Also set after a short delay in case video element is created later
-        setTimeout(setPlaysInline, 50);
-      }
-      
-      const replacePromise = mainVideoPlayer.replaceAsync(videoUrl);
-      if (replacePromise && typeof replacePromise.then === 'function') {
-        replacePromise.then(() => {
-          if (mainVideoPlayer) {
-            // Set properties required for autoplay
-            mainVideoPlayer.loop = true;
-            mainVideoPlayer.muted = true;
-            
-            // Ensure playsInline is set again after replaceAsync (Best Practice: iOS Safari requirement)
-            if (Platform.OS === 'web' && typeof document !== 'undefined') {
-              const setPlaysInline = () => {
-                const videoElements = document.querySelectorAll('video');
-                videoElements.forEach((videoElement: HTMLVideoElement) => {
-                  videoElement.setAttribute('playsinline', 'true');
-                  videoElement.setAttribute('webkit-playsinline', 'true');
-                  videoElement.setAttribute('x5-playsinline', 'true');
-                  videoElement.playsInline = true;
-                });
-              };
-              setPlaysInline();
-              setTimeout(setPlaysInline, 50);
-            }
-            
-            // Best Practice: Wait for video element to be ready before playing
-            const waitForVideoReady = (): Promise<void> => {
-              return new Promise<void>((resolve) => {
-                if (Platform.OS === 'web' && typeof document !== 'undefined') {
-                  const findVideoElement = () => {
-                    const videoElements = document.querySelectorAll('video');
-                    return Array.from(videoElements).find((video: HTMLVideoElement) => {
-                      return video.src === videoUrl || video.currentSrc === videoUrl;
-                    }) as HTMLVideoElement | undefined;
-                  };
-                  
-                  const videoElement = findVideoElement();
-                  if (videoElement) {
-                    // Best Practice: Use HAVE_CURRENT_DATA (2) for faster readiness
-                    const HAVE_CURRENT_DATA = 2;
-                    if (videoElement.readyState >= HAVE_CURRENT_DATA) {
-                      if (__DEV__) {
-                        console.log(`[VideoCarousel] Video element ready (readyState: ${videoElement.readyState}), proceeding to play`);
-                      }
-                      resolve();
-                    } else {
-                      // Best Practice: canplay is the most reliable event
-                      const canPlayHandler = () => {
-                        if (__DEV__) {
-                          console.log(`[VideoCarousel] canplay event fired (readyState: ${videoElement.readyState}), proceeding to play`);
-                        }
-                        resolve();
-                      };
-                      videoElement.addEventListener('canplay', canPlayHandler, { once: true });
-                      
-                      // Timeout fallback (Best Practice: Don't wait forever)
-                      setTimeout(() => {
-                        if (__DEV__) {
-                          console.log(`[VideoCarousel] canplay timeout, proceeding anyway (readyState: ${videoElement.readyState})`);
-                        }
-                        videoElement.removeEventListener('canplay', canPlayHandler);
-                        resolve();
-                      }, 500);
-                    }
-                  } else {
-                    // Video element not found, continue anyway
-                    if (__DEV__) {
-                      console.warn('[VideoCarousel] Video element not found, proceeding to play anyway');
-                    }
-                    resolve();
-                  }
-                } else {
-                  // Native platforms - resolve immediately
-                  resolve();
-                }
-              });
-            };
-            
-            // Wait for video to be ready, then play
-            waitForVideoReady().then(() => {
-              if (!mainVideoPlayer) return;
-              
-              // Best Practice: Set properties before play
-              mainVideoPlayer.loop = true;
-              mainVideoPlayer.muted = true;
-              
-              // Now safe to play (Best Practice: Play after canplay)
-              const playPromise = mainVideoPlayer.play();
-              
-              // Store play promise to cancel if needed
-              if (playPromise !== undefined) {
-                currentPlayPromiseRef.current = playPromise as Promise<void>;
-              }
-              
-              // Best Practice: Handle play promise properly with retry logic
-              if (playPromise !== undefined && typeof (playPromise as any).catch === 'function') {
-                (playPromise as any).then(() => {
-                  setIsVideoLoading(false);
-                  if (__DEV__) {
-                    console.log('[VideoCarousel] Video playing successfully after replaceAsync');
-                  }
-                }).catch((playError: any) => {
-                  // Best Practice: Retry with exponential backoff
-                  if (playError.name !== 'NotAllowedError') {
-                    if (__DEV__) {
-                      console.warn(`[VideoCarousel] Play failed (${playError.name}): ${playError.message}, retrying...`);
-                    }
-                    
-                    // Retry after delay (exponential backoff)
-                    setTimeout(() => {
-                      if (mainVideoPlayer) {
-                        const retryPlayResult = mainVideoPlayer.play();
-                        if (retryPlayResult !== undefined && typeof (retryPlayResult as any).then === 'function') {
-                          (retryPlayResult as any)
-                            .then(() => {
-                              setIsVideoLoading(false);
-                              if (__DEV__) {
-                                console.log('[VideoCarousel] Video playing successfully after retry');
-                              }
-                            })
-                            .catch((retryError: any) => {
-                              // Final failure - video loaded but can't autoplay
-                              setIsVideoLoading(false);
-                              if (__DEV__ && retryError.name !== 'NotAllowedError') {
-                                console.warn('[VideoCarousel] Play retry failed:', retryError.message);
-                              }
-                            });
-                        } else {
-                          setIsVideoLoading(false);
-                        }
-                      }
-                    }, 200);
-                  } else {
-                    // Autoplay blocked - this is expected, video is still loaded
-                    setIsVideoLoading(false);
-                    if (__DEV__) {
-                      console.log('[VideoCarousel] Autoplay blocked (expected), video is loaded');
-                    }
-                  }
-                });
-              } else {
-                setIsVideoLoading(false);
-              }
-            });
-          }
-          
-          // Mark initial mount as complete
-          isInitialMountRef.current = false;
-        }).catch((error: any) => {
-          console.error('[VideoCarousel] Error replacing video:', error, 'URL:', videoUrl);
-          setIsVideoLoading(false);
-          isInitialMountRef.current = false;
-        });
-      } else {
-        // If replaceAsync doesn't return a promise, mark initial mount as complete
-        isInitialMountRef.current = false;
-      }
-    } else if (!selectedVideo.videoUrl || !mainVideoPlayer) {
-      // If no video URL or player, mark initial mount as complete
-      isInitialMountRef.current = false;
-    }
-  }, [selectedVideo.videoUrl, selectedVideo.name, mainVideoPlayer]);
 
-  // Fade animation for main video change
-  useEffect(() => {
-    // Fade out then in
-    fadeAnim.setValue(0);
-    Animated.timing(fadeAnim, {
-      toValue: 1,
-      duration: 900,
-      easing: Easing.ease,
-      useNativeDriver: false,
-    }).start();
-  }, [selectedVideoId, selectedVideo.videoUrl]);
+      // --- Subsequent switches: crossfade ---
+      const outSlot = activeSlotRef.current;
+      const inSlot: 'A' | 'B' = outSlot === 'A' ? 'B' : 'A';
+      const incomingPlayer = getSlotPlayer(inSlot);
+      const incomingFade = getSlotFade(inSlot);
+      const outgoingFade = getSlotFade(outSlot);
+      const outgoingPlayer = getSlotPlayer(outSlot);
 
-  // Fade animation for thumbnails when selection changes
-  useEffect(() => {
-    // Fade out then in (same as main video)
-    thumbnailFadeAnim.setValue(0);
-    Animated.timing(thumbnailFadeAnim, {
-      toValue: 1,
-      duration: 900,
-      easing: Easing.ease,
-      useNativeDriver: false,
-    }).start();
-  }, [selectedVideoId]);
+      // Ensure incoming layer starts invisible
+      incomingFade.setValue(0);
 
-  // Scroll to center whenever selection changes
-  React.useEffect(() => {
-    if (!flatListRef.current || reorderedVideos.length === 0 || containerWidth === 0) return;
-
-    const scrollToCenter = () => {
       try {
-        // Scroll to centerIndex (2 on desktop, 1 on mobile)
-        flatListRef.current?.scrollToIndex({
-          index: centerIndex,
-          animated: true,
-          viewPosition: 0.5, // Center the item
+        await loadAndPlay(incomingPlayer, videoUrl);
+        if (cancelled) return;
+
+        // Crossfade: fade in incoming, fade out outgoing
+        Animated.parallel([
+          Animated.timing(incomingFade, {
+            toValue: 1,
+            duration: 300,
+            easing: Easing.ease,
+            useNativeDriver: false,
+          }),
+          Animated.timing(outgoingFade, {
+            toValue: 0,
+            duration: 300,
+            easing: Easing.ease,
+            useNativeDriver: false,
+          }),
+        ]).start(() => {
+          // After crossfade completes, pause the outgoing player
+          try { outgoingPlayer.pause(); } catch (_) {}
+          activeSlotRef.current = inSlot;
         });
-      } catch (error) {
-        // Retry after a delay if it fails
-        setTimeout(() => {
-          try {
-            flatListRef.current?.scrollToIndex({
-              index: centerIndex,
-              animated: true,
-              viewPosition: 0.5,
-            });
-          } catch (e) {
-            // Final fallback: manual offset calculation
-            const itemWidth = isDesktopWeb() ? 119 + 12 : 119 + 4; // Desktop: 131px, Mobile: 123px
-            const padding = Math.max((containerWidth - 119) / 2, spacing.md);
-            const itemCenter = (centerIndex * itemWidth) + (itemWidth / 2);
-            const containerCenter = containerWidth / 2;
-            const scrollOffset = itemCenter - containerCenter;
-            
-            try {
-              flatListRef.current?.scrollToOffset({
-                offset: Math.max(0, scrollOffset + padding),
-                animated: true,
-              });
-            } catch (finalError) {
-              console.warn('Failed to scroll to center:', finalError);
-            }
-          }
-        }, 100);
+      } catch (error: any) {
+        if (__DEV__) console.error('[VideoCarousel] Crossfade error:', error);
       }
+      if (!cancelled) setIsVideoLoading(false);
     };
 
-    // Wait for layout to be ready
-    if (Platform.OS === 'web') {
-      if (typeof window !== 'undefined' && window.requestAnimationFrame) {
-        window.requestAnimationFrame(() => {
-          setTimeout(scrollToCenter, 50);
-        });
-      } else {
-        setTimeout(scrollToCenter, 100);
-      }
-    } else {
-      setTimeout(scrollToCenter, 100);
-    }
-  }, [selectedVideoId, reorderedVideos, containerWidth, centerIndex]);
+    performSwitch();
 
-  const renderThumbnail = ({ item, index }: { item: VideoLevel; index: number }) => {
-    const isActive = index === centerIndex;
-    // On desktop, index 0 and 4 are outer items (2nd prev and 2nd next)
-    // On mobile, these don't exist (only 3 items shown)
-    const isOuter = isDesktopWeb() && (index === 0 || index === 4);
-    
-    return (
-      <Animated.View
-        style={[
-          styles.thumbnailCarouselItem,
-          isOuter && styles.thumbnailCarouselItemOuter,
-          {
-            opacity: thumbnailFadeAnim,
-          },
-        ]}
-      >
-        <AnimatedThumbnail
-          item={item}
-          isActive={isActive}
-          selectedVideoId={selectedVideoId}
-          videos={videos}
-          onPress={() => {
-            onVideoSelect(item);
-          }}
-          baseStyle={styles.thumbnail}
-          activeStyle={styles.thumbnailActive}
-          imageStyle={styles.thumbnailImage}
-          borderStyle={styles.activeBorder}
-        />
-      </Animated.View>
-    );
-  };
+    return () => { cancelled = true; };
+  }, [selectedVideo.videoUrl, playerA, playerB]);
+
+  // Initialize/reinitialize carousel animated values when videos change
+  if (carouselAnimsRef.current.length !== videos.length || prevVideosLengthRef.current !== videos.length) {
+    const selectedIndex = Math.max(0, videos.findIndex(v => v.id === selectedVideoId));
+    const desktop = isDesktopWeb();
+    carouselAnimsRef.current = videos.map((_, idx) => {
+      const slot = circularSlot(idx, selectedIndex, videos.length);
+      const isSelected = slot === 0;
+      const visible = desktop ? Math.abs(slot) <= 2 : Math.abs(slot) <= 1;
+      return {
+        translateX: new Animated.Value(slot * ITEM_SLOT_WIDTH),
+        width: new Animated.Value(isSelected ? ACTIVE_WIDTH : INACTIVE_WIDTH),
+        height: new Animated.Value(isSelected ? ACTIVE_HEIGHT : INACTIVE_HEIGHT),
+        opacity: new Animated.Value(!visible ? 0 : isSelected ? 1 : Math.abs(slot) === 1 ? 0.5 : 0.3),
+      };
+    });
+    prevVideosLengthRef.current = videos.length;
+    isCarouselFirstRender.current = true;
+  }
+
+  // Animate carousel thumbnails on selection change
+  useEffect(() => {
+    const selectedIndex = videos.findIndex(v => v.id === selectedVideoId);
+    if (selectedIndex < 0 || carouselAnimsRef.current.length !== videos.length) return;
+    const desktop = isDesktopWeb();
+
+    const animations: Animated.CompositeAnimation[] = [];
+
+    videos.forEach((_, idx) => {
+      const anim = carouselAnimsRef.current[idx];
+      if (!anim) return;
+
+      const slot = circularSlot(idx, selectedIndex, videos.length);
+      const isSelected = slot === 0;
+      const visible = desktop ? Math.abs(slot) <= 2 : Math.abs(slot) <= 1;
+
+      const targetTranslateX = slot * ITEM_SLOT_WIDTH;
+      const targetWidth = isSelected ? ACTIVE_WIDTH : INACTIVE_WIDTH;
+      const targetHeight = isSelected ? ACTIVE_HEIGHT : INACTIVE_HEIGHT;
+      const targetOpacity = !visible ? 0 : isSelected ? 1 : Math.abs(slot) === 1 ? 0.5 : 0.3;
+
+      if (isCarouselFirstRender.current) {
+        anim.translateX.setValue(targetTranslateX);
+        anim.width.setValue(targetWidth);
+        anim.height.setValue(targetHeight);
+        anim.opacity.setValue(targetOpacity);
+      } else {
+        animations.push(
+          Animated.timing(anim.translateX, {
+            toValue: targetTranslateX,
+            duration: ANIMATION_DURATION,
+            easing: Easing.out(Easing.cubic),
+            useNativeDriver: false,
+          }),
+          Animated.timing(anim.width, {
+            toValue: targetWidth,
+            duration: ANIMATION_DURATION,
+            easing: Easing.out(Easing.cubic),
+            useNativeDriver: false,
+          }),
+          Animated.timing(anim.height, {
+            toValue: targetHeight,
+            duration: ANIMATION_DURATION,
+            easing: Easing.out(Easing.cubic),
+            useNativeDriver: false,
+          }),
+          Animated.timing(anim.opacity, {
+            toValue: targetOpacity,
+            duration: ANIMATION_DURATION,
+            easing: Easing.out(Easing.cubic),
+            useNativeDriver: false,
+          }),
+        );
+      }
+    });
+
+    if (!isCarouselFirstRender.current && animations.length > 0) {
+      Animated.parallel(animations).start();
+    }
+
+    isCarouselFirstRender.current = false;
+  }, [selectedVideoId, videos]);
 
   const renderDots = () => {
     const selectedIndex = videos.findIndex(v => v.id === selectedVideoId);
@@ -1225,45 +510,61 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
             },
           } as any)}
         >
+          {/* Video Layer A */}
+          <Animated.View
+            style={[styles.mainVideo, { opacity: fadeAnimA }]}
+            pointerEvents="none"
+          >
+            <View style={styles.videoPlayerContainer} pointerEvents="none">
+              <VideoView
+                player={playerA}
+                style={styles.videoPlayer}
+                contentFit="cover"
+                nativeControls={false}
+                allowsFullscreen={false}
+                allowsPictureInPicture={false}
+                {...(Platform.OS === 'web' && {
+                  controls: false,
+                  disablePictureInPicture: true,
+                } as any)}
+              />
+            </View>
+          </Animated.View>
+
+          {/* Video Layer B (absolute overlay for crossfade) */}
           <Animated.View
             style={[
               styles.mainVideo,
-              {
-                opacity: fadeAnim,
-              },
+              { opacity: fadeAnimB, position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 1 },
             ]}
             pointerEvents="none"
           >
-            {selectedVideo.videoUrl && !isVideoLoading ? (
-              <View style={styles.videoPlayerContainer} pointerEvents="none">
-                <VideoView
-                  player={mainVideoPlayer}
-                  style={styles.videoPlayer}
-                  contentFit="cover"
-                  nativeControls={false}
-                  allowsFullscreen={false}
-                  allowsPictureInPicture={false}
-                  {...(Platform.OS === 'web' && {
-                    // Web-specific props to prevent controls
-                    controls: false,
-                    disablePictureInPicture: true,
-                    onError: (error: any) => {
-                      console.error('[VideoCarousel] VideoView error:', error);
-                      console.error('[VideoCarousel] Video URL:', selectedVideo.videoUrl);
-                    },
-                  } as any)}
-                />
-              </View>
-            ) : (
-              selectedVideo.thumbnailUrl ? (
-                <Image
-                  source={{ uri: selectedVideo.thumbnailUrl }}
-                  style={styles.videoPlayer}
-                  resizeMode="cover"
-                />
-              ) : null
-            )}
+            <View style={styles.videoPlayerContainer} pointerEvents="none">
+              <VideoView
+                player={playerB}
+                style={styles.videoPlayer}
+                contentFit="cover"
+                nativeControls={false}
+                allowsFullscreen={false}
+                allowsPictureInPicture={false}
+                {...(Platform.OS === 'web' && {
+                  controls: false,
+                  disablePictureInPicture: true,
+                } as any)}
+              />
+            </View>
           </Animated.View>
+
+          {/* Thumbnail fallback during initial load */}
+          {isVideoLoading && selectedVideo.thumbnailUrl ? (
+            <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 2 }}>
+              <Image
+                source={{ uri: selectedVideo.thumbnailUrl }}
+                style={styles.videoPlayer}
+                resizeMode="cover"
+              />
+            </View>
+          ) : null}
           
           {/* Transparent overlay to prevent video interactions on iOS Safari */}
           <View 
@@ -1322,7 +623,7 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
 
       {/* Thumbnails Carousel */}
       <View style={styles.thumbnailsSection}>
-        <View 
+        <View
           style={styles.thumbnailsWrapper}
           onLayout={(event) => {
             const { width } = event.nativeEvent.layout;
@@ -1332,59 +633,70 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
           }}
           collapsable={false}
         >
-          <FlatList
-            ref={flatListRef}
-            data={reorderedVideos}
-            renderItem={renderThumbnail}
-            keyExtractor={(item, index) => `video-${item.id}-${index}`}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            snapToAlignment="center"
-            snapToInterval={isDesktopWeb() ? 119 + 12 : 119 + 4} // Active width + gap for snapping (12px desktop, 4px mobile)
-            decelerationRate="fast"
-            pagingEnabled={false}
-            scrollEnabled={true}
-            initialScrollIndex={centerIndex}
-            getItemLayout={(_, index) => {
-              // Use consistent item width for layout calculations
-              // Desktop: 119px + 12px gap = 131px, Mobile: 119px + 4px gap = 123px
-              const itemWidth = isDesktopWeb() ? 119 + 12 : 119 + 4;
-              return {
-                length: itemWidth,
-                offset: itemWidth * index,
-                index,
-              };
-            }}
-            contentContainerStyle={[
-              styles.thumbnailsList,
-              containerWidth > 0 && {
-                // Add padding to center the widest thumbnail (119px active)
-                // This ensures the selected thumbnail (at index 1) is centered
-                paddingHorizontal: Math.max((containerWidth - 119) / 2, spacing.md),
-              },
-            ]}
-            onScrollToIndexFailed={(info) => {
-              // Retry after layout is ready
-              setTimeout(() => {
-                try {
-                  flatListRef.current?.scrollToIndex({
-                    index: centerIndex,
-                    animated: true,
-                    viewPosition: 0.5,
-                  });
-                } catch (e) {
-                  console.warn('Failed to scroll to center after retry:', e);
-                }
-              }, 100);
-            }}
-            {...(Platform.OS === 'web' && { 
-              style: { 
-                overflow: 'hidden',
-                WebkitOverflowScrolling: 'touch' as any,
-              } as any,
-              scrollEventThrottle: 16,
-            })}
-          />
+          {containerWidth > 0 && videos.map((video, idx) => {
+            const anim = carouselAnimsRef.current[idx];
+            if (!anim) return null;
+            const isActive = video.id === selectedVideoId;
+
+            return (
+              <Animated.View
+                key={video.id}
+                style={{
+                  position: 'absolute' as const,
+                  left: containerWidth / 2 - ITEM_SLOT_WIDTH / 2,
+                  top: 0,
+                  width: ITEM_SLOT_WIDTH,
+                  height: ACTIVE_HEIGHT,
+                  justifyContent: 'center' as const,
+                  alignItems: 'center' as const,
+                  transform: [{ translateX: anim.translateX }],
+                }}
+              >
+                <TouchableOpacity onPress={() => onVideoSelect(video)} activeOpacity={0.8}>
+                  <Animated.View
+                    style={{
+                      width: anim.width,
+                      height: anim.height,
+                      opacity: anim.opacity,
+                      borderRadius: 8,
+                      overflow: isActive ? 'visible' as const : 'hidden' as const,
+                    }}
+                  >
+                    {isActive ? (
+                      <View style={styles.thumbnailImageWrapper}>
+                        <LinearGradient
+                          colors={['#05BCD3', '#DBCDBC']}
+                          locations={[0, 0.7]}
+                          start={{ x: 0, y: 0.5 }}
+                          end={{ x: 1, y: 0.5 }}
+                          style={styles.activeGradientBorder}
+                        />
+                        <View style={styles.activeGradientInner}>
+                          {video.thumbnailUrl ? (
+                            <Image
+                              source={{ uri: video.thumbnailUrl }}
+                              style={styles.thumbnailImage}
+                              resizeMode="cover"
+                            />
+                          ) : null}
+                        </View>
+                      </View>
+                    ) : (
+                      <View style={styles.thumbnailImageWrapper}>
+                        {video.thumbnailUrl ? (
+                          <Image
+                            source={{ uri: video.thumbnailUrl }}
+                            style={styles.thumbnailImage}
+                            resizeMode="cover"
+                          />
+                        ) : null}
+                      </View>
+                    )}
+                  </Animated.View>
+                </TouchableOpacity>
+              </Animated.View>
+            );
+          })}
         </View>
         
         {/* Dots Indicator */}
@@ -1583,47 +895,6 @@ const styles = StyleSheet.create({
       minHeight: 80, // Ensure full height is visible
     }),
   },
-  thumbnailCarouselItem: {
-    // Mobile: smaller gap (4px), Desktop: larger gap (12px)
-    width: isDesktopWeb() ? 119 + 12 : 119 , // Active thumbnail width + gap
-    height: 80,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingRight: 0, // No extra padding, gap is handled by container width
-  },
-  thumbnailCarouselItemOuter: {
-    // Outer items (2nd prev and 2nd next) should be slightly visible
-    // Only on desktop web
-    opacity: 0.3, // Make them semi-transparent
-    transform: [{ scale: 0.85 }], // Slightly smaller
-    ...(isDesktopWeb() && {
-      // On desktop, reduce the gap between outer items and adjacent items
-      // This makes the gap between 2nd prev/next and prev/next equal to the gap between prev/next and center
-      marginHorizontal: -20,// Negative margin to reduce gap (half of the 12px gap)
-    }),
-  },
-  thumbnailsList: {
-    alignItems: 'center',
-    justifyContent: 'flex-start',
-    // Gap is handled by marginRight on thumbnails
-    // Padding will be set dynamically in contentContainerStyle based on containerWidth
-  },
-  thumbnail: {
-    width: 98,
-    height: 66,
-    borderRadius: 8,
-    overflow: 'hidden',
-    position: 'relative',
-    marginRight: 0, // Gap is handled by container width
-    alignSelf: 'center', // Center within the 131px container
-  },
-  thumbnailActive: {
-    width: 118,
-    height: 80,
-    overflow: 'visible', // Allow border to be visible
-    alignSelf: 'center', // Center within the 131px container
-    // aspect-ratio 59/40 ≈ 118/80
-  },
   thumbnailImageWrapper: {
     width: '100%',
     height: '100%',
@@ -1634,15 +905,6 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
     borderRadius: 8, // Match the thumbnail border radius
-  },
-  thumbnailImageInactive: {
-    opacity: 1,
-  },
-  activeBorder: {
-    borderWidth: 2,
-    borderColor: '#05BCD3',
-    borderRadius: 8,
-    overflow: 'hidden',
   },
   // Gradient border: linear-gradient(90deg, #05BCD3 0%, #DBCDBC 70%)
   activeGradientBorder: {

@@ -217,6 +217,11 @@ SPECIAL HANDLING:
     * "Costa Rica, Tamarindo" → {"country": "Costa Rica", "area": ["Tamarindo"]}
     * "El Salvador" → {"country": "El Salvador", "area": []}
   - When user says they want to UPDATE an existing trip (e.g., "I was in Australia for 3 months but it should be 2 years"), you should UPDATE the existing trip by matching the country name
+  - When user wants to REMOVE/DELETE a trip (e.g., "remove my trip to Portugal", "delete my California trip"), return is_finished: true with the trip object including "_delete": true
+    * Format: {"country": "Portugal", "_delete": true}
+    * For USA: {"country": "USA", "state": "California", "_delete": true}
+    * Match by country (and state for USA), same as update matching
+    * Confirm with the user before deleting (e.g., "I'll remove your Portugal trip now")
   - Always extract both time_in_days (calculated) and time_in_text (preserved from user input, rounded to years/half-years if 1+ year)
   - Examples:
     * User says "3 weeks" → time_in_days: 21, time_in_text: "3 weeks"
@@ -722,8 +727,23 @@ async function updateUserProfile(userId: string, field: string, value: any, supa
       const existingTrips = surferData.destinations_array || []
       const updatedTrips = [...existingTrips]
       
-      // For each new trip, check if it matches an existing one by country (and state for USA)
+      // For each new trip, check for deletion or update/add
       for (const newTrip of value) {
+        // Handle deletion
+        if (newTrip._delete) {
+          const delCountry = (newTrip.country || '').toLowerCase()
+          const delState = newTrip.state?.toLowerCase()
+          const idx = updatedTrips.findIndex((t: any) => {
+            const tc = (t.country || '').toLowerCase()
+            const ts = t.state?.toLowerCase()
+            return tc === delCountry && (delCountry !== 'usa' || ts === delState)
+          })
+          if (idx !== -1) updatedTrips.splice(idx, 1)
+          continue
+        }
+
+        // Check if it matches an existing one by country (and state for USA)
+
         // Support both new structure (country, state?, area) and legacy (destination_name)
         const newCountry = newTrip.country || extractCountryFromDestination(newTrip.destination_name || '')
         const newState = newTrip.state

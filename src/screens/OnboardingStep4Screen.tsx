@@ -25,6 +25,7 @@ import { OnboardingData } from './OnboardingStep1Screen';
 import { uploadProfileImage } from '../services/storage/storageService';
 import { supabase } from '../config/supabase';
 import { formatDateOfBirth, isValidDateOfBirth, dateToISOString } from '../utils/ageCalculation';
+import AvatarCropModal from '../components/AvatarCropModal';
 
 interface OnboardingStep4ScreenProps {
   onNext: (data: OnboardingData) => void;
@@ -1207,6 +1208,8 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
   // Modal state management - lifted to screen level for proper stacking
   const [activeModal, setActiveModal] = useState<'country' | 'pronoun' | null>(null);
   const [countrySearchQuery, setCountrySearchQuery] = useState('');
+  const [cropModalVisible, setCropModalVisible] = useState(false);
+  const [rawImageUri, setRawImageUri] = useState<string>('');
 
   const pickImage = async () => {
     if (Platform.OS === 'web') {
@@ -1220,8 +1223,9 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
           const reader = new FileReader();
           reader.onload = (event: any) => {
             const imageUri = event.target.result;
-            // Only set local state for preview - upload happens in handleNext
-            setProfilePicture(imageUri);
+            // Show crop modal before setting profile picture
+            setRawImageUri(imageUri);
+            setCropModalVisible(true);
           };
           reader.readAsDataURL(file);
         }
@@ -1705,6 +1709,17 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
           fontSize: 16,
           fontFamily: 'Inter',
         }}
+      />
+    )}
+    {Platform.OS === 'web' && (
+      <AvatarCropModal
+        visible={cropModalVisible}
+        imageUri={rawImageUri}
+        onConfirm={(croppedUri) => {
+          setProfilePicture(croppedUri);
+          setCropModalVisible(false);
+        }}
+        onCancel={() => setCropModalVisible(false)}
       />
     )}
   </>
