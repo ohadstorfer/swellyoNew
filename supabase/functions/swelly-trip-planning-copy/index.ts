@@ -73,6 +73,69 @@ interface Message {
 const TRIP_PLANNING_FIRST_QUESTION_TEXT =
   "Yo! Let's Travel! I can connect you with like minded surfers or surf travelers who have experience in specific destinations you are curious about. So, what are you looking for?"
 
+// ========== UI MESSAGES: Ordered, typed messages for perfect conversation restore ==========
+
+interface UIMessage {
+  id: string
+  order_index: number
+  type: 'bot_text' | 'user_text' | 'search_summary' | 'match_results' | 'no_matches' | 'new_chat_restart' | 'add_filter_prompt' | 'filter_removal_ack' | 'error'
+  text: string
+  timestamp: string  // ISO 8601
+  is_user: boolean
+  // Type-specific payload
+  matched_users?: MatchedUser[]
+  destination_country?: string
+  match_total_count?: number
+  action_row?: {
+    request_data: any
+    selected_action: 'new_chat' | 'add_filter' | 'more' | null
+  }
+  search_summary_block?: {
+    request_data: any
+    search_summary: string
+    selected_action: 'search' | 'continue_editing' | null
+  }
+  is_search_summary?: boolean
+  is_restart_after_new_chat?: boolean
+  backend_message_index?: number
+}
+
+function makeTimestamp(): string {
+  return new Date().toISOString()
+}
+
+function appendUIMessage(uiMessages: UIMessage[], partial: Omit<UIMessage, 'id' | 'order_index'>): UIMessage {
+  const msg: UIMessage = {
+    ...partial,
+    id: crypto.randomUUID(),
+    order_index: uiMessages.length,
+  }
+  uiMessages.push(msg)
+  return msg
+}
+
+/** Load ui_messages from DB (returns empty array if column is null/empty). */
+async function getUIMessages(chatId: string, supabaseAdmin: any): Promise<UIMessage[]> {
+  const { data, error } = await supabaseAdmin
+    .from('swelly_chat_history')
+    .select('ui_messages')
+    .eq('chat_id', chatId)
+    .single()
+  if (error || !data) return []
+  return Array.isArray(data.ui_messages) ? data.ui_messages : []
+}
+
+/** Save ui_messages to DB (alongside existing saveChatHistory for GPT messages). */
+async function saveUIMessages(chatId: string, uiMessages: UIMessage[], supabaseAdmin: any): Promise<void> {
+  const { error } = await supabaseAdmin
+    .from('swelly_chat_history')
+    .update({ ui_messages: uiMessages, updated_at: new Date().toISOString() })
+    .eq('chat_id', chatId)
+  if (error) {
+    console.error('[saveUIMessages] Error:', error)
+  }
+}
+
 // === INLINED find-matches: full LLM destination utils, no local imports ===
 interface MatchResultInline {
   user_id: string
@@ -2187,6 +2250,17 @@ ${getPronounInstructions(userProfile.pronoun)}`
         }
       }
 
+      // --- UI Messages: create initial bot message ---
+      const uiMessages: UIMessage[] = []
+      appendUIMessage(uiMessages, {
+        type: 'bot_text',
+        text: parsedResponse.return_message,
+        timestamp: makeTimestamp(),
+        is_user: false,
+        backend_message_index: messages.length - 1,
+      })
+      await saveUIMessages(chatId, uiMessages, supabaseAdmin)
+
       const responsePayload = { ...parsedResponse, message_index: messages.length - 1 }
       return new Response(
         JSON.stringify(responsePayload),
@@ -2571,6 +2645,11 @@ ${getPronounInstructions(userProfile.pronoun)}`
         const clarificationPayload = { return_message: clarificationText, is_finished: false, data: null }
         messages.push({ role: 'assistant', content: JSON.stringify(clarificationPayload) })
         await saveChatHistory(chatId, messages, user.id, body.conversation_id || null, supabaseAdmin)
+        // --- UI Messages: user message + clarification ---
+        const uiMsgsClarify = await getUIMessages(chatId, supabaseAdmin)
+        appendUIMessage(uiMsgsClarify, { type: 'user_text', text: body.message, timestamp: makeTimestamp(), is_user: true })
+        appendUIMessage(uiMsgsClarify, { type: 'bot_text', text: clarificationText, timestamp: makeTimestamp(), is_user: false, backend_message_index: messages.length - 1 })
+        await saveUIMessages(chatId, uiMsgsClarify, supabaseAdmin)
         console.log('🔀 Returning clarification (intentUnclear):', clarificationText)
         return new Response(JSON.stringify(clarificationPayload), {
           status: 200,
@@ -3360,6 +3439,24 @@ ${getPronounInstructions(userProfile.pronoun)}`
         }
       }
 
+      // --- UI Messages: append user message + bot response ---
+      try {
+        const uiMsgsContinue = await getUIMessages(chatId, supabaseAdmin)
+        appendUIMessage(uiMsgsContinue, { type: 'user_text', text: body.message, timestamp: makeTimestamp(), is_user: true })
+        const hasSearchSummaryContinue = parsedResponse.data?.search_summary != null && String(parsedResponse.data.search_summary).trim() !== ''
+        appendUIMessage(uiMsgsContinue, {
+          type: hasSearchSummaryContinue ? 'search_summary' : 'bot_text',
+          text: hasSearchSummaryContinue ? parsedResponse.data.search_summary : parsedResponse.return_message,
+          timestamp: makeTimestamp(),
+          is_user: false,
+          is_search_summary: hasSearchSummaryContinue || undefined,
+          backend_message_index: messages.length - 1,
+        })
+        await saveUIMessages(chatId, uiMsgsContinue, supabaseAdmin)
+      } catch (uiErr) {
+        console.error('[continue] Error saving ui_messages:', uiErr)
+      }
+
       const responsePayload = { ...parsedResponse, message_index: messages.length - 1 }
       return new Response(
         JSON.stringify(responsePayload),
@@ -3537,7 +3634,7 @@ ${getPronounInstructions(userProfile.pronoun)}`
         console.log('[attach-matches] Saving', messages.length, 'messages to database')
         await saveChatHistory(chatId, messages, user.id, null, supabaseAdmin)
         console.log('[attach-matches] Save completed successfully')
-        
+
         // Verify the save by reading back
         const verifyMessages = await getChatHistory(chatId, supabaseAdmin)
         const verifyMessage = verifyMessages[targetAssistantIndex]
@@ -3545,6 +3642,30 @@ ${getPronounInstructions(userProfile.pronoun)}`
           console.log('[attach-matches] ✅ Verified: Metadata saved successfully,', verifyMessage.metadata.matchedUsers.length, 'matched users')
         } else {
           console.error('[attach-matches] ❌ ERROR: Metadata was not saved! Message at index', targetAssistantIndex, 'has no metadata after save')
+        }
+
+        // --- UI Messages: append match_results or no_matches ---
+        try {
+          const uiMsgsMatch = await getUIMessages(chatId, supabaseAdmin)
+          const matchCount = body.matchedUsers.length
+          const matchType = matchCount > 0 ? 'match_results' : 'no_matches'
+          const matchText = matchCount > 0
+            ? `Found ${matchCount} awesome match${matchCount > 1 ? 'es' : ''} for you!`
+            : 'No surfers match your criteria right now. Try adjusting your destination or filters.'
+          appendUIMessage(uiMsgsMatch, {
+            type: matchType as 'match_results' | 'no_matches',
+            text: matchText,
+            timestamp: makeTimestamp(),
+            is_user: false,
+            matched_users: body.matchedUsers,
+            destination_country: body.destinationCountry,
+            match_total_count: body.totalCount ?? matchCount,
+            action_row: { request_data: body.requestData ?? null, selected_action: null },
+            backend_message_index: targetAssistantIndex,
+          })
+          await saveUIMessages(chatId, uiMsgsMatch, supabaseAdmin)
+        } catch (uiErr) {
+          console.error('[attach-matches] Error saving ui_messages:', uiErr)
         }
 
         return new Response(
@@ -3633,6 +3754,41 @@ ${getPronounInstructions(userProfile.pronoun)}`
           console.log('[update-match-action] Appended add-filter prompt at index', appendedMessageIndex)
         }
         await saveChatHistory(chatId, messages, user.id, null, supabaseAdmin)
+
+        // --- UI Messages: update action_row on match message + append synthetic message ---
+        try {
+          const uiMsgsAction = await getUIMessages(chatId, supabaseAdmin)
+          // Find the last match_results/no_matches UI message and update its action_row
+          for (let ui = uiMsgsAction.length - 1; ui >= 0; ui--) {
+            if (uiMsgsAction[ui].type === 'match_results' || uiMsgsAction[ui].type === 'no_matches') {
+              uiMsgsAction[ui].action_row = { ...uiMsgsAction[ui].action_row!, selected_action: body.selectedAction }
+              break
+            }
+          }
+          if (body.selectedAction === 'new_chat') {
+            appendUIMessage(uiMsgsAction, {
+              type: 'new_chat_restart',
+              text: TRIP_PLANNING_FIRST_QUESTION_TEXT,
+              timestamp: makeTimestamp(),
+              is_user: false,
+              is_restart_after_new_chat: true,
+              backend_message_index: appendedMessageIndex,
+            })
+          }
+          if (body.selectedAction === 'add_filter') {
+            appendUIMessage(uiMsgsAction, {
+              type: 'add_filter_prompt',
+              text: "Great! We can add some filters to your search. What would you like to add? For example: board type, surf level, destinations they've surfed, age, or country of origin.",
+              timestamp: makeTimestamp(),
+              is_user: false,
+              backend_message_index: appendedMessageIndex,
+            })
+          }
+          await saveUIMessages(chatId, uiMsgsAction, supabaseAdmin)
+        } catch (uiErr) {
+          console.error('[update-match-action] Error saving ui_messages:', uiErr)
+        }
+
         return new Response(JSON.stringify({ success: true, appendedMessageIndex }), { status: 200, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } })
       } catch (error) {
         console.error('Error updating match action:', error)
@@ -3681,6 +3837,23 @@ ${getPronounInstructions(userProfile.pronoun)}`
         if (!msg.metadata.actionRow) msg.metadata.actionRow = { requestData: null, selectedAction: null }
         msg.metadata.actionRow.requestData = body.requestData
         await saveChatHistory(chatId, messages, user.id, null, supabaseAdmin)
+
+        // --- UI Messages: update action_row.request_data on the match UI message ---
+        try {
+          const uiMsgsFilters = await getUIMessages(chatId, supabaseAdmin)
+          for (let ui = uiMsgsFilters.length - 1; ui >= 0; ui--) {
+            if (uiMsgsFilters[ui].type === 'match_results' || uiMsgsFilters[ui].type === 'no_matches') {
+              if (uiMsgsFilters[ui].action_row) {
+                uiMsgsFilters[ui].action_row!.request_data = body.requestData
+              }
+              break
+            }
+          }
+          await saveUIMessages(chatId, uiMsgsFilters, supabaseAdmin)
+        } catch (uiErr) {
+          console.error('[update-match-filters] Error saving ui_messages:', uiErr)
+        }
+
         return new Response(JSON.stringify({ success: true }), { status: 200, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } })
       } catch (error) {
         console.error('Error updating match filters:', error)
@@ -3739,6 +3912,25 @@ ${getPronounInstructions(userProfile.pronoun)}`
           selectedAction: body.selectedAction ?? null,
         }
         await saveChatHistory(chatId, messages, user.id, null, supabaseAdmin)
+
+        // --- UI Messages: update search_summary_block on the search_summary UI message ---
+        try {
+          const uiMsgsSS = await getUIMessages(chatId, supabaseAdmin)
+          for (let ui = uiMsgsSS.length - 1; ui >= 0; ui--) {
+            if (uiMsgsSS[ui].type === 'search_summary' || uiMsgsSS[ui].is_search_summary) {
+              uiMsgsSS[ui].search_summary_block = {
+                request_data: body.requestData,
+                search_summary: body.searchSummary ?? '',
+                selected_action: body.selectedAction ?? null,
+              }
+              break
+            }
+          }
+          await saveUIMessages(chatId, uiMsgsSS, supabaseAdmin)
+        } catch (uiErr) {
+          console.error('[update-search-summary-block] Error saving ui_messages:', uiErr)
+        }
+
         return new Response(JSON.stringify({ success: true }), { status: 200, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } })
       } catch (error) {
         console.error('Error updating search summary block:', error)
@@ -3822,12 +4014,39 @@ ${getPronounInstructions(userProfile.pronoun)}`
         console.log('[ack-filter-removal] save completed')
         const now = new Date()
         const timestamp = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
+        const newMessageId = crypto.randomUUID()
         const newMessage = {
-          id: crypto.randomUUID(),
+          id: newMessageId,
           text: text,
           isUser: false,
           timestamp,
         }
+
+        // --- UI Messages: append filter_removal_ack ---
+        try {
+          const uiMsgsAck = await getUIMessages(chatId, supabaseAdmin)
+          // Also update the match message's action_row.request_data
+          for (let ui = uiMsgsAck.length - 1; ui >= 0; ui--) {
+            if (uiMsgsAck[ui].type === 'match_results' || uiMsgsAck[ui].type === 'no_matches') {
+              if (uiMsgsAck[ui].action_row) {
+                uiMsgsAck[ui].action_row!.request_data = body.requestData
+              }
+              break
+            }
+          }
+          appendUIMessage(uiMsgsAck, {
+            type: 'filter_removal_ack',
+            text: text,
+            timestamp: makeTimestamp(),
+            is_user: false,
+            is_search_summary: true,
+            backend_message_index: messages.length - 1,
+          })
+          await saveUIMessages(chatId, uiMsgsAck, supabaseAdmin)
+        } catch (uiErr) {
+          console.error('[ack-filter-removal] Error saving ui_messages:', uiErr)
+        }
+
         return new Response(JSON.stringify({ success: true, newMessage }), { status: 200, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } })
       } catch (err) {
         console.error('acknowledge-filter-removal error:', err)
@@ -3865,6 +4084,25 @@ ${getPronounInstructions(userProfile.pronoun)}`
         console.error('latest chat error:', err)
         return new Response(
           JSON.stringify({ error: 'Failed to fetch latest chat', details: err instanceof Error ? err.message : String(err) }),
+          { status: 500, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } }
+        )
+      }
+    }
+
+    // Route: GET /swelly-trip-planning/ui-messages/:chat_id — return ordered UI messages for restore
+    const uiMessagesRouteMatch = path.match(/ui-messages\/([a-f0-9-]{36})/i)
+    if (uiMessagesRouteMatch && req.method === 'GET') {
+      const chatId = uiMessagesRouteMatch[1]
+      try {
+        const uiMessages = await getUIMessages(chatId, supabaseAdmin)
+        return new Response(
+          JSON.stringify({ chat_id: chatId, ui_messages: uiMessages }),
+          { status: 200, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } }
+        )
+      } catch (err) {
+        console.error('[ui-messages] Error:', err)
+        return new Response(
+          JSON.stringify({ error: 'Failed to fetch UI messages', details: err instanceof Error ? err.message : String(err) }),
           { status: 500, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } }
         )
       }

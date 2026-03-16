@@ -21,7 +21,7 @@ import Svg, { Path } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../components/Text';
 import { colors, spacing } from '../styles/theme';
-import { swellyServiceCopy, SwellyChatResponse } from '../services/swelly/swellyServiceCopy';
+import { swellyServiceCopy, SwellyChatResponse, UIMessage, type SwellyService as SwellyServiceType } from '../services/swelly/swellyServiceCopy';
 import { useOnboarding } from '../context/OnboardingContext';
 import { getImageUrl } from '../services/media/imageService';
 import { MatchedUserCard } from '../components/MatchedUserCard';
@@ -213,9 +213,11 @@ interface TripPlanningChatScreenProps {
   persistedMatchedUsers?: any[];
   persistedDestination?: string;
   onChatStateChange?: (chatId: string | null, matchedUsers: any[], destination: string) => void;
+  /** Optional: override the swelly service instance (e.g. to target a different edge function). */
+  service?: SwellyServiceType;
 }
 
-export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({ 
+export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   onChatComplete,
   onViewUserProfile,
   onStartConversation,
@@ -223,7 +225,9 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   persistedMatchedUsers,
   persistedDestination,
   onChatStateChange,
+  service,
 }) => {
+  const svc = service ?? swellyServiceCopy;
   const { formData } = useOnboarding();
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
@@ -352,54 +356,137 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   useEffect(() => {
     const initializeChat = async () => {
       try {
-        // Track swelly_chat_entered
+        // Track swelly_chat_entered (fire-and-forget)
         analyticsService.trackSwellyChatEntered();
-        
-        // Health check is best-effort: don't block init if it fails (e.g. CORS in local dev or edge not deployed)
-        console.log('Testing API connection...');
-        try {
-          const health = await swellyServiceCopy.healthCheck();
-          console.log('API health check successful:', health);
-        } catch (healthErr) {
-          console.warn('API health check failed (continuing anyway):', healthErr);
-        }
-        
+
+        // Health check: fire-and-forget, never blocks init
+        svc.healthCheck().then(h => console.log('API health check ok:', h)).catch(e => console.warn('API health check failed:', e));
+
         // If we have a persisted chatId, restore the conversation
         if (persistedChatId) {
           console.log('Restoring trip planning conversation from chatId:', persistedChatId);
-          
-          // Optional: Migrate existing AsyncStorage data to backend (one-time migration)
+
+          // AsyncStorage migration: fire-and-forget in background, never blocks restore
+          (async () => {
+            try {
+              const { loadMatchedUsers } = await import('../utils/tripPlanningStorage');
+              const storedMatchedUsers = await loadMatchedUsers(persistedChatId);
+              if (storedMatchedUsers && storedMatchedUsers.length > 0) {
+                console.log('[TripPlanningChatScreen] Migrating AsyncStorage data in background:', storedMatchedUsers.length, 'entries');
+                await Promise.all(
+                  storedMatchedUsers
+                    .filter(s => s.matchedUsers && s.matchedUsers.length > 0)
+                    .map(s => svc.attachMatchedUsersToMessage(persistedChatId!, s.matchedUsers, s.destinationCountry).catch(() => {}))
+                );
+                const { clearMatchedUsers } = await import('../utils/tripPlanningStorage');
+                await clearMatchedUsers(persistedChatId!);
+                console.log('[TripPlanningChatScreen] Background migration complete');
+              }
+            } catch (e) {
+              console.warn('[TripPlanningChatScreen] Background migration failed (non-critical):', e);
+            }
+          })();
+
           try {
-            const { loadMatchedUsers } = await import('../utils/tripPlanningStorage');
-            const storedMatchedUsers = await loadMatchedUsers(persistedChatId);
-            if (storedMatchedUsers && storedMatchedUsers.length > 0) {
-              console.log('[TripPlanningChatScreen] Found AsyncStorage data to migrate:', storedMatchedUsers.length, 'entries');
-              // Migrate each stored match group to backend
-              for (const stored of storedMatchedUsers) {
-                if (stored.matchedUsers && stored.matchedUsers.length > 0) {
-                  await swellyServiceCopy.attachMatchedUsersToMessage(
-                    persistedChatId,
-                    stored.matchedUsers,
-                    stored.destinationCountry
-                  ).catch(err => {
-                    console.warn('[TripPlanningChatScreen] Failed to migrate match group to backend:', err);
+            // Try UI messages first (new ordered format), fall back to legacy restore
+            const uiMessages = await svc.getUIMessages(persistedChatId);
+
+            if (uiMessages && uiMessages.length > 0) {
+              console.log('[TripPlanningChatScreen] Restoring from ui_messages:', uiMessages.length, 'entries');
+
+              const restoredMessages: Message[] = uiMessages.map((ui: UIMessage) => {
+                const isMatch = ui.type === 'match_results' || ui.type === 'no_matches';
+                const ts = (() => {
+                  try {
+                    return new Date(ui.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+                  } catch {
+                    return ui.timestamp;
+                  }
+                })();
+                return {
+                  id: ui.id,
+                  text: ui.text,
+                  isUser: ui.is_user,
+                  timestamp: ts,
+                  isMatchedUsers: isMatch || undefined,
+                  matchedUsers: ui.matched_users,
+                  destinationCountry: ui.destination_country,
+                  actionRow: ui.action_row ? { requestData: ui.action_row.request_data, selectedAction: ui.action_row.selected_action } : undefined,
+                  matchTotalCount: ui.match_total_count,
+                  backendMessageIndex: ui.backend_message_index,
+                  isSearchSummary: ui.is_search_summary || ui.type === 'search_summary' || ui.type === 'filter_removal_ack' || undefined,
+                  isRestartAfterNewChat: ui.is_restart_after_new_chat || ui.type === 'new_chat_restart' || undefined,
+                } as Message;
+              });
+
+              // Restore pending search from last search_summary UI message
+              for (let i = uiMessages.length - 1; i >= 0; i--) {
+                const ui = uiMessages[i];
+                if (ui.search_summary_block?.request_data != null) {
+                  setPendingSearch({
+                    data: ui.search_summary_block.request_data,
+                    searchSummary: ui.search_summary_block.search_summary ?? '',
                   });
+                  if (ui.search_summary_block.selected_action == null) {
+                    setAwaitingSearchDecision(true);
+                  }
+                  break;
                 }
               }
-              // Clear AsyncStorage after successful migration
-              const { clearMatchedUsers } = await import('../utils/tripPlanningStorage');
-              await clearMatchedUsers(persistedChatId);
-              console.log('[TripPlanningChatScreen] Migration complete, AsyncStorage cleared');
+
+              // Restore existingFiltersForAdd from last add_filter_prompt (if not superseded)
+              for (let i = uiMessages.length - 1; i >= 0; i--) {
+                const ui = uiMessages[i];
+                if (ui.type === 'add_filter_prompt') {
+                  // Check if there's a later restart or match
+                  const hasLater = uiMessages.slice(i + 1).some(
+                    (u: UIMessage) => u.type === 'new_chat_restart' || u.type === 'match_results'
+                  );
+                  if (!hasLater) {
+                    // Find the preceding match message's action_row for existing filters
+                    for (let j = i - 1; j >= 0; j--) {
+                      if (uiMessages[j].action_row?.request_data) {
+                        setExistingFiltersForAdd({ data: uiMessages[j].action_row!.request_data });
+                        setIsFinished(false);
+                        break;
+                      }
+                    }
+                  }
+                  break;
+                }
+              }
+
+              // Check if any messages have matched users
+              const hasMatchedUsers = restoredMessages.some(msg => msg.isMatchedUsers && msg.matchedUsers && msg.matchedUsers.length > 0);
+              if (hasMatchedUsers) {
+                setIsFinished(true);
+              }
+
+              // Sync parent state
+              if (onChatStateChange) {
+                const allRestoredMatchedUsers: any[] = [];
+                let latestRestoredDestination = '';
+                for (const msg of restoredMessages) {
+                  if (msg.isMatchedUsers && msg.matchedUsers && msg.matchedUsers.length > 0) {
+                    allRestoredMatchedUsers.push(...msg.matchedUsers);
+                    if (msg.destinationCountry) {
+                      latestRestoredDestination = msg.destinationCountry;
+                    }
+                  }
+                }
+                onChatStateChange(persistedChatId, allRestoredMatchedUsers, latestRestoredDestination);
+              }
+
+              setMessages(restoredMessages);
+              setIsInitializing(false);
+              return;
             }
-          } catch (migrationError) {
-            // Migration is optional - don't block if it fails
-            console.warn('[TripPlanningChatScreen] Migration check failed (non-critical):', migrationError);
-          }
-          
-          try {
-            const history = await swellyServiceCopy.getTripPlanningHistory(persistedChatId);
+
+            // Fallback: legacy restore from GPT messages + metadata
+            console.log('[TripPlanningChatScreen] No ui_messages found, falling back to legacy restore');
+            const history = await svc.getTripPlanningHistory(persistedChatId);
             console.log('Restored history:', history);
-            
+
             if (history && history.messages && history.messages.length > 0) {
               // Convert backend messages to UI format
               const restoredMessages: Message[] = [];
@@ -426,7 +513,6 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
                 if (msg.role === 'assistant') {
                   try {
                     const parsed = JSON.parse(msg.content);
-                    // Use search_summary for display ONLY when this message's own payload contains it (never reuse another message's summary)
                     const summary = parsed.data?.search_summary;
                     const hasSummary = summary != null && String(summary).trim() !== '';
                     messageText = hasSummary ? summary : (parsed.return_message ?? msg.content);
@@ -451,35 +537,16 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
                   backendMessageIndex: i,
                 };
 
-                // Extract matched users and action row from message metadata (if present)
                 if (msg.role === 'assistant') {
-                  // Debug: Check if message has any metadata
-                  if ((msg as any).metadata) {
-                    console.log('[TripPlanningChatScreen] Assistant message has metadata:', {
-                      hasMatchedUsers: !!(msg as any).metadata.matchedUsers,
-                      matchedUsersCount: (msg as any).metadata.matchedUsers?.length || 0,
-                      destinationCountry: (msg as any).metadata.destinationCountry,
-                      messageTextPreview: messageText.substring(0, 50)
-                    });
-                  } else {
-                    console.log('[TripPlanningChatScreen] Assistant message has no metadata, messageTextPreview:', messageText.substring(0, 50));
-                  }
-
                   const metadata = (msg as any).metadata;
                   const searchSummaryBlock = metadata?.searchSummaryBlock;
                   const hasMatchedUsers = metadata?.matchedUsers && metadata.matchedUsers.length > 0;
                   const hasSearchSummary = searchSummaryBlock && searchSummaryBlock.requestData != null;
 
                   if (hasMatchedUsers) {
-                    console.log('[TripPlanningChatScreen] Found matched users in message metadata - count:', metadata.matchedUsers.length);
-                    console.log('[TripPlanningChatScreen] Message text preview:', messageText.substring(0, 50));
-
-                    // If this message also has a search summary, mark the base message as search summary only
                     if (hasSearchSummary) {
                       restoredMessage.isSearchSummary = true;
                     }
-
-                    // Create a SEPARATE matched users message
                     const matchCount = metadata.matchedUsers.length;
                     const matchesMessage: Message = {
                       id: String(messageId++),
@@ -496,19 +563,14 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
                       matchTotalCount: metadata.totalCount,
                       backendMessageIndex: i,
                     };
-
-                    // Push search summary (or base) message first, then matches message
                     restoredMessages.push(restoredMessage);
                     restoredMessages.push(matchesMessage);
-                    continue; // Skip the default push at end of loop
+                    continue;
                   }
 
-                  // Search summary only (no matched users)
                   if (hasSearchSummary) {
                     restoredMessage.isSearchSummary = true;
                   }
-
-                  // Restore restart-after-new-chat marker
                   if (metadata?.isRestartAfterNewChat) {
                     restoredMessage.isRestartAfterNewChat = true;
                   }
@@ -527,7 +589,6 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
                       data: block.requestData,
                       searchSummary: block.searchSummary ?? '',
                     });
-                    // If the search was never acted on, resume awaiting decision
                     if (block.selectedAction == null) {
                       setAwaitingSearchDecision(true);
                     }
@@ -535,8 +596,8 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
                   }
                 }
               }
-              
-              // Restore existingFiltersForAdd from last add-filter prompt (if not superseded by restart or match)
+
+              // Restore existingFiltersForAdd from last add-filter prompt
               for (let i = history.messages.length - 1; i >= 0; i--) {
                 const meta = (history.messages[i] as any).metadata;
                 if (meta?.isAddFilterPrompt && meta?.existingFiltersData) {
@@ -554,15 +615,13 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
                 }
               }
 
-              console.log('[TripPlanningChatScreen] Restored', restoredMessages.length, 'messages, skippedInitialContext:', skippedInitialContext);
+              console.log('[TripPlanningChatScreen] Restored', restoredMessages.length, 'messages (legacy), skippedInitialContext:', skippedInitialContext);
 
-              // Check if any messages have matched users to determine if finished
               const hasMatchedUsers = restoredMessages.some(msg => msg.isMatchedUsers && msg.matchedUsers && msg.matchedUsers.length > 0);
               if (hasMatchedUsers) {
                 setIsFinished(true);
               }
 
-              // Sync parent state with aggregated matched users and destination from restored messages
               if (onChatStateChange) {
                 const allRestoredMatchedUsers: any[] = [];
                 let latestRestoredDestination = '';
@@ -579,7 +638,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
 
               setMessages(restoredMessages);
               setIsInitializing(false);
-              return; // Exit early, we've restored the conversation
+              return;
             }
           } catch (restoreError) {
             console.error('Failed to restore trip planning conversation:', restoreError);
@@ -587,63 +646,51 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
           }
         }
         
-        // Start new conversation
+        // Start new conversation — show the fixed first message instantly, create backend chat in background
         console.log('Initializing surfer connection conversation...');
-        
-        // Build context message from user's profile
+
+        // Show first message immediately so user sees content in <100ms
+        setMessages([
+          {
+            id: '1',
+            text: TRIP_PLANNING_FIRST_QUESTION,
+            isUser: false,
+            timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+          }
+        ]);
+        setIsInitializing(false);
+
+        // Create the backend chat in background
         const contextParts: string[] = [];
         if (formData.nickname) contextParts.push(`I'm ${formData.nickname}`);
         if (formData.age) contextParts.push(`${formData.age} years old`);
         if (formData.location) contextParts.push(`from ${formData.location}`);
-        
-        const boardTypeNames: { [key: number]: string } = {
-          0: 'shortboard',
-          1: 'midlength',
-          2: 'longboard',
-          3: 'soft top',
-        };
-        if (formData.boardType !== undefined) {
-          contextParts.push(`surfing ${boardTypeNames[formData.boardType] || 'surfboard'}`);
-        }
-        
+        const boardTypeNames: { [key: number]: string } = { 0: 'shortboard', 1: 'midlength', 2: 'longboard', 3: 'soft top' };
+        if (formData.boardType !== undefined) contextParts.push(`surfing ${boardTypeNames[formData.boardType] || 'surfboard'}`);
         if (formData.surfLevel !== undefined) {
           const levelNames = ['beginner', 'beginner-intermediate', 'intermediate', 'intermediate-advanced', 'advanced'];
           contextParts.push(`${levelNames[formData.surfLevel] || 'intermediate'} level`);
         }
-        
         const contextMessage = contextParts.length > 0
           ? `Hi! ${contextParts.join(', ')}. I'm looking to connect with surfers.`
           : 'Hi! I\'m looking to connect with surfers.';
-        
-        const response = await swellyServiceCopy.startTripPlanningConversation({
-          message: contextMessage,
-        });
-        
-        console.log('Chat initialized with response:', response);
-        const newChatId = response.chat_id || null;
-        setChatId(newChatId);
-        
-        // Notify parent of new chatId
-        if (onChatStateChange) {
-          onChatStateChange(newChatId, [], '');
-        }
-        
-        // Set the first message from Swelly's response
-        const backendMessageIndex = typeof response.message_index === 'number' && response.message_index >= 0 ? response.message_index : undefined;
-        setMessages([
-          {
-            id: '1',
-            text: response.return_message,
-            isUser: false,
-            timestamp: new Date().toLocaleTimeString('en-US', { 
-              hour: '2-digit', 
-              minute: '2-digit',
-              hour12: false 
-            }),
-            ...(backendMessageIndex !== undefined && { backendMessageIndex }),
+
+        svc.startTripPlanningConversation({ message: contextMessage }).then(response => {
+          console.log('Chat initialized with response:', response);
+          const newChatId = response.chat_id || null;
+          setChatId(newChatId);
+          if (onChatStateChange) onChatStateChange(newChatId, [], '');
+          // Update message with backend index once available
+          const backendMessageIndex = typeof response.message_index === 'number' && response.message_index >= 0 ? response.message_index : undefined;
+          if (backendMessageIndex !== undefined) {
+            setMessages(prev => prev.map(m => m.id === '1' ? { ...m, backendMessageIndex } : m));
           }
-        ]);
-        
+        }).catch(error => {
+          console.error('Backend chat creation failed:', error);
+          Alert.alert('Connection Error', 'Cannot connect to the backend server. Please check your internet connection and try again.', [{ text: 'OK' }]);
+        });
+        return; // isInitializing already set to false above
+
       } catch (error) {
         console.error('API health check or chat initialization failed:', error);
         Alert.alert(
@@ -675,7 +722,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     };
     
     try {
-      const { matches: matchedUsers, totalCount } = await swellyServiceCopy.findMatchingUsersServer(currentChatId, tripPlanningData);
+      const { matches: matchedUsers, totalCount } = await svc.findMatchingUsersServer(currentChatId, tripPlanningData);
       console.log('Matched users found (server):', matchedUsers.length, 'totalCount:', totalCount);
       const needsConfirmation = (matchedUsers as any).__needsConfirmation === true;
       const isSingleCriterion = (matchedUsers as any).__singleCriterion === true;
@@ -725,7 +772,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
           });
           if (onChatStateChange) setTimeout(() => onChatStateChange(currentChatId, allMatchedUsers, latestDestination), 0);
           if (currentChatId) {
-            swellyServiceCopy.attachMatchedUsersToMessage(currentChatId, matchedUsers, matchesDestination, tripPlanningData, totalCount).then(res => {
+            svc.attachMatchedUsersToMessage(currentChatId, matchedUsers, matchesDestination, tripPlanningData, totalCount).then(res => {
               if (res?.messageIndex != null) {
                 setMessages(prevMsgs => prevMsgs.map(m => m.id === newMatchMessageId ? { ...m, backendMessageIndex: res!.messageIndex } : m));
               }
@@ -759,7 +806,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
           };
           const updated = [...filtered, noMatchesMessage];
           if (currentChatId) {
-            swellyServiceCopy.attachMatchedUsersToMessage(currentChatId, [], matchesDestination, tripPlanningData, 0).then(res => {
+            svc.attachMatchedUsersToMessage(currentChatId, [], matchesDestination, tripPlanningData, 0).then(res => {
               if (res?.messageIndex != null) {
                 setMessages(prevMsgs => prevMsgs.map(m => m.id === newNoMatchMessageId ? { ...m, backendMessageIndex: res!.messageIndex } : m));
               }
@@ -859,7 +906,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
           // Save matched users to backend
           if (chatId) {
             console.log('[TripPlanningChatScreen] Saving single criterion matches - matchedUsersCount:', pendingSingleCriterionMatches.length);
-            swellyServiceCopy.attachMatchedUsersToMessage(chatId, pendingSingleCriterionMatches, destinationCountry, lastMatchRequestData ?? undefined).then(res => {
+            svc.attachMatchedUsersToMessage(chatId, pendingSingleCriterionMatches, destinationCountry, lastMatchRequestData ?? undefined).then(res => {
               if (res?.messageIndex != null) {
                 setMessages(prevMsgs => prevMsgs.map(m => m.id === newMatchMessageId ? { ...m, backendMessageIndex: res!.messageIndex } : m));
               }
@@ -912,11 +959,11 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         const hasExistingFilters = continuePayload.existing_query_filters != null;
         const efKeys = hasExistingFilters && typeof continuePayload.existing_query_filters === 'object' ? Object.keys(continuePayload.existing_query_filters).join(',') : 'n/a';
         console.log('[continue] chatId=', chatId, 'message=', (userMessage.text || '').slice(0, 40), 'hasExistingQueryFilters=', hasExistingFilters, 'existing_query_filters keys=[' + efKeys + ']');
-        response = await swellyServiceCopy.continueTripPlanningConversation(chatId, continuePayload);
+        response = await svc.continueTripPlanningConversation(chatId, continuePayload);
       } else {
         // This shouldn't happen since we initialize chat on mount, but fallback just in case
         console.log('Starting new chat (fallback)');
-        response = await swellyServiceCopy.startTripPlanningConversation({
+        response = await svc.startTripPlanningConversation({
           message: userMessage.text,
         });
         console.log('New chat response:', response);
@@ -1196,7 +1243,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     // For 'more' action, skip the separate PATCH — attach-matches handles both
     // the selectedAction marking and the placeholder append atomically, avoiding race conditions.
     if (action !== 'more' && messageIndexForPatch != null && messageIndexForPatch >= 0 && chatId) {
-      swellyServiceCopy.updateMatchActionSelection(chatId, messageIndexForPatch, action)
+      svc.updateMatchActionSelection(chatId, messageIndexForPatch, action)
         .then(result => {
           if (result?.appendedMessageIndex != null && syntheticMessageId) {
             setMessages(prev => prev.map(m =>
@@ -1245,7 +1292,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         ? `Hi! ${contextParts.join(', ')}. I'm looking to connect with surfers.`
         : "Hi! I'm looking to connect with surfers.";
 
-      const response = await swellyServiceCopy.startTripPlanningConversation({ message: contextMessage });
+      const response = await svc.startTripPlanningConversation({ message: contextMessage });
       const newChatId = response.chat_id || null;
       setChatId(newChatId);
 
@@ -1300,7 +1347,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         setFiltersMenuVisible(false);
         setAwaitingFilterRemovalResponse(true);
         console.log('[filter-removal] calling acknowledgeFilterRemoval context=pending_search chatId=', chatId);
-        swellyServiceCopy.acknowledgeFilterRemoval(chatId, {
+        svc.acknowledgeFilterRemoval(chatId, {
           requestData: nextRequestData,
           removedFilterLabel: item.label,
           context: 'pending_search',
@@ -1331,9 +1378,9 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         setFiltersMenuVisible(false);
         setAwaitingFilterRemovalResponse(true);
         console.log('[filter-removal] calling acknowledgeFilterRemoval context=message chatId=', chatId, 'messageIndex=', backendIndex);
-        swellyServiceCopy.updateMatchRequestData(chatId, backendIndex, nextRequestData).catch(err =>
+        svc.updateMatchRequestData(chatId, backendIndex, nextRequestData).catch(err =>
           console.warn('[TripPlanningChatScreen] Failed to persist filter removal:', err));
-        swellyServiceCopy.acknowledgeFilterRemoval(chatId, {
+        svc.acknowledgeFilterRemoval(chatId, {
           messageIndex: backendIndex,
           requestData: nextRequestData,
           removedFilterLabel: item.label,

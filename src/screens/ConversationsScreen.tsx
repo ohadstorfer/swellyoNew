@@ -962,7 +962,7 @@ export default function ConversationsScreen({
     return (
       <TouchableOpacity
         style={styles.swellyContainer}
-        onPress={onSwellyPressCopy || onSwellyPress}
+        onPress={onSwellyPress}
       >
         <View style={styles.conversationContent}>
           {/* Swelly avatar with ellipse design - matching ChatScreen */}
@@ -1336,6 +1336,40 @@ export default function ConversationsScreen({
 
       {/* Swelly conversation card - positioned at bottom */}
       <View style={styles.swellyCardWrapper}>
+        {showSwellyCopyCard && (
+          <TouchableOpacity
+            style={[styles.swellyContainer, { marginBottom: 4, borderColor: '#00BCD4' }]}
+            onPress={onSwellyPressCopy}
+          >
+            <View style={styles.conversationContent}>
+              <View style={styles.swellyAvatarContainer}>
+                <View style={styles.swellyAvatarRing}>
+                  <Image
+                    source={{ uri: getImageUrl('/Ellipse 11.svg') }}
+                    style={styles.swellyEllipseBackground}
+                    resizeMode="contain"
+                  />
+                  <View style={styles.swellyAvatarImageContainer}>
+                    <Image
+                      source={{ uri: getImageUrl('/Swelly avatar onboarding.png') }}
+                      style={styles.swellyAvatarImage}
+                      resizeMode="cover"
+                    />
+                  </View>
+                </View>
+              </View>
+              <View style={styles.swellyTextContainer}>
+                <Text style={styles.swellyName}>Swelly Copy (Dev)</Text>
+                <Text style={[
+                  styles.swellyLastMessage,
+                  Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
+                ]} numberOfLines={1}>
+                  Testing swelly-trip-planning-copy
+                </Text>
+              </View>
+            </View>
+          </TouchableOpacity>
+        )}
         {renderSwellyConversation()}
       </View>
 

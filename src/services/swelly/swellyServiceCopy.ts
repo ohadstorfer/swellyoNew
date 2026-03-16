@@ -55,7 +55,14 @@ export interface SwellyContinueChatResponse {
   };
 }
 
-class SwellyService {
+export class SwellyService {
+  /** Edge function name used for trip-planning calls (configurable per instance). */
+  private tripPlanningEdgeName: string;
+
+  constructor(tripPlanningEdgeName: string = 'swelly-trip-planning-copy') {
+    this.tripPlanningEdgeName = tripPlanningEdgeName;
+  }
+
   /**
    * Get the Supabase Edge Function URL for Swelly chat
    */
@@ -63,18 +70,17 @@ class SwellyService {
     if (!isSupabaseConfigured()) {
       throw new Error('Supabase is not configured');
     }
-    
+
     const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
     if (!supabaseUrl) {
       throw new Error('EXPO_PUBLIC_SUPABASE_URL is not set');
     }
-    
-    // Copy flow: use "swelly-trip-planning-copy" edge for all trip-planning (and health when used from Copy screen)
+
     const isDevMode = process.env.EXPO_PUBLIC_DEV_MODE === 'true';
     const isMvpMode = process.env.EXPO_PUBLIC_MVP_MODE === 'true';
     const isDevLikeMode = isDevMode || isMvpMode;
     const chatFunctionName = isDevLikeMode ? 'swelly-chat-demo' : 'swelly-chat';
-    const functionName = conversationType === 'trip-planning' ? 'swelly-trip-planning-copy' : chatFunctionName;
+    const functionName = conversationType === 'trip-planning' ? this.tripPlanningEdgeName : chatFunctionName;
     return `${supabaseUrl}/functions/v1/${functionName}${endpoint}`;
   }
 
@@ -625,6 +631,36 @@ class SwellyService {
   }
 
   /**
+   * Get ordered UI messages for a trip planning conversation.
+   * Returns the ui_messages array that can be mapped 1:1 to client Message[] state.
+   */
+  async getUIMessages(chatId: string): Promise<UIMessage[]> {
+    try {
+      const url = this.getFunctionUrl(`/ui-messages/${chatId}`, 'trip-planning');
+      const headers = await this.getAuthHeaders();
+
+      console.log('[SwellyServiceCopy] Getting UI messages:', url);
+
+      const response = await fetch(url, {
+        method: 'GET',
+        headers,
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[SwellyServiceCopy] Error fetching UI messages:', errorText);
+        return [];
+      }
+
+      const result = await response.json();
+      return result.ui_messages || [];
+    } catch (error) {
+      console.error('[SwellyServiceCopy] Error getting UI messages:', error);
+      return [];
+    }
+  }
+
+  /**
    * Run matching on the server (Copy flow only). POSTs to /find-matches on the Copy edge.
    * @param chatId - Trip planning chat ID
    * @param tripPlanningData - Extracted data from Swelly response (destination_country, area, queryFilters, etc.)
@@ -693,4 +729,30 @@ function mapServerMatchToMatchedUser(m: any): MatchedUser {
   };
 }
 
-export const swellyServiceCopy = new SwellyService();
+/** UI message type stored in the database for perfect ordered restore. */
+export interface UIMessage {
+  id: string;
+  order_index: number;
+  type: 'bot_text' | 'user_text' | 'search_summary' | 'match_results' | 'no_matches' | 'new_chat_restart' | 'add_filter_prompt' | 'filter_removal_ack' | 'error';
+  text: string;
+  timestamp: string;
+  is_user: boolean;
+  matched_users?: MatchedUser[];
+  destination_country?: string;
+  match_total_count?: number;
+  action_row?: {
+    request_data: any;
+    selected_action: 'new_chat' | 'add_filter' | 'more' | null;
+  };
+  search_summary_block?: {
+    request_data: any;
+    search_summary: string;
+    selected_action: 'search' | 'continue_editing' | null;
+  };
+  is_search_summary?: boolean;
+  is_restart_after_new_chat?: boolean;
+  backend_message_index?: number;
+}
+
+export const swellyServiceCopy = new SwellyService('swelly-trip-planning-copy');
+export const swellyServiceCopyCopy = new SwellyService('swelly-trip-planning-copy-copy');

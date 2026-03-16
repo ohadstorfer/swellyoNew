@@ -23,7 +23,7 @@ import { analyticsService } from '../services/analytics/analyticsService';
 import { useAuthGuard } from '../hooks/useAuthGuard';
 import { isFirstVideoReadyForBoardType, waitForFirstVideoReadyForBoardType, getVideoPreloadStatus, waitForVideoReady, preloadLoadingVideo, getLoadingVideoUrl } from '../services/media/videoPreloadService';
 import { STEP_WELCOME } from '../constants/onboardingSteps';
-import { swellyServiceCopy } from '../services/swelly/swellyServiceCopy';
+import { swellyServiceCopy, swellyServiceCopyCopy } from '../services/swelly/swellyServiceCopy';
 
 export const AppContent: React.FC = () => {
   const { currentStep, formData, setCurrentStep, updateFormData, saveStepToSupabase, isComplete, markOnboardingComplete, isDemoUser, setIsDemoUser, setUser, resetOnboarding, user, isRestoringSession } = useOnboarding();
@@ -615,20 +615,20 @@ export const AppContent: React.FC = () => {
     }
   };
 
+  // Track which service instance the copy screen should use
+  const [activeCopyService, setActiveCopyService] = useState<'copy' | 'copy-copy'>('copy');
+
   const handleSwellyPress = async () => {
-    // Navigate to Swelly trip planning chat from conversations page
-    // In MVP mode, use the copy/server-side matching flow
-    if (isMVPMode) {
-      await restoreLatestChatIfNeeded();
-      setShowTripPlanningChatCopy(true);
-    } else {
-      setShowTripPlanningChat(true);
-    }
+    // Both buttons open TripPlanningChatScreenCopy, but with different edge functions
+    await restoreLatestChatIfNeeded();
+    setActiveCopyService('copy');
+    setShowTripPlanningChatCopy(true);
   };
 
   const handleSwellyPressCopy = async () => {
-    // Navigate to Swelly trip planning chat copy from conversations page
+    // Dev card: uses swelly-trip-planning-copy-copy edge
     await restoreLatestChatIfNeeded();
+    setActiveCopyService('copy-copy');
     setShowTripPlanningChatCopy(true);
   };
 
@@ -1079,8 +1079,8 @@ export const AppContent: React.FC = () => {
     // Show trip planning chat copy (dev mode) if requested
     if (showTripPlanningChatCopy) {
       return (
-        <TripPlanningChatScreenCopy 
-          onChatComplete={() => setShowTripPlanningChatCopy(false)} 
+        <TripPlanningChatScreenCopy
+          onChatComplete={() => setShowTripPlanningChatCopy(false)}
           onViewUserProfile={handleViewUserProfile}
           onStartConversation={handleStartConversation}
           persistedChatId={tripPlanningChatId}
@@ -1091,6 +1091,7 @@ export const AppContent: React.FC = () => {
             setTripPlanningMatchedUsers(matchedUsers);
             setTripPlanningDestination(destination);
           }}
+          service={activeCopyService === 'copy-copy' ? swellyServiceCopyCopy : swellyServiceCopy}
         />
       );
     }
