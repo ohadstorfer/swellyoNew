@@ -102,19 +102,7 @@ const AvatarCropModal: React.FC<AvatarCropModalProps> = ({
             />
           </View>
 
-          <View style={styles.zoomRow}>
-            <Text style={styles.zoomLabel}>Zoom</Text>
-            <input
-              type="range"
-              min={1}
-              max={3}
-              step={0.05}
-              value={zoom}
-              onChange={(e) => setZoom(Number(e.target.value))}
-              style={{ flex: 1, marginLeft: 12 }}
-            />
-          </View>
-
+         
           <View style={styles.buttonRow}>
             <TouchableOpacity style={styles.cancelButton} onPress={handleCancel}>
               <Text style={styles.cancelText}>Cancel</Text>
