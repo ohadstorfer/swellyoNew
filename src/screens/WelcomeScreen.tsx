@@ -21,6 +21,7 @@ import { isSupabaseConfigured } from '../config/supabase';
 import { useOnboarding } from '../context/OnboardingContext';
 import { getImageUrl } from '../services/media/imageService';
 import { useIsMobile, responsiveWidth } from '../utils/responsive';
+import { ONBOARDING_WELCOME_IMAGE_URLS } from './OnboardingWelcomeScreen';
 
 interface WelcomeScreenProps {
   onGetStarted: () => void;
@@ -160,6 +161,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
             // Check if user has finished onboarding before navigating
             const hasFinishedOnboarding = await checkOnboardingStatus();
             if (!hasFinishedOnboarding) {
+              ONBOARDING_WELCOME_IMAGE_URLS.forEach(url => Image.prefetch(url).catch(() => {}));
               onGetStarted();
             }
             // If hasFinishedOnboarding is true, isComplete will be set and AppContent will show homepage
@@ -321,6 +323,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
           // Check if user has finished onboarding before navigating
           const hasFinishedOnboarding = await checkOnboardingStatus();
           if (!hasFinishedOnboarding) {
+            ONBOARDING_WELCOME_IMAGE_URLS.forEach(url => Image.prefetch(url).catch(() => {}));
             onGetStarted(); // Only navigate to onboarding if not complete
           }
           // If complete, don't call onGetStarted() - AppContent will show ConversationsScreen
@@ -382,6 +385,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
         // Check if user has finished onboarding before navigating
         const hasFinishedOnboarding = await checkOnboardingStatus();
         if (!hasFinishedOnboarding) {
+          ONBOARDING_WELCOME_IMAGE_URLS.forEach(url => Image.prefetch(url).catch(() => {}));
           onGetStarted(); // Only navigate to onboarding if not complete
         }
         // If complete, don't call onGetStarted() - AppContent will show ConversationsScreen

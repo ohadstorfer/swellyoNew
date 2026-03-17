@@ -2,7 +2,6 @@ import React, { useState, useCallback } from 'react';
 import { View, StyleSheet, TouchableOpacity, Modal } from 'react-native';
 import Cropper from 'react-easy-crop';
 import { Text } from './Text';
-import { colors } from '../styles/theme';
 
 interface Area {
   x: number;
@@ -55,19 +54,34 @@ const AvatarCropModal: React.FC<AvatarCropModalProps> = ({
 }) => {
   const [crop, setCrop] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
+  const [minZoom, setMinZoom] = useState(1);
   const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null);
+  const [containerWidth, setContainerWidth] = useState<number>(0);
+  const [containerHeight, setContainerHeight] = useState<number>(0);
+  const cropDiameter = containerWidth > 0 ? containerWidth - 16 : 0;
 
   const onCropComplete = useCallback((_croppedArea: Area, croppedPixels: Area) => {
     setCroppedAreaPixels(croppedPixels);
   }, []);
 
+  const onMediaLoaded = useCallback((mediaSize: { naturalWidth: number; naturalHeight: number; width: number; height: number }) => {
+    if (cropDiameter > 0) {
+      // Scale so the image width fills the crop circle diameter.
+      const requiredZoom = cropDiameter / mediaSize.width;
+      const newMinZoom = Math.max(1, requiredZoom);
+      setMinZoom(newMinZoom);
+      setZoom(newMinZoom);
+      setCrop({ x: 0, y: 0 });
+    }
+  }, [cropDiameter]);
+
   const handleConfirm = async () => {
     if (!croppedAreaPixels) return;
     try {
       const croppedUri = await getCroppedImg(imageUri, croppedAreaPixels);
-      // Reset state for next use
       setCrop({ x: 0, y: 0 });
       setZoom(1);
+      setMinZoom(1);
       onConfirm(croppedUri);
     } catch (e) {
       console.error('Failed to crop image:', e);
@@ -77,6 +91,7 @@ const AvatarCropModal: React.FC<AvatarCropModalProps> = ({
   const handleCancel = () => {
     setCrop({ x: 0, y: 0 });
     setZoom(1);
+    setMinZoom(1);
     onCancel();
   };
 
@@ -85,32 +100,43 @@ const AvatarCropModal: React.FC<AvatarCropModalProps> = ({
   return (
     <Modal visible={visible} transparent animationType="fade">
       <View style={styles.overlay}>
-        <View style={styles.container}>
-          <Text style={styles.title}>Crop your photo</Text>
+        <Text style={styles.title}>Move and scale</Text>
 
-          <View style={styles.cropperWrapper}>
+        <View
+          style={styles.cropperWrapper}
+          onLayout={(e) => {
+            const { width, height } = e.nativeEvent.layout;
+            setContainerWidth(width);
+            setContainerHeight(height);
+          }}
+        >
+          {cropDiameter > 0 && (
             <Cropper
               image={imageUri}
               crop={crop}
               zoom={zoom}
+              minZoom={minZoom}
+              maxZoom={minZoom * 3}
               aspect={1}
               cropShape="round"
               showGrid={false}
+              restrictPosition={false}
+              cropSize={{ width: cropDiameter, height: cropDiameter }}
+              onMediaLoaded={onMediaLoaded}
               onCropChange={setCrop}
               onZoomChange={setZoom}
               onCropComplete={onCropComplete}
             />
-          </View>
+          )}
+        </View>
 
-         
-          <View style={styles.buttonRow}>
-            <TouchableOpacity style={styles.cancelButton} onPress={handleCancel}>
-              <Text style={styles.cancelText}>Cancel</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.confirmButton} onPress={handleConfirm}>
-              <Text style={styles.confirmText}>Done</Text>
-            </TouchableOpacity>
-          </View>
+        <View style={styles.buttonRow}>
+          <TouchableOpacity onPress={handleCancel}>
+            <Text style={styles.cancelText}>Cancel</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={handleConfirm}>
+            <Text style={styles.confirmText}>Choose</Text>
+          </TouchableOpacity>
         </View>
       </View>
     </Modal>
@@ -120,63 +146,36 @@ const AvatarCropModal: React.FC<AvatarCropModalProps> = ({
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  container: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    width: 380,
-    maxWidth: '90%' as any,
-    overflow: 'hidden',
+    backgroundColor: '#000',
   },
   title: {
     fontSize: 18,
-    fontWeight: '600',
+    fontWeight: '500',
     textAlign: 'center',
-    paddingVertical: 16,
+    color: '#fff',
+    paddingTop: 60,
+    paddingBottom: 20,
   },
   cropperWrapper: {
+    flex: 1,
     position: 'relative',
-    width: '100%' as any,
-    height: 320,
-  },
-  zoomRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-  },
-  zoomLabel: {
-    fontSize: 14,
-    color: '#666',
+    overflow: 'hidden',
   },
   buttonRow: {
     flexDirection: 'row',
-    borderTopWidth: 1,
-    borderTopColor: '#eee',
-  },
-  cancelButton: {
-    flex: 1,
-    paddingVertical: 14,
-    alignItems: 'center',
-    borderRightWidth: 1,
-    borderRightColor: '#eee',
-  },
-  confirmButton: {
-    flex: 1,
-    paddingVertical: 14,
-    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 24,
+    paddingVertical: 20,
+    paddingBottom: 40,
   },
   cancelText: {
-    fontSize: 16,
-    color: '#999',
+    fontSize: 17,
+    color: '#fff',
   },
   confirmText: {
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: '600',
-    color: colors.primary,
+    color: '#fff',
   },
 });
 

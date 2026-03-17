@@ -71,7 +71,7 @@ interface Message {
 
 /** First question shown when starting or restarting trip planning. */
 const TRIP_PLANNING_FIRST_QUESTION_TEXT =
-  "Yo! Let's Travel! I can connect you with like minded surfers or surf travelers who have experience in specific destinations you are curious about. So, what are you looking for?"
+  "Yo! Let’s get you connected! So what are we looking for today?"
 
 // ========== UI MESSAGES: Ordered, typed messages for perfect conversation restore ==========
 

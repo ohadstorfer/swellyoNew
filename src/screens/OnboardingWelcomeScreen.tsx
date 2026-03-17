@@ -19,17 +19,19 @@ const STEP_HEADER_HEIGHT = 60;
 const BUTTON_CONTAINER_HEIGHT = 92;
 const MIN_CONTENT_HEIGHT = 400;
 
-// Figma asset URLs (replace with permanent assets if needed after 7 days)
 const CARD_IMAGES = {
   share_wisdom:
-    'https://www.figma.com/api/mcp/asset/12c06250-18d0-458a-8aa2-134b920d9c9f',
+    'https://rfdhtvcmagsbxqntnepv.supabase.co/storage/v1/object/public/onboarding-welcome-images/b0d7956780bd01fbfac42c1db76ed27df34c3fcf.jpg',
   find_crew:
-    'https://www.figma.com/api/mcp/asset/ed75f7f6-1141-459e-a42e-87874db75512',
+    'https://rfdhtvcmagsbxqntnepv.supabase.co/storage/v1/object/public/onboarding-welcome-images/63ee08f6a46333084911295e23748727ebc90198.jpg',
   plan_trip:
-    'https://www.figma.com/api/mcp/asset/d4cedc6c-d6c4-4d92-aa62-3ebe56f873e5',
+    'https://rfdhtvcmagsbxqntnepv.supabase.co/storage/v1/object/public/onboarding-welcome-images/6cbafc07268184703dff606b6cb48836431babec.jpg',
   just_waves:
-    'https://www.figma.com/api/mcp/asset/2f80058e-8d18-4487-a4f6-786526e7411b',
+    'https://rfdhtvcmagsbxqntnepv.supabase.co/storage/v1/object/public/onboarding-welcome-images/082aedec1b3d12fa462436f56cd5af2e3d6ad236.jpg',
 } as const;
+
+/** All onboarding welcome image URLs — exported for prefetching. */
+export const ONBOARDING_WELCOME_IMAGE_URLS = Object.values(CARD_IMAGES);
 
 const JOURNEY_OPTIONS: Array<{
   id: string;

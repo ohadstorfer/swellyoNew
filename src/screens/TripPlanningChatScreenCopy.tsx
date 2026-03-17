@@ -52,7 +52,7 @@ function getLabelParts(label: string): { prefix: string; value: string } | null 
 
 /** First question shown when starting or restarting trip planning (matches backend prompt). */
 const TRIP_PLANNING_FIRST_QUESTION =
-  "Yo! Let's Travel! I can connect you with like minded surfers or surf travelers who have experience in specific destinations you are curious about. So, what are you looking for?";
+  "Yo! Let’s get you connected! So what are we looking for today?";
 
 /** True if we have at least one filter required for find-matches (matches backend validation). */
 function hasSearchableFilters(data: any): boolean {
