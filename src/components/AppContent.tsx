@@ -6,6 +6,7 @@ import { OnboardingStep1Screen, OnboardingData } from '../screens/OnboardingStep
 import { OnboardingStep2Screen } from '../screens/OnboardingStep2Screen';
 import { OnboardingStep3Screen } from '../screens/OnboardingStep3Screen';
 import { OnboardingStep4Screen } from '../screens/OnboardingStep4Screen';
+import { OnboardingVideoUploadScreen } from '../screens/OnboardingVideoUploadScreen';
 import { LoadingScreen } from '../screens/LoadingScreen';
 import { OnboardingChatScreen } from '../screens/ChatScreen';
 import { TripPlanningChatScreen } from '../screens/TripPlanningChatScreen';
@@ -33,6 +34,7 @@ export const AppContent: React.FC = () => {
   const [showLoading, setShowLoading] = useState(false);
   const [isSavingStep1, setIsSavingStep1] = useState(false);
   const [isSavingStep2, setIsSavingStep2] = useState(false);
+  const [showVideoUploadStep, setShowVideoUploadStep] = useState(false);
   const [isSavingStep3, setIsSavingStep3] = useState(false);
   const [isSavingStep4, setIsSavingStep4] = useState(false);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
@@ -355,11 +357,11 @@ export const AppContent: React.FC = () => {
       const { onboardingService } = await import('../services/onboarding/onboardingService');
       await onboardingService.saveStep2(data.boardType!, data.surfLevel!);
       
-      setCurrentStep(3); // Go to step 3 (travel experience)
+      setShowVideoUploadStep(true); // Show video upload mid-step
     } catch (error) {
       console.error('Error in Step 2 Next:', error);
       // Still allow navigation even if save fails
-      setCurrentStep(3);
+      setShowVideoUploadStep(true);
     } finally {
       setIsSavingStep2(false);
     }
@@ -959,12 +961,28 @@ export const AppContent: React.FC = () => {
     setCurrentStep(1); // Go back to step 1
   };
 
+  const handleVideoUploadSkip = () => {
+    setShowVideoUploadStep(false);
+    setCurrentStep(3);
+  };
+
+  const handleVideoUploadNext = () => {
+    setShowVideoUploadStep(false);
+    setCurrentStep(3);
+  };
+
+  const handleVideoUploadBack = () => {
+    setShowVideoUploadStep(false);
+    // currentStep is still 2, so it shows step 2 screen
+  };
+
   const handleStep3Back = () => {
     // If Soft Top (id: 3) was selected, go back to step 1 (since step 2 was skipped)
     if (formData.boardType === 3) {
       setCurrentStep(1); // Go back to step 1
     } else {
-      setCurrentStep(2); // Go back to step 2
+      setCurrentStep(2);
+      setShowVideoUploadStep(true); // Go back to video upload screen
     }
   };
 
@@ -1237,6 +1255,18 @@ export const AppContent: React.FC = () => {
 
   // Show onboarding step 2 if we're on step 2
   if (currentStep === 2) {
+    if (showVideoUploadStep) {
+      return (
+        <OnboardingVideoUploadScreen
+          onNext={handleVideoUploadNext}
+          onSkip={handleVideoUploadSkip}
+          onBack={handleVideoUploadBack}
+          boardType={formData.boardType!}
+          surfLevel={formData.surfLevel!}
+          userId={user?.id || ''}
+        />
+      );
+    }
     console.log('Rendering OnboardingStep2Screen with initialData:', formData);
     return (
       <OnboardingStep2Screen
