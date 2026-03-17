@@ -1016,6 +1016,8 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
         const input = document.createElement('input');
         input.type = 'file';
         input.accept = 'image/*';
+        input.style.display = 'none';
+        document.body.appendChild(input);
         input.onchange = async (e: any) => {
           const file = e.target.files[0];
           if (file) {
@@ -1027,6 +1029,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
             };
             reader.readAsDataURL(file);
           }
+          document.body.removeChild(input);
         };
         input.click();
       } else {

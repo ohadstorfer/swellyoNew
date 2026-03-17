@@ -1217,6 +1217,8 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
       const input = document.createElement('input');
       input.type = 'file';
       input.accept = 'image/*';
+      input.style.display = 'none';
+      document.body.appendChild(input);
       input.onchange = (e: any) => {
         const file = e.target.files[0];
         if (file) {
@@ -1229,6 +1231,7 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
           };
           reader.readAsDataURL(file);
         }
+        document.body.removeChild(input);
       };
       input.click();
     } else {
