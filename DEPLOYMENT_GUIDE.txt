@@ -1,0 +1,877 @@
+================================================================================
+       SWELLYO - COMPLETE APP STORE & PLAY STORE DEPLOYMENT GUIDE
+       For full-stack web developers new to mobile app publishing
+================================================================================
+
+TABLE OF CONTENTS
+-----------------
+1. Overview - How Mobile Deployment Works
+2. Prerequisites - Accounts & Tools You Need
+3. Step 1: Set Up EAS (Expo Application Services)
+4. Step 2: Configure Your App Identity
+5. Step 3: Set Up Your Apple Developer Account
+6. Step 4: Set Up Your Google Play Developer Account
+7. Step 5: Build for iOS
+8. Step 6: Build for Android
+9. Step 7: Submit to Apple App Store
+10. Step 8: Submit to Google Play Store
+11. Step 9: App Store Review - What to Expect
+12. Step 10: Post-Launch
+13. Common Gotchas & Troubleshooting
+14. Glossary
+
+
+================================================================================
+1. OVERVIEW - HOW MOBILE DEPLOYMENT WORKS
+================================================================================
+
+As a web developer, you're used to: build -> deploy to server -> done.
+
+Mobile is different. Here's the flow:
+
+  You write code
+       |
+  Build a binary (.ipa for iOS, .aab for Android)
+       |
+  Upload binary to Apple / Google
+       |
+  They REVIEW your app (humans + automated checks)
+       |
+  If approved -> published to the store
+       |
+  Users download it
+
+Key differences from web:
+- You CANNOT just push updates instantly. Each update goes through review.
+  (Exception: Expo has "over-the-air updates" for JS-only changes - more later)
+- Apple charges $99/year. Google charges a one-time $25.
+- Apple's review is stricter and slower (1-3 days typically).
+- Google's review is faster (hours to 1-2 days).
+
+YOUR PROJECT specifically:
+- Built with Expo (React Native) - this is great news!
+- Expo has a cloud build service called EAS (Expo Application Services)
+  that handles building the native binaries for you.
+- You do NOT need Xcode or Android Studio installed for cloud builds.
+- However, you DO need a Mac with Xcode for certain iOS-specific tasks
+  (like managing certificates locally, though EAS can handle most of this).
+
+
+================================================================================
+2. PREREQUISITES - ACCOUNTS & TOOLS YOU NEED
+================================================================================
+
+ACCOUNTS TO CREATE:
+-------------------
+
+[ ] 1. Expo Account (free)
+       -> https://expo.dev/signup
+       -> This is for EAS Build (cloud builds)
+
+[ ] 2. Apple Developer Account ($99/year)
+       -> https://developer.apple.com/programs/enroll/
+       -> You need this to publish to the App Store
+       -> Enrollment takes 24-48 hours (sometimes longer)
+       -> You MUST use a real person or legal business entity
+       -> If enrolling as an organization, you need a D-U-N-S number
+          (free but takes ~5 business days to get)
+
+[ ] 3. Google Play Developer Account ($25 one-time)
+       -> https://play.google.com/console/signup
+       -> You need this to publish to Google Play
+       -> Verification takes a few days
+
+[ ] 4. Apple App Store Connect Access
+       -> https://appstoreconnect.apple.com
+       -> This is where you manage your iOS app listing
+       -> Automatically available once your Developer Account is active
+
+TOOLS TO INSTALL:
+-----------------
+
+[ ] 1. EAS CLI
+       Run: npm install -g eas-cli
+
+[ ] 2. Make sure you have Node.js 18+ installed (you probably already do)
+
+[ ] 3. (Optional but recommended for iOS) Xcode on a Mac
+       -> Only needed if you want to test on a physical iPhone locally
+       -> NOT needed for cloud builds via EAS
+
+[ ] 4. (Optional) Android Studio
+       -> Only needed if you want to test on an Android emulator locally
+       -> NOT needed for cloud builds via EAS
+
+
+================================================================================
+3. STEP 1: SET UP EAS (EXPO APPLICATION SERVICES)
+================================================================================
+
+EAS is Expo's cloud build and submission service. It builds your app on their
+servers and gives you the .ipa (iOS) and .aab (Android) files ready to upload
+to the stores.
+
+A. LOG IN TO EAS
+----------------
+Run in your project directory:
+
+    eas login
+
+Enter your Expo account credentials.
+
+
+B. CONFIGURE YOUR PROJECT WITH EAS
+-----------------------------------
+Run:
+
+    eas build:configure
+
+This will:
+- Ask you which platforms (select both iOS and Android)
+- Create an eas.json file in your project root
+
+The generated eas.json will look something like this. You should customize it:
+
+    {
+      "cli": {
+        "version": ">= 3.0.0"
+      },
+      "build": {
+        "development": {
+          "developmentClient": true,
+          "distribution": "internal"
+        },
+        "preview": {
+          "distribution": "internal"
+        },
+        "production": {}
+      },
+      "submit": {
+        "production": {
+          "ios": {
+            "appleId": "your-apple-id@email.com",
+            "ascAppId": "your-app-store-connect-app-id",
+            "appleTeamId": "YOUR_TEAM_ID"
+          },
+          "android": {
+            "serviceAccountKeyPath": "./google-service-account-key.json",
+            "track": "production"
+          }
+        }
+      }
+    }
+
+Don't worry about filling in all values now - we'll cover each one below.
+
+
+C. LINK YOUR PROJECT TO EXPO
+-----------------------------
+Run:
+
+    eas init
+
+This registers your project with Expo's servers and adds a project ID
+to your app.json.
+
+
+================================================================================
+4. STEP 2: CONFIGURE YOUR APP IDENTITY
+================================================================================
+
+Your app.json needs some additions for store publishing. Here's what to add:
+
+A. iOS BUNDLE IDENTIFIER
+-------------------------
+This is your app's unique ID on Apple's systems. Convention: reverse domain.
+Example: com.swellyo.app
+
+Add to app.json under "ios":
+
+    "bundleIdentifier": "com.swellyo.app"
+
+B. ANDROID PACKAGE NAME
+------------------------
+Same concept for Android. Usually matches the iOS bundle ID.
+
+Add to app.json under "android":
+
+    "package": "com.swellyo.app"
+
+C. VERSION NUMBERS
+------------------
+Your app.json already has "version": "1.0.0" - that's good.
+
+For iOS, also add:
+    "buildNumber": "1"
+
+For Android, also add:
+    "versionCode": 1
+
+These are internal build numbers. Increment them each time you submit a new
+build. The "version" (1.0.0) is what users see. The buildNumber/versionCode
+is what the stores use internally.
+
+D. YOUR UPDATED app.json SHOULD LOOK LIKE:
+-------------------------------------------
+
+    {
+      "expo": {
+        "name": "swellyo",
+        "slug": "swellyo",
+        "version": "1.0.0",
+        "scheme": "swellyo",
+        "orientation": "portrait",
+        "icon": "./assets/icon.png",
+        "userInterfaceStyle": "light",
+        "newArchEnabled": true,
+        "splash": {
+          "image": "./assets/splash-icon.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#ffffff"
+        },
+        "ios": {
+          "supportsTablet": true,
+          "bundleIdentifier": "com.swellyo.app",
+          "buildNumber": "1",
+          "infoPlist": {
+            "NSPhotoLibraryUsageDescription": "This app needs access to your photo library to select profile pictures.",
+            "NSCameraUsageDescription": "This app needs access to your camera to take profile pictures."
+          }
+        },
+        "android": {
+          "adaptiveIcon": {
+            "foregroundImage": "./assets/adaptive-icon.png",
+            "backgroundColor": "#ffffff"
+          },
+          "edgeToEdgeEnabled": true,
+          "package": "com.swellyo.app",
+          "versionCode": 1,
+          "permissions": [
+            "android.permission.CAMERA",
+            "android.permission.READ_EXTERNAL_STORAGE",
+            "android.permission.WRITE_EXTERNAL_STORAGE"
+          ]
+        },
+        "web": {
+          "favicon": "./assets/favicon.png",
+          "backgroundColor": "#FAFAFA"
+        },
+        "plugins": [
+          "expo-web-browser",
+          [
+            "expo-image-picker",
+            {
+              "photosPermission": "The app accesses your photos to let you share them.",
+              "cameraPermission": "The app accesses your camera to let you take photos."
+            }
+          ]
+        ]
+      }
+    }
+
+
+================================================================================
+5. STEP 3: SET UP YOUR APPLE DEVELOPER ACCOUNT
+================================================================================
+
+A. ENROLL IN THE APPLE DEVELOPER PROGRAM
+-----------------------------------------
+1. Go to https://developer.apple.com/programs/enroll/
+2. Sign in with your Apple ID (or create one)
+3. Choose "Individual" or "Organization"
+   - Individual: simpler, just need your personal info
+   - Organization: need a D-U-N-S number, takes longer
+4. Pay $99/year
+5. Wait for approval (24-48 hours, sometimes up to a week)
+
+B. CREATE YOUR APP IN APP STORE CONNECT
+---------------------------------------
+Once your developer account is active:
+
+1. Go to https://appstoreconnect.apple.com
+2. Click "My Apps" -> "+" -> "New App"
+3. Fill in:
+   - Platform: iOS
+   - Name: Swellyo (the name shown on the App Store)
+   - Primary Language: English
+   - Bundle ID: select the one matching com.swellyo.app
+     (If it doesn't appear, you may need to register it first at
+      https://developer.apple.com/account/resources/identifiers/list)
+   - SKU: swellyo-ios (any unique string, internal use only)
+4. Click "Create"
+
+C. NOTE YOUR CREDENTIALS
+-------------------------
+You'll need these for eas.json:
+- Apple ID (your email): the email you used for Apple Developer
+- Apple Team ID: found at https://developer.apple.com/account -> Membership
+- ASC App ID: found in App Store Connect -> your app -> General -> Apple ID
+  (it's a numeric ID like 1234567890)
+
+
+================================================================================
+6. STEP 4: SET UP YOUR GOOGLE PLAY DEVELOPER ACCOUNT
+================================================================================
+
+A. REGISTER FOR GOOGLE PLAY CONSOLE
+------------------------------------
+1. Go to https://play.google.com/console/signup
+2. Pay $25 one-time fee
+3. Complete identity verification (may take a few days)
+
+B. CREATE YOUR APP IN GOOGLE PLAY CONSOLE
+------------------------------------------
+1. Go to https://play.google.com/console
+2. Click "Create app"
+3. Fill in:
+   - App name: Swellyo
+   - Default language: English
+   - App or game: App
+   - Free or paid: Free (or Paid)
+4. Accept the declarations
+5. Click "Create app"
+
+C. SET UP A GOOGLE SERVICE ACCOUNT (for automated uploads)
+-----------------------------------------------------------
+This lets EAS automatically upload your builds to Google Play.
+
+1. Go to https://console.cloud.google.com
+2. Create a new project (or select existing one)
+3. Go to "APIs & Services" -> "Enabled APIs & Services"
+4. Search and enable "Google Play Android Developer API"
+5. Go to "IAM & Admin" -> "Service Accounts"
+6. Click "Create Service Account"
+   - Name: eas-submit
+   - Click "Create and Continue"
+   - Skip the role (click "Continue")
+   - Click "Done"
+7. Click on the service account you just created
+8. Go to "Keys" tab -> "Add Key" -> "Create new key"
+   - Choose JSON format
+   - Download the file
+9. Rename it to google-service-account-key.json
+10. Put it in your project root (BUT add it to .gitignore!)
+
+IMPORTANT: Add this to your .gitignore:
+    google-service-account-key.json
+
+11. Go back to Google Play Console
+12. Go to "Settings" -> "API access"
+13. Click "Link" next to your Google Cloud project
+14. Under "Service accounts", find your service account
+15. Click "Manage Play Console permissions"
+16. Grant these permissions:
+    - Release to production, exclude devices, and use Play App Signing
+    - Manage testing tracks and edit tester lists
+17. Click "Invite user" -> "Save"
+
+
+================================================================================
+7. STEP 5: BUILD FOR iOS
+================================================================================
+
+A. RUN THE BUILD
+----------------
+From your project directory:
+
+    eas build --platform ios --profile production
+
+What happens:
+1. EAS packages your project and uploads it to Expo's build servers
+2. It will ask about Apple credentials:
+   - "Log in to your Apple Developer account" -> enter your Apple ID & password
+   - It may ask for 2FA code
+   - "Would you like EAS to manage your certificates?" -> YES (choose this!)
+     EAS will automatically create and manage your provisioning profiles
+     and signing certificates. This saves you a LOT of headache.
+3. The build runs on Expo's cloud servers (takes 10-30 minutes)
+4. You get a link to download the .ipa file (or it stays on Expo's servers
+   for submission)
+
+B. COMMON FIRST-BUILD ISSUES
+-----------------------------
+- If it asks about "Apple Distribution Certificate", let EAS create one
+- If you hit a "Maximum certificates" error, go to
+  https://developer.apple.com/account/resources/certificates/list
+  and revoke old/unused certificates
+- Build logs are available at https://expo.dev -> your project -> builds
+
+
+================================================================================
+8. STEP 6: BUILD FOR ANDROID
+================================================================================
+
+A. RUN THE BUILD
+----------------
+From your project directory:
+
+    eas build --platform android --profile production
+
+What happens:
+1. EAS packages and uploads your project
+2. It will ask: "Generate a new Android Keystore?" -> YES
+   (EAS will manage this for you. The keystore is used to sign your app.
+    If you lose it, you can never update your app, so let EAS keep it safe.)
+3. Build runs on cloud servers (takes 10-20 minutes)
+4. Produces an .aab file (Android App Bundle)
+
+B. BUILD BOTH PLATFORMS AT ONCE
+-------------------------------
+You can run both builds in parallel:
+
+    eas build --platform all --profile production
+
+
+================================================================================
+9. STEP 7: SUBMIT TO APPLE APP STORE
+================================================================================
+
+A. PREPARE YOUR APP STORE LISTING (in App Store Connect)
+---------------------------------------------------------
+Before submitting the binary, you need to fill out your App Store listing.
+Go to https://appstoreconnect.apple.com -> Your App:
+
+REQUIRED ITEMS:
+
+[ ] 1. Screenshots (MANDATORY)
+       You need screenshots for each device size you support:
+       - 6.7" (iPhone 15 Pro Max) - REQUIRED: 1290 x 2796 px
+       - 6.5" (iPhone 14 Plus) - REQUIRED: 1284 x 2778 px
+       - 5.5" (iPhone 8 Plus) - optional: 1242 x 2208 px
+       - iPad Pro 12.9" - REQUIRED if you support iPad: 2048 x 2732 px
+
+       TIP: You can take these from the iOS Simulator, or create them
+       in Figma/design tool. Many devs use tools like:
+       - https://screenshots.pro
+       - https://studio.app-mockup.com
+       - Just use the Simulator + screenshot
+
+       You need at least 1 screenshot per size, max 10. Show your best
+       features.
+
+[ ] 2. App Description (up to 4000 characters)
+       Write what your app does. Be clear and honest - Apple will reject
+       vague or misleading descriptions.
+
+[ ] 3. Subtitle (up to 30 characters)
+       Short tagline shown under your app name.
+
+[ ] 4. Keywords (up to 100 characters, comma-separated)
+       Search terms people might use to find your app.
+
+[ ] 5. Support URL
+       A webpage where users can get help. Can be a simple page on your
+       existing website.
+
+[ ] 6. Privacy Policy URL (MANDATORY)
+       Apple REQUIRES this. Must be a publicly accessible URL.
+       Must describe what data you collect, how you use it, etc.
+       You CANNOT publish without this.
+
+       Your app collects: photos, camera data, location data (Google Places),
+       chat messages, user profiles. Make sure your privacy policy covers all
+       of these.
+
+[ ] 7. App Category
+       Choose the most relevant category (Social Networking, Lifestyle, etc.)
+
+[ ] 8. Age Rating
+       Fill out the questionnaire about content (violence, language, etc.)
+       Apple will auto-assign a rating.
+
+[ ] 9. App Icon
+       1024 x 1024 px, no transparency, no rounded corners (Apple adds those).
+       Your assets/icon.png may work if it's this size.
+
+[ ] 10. Privacy Nutrition Labels
+        In App Store Connect -> App Privacy, you must declare:
+        - What data types you collect (name, email, photos, location, etc.)
+        - Whether each is linked to the user's identity
+        - Whether it's used for tracking
+        Be accurate - Apple may reject for inaccurate declarations.
+
+
+B. SUBMIT THE BUILD
+--------------------
+Option 1 - Use EAS Submit (recommended):
+
+    eas submit --platform ios --latest
+
+This takes the latest iOS build from EAS and uploads it to App Store Connect.
+It will ask for your Apple ID, team, and ASC App ID if not in eas.json.
+
+Option 2 - If you configured eas.json with submit settings:
+
+    eas submit --platform ios --latest --profile production
+
+C. SELECT THE BUILD IN APP STORE CONNECT
+-----------------------------------------
+1. After upload, go to App Store Connect -> Your App
+2. Under the version (1.0), scroll to "Build"
+3. Click "+" and select the build you just uploaded
+4. It may take 10-30 minutes for the build to appear and be processed
+5. Fill in "What's New in This Version" (for v1.0, describe the app)
+6. Click "Submit for Review"
+
+D. REVIEW QUESTIONNAIRE
+------------------------
+Apple will ask:
+- Does your app use the IDFA (advertising identifier)? -> Probably No
+- Does your app use encryption? -> If you use HTTPS (yes, you do with
+  Supabase), select YES, then select the exemption for "standard HTTPS"
+- Sign-in info: Provide a TEST ACCOUNT with credentials so Apple's
+  reviewer can log in and test your app. This is crucial - if they can't
+  use your app, they'll reject it.
+
+  Since you use Google Sign-In, you may need to provide a way for
+  reviewers to test without a Google account, OR provide a demo Google
+  account. Some developers add an email/password login specifically for
+  review purposes.
+
+
+================================================================================
+10. STEP 8: SUBMIT TO GOOGLE PLAY STORE
+================================================================================
+
+A. PREPARE YOUR PLAY STORE LISTING
+------------------------------------
+Go to Google Play Console -> Your App -> Store presence -> Main store listing:
+
+REQUIRED ITEMS:
+
+[ ] 1. Short description (up to 80 characters)
+
+[ ] 2. Full description (up to 4000 characters)
+
+[ ] 3. App icon: 512 x 512 px, PNG, 32-bit
+
+[ ] 4. Feature graphic: 1024 x 500 px
+       This is the banner image shown at the top of your listing.
+
+[ ] 5. Phone screenshots: min 2, max 8
+       Minimum size: 320px, maximum: 3840px
+       Recommended: 1080 x 1920 px (or 9:16 ratio)
+
+[ ] 6. Privacy Policy URL (same one you made for Apple)
+
+[ ] 7. App Category (similar to Apple)
+
+[ ] 8. Content Rating
+       Go to "Content rating" and fill out the IARC questionnaire.
+       This is mandatory.
+
+[ ] 9. Target audience
+       Declare the age group your app targets.
+       IMPORTANT: If your app could be seen as targeting children (under 13),
+       you need to comply with additional regulations (COPPA). If it's for
+       adults only, say so clearly.
+
+[ ] 10. Data Safety section
+        Similar to Apple's privacy labels. Declare:
+        - What data you collect
+        - Whether it's shared with third parties
+        - Whether users can request deletion
+        You can find this under "App content" -> "Data safety"
+
+
+B. SUBMIT THE BUILD
+--------------------
+Option 1 - Use EAS Submit:
+
+    eas submit --platform android --latest
+
+This uploads the latest .aab file to Google Play Console.
+You need the google-service-account-key.json set up (Step 4C).
+
+Option 2 - Manual upload:
+1. Download the .aab from Expo's build page
+2. Go to Google Play Console -> Your App -> Production -> "Create new release"
+3. Upload the .aab file
+4. Fill in release notes
+5. Click "Review release" -> "Start rollout to production"
+
+C. GOOGLE'S REVIEW
+-------------------
+- Faster than Apple, usually hours to 2 days
+- First app review may take longer (up to 7 days)
+- They focus on policy compliance, not UI quality
+
+
+================================================================================
+11. STEP 9: APP STORE REVIEW - WHAT TO EXPECT
+================================================================================
+
+APPLE REVIEW - COMMON REJECTION REASONS:
+-----------------------------------------
+
+1. SIGN-IN / ACCOUNT ACCESS
+   - Rejection: "We were unable to sign in to your app"
+   - Fix: Provide demo credentials in the review notes
+   - Your app uses Google Sign-In. Apple may also require "Sign in with Apple"
+     as an option. Apple's guideline 4.8 says: if you offer third-party
+     sign-in (Google, Facebook), you MUST also offer Sign in with Apple.
+     THIS IS IMPORTANT - plan for adding Sign in with Apple before submitting.
+
+2. MISSING FUNCTIONALITY
+   - Rejection: "Your app did not include sufficient content or features"
+   - Fix: Make sure the app is fully functional, not a wrapper around a website
+
+3. PRIVACY ISSUES
+   - Rejection: "Your app's privacy policy is missing or incomplete"
+   - Fix: Make sure your privacy policy URL works and covers all data you collect
+
+4. PERMISSIONS
+   - Rejection: "Your app requests permission to access X but doesn't explain why"
+   - Fix: Your app.json already has description strings for camera and photos.
+     Make sure every permission has a clear, user-facing reason.
+
+5. METADATA
+   - Rejection: "Your screenshots don't accurately represent the app"
+   - Fix: Use real screenshots, not mockups that exaggerate features
+
+GOOGLE PLAY REVIEW - COMMON REJECTION REASONS:
+-----------------------------------------------
+
+1. DATA SAFETY FORM
+   - Rejection: "Inaccurate data safety declarations"
+   - Fix: Accurately declare ALL data collection including analytics (PostHog)
+
+2. TARGET AUDIENCE
+   - Rejection: "App may appeal to children but doesn't comply with policies"
+   - Fix: Clearly set your target audience to 13+ or 18+ if appropriate
+
+3. PERMISSIONS
+   - Rejection: "App requests broad permissions unnecessarily"
+   - Fix: Only request permissions you actually need. Your current storage
+     permissions may need review - modern Android (API 33+) doesn't need
+     READ/WRITE_EXTERNAL_STORAGE for picking images (expo-image-picker
+     handles this).
+
+
+================================================================================
+12. STEP 10: POST-LAUNCH
+================================================================================
+
+A. OVER-THE-AIR (OTA) UPDATES WITH EAS UPDATE
+----------------------------------------------
+One of the biggest advantages of Expo: you can push JavaScript-only updates
+without going through app review!
+
+Setup:
+    npx expo install expo-updates
+    eas update:configure
+
+Push an update:
+    eas update --branch production --message "Fixed a bug"
+
+What CAN be updated OTA:
+- JavaScript code changes
+- New screens, UI changes
+- Bug fixes in JS code
+
+What CANNOT be updated OTA (requires a new build + review):
+- New native modules/dependencies
+- Changes to app.json native config
+- New permissions
+- Expo SDK version upgrades
+
+B. RELEASING NEW VERSIONS
+--------------------------
+For changes that need a new binary:
+
+1. Bump the version in app.json:
+   "version": "1.1.0"
+2. Bump buildNumber (iOS) and versionCode (Android):
+   "buildNumber": "2"
+   "versionCode": 2
+3. Build: eas build --platform all --profile production
+4. Submit: eas submit --platform all --latest
+5. Go to App Store Connect / Play Console to submit for review
+
+C. MONITORING
+--------------
+- App Store Connect shows crash reports, user reviews, analytics
+- Google Play Console shows ANRs, crashes, user reviews, install stats
+- Your PostHog analytics will continue working in the native app
+
+
+================================================================================
+13. COMMON GOTCHAS & TROUBLESHOOTING
+================================================================================
+
+1. "SIGN IN WITH APPLE" REQUIREMENT
+   Since you use Google Sign-In, Apple requires you to ALSO offer
+   "Sign in with Apple". You need to add this before your first submission.
+
+   Install: npx expo install expo-apple-authentication
+   Then implement the Sign in with Apple button alongside Google Sign-In.
+   This is probably the biggest new piece of work you need to do.
+
+2. ENVIRONMENT VARIABLES IN BUILDS
+   Your .env file is NOT automatically included in EAS builds.
+   You need to set them as EAS secrets:
+
+       eas secret:create --name SUPABASE_URL --value "your-value"
+       eas secret:create --name SUPABASE_ANON_KEY --value "your-value"
+       (repeat for all env vars)
+
+   Or use eas.json "env" field for non-sensitive values.
+
+   Check how your app reads env vars - if you use process.env, you may
+   need to switch to expo-constants or a similar approach for native builds.
+
+3. PUSH NOTIFICATIONS
+   If you plan to add push notifications (common for chat/social apps):
+   - iOS requires APNs (Apple Push Notification service) setup
+   - Android requires FCM (Firebase Cloud Messaging) setup
+   - expo-notifications makes this easier
+   - This is a separate guide in itself, but plan for it
+
+4. APP ICONS AND SPLASH SCREEN
+   Make sure your assets are the right sizes:
+   - icon.png: 1024 x 1024 px (no transparency)
+   - adaptive-icon.png: 1024 x 1024 px (Android, can have transparency)
+   - splash-icon.png: recommend at least 1284 x 2778 px
+   Check that these look good on different device sizes.
+
+5. DEEP LINKING
+   Your app.json has "scheme": "swellyo" which enables swellyo:// deep links.
+   Make sure this works if you use it for OAuth redirects (Google Sign-In).
+
+6. ANDROID STORAGE PERMISSIONS
+   Your current permissions include READ/WRITE_EXTERNAL_STORAGE.
+   On Android 13+ (API 33), these are deprecated. expo-image-picker handles
+   the new granular permissions automatically. You may want to remove the
+   old storage permissions to avoid Play Store warnings:
+
+   Remove from android.permissions:
+   - "android.permission.READ_EXTERNAL_STORAGE"
+   - "android.permission.WRITE_EXTERNAL_STORAGE"
+
+7. TESTING BEFORE SUBMISSION
+   Before submitting to the stores, test on real devices:
+
+   Build a preview version:
+       eas build --platform ios --profile preview
+       eas build --platform android --profile preview
+
+   For iOS: install via Expo dashboard (requires registering test devices)
+   For Android: download the .apk and install directly
+
+   Or use TestFlight (iOS) and Internal Testing (Android) for beta testing
+   with real users.
+
+8. FREE TIER LIMITS
+   EAS Build has free tier limits:
+   - Free plan: lower priority builds, limited builds per month
+   - Check https://expo.dev/pricing for current limits
+   - For your first submission, free tier is usually fine
+
+
+================================================================================
+14. GLOSSARY
+================================================================================
+
+Terms you'll encounter that don't exist in web development:
+
+AAB (Android App Bundle)
+    The file format Google Play accepts. Like a .zip of your compiled app.
+
+APK (Android Package)
+    An installable Android app file. Used for testing. Play Store uses AAB.
+
+App Store Connect
+    Apple's web portal for managing your iOS apps, similar to a CMS for
+    your app listing.
+
+Bundle Identifier (iOS)
+    Unique ID for your app (e.g., com.swellyo.app). Like a domain name
+    but for apps. Cannot be changed after first submission.
+
+Certificate (iOS)
+    A cryptographic file that proves you are who you say you are.
+    Apple requires apps to be "signed" with your certificate.
+    EAS manages this for you.
+
+Code Signing
+    The process of cryptographically signing your app so the OS knows
+    it came from you and hasn't been tampered with.
+
+EAS (Expo Application Services)
+    Expo's cloud service for building, submitting, and updating apps.
+
+IPA
+    The iOS app binary file format. Like .exe for iOS.
+
+Keystore (Android)
+    Android's equivalent of iOS certificates. A file used to sign your app.
+    NEVER lose this - you can't update your app without it.
+    Let EAS manage it.
+
+OTA (Over-the-Air) Update
+    Pushing JS code changes directly to users without going through
+    app store review. Expo's killer feature.
+
+Package Name (Android)
+    Android's equivalent of Bundle Identifier. Same format (com.swellyo.app).
+
+Provisioning Profile (iOS)
+    Links your certificate, app ID, and devices together. Tells iOS
+    "this app, signed by this developer, can run on these devices."
+    EAS manages this for you.
+
+TestFlight
+    Apple's beta testing platform. You upload a build, invite testers
+    by email, they install it via the TestFlight app.
+
+Track (Google Play)
+    A release channel. "Internal testing" -> "Closed testing" ->
+    "Open testing" -> "Production". You can start with production directly.
+
+
+================================================================================
+QUICK REFERENCE - THE COMMANDS YOU'LL RUN (IN ORDER)
+================================================================================
+
+# 1. Install EAS CLI
+npm install -g eas-cli
+
+# 2. Log in
+eas login
+
+# 3. Configure project
+eas build:configure
+eas init
+
+# 4. Build for both platforms
+eas build --platform all --profile production
+
+# 5. Submit to both stores
+eas submit --platform ios --latest
+eas submit --platform android --latest
+
+# 6. Later, for OTA updates (JS-only changes)
+npx expo install expo-updates
+eas update:configure
+eas update --branch production --message "describe your changes"
+
+
+================================================================================
+ESTIMATED TIMELINE
+================================================================================
+
+Day 1-2:    Create Apple & Google developer accounts, set up EAS
+Day 3-4:    Add Sign in with Apple, configure app.json, set up env vars
+Day 5:      Build and test on real devices
+Day 6-7:    Create store listings (screenshots, descriptions, privacy policy)
+Day 8:      Submit to both stores
+Day 9-14:   Wait for review, address any rejections
+Day 14-15:  App is live!
+
+This is optimistic - Apple Developer enrollment alone can take up to a week.
+Start with the account creation first, then work on the code changes while
+you wait.
+
+================================================================================
+END OF GUIDE
+================================================================================
