@@ -801,7 +801,7 @@ const styles = StyleSheet.create({
   videoContainer: {
     borderRadius: 0,
     overflow: 'hidden',
-    backgroundColor: colors.backgroundGray,
+    backgroundColor: Platform.OS === 'web' ? colors.backgroundGray : 'transparent',
     position: 'relative',
     zIndex: 1,
     alignSelf: 'center',
@@ -810,7 +810,7 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
     position: 'relative',
-    backgroundColor: colors.backgroundGray, // Match container background
+    backgroundColor: Platform.OS === 'web' ? colors.backgroundGray : 'transparent',
   },
   videoPlayerContainer: {
     width: '100%',
@@ -818,7 +818,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 0,
     left: 0,
-    backgroundColor: colors.backgroundGray, // Match container background
+    backgroundColor: Platform.OS === 'web' ? colors.backgroundGray : 'transparent',
     pointerEvents: 'none', // Prevent all interactions with video
     ...(Platform.OS === 'web' && {
       // Prevent video controls and interactions on web
@@ -832,8 +832,8 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
     pointerEvents: 'none',
-    // backgroundColor: colors.backgroundGray, // Match container background for visual blending
-  
+    ...(Platform.OS !== 'web' && { backgroundColor: 'transparent' }),
+
     ...(Platform.OS === 'web' && {
       objectFit: 'cover' as any,
       display: 'block' as any,

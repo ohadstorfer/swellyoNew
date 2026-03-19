@@ -888,7 +888,8 @@ const styles = StyleSheet.create({
   },
   headerContainer: {
     backgroundColor: colors.white,
-    paddingTop: Platform.OS === 'web' ? 40 : 0,
+    paddingTop: Platform.OS === 'web' ? 40 : 20,
+
     paddingBottom: 12,
     paddingHorizontal: 0,
     alignItems: 'center',

@@ -5,6 +5,7 @@ import {
   Animated,
   Image,
   Platform,
+  PanResponder,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Slider from '@react-native-community/slider';
@@ -12,14 +13,32 @@ import { colors, spacing, typography } from '../styles/theme';
 import { Text } from './Text';
 import { getImageUrl } from '../services/media/imageService';
 
-// Native-only imports for smooth gesture-based slider
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import ReanimatedAnimated, {
-  useSharedValue,
-  useAnimatedStyle,
-  runOnJS,
-  withTiming,
-} from 'react-native-reanimated';
+// Native-only imports for smooth gesture-based slider (conditional to avoid crash when native modules are unavailable)
+let Gesture: any = null;
+let GestureDetector: any = null;
+let ReanimatedAnimated: any = null;
+let useSharedValue: any = null;
+let useAnimatedStyle: any = null;
+let runOnJS: any = null;
+let withTiming: any = null;
+let hasNativeGestures = false;
+
+if (Platform.OS !== 'web') {
+  try {
+    const gh = require('react-native-gesture-handler');
+    Gesture = gh.Gesture;
+    GestureDetector = gh.GestureDetector;
+    const reanimated = require('react-native-reanimated');
+    ReanimatedAnimated = reanimated.default;
+    useSharedValue = reanimated.useSharedValue;
+    useAnimatedStyle = reanimated.useAnimatedStyle;
+    runOnJS = reanimated.runOnJS;
+    withTiming = reanimated.withTiming;
+    hasNativeGestures = true;
+  } catch (e) {
+    console.warn('Native gesture modules not available, using fallback slider');
+  }
+}
 
 interface TravelExperienceLevel {
   id: number;
@@ -158,6 +177,66 @@ const NativeSlider: React.FC<{ currentTrips: number; updateTrips: (trips: number
         <ReanimatedAnimated.View style={[styles.nativeThumb, thumbStyle]} />
       </View>
     </GestureDetector>
+  );
+};
+
+/** Fallback slider for native when reanimated is unavailable — uses PanResponder for exact visual parity with web */
+const FallbackNativeSlider: React.FC<{ currentTrips: number; updateTrips: (trips: number) => void }> = ({
+  currentTrips,
+  updateTrips,
+}) => {
+  const updateTripsRef = useRef(updateTrips);
+  updateTripsRef.current = updateTrips;
+  const startXRef = useRef(0);
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: (evt) => {
+        const x = evt.nativeEvent.locationX;
+        startXRef.current = x;
+        const trips = Math.round(Math.max(0, Math.min(MAX_TRIPS, (x / BAR_WIDTH) * MAX_TRIPS)));
+        updateTripsRef.current(trips);
+      },
+      onPanResponderMove: (_evt, gestureState) => {
+        const newX = Math.max(0, Math.min(BAR_WIDTH, startXRef.current + gestureState.dx));
+        const trips = Math.round((newX / BAR_WIDTH) * MAX_TRIPS);
+        updateTripsRef.current(trips);
+      },
+    })
+  ).current;
+
+  return (
+    <View style={styles.sliderWrapper} {...panResponder.panHandlers}>
+      {/* Track background */}
+      <View style={styles.trackBackground} />
+
+      {/* Gradient fill */}
+      <View style={styles.trackFillContainer}>
+        <View
+          style={[
+            styles.trackFill,
+            { width: `${(currentTrips / MAX_TRIPS) * 100}%` },
+          ]}
+        >
+          <LinearGradient
+            colors={['#00A2B6', '#0788B0']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={StyleSheet.absoluteFill}
+          />
+        </View>
+      </View>
+
+      {/* Custom thumb */}
+      <View
+        style={[
+          styles.nativeThumb,
+          { left: (currentTrips / MAX_TRIPS) * BAR_WIDTH - KNOB_SIZE / 2 },
+        ]}
+      />
+    </View>
   );
 };
 
@@ -357,8 +436,13 @@ export const TravelExperienceSlider: React.FC<TravelExperienceSliderProps> = ({
 
       {/* Level Bar */}
       <View style={styles.barContainer}>
-        {Platform.OS !== 'web' ? (
+        {hasNativeGestures ? (
           <NativeSlider
+            currentTrips={currentTrips}
+            updateTrips={updateTrips}
+          />
+        ) : Platform.OS !== 'web' ? (
+          <FallbackNativeSlider
             currentTrips={currentTrips}
             updateTrips={updateTrips}
           />

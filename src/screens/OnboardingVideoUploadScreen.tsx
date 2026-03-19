@@ -413,7 +413,12 @@ export const OnboardingVideoUploadScreen: React.FC<OnboardingVideoUploadScreenPr
           </View>
         </View>
 
-        {/* Title & Subtitle */}
+        
+
+        {/* Main Content */}
+        <View style={styles.mainContent}>
+
+          {/* Title & Subtitle */}
         <View style={styles.titleContainer}>
           <Text style={styles.title}>Show Us Your Style</Text>
           <Text style={styles.subtitle}>
@@ -421,8 +426,6 @@ export const OnboardingVideoUploadScreen: React.FC<OnboardingVideoUploadScreenPr
           </Text>
         </View>
 
-        {/* Main Content */}
-        <View style={styles.mainContent}>
           <View style={styles.previewContainer}>
             <View style={styles.videoPreview} pointerEvents="box-none">
               <View style={styles.surfSkillVideoWrapper}>
@@ -549,7 +552,7 @@ const styles = StyleSheet.create({
   },
   titleContainer: {
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.md,
+    paddingBottom: spacing.xxl,
     alignItems: 'center',
   },
   title: {

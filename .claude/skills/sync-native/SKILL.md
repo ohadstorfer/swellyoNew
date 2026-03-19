@@ -1,13 +1,13 @@
 ---
 name: sync-native
-description: Make a native screen visually indistinguishable from the web version by systematically fixing all visual and functional differences
+description: Analyze a native screen and all its inner components/libraries, compare web vs native behavior and UI, identify differences, and directly implement fixes to make native visually indistinguishable from web
 user_invocable: true
 arguments: "[screen_name] - Optional: specific screen file name, like WelcomeScreen. If omitted, lists all screens and asks which to process."
 ---
 
 # Sync Native Screen to Match Web Design
 
-You are making a React Native Expo screen's **native (iOS/Android)** rendering look and behave **visually indistinguishable** from the **web** version. The web version is the source of truth. Do NOT change web behavior — only bring native up to match web.
+You are analyzing a React Native Expo screen and ALL of its inner components, views, and libraries. You must compare how each part looks and behaves on web vs native, identify all UI and behavior differences, and directly implement the necessary fixes to make the native version visually indistinguishable from the web version.
 
 ## Context about this project
 - React Native Expo app with web support via `react-native-web`
@@ -25,7 +25,7 @@ The argument is the screen name. If not provided, list screens from `src/screens
 
 ## Process
 
-### Phase 1: Audit
+### Phase 1: Audit (Screen + All Inner Components + Libraries)
 
 1. **Read the screen file** completely (`src/screens/{ScreenName}.tsx`)
 2. **Identify every imported component** from `src/components/` and list them
@@ -33,6 +33,10 @@ The argument is the screen name. If not provided, list screens from `src/screens
 4. **Check for platform-specific variants**: Use a single Glob `src/components/{ComponentA,ComponentB,ComponentC}*.tsx` to check all at once
 5. **Scan for Platform.OS checks** — only note the ones that create visual or functional differences between web and native. Skip harmless ones like `cursor: 'pointer'`.
 6. **Only read `theme.ts` or `responsive.ts` if you need to look up a specific token** — the key values are listed in the Context section above.
+7. **For every component, view, and library used**:
+   - Analyze how it renders and behaves on web
+   - Analyze how it renders and behaves on native
+   - Note ANY UI or behavioral differences (layout, styling, interaction, rendering)
 
 ### Phase 2: Find and Fix Discrepancies
 
@@ -44,11 +48,44 @@ Scan the actual code and only check items from the reference list below that are
 3. **Typography & spacing** (wrong fonts, sizes, spacing)
 4. **Visual polish** (shadows, gradients, animations, hover states)
 
-For each issue found, apply the fix immediately. Rules:
+For each issue found, apply the fix immediately.
+
+#### Rules:
 - Do NOT change web behavior — only bring native up to match web
 - **Minimize diff size** — prefer small, targeted changes over rewrites
 - **Prefer cross-platform solutions first** — only add `Platform.OS` checks when no single expression works on both platforms
-- **Shared components**: Before modifying any component in `src/components/`, grep for all files that import it. Ensure compatibility with all usages.
+
+- **Functionality Safety (CRITICAL)**:
+  - Do NOT break existing logic, state, or handlers
+  - After each change, verify:
+    - All `onPress` / handlers are still connected
+    - No web-only APIs are used (`window`, `document`, `localStorage`)
+    - Navigation still works correctly
+    - No props or state variables were removed or disconnected
+
+- **Reuse Existing Implementations First**:
+  - If a working implementation exists elsewhere (e.g., another screen), reuse or adapt it
+  - Do NOT recreate logic or UI from scratch if it already exists in the codebase
+
+- **Library Alignment**:
+  - If a library behaves differently between web and native:
+    - Prefer using a cross-platform-compatible approach
+    - If needed, override or adapt the native implementation to match web behavior
+    - Do NOT remove a library unless a safe replacement exists
+
+- **Shared components**:
+  - Before modifying any component in `src/components/`, grep for all files that import it
+  - Ensure compatibility with all usages
+  - If a change may break other screens, create a safe variant or conditional logic instead of modifying the base behavior
+
+- Do NOT refactor unrelated code or restructure components
+- Do NOT rewrite files unless absolutely necessary
+
+- After each fix:
+  - Ensure the file compiles (no TypeScript or import errors)
+  - Ensure JSX structure remains valid
+
+- Do NOT proceed to lower priority fixes if higher priority issues are still broken
 
 #### Reference Checklist (check only what's relevant to the screen)
 

@@ -25,7 +25,7 @@ import { colors, spacing, typography } from '../styles/theme';
 import { OnboardingData } from './OnboardingStep1Screen';
 import { uploadProfileImage } from '../services/storage/storageService';
 import { supabase } from '../config/supabase';
-import { formatDateOfBirth, isValidDateOfBirth, dateToISOString } from '../utils/ageCalculation';
+import { formatDateOfBirth, isValidDateOfBirth, dateToISOString, calculateAgeFromDOB } from '../utils/ageCalculation';
 import AvatarCropModal from '../components/AvatarCropModal';
 
 interface OnboardingStep4ScreenProps {
@@ -842,10 +842,9 @@ const DateOfBirthField: React.FC<DateOfBirthFieldProps> = ({
               activeOpacity={1}
               onPress={handleWebCancel}
             >
-              <TouchableOpacity
+              <View
                 style={styles.datePickerModal as any}
-                activeOpacity={1}
-                onPress={(e) => e.stopPropagation()}
+                onStartShouldSetResponder={() => true}
               >
                 {/* Modal header */}
                 <View style={styles.datePickerHeader as any}>
@@ -1021,7 +1020,7 @@ const DateOfBirthField: React.FC<DateOfBirthFieldProps> = ({
                     <Text style={styles.datePickerConfirmText as any}>Confirm</Text>
                   </TouchableOpacity>
                 </View>
-              </TouchableOpacity>
+              </View>
             </TouchableOpacity>
           </Modal>
         )}
@@ -1149,7 +1148,6 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
       setDateOfBirthError('Date of birth is required');
       hasError = true;
     } else {
-      const { isValidDateOfBirth } = await import('../utils/ageCalculation');
       const validation = isValidDateOfBirth(dateOfBirth);
       if (!validation.valid) {
         setDateOfBirthError(validation.error || 'Invalid date of birth');
@@ -1202,7 +1200,6 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
     }
     
     // Calculate age from DOB for backward compatibility (database trigger will also calculate)
-    const { calculateAgeFromDOB } = await import('../utils/ageCalculation');
     const calculatedAge = calculateAgeFromDOB(dateOfBirth);
     
     const formData: OnboardingData = {
@@ -1333,16 +1330,14 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
               <DateOfBirthField
                 label="Age"
                 value={dateOfBirth}
-                onChange={async (dob) => {
+                onChange={(dob) => {
                   setDateOfBirth(dob);
                   setDateOfBirthError('');
                   // Validate DOB
-                  const { isValidDateOfBirth, calculateAgeFromDOB } = await import('../utils/ageCalculation');
                   const validation = isValidDateOfBirth(dob);
                   if (!validation.valid) {
                     setDateOfBirthError(validation.error || 'Invalid date of birth');
                   } else {
-                    // Calculate age for immediate feedback (database trigger will also calculate)
                     const calculatedAge = calculateAgeFromDOB(dob);
                     if (calculatedAge !== null) {
                       updateFormData({ dateOfBirth: dob, age: calculatedAge });
@@ -1952,6 +1947,12 @@ const styles = StyleSheet.create({
     maxWidth: 500,
     maxHeight: '80%',
     overflow: 'hidden',
+    // Shadow
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 20,
+    elevation: 10,
     ...(Platform.OS === 'web' && {
       boxShadow: '0 4px 20px rgba(0, 0, 0, 0.15)',
     }),
@@ -1963,7 +1964,13 @@ const styles = StyleSheet.create({
     maxWidth: 500,
     maxHeight: '80%',
     overflow: 'hidden',
-    zIndex: 10001,  // Explicitly set z-index for content, higher than pronoun modal
+    zIndex: 10001,
+    // Shadow
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 20,
+    elevation: 10,
     ...(Platform.OS === 'web' && {
       boxShadow: '0 4px 20px rgba(0, 0, 0, 0.15)',
     }),
@@ -2053,6 +2060,12 @@ const styles = StyleSheet.create({
     maxWidth: 400,
     zIndex: 9001,
     overflow: 'hidden',
+    // Shadow
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 20,
+    elevation: 10,
     ...(Platform.OS === 'web' && {
       boxShadow: '0 4px 20px rgba(0, 0, 0, 0.15)',
     }),
@@ -2103,6 +2116,12 @@ const styles = StyleSheet.create({
     width: 344,
     paddingHorizontal: 16,
     paddingVertical: 24,
+    // Shadow
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 20,
+    elevation: 10,
   },
   datePickerHeader: {
     alignItems: 'center',
@@ -2111,7 +2130,7 @@ const styles = StyleSheet.create({
   datePickerTitle: {
     fontSize: 18,
     fontWeight: '700',
-    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat-Bold',
+    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat',
     color: '#333333',
     lineHeight: 24,
   },
@@ -2198,7 +2217,7 @@ const styles = StyleSheet.create({
   webDatePickerItemText: {
     fontSize: 16,
     fontWeight: '700',
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter-Bold',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     color: '#7B7B7B',
     lineHeight: 15,
   },
@@ -2210,7 +2229,7 @@ const styles = StyleSheet.create({
   webDatePickerItemTextSelected: {
     fontSize: 18,
     fontWeight: '700',
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter-Bold',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     color: '#FFFFFF',
     lineHeight: 22,
   },
