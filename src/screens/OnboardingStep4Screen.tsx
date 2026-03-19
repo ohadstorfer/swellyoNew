@@ -711,7 +711,7 @@ const DateOfBirthField: React.FC<DateOfBirthFieldProps> = ({
           const monthIndex = initialDate.getMonth();
           const dayIndex = initialDate.getDate() - 1;
           const currentYear = new Date().getFullYear();
-          const yearIndex = currentYear - initialDate.getFullYear();
+          const yearIndex = initialDate.getFullYear() - (currentYear - 120);
 
           webMonthScrollRef.current?.scrollTo({ y: monthIndex * ITEM_HEIGHT, animated: false });
           webDayScrollRef.current?.scrollTo({ y: dayIndex * ITEM_HEIGHT, animated: false });
@@ -743,7 +743,8 @@ const DateOfBirthField: React.FC<DateOfBirthFieldProps> = ({
     // Generate month, day, year arrays (short month names per Figma)
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     const currentYear = new Date().getFullYear();
-    const years = Array.from({ length: 121 }, (_, i) => currentYear - i); // Last 120 years
+    const oldestYear = currentYear - 120;
+    const years = Array.from({ length: 121 }, (_, i) => oldestYear + i); // Oldest to newest (top to bottom)
     const daysInMonth = new Date(webTempDate.getFullYear(), webTempDate.getMonth() + 1, 0).getDate();
     const days = Array.from({ length: daysInMonth }, (_, i) => i + 1);
 
@@ -986,7 +987,7 @@ const DateOfBirthField: React.FC<DateOfBirthFieldProps> = ({
                               }
                               setWebTempDate(newDate);
                               const currentYear = new Date().getFullYear();
-                              const yearIndex = currentYear - year;
+                              const yearIndex = year - (currentYear - 120);
                               snapToItem(webYearScrollRef, yearIndex);
                               snapToItem(webDayScrollRef, newDate.getDate() - 1);
                             }}

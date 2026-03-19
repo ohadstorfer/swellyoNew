@@ -210,9 +210,10 @@ export const OnboardingWelcomeScreen: React.FC<OnboardingWelcomeScreenProps> = (
       {/* Next button */}
       <View style={styles.buttonContainer}>
         <TouchableOpacity
-          style={styles.button}
+          style={[styles.button, selectedIds.length < 2 && styles.buttonDisabled]}
           onPress={handleNext}
           activeOpacity={0.8}
+          disabled={selectedIds.length < 2}
         >
           <Text style={styles.buttonText}>Next</Text>
         </TouchableOpacity>
@@ -417,6 +418,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 24,
+  },
+  buttonDisabled: {
+    opacity: 0.35,
   },
   buttonText: {
     fontFamily: Platform.OS === 'web' ? 'var(--Family-Headings, Montserrat), sans-serif' : 'Montserrat',

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   StyleSheet,
@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   Platform,
   Alert,
-  ActivityIndicator,
 } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { Ionicons } from '@expo/vector-icons';
@@ -16,7 +15,49 @@ import { useIsDesktopWeb, responsiveWidth } from '../utils/responsive';
 import { getSurfLevelMapping } from '../utils/surfLevelMapping';
 import { validateVideoComplete } from '../utils/videoValidation';
 import { uploadProfileVideo } from '../services/storage/storageService';
-import { supabaseDatabaseService } from '../services/database/supabaseDatabaseService';
+import { getSurfLevelVideoFromStorage } from '../services/media/videoService';
+
+const BOARD_VIDEO_DEFINITIONS: { [boardType: number]: Array<{ name: string; videoFileName: string; thumbnailFileName: string }> } = {
+  0: [
+    { name: 'Dipping My Toes', videoFileName: 'Dipping My Toes.mp4', thumbnailFileName: 'Dipping My Toes thumbnail.PNG' },
+    { name: 'Cruising Around', videoFileName: 'Cruising Around.mp4', thumbnailFileName: 'Cruising Around thumbnail.PNG' },
+    { name: 'Snapping', videoFileName: 'Snapping.mp4', thumbnailFileName: 'Snapping thumbnail.PNG' },
+    { name: 'Charging', videoFileName: 'Charging.mp4', thumbnailFileName: 'Charging thumbnail.PNG' },
+  ],
+  1: [
+    { name: 'Dipping My Toes', videoFileName: 'Dipping My Toes.mp4', thumbnailFileName: 'Dipping My Toes thumbnail.PNG' },
+    { name: 'Cruising Around', videoFileName: 'Cruising Around.mp4', thumbnailFileName: 'Cruising Around thumbnail.PNG' },
+    { name: 'Trimming Lines', videoFileName: 'Trimming Lines.mp4', thumbnailFileName: 'Trimming Lines thumbnail.PNG' },
+    { name: 'Carving Turns', videoFileName: 'Carving Turns.mp4', thumbnailFileName: 'Carving Turns thumbnail.PNG' },
+  ],
+  2: [
+    { name: 'Dipping My Toes', videoFileName: 'Dipping My Toes.mp4', thumbnailFileName: 'Dipping My Toes thumbnail.PNG' },
+    { name: 'Cruising Around', videoFileName: 'Cruising Around.mp4', thumbnailFileName: 'Cruising Around thumbnail.PNG' },
+    { name: 'Trimming Lines', videoFileName: 'Trimming Lines.mp4', thumbnailFileName: 'Trimming Lines thumbnail.PNG' },
+    { name: 'Carving Turns', videoFileName: 'Carving Turns.mp4', thumbnailFileName: 'Carving Turns thumbnail.PNG' },
+  ],
+  3: [
+    { name: 'Dipping My Toes', videoFileName: 'Dipping My Toes.mp4', thumbnailFileName: 'Dipping My Toes thumbnail.PNG' },
+    { name: 'Cruising Around', videoFileName: 'Cruising Around.mp4', thumbnailFileName: 'Cruising Around thumbnail.PNG' },
+    { name: 'Trimming Lines', videoFileName: 'Trimming Lines.mp4', thumbnailFileName: 'Trimming Lines thumbnail.PNG' },
+    { name: 'Carving Turns', videoFileName: 'Carving Turns.mp4', thumbnailFileName: 'Carving Turns thumbnail.PNG' },
+  ],
+};
+
+const getBoardFolder = (boardType: number): string => {
+  const folderMap: { [key: number]: string } = { 0: 'shortboard', 1: 'midlength', 2: 'longboard', 3: 'softtop' };
+  return folderMap[boardType] || 'shortboard';
+};
+
+const getCategorySubtitle = (category: string): string => {
+  const categoryMap: { [key: string]: string } = {
+    'beginner': 'Just Starting',
+    'intermediate': 'Getting There',
+    'advanced': 'Doing Good',
+    'pro': 'Excellent',
+  };
+  return categoryMap[category.toLowerCase()] || 'Just Starting';
+};
 
 interface OnboardingVideoUploadScreenProps {
   onNext: () => void;
@@ -36,43 +77,242 @@ export const OnboardingVideoUploadScreen: React.FC<OnboardingVideoUploadScreenPr
   userId,
 }) => {
   const isDesktop = useIsDesktopWeb();
-  const [videoUri, setVideoUri] = useState<string | null>(null);
+  const [userVideoUri, setUserVideoUri] = useState<string | null>(null);
   const [mimeType, setMimeType] = useState<string | undefined>(undefined);
-  const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const hasUserVideo = userVideoUri !== null;
 
   const progressBarWidth = isDesktop ? 300 : 237;
   const buttonWidth = responsiveWidth(90, 280, 330, 0);
 
   const surfLevelInfo = getSurfLevelMapping(boardType, surfLevel);
 
-  const previewPlayer = useVideoPlayer(null, (player: any) => {
+  const displayName = surfLevelInfo?.description || 'Dipping My Toes';
+  const subtitle = getCategorySubtitle(surfLevelInfo?.category || 'beginner');
+
+  // Compute default video URL from boardType (0-based) and surfLevel (0-based)
+  const defaultVideoUrl = (() => {
+    const boardVideos = BOARD_VIDEO_DEFINITIONS[boardType];
+    if (!boardVideos) return '';
+    const videoIndex = Math.min(surfLevel, boardVideos.length - 1);
+    const video = boardVideos[videoIndex];
+    if (!video) return '';
+    const boardFolder = getBoardFolder(boardType);
+    return getSurfLevelVideoFromStorage(`${boardFolder}/${video.videoFileName}`);
+  })();
+
+  const isInitialMountRef = useRef(true);
+
+  const previewPlayer = useVideoPlayer(defaultVideoUrl || '', (player: any) => {
     if (player) {
+      player.staysActiveInBackground = true;
       player.loop = true;
       player.muted = true;
     }
   });
 
+  // Hook A: Status change listener — play when readyToPlay
   useEffect(() => {
-    if (!videoUri || !previewPlayer) return;
+    if (!previewPlayer || !defaultVideoUrl) return;
 
-    const loadAndPlay = async () => {
-      try {
-        const replacePromise = previewPlayer.replaceAsync(videoUri);
-        if (replacePromise && typeof replacePromise.then === 'function') {
-          await replacePromise;
-        }
-        previewPlayer.loop = true;
+    let isMounted = true;
+
+    const handleStatusChange = (status: any) => {
+      if (!isMounted || !previewPlayer) return;
+
+      const isReady = status?.status === 'readyToPlay' ||
+                     status?.isReadyToPlay ||
+                     (status?.status === 'readyToPlay' && !status?.error);
+
+      if (isReady) {
         previewPlayer.muted = true;
-        previewPlayer.play();
-      } catch (e) {
-        console.warn('Error loading video preview:', e);
+        previewPlayer.loop = true;
+
+        const playPromise = previewPlayer.play();
+        if (playPromise !== undefined && typeof (playPromise as any).catch === 'function') {
+          (playPromise as any).catch((error: any) => {
+            if (__DEV__ && error.name !== 'NotAllowedError') {
+              console.warn('[OnboardingVideo] Play failed:', error);
+            }
+          });
+        }
       }
     };
 
-    loadAndPlay();
-  }, [videoUri, previewPlayer]);
+    try {
+      if (previewPlayer.addListener) {
+        const statusSubscription = previewPlayer.addListener('statusChange', handleStatusChange);
+
+        return () => {
+          isMounted = false;
+          if (statusSubscription && typeof statusSubscription.remove === 'function') {
+            statusSubscription.remove();
+          }
+        };
+      }
+    } catch (error) {
+      if (__DEV__) {
+        console.warn('[OnboardingVideo] Could not set up listeners:', error);
+      }
+    }
+
+    return () => {
+      isMounted = false;
+    };
+  }, [previewPlayer, defaultVideoUrl]);
+
+  // Hook B: replaceAsync + web playsInline + canplay wait
+  useEffect(() => {
+    const videoUrl = userVideoUri || defaultVideoUrl;
+    if (!videoUrl || !previewPlayer) {
+      isInitialMountRef.current = false;
+      return;
+    }
+
+    // Ensure playsInline is set before replaceAsync (Safari requirement)
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      const setPlaysInline = () => {
+        const videoElements = document.querySelectorAll('video');
+        videoElements.forEach((videoElement: HTMLVideoElement) => {
+          videoElement.setAttribute('playsinline', 'true');
+          videoElement.setAttribute('webkit-playsinline', 'true');
+          videoElement.setAttribute('x5-playsinline', 'true');
+          videoElement.playsInline = true;
+        });
+      };
+      setPlaysInline();
+      setTimeout(setPlaysInline, 50);
+    }
+
+    const replacePromise = previewPlayer.replaceAsync(videoUrl);
+    if (replacePromise && typeof replacePromise.then === 'function') {
+      replacePromise.then(() => {
+        if (!previewPlayer) return;
+
+        previewPlayer.loop = true;
+        previewPlayer.muted = true;
+
+        // Ensure playsInline is set again after replaceAsync
+        if (Platform.OS === 'web' && typeof document !== 'undefined') {
+          const setPlaysInline = () => {
+            const videoElements = document.querySelectorAll('video');
+            videoElements.forEach((videoElement: HTMLVideoElement) => {
+              videoElement.setAttribute('playsinline', 'true');
+              videoElement.setAttribute('webkit-playsinline', 'true');
+              videoElement.setAttribute('x5-playsinline', 'true');
+              videoElement.playsInline = true;
+            });
+          };
+          setPlaysInline();
+          setTimeout(setPlaysInline, 50);
+        }
+
+        // Wait for video element to be ready before playing
+        const waitForVideoReady = (): Promise<void> => {
+          return new Promise<void>((resolve) => {
+            if (Platform.OS === 'web' && typeof document !== 'undefined') {
+              const findVideoElement = () => {
+                const videoElements = document.querySelectorAll('video');
+                return Array.from(videoElements).find((video: HTMLVideoElement) => {
+                  return video.src === videoUrl || video.currentSrc === videoUrl;
+                }) as HTMLVideoElement | undefined;
+              };
+
+              const videoElement = findVideoElement();
+              if (videoElement) {
+                const HAVE_CURRENT_DATA = 2;
+                if (videoElement.readyState >= HAVE_CURRENT_DATA) {
+                  resolve();
+                } else {
+                  const canPlayHandler = () => {
+                    resolve();
+                  };
+                  videoElement.addEventListener('canplay', canPlayHandler, { once: true });
+
+                  setTimeout(() => {
+                    videoElement.removeEventListener('canplay', canPlayHandler);
+                    resolve();
+                  }, 500);
+                }
+              } else {
+                resolve();
+              }
+            } else {
+              resolve();
+            }
+          });
+        };
+
+        waitForVideoReady().then(() => {
+          if (!previewPlayer) return;
+
+          previewPlayer.loop = true;
+          previewPlayer.muted = true;
+
+          const playPromise = previewPlayer.play();
+
+          if (playPromise !== undefined && typeof (playPromise as any).catch === 'function') {
+            (playPromise as any).then(() => {
+              if (__DEV__) {
+                console.log('[OnboardingVideo] Video playing successfully after replaceAsync');
+              }
+            }).catch((playError: any) => {
+              if (playError.name !== 'NotAllowedError') {
+                if (__DEV__) {
+                  console.warn(`[OnboardingVideo] Play failed (${playError.name}): ${playError.message}, retrying...`);
+                }
+
+                setTimeout(() => {
+                  if (previewPlayer) {
+                    const retryPlayResult = previewPlayer.play();
+                    if (retryPlayResult !== undefined && typeof (retryPlayResult as any).then === 'function') {
+                      (retryPlayResult as any).catch((retryError: any) => {
+                        if (__DEV__ && retryError.name !== 'NotAllowedError') {
+                          console.warn('[OnboardingVideo] Play retry failed:', retryError.message);
+                        }
+                      });
+                    }
+                  }
+                }, 200);
+              }
+            });
+          }
+        });
+
+        isInitialMountRef.current = false;
+      }).catch((error: any) => {
+        console.error('[OnboardingVideo] Error replacing video:', error);
+        isInitialMountRef.current = false;
+      });
+    } else {
+      isInitialMountRef.current = false;
+    }
+  }, [userVideoUri, defaultVideoUrl, previewPlayer]);
+
+  // Hook C: Workaround timeout — backup play attempt
+  useEffect(() => {
+    const videoUrl = userVideoUri || defaultVideoUrl;
+    if (!previewPlayer || !videoUrl) return;
+
+    const timeoutId = setTimeout(() => {
+      if (previewPlayer) {
+        previewPlayer.muted = true;
+        previewPlayer.loop = true;
+
+        const playPromise = previewPlayer.play();
+        if (playPromise !== undefined && typeof (playPromise as any).catch === 'function') {
+          (playPromise as any).catch((error: any) => {
+            if (__DEV__ && error.name !== 'NotAllowedError') {
+              console.warn('[OnboardingVideo] AutoPlay workaround failed:', error);
+            }
+          });
+        }
+      }
+    }, Platform.OS === 'web' ? 200 : 100);
+
+    return () => clearTimeout(timeoutId);
+  }, [previewPlayer, userVideoUri, defaultVideoUrl]);
 
   const pickVideo = async () => {
     setError(null);
@@ -97,7 +337,7 @@ export const OnboardingVideoUploadScreen: React.FC<OnboardingVideoUploadScreenPr
             URL.revokeObjectURL(uri);
             return;
           }
-          setVideoUri(uri);
+          setUserVideoUri(uri);
           setMimeType(fileMimeType);
         } catch (err) {
           console.error('Error validating video:', err);
@@ -134,7 +374,7 @@ export const OnboardingVideoUploadScreen: React.FC<OnboardingVideoUploadScreenPr
             setError(validation.error || 'Please select a valid video file.');
             return;
           }
-          setVideoUri(videoAsset.uri);
+          setUserVideoUri(videoAsset.uri);
           setMimeType(assetMimeType);
         }
       } catch (err) {
@@ -144,58 +384,12 @@ export const OnboardingVideoUploadScreen: React.FC<OnboardingVideoUploadScreenPr
     }
   };
 
-  const handleNext = async () => {
-    if (!videoUri || isUploading) return;
-
-    setIsUploading(true);
-    setError(null);
-
-    try {
-      const result = await uploadProfileVideo(videoUri, userId, mimeType);
-
-      if (result.success) {
-        if (result.processing) {
-          // Poll for video processing completion
-          let attempts = 0;
-          const maxAttempts = 60;
-          const intervalMs = 2000;
-
-          pollIntervalRef.current = setInterval(async () => {
-            attempts++;
-            try {
-              const surferData = await supabaseDatabaseService.getSurferByUserId(userId);
-              if (surferData?.profile_video_url) {
-                if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
-                setIsUploading(false);
-                onNext();
-              } else if (attempts >= maxAttempts) {
-                if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
-                setIsUploading(false);
-                // Still advance even if processing takes too long
-                onNext();
-              }
-            } catch (pollError) {
-              console.error('Error polling for video update:', pollError);
-              if (attempts >= maxAttempts) {
-                if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
-                setIsUploading(false);
-                onNext();
-              }
-            }
-          }, intervalMs);
-        } else {
-          setIsUploading(false);
-          onNext();
-        }
-      } else {
-        setIsUploading(false);
-        setError(result.error || 'Failed to upload video. Please try again.');
-      }
-    } catch (err) {
-      console.error('Error uploading video:', err);
-      setIsUploading(false);
-      setError(err instanceof Error ? err.message : 'Failed to upload video. Please try again.');
+  const handleNext = () => {
+    if (hasUserVideo && userVideoUri) {
+      uploadProfileVideo(userVideoUri, userId, mimeType)
+        .catch(err => console.error('Background video upload error:', err));
     }
+    onNext();
   };
 
   return (
@@ -221,63 +415,59 @@ export const OnboardingVideoUploadScreen: React.FC<OnboardingVideoUploadScreenPr
 
         {/* Title & Subtitle */}
         <View style={styles.titleContainer}>
-          <Text style={styles.title}>
-            {videoUri ? 'Show Us Your Style' : 'Upload your own surf clip'}
-          </Text>
+          <Text style={styles.title}>Show Us Your Style</Text>
           <Text style={styles.subtitle}>
-            {videoUri
-              ? 'Drop a clip of you surfing so others can see how you ride'
-              : 'Show us how you ride'}
+            Drop a clip of you surfing so others can see how you ride
           </Text>
         </View>
 
         {/* Main Content */}
         <View style={styles.mainContent}>
-          {!videoUri ? (
-            /* State 1: No video selected */
-            <TouchableOpacity style={styles.uploadArea} onPress={pickVideo} activeOpacity={0.7}>
-              <View style={styles.uploadIconContainer}>
-                <Ionicons name="cloud-upload-outline" size={45} color="#7B7B7B" />
-                <Text style={styles.uploadText}>
-                  {'Tap to upload\nyour video here'}
-                </Text>
-              </View>
-              <View style={styles.uploadFooter}>
-                <Text style={styles.uploadFooterText}>MP4 or MOV • Up to 50MB</Text>
-              </View>
-            </TouchableOpacity>
-          ) : (
-            /* State 2: Video selected - preview */
-            <View style={styles.previewContainer}>
-              <View style={styles.videoPreview} pointerEvents="box-none">
+          <View style={styles.previewContainer}>
+            <View style={styles.videoPreview} pointerEvents="box-none">
+              <View style={styles.surfSkillVideoWrapper}>
                 <VideoView
                   player={previewPlayer}
                   style={styles.videoThumbnail}
                   contentFit="cover"
                   nativeControls={false}
+                  allowsFullscreen={false}
+                  allowsPictureInPicture={false}
+                  {...(Platform.OS === 'web' && {
+                    controls: false,
+                    disablePictureInPicture: true,
+                    playsinline: true,
+                    'webkit-playsinline': true,
+                    playsInline: true,
+                  } as any)}
                 />
-                <View style={styles.videoOverlay}>
-                  <Text style={styles.surfSkillLabel}>Surf Skill</Text>
-                  <View style={styles.surfLevelInfo}>
-                    <Text style={styles.surfLevelName}>
-                      {surfLevelInfo?.description || 'Surfer'}
-                    </Text>
-                    <Text style={styles.surfLevelCategory}>
-                      {surfLevelInfo?.category || ''}
-                    </Text>
-                  </View>
+                {/* Transparent overlay to prevent interactions */}
+                <View style={styles.surfSkillVideoOverlay} />
+
+                {/* Title - top left */}
+                <View style={styles.surfSkillTitleOverlay}>
+                  <Text style={styles.surfSkillTitleOverlayText}>Surf Skill</Text>
                 </View>
-                {/* Change video button */}
-                <TouchableOpacity style={styles.changeVideoButton} onPress={pickVideo} activeOpacity={0.8}>
-                  <Ionicons name="cloud-upload-outline" size={42} color="#FFF" />
-                </TouchableOpacity>
+
+                {/* Level Name and Subtitle - bottom left */}
+                <View style={styles.surfSkillContentOverlay}>
+                  <View style={styles.surfSkillNameContainer}>
+                    <Text style={styles.surfSkillNameOverlay}>{displayName}</Text>
+                  </View>
+                  <Text style={styles.surfSkillSubtitleOverlay}>{subtitle}</Text>
+                </View>
               </View>
 
-              <Text style={styles.messageText}>
-                {'This helps us match you with the right people, trips, and surf experiences. No pressure,\n\nJust be you!'}
-              </Text>
+              {/* Change video button */}
+              <TouchableOpacity style={styles.changeVideoButton} onPress={pickVideo} activeOpacity={0.8}>
+                <Ionicons name="cloud-upload-outline" size={42} color="#FFF" />
+              </TouchableOpacity>
             </View>
-          )}
+
+            <Text style={styles.messageText}>
+              {'This helps us match you with the right people, trips, and surf experiences. No pressure,\n\nJust be you!'}
+            </Text>
+          </View>
 
           {error && (
             <Text style={styles.errorText}>{error}</Text>
@@ -287,18 +477,11 @@ export const OnboardingVideoUploadScreen: React.FC<OnboardingVideoUploadScreenPr
         {/* Button */}
         <View style={styles.buttonContainer}>
           <TouchableOpacity
-            onPress={videoUri ? handleNext : onSkip}
+            onPress={handleNext}
             activeOpacity={0.8}
-            disabled={isUploading}
-            style={[styles.actionButton, { width: buttonWidth }, isUploading && styles.buttonDisabled]}
+            style={[styles.actionButton, { width: buttonWidth }]}
           >
-            {isUploading ? (
-              <ActivityIndicator color="#FFF" />
-            ) : (
-              <Text style={styles.buttonText}>
-                {videoUri ? 'Next' : 'Skip'}
-              </Text>
-            )}
+            <Text style={styles.buttonText}>Next</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -391,45 +574,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  // State 1: Upload area
-  uploadArea: {
-    width: 339,
-    height: 324,
-    borderWidth: 1,
-    borderStyle: 'dashed',
-    borderColor: '#7B7B7B',
-    borderRadius: 21,
-    backgroundColor: '#EEE',
-    overflow: 'hidden',
-  },
-  uploadIconContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  uploadText: {
-    fontSize: 14,
-    fontWeight: '700',
-    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'System',
-    color: '#7B7B7B',
-    textAlign: 'center',
-    marginTop: 12,
-    lineHeight: 20,
-  },
-  uploadFooter: {
-    borderTopWidth: 1,
-    borderTopColor: '#CFCFCF',
-    height: 48,
-    justifyContent: 'center',
-    alignItems: 'center',
-    alignSelf: 'stretch',
-  },
-  uploadFooterText: {
-    fontSize: 14,
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'System',
-    color: '#7B7B7B',
-  },
-  // State 2: Video preview
   previewContainer: {
     width: '100%',
     alignItems: 'center',
@@ -445,35 +589,58 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
-  videoOverlay: {
+  surfSkillVideoWrapper: {
+    width: '100%',
+    height: '100%',
+    position: 'relative',
+  },
+  surfSkillVideoOverlay: {
     position: 'absolute',
-    bottom: 0,
+    top: 0,
     left: 0,
     right: 0,
-    padding: 16,
-    // gradient-like overlay effect
-    backgroundColor: 'rgba(0,0,0,0.3)',
+    bottom: 0,
+    backgroundColor: 'transparent',
+    zIndex: 1,
   },
-  surfSkillLabel: {
+  surfSkillTitleOverlay: {
     position: 'absolute',
-    top: -190,
+    top: 16,
     left: 16,
+    zIndex: 20,
+    pointerEvents: 'none',
+  },
+  surfSkillTitleOverlayText: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#FFF',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    lineHeight: 22,
+    color: colors.white,
   },
-  surfLevelInfo: {
-    // positioned at bottom-left via parent padding
+  surfSkillContentOverlay: {
+    position: 'absolute',
+    bottom: 16,
+    left: 16,
+    zIndex: 20,
+    pointerEvents: 'none',
+    gap: 4,
   },
-  surfLevelName: {
-    fontSize: 16,
+  surfSkillNameContainer: {
+    marginBottom: 4,
+  },
+  surfSkillNameOverlay: {
+    fontSize: 18,
     fontWeight: '700',
-    color: '#FFF',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    lineHeight: 22,
+    color: colors.white,
   },
-  surfLevelCategory: {
-    fontSize: 10,
-    color: '#DADADA',
-    marginTop: 2,
+  surfSkillSubtitleOverlay: {
+    fontSize: 14,
+    fontWeight: '400',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    lineHeight: 20,
+    color: colors.white,
   },
   changeVideoButton: {
     position: 'absolute',
@@ -494,6 +661,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 4,
     elevation: 5,
+    zIndex: 30,
   },
   messageText: {
     fontSize: 14,
@@ -529,8 +697,5 @@ const styles = StyleSheet.create({
     fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'System',
     color: '#FFF',
     textAlign: 'center',
-  },
-  buttonDisabled: {
-    opacity: 0.6,
   },
 });
