@@ -350,7 +350,7 @@ const styles = StyleSheet.create({
     minWidth: 120,
     flex: 1,
     fontSize: 16,
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     fontWeight: '400',
     color: colors.textPrimary,
     paddingVertical: 4,
@@ -386,7 +386,7 @@ const styles = StyleSheet.create({
   dropdownItemText: {
     fontSize: 15,
     color: '#333333',
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
   },
   loadingRowAbsolute: {
     position: 'absolute',

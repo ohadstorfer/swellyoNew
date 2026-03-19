@@ -12,6 +12,15 @@ import { colors, spacing, typography } from '../styles/theme';
 import { Text } from './Text';
 import { getImageUrl } from '../services/media/imageService';
 
+// Native-only imports for smooth gesture-based slider
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import ReanimatedAnimated, {
+  useSharedValue,
+  useAnimatedStyle,
+  runOnJS,
+  withTiming,
+} from 'react-native-reanimated';
+
 interface TravelExperienceLevel {
   id: number;
   title: string;
@@ -79,6 +88,78 @@ const BAR_HEIGHT = 4;
 const KNOB_SIZE = 28;
 
 const MAX_TRIPS = 20; // Maximum value for the slider (20+)
+
+/** Native gesture-based slider — all drag logic runs on the UI thread via Reanimated worklets */
+const NativeSlider: React.FC<{ currentTrips: number; updateTrips: (trips: number) => void }> = ({
+  currentTrips,
+  updateTrips,
+}) => {
+  const thumbX = useSharedValue((currentTrips / MAX_TRIPS) * BAR_WIDTH);
+  const startX = useSharedValue(0);
+  const lastRoundedTrips = useSharedValue(Math.round(currentTrips));
+
+  // Sync shared value when currentTrips changes externally (e.g. initial load)
+  useEffect(() => {
+    thumbX.value = (currentTrips / MAX_TRIPS) * BAR_WIDTH;
+    lastRoundedTrips.value = Math.round(currentTrips);
+  }, [currentTrips]);
+
+  const panGesture = Gesture.Pan()
+    .onStart(() => {
+      'worklet';
+      startX.value = thumbX.value;
+    })
+    .onUpdate((e) => {
+      'worklet';
+      const newX = Math.min(Math.max(startX.value + e.translationX, 0), BAR_WIDTH);
+      thumbX.value = newX;
+
+      const trips = Math.round((newX / BAR_WIDTH) * MAX_TRIPS);
+      // Only bridge to JS when the rounded trip value changes
+      if (trips !== lastRoundedTrips.value) {
+        lastRoundedTrips.value = trips;
+        runOnJS(updateTrips)(trips);
+      }
+    })
+    .onEnd(() => {
+      'worklet';
+      const trips = Math.round((thumbX.value / BAR_WIDTH) * MAX_TRIPS);
+      thumbX.value = withTiming((trips / MAX_TRIPS) * BAR_WIDTH, { duration: 50 });
+      runOnJS(updateTrips)(trips);
+    });
+
+  const thumbStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: thumbX.value - KNOB_SIZE / 2 }],
+  }));
+
+  const fillStyle = useAnimatedStyle(() => ({
+    width: thumbX.value,
+  }));
+
+  return (
+    <GestureDetector gesture={panGesture}>
+      <View style={styles.sliderWrapper}>
+        {/* Track background */}
+        <View style={styles.trackBackground} />
+
+        {/* Gradient fill — width driven by shared value on UI thread */}
+        <View style={styles.trackFillContainer}>
+          <ReanimatedAnimated.View style={[styles.trackFill, fillStyle]}>
+            <LinearGradient
+              colors={['#00A2B6', '#0788B0']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={StyleSheet.absoluteFill}
+            />
+          </ReanimatedAnimated.View>
+        </View>
+
+        {/* Custom thumb */}
+        <ReanimatedAnimated.View style={[styles.nativeThumb, thumbStyle]} />
+      </View>
+    </GestureDetector>
+  );
+};
 
 export const TravelExperienceSlider: React.FC<TravelExperienceSliderProps> = ({
   value,
@@ -154,6 +235,10 @@ export const TravelExperienceSlider: React.FC<TravelExperienceSliderProps> = ({
 
   const handleSliderChange = (newValue: number) => {
     updateTrips(newValue);
+  };
+
+  const handleSlidingComplete = (newValue: number) => {
+    updateTrips(Math.round(newValue));
   };
 
   // Get the category based on current number of trips
@@ -270,54 +355,62 @@ export const TravelExperienceSlider: React.FC<TravelExperienceSliderProps> = ({
         </Text>
       </View>
 
-      {/* Level Bar - Using @react-native-community/slider */}
+      {/* Level Bar */}
       <View style={styles.barContainer}>
-        <View style={styles.sliderWrapper}>
-          {/* Custom track background */}
-          <View style={styles.trackBackground} />
-          
-          {/* Gradient fill overlay */}
-          <View style={styles.trackFillContainer}>
-            <View 
+        {Platform.OS !== 'web' ? (
+          <NativeSlider
+            currentTrips={currentTrips}
+            updateTrips={updateTrips}
+          />
+        ) : (
+          <View style={styles.sliderWrapper}>
+            {/* Custom track background */}
+            <View style={styles.trackBackground} />
+
+            {/* Gradient fill overlay */}
+            <View style={styles.trackFillContainer}>
+              <View
+                style={[
+                  styles.trackFill,
+                  {
+                    width: `${(currentTrips / MAX_TRIPS) * 100}%`,
+                  },
+                ]}
+              >
+                <LinearGradient
+                  colors={['#00A2B6', '#0788B0']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={StyleSheet.absoluteFill}
+                />
+              </View>
+            </View>
+
+            {/* Slider component */}
+            <Slider
+              value={currentTrips}
+              onValueChange={handleSliderChange}
+              onSlidingComplete={handleSlidingComplete}
+              minimumValue={0}
+              maximumValue={MAX_TRIPS}
+              step={1}
+              style={styles.slider}
+              minimumTrackTintColor="transparent"
+              maximumTrackTintColor="transparent"
+              thumbTintColor="#FFFFFF"
+            />
+
+            {/* Custom thumb overlay with shadow */}
+            <View
               style={[
-                styles.trackFill,
+                styles.customThumb,
                 {
-                  width: `${(currentTrips / MAX_TRIPS) * 100}%`,
+                  left: (currentTrips / MAX_TRIPS) * BAR_WIDTH - KNOB_SIZE / 2,
                 },
               ]}
-            >
-              <LinearGradient
-                colors={['#00A2B6', '#0788B0']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                style={StyleSheet.absoluteFill}
-              />
-            </View>
+            />
           </View>
-          
-          {/* Slider component */}
-          <Slider
-            value={currentTrips}
-            onValueChange={handleSliderChange}
-            minimumValue={0}
-            maximumValue={MAX_TRIPS}
-            step={1}
-            style={styles.slider}
-            minimumTrackTintColor="transparent"
-            maximumTrackTintColor="transparent"
-            thumbTintColor="#FFFFFF"
-          />
-          
-          {/* Custom thumb overlay with shadow */}
-          <View
-            style={[
-              styles.customThumb,
-              {
-                left: (currentTrips / MAX_TRIPS) * BAR_WIDTH - KNOB_SIZE / 2,
-              },
-            ]}
-          />
-        </View>
+        )}
       </View>
 
       {error && <Text style={styles.errorText}>{error}</Text>}
@@ -437,6 +530,21 @@ const styles = StyleSheet.create({
     width: BAR_WIDTH,
     height: KNOB_SIZE,
     zIndex: 2,
+  },
+  nativeThumb: {
+    position: 'absolute',
+    width: KNOB_SIZE,
+    height: KNOB_SIZE,
+    borderRadius: KNOB_SIZE / 2,
+    backgroundColor: '#FFFFFF',
+    top: (KNOB_SIZE - KNOB_SIZE) / 2, // vertically centered
+    left: 0, // translateX handles positioning
+    zIndex: 3,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.10,
+    shadowRadius: 12,
+    elevation: 8,
   },
   customThumb: {
     position: 'absolute',

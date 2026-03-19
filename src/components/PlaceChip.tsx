@@ -55,6 +55,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '400',
     color: '#333333',
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
   },
 });

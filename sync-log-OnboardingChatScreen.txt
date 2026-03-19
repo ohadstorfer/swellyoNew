@@ -1,0 +1,17 @@
+Here's a summary of all fixes applied:
+
+## Summary
+
+**`src/screens/ChatScreen.tsx`** (4 fixes):
+1. **Header paddingTop** — Changed from `40` to `Platform.OS === 'web' ? 40 : 0`. SafeAreaView already provides the top inset on native, so the extra 40px was doubling the top spacing.
+2. **Bot message bubble shadow** — Added `shadowColor`, `shadowOffset`, `shadowOpacity`, `shadowRadius`, and `elevation` to `botMessageBubble`. Previously shadow only showed on web via `boxShadow`.
+3. **SVG ellipse avatar ring** — Added platform branch: web keeps the SVG `Image`, native uses a `View` with purple `borderColor`/`borderWidth` and gray fill (`ellipseBackgroundNative`). RN's `Image` can't render SVG URLs on native.
+4. **Input wrapper paddingBottom** — Changed from `35` to `Platform.OS === 'web' ? 35 : 8`. SafeAreaView handles bottom inset on native; 35px was creating excessive bottom space.
+
+**`src/components/ChatTextInput.tsx`** (1 fix):
+5. **Input bar shadow on iOS** — Changed `shadowOpacity`/`shadowRadius`/`elevation` from platform-conditional (disabled on iOS) to always-on `0.08`/`20`/`5`. The shadow was showing on web and Android but missing on iOS.
+
+**Remaining items for manual testing:**
+- Verify the native ellipse ring color/size matches the SVG on web (may need color/radius adjustment)
+- Test KeyboardAvoidingView offset values on both iOS and Android devices
+- Verify destination/budget carousel scrolling behavior on native

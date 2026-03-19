@@ -58,7 +58,7 @@ const styles = StyleSheet.create({
   text: {
     fontSize: 16,
     fontWeight: '400',
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     lineHeight: 22,
     color: '#000000',
   },

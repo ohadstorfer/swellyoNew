@@ -1199,11 +1199,15 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             
             <View style={styles.avatar}>
               <View style={styles.avatarRing}>
-                <Image
-                  source={{ uri: getImageUrl('/Ellipse 11.svg') }}
-                  style={styles.ellipseBackground}
-                  resizeMode="contain"
-                />
+                {Platform.OS === 'web' ? (
+                  <Image
+                    source={{ uri: getImageUrl('/Ellipse 11.svg') }}
+                    style={styles.ellipseBackground}
+                    resizeMode="contain"
+                  />
+                ) : (
+                  <View style={styles.ellipseBackgroundNative} />
+                )}
                 <View style={styles.avatarImageContainer}>
                   <Image
                     source={{ uri: getImageUrl('/Swelly avatar onboarding.png') }}
@@ -1287,7 +1291,7 @@ const styles = StyleSheet.create({
   },
   headerContainer: {
     backgroundColor: colors.white,
-    paddingTop: 40,
+    paddingTop: Platform.OS === 'web' ? 40 : 0,
     paddingBottom: 0,
     paddingHorizontal: 0,
     alignItems: 'center',
@@ -1342,6 +1346,18 @@ const styles = StyleSheet.create({
     ...(Platform.OS === 'web' && {
       objectFit: 'contain' as any,
     }),
+  },
+  ellipseBackgroundNative: {
+    position: 'absolute',
+    width: '105%',
+    height: '105%',
+    top: '-2.5%',
+    left: '-2.5%',
+    zIndex: 0,
+    borderRadius: 35,
+    borderWidth: 2,
+    borderColor: '#B72DF2',
+    backgroundColor: '#E0E0E0',
   },
   avatarImageContainer: {
     position: 'absolute',
@@ -1448,6 +1464,11 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 16,
     borderBottomLeftRadius: 16,
     borderBottomRightRadius: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.08,
+    shadowRadius: 20,
+    elevation: 3,
     ...(Platform.OS === 'web' && {
       boxShadow: '0px 0px 20px rgba(0, 0, 0, 0.08)',
     }),
@@ -1489,7 +1510,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     paddingHorizontal: 8,
-    paddingBottom: 35,
+    paddingBottom: Platform.OS === 'web' ? 35 : 8,
     paddingTop: 0,
   },
   attachButtonWrapper: {

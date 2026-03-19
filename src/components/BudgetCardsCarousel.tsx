@@ -369,7 +369,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
   },
   structuredCardTitle: {
-    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : undefined,
+    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat',
     fontWeight: '700',
     fontSize: 22,
     lineHeight: 32,
@@ -390,7 +390,7 @@ const styles = StyleSheet.create({
     height: 116,
   },
   structuredCardTagline: {
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     fontWeight: '700',
     fontSize: 18,
     lineHeight: 22,
@@ -401,10 +401,10 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   structuredCardDescription: {
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     fontWeight: '400',
     fontSize: 16,
-    lineHeight: 15,
+    lineHeight: Platform.OS === 'web' ? 15 : 18,
     color: '#a0a0a0',
     textAlign: 'center',
     maxWidth: 228,
@@ -423,7 +423,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   structuredCardSelectButtonText: {
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     fontWeight: '400',
     fontSize: 18,
     lineHeight: 22,

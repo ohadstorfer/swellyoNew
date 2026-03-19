@@ -1,0 +1,20 @@
+These are pre-existing project-level TS errors, not related to my changes. The import of `useSafeAreaInsets` from `react-native-safe-area-context` is valid.
+
+## Summary
+
+### Files modified:
+
+**`src/screens/OnboardingStep2Screen.tsx`** — 2 fixes:
+
+1. **SafeAreaView + screenHeight mismatch (CRITICAL)** — Added `useSafeAreaInsets()` and subtracted `insets.top + insets.bottom` from `screenHeight` on native. Without this, `calculateAvailableVideoHeight()` and `calculateBackgroundVideoHeight()` computed values ~90px too large on native, causing the video to overflow and the Next button to be pushed below the visible area.
+
+2. **`overflow: 'hidden'` on `content` view** — Changed to `Platform.OS === 'web' ? 'hidden' : 'visible'` so that content (especially the video carousel and its transforms) isn't clipped on native.
+
+### No changes needed in:
+- **`src/components/VideoCarousel.tsx`** — The `useNativeDriver: false` is already correctly set for width/height/opacity animations. The `overflow: 'hidden'` behavior on thumbnails matches mobile web. Swipe gestures use `onTouchStart`/`onTouchMove` which work on native.
+- **`src/components/Text.tsx`** — No platform discrepancies.
+
+### Items to verify on device:
+- Confirm the main video fills the available space correctly without overflowing
+- Confirm the Next button is visible and not pushed below the screen
+- Confirm thumbnail carousel swipe works smoothly on native

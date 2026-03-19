@@ -1,0 +1,17 @@
+Sync Log - ConversationsScreen
+================================
+
+Files Modified:
+- src/screens/ConversationsScreen.tsx
+
+Changes:
+1. Added SafeAreaView wrapper on native (prevents header content from overlapping status bar/notch)
+2. Replaced SVG URL-based filter icons (Get adv, Give adv) with inline SVG components (RN Image can't render SVG URLs)
+3. Replaced Swelly ellipse SVG URL Image with inline SVG component (SwellyEllipse)
+4. Fixed swellyContainer background opacity on native (0.06 → 0.95) to compensate for missing backdropFilter blur
+
+Remaining items for device testing:
+- Verify SafeAreaView insets look correct on various iPhone models
+- Verify Swelly card opacity/background matches web frosted glass appearance
+- Verify filter icon SVGs render at correct size (24x24)
+- Swelly avatar image positioning with new inline SVG ellipse

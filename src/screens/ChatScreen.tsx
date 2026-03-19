@@ -789,11 +789,15 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
             <View style={styles.avatar}>
               {/* Ellipse 11 background with purple ring and gray fill */}
               <View style={styles.avatarRing}>
-                <Image
-                  source={{ uri: getImageUrl('/Ellipse 11.svg') }}
-                  style={styles.ellipseBackground}
-                  resizeMode="contain"
-                />
+                {Platform.OS === 'web' ? (
+                  <Image
+                    source={{ uri: getImageUrl('/Ellipse 11.svg') }}
+                    style={styles.ellipseBackground}
+                    resizeMode="contain"
+                  />
+                ) : (
+                  <View style={styles.ellipseBackgroundNative} />
+                )}
                 <View style={styles.avatarImageContainer}>
                   <Image
                     source={{ uri: getImageUrl('/Swelly avatar onboarding.png') }}
@@ -884,7 +888,7 @@ const styles = StyleSheet.create({
   },
   headerContainer: {
     backgroundColor: colors.white,
-    paddingTop: 40,
+    paddingTop: Platform.OS === 'web' ? 40 : 0,
     paddingBottom: 12,
     paddingHorizontal: 0,
     alignItems: 'center',
@@ -943,6 +947,18 @@ const styles = StyleSheet.create({
       objectFit: 'contain' as any, // Maintain original aspect ratio
     }),
   },
+  ellipseBackgroundNative: {
+    position: 'absolute',
+    width: '105%',
+    height: '105%',
+    top: '-2.5%',
+    left: '-2.5%',
+    zIndex: 0,
+    borderRadius: 35,
+    borderWidth: 2,
+    borderColor: '#B72DF2',
+    backgroundColor: '#E0E0E0',
+  },
   avatarImageContainer: {
     position: 'absolute',
     // Container for the avatar image, centered horizontally
@@ -973,7 +989,7 @@ const styles = StyleSheet.create({
   profileName: {
     fontSize: 18,
     fontWeight: '700',
-    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : undefined,
+    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat',
     lineHeight: 24,
     color: '#333333',
     marginBottom: 2,
@@ -981,7 +997,7 @@ const styles = StyleSheet.create({
   profileTagline: {
     fontSize: 12,
     fontWeight: '400',
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     lineHeight: 15,
     color: '#868686',
   },
@@ -1057,6 +1073,11 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 16,
     borderBottomLeftRadius: 16,
     borderBottomRightRadius: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.08,
+    shadowRadius: 20,
+    elevation: 3,
     ...(Platform.OS === 'web' && {
       boxShadow: '0px 0px 20px rgba(0, 0, 0, 0.08)',
     }),
@@ -1069,14 +1090,14 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 18,
     fontWeight: '400',
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     lineHeight: 22,
   },
   botMessageText: {
     color: '#333333',
     fontSize: 18,
     fontWeight: '400',
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     lineHeight: 22,
   },
   timestampContainer: {
@@ -1085,7 +1106,7 @@ const styles = StyleSheet.create({
   timestamp: {
     fontSize: 14,
     fontWeight: '400',
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     lineHeight: 20,
   },
   userTimestamp: {
@@ -1098,7 +1119,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     paddingHorizontal: 8,
-    paddingBottom: 35,
+    paddingBottom: Platform.OS === 'web' ? 35 : 8,
     paddingTop: 0,
   },
   attachButtonWrapper: {

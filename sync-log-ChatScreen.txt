@@ -1,0 +1,22 @@
+The TypeScript errors are all pre-existing (not from my changes). My changes only affected `fontFamily` string values.
+
+## Summary
+
+### Files modified and changes:
+
+1. **`src/screens/ChatScreen.tsx`** — Fixed 5 font family declarations: `profileName` now uses `'Montserrat'`, `profileTagline`/`userMessageText`/`botMessageText`/`timestamp` now use `'Inter'` on native (were `undefined`, falling back to system font)
+
+2. **`src/components/BudgetCardsCarousel.tsx`** — Fixed 4 font family declarations (`structuredCardTitle` → `'Montserrat'`, tagline/description/button text → `'Inter'`). Fixed `structuredCardDescription` lineHeight from `15` to `18` on native (was smaller than fontSize `16`, causing text clipping)
+
+3. **`src/components/DestinationMapPickerCard.tsx`** — Fixed 5 font family declarations (`undefined` → `'Inter'`)
+
+4. **`src/components/DestinationInputCardCopy.tsx`** — Fixed 4 font family declarations (`undefined` → `'Inter'`)
+
+5. **`src/components/PlaceChip.tsx`** — Fixed 1 font family declaration (`undefined` → `'Inter'`)
+
+6. **`src/components/MultiPlaceAutocompleteInput.tsx`** — Fixed 2 font family declarations (`undefined` → `'Inter'`)
+
+### Remaining items to verify on device:
+- Confirm Inter and Montserrat fonts are properly installed/loaded on native (if they're not bundled, the font family names won't resolve)
+- The progress bar has a CSS `transition` on web but no animation on native — changes appear instant. Could add `Animated` if smooth transition is desired
+- The avatar ellipse renders as an SVG image on web but a styled View on native — this is an existing intentional platform split

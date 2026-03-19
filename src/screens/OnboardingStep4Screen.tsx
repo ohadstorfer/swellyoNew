@@ -18,8 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 // @ts-ignore - react-native-keyboard-aware-scroll-view types may not be available
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import Svg, { Circle, Rect, Defs, Filter, FeFlood, FeColorMatrix, FeOffset, FeGaussianBlur, FeComposite, FeBlend, Path } from 'react-native-svg';
-// Platform-specific wrapper - automatically uses .native.tsx on native and .web.tsx on web
-import { CountryPicker, Country, CountryCode } from '../components/CountryPickerWrapper';
+// CountryPicker import removed - using custom searchable modal on all platforms
 // Image picker will be conditionally imported
 import { Text } from '../components/Text';
 import { colors, spacing, typography } from '../styles/theme';
@@ -440,7 +439,7 @@ const COUNTRIES = [
   'Zimbabwe',
 ].sort();
 
-// Country Field Component - matches Field styling but uses CountryPicker (native) or custom dropdown (web)
+// Country Field Component - matches Field styling with custom searchable dropdown
 const CountryField: React.FC<CountryFieldProps> = ({
   label,
   value,
@@ -489,8 +488,7 @@ const CountryField: React.FC<CountryFieldProps> = ({
       : country.name?.common || 'Unknown';
     onSelect(countryName);
     if (onOpen) {
-      // For native, we still need to handle closing if there's a modal
-      // But for now, native CountryPicker handles its own modal
+      // Modal closing is handled by the screen-level modal
     }
   };
 
@@ -498,60 +496,6 @@ const CountryField: React.FC<CountryFieldProps> = ({
   const textStyle = hasValue 
     ? styles.fieldInputFilled 
     : styles.fieldInput;
-
-  // Web implementation
-  if (Platform.OS === 'web') {
-    return (
-      <>
-        <TouchableOpacity
-          style={[styles.fieldContainer, width && { width }, style, error && styles.fieldError]}
-          activeOpacity={0.7}
-          onPress={() => onOpen?.()}
-        >
-          <PencilIcon size={24} />
-          <View style={styles.inputContainer}>
-            <Text
-              style={[textStyle, styles.fieldInputWeb]}
-              numberOfLines={1}
-            >
-              {hasValue ? value : (placeholder || label)}
-            </Text>
-          </View>
-          {showCheck && (
-            <View style={styles.checkIconContainer}>
-              <CheckIcon size={16} />
-            </View>
-          )}
-        </TouchableOpacity>
-      </>
-    );
-  }
-
-  // Native implementation
-  if (!CountryPicker) {
-    // Fallback if CountryPicker is not available
-    return (
-      <TouchableOpacity
-        style={[styles.fieldContainer, width && { width }, style, error && styles.fieldError]}
-        activeOpacity={0.7}
-      >
-        <PencilIcon size={24} />
-        <View style={styles.inputContainer}>
-          <Text
-            style={[textStyle]}
-            numberOfLines={1}
-          >
-            {hasValue ? value : (placeholder || label)}
-          </Text>
-        </View>
-        {showCheck && (
-          <View style={styles.checkIconContainer}>
-            <CheckIcon size={16} />
-          </View>
-        )}
-      </TouchableOpacity>
-    );
-  }
 
   return (
     <>
@@ -563,7 +507,7 @@ const CountryField: React.FC<CountryFieldProps> = ({
         <PencilIcon size={24} />
         <View style={styles.inputContainer}>
           <Text
-            style={[textStyle]}
+            style={[textStyle, styles.fieldInputWeb]}
             numberOfLines={1}
           >
             {hasValue ? value : (placeholder || label)}
@@ -731,9 +675,8 @@ const DateOfBirthField: React.FC<DateOfBirthFieldProps> = ({
     ? styles.fieldInputFilled 
     : styles.fieldInput;
 
-  // Web implementation with custom calendar modal
-  if (Platform.OS === 'web') {
-    const [webTempDate, setWebTempDate] = useState<Date>(dateValue);
+  // Custom scroll wheel date picker (used on all platforms)
+  const [webTempDate, setWebTempDate] = useState<Date>(dateValue);
     const webMonthScrollRef = useRef<ScrollView>(null);
     const webDayScrollRef = useRef<ScrollView>(null);
     const webYearScrollRef = useRef<ScrollView>(null);
@@ -1083,104 +1026,6 @@ const DateOfBirthField: React.FC<DateOfBirthFieldProps> = ({
         )}
       </>
     );
-  }
-
-  // Native implementation with DateTimePicker in modal
-  // Dynamically require DateTimePicker only for native platforms to avoid web bundling errors
-  let DateTimePicker: any = null;
-  // Check if we're on web by checking for window/document (more reliable than Platform.OS for web detection)
-  const isWebPlatform = typeof window !== 'undefined' && typeof document !== 'undefined';
-  if (!isWebPlatform) {
-    try {
-      DateTimePicker = require('@react-native-community/datetimepicker').default;
-    } catch (e) {
-      console.warn('DateTimePicker not available:', e);
-    }
-  }
-
-  return (
-    <>
-      <TouchableOpacity
-        style={[styles.fieldContainer, width && { width }, style, error && styles.fieldError]}
-        activeOpacity={1}
-        onPress={handleContainerPress}
-      >
-        <PencilIcon size={24} />
-        <View style={styles.inputContainer}>
-          <Text
-            style={[textStyle, error && { color: '#FF0000' }]}
-            numberOfLines={1}
-          >
-            {displayValue}
-          </Text>
-        </View>
-        {showCheck && (
-          <View style={styles.checkIconContainer}>
-            <CheckIcon size={16} />
-          </View>
-        )}
-      </TouchableOpacity>
-      {error && (
-        <Text style={styles.errorText}>{error}</Text>
-      )}
-      {showPicker && DateTimePicker && (
-        <Modal
-          visible={showPicker}
-          transparent={true}
-          animationType="fade"
-          onRequestClose={handleCancel}
-        >
-          <TouchableOpacity
-            style={styles.datePickerOverlay as any}
-            activeOpacity={1}
-            onPress={handleCancel}
-          >
-            <TouchableOpacity
-              style={styles.datePickerModal as any}
-              activeOpacity={1}
-              onPress={(e) => e.stopPropagation()}
-            >
-              {/* Modal header */}
-              <View style={styles.datePickerHeader as any}>
-                <Text style={styles.datePickerTitle as any}>What's your date of birth?</Text>
-              </View>
-
-              {/* Date picker */}
-              <View style={styles.datePickerContainer as any}>
-                <DateTimePicker
-                  value={tempDate || dateValue}
-                  mode="date"
-                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                  onChange={handleDateChange}
-                  maximumDate={maxDate}
-                  minimumDate={minDate}
-                  style={styles.datePicker as any}
-                />
-              </View>
-
-              {/* Action buttons - Figma: Cancel (gray) | Confirm (teal) */}
-              <View style={styles.datePickerActions as any}>
-                <TouchableOpacity
-                  style={styles.datePickerCancelButton as any}
-                  onPress={handleCancel}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.datePickerCancelText as any}>Cancel</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.datePickerConfirmButton as any}
-                  onPress={handleConfirm}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.datePickerConfirmText as any}>Confirm</Text>
-                </TouchableOpacity>
-              </View>
-            </TouchableOpacity>
-          </TouchableOpacity>
-        </Modal>
-      )}
-    </>
-  );
 };
 
 // Plus Icon SVG Component
@@ -1554,83 +1399,93 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
     </SafeAreaView>
 
     {/* Modals rendered at screen level for proper stacking */}
-    {Platform.OS === 'web' && activeModal === 'country' && (
-      <TouchableOpacity
-        style={styles.countryPickerOverlay}
-        activeOpacity={1}
-        onPress={() => {
+    {activeModal === 'country' && (
+      <Modal
+        visible={activeModal === 'country'}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => {
           setActiveModal(null);
           setCountrySearchQuery('');
         }}
       >
         <TouchableOpacity
-          style={styles.countryPickerContent}
+          style={styles.countryPickerOverlayModal}
           activeOpacity={1}
-          onPress={(e) => {
-            // Prevent closing when clicking inside the modal
-            e.stopPropagation();
+          onPress={() => {
+            setActiveModal(null);
+            setCountrySearchQuery('');
           }}
         >
-          <View style={styles.webModalHeader}>
-            <Text style={styles.webModalTitle}>Select Country</Text>
-            <TouchableOpacity
-              onPress={() => {
-                setActiveModal(null);
-                setCountrySearchQuery('');
-              }}
-              style={styles.webModalCloseButton}
-            >
-              <Ionicons name="close" size={24} color="#333" />
-            </TouchableOpacity>
-          </View>
-          
-          <TextInput
-            style={styles.webSearchInput}
-            placeholder="Search countries..."
-            value={countrySearchQuery}
-            onChangeText={setCountrySearchQuery}
-            autoFocus
-          />
-
-          <View style={styles.webCountryList}>
-            {COUNTRIES.filter(country =>
-              country.toLowerCase().includes(countrySearchQuery.toLowerCase())
-            ).map((country) => (
+          <TouchableOpacity
+            style={styles.countryPickerContent}
+            activeOpacity={1}
+            onPress={(e) => {
+              // Prevent closing when clicking inside the modal
+              e.stopPropagation();
+            }}
+          >
+            <View style={styles.webModalHeader}>
+              <Text style={styles.webModalTitle}>Select Country</Text>
               <TouchableOpacity
-                key={country}
-                style={[
-                  styles.webCountryItem,
-                  location === country && styles.webCountryItemSelected,
-                ]}
                 onPress={() => {
-                  setLocation(country);
-                  setLocationError(false);
-                  updateFormData({ location: country });
                   setActiveModal(null);
                   setCountrySearchQuery('');
                 }}
+                style={styles.webModalCloseButton}
               >
-                <Text
-                  style={[
-                    styles.webCountryText,
-                    location === country && styles.webCountryTextSelected,
-                  ]}
-                >
-                  {country}
-                </Text>
+                <Ionicons name="close" size={24} color="#333" />
               </TouchableOpacity>
-            ))}
-            {COUNTRIES.filter(country =>
-              country.toLowerCase().includes(countrySearchQuery.toLowerCase())
-            ).length === 0 && (
-              <Text style={styles.webNoResults}>No countries found</Text>
-            )}
-          </View>
+            </View>
+
+            <TextInput
+              style={styles.webSearchInput}
+              placeholder="Search countries..."
+              value={countrySearchQuery}
+              onChangeText={setCountrySearchQuery}
+              autoFocus
+            />
+
+            <ScrollView style={styles.webCountryList}>
+              {COUNTRIES.filter(country =>
+                country.toLowerCase().includes(countrySearchQuery.toLowerCase())
+              ).map((country) => (
+                <TouchableOpacity
+                  key={country}
+                  style={[
+                    styles.webCountryItem,
+                    location === country && styles.webCountryItemSelected,
+                  ]}
+                  onPress={() => {
+                    setLocation(country);
+                    setLocationError(false);
+                    updateFormData({ location: country });
+                    setActiveModal(null);
+                    setCountrySearchQuery('');
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.webCountryText,
+                      location === country && styles.webCountryTextSelected,
+                    ]}
+                  >
+                    {country}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+              {COUNTRIES.filter(country =>
+                country.toLowerCase().includes(countrySearchQuery.toLowerCase())
+              ).length === 0 && (
+                <Text style={styles.webNoResults}>No countries found</Text>
+              )}
+            </ScrollView>
+          </TouchableOpacity>
         </TouchableOpacity>
-      </TouchableOpacity>
+      </Modal>
     )}
 
-    {activeModal === 'pronoun' && (
+    {activeModal === 'pronoun' && Platform.OS === 'web' && (
       <TouchableOpacity
         style={styles.pronounModalOverlay}
         activeOpacity={1}
@@ -1653,7 +1508,7 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
               <Ionicons name="close" size={24} color="#333" />
             </TouchableOpacity>
           </View>
-          
+
           <View style={styles.pronounModalList}>
             {PRONOUN_OPTIONS.map((option) => {
               const isSelected = pronoun.toLowerCase() === option.toLowerCase();
@@ -1693,52 +1548,73 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
       </TouchableOpacity>
     )}
 
-    {/* Native CountryPicker - rendered at screen level */}
-    {Platform.OS !== 'web' && CountryPicker && (
-      <CountryPicker
-        visible={activeModal === 'country'}
-        withFilter
-        withFlag
-        withCountryNameButton={false}
-        withAlphaFilter
-        withCallingCode={false}
-        withEmoji
-        countryCode={(() => {
-          // Get country code from location value
-          const nameToCode: Record<string, string> = {
-            'United States': 'US', 'United Kingdom': 'GB', 'Canada': 'CA',
-            'Australia': 'AU', 'Germany': 'DE', 'France': 'FR', 'Spain': 'ES',
-            'Italy': 'IT', 'Japan': 'JP', 'China': 'CN', 'India': 'IN',
-            'Brazil': 'BR', 'Mexico': 'MX', 'Netherlands': 'NL', 'Sweden': 'SE',
-            'Norway': 'NO', 'Denmark': 'DK', 'Finland': 'FI', 'Poland': 'PL',
-            'Portugal': 'PT', 'Greece': 'GR', 'Ireland': 'IE', 'Switzerland': 'CH',
-            'Austria': 'AT', 'Belgium': 'BE', 'New Zealand': 'NZ', 'South Africa': 'ZA',
-            'Argentina': 'AR', 'Chile': 'CL', 'Colombia': 'CO', 'Peru': 'PE',
-            'Israel': 'IL', 'Turkey': 'TR', 'Russia': 'RU', 'South Korea': 'KR',
-            'Thailand': 'TH', 'Indonesia': 'ID', 'Philippines': 'PH', 'Vietnam': 'VN',
-            'Singapore': 'SG', 'Malaysia': 'MY',
-          };
-          return (location && nameToCode[location]) || 'US';
-        })()}
-        onSelect={(country: any) => {
-          const countryName = typeof country.name === 'string' 
-            ? country.name 
-            : country.name?.common || 'Unknown';
-          setLocation(countryName);
-          updateFormData({ location: countryName });
-          setActiveModal(null);
-        }}
-        onClose={() => setActiveModal(null)}
-        theme={{
-          primaryColor: '#00A2B6',
-          primaryColorVariant: '#0788B0',
-          backgroundColor: colors.white || '#FFFFFF',
-          onBackgroundTextColor: colors.textPrimary || '#333333',
-          fontSize: 16,
-          fontFamily: 'Inter',
-        }}
-      />
+    {Platform.OS !== 'web' && (
+      <Modal
+        visible={activeModal === 'pronoun'}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setActiveModal(null)}
+      >
+        <TouchableOpacity
+          style={styles.nativePronounModalOverlay}
+          activeOpacity={1}
+          onPress={() => setActiveModal(null)}
+        >
+          <TouchableOpacity
+            style={styles.pronounModalContent}
+            activeOpacity={1}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <View style={styles.webModalHeader}>
+              <Text style={styles.webModalTitle}>How can we call you?</Text>
+              <TouchableOpacity
+                onPress={() => setActiveModal(null)}
+                style={styles.webModalCloseButton}
+              >
+                <Ionicons name="close" size={24} color="#333" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.pronounModalList}>
+              {PRONOUN_OPTIONS.map((option) => {
+                const isSelected = pronoun.toLowerCase() === option.toLowerCase();
+                return (
+                  <TouchableOpacity
+                    key={option}
+                    style={[
+                      styles.pronounModalItem,
+                      isSelected && styles.pronounModalItemSelected,
+                    ]}
+                    onPress={() => {
+                      const optionValue = option.toLowerCase();
+                      setPronoun(optionValue);
+                      setPronounError(false);
+                      updateFormData({ pronouns: optionValue });
+                      setActiveModal(null);
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.pronounModalText,
+                        isSelected && styles.pronounModalTextSelected,
+                      ]}
+                    >
+                      {option}
+                    </Text>
+                    {isSelected && (
+                      <View style={styles.pronounModalCheck}>
+                        <CheckIcon size={16} />
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
     )}
+
     {Platform.OS === 'web' && (
       <AvatarCropModal
         visible={cropModalVisible}
@@ -1885,6 +1761,7 @@ const styles = StyleSheet.create({
     width: 161.105,
     height: 163,
     borderRadius: 81.5,
+    overflow: 'hidden',
   } as const,
   profilePicturePlaceholder: {
     width: 161.105,
@@ -2061,6 +1938,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  countryPickerOverlayModal: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center' as const,
+    alignItems: 'center' as const,
+  },
   webModalContent: {
     backgroundColor: colors.white || '#FFFFFF',
     borderRadius: 12,
@@ -2153,6 +2036,12 @@ const styles = StyleSheet.create({
     bottom: 0,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     zIndex: 9000,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  nativePronounModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'center',
     alignItems: 'center',
   },

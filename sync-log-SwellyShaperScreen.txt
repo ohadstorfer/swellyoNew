@@ -1,0 +1,14 @@
+The errors are all pre-existing project-wide TS config issues, not related to my changes. The file itself has no new errors.
+
+Here's a summary of the fixes applied to `SwellyShaperScreen.tsx`:
+
+| File | Fix |
+|------|-----|
+| `src/screens/SwellyShaperScreen.tsx` | **Header double padding**: Changed `paddingTop: 44` to `Platform.OS === 'web' ? 44 : 0` — SafeAreaView already handles top insets on native |
+| `src/screens/SwellyShaperScreen.tsx` | **SVG image won't render on native**: Added platform check for Ellipse 11.svg — uses `Image` on web, native fallback `View` with border/background (matching ChatScreen pattern) |
+| `src/screens/SwellyShaperScreen.tsx` | **Bot message bubble missing shadow on native**: Added `shadowColor`, `shadowOffset`, `shadowOpacity`, `shadowRadius`, and `elevation` to `normalBotMessageBubble` |
+| `src/screens/SwellyShaperScreen.tsx` | **Input area excessive bottom padding on native**: Changed `paddingBottom: 35` to `Platform.OS === 'web' ? 35 : 8` — SafeAreaView already provides bottom safe area insets |
+
+**Remaining notes for manual testing:**
+- Verify the avatar ellipse ring appearance on a physical device matches the web SVG closely enough
+- Test keyboard avoidance behavior on both iOS and Android with the reduced bottom padding

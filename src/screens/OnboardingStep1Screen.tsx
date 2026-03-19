@@ -5,6 +5,7 @@ import {
   SafeAreaView,
   TouchableOpacity,
   Platform,
+  Dimensions,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -135,9 +136,13 @@ export const OnboardingStep1Screen: React.FC<OnboardingStep1ScreenProps> = ({
     // Total used space = everything above subtitle + subtitle + label + button
     const totalUsedSpace = headerHeight + progressHeight + titleHeight + subtitleTotalHeight + labelHeight + buttonHeight;
     
-    // Available space = screen height - used space + carousel margin (negative margin adds space)
+    // On native, SafeAreaView consumes top/bottom insets (status bar ~50px, home indicator ~34px)
+    // but screenHeight is the full window height. Subtract these so boards fit within safe area.
+    const safeAreaInsets = Platform.OS === 'web' ? 0 : 90;
+
+    // Available space = screen height - safe area - used space + carousel margin (negative margin adds space)
     // Subtract a small buffer (8px) for visual spacing
-    const availableSpace = screenHeight - totalUsedSpace + carouselMarginTop - 8;
+    const availableSpace = screenHeight - safeAreaInsets - totalUsedSpace + carouselMarginTop - 8;
     
     // Ensure minimum height (at least 200px) and maximum reasonable height
     if (availableSpace < 200) {
@@ -447,6 +452,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     marginTop: -spacing.xl,
+    zIndex: 1,
   },
   carouselContainerDesktop: {
     marginTop: -spacing.lg,

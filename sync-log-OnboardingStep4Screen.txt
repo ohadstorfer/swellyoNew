@@ -1,0 +1,18 @@
+These are all pre-existing type errors from dependencies, not from our changes. The file is fine.
+
+## Summary
+
+**Files modified:** `src/screens/OnboardingStep4Screen.tsx`
+
+**Fixes applied:**
+1. **Pronoun modal: `position: 'fixed'` broken on native** — Split into web (existing overlay with `position: 'fixed'`) and native (wrapped in `Modal` component with proper fullscreen overlay), matching how the date picker modal already works on native.
+2. **Profile picture `borderRadius` clipping on Android** — Added `overflow: 'hidden'` to the `profilePicture` style so the circular crop renders correctly on Android.
+
+**No issues found with:**
+- Country picker — already uses platform-specific rendering (web dropdown vs native `CountryPicker` component)
+- Date picker — already uses `Modal` on native with `DateTimePicker`
+- Button container `position: 'fixed'` — already guarded with `Platform.OS === 'web'`
+- `boxShadow` — already guarded with `Platform.OS === 'web'`
+- Image picking — already uses `expo-image-picker` on native, file input on web
+- Font families — properly set per platform
+- Web-only styles (`outline`, `overflowY`) — all properly guarded

@@ -1,0 +1,17 @@
+All changes look correct. Here's a summary of the fixes applied:
+
+## Summary
+
+**Files modified: `src/screens/TripPlanningChatScreen.tsx`**
+
+1. **headerContainer paddingTop** — Changed from `40` to `Platform.OS === 'web' ? 40 : 0`. SafeAreaView already provides top inset on native, so the extra 40px was creating a large gap at the top.
+
+2. **botMessageBubble native shadow** — Added `shadowColor`, `shadowOffset`, `shadowOpacity`, `shadowRadius`, and `elevation` to match the web `boxShadow: '0px 0px 20px rgba(0, 0, 0, 0.08)'`. Bot message bubbles were flat/unshadowed on native.
+
+3. **SVG avatar ellipse** — Added `Platform.OS` branch: web uses the SVG `<Image>`, native uses a `<View>` with `borderRadius`, `borderWidth`, and `borderColor` to replicate the purple ring (same pattern as ChatScreen). RN `<Image>` doesn't support SVG format.
+
+4. **inputWrapper paddingBottom** — Changed from `35` to `Platform.OS === 'web' ? 35 : 8`. SafeAreaView already provides bottom inset on native, so the extra 35px pushed the input too far up.
+
+**Remaining issues for manual device testing:**
+- Verify the avatar ellipse ring color/size matches the SVG version visually on device
+- Verify the bot bubble shadow intensity looks right on both iOS and Android

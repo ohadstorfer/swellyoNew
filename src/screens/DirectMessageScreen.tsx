@@ -2247,7 +2247,7 @@ const styles = StyleSheet.create({
   loadingText: {
     fontSize: 14,
     color: '#7B7B7B',
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
   },
   emptyContainer: {
     flex: 1,
@@ -2377,14 +2377,14 @@ const styles = StyleSheet.create({
     color: '#333333', // Dark text on white background for outbound messages
     fontSize: 16,
     fontWeight: '500',
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     lineHeight: 21,
   },
   botMessageText: {
     color: '#333333', // Figma: text-[color:var(--text\/primary,#333333)]
     fontSize: 16, // Figma: text-[length:var(--size\/xs,16px)]
     fontWeight: '500', // Figma: font-medium
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     lineHeight: 21, // Figma: leading-[normal]
   },
   botMessageTextGiveAdv: {
@@ -2406,7 +2406,7 @@ const styles = StyleSheet.create({
   timestamp: {
     fontSize: 14, // Figma: text-[length:var(--size\/xxs,14px)]
     fontWeight: '400', // Figma: font-normal
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     lineHeight: 20, // Figma: leading-[20px]
   },
   userTimestamp: {
@@ -2475,7 +2475,7 @@ const styles = StyleSheet.create({
   editButtonText: {
     fontSize: 14,
     color: colors.textDark,
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
   },
   editButtonTextSave: {
     color: colors.white,
@@ -2485,7 +2485,7 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontStyle: 'italic',
     marginTop: 4,
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
   },
   deletedMessageText: {
     fontStyle: 'italic',

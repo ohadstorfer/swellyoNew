@@ -1640,7 +1640,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
       {/* Header */}
       <View style={styles.headerContainer}>
         <View style={styles.header}>
@@ -1656,11 +1656,15 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             
             <View style={styles.avatar}>
               <View style={styles.avatarRing}>
-                <Image
-                  source={{ uri: getImageUrl('/Ellipse 11.svg') }}
-                  style={styles.ellipseBackground}
-                  resizeMode="contain"
-                />
+                {Platform.OS === 'web' ? (
+                  <Image
+                    source={{ uri: getImageUrl('/Ellipse 11.svg') }}
+                    style={styles.ellipseBackground}
+                    resizeMode="contain"
+                  />
+                ) : (
+                  <View style={styles.ellipseBackgroundNative} />
+                )}
                 <View style={styles.avatarImageContainer}>
                   <Image
                     source={{ uri: getImageUrl('/Swelly avatar onboarding.png') }}
@@ -1976,7 +1980,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
           </Pressable>
         </Pressable>
       </Modal>
-    </SafeAreaView>
+    </View>
   );
 };
 
@@ -2043,6 +2047,18 @@ const styles = StyleSheet.create({
       objectFit: 'contain' as any,
     }),
   },
+  ellipseBackgroundNative: {
+    position: 'absolute',
+    width: '105%',
+    height: '105%',
+    top: '-2.5%',
+    left: '-2.5%',
+    zIndex: 0,
+    borderRadius: 35,
+    borderWidth: 2,
+    borderColor: '#B72DF2',
+    backgroundColor: '#E0E0E0',
+  },
   avatarImageContainer: {
     position: 'absolute',
     width: 75,
@@ -2067,7 +2083,7 @@ const styles = StyleSheet.create({
   profileName: {
     fontSize: 18,
     fontWeight: '700',
-    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : undefined,
+    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat',
     lineHeight: 24,
     color: '#333333',
     marginBottom: 2,
@@ -2075,7 +2091,7 @@ const styles = StyleSheet.create({
   profileTagline: {
     fontSize: 12,
     fontWeight: '400',
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     lineHeight: 15,
     color: '#868686',
   },
@@ -2151,6 +2167,11 @@ const styles = StyleSheet.create({
     ...(Platform.OS === 'web' && {
       boxShadow: '0px 0px 20px rgba(0, 0, 0, 0.08)',
     }),
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.08,
+    shadowRadius: 20,
+    elevation: 3,
   },
   messageTextContainer: {
     marginBottom: 10,
@@ -2160,14 +2181,14 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 18,
     fontWeight: '400',
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     lineHeight: 22,
   },
   botMessageText: {
     color: '#333333',
     fontSize: 18,
     fontWeight: '400',
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     lineHeight: 22,
   },
   timestampContainer: {
@@ -2176,7 +2197,7 @@ const styles = StyleSheet.create({
   timestamp: {
     fontSize: 14,
     fontWeight: '400',
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     lineHeight: 20,
   },
   userTimestamp: {
@@ -2189,7 +2210,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     paddingHorizontal: 8,
-    paddingBottom: 35,
+    paddingBottom: Platform.OS === 'web' ? 35 : 8,
     paddingTop: 0,
   },
   attachButtonWrapper: {
@@ -2398,7 +2419,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#555',
     fontWeight: '500',
-    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : undefined,
+    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat',
   },
   searchButtonWrapper: {
     marginTop: 12,
@@ -2428,7 +2449,7 @@ const styles = StyleSheet.create({
     color: '#222B30',
     fontSize: 16,
     fontWeight: '600',
-    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : undefined,
+    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat',
   },
   actionButtonsRow: {
     flexDirection: 'row',
@@ -2456,7 +2477,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     flexShrink: 0,
-    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : undefined,
+    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat',
   },
   actionButtonInnerSelected: {
     backgroundColor: '#E0F2F7',
@@ -2468,7 +2489,7 @@ const styles = StyleSheet.create({
     color: '#222B30',
     fontSize: 12,
     fontWeight: '600',
-    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : undefined,
+    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat',
   },
   // New Chat Modal styles
   modalOverlay: {
@@ -2536,7 +2557,7 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 22,
     fontWeight: '700',
-    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : undefined,
+    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat',
     lineHeight: 32,
     color: '#333',
     marginBottom: 16,
@@ -2544,7 +2565,7 @@ const styles = StyleSheet.create({
   modalDescription: {
     fontSize: 18,
     fontWeight: '400',
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     lineHeight: 22,
     color: '#A0A0A0',
     textAlign: 'center',
@@ -2567,7 +2588,7 @@ const styles = StyleSheet.create({
   modalKeepButtonText: {
     fontSize: 18,
     fontWeight: '700',
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     lineHeight: 22,
     color: '#333',
   },
@@ -2583,7 +2604,7 @@ const styles = StyleSheet.create({
   modalStartButtonText: {
     fontSize: 18,
     fontWeight: '700',
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     lineHeight: 22,
     color: colors.white,
   },

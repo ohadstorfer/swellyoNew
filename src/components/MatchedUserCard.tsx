@@ -305,7 +305,7 @@ const styles = StyleSheet.create({
   },
   fullName: {
     color: '#000',
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     fontSize: 14,
     fontStyle: 'normal',
     fontWeight: '600',
@@ -339,7 +339,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   infoText: {
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     fontSize: 16,
     lineHeight: 15,
     color: colors.textSecondary,
@@ -347,14 +347,14 @@ const styles = StyleSheet.create({
   infoTextBold: {
     color: '#333',
     textAlign: 'center',
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     fontSize: 14,
     fontStyle: 'normal',
     fontWeight: '700',
     lineHeight: 18,
   },
   infoTextLight: {
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     fontSize: 14,
     lineHeight: 18,
     color: '#A0A0A0',
@@ -382,7 +382,7 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   sendMessageText: {
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     fontSize: 14,
     fontStyle: 'normal',
     fontWeight: '400',
@@ -390,7 +390,7 @@ const styles = StyleSheet.create({
     color: '#0788B0',
   },
   viewProfileText: {
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     fontSize: 14,
     fontStyle: 'normal',
     fontWeight: '400',

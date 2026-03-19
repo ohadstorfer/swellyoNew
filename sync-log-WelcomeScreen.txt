@@ -1,0 +1,15 @@
+WelcomeScreen Sync Log
+======================
+
+Files Modified:
+1. src/components/Logo.tsx - Added inline SVG rendering using react-native-svg for native platforms. The logo icon (gradient circle with wave paths) and SWELLYO vector text now render correctly on native instead of showing fallback "S" circle / blank text.
+2. src/screens/WelcomeScreen.tsx - Added inline SVG rendering for Google logo icon on native. Previously showed blue "G" fallback on native.
+
+Root Cause:
+- SVG files loaded via Image URI don't render on native (React Native Image component doesn't support SVG format)
+- On web, SVGs are served from the public/ folder and rendered fine by the browser
+- On native, these would always fail and trigger fallback UI (purple "S" circle, missing vector text, blue "G" for Google)
+
+Remaining Issues (flagged for manual testing):
+- Montserrat and Inter fonts are NOT bundled for native (no .ttf/.otf files in assets). The fontFamily references silently fall back to system fonts on native. This is an app-wide issue affecting 25+ files, not specific to WelcomeScreen.
+- BackgroundVideo uses expo-video on native - verify video actually plays on device (autoplay behavior differs)

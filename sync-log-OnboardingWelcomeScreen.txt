@@ -1,0 +1,16 @@
+That's the only discrepancy I found. The rest of the screen is already well-implemented for cross-platform:
+
+## Summary
+
+| File | Change |
+|------|--------|
+| `src/screens/OnboardingWelcomeScreen.tsx` | Subtracted ~90px SafeAreaView insets from `availableContentHeight` on native to prevent content overflow — `Dimensions.get('window').height` includes the full screen on native but `SafeAreaView` consumes status bar + home indicator space |
+
+**Already correct:**
+- Font families have proper `Platform.OS` checks
+- Card shadows use both iOS shadow properties and Android `elevation`
+- Image `resizeMode="cover"` with web `objectFit` fallback
+- All styles use `StyleSheet.create()` with theme tokens
+- No `position: 'fixed'`, CSS units, or web-only APIs
+
+**Note:** The `Alert.alert()` usage is fine on native but renders differently than web's `window.alert`. Test on device to verify the alert styling is acceptable.

@@ -1,0 +1,25 @@
+The sync log is empty. The screen is already well-synced. Here's my summary:
+
+## Sync Summary: OnboardingStep1Screen
+
+**Files analyzed:**
+- `src/screens/OnboardingStep1Screen.tsx`
+- `src/components/BoardCarousel.tsx`
+- `src/components/Text.tsx`
+
+**Already correctly handled (no changes needed):**
+- SafeAreaView + Dimensions height mismatch — 90px inset subtracted on native
+- Carousel `overflow: 'visible'` on native for FlatList and wrapper
+- `zIndex: 1` on carouselContainer to prevent sibling paint-over
+- Platform-specific vertical offset for side boards (0.15 web vs 0.05 native)
+- Font families via `Platform.select()` (Montserrat/Inter)
+- All `lineHeight` values are numbers (not strings)
+- Touch gesture handling works on both platforms via `onTouchStart`/`onTouchEnd`
+- No unsupported CSS properties (`position: 'fixed'`, `vh`, `boxShadow`, etc.)
+
+**Fix applied:**
+1. **`BoardCarousel.tsx`** — `contentContainerStyle` padding was static (evaluated once at module load via `getCarouselItemWidth()`). Changed to use dynamic `carouselItemWidth` state so padding updates correctly on native device rotation.
+
+**Items to verify on device:**
+- Carousel swipe gestures work smoothly on iOS/Android (touch-to-scroll-to-offset approach)
+- Board images render at correct sizes on various screen heights (SE vs Pro Max)

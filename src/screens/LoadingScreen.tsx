@@ -598,7 +598,10 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
     }
   };
 
-  const { height: screenHeight } = useScreenDimensions();
+  const { height: rawScreenHeight } = useScreenDimensions();
+  // On native, SafeAreaView consumes top/bottom insets (status bar ~50px, home indicator ~34px)
+  const safeAreaInsets = Platform.OS === 'web' ? 0 : 90;
+  const screenHeight = rawScreenHeight - safeAreaInsets;
   const spacingScale = Math.min(1.2, Math.max(0.55, screenHeight / REFERENCE_HEIGHT));
   const v = (base: number) => Math.round(base * spacingScale);
   const headerGap = v(12);

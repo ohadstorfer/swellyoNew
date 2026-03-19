@@ -1,0 +1,25 @@
+ProfileScreen Sync Log
+======================
+
+FIXED:
+1. [CRITICAL] profileInfoSection: Changed from `position: absolute` to flow layout on native using Platform.select. On native, absolute-positioned elements don't contribute to ScrollView content size, making all content below the cover image (cards, surf skill, lifestyle, destinations) unreachable by scrolling. Fixed by using `marginTop: -35` (145 - 180px cover height) on native to achieve the same visual positioning while keeping content in the flow.
+
+VERIFIED OK (no changes needed):
+- boxShadow: Already properly handled with Platform.OS === 'web' guards and native shadow properties (shadowColor/Offset/Opacity/Radius + elevation)
+- objectFit: Guarded with Platform.OS === 'web', native uses resizeMode prop
+- fontFamily: Web-specific fonts guarded with Platform.OS === 'web' ? 'Inter, sans-serif' : undefined
+- filter CSS property: Guarded with Platform.OS === 'web' on plusIconContainer
+- useNativeDriver: true animations: Only uses transform and opacity, which are supported by native driver
+- Image borderRadius on Android: Containers use overflow: 'hidden' where needed
+- Text styles: Applied directly to Text components, no inheritance issues
+- gap property: Works in modern React Native
+- Percentage heights: All have parent containers with definite dimensions
+- Platform-specific file handling: expo-image-picker for native, file input for web
+
+MINOR (not fixed - cosmetic only):
+- SVG filters (Filter, FeGaussianBlur, etc.) in PlusIcon: May render without drop shadow effect on native. The icon (teal circle with + sign) still displays correctly, just without the subtle shadow. react-native-svg v15.12.1 has limited filter support on native.
+
+NEEDS MANUAL TESTING:
+- Verify scrolling works correctly on native (was broken before fix)
+- Verify profile picture z-order (zIndex: 10) appears above profileInfoSection on both iOS and Android
+- Verify SVG PlusIcon renders acceptably on native without filter shadow

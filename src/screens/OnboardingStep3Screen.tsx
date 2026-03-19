@@ -30,7 +30,9 @@ export const OnboardingStep3Screen: React.FC<OnboardingStep3ScreenProps> = ({
   isLoading = false,
 }) => {
   const isDesktop = useIsDesktopWeb();
-  const { height: screenHeight } = useScreenDimensions();
+  const { height: rawScreenHeight } = useScreenDimensions();
+  // On native, SafeAreaView consumes ~90px of insets but Dimensions returns full window height
+  const screenHeight = Platform.OS === 'web' ? rawScreenHeight : rawScreenHeight - 90;
   
   const [formData, setFormData] = useState<OnboardingData>({
     nickname: initialData.nickname || '',

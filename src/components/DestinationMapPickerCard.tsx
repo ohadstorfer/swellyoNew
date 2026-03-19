@@ -598,7 +598,7 @@ const styles = StyleSheet.create({
   destinationName: {
     fontSize: 16,
     fontWeight: '400',
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     color: '#333333',
     lineHeight: 22,
     marginBottom: 32,
@@ -650,7 +650,7 @@ const styles = StyleSheet.create({
     minWidth: 120,
     flex: 1,
     fontSize: 16,
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     fontWeight: '400',
     color: colors.textPrimary,
     paddingVertical: 4,
@@ -676,7 +676,7 @@ const styles = StyleSheet.create({
   timeInput: {
     flex: 1,
     fontSize: 16,
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     fontWeight: '400',
     color: colors.textPrimary,
     lineHeight: 22,
@@ -696,7 +696,7 @@ const styles = StyleSheet.create({
   unitCarouselContent: { alignItems: 'center', justifyContent: 'center' },
   unitCarouselItem: { height: 56, alignItems: 'center', justifyContent: 'center' },
   unitCarouselItemText: {
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     fontSize: 16,
     fontWeight: '400',
     lineHeight: 22,
@@ -718,7 +718,7 @@ const styles = StyleSheet.create({
     color: colors.white,
     fontSize: 17,
     fontWeight: '700',
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
   },
   saveButton: {
     backgroundColor: '#212121',

@@ -2532,14 +2532,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   profileInfoSection: {
-    position: 'absolute',
-    top: 145,
-    left: '50%',
-    transform: [{ translateX: -180.5 }], // Half of 361px
     paddingHorizontal: 0,
     alignItems: 'center',
     width: 361,
     alignSelf: 'center',
+    ...Platform.select({
+      web: {
+        position: 'absolute' as any,
+        top: 145,
+        left: '50%',
+        transform: [{ translateX: -180.5 }],
+      },
+      default: {
+        // On native, use flow layout so content contributes to ScrollView scroll area.
+        // Absolute elements don't contribute to ScrollView content size on native,
+        // making content below the fold unreachable.
+        marginTop: -35, // 145 - 180 (cover height) to match web's top: 145
+      },
+    }),
   },
   contentContainer: {
     marginTop: 16,

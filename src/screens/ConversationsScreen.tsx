@@ -11,6 +11,7 @@ import {
   Alert,
   Animated,
   ActivityIndicator,
+  SafeAreaView,
 } from 'react-native';
 import { supabase } from '../config/supabase';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -84,6 +85,50 @@ const ShaperIcon: React.FC = () => {
        stroke="#222B30"
         strokeWidth="1.1"
         strokeMiterlimit="10"
+      />
+    </Svg>
+  );
+};
+
+// Get Adv Filter Icon Component (map/flag icon)
+const GetAdvIcon: React.FC = () => {
+  return (
+    <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M9 18L2 22V6L9 2M9 18L16 22M9 18V2M16 22L22 18V2L16 6M16 22V6M16 6L9 2"
+        stroke="#333333"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+};
+
+// Give Adv Filter Icon Component (binoculars icon)
+const GiveAdvIcon: React.FC = () => {
+  return (
+    <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M14 12.4653C12.7665 13.1782 11.2337 13.1782 10.0001 12.4653M15.1716 14.8284C13.6095 13.2663 13.6095 10.7337 15.1716 9.17157C16.7337 7.60948 19.2663 7.60948 20.8284 9.17157C22.3905 10.7337 22.3905 13.2663 20.8284 14.8284C19.2663 16.3905 16.7337 16.3905 15.1716 14.8284ZM3.17157 14.8284C1.60948 13.2663 1.60948 10.7337 3.17157 9.17157C4.73366 7.60948 7.26633 7.60948 8.82843 9.17157C10.3905 10.7337 10.3905 13.2663 8.82843 14.8284C7.26634 16.3905 4.73367 16.3905 3.17157 14.8284Z"
+        stroke="#333333"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+};
+
+// Swelly Ellipse Background Component
+const SwellyEllipse: React.FC = () => {
+  return (
+    <Svg width={62} height={63} viewBox="0 0 62 63" fill="none">
+      <Path
+        d="M30.8242 0.75C47.4452 0.75 60.8984 14.4406 60.8984 31.3027C60.8983 48.1648 47.4451 61.8545 30.8242 61.8545C14.2034 61.8544 0.75014 48.1648 0.75 31.3027C0.75 14.4406 14.2033 0.750059 30.8242 0.75Z"
+        fill="#D9D9D9"
+        stroke="#B72DF2"
+        strokeWidth="1.5"
       />
     </Svg>
   );
@@ -623,14 +668,6 @@ export default function ConversationsScreen({
   ) => {
     const isActive = filter === type;
 
-    // Get icon path based on filter type
-    let iconUrl: string | null = null;
-    if (type === 'advisor') {
-      iconUrl = getImageUrl('/Get adv icon.svg');
-    } else if (type === 'seeker') {
-      iconUrl = getImageUrl('/Give adv icon.svg');
-    }
-
     return (
       <TouchableOpacity
         style={[
@@ -639,13 +676,8 @@ export default function ConversationsScreen({
         ]}
         onPress={() => setFilter(type)}
       >
-        {iconUrl && type !== 'all' && (
-          <Image
-            source={{ uri: iconUrl }}
-            style={styles.filterIcon}
-            resizeMode="contain"
-          />
-        )}
+        {type === 'advisor' && <GetAdvIcon />}
+        {type === 'seeker' && <GiveAdvIcon />}
         <Text style={[
           styles.filterButtonText,
           Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
@@ -968,11 +1000,9 @@ export default function ConversationsScreen({
           {/* Swelly avatar with ellipse design - matching ChatScreen */}
           <View style={styles.swellyAvatarContainer}>
             <View style={styles.swellyAvatarRing}>
-              <Image
-                source={{ uri: getImageUrl('/Ellipse 11.svg') }}
-                style={styles.swellyEllipseBackground}
-                resizeMode="contain"
-              />
+              <View style={styles.swellyEllipseBackground}>
+                <SwellyEllipse />
+              </View>
               <View style={styles.swellyAvatarImageContainer}>
                 <Image
                   source={{ uri: getImageUrl('/Swelly avatar onboarding.png') }}
@@ -1085,8 +1115,10 @@ export default function ConversationsScreen({
     );
   }
 
+  const Container = Platform.OS === 'web' ? View : SafeAreaView;
+
   return (
-    <View style={styles.container}>
+    <Container style={styles.container}>
       {/* Survey Bubble - Fixed position, above everything (MVP mode only) */}
       {showSurveyBubble && isMVPMode && (
         <TouchableOpacity 
@@ -1494,7 +1526,7 @@ export default function ConversationsScreen({
           </View>
         </Modal>
       )}
-    </View>
+    </Container>
   );
 }
 
@@ -1862,9 +1894,9 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingVertical: 16,
     paddingHorizontal: 16,
-    backgroundColor: Platform.OS === 'web' 
-      ? 'rgba(255, 255, 255, 0.08)' 
-      : 'rgba(255, 255, 255, 0.06)',
+    backgroundColor: Platform.OS === 'web'
+      ? 'rgba(255, 255, 255, 0.08)'
+      : 'rgba(250, 250, 250, 0.95)',
     borderRadius: 16,
     borderWidth: 1,
     borderColor: '#B72DF2',
@@ -1913,10 +1945,8 @@ const styles = StyleSheet.create({
     top: '-2.5%', // Offset to center the larger size
     left: '-2.5%', // Offset to center the larger size
     zIndex: 0, // Behind the avatar image
-    // resizeMode="contain" maintains the original aspect ratio
-    ...(Platform.OS === 'web' && {
-      objectFit: 'contain' as any, // Maintain original aspect ratio
-    }),
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   swellyAvatarImageContainer: {
     position: 'absolute',

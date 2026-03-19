@@ -106,9 +106,10 @@ export const OnboardingWelcomeScreen: React.FC<OnboardingWelcomeScreenProps> = (
   const progressFilled = 34; // 1/4 step
 
   const { height: screenHeight } = useScreenDimensions();
+  const safeAreaInsets = Platform.OS === 'web' ? 0 : 90;
   const availableContentHeight = Math.max(
     MIN_CONTENT_HEIGHT,
-    screenHeight - STEP_HEADER_HEIGHT - BUTTON_CONTAINER_HEIGHT
+    screenHeight - STEP_HEADER_HEIGHT - BUTTON_CONTAINER_HEIGHT - safeAreaInsets
   );
 
   return (

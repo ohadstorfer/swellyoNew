@@ -611,7 +611,7 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
     // Use the responsive baseImageHeight calculated at component level
     const centerBoardHeight = baseImageHeight;
     const sideBoardHeight = baseImageHeight * 0.89;
-    const verticalOffsetValue = (centerBoardHeight - sideBoardHeight) + (baseImageHeight * 0.15);
+    const verticalOffsetValue = (centerBoardHeight - sideBoardHeight) + (baseImageHeight * (Platform.OS === 'web' ? 0.15 : 0.05));
     
     const animatedTranslateY = scrollX.interpolate({
       inputRange,
@@ -885,7 +885,7 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
           snapToInterval={undefined} // Disable automatic snapping - we handle it manually
           decelerationRate={0} // Disable momentum completely - always move exactly one board per swipe
           disableIntervalMomentum={true} // Disable momentum to prevent scrolling past one item
-          contentContainerStyle={styles.carouselContent}
+          contentContainerStyle={[styles.carouselContent, { paddingLeft: carouselItemWidth, paddingRight: carouselItemWidth }]}
           contentInsetAdjustmentBehavior="never"
           onScroll={(event) => {
             // During gesture, prevent scroll updates to keep position locked
@@ -931,12 +931,13 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
             // Web-specific: ensure scroll events fire
             scrollEventThrottle: 16,
           })}
-          // Native: ensure proper scroll behavior
+          // Native: ensure proper scroll behavior and allow side boards to overflow vertically
           {...(Platform.OS !== 'web' && {
             bounces: true,
             alwaysBounceHorizontal: true,
             alwaysBounceVertical: false,
             nestedScrollEnabled: true,
+            style: { overflow: 'visible' as any },
           })}
         />
 
@@ -982,7 +983,7 @@ const styles = StyleSheet.create({
   },
   carouselWrapper: {
     width: '100%',
-    overflow: 'hidden',
+    overflow: Platform.OS === 'web' ? 'hidden' : 'visible',
     position: 'relative',
     // @ts-ignore
     WebkitOverflowScrolling: 'touch',
@@ -1027,11 +1028,8 @@ const styles = StyleSheet.create({
   },
   carouselContent: {
     alignItems: 'center',
-    paddingVertical: Platform.OS === 'web' ? spacing.lg : 0,
-    // Add horizontal padding to center items properly (one item width on each side)
-    paddingLeft: getCarouselItemWidth(),
-    paddingRight: getCarouselItemWidth(),
-    // Disable CSS Scroll Snap - we handle snapping manually
+    paddingVertical: spacing.lg,
+    // paddingLeft/paddingRight are set dynamically via inline style using carouselItemWidth state
   },
   carouselItem: {
     justifyContent: 'flex-start', // Align to top so center board is higher

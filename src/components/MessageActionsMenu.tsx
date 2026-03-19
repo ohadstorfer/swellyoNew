@@ -149,7 +149,7 @@ const styles = StyleSheet.create({
   menuItemText: {
     fontSize: 16,
     color: colors.text,
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
   },
   deleteText: {
     color: '#FF3B30',

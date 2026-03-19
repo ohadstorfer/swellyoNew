@@ -1,0 +1,13 @@
+Sync Native: DirectMessageScreen — 2026-03-17
+
+Files modified:
+- src/screens/DirectMessageScreen.tsx — Fixed fontFamily for native: userMessageText, botMessageText, timestamp, editButtonText, editedBadge, loadingText (undefined → 'Inter')
+- src/components/ChatTextInput.tsx — Added fontFamily: 'Inter' for native inputText; also simplified redundant Platform.OS fontSize ternary
+- src/components/MessageActionsMenu.tsx — Fixed fontFamily for native: menuItemText (undefined → 'Inter')
+- src/components/WelcomeIntroMessage.tsx — Fixed fontFamily for native: text (undefined → 'Inter')
+- src/components/FullscreenImageViewer.tsx — Fixed fontFamily for native: errorText (undefined → 'Inter')
+- src/components/ImagePreviewModal.tsx — Fixed fontFamily for native: cancelButtonText, title, sendButtonText, captionInput (undefined → 'Inter')
+
+Issue: On web, all text renders with Inter font. On native, many text styles had fontFamily: undefined, causing system font (San Francisco/Roboto) to render instead of Inter. Header text (profileName, profileTagline) already used 'Inter'/'Inter-Bold' on native, creating an inconsistency with message body text.
+
+No remaining issues found. Shadows, layout, animations, interactions, and platform-specific code all verified correct.

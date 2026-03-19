@@ -1,0 +1,14 @@
+Sync LoadingScreen: Native ← Web
+
+Files modified:
+- src/screens/LoadingScreen.tsx: Fixed SafeAreaView + Dimensions height mismatch — subtracted ~90px safe area insets on native so that screenHeight-based calculations (spacingScale, videoHeight, subtitleToButtonGap, buttonBottom) match the actual available space, consistent with the pattern in OnboardingStep1Screen.
+
+No other discrepancies found:
+- Platform.OS checks for web-only styles (CSS variables, font families, pointer events) are already correct
+- Video player setup with expo-video works cross-platform
+- Layout uses flex: 1 properly for the video middle section
+- Text component has no platform-specific variants
+- No SVGs, no hover states, no CSS animations, no position: 'fixed' usage
+- pointerEvents="none" already correctly set as prop on videoPlayerContainer View
+
+Remaining: test on device to verify video playback and spacing look correct.

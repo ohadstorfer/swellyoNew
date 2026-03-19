@@ -126,7 +126,9 @@ export const OnboardingStep2Screen: React.FC<OnboardingStep2ScreenProps> = ({
   isLoading = false,
 }) => {
   const isDesktop = useIsDesktopWeb();
-  const { height: screenHeight, width: screenWidth } = useScreenDimensions();
+  const { height: rawScreenHeight, width: screenWidth } = useScreenDimensions();
+  // On native, SafeAreaView consumes ~90px of insets but Dimensions returns full window height
+  const screenHeight = Platform.OS === 'web' ? rawScreenHeight : rawScreenHeight - 90;
   
   // Get board type from initial data (default to 0 if not set)
   const boardType = initialData.boardType ?? 0;
@@ -529,7 +531,7 @@ const styles = StyleSheet.create({
     zIndex: 1,
     width: '100%',
     maxWidth: '100%',
-    overflow: 'hidden',
+    overflow: Platform.OS === 'web' ? 'hidden' : 'visible',
   },
   contentDesktop: {
     overflow: 'visible',

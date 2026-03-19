@@ -8,6 +8,7 @@ import { AppContent } from './src/components/AppContent';
 import { analyticsService } from './src/services/analytics/analyticsService';
 import { PostHogErrorBoundary } from './src/components/PostHogErrorBoundary';
 import { registerLogoutHandlers } from './src/utils/registerLogoutHandlers';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 const POSTHOG_API_KEY = process.env.EXPO_PUBLIC_POSTHOG_API_KEY || '';
 const POSTHOG_HOST = process.env.EXPO_PUBLIC_POSTHOG_HOST || 'https://app.posthog.com';
@@ -26,6 +27,7 @@ export default function App() {
   };
 
   return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
     <NavigationContainer independent={true} onReady={handleNavigationReady}>
       <PostHogErrorBoundary>
         {isNavigationReady ? (
@@ -59,5 +61,6 @@ export default function App() {
         )}
       </PostHogErrorBoundary>
     </NavigationContainer>
+    </GestureHandlerRootView>
   );
 }

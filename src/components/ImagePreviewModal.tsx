@@ -138,13 +138,13 @@ const styles = StyleSheet.create({
   cancelButtonText: {
     fontSize: 16,
     color: colors.textSecondary,
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
   },
   title: {
     fontSize: 18,
     fontWeight: '600',
     color: colors.textPrimary,
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
   },
   sendButton: {
     paddingVertical: spacing.xs,
@@ -159,7 +159,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#FFFFFF',
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
   },
   imageContainer: {
     width: '100%',
@@ -183,7 +183,7 @@ const styles = StyleSheet.create({
     maxHeight: 120,
     fontSize: 16,
     color: colors.textPrimary,
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     textAlignVertical: 'top',
   },
 });

@@ -174,7 +174,8 @@ export const ChatTextInput = forwardRef<ChatTextInputRef, ChatTextInputProps>(fu
               style={[
                 styles.inputText,
                 {
-                  height: inputHeight,
+                  // On web, drive height from mirror measurement; on native, let multiline auto-size
+                  ...(Platform.OS === 'web' ? { height: inputHeight } : {}),
                   minHeight: MIN_INPUT_HEIGHT,
                   maxHeight: MAX_INPUT_HEIGHT,
                   lineHeight: LINE_HEIGHT,
@@ -264,9 +265,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.white,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: Platform.OS === 'android' ? 0.08 : Platform.OS === 'web' ? 0.08 : 0,
-    shadowRadius: Platform.OS === 'android' ? 20 : Platform.OS === 'web' ? 20 : 0,
-    elevation: Platform.OS === 'android' ? 5 : Platform.OS === 'web' ? 5 : 0,
+    shadowOpacity: 0.08,
+    shadowRadius: 20,
+    elevation: 5,
     ...(Platform.OS === 'web' && {
       boxShadow: '0px 0px 20px rgba(0, 0, 0, 0.08)',
     }),
@@ -311,9 +312,10 @@ const styles = StyleSheet.create({
   },
   inputText: {
     width: '100%',
-    fontSize: Platform.OS === 'web' ? 16 : 16,
+    fontSize: 16,
     fontWeight: '400',
     color: colors.textPrimary,
+    fontFamily: Platform.OS === 'web' ? undefined : 'Inter',
     padding: 0,
     paddingLeft: 8,
     paddingVertical: INPUT_PADDING_VERTICAL,

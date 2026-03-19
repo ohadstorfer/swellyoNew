@@ -1,0 +1,13 @@
+The TS errors are pre-existing and unrelated to my changes. The files I modified compile fine.
+
+## Summary
+
+**Files modified:**
+
+- **`src/screens/OnboardingStep3Screen.tsx`** — Fixed SafeAreaView + Dimensions height mismatch. Added `useSafeAreaInsets()` and subtracted insets from `screenHeight` on native, matching the pattern already used in `OnboardingStep2Screen`. Without this fix, the content area was ~90px too tall on native, causing the slider to overflow past the bottom button.
+
+- **`src/components/TravelExperienceSlider.tsx`** — Hidden the custom thumb overlay on native (`Platform.OS === 'web'` guard). The custom thumb's position is calculated assuming the slider track spans the full `BAR_WIDTH`, but on native iOS the `@react-native-community/slider` has internal padding (~16px per side), causing a visible misalignment between the decorative thumb and the actual slider thumb. The native slider already renders a proper white thumb via `thumbTintColor="#FFFFFF"`.
+
+**Remaining notes for device testing:**
+- Verify the slider thumb shadow appearance on native (the native thumb won't have the custom drop shadow that web has — if needed, consider adding platform-specific shadow styles to the slider's `thumbStyle` prop)
+- Verify image crossfade animations work smoothly on native devices
