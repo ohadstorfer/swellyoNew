@@ -14,6 +14,7 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
+      "bundleIdentifier": "com.swellyo.app",
       "supportsTablet": true,
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "This app needs access to your photo library to select profile pictures.",
@@ -44,7 +45,8 @@
           "photosPermission": "The app accesses your photos to let you share them.",
           "cameraPermission": "The app accesses your camera to let you take photos."
         }
-      ]
+      ],
+      "@react-native-google-signin/google-signin"
     ]
   }
 }

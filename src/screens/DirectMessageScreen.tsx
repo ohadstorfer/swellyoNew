@@ -2,7 +2,6 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   View,
   StyleSheet,
-  SafeAreaView,
   ScrollView,
   TouchableOpacity,
   KeyboardAvoidingView,
@@ -15,6 +14,7 @@ import {
   Modal,
   Dimensions,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { TextInput as PaperTextInput } from 'react-native-paper';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Path } from 'react-native-svg';
@@ -37,6 +37,7 @@ import { FullscreenImageViewer } from '../components/FullscreenImageViewer';
 import { ImagePreviewModal } from '../components/ImagePreviewModal';
 import { ChatTextInput, ChatTextInputRef } from '../components/ChatTextInput';
 import { WelcomeIntroMessage } from '../components/WelcomeIntroMessage';
+import { useChatKeyboardScroll } from '../hooks/useChatKeyboardScroll';
 
 interface DirectMessageScreenProps {
   conversationId?: string; // Optional: undefined for pending conversations (will be created on first message)
@@ -100,6 +101,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const pickerFallbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isProcessingImage, setIsProcessingImage] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
+  const { handleScroll: handleKeyboardScroll, handleContentSizeChange, handleLayout, scrollToBottom } = useChatKeyboardScroll(scrollViewRef);
   const chatInputRef = useRef<ChatTextInputRef>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const typingDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -228,7 +230,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                 console.error('Error marking message as read:', err);
               });
             }
-            setTimeout(() => scrollToBottom(), 100);
+            scrollToBottom();
           },
           onMessageUpdated: (updatedMessage) => {
             // #region agent log
@@ -531,7 +533,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       setIsFetchingMessages(false);
       setShowSkeletons(false);  // Binary: cache exists = no skeleton
       
-      setTimeout(() => scrollToBottom(), 200);
+      scrollToBottom();
       
       // CRITICAL: Always check server for updated messages when loading from cache
       // This ensures image messages are loaded even if cache is stale
@@ -676,7 +678,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         setIsFetchingMessages(false);
         setShowSkeletons(false);  // Binary: cache exists = no skeleton
         
-        setTimeout(() => scrollToBottom(), 200);
+        scrollToBottom();
         
         // Sync with server in background
         syncWithServerInBackground();
@@ -717,7 +719,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         setIsFetchingMessages(false);
         setShowSkeletons(false);
         
-        setTimeout(() => scrollToBottom(), 200);
+        scrollToBottom();
       }
     } catch (error) {
       console.error('[DirectMessageScreen] ❌ Error loading messages:', error);
@@ -876,7 +878,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     setInputText('');
     
     // Scroll to bottom immediately
-    setTimeout(() => scrollToBottom(), 50);
+    scrollToBottom();
     
     // 2. Create conversation if needed (still blocking, but message already visible)
     let targetConversationId = currentConversationId;
@@ -979,7 +981,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         return updated;
       });
       
-      setTimeout(() => scrollToBottom(), 100);
+      scrollToBottom();
     } catch (error) {
       console.error('Error sending message:', error);
       // Remove optimistic message on error
@@ -989,13 +991,6 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     } finally {
       setIsLoading(false);
     }
-  };
-
-  const scrollToBottom = () => {
-    // Use requestAnimationFrame for better timing
-    requestAnimationFrame(() => {
-      scrollViewRef.current?.scrollToEnd({ animated: true });
-    });
   };
 
   // Handle typing indicator: send startTyping soon after user starts typing (leading + throttle), stopTyping after 3s idle (trailing)
@@ -1391,7 +1386,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       setIsProcessingImage(false);
       
       // Scroll to bottom to show new message
-      setTimeout(() => scrollToBottom(), 200);
+      scrollToBottom();
     } catch (error: any) {
       console.error('Error sending image:', error);
       Alert.alert('Error', error?.message || 'Failed to send image');
@@ -1543,13 +1538,6 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       </View>
     );
   };
-
-  // Scroll to bottom when messages change
-  useEffect(() => {
-    if (messages.length > 0 && !isFetchingMessages) {
-      setTimeout(() => scrollToBottom(), 100);
-    }
-  }, [messages.length, isFetchingMessages]);
 
   const formatTime = (timestamp: string) => {
     const date = new Date(timestamp);
@@ -1815,7 +1803,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       {/* Header */}
       <View style={styles.headerContainer}>
         <View style={styles.headerGradientBorder} />
@@ -1895,13 +1883,15 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             contentContainerStyle={styles.messagesContent}
             showsVerticalScrollIndicator={false}
             onScroll={(event) => {
+              handleKeyboardScroll(event);
               const { contentOffset } = event.nativeEvent;
-              // Trigger when scrolled near top (within 200px)
               if (contentOffset.y <= 200 && hasMoreMessages && !isLoadingOlderMessages) {
                 loadOlderMessages();
               }
             }}
-            scrollEventThrottle={400}
+            scrollEventThrottle={16}
+            onContentSizeChange={handleContentSizeChange}
+            onLayout={handleLayout}
           >
           {messages.length === 0 && isFetchingMessages ? (
             // Show skeletons only when fetching AND no messages
@@ -1960,6 +1950,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             }
           />
         </View>
+        <SafeAreaView edges={['bottom']} />
       </KeyboardAvoidingView>
 
       {/* Message Actions Menu */}
@@ -2419,7 +2410,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     paddingHorizontal: 8,
-    paddingBottom: 35,
+    paddingBottom: Platform.OS === 'web' ? 35 : 8,
     paddingTop: 0,
   },
   attachButtonWrapper: {

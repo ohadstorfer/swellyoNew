@@ -11,8 +11,12 @@ import {
   ImageBackground,
   Animated,
   Dimensions,
+  ScrollView as RNScrollView,
 } from 'react-native';
-import { ScrollView, Gesture, GestureDetector } from 'react-native-gesture-handler';
+
+// On native, use RN's built-in ScrollView with nestedScrollEnabled.
+// GestureDetector + gesture-handler ScrollView causes Expo Go crashes on scroll.
+const ScrollView = RNScrollView;
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../components/Text';
 import { colors, spacing, typography, borderRadius } from '../styles/theme';
@@ -21,11 +25,17 @@ import { useOnboarding } from '../context/OnboardingContext';
 import { getImageUrl, getLifestyleImageBucketUrlForFilename, getLifestyleImageFromPexels } from '../services/media/imageService';
 import { supabase, isSupabaseConfigured } from '../config/supabase';
 import { supabaseDatabaseService } from '../services/database/supabaseDatabaseService';
-import { messagingService } from '../services/messaging/messagingService';
 import { analyticsService } from '../services/analytics/analyticsService';
 import { DestinationCardsCarouselCopy } from '../components/DestinationCardsCarouselCopy';
 import { BudgetCardsCarousel, type BudgetOption } from '../components/BudgetCardsCarousel';
 import { ChatTextInput } from '../components/ChatTextInput';
+import { useChatKeyboardScroll } from '../hooks/useChatKeyboardScroll';
+
+// Resolve image URLs once at module level to avoid heavy manifest inspection +
+// console.log spam on every render (getImageUrl does extensive Constants lookups).
+const ELLIPSE_IMAGE_URI = getImageUrl('/Ellipse 11.svg');
+const AVATAR_IMAGE_URI = getImageUrl('/Swelly avatar onboarding.png');
+const CHAT_BG_IMAGE_URI = getImageUrl('/chat background.png');
 
 interface Message {
   id: string;
@@ -40,6 +50,69 @@ interface Message {
   };
 }
 
+
+// TypingIndicator defined outside the main component to prevent Animated value
+// leaks from unmount/remount cycles on every parent re-render.
+const TypingIndicator = React.memo(() => {
+  const dot1 = useRef(new Animated.Value(0)).current;
+  const dot2 = useRef(new Animated.Value(0)).current;
+  const dot3 = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const animateDot = (dot: Animated.Value, delay: number) => {
+      return Animated.loop(
+        Animated.sequence([
+          Animated.delay(delay),
+          Animated.timing(dot, {
+            toValue: 1,
+            duration: 400,
+            useNativeDriver: true,
+          }),
+          Animated.timing(dot, {
+            toValue: 0,
+            duration: 400,
+            useNativeDriver: true,
+          }),
+        ])
+      );
+    };
+
+    const animations = [
+      animateDot(dot1, 0),
+      animateDot(dot2, 200),
+      animateDot(dot3, 400),
+    ];
+
+    animations.forEach(anim => anim.start());
+
+    return () => {
+      animations.forEach(anim => anim.stop());
+    };
+  }, [dot1, dot2, dot3]);
+
+  const opacity1 = dot1.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.3, 1],
+  });
+
+  const opacity2 = dot2.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.3, 1],
+  });
+
+  const opacity3 = dot3.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.3, 1],
+  });
+
+  return (
+    <View style={styles.typingContainer}>
+      <Animated.View style={[styles.typingDot, { opacity: opacity1 }]} />
+      <Animated.View style={[styles.typingDot, { opacity: opacity2 }]} />
+      <Animated.View style={[styles.typingDot, { opacity: opacity3 }]} />
+    </View>
+  );
+});
 
 interface OnboardingChatScreenProps {
   onChatComplete?: () => void;
@@ -57,8 +130,8 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
   const [isFinished, setIsFinished] = useState(false);
   const [onboardingStartTime] = useState<number>(Date.now()); // Track when onboarding chat started
   const scrollViewRef = useRef<ScrollView>(null);
-  const scrollNativeGestureRef = useRef<any>(null);
-  const scrollNativeGesture = useMemo(() => Gesture.Native().withRef(scrollNativeGestureRef), []);
+  const { handleScroll, handleContentSizeChange, handleLayout } = useChatKeyboardScroll(scrollViewRef);
+  const chatInitializedRef = useRef(false);
   
   // State for destination cards
   const [showDestinationCards, setShowDestinationCards] = useState(false);
@@ -111,33 +184,45 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
 
   const progressPercentage = calculateProgress();
 
-  // Test API connection and initialize chat context on component mount
+  // Keep a ref to formData so the init effect can read the latest value without
+  // re-running every time the context updates formData.
+  const formDataRef = useRef(formData);
+  formDataRef.current = formData;
+
+  // Test API connection and initialize chat context on component mount (once only)
   useEffect(() => {
+    if (chatInitializedRef.current) return;
+    chatInitializedRef.current = true;
+
+    let timeout1: ReturnType<typeof setTimeout> | null = null;
+    let timeout2: ReturnType<typeof setTimeout> | null = null;
+    let cancelled = false;
+
     const initializeChat = async () => {
       try {
         console.log('Testing API connection...');
         const health = await swellyService.healthCheck();
+        if (cancelled) return;
         console.log('API health check successful:', health);
-        
-        // Onboarding: Send initial context message using actual onboarding data
+
+        const fd = formDataRef.current;
         console.log('Initializing onboarding chat with user profile data...');
-        console.log('Form data:', formData);
-        
-        // Use initializeWithProfile to build context from onboarding data
-        // This will use the actual data collected during onboarding steps 1-4
+        console.log('Form data:', fd);
+
         const response = await swellyService.initializeWithProfile({
-          nickname: formData.nickname,
-          age: formData.age,
-          boardType: formData.boardType,
-          surfLevel: formData.surfLevel,
-          travelExperience: formData.travelExperience,
+          nickname: fd.nickname,
+          age: fd.age,
+          boardType: fd.boardType,
+          surfLevel: fd.surfLevel,
+          travelExperience: fd.travelExperience,
         });
-        
+        if (cancelled) return;
+
         console.log('Chat initialized with response:', response);
         const newChatId = response.chat_id || null;
         setChatId(newChatId);
 
-        const nickname = formData.nickname || 'Jake';
+        const nickname = fd.nickname || 'Jake';
         const firstMessage: Message = {
           id: '1',
           text: `Yo ${nickname}! Swelly here! Stoked to have you in the community 🌊! Time to get your profile as dialed as your favorite board!`,
@@ -152,10 +237,14 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
         setIsInitializing(false);
 
         // After 1s show typing bubble; after 3s total hide it and append second message
-        initialTypingTimeout1Ref.current = setTimeout(() => {
+        timeout1 = setTimeout(() => {
+          if (cancelled) return;
           setShowInitialTypingBubble(true);
         }, 1000);
-        initialTypingTimeout2Ref.current = setTimeout(() => {
+        initialTypingTimeout1Ref.current = timeout1;
+
+        timeout2 = setTimeout(() => {
+          if (cancelled) return;
           setShowInitialTypingBubble(false);
           const secondMessage: Message = {
             id: '2',
@@ -169,7 +258,9 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
           };
           setMessages(prev => [...prev, secondMessage]);
         }, 3000);
+        initialTypingTimeout2Ref.current = timeout2;
       } catch (error) {
+        if (cancelled) return;
         console.error('API health check or chat initialization failed:', error);
         Alert.alert(
           'Connection Error',
@@ -177,22 +268,19 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
           [{ text: 'OK' }]
         );
       } finally {
-        setIsInitializing(false);
+        if (!cancelled) {
+          setIsInitializing(false);
+        }
       }
     };
 
     initializeChat();
     return () => {
-      if (initialTypingTimeout1Ref.current) {
-        clearTimeout(initialTypingTimeout1Ref.current);
-        initialTypingTimeout1Ref.current = null;
-      }
-      if (initialTypingTimeout2Ref.current) {
-        clearTimeout(initialTypingTimeout2Ref.current);
-        initialTypingTimeout2Ref.current = null;
-      }
+      cancelled = true;
+      if (timeout1) clearTimeout(timeout1);
+      if (timeout2) clearTimeout(timeout2);
     };
-  }, [formData]); // Re-run if formData changes
+  }, []); // Run once on mount
 
   /**
    * Save onboarding result with server-provided lifestyle image filenames,
@@ -459,8 +547,8 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
         setPendingBudgetUiHints(null);
       }
 
-      // After cards are rendered, scroll to the bottom of the chat
-      scrollToBottom();
+      // After cards are rendered, delay scroll so React has time to layout the new content
+      setTimeout(() => scrollToBottom(), 300);
 
       setIsUiDelayLoading(false);
     }, 3000);
@@ -470,68 +558,6 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
       setIsUiDelayLoading(false);
     };
   }, [pendingDestinationUiHints, pendingBudgetUiHints]);
-
-  // Typing animation component
-  const TypingIndicator = () => {
-    const dot1 = useRef(new Animated.Value(0)).current;
-    const dot2 = useRef(new Animated.Value(0)).current;
-    const dot3 = useRef(new Animated.Value(0)).current;
-
-    useEffect(() => {
-      const animateDot = (dot: Animated.Value, delay: number) => {
-        return Animated.loop(
-          Animated.sequence([
-            Animated.delay(delay),
-            Animated.timing(dot, {
-              toValue: 1,
-              duration: 400,
-              useNativeDriver: true,
-            }),
-            Animated.timing(dot, {
-              toValue: 0,
-              duration: 400,
-              useNativeDriver: true,
-            }),
-          ])
-        );
-      };
-
-      const animations = [
-        animateDot(dot1, 0),
-        animateDot(dot2, 200),
-        animateDot(dot3, 400),
-      ];
-
-      animations.forEach(anim => anim.start());
-
-      return () => {
-        animations.forEach(anim => anim.stop());
-      };
-    }, []);
-
-    const opacity1 = dot1.interpolate({
-      inputRange: [0, 1],
-      outputRange: [0.3, 1],
-    });
-
-    const opacity2 = dot2.interpolate({
-      inputRange: [0, 1],
-      outputRange: [0.3, 1],
-    });
-
-    const opacity3 = dot3.interpolate({
-      inputRange: [0, 1],
-      outputRange: [0.3, 1],
-    });
-
-    return (
-      <View style={styles.typingContainer}>
-        <Animated.View style={[styles.typingDot, { opacity: opacity1 }]} />
-        <Animated.View style={[styles.typingDot, { opacity: opacity2 }]} />
-        <Animated.View style={[styles.typingDot, { opacity: opacity3 }]} />
-      </View>
-    );
-  };
 
   // Handler for destination card submission
   const handleDestinationSubmit = async (allDestinationsData: Array<{
@@ -745,8 +771,7 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
                 isReadOnly={destinationsSubmitted}
                 initialData={destinationsSubmitted ? submittedDestinationData : undefined}
                 fullWidth
-                parentScrollNativeRef={scrollNativeGestureRef}
-                parentScrollGesture={scrollNativeGesture}
+                onInputFocus={scrollToBottom}
               />
             </View>
         </View>
@@ -761,7 +786,6 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
                 onSelect={handleBudgetSelect}
                 isReadOnly={budgetSubmitted}
                 initialSelection={budgetSubmitted && selectedBudget ? selectedBudget : undefined}
-                parentScrollNativeRef={scrollNativeGestureRef}
               />
             </View>
           </View>
@@ -791,7 +815,7 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
               <View style={styles.avatarRing}>
                 {Platform.OS === 'web' ? (
                   <Image
-                    source={{ uri: getImageUrl('/Ellipse 11.svg') }}
+                    source={{ uri: ELLIPSE_IMAGE_URI }}
                     style={styles.ellipseBackground}
                     resizeMode="contain"
                   />
@@ -800,7 +824,7 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
                 )}
                 <View style={styles.avatarImageContainer}>
                   <Image
-                    source={{ uri: getImageUrl('/Swelly avatar onboarding.png') }}
+                    source={{ uri: AVATAR_IMAGE_URI }}
                     style={styles.avatarImage}
                     resizeMode="cover"
                   />
@@ -831,32 +855,34 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
         keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
       >
         <ImageBackground
-          source={{ uri: getImageUrl('/chat background.png') }}
+          source={{ uri: CHAT_BG_IMAGE_URI }}
           style={styles.backgroundImage}
           resizeMode="cover"
       >
-        <GestureDetector gesture={scrollNativeGesture}>
-          <ScrollView
-            ref={scrollViewRef}
-            style={styles.messagesList}
-            contentContainerStyle={styles.messagesContent}
-            showsVerticalScrollIndicator={false}
-            nestedScrollEnabled
-            directionalLockEnabled
-            keyboardShouldPersistTaps="handled"
-          >
-            {messages.map(renderMessage)}
-            {(isLoading || isInitializing || showInitialTypingBubble || isUiDelayLoading) && (
-              <View style={[styles.messageContainer, styles.botMessageContainer]}>
-                <View style={[styles.messageBubble, styles.botMessageBubble]}>
-                  <View style={styles.messageTextContainer}>
-                    <TypingIndicator />
-                  </View>
+        <ScrollView
+          ref={scrollViewRef}
+          style={styles.messagesList}
+          contentContainerStyle={styles.messagesContent}
+          showsVerticalScrollIndicator={false}
+          nestedScrollEnabled
+          directionalLockEnabled
+          keyboardShouldPersistTaps="handled"
+          onScroll={handleScroll}
+          scrollEventThrottle={16}
+          onContentSizeChange={handleContentSizeChange}
+          onLayout={handleLayout}
+        >
+          {messages.map(renderMessage)}
+          {(isLoading || isInitializing || showInitialTypingBubble || isUiDelayLoading) && (
+            <View style={[styles.messageContainer, styles.botMessageContainer]}>
+              <View style={[styles.messageBubble, styles.botMessageBubble]}>
+                <View style={styles.messageTextContainer}>
+                  <TypingIndicator />
                 </View>
               </View>
-            )}
-          </ScrollView>
-        </GestureDetector>
+            </View>
+          )}
+        </ScrollView>
         </ImageBackground>
 
         {/* Input Area */}
@@ -865,7 +891,7 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
             value={inputText}
             onChangeText={setInputText}
             onSend={sendMessage}
-            disabled={isLoading || isInitializing}
+            disabled={isLoading || isInitializing || (showDestinationCards && !destinationsSubmitted) || (showBudgetButtons && !budgetSubmitted)}
             placeholder="Type your message.."
             maxLength={500}
             primaryColor={colors.primary || '#B72DF2'}
@@ -951,11 +977,10 @@ const styles = StyleSheet.create({
   ellipseBackgroundNative: {
     position: 'absolute',
     width: '105%',
-    height: '105%',
-    top: '-2.5%',
+    height: '98%',
     left: '-2.5%',
     zIndex: 0,
-    borderRadius: 35,
+    borderRadius: 45,
     borderWidth: 2,
     borderColor: '#B72DF2',
     backgroundColor: '#E0E0E0',

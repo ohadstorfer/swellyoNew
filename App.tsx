@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { Platform } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { PostHogProvider, PostHogSurveyProvider } from 'posthog-react-native';
 import { NavigationContainer } from '@react-navigation/native';
@@ -9,6 +10,7 @@ import { analyticsService } from './src/services/analytics/analyticsService';
 import { PostHogErrorBoundary } from './src/components/PostHogErrorBoundary';
 import { registerLogoutHandlers } from './src/utils/registerLogoutHandlers';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 const POSTHOG_API_KEY = process.env.EXPO_PUBLIC_POSTHOG_API_KEY || '';
 const POSTHOG_HOST = process.env.EXPO_PUBLIC_POSTHOG_HOST || 'https://app.posthog.com';
@@ -28,6 +30,7 @@ export default function App() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
+    <SafeAreaProvider>
     <NavigationContainer independent={true} onReady={handleNavigationReady}>
       <PostHogErrorBoundary>
         {isNavigationReady ? (
@@ -35,7 +38,7 @@ export default function App() {
             apiKey={POSTHOG_API_KEY}
             options={{
               host: POSTHOG_HOST,
-              enableSessionReplay: true,
+              enableSessionReplay: Platform.OS === 'web',
               captureAppLifecycleEvents: true,
               captureDeepLinks: true,
               enableNativeNavigationTracking: false, // Disable navigation tracking to prevent useNavigationState errors
@@ -61,6 +64,7 @@ export default function App() {
         )}
       </PostHogErrorBoundary>
     </NavigationContainer>
+    </SafeAreaProvider>
     </GestureHandlerRootView>
   );
 }

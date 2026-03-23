@@ -2,7 +2,6 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   StyleSheet,
-  SafeAreaView,
   ScrollView,
   TouchableOpacity,
   KeyboardAvoidingView,
@@ -11,6 +10,7 @@ import {
   ImageBackground,
   Animated,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Text } from '../components/Text';
@@ -23,6 +23,7 @@ import { supabase } from '../config/supabase';
 import { MessageListSkeleton } from '../components/skeletons';
 import { SKELETON_DELAY_MS } from '../constants/loading';
 import { ChatTextInput } from '../components/ChatTextInput';
+import { useChatKeyboardScroll } from '../hooks/useChatKeyboardScroll';
 
 interface Message {
   id: string;
@@ -56,6 +57,7 @@ export const SwellyShaperScreen: React.FC<SwellyShaperScreenProps> = ({ onBack, 
   const [showSkeletons, setShowSkeletons] = useState(false); // Delayed skeleton display to avoid flicker
   const [profileData, setProfileData] = useState<SupabaseSurfer | null>(null);
   const scrollViewRef = useRef<ScrollView>(null);
+  const { handleScroll, handleContentSizeChange, handleLayout, scrollToBottom } = useChatKeyboardScroll(scrollViewRef);
 
   // Load chat_id from storage and profile data on mount
   useEffect(() => {
@@ -170,15 +172,6 @@ export const SwellyShaperScreen: React.FC<SwellyShaperScreenProps> = ({ onBack, 
     }
   }, [isInitializing]);
 
-  // Scroll to bottom when messages change
-  useEffect(() => {
-    if (scrollViewRef.current) {
-      setTimeout(() => {
-        scrollViewRef.current?.scrollToEnd({ animated: true });
-      }, 100);
-    }
-  }, [messages]);
-
   const handleSend = async () => {
     if (!inputText.trim() || isLoading) return;
 
@@ -194,6 +187,7 @@ export const SwellyShaperScreen: React.FC<SwellyShaperScreenProps> = ({ onBack, 
     };
     
     setMessages(prev => [...prev, userMsg]);
+    scrollToBottom();
     setIsLoading(true);
 
     try {
@@ -389,7 +383,7 @@ export const SwellyShaperScreen: React.FC<SwellyShaperScreenProps> = ({ onBack, 
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       {/* Header */}
       <View style={styles.headerContainer}>
         <View style={styles.header}>
@@ -448,6 +442,10 @@ export const SwellyShaperScreen: React.FC<SwellyShaperScreenProps> = ({ onBack, 
             style={styles.messagesList}
             contentContainerStyle={styles.messagesContent}
             showsVerticalScrollIndicator={false}
+            onScroll={handleScroll}
+            scrollEventThrottle={16}
+            onContentSizeChange={handleContentSizeChange}
+            onLayout={handleLayout}
           >
             {isInitializing && showSkeletons ? (
               <MessageListSkeleton count={5} />
@@ -487,6 +485,7 @@ export const SwellyShaperScreen: React.FC<SwellyShaperScreenProps> = ({ onBack, 
             }
           />
         </View>
+        <SafeAreaView edges={['bottom']} />
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -504,7 +503,7 @@ const styles = StyleSheet.create({
   },
   headerContainer: {
     backgroundColor: colors.white,
-    paddingTop: Platform.OS === 'web' ? 44 : 0,
+    paddingTop: Platform.OS === 'web' ? 44 : 20,
     paddingBottom: 12,
     paddingHorizontal: 16,
   },
@@ -559,11 +558,10 @@ const styles = StyleSheet.create({
   ellipseBackgroundNative: {
     position: 'absolute',
     width: '105%',
-    height: '105%',
-    top: '-2.5%',
+    height: '98%',
     left: '-2.5%',
     zIndex: 0,
-    borderRadius: 31,
+    borderRadius: 45,
     borderWidth: 2,
     borderColor: '#B72DF2',
     backgroundColor: '#E0E0E0',

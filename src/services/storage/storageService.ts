@@ -74,9 +74,34 @@ const dataURLtoBlob = (dataURL: string): Blob => {
  * Fetch a file URI and convert to Blob (for React Native)
  */
 const uriToBlob = async (uri: string): Promise<Blob> => {
-  const response = await fetch(uri);
-  const blob = await response.blob();
-  return blob;
+  if (Platform.OS === 'web') {
+    const response = await fetch(uri);
+    return response.blob();
+  }
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.onload = () => resolve(xhr.response);
+    xhr.onerror = () => reject(new Error('Failed to convert URI to blob'));
+    xhr.responseType = 'blob';
+    xhr.open('GET', uri, true);
+    xhr.send(null);
+  });
+};
+
+/**
+ * Build a FormData body from a native file URI.
+ * React Native's networking layer can read file:// URIs directly from FormData,
+ * bypassing the need to convert to a Blob first.
+ */
+const nativeFileFormData = (uri: string, contentType: string): FormData => {
+  const formData = new FormData();
+  const extension = contentType.split('/')[1] || 'jpg';
+  formData.append('', {
+    uri,
+    name: `upload.${extension}`,
+    type: contentType,
+  } as any);
+  return formData;
 };
 
 /**
@@ -109,39 +134,38 @@ export const uploadProfileImage = async (
       firstChars: imageUri.substring(0, 50),
     });
 
-    let blob: Blob;
+    let uploadBody: Blob | FormData;
+    const contentType = 'image/jpeg';
 
-    // Handle different image formats
-    if (imageUri.startsWith('data:')) {
+    // On native, use FormData with the file URI directly (avoids Blob issues)
+    const isNativeFileUri = Platform.OS !== 'web' &&
+      (imageUri.startsWith('file://') || imageUri.startsWith('content://') || imageUri.startsWith('ph://'));
+
+    if (isNativeFileUri) {
+      console.log('[StorageService] Native file URI – using FormData upload');
+      uploadBody = nativeFileFormData(imageUri, contentType);
+    } else if (imageUri.startsWith('data:')) {
       // Base64 data URL (web)
       console.log('[StorageService] Handling data: URI');
-      blob = dataURLtoBlob(imageUri);
+      uploadBody = dataURLtoBlob(imageUri);
     } else if (imageUri.startsWith('blob:')) {
       // Blob URL (web - from expo-image-manipulator)
       console.log('[StorageService] Handling blob: URI');
-      blob = await uriToBlob(imageUri);
-    } else if (imageUri.startsWith('file://') || imageUri.startsWith('content://') || imageUri.startsWith('ph://')) {
-      // Local file URI (React Native)
-      console.log('[StorageService] Handling file:///content:///ph:// URI');
-      blob = await uriToBlob(imageUri);
+      uploadBody = await uriToBlob(imageUri);
     } else if (imageUri.startsWith('http://') || imageUri.startsWith('https://')) {
-      // Already a URL - might be updating from existing
-      // Fetch and re-upload
       console.log('[StorageService] Handling http:// URI');
-      blob = await uriToBlob(imageUri);
+      uploadBody = await uriToBlob(imageUri);
     } else {
-      // Fallback: Try to fetch as blob (works for most formats)
-      // This handles cases where expo-image-manipulator returns unexpected formats
       console.log('[StorageService] Unknown format, attempting to fetch as blob...');
       try {
-        blob = await uriToBlob(imageUri);
+        uploadBody = await uriToBlob(imageUri);
         console.log('[StorageService] Successfully converted unknown format to blob');
       } catch (fetchError) {
         console.error('[StorageService] Failed to fetch as blob:', fetchError);
         console.error('[StorageService] Full URI (first 100 chars):', imageUri.substring(0, 100));
-        return { 
-          success: false, 
-          error: `Unsupported image format. URI starts with: ${imageUri.substring(0, 20)}...` 
+        return {
+          success: false,
+          error: `Unsupported image format. URI starts with: ${imageUri.substring(0, 20)}...`
         };
       }
     }
@@ -150,8 +174,8 @@ export const uploadProfileImage = async (
     // (bucket check might fail due to permissions, but upload might still work)
     const { data, error } = await supabase.storage
       .from('profile-images')
-      .upload(fileName, blob, {
-        contentType: 'image/jpeg',
+      .upload(fileName, uploadBody, {
+        contentType,
         upsert: true,
       });
 
@@ -248,36 +272,36 @@ export const uploadProfileVideo = async (
     // Generate a unique filename for temporary storage
     const tempFileName = `temp/${userId}/profile-surf-video-${Date.now()}${extension}`;
 
-    let blob: Blob;
+    let uploadBody: Blob | FormData;
 
-    // Handle different video formats
-    if (videoUri.startsWith('data:')) {
+    // On native, use FormData with the file URI directly (avoids Blob issues)
+    const isNativeFileUri = Platform.OS !== 'web' &&
+      (videoUri.startsWith('file://') || videoUri.startsWith('content://') || videoUri.startsWith('ph://'));
+
+    if (isNativeFileUri) {
+      console.log('[StorageService] Native file URI – using FormData upload for video');
+      uploadBody = nativeFileFormData(videoUri, finalMimeType);
+    } else if (videoUri.startsWith('data:')) {
       // Base64 data URL (web)
       console.log('[StorageService] Handling data: URI for video');
-      blob = dataURLtoBlob(videoUri);
+      uploadBody = dataURLtoBlob(videoUri);
     } else if (videoUri.startsWith('blob:')) {
       // Blob URL (web)
       console.log('[StorageService] Handling blob: URI for video');
-      blob = await uriToBlob(videoUri);
-    } else if (videoUri.startsWith('file://') || videoUri.startsWith('content://') || videoUri.startsWith('ph://')) {
-      // Local file URI (React Native)
-      console.log('[StorageService] Handling file:///content:///ph:// URI for video');
-      blob = await uriToBlob(videoUri);
+      uploadBody = await uriToBlob(videoUri);
     } else if (videoUri.startsWith('http://') || videoUri.startsWith('https://')) {
-      // Already a URL - fetch and re-upload
       console.log('[StorageService] Handling http:// URI for video');
-      blob = await uriToBlob(videoUri);
+      uploadBody = await uriToBlob(videoUri);
     } else {
-      // Fallback: Try to fetch as blob
       console.log('[StorageService] Unknown format, attempting to fetch as blob...');
       try {
-        blob = await uriToBlob(videoUri);
+        uploadBody = await uriToBlob(videoUri);
         console.log('[StorageService] Successfully converted unknown format to blob');
       } catch (fetchError) {
         console.error('[StorageService] Failed to fetch as blob:', fetchError);
-        return { 
-          success: false, 
-          error: `Unsupported video format. URI starts with: ${videoUri.substring(0, 20)}...` 
+        return {
+          success: false,
+          error: `Unsupported video format. URI starts with: ${videoUri.substring(0, 20)}...`
         };
       }
     }
@@ -285,7 +309,7 @@ export const uploadProfileVideo = async (
     // Upload to temporary location in profile-surf-videos bucket
     const { data, error } = await supabase.storage
       .from('profile-surf-videos')
-      .upload(tempFileName, blob, {
+      .upload(tempFileName, uploadBody, {
         contentType: finalMimeType,
         upsert: false, // Don't overwrite temp files
       });

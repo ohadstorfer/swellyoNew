@@ -2,9 +2,21 @@ import { Platform } from 'react-native';
 import { supabase, isSupabaseConfigured } from '../../config/supabase';
 import * as AuthSession from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
+import { GoogleSignin } from '@react-native-google-signin/google-signin';
 
 // Complete the web browser authentication session
 WebBrowser.maybeCompleteAuthSession();
+
+// Configure Google Sign-In for native mobile
+if (Platform.OS !== 'web') {
+  GoogleSignin.configure({
+    // Web client ID is required for signInWithIdToken to work with Supabase
+    webClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
+    // iOS client ID is set automatically by the config plugin from GoogleService-Info.plist
+    // but we can also set it explicitly if needed
+    iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
+  });
+}
 
 export interface User {
   id: string; // Supabase uses UUID strings
@@ -159,77 +171,46 @@ class SupabaseAuthService {
   }
 
   /**
-   * Mobile implementation using Supabase OAuth with expo-auth-session (PKCE flow).
+   * Mobile implementation using native Google Sign-In + Supabase signInWithIdToken.
    *
-   * With PKCE, the redirect URL contains a `code` query parameter (not tokens
-   * in the hash). We exchange the code for a session using
-   * `supabase.auth.exchangeCodeForSession(code)`.
+   * This bypasses Supabase's OAuth redirect flow entirely, avoiding the known
+   * issue where Supabase blocks exp:// redirect URLs containing IP addresses.
+   * Instead, we authenticate natively with Google and pass the ID token to Supabase.
    */
   private async signInWithGoogleMobile(): Promise<User> {
     try {
-      console.log('Starting Supabase Google OAuth for mobile...');
+      console.log('Starting native Google Sign-In for mobile...');
 
-      const redirectUri = AuthSession.makeRedirectUri({});
+      // Check if Google Play Services are available (Android only, always true on iOS)
+      await GoogleSignin.hasPlayServices();
 
-      if (__DEV__) {
-        console.log('Redirect URI:', redirectUri);
+      // Trigger the native Google Sign-In flow
+      const signInResult = await GoogleSignin.signIn();
+
+      const idToken = signInResult?.data?.idToken;
+      if (!idToken) {
+        throw new Error('No ID token returned from Google Sign-In');
       }
 
-      const { data, error } = await supabase.auth.signInWithOAuth({
+      console.log('Got Google ID token, exchanging with Supabase...');
+
+      // Pass the Google ID token to Supabase — no redirect URLs needed
+      const { data: sessionData, error } = await supabase.auth.signInWithIdToken({
         provider: 'google',
-        options: {
-          redirectTo: redirectUri,
-          queryParams: {
-            prompt: 'select_account',
-          },
-        },
+        token: idToken,
       });
 
       if (error) {
         throw error;
       }
 
-      if (!data.url) {
-        throw new Error('No OAuth URL returned from Supabase');
+      if (!sessionData.session) {
+        throw new Error('No session returned from Supabase');
       }
 
-      const result = await WebBrowser.openAuthSessionAsync(
-        data.url,
-        redirectUri
-      );
-
-      if (result.type === 'cancel') {
-        throw new Error('Sign in was cancelled');
-      }
-
-      if (result.type === 'success' && result.url) {
-        const url = new URL(result.url);
-
-        // PKCE flow: exchange the authorization code for a session
-        const code = url.searchParams.get('code');
-        if (code) {
-          const { data: sessionData, error: sessionError } =
-            await supabase.auth.exchangeCodeForSession(code);
-
-          if (sessionError) {
-            throw sessionError;
-          }
-
-          if (sessionData.session) {
-            return this.convertSupabaseUserToAppUser(sessionData.session.user);
-          }
-        }
-
-        // Fallback: session may have been established via another mechanism
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session?.user) {
-          return this.convertSupabaseUserToAppUser(session.user);
-        }
-      }
-
-      throw new Error('Failed to complete OAuth flow');
+      return this.convertSupabaseUserToAppUser(sessionData.session.user);
     } catch (error: any) {
-      console.error('Error in mobile Google OAuth:', error);
+      console.error('Error in mobile Google Sign-In:', error);
       throw error;
     }
   }

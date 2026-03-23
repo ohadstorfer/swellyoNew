@@ -33,6 +33,8 @@ interface DestinationCardsCarouselCopyProps {
   parentScrollNativeRef?: React.RefObject<unknown> | null;
   /** Parent scroll gesture (kept for API compatibility, unused with native scroll). */
   parentScrollGesture?: unknown;
+  /** Called when a TextInput inside a card receives focus (e.g. to scroll chat into view). */
+  onInputFocus?: () => void;
 }
 
 export const DestinationCardsCarouselCopy: React.FC<DestinationCardsCarouselCopyProps> = ({
@@ -44,8 +46,10 @@ export const DestinationCardsCarouselCopy: React.FC<DestinationCardsCarouselCopy
   useMapPickerCard = true,
   parentScrollNativeRef,
   parentScrollGesture,
+  onInputFocus,
 }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [carouselScrollEnabled, setCarouselScrollEnabled] = useState(true);
   const currentIndexRef = useRef(0);
   currentIndexRef.current = currentIndex;
   const itemWidthRef = useRef(0);
@@ -131,11 +135,6 @@ export const DestinationCardsCarouselCopy: React.FC<DestinationCardsCarouselCopy
         0,
         Math.min(destinations.length - 1, Math.round(offsetX / itemWidth))
       );
-      const targetOffset = nearestIndex * itemWidth;
-      flatListRef.current?.scrollToOffset({
-        offset: targetOffset,
-        animated: true,
-      });
       currentIndexRef.current = nearestIndex;
       setCurrentIndex(nearestIndex);
     },
@@ -151,25 +150,16 @@ export const DestinationCardsCarouselCopy: React.FC<DestinationCardsCarouselCopy
     }, FOCUS_NEXT_INPUT_DELAY_MS);
   };
 
-  const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
-    if (viewableItems.length > 0) {
-      const index = viewableItems[0].index;
-      if (index != null) {
-        setCurrentIndex(index);
-      }
-    }
-  }).current;
-
-  const viewabilityConfig = useRef({
-    itemVisiblePercentThreshold: 50,
-  }).current;
-
   const snapToOffsets =
     destinations.length > 0
       ? destinations.map((_, i) => i * itemWidth)
       : undefined;
 
   const listFooterComponent = fullWidth ? <View style={{ width: PEEK }} /> : undefined;
+
+  const handleSetParentScrollEnabled = useCallback((enabled: boolean) => {
+    setCarouselScrollEnabled(enabled);
+  }, []);
 
   const onSwipeExcludeZonesLayout = useCallback(
     (index: number, zones: { timeUnit: SwipeExcludeZoneRect; areaInput: SwipeExcludeZoneRect }) => {
@@ -193,7 +183,7 @@ export const DestinationCardsCarouselCopy: React.FC<DestinationCardsCarouselCopy
         <FlatList
           ref={setFlatListRef}
           data={destinations}
-          scrollEnabled
+          scrollEnabled={carouselScrollEnabled}
           keyboardShouldPersistTaps="always"
           renderItem={({ item, index }) => {
             const cardData = destinationData[item];
@@ -226,6 +216,8 @@ export const DestinationCardsCarouselCopy: React.FC<DestinationCardsCarouselCopy
               initialTimeUnit,
               onSwipeExcludeZonesLayout,
               isCurrentCard: index === currentIndex,
+              onSetParentScrollEnabled: handleSetParentScrollEnabled,
+              onInputFocus,
             };
             return (
               <View
@@ -259,10 +251,7 @@ export const DestinationCardsCarouselCopy: React.FC<DestinationCardsCarouselCopy
           snapToInterval={itemWidth}
           snapToOffsets={snapToOffsets}
           snapToAlignment="start"
-          onScrollEndDrag={handleScrollEnd}
           onMomentumScrollEnd={handleScrollEnd}
-          onViewableItemsChanged={onViewableItemsChanged}
-          viewabilityConfig={viewabilityConfig}
           contentContainerStyle={[
             styles.carouselContent,
             fullWidth && styles.carouselContentFullWidth,

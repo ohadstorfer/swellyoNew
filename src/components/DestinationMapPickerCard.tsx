@@ -86,6 +86,9 @@ interface DestinationMapPickerCardProps {
     zones: { timeUnit: SwipeExcludeZoneRect; areaInput: SwipeExcludeZoneRect }
   ) => void;
   isCurrentCard?: boolean;
+  onSetParentScrollEnabled?: (enabled: boolean) => void;
+  /** Called when a TextInput inside this card receives focus (native only). */
+  onInputFocus?: () => void;
 }
 
 export interface DestinationMapPickerCardRef {
@@ -99,7 +102,7 @@ const UNIT_LABELS: Record<TimeUnit, string> = { days: 'Days', weeks: 'Weeks', mo
 const UNIT_ITEM_WIDTH = 58;
 const UNIT_CAROUSEL_CONTAINER_WIDTH = 179;
 /** Minimum horizontal drag (px) to advance/retreat one time unit. */
-const SWIPE_THRESHOLD = 20;
+const SWIPE_THRESHOLD = 12;
 
 /** Saved place: identified by placeId, shown by displayLabel (e.g. formatted_address or name). */
 interface SavedPlace {
@@ -137,6 +140,8 @@ export const DestinationMapPickerCard = forwardRef<
     initialTimeUnit,
     onSwipeExcludeZonesLayout,
     isCurrentCard,
+    onSetParentScrollEnabled,
+    onInputFocus,
   },
   ref
 ) {
@@ -269,9 +274,12 @@ export const DestinationMapPickerCard = forwardRef<
 
   const [countryImageFailed, setCountryImageFailed] = useState(false);
   const [pexelsImageUrl, setPexelsImageUrl] = useState<string | null>(null);
+  const bucketImageErrorHandledRef = useRef(false);
   const countryImageUrl = getCountryImageFromStorage(flagKey);
   const countryFlagUrl = getCountryFlag(flagKey);
   const handleBucketImageError = async () => {
+    if (bucketImageErrorHandledRef.current) return;
+    bucketImageErrorHandledRef.current = true;
     setCountryImageFailed(true);
     const url = await getCountryImageFromPexels(flagKey);
     if (url) setPexelsImageUrl(url);
@@ -283,6 +291,7 @@ export const DestinationMapPickerCard = forwardRef<
   useEffect(() => {
     setCountryImageFailed(false);
     setPexelsImageUrl(null);
+    bucketImageErrorHandledRef.current = false;
   }, [destination]);
 
   const handleTimeValueChange = (text: string) => {
@@ -309,21 +318,30 @@ export const DestinationMapPickerCard = forwardRef<
     setTimeValue(cleanedText);
   };
 
+  const onSetParentScrollEnabledRef = useRef(onSetParentScrollEnabled);
+  onSetParentScrollEnabledRef.current = onSetParentScrollEnabled;
+
   const unitPanResponder = useMemo(
     () =>
       PanResponder.create({
-        onStartShouldSetPanResponder: () => false,
+        onStartShouldSetPanResponder: () => Platform.OS !== 'web' && !isReadOnly,
         onMoveShouldSetPanResponderCapture: (_, gestureState) => {
           if (isReadOnly) return false;
           const { dx, dy } = gestureState;
-          return Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 4;
+          return Math.abs(dx) > Math.abs(dy) * 0.5 && Math.abs(dx) > 4;
         },
-        onPanResponderGrant: () => {},
+        onPanResponderGrant: () => {
+          onSetParentScrollEnabledRef.current?.(false);
+        },
         onPanResponderMove: () => {},
         onPanResponderRelease: (_, gestureState) => {
           const { dx } = gestureState;
           const direction = dx > SWIPE_THRESHOLD ? -1 : dx < -SWIPE_THRESHOLD ? 1 : 0;
           stepTimeUnit(direction);
+          onSetParentScrollEnabledRef.current?.(true);
+        },
+        onPanResponderTerminate: () => {
+          onSetParentScrollEnabledRef.current?.(true);
         },
       }),
     [isReadOnly, stepTimeUnit]
@@ -450,6 +468,11 @@ export const DestinationMapPickerCard = forwardRef<
                         });
                         setQuery(text);
                       }}
+                      onFocus={() => {
+                        if (Platform.OS !== 'web' && onInputFocus) {
+                          setTimeout(() => onInputFocus(), 300);
+                        }
+                      }}
                       placeholder={places.length === 0 ? 'City/town/surf spots...' : 'Add another...'}
                       placeholderTextColor="#A0A0A0"
                       editable={!isReadOnly && !!apiKey}
@@ -478,6 +501,11 @@ export const DestinationMapPickerCard = forwardRef<
                       style={[styles.timeInput, isReadOnly && styles.inputReadOnly]}
                       value={timeValue}
                       onChangeText={handleTimeValueChange}
+                      onFocus={() => {
+                        if (Platform.OS !== 'web' && onInputFocus) {
+                          setTimeout(() => onInputFocus(), 300);
+                        }
+                      }}
                       placeholder="🕝 Time spent"
                       placeholderTextColor="#A0A0A0"
                       keyboardType="decimal-pad"
@@ -655,7 +683,7 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     paddingVertical: 4,
     paddingHorizontal: 0,
-    outlineStyle: 'none',
+    ...(Platform.OS === 'web' && { outlineStyle: 'none' as any }),
   },
   inputRowTextInputDisabled: { color: '#999' },
   timeInputContainer: { width: '100%' },
@@ -680,7 +708,7 @@ const styles = StyleSheet.create({
     fontWeight: '400',
     color: colors.textPrimary,
     lineHeight: 22,
-    outlineStyle: 'none',
+    ...(Platform.OS === 'web' && { outlineStyle: 'none' as any }),
   },
   inputReadOnly: { opacity: 0.6, backgroundColor: '#F5F5F5' },
   unitCarouselContainer: {

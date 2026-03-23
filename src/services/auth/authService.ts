@@ -184,7 +184,7 @@ class AuthService {
       }
 
       // Use expo-auth-session for OAuth flow
-      const redirectUri = AuthSession.makeRedirectUri({});
+      const redirectUri = AuthSession.makeRedirectUri({ scheme: 'swellyo' });
 
       const discovery = {
         authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',

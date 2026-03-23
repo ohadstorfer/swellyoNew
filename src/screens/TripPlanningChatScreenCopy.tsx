@@ -2,7 +2,6 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   View,
   StyleSheet,
-  SafeAreaView,
   ScrollView,
   TouchableOpacity,
   Alert,
@@ -16,6 +15,7 @@ import {
   PanResponder,
   Modal,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Path } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons';
@@ -34,6 +34,7 @@ import {
   removeFilterFromRequestData,
   type FilterDisplayItem,
 } from '../utils/tripPlanningFilters';
+import { useChatKeyboardScroll } from '../hooks/useChatKeyboardScroll';
 
 /** Split filter label into prefix and value for chip display (e.g. "Origin – Israel" -> prefix "Origin", value "Israel"). */
 function getLabelParts(label: string): { prefix: string; value: string } | null {
@@ -250,6 +251,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   const [trashHoverProgress, setTrashHoverProgress] = useState(0);
   const [showNewChatModal, setShowNewChatModal] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
+  const { handleScroll, handleContentSizeChange, handleLayout, scrollToBottom } = useChatKeyboardScroll(scrollViewRef);
   // Drag-to-delete: ghost chip position and dragged item
   const [dragState, setDragState] = useState<{
     item: FilterDisplayItem;
@@ -939,11 +941,12 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     
     setMessages(prev => [...prev, userMessage]);
     setInputText('');
+    scrollToBottom();
     setIsLoading(true);
 
     try {
       let response: SwellyChatResponse;
-      
+
       if (chatId) {
         // Continue existing chat
         const continuePayload: { message: string; existing_query_filters?: any; adding_filters?: boolean; existing_destination_country?: string | null; existing_area?: string | null } = {
@@ -1091,16 +1094,6 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     }
   };
 
-  const scrollToBottom = () => {
-    setTimeout(() => {
-      scrollViewRef.current?.scrollToEnd({ animated: true });
-    }, 100);
-  };
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages, isInitializing, isLoading, pendingSearch, lastMatchRequestData]);
-
   const handleSendMessage = async (userId: string) => {
     console.log('[TripPlanningChatScreen] handleSendMessage called with userId:', userId);
     console.log('[TripPlanningChatScreen] onStartConversation exists:', !!onStartConversation);
@@ -1238,7 +1231,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
       setIsFinished(false);
       setExistingFiltersForAdd(null);
       setFiltersMenuVisible(false);
-      setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100);
+      scrollToBottom();
     }
     // For 'more' action, skip the separate PATCH — attach-matches handles both
     // the selectedAction marking and the placeholder append atomically, avoiding race conditions.
@@ -1358,7 +1351,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             if (idToUnblock) setMessageIdsUnblockedByFilterDeletion(prev => ({ ...prev, [idToUnblock]: true }));
             if (res.newMessage) {
               setMessages(prev => [...prev, { ...res.newMessage!, id: res.newMessage!.id, text: res.newMessage!.text, isUser: false, timestamp: res.newMessage!.timestamp }]);
-              setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100);
+              scrollToBottom();
             }
           }
         }).catch(() => setAwaitingFilterRemovalResponse(false));
@@ -1391,7 +1384,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             setMessageIdsUnblockedByFilterDeletion(prev => ({ ...prev, [filterSourceMessage.id]: true }));
             if (res.newMessage) {
               setMessages(prev => [...prev, { ...res.newMessage!, id: res.newMessage!.id, text: res.newMessage!.text, isUser: false, timestamp: res.newMessage!.timestamp }]);
-              setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100);
+              scrollToBottom();
             }
           }
         }).catch(() => setAwaitingFilterRemovalResponse(false));
@@ -1640,7 +1633,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   };
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       {/* Header */}
       <View style={styles.headerContainer}>
         <View style={styles.header}>
@@ -1705,6 +1698,10 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             style={styles.messagesList}
             contentContainerStyle={styles.messagesContent}
             showsVerticalScrollIndicator={false}
+            onScroll={handleScroll}
+            scrollEventThrottle={16}
+            onContentSizeChange={handleContentSizeChange}
+            onLayout={handleLayout}
           >
             {messages.map(renderMessage)}
             {(isLoading || isInitializing || isAwaitingFilterRemovalResponse) && (
@@ -1929,6 +1926,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             </View>
           </Animated.View>
         )}
+        <SafeAreaView edges={['bottom']} />
       </KeyboardAvoidingView>
       {/* New Chat Confirmation Modal */}
       <Modal
@@ -1980,7 +1978,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
           </Pressable>
         </Pressable>
       </Modal>
-    </View>
+    </SafeAreaView>
   );
 };
 
@@ -2050,11 +2048,10 @@ const styles = StyleSheet.create({
   ellipseBackgroundNative: {
     position: 'absolute',
     width: '105%',
-    height: '105%',
-    top: '-2.5%',
+    height: '98%',
     left: '-2.5%',
     zIndex: 0,
-    borderRadius: 35,
+    borderRadius: 45,
     borderWidth: 2,
     borderColor: '#B72DF2',
     backgroundColor: '#E0E0E0',

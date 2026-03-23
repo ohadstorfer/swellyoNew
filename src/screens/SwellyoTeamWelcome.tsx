@@ -2,13 +2,13 @@ import React from 'react';
 import {
   View,
   StyleSheet,
-  SafeAreaView,
   ScrollView,
   TouchableOpacity,
   Image,
   ImageBackground,
   Platform,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../components/Text';
@@ -36,7 +36,9 @@ Drop in with Swelly, start connecting and help us grow the Swellyo community.
  - Jake & Eyal`;
 
   return (
-    <SafeAreaView style={styles.container}>
+    
+    <SafeAreaView style={{flex: 1, backgroundColor: '#212121' }} edges={['top']}>
+      <View style={{ flex: 1, backgroundColor: '#F7F7F7' }}>
       {/* Header */}
       <View style={styles.headerContainer}>
         <View style={styles.header}>
@@ -130,6 +132,8 @@ Drop in with Swelly, start connecting and help us grow the Swellyo community.
           <Text style={styles.dropInButtonText}>Drop In With Swelly!</Text>
         </TouchableOpacity>
       </View>
+    
+    </View>
     </SafeAreaView>
   );
 };
@@ -156,6 +160,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
     gap: 16,
+    paddingTop: Platform.OS === 'web' ? 0 : 30,
+  
   },
   headerLeft: {
     flexDirection: 'row',

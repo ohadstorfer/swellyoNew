@@ -11,8 +11,15 @@ import {
 } from 'react-native';
 import { Text } from './Text';
 
-// WebView is native-only; avoid importing on web to prevent bundle errors
-const WebView = Platform.OS === 'web' ? null : require('react-native-webview').WebView;
+// WebView is native-only; wrap in try/catch so Expo Go (which lacks the native module) doesn't crash
+let WebView: any = null;
+if (Platform.OS !== 'web') {
+  try {
+    WebView = require('react-native-webview').WebView;
+  } catch {
+    console.warn('react-native-webview not available, map picker will be disabled');
+  }
+}
 import { colors } from '../styles/theme';
 
 /** Card-sized inline map: receives query from parent, sends PLACE_SELECTED on select. */

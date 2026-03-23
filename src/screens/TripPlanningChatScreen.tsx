@@ -2,7 +2,6 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   StyleSheet,
-  SafeAreaView,
   ScrollView,
   TouchableOpacity,
   Alert,
@@ -12,6 +11,7 @@ import {
   ImageBackground,
   Animated,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Path } from 'react-native-svg';
 import { Text } from '../components/Text';
@@ -27,6 +27,7 @@ import { supabaseAuthService } from '../services/auth/supabaseAuthService';
 import { MatchedUser, TripPlanningRequest } from '../types/tripPlanning';
 import { analyticsService } from '../services/analytics/analyticsService';
 import { ChatTextInput } from '../components/ChatTextInput';
+import { useChatKeyboardScroll } from '../hooks/useChatKeyboardScroll';
 
 /**
  * Count how many criteria are requested (helper function for UI)
@@ -246,6 +247,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   const [pendingSingleCriterionMatches, setPendingSingleCriterionMatches] = useState<MatchedUser[] | null>(null);
   const [singleCriterionType, setSingleCriterionType] = useState<string | null>(null);
   const scrollViewRef = useRef<ScrollView>(null);
+  const { handleScroll, handleContentSizeChange, handleLayout, scrollToBottom } = useChatKeyboardScroll(scrollViewRef);
 
   // Test API connection and initialize chat context on component mount
   useEffect(() => {
@@ -682,11 +684,12 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     
     setMessages(prev => [...prev, userMessage]);
     setInputText('');
+    scrollToBottom();
     setIsLoading(true);
 
     try {
       let response: SwellyChatResponse;
-      
+
       if (chatId) {
         // Continue existing chat
         console.log('Continuing chat with ID:', chatId);
@@ -1012,16 +1015,6 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     }
   };
 
-  const scrollToBottom = () => {
-    setTimeout(() => {
-      scrollViewRef.current?.scrollToEnd({ animated: true });
-    }, 100);
-  };
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages, isInitializing, isLoading]);
-
   const handleSendMessage = async (userId: string) => {
     console.log('[TripPlanningChatScreen] handleSendMessage called with userId:', userId);
     console.log('[TripPlanningChatScreen] onStartConversation exists:', !!onStartConversation);
@@ -1183,7 +1176,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       {/* Header */}
       <View style={styles.headerContainer}>
         <View style={styles.header}>
@@ -1248,6 +1241,10 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             style={styles.messagesList}
             contentContainerStyle={styles.messagesContent}
             showsVerticalScrollIndicator={false}
+            onScroll={handleScroll}
+            scrollEventThrottle={16}
+            onContentSizeChange={handleContentSizeChange}
+            onLayout={handleLayout}
           >
             {messages.map(renderMessage)}
             {(isLoading || isInitializing) && (
@@ -1279,6 +1276,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             }
           />
         </View>
+        <SafeAreaView edges={['bottom']} />
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -1350,11 +1348,10 @@ const styles = StyleSheet.create({
   ellipseBackgroundNative: {
     position: 'absolute',
     width: '105%',
-    height: '105%',
-    top: '-2.5%',
+    height: '98%',
     left: '-2.5%',
     zIndex: 0,
-    borderRadius: 35,
+    borderRadius: 45,
     borderWidth: 2,
     borderColor: '#B72DF2',
     backgroundColor: '#E0E0E0',

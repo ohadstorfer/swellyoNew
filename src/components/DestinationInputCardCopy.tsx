@@ -73,6 +73,9 @@ interface DestinationInputCardCopyProps {
     zones: { timeUnit: SwipeExcludeZoneRect; areaInput: SwipeExcludeZoneRect }
   ) => void;
   isCurrentCard?: boolean;
+  onSetParentScrollEnabled?: (enabled: boolean) => void;
+  /** Called when a TextInput inside this card receives focus (native only). */
+  onInputFocus?: () => void;
 }
 
 export interface DestinationInputCardCopyRef {
@@ -86,7 +89,7 @@ const UNIT_LABELS: Record<TimeUnit, string> = { days: 'Days', weeks: 'Weeks', mo
 const UNIT_ITEM_WIDTH = 58;
 const UNIT_CAROUSEL_CONTAINER_WIDTH = 179;
 /** Minimum horizontal drag (px) to advance/retreat one time unit. */
-const SWIPE_THRESHOLD = 20;
+const SWIPE_THRESHOLD = 12;
 
 export const DestinationInputCardCopy = forwardRef<
   DestinationInputCardCopyRef,
@@ -106,6 +109,7 @@ export const DestinationInputCardCopy = forwardRef<
     initialTimeUnit,
     onSwipeExcludeZonesLayout,
     isCurrentCard,
+    onSetParentScrollEnabled,
   },
   ref
 ) {
@@ -227,9 +231,12 @@ export const DestinationInputCardCopy = forwardRef<
 
   const [countryImageFailed, setCountryImageFailed] = useState(false);
   const [pexelsImageUrl, setPexelsImageUrl] = useState<string | null>(null);
+  const bucketImageErrorHandledRef = useRef(false);
   const countryImageUrl = getCountryImageFromStorage(flagKey);
   const countryFlagUrl = getCountryFlag(flagKey);
   const handleBucketImageError = async () => {
+    if (bucketImageErrorHandledRef.current) return;
+    bucketImageErrorHandledRef.current = true;
     setCountryImageFailed(true);
     const url = await getCountryImageFromPexels(flagKey);
     if (url) setPexelsImageUrl(url);
@@ -241,6 +248,7 @@ export const DestinationInputCardCopy = forwardRef<
   useEffect(() => {
     setCountryImageFailed(false);
     setPexelsImageUrl(null);
+    bucketImageErrorHandledRef.current = false;
   }, [destination]);
 
   const handleTimeValueChange = (text: string) => {
@@ -267,21 +275,33 @@ export const DestinationInputCardCopy = forwardRef<
     setTimeValue(cleanedText);
   };
 
+  const onSetParentScrollEnabledRef = useRef(onSetParentScrollEnabled);
+  onSetParentScrollEnabledRef.current = onSetParentScrollEnabled;
+
   const unitPanResponder = useMemo(
     () =>
       PanResponder.create({
-        onStartShouldSetPanResponder: () => false,
+        // On native, claim the responder immediately on touch-start so the
+        // parent FlatList's native scroll recognizer doesn't grab the gesture.
+        // On web the FlatList is CSS overflow-scroll, so capture-on-move works.
+        onStartShouldSetPanResponder: () => Platform.OS !== 'web' && !isReadOnly,
         onMoveShouldSetPanResponderCapture: (_, gestureState) => {
           if (isReadOnly) return false;
           const { dx, dy } = gestureState;
-          return Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 4;
+          return Math.abs(dx) > Math.abs(dy) * 0.5 && Math.abs(dx) > 4;
         },
-        onPanResponderGrant: () => {},
+        onPanResponderGrant: () => {
+          onSetParentScrollEnabledRef.current?.(false);
+        },
         onPanResponderMove: () => {},
         onPanResponderRelease: (_, gestureState) => {
           const { dx } = gestureState;
           const direction = dx > SWIPE_THRESHOLD ? -1 : dx < -SWIPE_THRESHOLD ? 1 : 0;
           stepTimeUnit(direction);
+          onSetParentScrollEnabledRef.current?.(true);
+        },
+        onPanResponderTerminate: () => {
+          onSetParentScrollEnabledRef.current?.(true);
         },
       }),
     [isReadOnly, stepTimeUnit]

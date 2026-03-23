@@ -11,8 +11,8 @@ import {
   Alert,
   Animated,
   ActivityIndicator,
-  SafeAreaView,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '../config/supabase';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -1117,8 +1117,8 @@ export default function ConversationsScreen({
 
   const Container = Platform.OS === 'web' ? View : SafeAreaView;
 
-  return (
-    <Container style={styles.container}>
+  const content = (
+    <Container style={styles.container} {...(Platform.OS !== 'web' && { edges: ['top'] as const })}>
       {/* Survey Bubble - Fixed position, above everything (MVP mode only) */}
       {showSurveyBubble && isMVPMode && (
         <TouchableOpacity 
@@ -1528,6 +1528,17 @@ export default function ConversationsScreen({
       )}
     </Container>
   );
+
+  // On native, wrap in a View with the dark background so it extends below the safe area
+  if (Platform.OS !== 'web') {
+    return (
+      <View style={{ flex: 1, backgroundColor: '#FAFAFA' }}>
+        {content}
+      </View>
+    );
+  }
+
+  return content;
 }
 
 const styles = StyleSheet.create({
@@ -1885,7 +1896,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     alignItems: 'center',
-    paddingBottom: 16,
+    paddingBottom: Platform.OS === 'web' ? 16 : 32,
     zIndex: 10,
   },
   swellyContainer: {
@@ -1983,7 +1994,7 @@ const styles = StyleSheet.create({
   },
   swellyLastMessage: {
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '400',
     lineHeight: 24,
     color: '#333333',
