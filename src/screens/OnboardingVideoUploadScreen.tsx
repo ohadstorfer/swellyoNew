@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Text } from '../components/Text';
 import { colors, spacing } from '../styles/theme';
 import { useIsDesktopWeb, responsiveWidth } from '../utils/responsive';
@@ -480,11 +481,17 @@ export const OnboardingVideoUploadScreen: React.FC<OnboardingVideoUploadScreenPr
         {/* Button */}
         <View style={styles.buttonContainer}>
           <TouchableOpacity
-            onPress={handleNext}
+            onPress={hasUserVideo ? handleNext : onSkip}
             activeOpacity={0.8}
-            style={[styles.actionButton, { width: buttonWidth }]}
           >
-            <Text style={styles.buttonText}>Next</Text>
+            <LinearGradient
+              colors={['#00A2B6', '#0788B0']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={[styles.gradientButton, { width: buttonWidth }]}
+            >
+              <Text style={styles.buttonText}>{hasUserVideo ? 'Next' : 'Skip'}</Text>
+            </LinearGradient>
           </TouchableOpacity>
         </View>
       </View>
@@ -687,10 +694,9 @@ const styles = StyleSheet.create({
     width: '100%',
     flexShrink: 0,
   },
-  actionButton: {
+  gradientButton: {
     height: 56,
     borderRadius: 999,
-    backgroundColor: '#212121',
     justifyContent: 'center',
     alignItems: 'center',
   },
