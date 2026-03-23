@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   StyleSheet,
@@ -31,6 +31,14 @@ export const FullscreenImageViewer: React.FC<FullscreenImageViewerProps> = ({
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
   const [imageLoaded, setImageLoaded] = useState(false);
+
+  useEffect(() => {
+    if (visible) {
+      setIsLoading(true);
+      setHasError(false);
+      setImageLoaded(false);
+    }
+  }, [visible]);
 
   const handleImageLoad = () => {
     setIsLoading(false);

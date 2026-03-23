@@ -495,6 +495,7 @@ export const AppContent: React.FC = () => {
     otherUserName: string;
     otherUserAvatar: string | null;
     fromTripPlanning?: boolean; // If true, conversation was created from trip planning recommendations
+    fromTripPlanningCopy?: boolean; // If true, conversation was created from the Copy variant of trip planning
   } | null>(null);
   
   // State for conversation loading screen
@@ -504,6 +505,7 @@ export const AppContent: React.FC = () => {
     otherUserName: string;
     otherUserAvatar: string | null;
     fromTripPlanning: boolean;
+    fromTripPlanningCopy?: boolean;
   } | null>(null);
   const [currentUserAvatar, setCurrentUserAvatar] = useState<string | null>(null);
   const [currentUserName, setCurrentUserName] = useState<string>('User');
@@ -629,11 +631,11 @@ export const AppContent: React.FC = () => {
   // Track which service instance the copy screen should use
   const [activeCopyService, setActiveCopyService] = useState<'copy' | 'copy-copy'>('copy');
 
-  const handleSwellyPress = async () => {
-    // Both buttons open TripPlanningChatScreenCopy, but with different edge functions
-    await restoreLatestChatIfNeeded();
+  const handleSwellyPress = () => {
     setActiveCopyService('copy');
     setShowTripPlanningChatCopy(true);
+    // Restore chat in background - don't block navigation
+    restoreLatestChatIfNeeded();
   };
 
   const handleSwellyPressCopy = async () => {
@@ -806,6 +808,7 @@ export const AppContent: React.FC = () => {
           otherUserName: existingConv.other_user.name || 'User',
           otherUserAvatar: existingConv.other_user.profile_image_url || null,
           fromTripPlanning: isFromTripPlanning,
+          fromTripPlanningCopy: isFromTripPlanning && showTripPlanningChatCopy,
         });
         console.log('[AppContent] selectedConversation state updated');
       } else {
@@ -840,6 +843,7 @@ export const AppContent: React.FC = () => {
             otherUserName: surferData?.name || 'User',
             otherUserAvatar: surferData?.profile_image_url || null,
             fromTripPlanning: true,
+            fromTripPlanningCopy: showTripPlanningChatCopy,
           });
           console.log('[AppContent] pendingConversation state updated');
           console.log('[AppContent] Setting showConversationLoading to true...');
@@ -895,6 +899,7 @@ export const AppContent: React.FC = () => {
         otherUserName: pendingConversation.otherUserName,
         otherUserAvatar: pendingConversation.otherUserAvatar,
         fromTripPlanning: pendingConversation.fromTripPlanning,
+        fromTripPlanningCopy: pendingConversation.fromTripPlanningCopy,
       });
       setShowConversationLoading(false);
       setPendingConversation(null);
@@ -907,8 +912,13 @@ export const AppContent: React.FC = () => {
   const handleBackFromChat = () => {
     // If user came from trip planning, return there
     if (selectedConversation?.fromTripPlanning) {
+      const goBackToCopy = selectedConversation?.fromTripPlanningCopy;
       setSelectedConversation(null);
-      setShowTripPlanningChat(true);
+      if (goBackToCopy) {
+        setShowTripPlanningChatCopy(true);
+      } else {
+        setShowTripPlanningChat(true);
+      }
       // Reset profile flag since we're going back to trip planning
       setProfileFromTripPlanningChat(false);
     } else {
@@ -1107,7 +1117,7 @@ export const AppContent: React.FC = () => {
     if (showTripPlanningChatCopy) {
       return (
         <TripPlanningChatScreenCopy
-          onChatComplete={() => setShowTripPlanningChatCopy(false)}
+          onChatComplete={() => { setShowTripPlanningChatCopy(false); setShowTripPlanningChat(false); }}
           onViewUserProfile={handleViewUserProfile}
           onStartConversation={handleStartConversation}
           persistedChatId={tripPlanningChatId}

@@ -282,20 +282,11 @@ const conversationReducer = (state: Conversation[], action: ConversationAction):
       // Add new conversations that don't exist in state
       const newOnes = newConversations.filter(c => !existingIds.has(c.id));
       
-      // For initial load (offset=0), replace everything and sort
-      // For subsequent loads, we should preserve order (new ones go to end)
-      // But since REPLACE_ALL is only used for offset=0, we can sort
-      // However, to avoid expensive sorting on every update, only sort if we have new ones
-      if (newOnes.length > 0) {
-        // Merge and sort only if we added new conversations
-        const merged = [...updated, ...newOnes];
-        return merged.sort((a, b) => 
-          new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
-        );
-      }
-      
-      // No new conversations, just return updated existing ones (preserve order)
-      return updated;
+      // Always sort by updated_at to ensure correct order after cache → server refresh
+      const merged = [...updated, ...newOnes];
+      return merged.sort((a, b) =>
+        new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+      );
     }
       
     case 'APPEND_CONVERSATIONS': {

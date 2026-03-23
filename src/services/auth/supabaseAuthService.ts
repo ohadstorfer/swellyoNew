@@ -2,21 +2,22 @@ import { Platform } from 'react-native';
 import { supabase, isSupabaseConfigured } from '../../config/supabase';
 import * as AuthSession from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
-import { GoogleSignin } from '@react-native-google-signin/google-signin';
+// Lazy-load native Google Sign-In to avoid crash in Expo Go
+let GoogleSignin: any = null;
+if (Platform.OS !== 'web') {
+  try {
+    GoogleSignin = require('@react-native-google-signin/google-signin').GoogleSignin;
+    GoogleSignin.configure({
+      webClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
+      iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
+    });
+  } catch (e) {
+    console.warn('Google Sign-In native module not available (Expo Go?):', e);
+  }
+}
 
 // Complete the web browser authentication session
 WebBrowser.maybeCompleteAuthSession();
-
-// Configure Google Sign-In for native mobile
-if (Platform.OS !== 'web') {
-  GoogleSignin.configure({
-    // Web client ID is required for signInWithIdToken to work with Supabase
-    webClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
-    // iOS client ID is set automatically by the config plugin from GoogleService-Info.plist
-    // but we can also set it explicitly if needed
-    iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
-  });
-}
 
 export interface User {
   id: string; // Supabase uses UUID strings

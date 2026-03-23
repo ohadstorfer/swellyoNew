@@ -251,6 +251,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   const [trashHoverProgress, setTrashHoverProgress] = useState(0);
   const [showNewChatModal, setShowNewChatModal] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
+  const loadingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { handleScroll, handleContentSizeChange, handleLayout, scrollToBottom } = useChatKeyboardScroll(scrollViewRef);
   // Drag-to-delete: ghost chip position and dragged item
   const [dragState, setDragState] = useState<{
@@ -708,9 +709,26 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     initializeChat();
   }, [formData]); // Re-run if formData changes
 
+  const startLoadingWithTimeout = () => {
+    setIsLoading(true);
+    if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
+    loadingTimeoutRef.current = setTimeout(() => {
+      console.warn('[TripPlanningChatScreen] Loading timeout reached (30s), forcing isLoading=false');
+      setIsLoading(false);
+    }, 30000);
+  };
+
+  const stopLoading = () => {
+    setIsLoading(false);
+    if (loadingTimeoutRef.current) {
+      clearTimeout(loadingTimeoutRef.current);
+      loadingTimeoutRef.current = null;
+    }
+  };
+
   const runFindMatches = async (currentChatId: string, tripPlanningData: any, excludePrevious: boolean = false) => {
     if (!currentChatId) return;
-    setIsLoading(true);
+    startLoadingWithTimeout();
     const requestData = {
       destination_country: tripPlanningData.destination_country,
       area: tripPlanningData.area || null,
@@ -830,7 +848,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
       }]);
     } finally {
-      setIsLoading(false);
+      stopLoading();
     }
   };
 
@@ -942,7 +960,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     setMessages(prev => [...prev, userMessage]);
     setInputText('');
     scrollToBottom();
-    setIsLoading(true);
+    startLoadingWithTimeout();
 
     try {
       let response: SwellyChatResponse;
@@ -993,7 +1011,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
           if (chatId) {
             const dataToSearch = response.data?.queryFilters != null ? response.data : pendingSearch.data;
             if (hasSearchableFilters(dataToSearch)) {
-              runFindMatches(chatId, dataToSearch);
+              await runFindMatches(chatId, dataToSearch);
             } else {
               const noFilterMsg: Message = {
                 id: (Date.now() + 1).toString(),
@@ -1054,7 +1072,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         // Backend explicitly told us to search
         if (chatId && response.data) {
           if (hasSearchableFilters(response.data)) {
-            runFindMatches(chatId, response.data);
+            await runFindMatches(chatId, response.data);
           } else {
             const noFilterMsg: Message = {
               id: (Date.now() + 1).toString(),
@@ -1090,7 +1108,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
       if (!awaitingSearchDecision) {
         setExistingFiltersForAdd(null);
       }
-      setIsLoading(false);
+      stopLoading();
     }
   };
 
@@ -1220,7 +1238,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         return [...updated, addFilterBotMessage];
       }
       if (action === 'more' && chatId && requestData != null) {
-        runFindMatches(chatId, requestData, true);
+        runFindMatches(chatId, requestData, true).catch(() => stopLoading());
         return updated;
       }
       return updated;
@@ -1254,7 +1272,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     setShowNewChatModal(false);
     // Reset all conversation state
     setMessages([]);
-    setIsLoading(true);
+    startLoadingWithTimeout();
     setIsInitializing(true);
     setIsFinished(false);
     setMatchedUsers([]);
@@ -1310,7 +1328,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
       }]);
     } finally {
-      setIsLoading(false);
+      stopLoading();
       setIsInitializing(false);
     }
   };
