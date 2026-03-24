@@ -1633,6 +1633,21 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
                     </Svg>
                     <Text style={styles.reviewFiltersButtonText}>Review filters</Text>
                   </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => {
+                      if (chatId && pendingSearch) {
+                        setAwaitingSearchDecision(false);
+                        runFindMatches(chatId, pendingSearch.data);
+                      }
+                    }}
+                    activeOpacity={0.8}
+                    style={styles.searchNowButton}
+                  >
+                    <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+                      <Path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" fill="#555" />
+                    </Svg>
+                    <Text style={styles.searchNowButtonText}>Search</Text>
+                  </TouchableOpacity>
                 </View>
               )}
             </View>
@@ -2417,6 +2432,8 @@ const styles = StyleSheet.create({
   },
   reviewFiltersRow: {
     marginTop: 8,
+    flexDirection: 'row',
+    gap: 8,
   },
   reviewFiltersButton: {
     flexDirection: 'row',
@@ -2431,6 +2448,24 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.80)',
   },
   reviewFiltersButtonText: {
+    fontSize: 14,
+    color: '#555',
+    fontWeight: '500',
+    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat',
+  },
+  searchNowButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#999',
+    backgroundColor: 'rgba(255, 255, 255, 0.80)',
+  },
+  searchNowButtonText: {
     fontSize: 14,
     color: '#555',
     fontWeight: '500',

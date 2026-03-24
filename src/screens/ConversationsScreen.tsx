@@ -818,7 +818,7 @@ export default function ConversationsScreen({
                 styles.lastMessage,
                 Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
               ]} numberOfLines={1}>
-                {conv.last_message?.body || ''}
+                {conv.last_message?.body || 'You got a new match!'}
               </Text>
             )}
           </View>
@@ -974,7 +974,7 @@ export default function ConversationsScreen({
                 styles.lastMessage,
                 Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
               ]} numberOfLines={1}>
-                {conv.last_message?.body || ''}
+                {conv.last_message?.body || 'You got a new match!'}
               </Text>
             )}
           </View>

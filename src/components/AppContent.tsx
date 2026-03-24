@@ -25,6 +25,7 @@ import { useAuthGuard } from '../hooks/useAuthGuard';
 import { isFirstVideoReadyForBoardType, getVideoPreloadStatus, waitForVideoReady, preloadLoadingVideo, getLoadingVideoUrl } from '../services/media/videoPreloadService';
 import { STEP_WELCOME } from '../constants/onboardingSteps';
 import { swellyServiceCopy, swellyServiceCopyCopy } from '../services/swelly/swellyServiceCopy';
+import { findAndConnectMatches } from '../services/matching/onboardingMatchingService';
 
 export const AppContent: React.FC = () => {
   const { currentStep, formData, setCurrentStep, updateFormData, saveStepToSupabase, isComplete, markOnboardingComplete, isDemoUser, setIsDemoUser, setUser, resetOnboarding, user, isRestoringSession } = useOnboarding();
@@ -545,6 +546,18 @@ export const AppContent: React.FC = () => {
 
   const handleSaveAndGoToConversations = useCallback(() => {
     handleProfileBack();
+
+    // Fire-and-forget: find top 3 matches and create conversations in the background
+    findAndConnectMatches()
+      .then((result) => {
+        if (result && result.match_count > 0) {
+          console.log(`[AppContent] Created ${result.match_count} match conversations`);
+        }
+      })
+      .catch((err) => {
+        console.warn('[AppContent] Matching failed (non-blocking):', err);
+      });
+
     if (welcomeOverlayTimeoutRef.current) {
       clearTimeout(welcomeOverlayTimeoutRef.current);
       welcomeOverlayTimeoutRef.current = null;
