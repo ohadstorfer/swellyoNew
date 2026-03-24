@@ -1,4 +1,5 @@
 import { Platform } from 'react-native';
+import * as FileSystem from 'expo-file-system';
 import { getSurfLevelVideoFromStorage } from './videoService';
 
 const BOARD_VIDEO_DEFINITIONS: { [boardType: number]: Array<{ name: string; videoFileName: string; thumbnailFileName: string }> } = {
@@ -44,8 +45,11 @@ export interface VideoPreloadResult {
 const preloadStatusMap = new Map<string, VideoPreloadStatus>();
 const hiddenVideoElements = new Map<string, HTMLVideoElement>();
 const preloadLinks = new Map<string, HTMLLinkElement>(); // Track preload link elements
-/** Safari: original URL -> blob URL for instant playback (no second network request) */
+/** Safari/mobile web: original URL -> blob URL for instant playback (no second network request) */
 const blobUrlMap = new Map<string, string>();
+/** Native: original URL -> local file:// URI for instant playback (AVPlayer loads from disk) */
+const nativeFileMap = new Map<string, string>();
+const NATIVE_VIDEO_CACHE_DIR = `${FileSystem.cacheDirectory}video-preload/`;
 const HAVE_CURRENT_DATA = 2; // Less strict - video can play (Best Practice)
 const HAVE_FUTURE_DATA = 3; // More strict - video can play through
 
@@ -98,6 +102,16 @@ const needsSafariPreloadWorkaround = (): boolean => {
   return isIOS || isSafariDesktop;
 };
 
+/**
+ * Returns true on mobile browsers where preload="auto" on hidden video elements
+ * is unreliable. Mobile browsers deprioritize video loading for power/bandwidth savings,
+ * so we use fetch+blob URL instead for reliable preloading.
+ */
+const isMobileBrowser = (): boolean => {
+  if (typeof navigator === 'undefined' || !navigator.userAgent) return false;
+  return /iPhone|iPad|iPod|Android|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+};
+
 const preloadVideoWeb = async (url: string, priority: 'high' | 'normal' = 'normal'): Promise<VideoPreloadStatus> => {
   if (typeof document === 'undefined') return { url, ready: false, error: new Error('Document not available') };
   const existingStatus = preloadStatusMap.get(url);
@@ -133,9 +147,11 @@ const preloadVideoWeb = async (url: string, priority: 'high' | 'normal' = 'norma
   
   try {
     const useSafariWorkaround = needsSafariPreloadWorkaround();
+    const useBlobPreload = useSafariWorkaround || isMobileBrowser();
 
-    // Safari: fetch + blob URL so the player uses in-memory URL = instant playback (no second request)
-    if (useSafariWorkaround) {
+    // Mobile & Safari: fetch + blob URL so the player uses in-memory URL = instant playback (no second request)
+    // Mobile browsers deprioritize hidden video element preloading, so blob URLs are more reliable.
+    if (useBlobPreload) {
       try {
         const response = await fetch(url, { cache: 'force-cache' });
         if (!response.ok) throw new Error(`Fetch failed: ${response.statusText}`);
@@ -145,12 +161,12 @@ const preloadVideoWeb = async (url: string, priority: 'high' | 'normal' = 'norma
         const status: VideoPreloadStatus = { url, ready: true };
         preloadStatusMap.set(url, status);
         if (__DEV__) {
-          console.log(`[videoPreloadService] Safari blob preload ready: ${url}`);
+          console.log(`[videoPreloadService] Blob preload ready (mobile/Safari): ${url}`);
         }
         return status;
       } catch (fetchErr) {
         if (__DEV__) {
-          console.warn('[videoPreloadService] Safari fetch+blob failed, falling back to video element:', fetchErr);
+          console.warn('[videoPreloadService] fetch+blob failed, falling back to video element:', fetchErr);
         }
         preloadStatusMap.delete(url);
         // Fall through to hidden-video path below
@@ -316,19 +332,54 @@ const preloadVideoWeb = async (url: string, priority: 'high' | 'normal' = 'norma
   }
 };
 
+/**
+ * Native preload: download video to a local file.
+ * This is the native equivalent of web's blob URL approach.
+ * AVPlayer loads from file:// URI = instant playback, no network request.
+ */
 const preloadVideoNative = async (url: string): Promise<VideoPreloadStatus> => {
   const existingStatus = preloadStatusMap.get(url);
   if (existingStatus?.ready) return existingStatus;
+
+  // Mark in-progress
+  preloadStatusMap.set(url, { url, ready: false });
+
   try {
-    const response = await fetch(url, { cache: 'force-cache' });
-    if (!response.ok) throw new Error(`Failed to fetch video: ${response.statusText}`);
-    await response.blob();
-    const status: VideoPreloadStatus = { url, ready: true };
-    preloadStatusMap.set(url, status);
-    return status;
+    const fileName = encodeURIComponent(url.split('/').pop() || 'video.mp4');
+    const localUri = `${NATIVE_VIDEO_CACHE_DIR}${fileName}`;
+
+    // Check if already downloaded from a previous session
+    const fileInfo = await FileSystem.getInfoAsync(localUri);
+    if (fileInfo.exists && (fileInfo as any).size > 0) {
+      console.log(`[videoPreload] Native: already cached ${fileName}`);
+      nativeFileMap.set(url, localUri);
+      const status: VideoPreloadStatus = { url, ready: true };
+      preloadStatusMap.set(url, status);
+      return status;
+    }
+
+    // Ensure cache directory exists
+    await FileSystem.makeDirectoryAsync(NATIVE_VIDEO_CACHE_DIR, { intermediates: true });
+
+    // Download to local file
+    const t0 = Date.now();
+    const result = await FileSystem.downloadAsync(url, localUri);
+    if (result.status >= 200 && result.status < 300) {
+      nativeFileMap.set(url, localUri);
+      const status: VideoPreloadStatus = { url, ready: true };
+      preloadStatusMap.set(url, status);
+      console.log(`[videoPreload] Native: downloaded ${fileName} (+${Date.now() - t0}ms)`);
+      return status;
+    }
+    throw new Error(`Download failed with status ${result.status}`);
   } catch (error) {
-    const status: VideoPreloadStatus = { url, ready: false, error: error instanceof Error ? error : new Error(String(error)) };
+    const status: VideoPreloadStatus = {
+      url,
+      ready: false,
+      error: error instanceof Error ? error : new Error(String(error)),
+    };
     preloadStatusMap.set(url, status);
+    console.warn(`[videoPreload] Native download failed: ${url.split('/').pop()}`, error);
     return status;
   }
 };
@@ -337,15 +388,21 @@ export const preloadVideo = async (url: string, priority: 'high' | 'normal' = 'n
   return Platform.OS === 'web' ? preloadVideoWeb(url, priority) : preloadVideoNative(url);
 };
 
+/** @deprecated No longer uses headless players. Kept for API compatibility. */
+export const releaseHeadlessPlayers = () => {};
+
 export const preloadVideosForBoardType = async (boardType: number, priority: 'high' | 'normal' = 'normal'): Promise<VideoPreloadResult> => {
   if (boardType === 3) return { totalCount: 0, readyCount: 0, failedCount: 0, videos: [] };
   const videoUrls = getVideoUrlsForBoardType(boardType);
   if (videoUrls.length === 0) return { totalCount: 0, readyCount: 0, failedCount: 0, videos: [] };
+  const t0 = Date.now();
   const firstVideoUrl = videoUrls[0];
   const remainingUrls = videoUrls.slice(1);
   const results: VideoPreloadStatus[] = [];
+  console.log(`[videoPreload] Starting first video preload for board ${boardType}`);
   const firstVideoPromise = preloadVideo(firstVideoUrl, 'high');
   results.push(await firstVideoPromise);
+  console.log(`[videoPreload] First video preload done, ready=${results[0].ready} (+${Date.now() - t0}ms)`);
   const concurrentLimit = 2;
   const remainingPromises: Promise<VideoPreloadStatus>[] = [];
   for (let i = 0; i < remainingUrls.length; i += concurrentLimit) {
@@ -364,6 +421,21 @@ export const preloadVideosForBoardType = async (boardType: number, priority: 'hi
   return { totalCount: results.length, readyCount, failedCount, videos: results };
 };
 
+/**
+ * Preload only the first video for a board type (high priority).
+ * Use on native to avoid saturating the network before the player loads.
+ */
+export const preloadFirstVideoForBoardType = async (boardType: number): Promise<VideoPreloadStatus | null> => {
+  if (boardType === 3) return null;
+  const videoUrls = getVideoUrlsForBoardType(boardType);
+  if (videoUrls.length === 0) return null;
+  const t0 = Date.now();
+  console.log(`[videoPreload] Preloading first video only for board ${boardType}`);
+  const result = await preloadVideo(videoUrls[0], 'high');
+  console.log(`[videoPreload] First video done, ready=${result.ready} (+${Date.now() - t0}ms)`);
+  return result;
+};
+
 export const isVideoPreloaded = (url: string): boolean => {
   const status = preloadStatusMap.get(url);
   return status?.ready === true;
@@ -374,11 +446,13 @@ export const getVideoPreloadStatus = (url: string): VideoPreloadStatus | null =>
 };
 
 /**
- * Returns the best URL for immediate playback. On Safari, when we preloaded via fetch+blob,
- * returns the blob URL (in-memory) so the player starts instantly; otherwise returns the original URL.
+ * Returns the best URL for immediate playback.
+ * - Web/Safari: returns blob URL (in-memory) for instant playback
+ * - Native: returns local file:// URI (downloaded to disk) for instant playback
+ * - Fallback: returns original URL (streams from network)
  */
 export const getPlaybackUrl = (originalUrl: string): string => {
-  return blobUrlMap.get(originalUrl) || originalUrl;
+  return blobUrlMap.get(originalUrl) || nativeFileMap.get(originalUrl) || originalUrl;
 };
 
 // Check if preload is currently in progress for a URL
@@ -489,6 +563,7 @@ export const clearPreloadCache = (): void => {
     });
     blobUrlMap.clear();
   }
+  nativeFileMap.clear();
   preloadStatusMap.clear();
 };
 

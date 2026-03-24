@@ -22,7 +22,7 @@ import { supabaseAuthService } from '../services/auth/supabaseAuthService';
 import { useOnboarding } from '../context/OnboardingContext';
 import { analyticsService } from '../services/analytics/analyticsService';
 import { useAuthGuard } from '../hooks/useAuthGuard';
-import { isFirstVideoReadyForBoardType, waitForFirstVideoReadyForBoardType, getVideoPreloadStatus, waitForVideoReady, preloadLoadingVideo, getLoadingVideoUrl } from '../services/media/videoPreloadService';
+import { isFirstVideoReadyForBoardType, getVideoPreloadStatus, waitForVideoReady, preloadLoadingVideo, getLoadingVideoUrl } from '../services/media/videoPreloadService';
 import { STEP_WELCOME } from '../constants/onboardingSteps';
 import { swellyServiceCopy, swellyServiceCopyCopy } from '../services/swelly/swellyServiceCopy';
 
@@ -290,45 +290,34 @@ export const AppContent: React.FC = () => {
 
   const handleStep1Next = async (data: OnboardingData) => {
     if (isSavingStep1) return; // Prevent multiple clicks
-    
-    console.log('Step 1 next called with data:', data);
+
+    const t0 = Date.now();
+    console.log(`[AppContent] Step 1 Next pressed, boardType=${data.boardType}`);
     setIsSavingStep1(true);
-    
+
     try {
       updateFormData(data);
-      
-      // Save Step 1 data to Supabase (board type) using onboarding service
-      const { onboardingService } = await import('../services/onboarding/onboardingService');
-      await onboardingService.saveStep1(data.boardType);
-      
+
+      // Save Step 1 data to Supabase — fire and forget, don't block navigation
+      import('../services/onboarding/onboardingService').then(({ onboardingService }) =>
+        onboardingService.saveStep1(data.boardType)
+          .then(() => console.log(`[AppContent] Supabase save done (+${Date.now() - t0}ms)`))
+          .catch(err => console.warn('[AppContent] Step 1 save failed (non-blocking):', err))
+      );
+
       // Track onboarding step 1 completion
       analyticsService.trackOnboardingStep1Completed();
-      
+
       // Soft Top (id: 3) skips step 2 and goes directly to step 3
       if (data.boardType === 3) {
-        // Set a default surf level for Soft Top (level 3 as specified)
         updateFormData({ surfLevel: 3 });
-        setCurrentStep(3); // Go directly to step 3 (travel experience)
+        setCurrentStep(3);
       } else {
-        // For board types with videos (0, 1, 2): navigate when first video is ready (rest load in background).
-        if (isFirstVideoReadyForBoardType(data.boardType)) {
-          if (__DEV__) {
-            console.log('[AppContent] First video preloaded for board type', data.boardType, ', navigating to step 2');
-          }
-          setCurrentStep(2);
-        } else {
-          if (__DEV__) {
-            console.log('[AppContent] Waiting for first video to be ready before navigating to step 2...');
-          }
-          const firstReady = await waitForFirstVideoReadyForBoardType(data.boardType, 15000);
-          if (__DEV__) {
-            console.log('[AppContent] First video ready:', firstReady, ', navigating to step 2');
-          }
-          if (!firstReady) {
-            console.warn('[AppContent] Navigate to step 2 despite timeout (videos will load normally)');
-          }
-          setCurrentStep(2);
-        }
+        // Navigate immediately — headless player warms AVPlayer's cache in background.
+        // Step 2's player benefits from useCaching; thumbnail stays until readyToPlay.
+        const firstReady = isFirstVideoReadyForBoardType(data.boardType);
+        console.log(`[AppContent] Navigating to step 2, cache warm=${firstReady} (+${Date.now() - t0}ms)`);
+        setCurrentStep(2);
       }
     } catch (error) {
       console.error('Error in Step 1 Next:', error);

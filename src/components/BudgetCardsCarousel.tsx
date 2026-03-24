@@ -165,13 +165,11 @@ export const BudgetCardsCarousel: React.FC<BudgetCardsCarouselProps> = ({
     (event: { nativeEvent: { contentOffset: { x: number } } }) => {
       const offsetX = event?.nativeEvent?.contentOffset?.x ?? 0;
       const targetIndex = scrollOffsetToRealIndex(offsetX);
-      const targetOffset = getScrollOffsetForIndex(targetIndex);
-      flatListRef.current?.scrollToOffset({ offset: targetOffset, animated: true });
       centeredIndexRef.current = targetIndex;
       lastReportedCenteredIndexRef.current = targetIndex;
       setCenteredIndex(targetIndex);
     },
-    [getScrollOffsetForIndex, scrollOffsetToRealIndex]
+    [scrollOffsetToRealIndex]
   );
 
   const onViewableItemsChanged = useRef(
@@ -234,7 +232,6 @@ export const BudgetCardsCarousel: React.FC<BudgetCardsCarouselProps> = ({
           scrollEnabled
           directionalLockEnabled
           showsHorizontalScrollIndicator={false}
-          snapToInterval={itemWidth}
           snapToOffsets={snapToOffsets}
           snapToAlignment="start"
           onScroll={handleScroll}
@@ -426,7 +423,7 @@ const styles = StyleSheet.create({
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     fontWeight: '400',
     fontSize: 18,
-    lineHeight: 22,
+    lineHeight: 20,
     color: '#333',
   },
 });

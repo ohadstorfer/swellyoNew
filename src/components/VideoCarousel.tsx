@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect, useCallback } from 'react';
 import {
   View,
   Image,
@@ -8,6 +8,8 @@ import {
   TouchableOpacity,
   Animated,
   Easing,
+  StyleProp,
+  ViewStyle,
 } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -51,6 +53,103 @@ const circularSlot = (itemIdx: number, selectedIdx: number, total: number): numb
   return diff;
 };
 
+// --- VideoSlot: each instance owns its own pre-buffered player ---
+interface VideoSlotProps {
+  videoUrl: string | null;
+  isActive: boolean;
+  style: StyleProp<ViewStyle>;
+  onReady: () => void;
+}
+
+const VideoSlot: React.FC<VideoSlotProps> = React.memo(({ videoUrl, isActive, style, onReady }) => {
+  const isActiveRef = useRef(isActive);
+  isActiveRef.current = isActive;
+
+  const source = videoUrl
+    ? (Platform.OS === 'web' ? videoUrl : { uri: videoUrl, useCaching: true })
+    : null;
+
+  const player = useVideoPlayer(source, (p: any) => {
+    if (p) {
+      p.loop = true;
+      p.muted = true;
+    }
+  });
+
+  // Play/pause based on active state
+  // On iOS, calling play() before readyToPlay can stall loading — only play if already ready
+  useEffect(() => {
+    if (!player) return;
+    try {
+      if (isActive) {
+        const status = (player as any).status;
+        if (status === 'readyToPlay') {
+          player.play();
+        }
+        // Otherwise, the statusChange listener below will call play() when ready
+      } else {
+        player.pause();
+      }
+    } catch (e: any) {
+      if (e.name !== 'NotAllowedError') {
+        console.warn('[VideoSlot] play/pause error:', e);
+      }
+    }
+  }, [isActive, player]);
+
+  // When player becomes ready: notify parent AND auto-play if this is the active slot
+  useEffect(() => {
+    if (!player) return;
+
+    // Check if player is ALREADY ready (event may have fired before this effect ran)
+    try {
+      if ((player as any).status === 'readyToPlay') {
+        onReady();
+        if (isActiveRef.current) {
+          player.play();
+        }
+      }
+    } catch (_) {}
+
+    const sub = player.addListener('statusChange', ({ status, error }: { status: string; error?: any }) => {
+      const urlSnippet = videoUrl ? videoUrl.substring(videoUrl.lastIndexOf('/') + 1, videoUrl.lastIndexOf('/') + 30) : 'null';
+      console.log(`[VideoSlot] ${urlSnippet} status=${status} isActive=${isActiveRef.current}${error ? ` error=${JSON.stringify(error)}` : ''}`);
+      if (status === 'readyToPlay') {
+        onReady();
+        if (isActiveRef.current) {
+          try {
+            player.play();
+          } catch (e: any) {
+            if (e.name !== 'NotAllowedError') {
+              console.warn('[VideoSlot] play on ready error:', e);
+            }
+          }
+        }
+      }
+    });
+    return () => sub.remove();
+  }, [player, onReady]);
+
+  return (
+    <View style={style} pointerEvents="none">
+      <View style={styles.videoPlayerContainer} pointerEvents="none">
+        <VideoView
+          player={player}
+          style={styles.videoPlayer}
+          contentFit="cover"
+          nativeControls={false}
+          allowsFullscreen={false}
+          allowsPictureInPicture={false}
+          {...(Platform.OS === 'web' && {
+            controls: false,
+            disablePictureInPicture: true,
+          } as any)}
+        />
+      </View>
+    </View>
+  );
+});
+
 interface VideoCarouselProps {
   videos: VideoLevel[];
   selectedVideoId: number;
@@ -73,24 +172,24 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
   }[]>([]);
   const isCarouselFirstRender = useRef(true);
   const prevVideosLengthRef = useRef(0);
-  
+
   // Get the selected video directly from selectedVideoId
   const selectedVideo = React.useMemo(() => {
     return videos.find(v => v.id === selectedVideoId) || videos[0];
   }, [videos, selectedVideoId]);
-  
-  
+
+
   // Calculate video dimensions based on available height
   // Maintain aspect ratio while fitting available space
   // Make smaller on smaller screens to ensure it fits with gaps
   const getVideoDimensions = () => {
     const screenWidth = getScreenWidth();
-    
+
     if (availableVideoHeight && availableVideoHeight > 0) {
       // Use available height to calculate width maintaining aspect ratio
       // Default aspect ratio: 340/324 (mobile) or 300/286 (desktop)
       const aspectRatio = isDesktopWeb() ? 300 / 286 : 340 / 324;
-      
+
       // On smaller screens, reduce the height slightly to ensure gaps are maintained
       let calculatedHeight = availableVideoHeight;
       if (screenWidth <= 375) {
@@ -100,17 +199,17 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
         // iPhone 12/13/14: reduce by 5% to ensure gaps
         calculatedHeight = availableVideoHeight * 0.95;
       }
-      
+
       const calculatedWidth = calculatedHeight * aspectRatio;
-      
+
       // Ensure width doesn't exceed screen bounds
       const maxWidth = getScreenWidth() - 32; // 16px padding on each side
       const finalWidth = Math.min(calculatedWidth, maxWidth);
       const finalHeight = finalWidth / aspectRatio;
-      
+
       return { width: finalWidth, height: finalHeight };
     }
-    
+
     // Fallback to default sizing (smaller on smaller screens)
     if (isDesktopWeb()) {
       return {
@@ -125,36 +224,55 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
       } else if (screenWidth <= 414) {
         baseWidth = 320; // Medium on iPhone 12/13/14
       }
-      
+
       return {
         width: Math.min(baseWidth, getScreenWidth() - 32),
         height: Math.min(baseWidth, getScreenWidth() - 32) * (324 / 340),
       };
     }
   };
-  
+
   const videoDimensions = getVideoDimensions();
 
-  // --- Single player + thumbnail overlay ---
-  const currentPlayPromiseRef = useRef<Promise<void> | null>(null);
+  // --- Multi-player architecture: track which slots are ready ---
+  const [readySlots, setReadySlots] = useState<Set<number>>(new Set());
+  const readySlotsRef = useRef(readySlots);
+  readySlotsRef.current = readySlots;
+
+  const handleSlotReady = useCallback((videoId: number) => {
+    setReadySlots(prev => {
+      if (prev.has(videoId)) return prev;
+      const next = new Set(prev);
+      next.add(videoId);
+      return next;
+    });
+  }, []);
+
+  // --- Thumbnail fade logic ---
   const thumbnailFadeAnim = useRef(new Animated.Value(1)).current; // Start visible
   const prevSelectedVideoIdRef = useRef(selectedVideoId);
 
-  // Show thumbnail synchronously during render when video changes — before any paint
+  // On video switch: skip thumbnail if already buffered, else show it briefly
   if (prevSelectedVideoIdRef.current !== selectedVideoId) {
-    thumbnailFadeAnim.setValue(1);
+    if (readySlotsRef.current.has(selectedVideoId)) {
+      thumbnailFadeAnim.setValue(0); // Already buffered — no thumbnail needed
+    } else {
+      thumbnailFadeAnim.setValue(1); // Not ready yet — show thumbnail briefly
+    }
     prevSelectedVideoIdRef.current = selectedVideoId;
   }
 
-  const mainPlayer = useVideoPlayer(
-    selectedVideo.videoUrl || null,
-    (player: any) => {
-      if (player) {
-        player.loop = true;
-        player.muted = true;
-      }
+  // When a slot becomes ready and it's the active one, fade out thumbnail
+  useEffect(() => {
+    if (readySlots.has(selectedVideoId)) {
+      Animated.timing(thumbnailFadeAnim, {
+        toValue: 0,
+        duration: 100,
+        easing: Easing.ease,
+        useNativeDriver: false,
+      }).start();
     }
-  );
+  }, [readySlots, selectedVideoId]);
 
   // Web: inject CSS to hide video controls & set playsInline (runs once)
   useEffect(() => {
@@ -213,96 +331,6 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
     observer.observe(document.body, { childList: true, subtree: true });
     return () => observer.disconnect();
   }, []);
-
-  // Helper: set playsInline on all video elements
-  const ensurePlaysInline = () => {
-    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
-    document.querySelectorAll('video').forEach((el: HTMLVideoElement) => {
-      el.setAttribute('playsinline', 'true');
-      el.setAttribute('webkit-playsinline', 'true');
-      el.setAttribute('x5-playsinline', 'true');
-      el.playsInline = true;
-    });
-  };
-
-  // Main effect: on video change, show thumbnail immediately, load video, fade thumbnail out when playing
-  useEffect(() => {
-    const videoUrl = selectedVideo.videoUrl;
-    if (!videoUrl || !mainPlayer) return;
-
-    let cancelled = false;
-
-    const performSwitch = async () => {
-      // Thumbnail is already visible (set synchronously during render)
-      ensurePlaysInline();
-
-      // Cancel any pending play promise
-      if (currentPlayPromiseRef.current) {
-        currentPlayPromiseRef.current.catch(() => {});
-        currentPlayPromiseRef.current = null;
-      }
-
-      try {
-        const replacePromise = mainPlayer.replaceAsync(videoUrl);
-        if (replacePromise && typeof replacePromise.then === 'function') {
-          await replacePromise;
-        }
-        if (cancelled) return;
-
-        mainPlayer.loop = true;
-        mainPlayer.muted = true;
-        ensurePlaysInline();
-
-        const playPromise = mainPlayer.play();
-        if (playPromise !== undefined) {
-          currentPlayPromiseRef.current = playPromise as Promise<void>;
-          try {
-            await playPromise;
-          } catch (e: any) {
-            if (e.name !== 'NotAllowedError') {
-              try { const r = mainPlayer.play() as any; if (r && r.then) await r; } catch (_) {}
-            }
-          }
-        }
-        if (cancelled) return;
-
-        // Wait for first frame on web (Safari needs this)
-        if (Platform.OS === 'web' && typeof document !== 'undefined') {
-          await new Promise<void>((resolve) => {
-            const vids = document.querySelectorAll('video');
-            const el = Array.from(vids).find((v: HTMLVideoElement) =>
-              v.src === videoUrl || v.currentSrc === videoUrl
-            ) as HTMLVideoElement | undefined;
-            if (el && el.currentTime > 0) { resolve(); return; }
-            if (el) {
-              const h = () => resolve();
-              el.addEventListener('timeupdate', h, { once: true });
-              setTimeout(() => { el.removeEventListener('timeupdate', h); resolve(); }, 400);
-            } else {
-              if (typeof requestAnimationFrame !== 'undefined') {
-                requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-              } else { setTimeout(resolve, 50); }
-            }
-          });
-        }
-        if (cancelled) return;
-
-        // Video is playing — fade out thumbnail to reveal video
-
-        Animated.timing(thumbnailFadeAnim, {
-          toValue: 0,
-          duration: 300,
-          easing: Easing.ease,
-          useNativeDriver: false,
-        }).start();
-      } catch (error: any) {
-        if (__DEV__) console.error('[VideoCarousel] Video switch error:', error);
-      }
-    };
-
-    performSwitch();
-    return () => { cancelled = true; };
-  }, [selectedVideo.videoUrl, mainPlayer]);
 
   // Initialize/reinitialize carousel animated values when videos change
   if (carouselAnimsRef.current.length !== videos.length || prevVideosLengthRef.current !== videos.length) {
@@ -443,7 +471,7 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
     <View style={[styles.container, { flex: 1, justifyContent: 'flex-end' }]}>
       {/* Main Video Display */}
       <View style={styles.mainVideoContainer}>
-        <View 
+        <View
           style={[styles.videoWrapper, { width: videoDimensions.width, height: videoDimensions.height }]}
           {...(Platform.OS === 'web' && {
             // Prevent default touch behaviors on web (especially iOS Safari)
@@ -461,30 +489,33 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
             },
           } as any)}
         >
-          {/* Video player */}
+          {/* Video players — one per video, all pre-buffered, only active one visible */}
           <View style={styles.mainVideo} pointerEvents="none">
-            <View style={styles.videoPlayerContainer} pointerEvents="none">
-              <VideoView
-                player={mainPlayer}
-                style={styles.videoPlayer}
-                contentFit="cover"
-                nativeControls={false}
-                allowsFullscreen={false}
-                allowsPictureInPicture={false}
-                {...(Platform.OS === 'web' && {
-                  controls: false,
-                  disablePictureInPicture: true,
-                } as any)}
+            {videos.map((video) => (
+              <VideoSlot
+                key={video.id}
+                videoUrl={video.videoUrl || null}
+                isActive={video.id === selectedVideoId}
+                style={{
+                  position: 'absolute' as const,
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  zIndex: video.id === selectedVideoId ? 1 : 0,
+                  opacity: video.id === selectedVideoId ? 1 : 0,
+                }}
+                onReady={() => handleSlotReady(video.id)}
               />
-            </View>
+            ))}
           </View>
 
-          {/* Thumbnail overlay — always rendered, shown instantly on switch, fades out when video plays */}
+          {/* Thumbnail overlay — shown briefly on first load, skipped when video is pre-buffered */}
           {selectedVideo.thumbnailUrl ? (
             <Animated.View
               style={{
                 position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-                zIndex: 1, opacity: thumbnailFadeAnim,
+                zIndex: 2, opacity: thumbnailFadeAnim,
               }}
               pointerEvents="none"
             >
@@ -495,9 +526,9 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
               />
             </Animated.View>
           ) : null}
-          
+
           {/* Transparent overlay to prevent video interactions on iOS Safari */}
-          <View 
+          <View
             style={styles.videoOverlay}
             {...(Platform.OS === 'web' && {
               // Prevent default touch behaviors on web (especially iOS Safari)
@@ -519,16 +550,7 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
               },
             } as any)}
           />
-          
-          {/* Gradient Overlay */}
-          {/* <LinearGradient
-            colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.8)']}
-            locations={[0.80097, 0.25243]}
-            start={{ x: 0, y: 0.80097 }}
-            end={{ x: 0, y: 0.25243 }}
-            style={styles.gradientOverlay}
-          /> */}
-          
+
           {/* Frame: 4 corners only, same radius (24) as video */}
           <View style={styles.frameBorderWrapper} pointerEvents="none">
             <View style={[styles.frameCorner, styles.frameCornerTopLeft]} />
@@ -536,14 +558,14 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
             <View style={[styles.frameCorner, styles.frameCornerBottomLeft]} />
             <View style={[styles.frameCorner, styles.frameCornerBottomRight]} />
           </View>
-          
+
           {/* Recording Indicator */}
           <View style={styles.recIcon}>
             <Svg width="11" height="15.43" viewBox="0 0 11 15.43" fill="none">
               <Circle cx="5" cy="7.715" r="5" fill="#EB4C43"/>
             </Svg>
           </View>
-          
+
           {/* Video Title */}
           <View style={styles.titleContainer}>
             <Text style={styles.videoTitle}>{selectedVideo.name}</Text>
@@ -630,7 +652,7 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
             );
           })}
         </View>
-        
+
         {/* Dots Indicator */}
         {renderDots()}
       </View>
@@ -880,5 +902,3 @@ const styles = StyleSheet.create({
     backgroundColor: '#CFCFCF',
   },
 });
-
-

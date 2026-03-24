@@ -5,9 +5,7 @@ import {
   SafeAreaView,
   TouchableOpacity,
   Platform,
-  Image,
 } from 'react-native';
-import { useVideoPlayer, VideoView } from 'expo-video';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../components/Text';
@@ -225,21 +223,6 @@ export const OnboardingStep2Screen: React.FC<OnboardingStep2ScreenProps> = ({
   
   const availableVideoHeight = calculateAvailableVideoHeight();
   
-  // Calculate background video container height
-  // Background video should cover the area from top to where main video ends
-  // It includes: header + progress + title + main video area
-  const calculateBackgroundVideoHeight = () => {
-    const headerHeight = 44 + (isDesktop ? spacing.lg : spacing.sm) + spacing.md;
-    const progressHeight = 4 + (isDesktop ? spacing.sm * 2 : spacing.md * 2);
-    const titleHeight = 28 + (isDesktop ? spacing.md : spacing.xs) + (Platform.OS !== 'web' ? spacing.lg : spacing.md);
-    const mainVideoArea = availableVideoHeight;
-    
-    // Total height covers up to the end of main video area
-    return headerHeight + progressHeight + titleHeight + mainVideoArea + 35; // 48px for rounded bottom
-  };
-  
-  const backgroundVideoHeight = calculateBackgroundVideoHeight();
-
   // Get videos with resolved URLs for the selected board type
   const surfLevelVideos = React.useMemo(() => getSurfLevelVideos(boardType), [boardType]);
 
@@ -259,55 +242,50 @@ export const OnboardingStep2Screen: React.FC<OnboardingStep2ScreenProps> = ({
   // Check preload status synchronously before render to optimize initial loading state
   const initialMainVideoLoading = React.useMemo(() => {
     if (surfLevelVideos.length === 0) return true;
-    
     const firstVideo = surfLevelVideos[0];
     if (!firstVideo?.videoUrl) return true;
-    
-    // Blob URL = Safari preload in memory, ready for instant playback
-    if (firstVideo.videoUrl.startsWith('blob:')) return false;
-    const preloadStatus = getVideoPreloadStatus(firstVideo.videoUrl);
-    const isPreloaded = preloadStatus?.ready === true;
-    
-    if (__DEV__ && isPreloaded) {
-      console.log('[OnboardingStep2] First video is preloaded on mount, skipping loading state');
+
+    if (Platform.OS === 'web') {
+      // On web, check blob URL or preload status
+      const isBlobUrl = firstVideo.videoUrl.startsWith('blob:');
+      const preloadStatus = getVideoPreloadStatus(firstVideo.videoUrl);
+      const isPreloaded = isBlobUrl || preloadStatus?.ready === true;
+      console.log(`[OnboardingStep2] Mount: preloaded=${isPreloaded}, isBlobUrl=${isBlobUrl}`);
+      return !isPreloaded;
     }
-    
-    return !isPreloaded;
+
+    // On native, always start with thumbnail visible.
+    // The VideoCarousel's statusChange 'readyToPlay' listener drives the reveal.
+    console.log(`[OnboardingStep2] Mount: native, showing thumbnail until player ready`);
+    return true;
   }, [surfLevelVideos]);
 
   // Loading states for video optimization - initialized based on preload status
   const [isMainVideoLoading, setIsMainVideoLoading] = useState(initialMainVideoLoading);
-  const [isBackgroundVideoLoading, setIsBackgroundVideoLoading] = useState(true);
 
-  // Check preload status on mount and optimize loading state (for videos that weren't preloaded)
+  // On web: check preload status on mount and clear loading if ready
   React.useEffect(() => {
+    if (Platform.OS !== 'web') return;
     if (surfLevelVideos.length === 0) return;
-    
     const firstVideo = surfLevelVideos[0];
     if (!firstVideo?.videoUrl) return;
-    
+
     if (firstVideo.videoUrl.startsWith('blob:')) {
       setIsMainVideoLoading(false);
       return;
     }
     const preloadStatus = getVideoPreloadStatus(firstVideo.videoUrl);
     if (preloadStatus?.ready) {
-      if (__DEV__) {
-        console.log('[OnboardingStep2] First video is preloaded and ready');
-      }
       setIsMainVideoLoading(false);
     } else {
       waitForVideoReady(firstVideo.videoUrl, 500)
-        .then((ready: boolean) => {
-          if (ready) {
-            if (__DEV__) {
-              console.log('[OnboardingStep2] First video became ready');
-            }
-            setIsMainVideoLoading(false);
-          }
-        });
+        .then(() => setIsMainVideoLoading(false));
     }
   }, [surfLevelVideos]);
+
+  // Native: no remaining video preload — avoids bandwidth competition with the player.
+  // Remaining videos load on-demand when the user taps them (useCaching: true caches after first play).
+  // Web: all videos were preloaded on Step 1 already.
 
   // Reset selectedVideoId when board type changes to ensure it's valid for the new board's videos
   React.useEffect(() => {
@@ -348,91 +326,8 @@ export const OnboardingStep2Screen: React.FC<OnboardingStep2ScreenProps> = ({
 
   const selectedVideo = surfLevelVideos.find((v: VideoLevel) => v.id === selectedVideoId) || surfLevelVideos[0];
 
-  // Create video player for background video (delayed loading)
-  // FIX: Don't initialize with empty string - use selectedVideo.videoUrl or null
-  const backgroundPlayer = useVideoPlayer(
-    selectedVideo.videoUrl || null, // Use actual URL or null instead of empty string
-    (player: any) => {
-      // Background video will be loaded after main video starts
-      if (player) {
-        player.loop = true;
-        player.muted = true;
-      }
-    }
-  );
-
-  // Delay background video loading to prioritize main video
-  React.useEffect(() => {
-    if (!selectedVideo.videoUrl || !backgroundPlayer) return;
-    
-    // Wait for main video to start loading before loading background
-    const timer = setTimeout(() => {
-      if (backgroundPlayer && selectedVideo.videoUrl) {
-        setIsBackgroundVideoLoading(true);
-        backgroundPlayer.replaceAsync(selectedVideo.videoUrl).then(() => {
-          if (backgroundPlayer) {
-            backgroundPlayer.loop = true;
-            backgroundPlayer.muted = true;
-            
-            // Safari-specific: Set playsInline attributes on the video element
-            if (Platform.OS === 'web' && typeof document !== 'undefined') {
-              const setPlaysInline = () => {
-                const videoElements = document.querySelectorAll('video');
-                videoElements.forEach((videoElement: HTMLVideoElement) => {
-                  videoElement.setAttribute('playsinline', 'true');
-                  videoElement.setAttribute('webkit-playsinline', 'true');
-                  videoElement.setAttribute('x5-playsinline', 'true');
-                  videoElement.playsInline = true;
-                });
-              };
-              
-              // Set attributes before playing
-              setPlaysInline();
-              setTimeout(setPlaysInline, 100);
-            }
-            
-            const playPromise = backgroundPlayer.play();
-            if (playPromise !== undefined && typeof (playPromise as any).catch === 'function') {
-              (playPromise as any).catch(() => {
-                // Autoplay may be blocked, that's OK for background
-              });
-            }
-            setIsBackgroundVideoLoading(false);
-          }
-        }).catch((error: any) => {
-          console.error('Error loading background video:', error);
-          setIsBackgroundVideoLoading(false);
-        });
-      }
-    }, 1000); // Delay by 1 second to prioritize main video
-    
-    return () => clearTimeout(timer);
-  }, [selectedVideo.videoUrl, backgroundPlayer]);
-
   return (
     <SafeAreaView style={styles.container}>
-      {/* Background Video/Image with 20% opacity */}
-      <View style={[styles.backgroundVideoContainer, { height: backgroundVideoHeight }]}>
-        <View style={styles.backgroundVideoWrapper}>
-          {selectedVideo.videoUrl ? (
-            <VideoView
-              player={backgroundPlayer}
-              style={styles.backgroundVideo}
-              contentFit="cover"
-              nativeControls={false}
-              allowsFullscreen={false}
-              allowsPictureInPicture={false}
-            />
-          ) : (
-            <Image
-              source={{ uri: selectedVideo.thumbnailUrl }}
-              style={styles.backgroundVideo}
-              resizeMode="cover"
-            />
-          )}
-        </View>
-      </View>
-
       <View style={[styles.content, isDesktop && styles.contentDesktop]}>
         {/* Header */}
         <View style={[styles.header, isDesktop && styles.headerDesktop]}>
@@ -502,29 +397,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.backgroundGray || '#FAFAFA',
     width: '100%',
     overflow: 'hidden',
-  },
-  backgroundVideoContainer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    // Height is set dynamically via inline style to match main video area
-    overflow: 'hidden',
-    borderBottomLeftRadius: 48,
-    borderBottomRightRadius: 48,
-  },
-  backgroundVideoWrapper: {
-    width: '100%',
-    height: '100%',
-    opacity: 0.2,
-  },
-  backgroundVideo: {
-    width: '100%',
-    height: '100%',
-    ...(Platform.OS === 'web' && {
-      objectFit: 'cover' as any,
-      objectPosition: 'center center' as any,
-    }),
   },
   content: {
     flex: 1,

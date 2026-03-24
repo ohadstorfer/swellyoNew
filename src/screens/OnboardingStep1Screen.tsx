@@ -14,7 +14,7 @@ import { BoardCarousel } from '../components/BoardCarousel';
 import { colors, spacing, typography } from '../styles/theme';
 import { useOnboarding } from '../context/OnboardingContext';
 import { useIsDesktopWeb, useScreenDimensions } from '../utils/responsive';
-import { preloadVideosForBoardType, areAllVideosReadyForBoardType } from '../services/media/videoPreloadService';
+import { preloadVideosForBoardType, preloadFirstVideoForBoardType, areAllVideosReadyForBoardType, isFirstVideoReadyForBoardType } from '../services/media/videoPreloadService';
 
 interface OnboardingStep1ScreenProps {
   onNext: (data: OnboardingData) => void;
@@ -162,39 +162,48 @@ export const OnboardingStep1Screen: React.FC<OnboardingStep1ScreenProps> = ({
   // Track current preload promise to cancel if board type changes
   const preloadPromiseRef = useRef<Promise<any> | null>(null);
 
-  // When board is selected (or first rendered), load ALL videos for that board (first first, then rest).
-  // Skip full preload only when all videos for this board are already ready.
+  // When board is selected, preload videos for that board type.
+  // On native: only preload the first video to avoid saturating the network
+  // (remaining videos preload on Step 2 after the first video is playing).
+  // On web: preload all videos (browser handles concurrent downloads better).
   useEffect(() => {
-    if (selectedBoardId === undefined || selectedBoardId === 3) return; // Skip softtop (no videos)
+    if (selectedBoardId === undefined || selectedBoardId === 3) return;
 
-    const debounceDelay = 100; // Debounce to avoid duplicate work on rapid board switches
+    const debounceDelay = 100;
 
     const timeoutId = setTimeout(() => {
-      // Skip preload only when every video for this board is already ready
-      if (areAllVideosReadyForBoardType(selectedBoardId)) {
-        if (__DEV__) {
-          console.log(`[OnboardingStep1] All videos already preloaded for board type ${selectedBoardId}, skipping preload`);
+      if (Platform.OS === 'web') {
+        // Web: preload all videos (browser manages concurrent downloads well)
+        if (areAllVideosReadyForBoardType(selectedBoardId)) {
+          console.log(`[OnboardingStep1] All videos already preloaded for board type ${selectedBoardId}, skipping`);
+          return;
         }
-        return;
-      }
-
-      // Cancel previous preload if board type changed (we can't cancel the promise, but we ignore its result)
-      preloadPromiseRef.current = null;
-
-      // Load all videos for selected board (first video high priority, then rest in batches)
-      const preloadPromise = preloadVideosForBoardType(selectedBoardId, 'high')
-        .then(result => {
-          if (__DEV__) {
+        preloadPromiseRef.current = null;
+        console.log(`[OnboardingStep1] Starting all-video preload for board type ${selectedBoardId}`);
+        const preloadPromise = preloadVideosForBoardType(selectedBoardId, 'high')
+          .then(result => {
             console.log(`[OnboardingStep1] Preloaded ${result.readyCount}/${result.totalCount} videos for board type ${selectedBoardId}`);
-          }
-        })
-        .catch(err => {
-          console.warn('[OnboardingStep1] Video preload failed (non-blocking):', err);
-        });
-      
-      preloadPromiseRef.current = preloadPromise;
+          })
+          .catch(err => {
+            console.warn('[OnboardingStep1] Video preload failed (non-blocking):', err);
+          });
+        preloadPromiseRef.current = preloadPromise;
+      } else {
+        // Native: only preload the first video to keep bandwidth free for the player
+        if (isFirstVideoReadyForBoardType(selectedBoardId)) {
+          console.log(`[OnboardingStep1] First video already preloaded for board type ${selectedBoardId}, skipping`);
+          return;
+        }
+        preloadPromiseRef.current = null;
+        console.log(`[OnboardingStep1] Starting first-video-only preload for board type ${selectedBoardId}`);
+        const preloadPromise = preloadFirstVideoForBoardType(selectedBoardId)
+          .catch(err => {
+            console.warn('[OnboardingStep1] Video preload failed (non-blocking):', err);
+          });
+        preloadPromiseRef.current = preloadPromise;
+      }
     }, debounceDelay);
-    
+
     return () => {
       clearTimeout(timeoutId);
     };
