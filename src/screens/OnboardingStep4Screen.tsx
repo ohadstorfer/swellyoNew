@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   StyleSheet,
@@ -1080,6 +1080,18 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
   const [countrySearchQuery, setCountrySearchQuery] = useState('');
   const [cropModalVisible, setCropModalVisible] = useState(false);
   const [rawImageUri, setRawImageUri] = useState<string>('');
+
+  // Prevent iOS Safari zoom bounce when keyboard opens/closes on mobile web
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const viewport = document.querySelector('meta[name="viewport"]');
+    if (!viewport) return;
+    const original = viewport.getAttribute('content') || '';
+    viewport.setAttribute('content', original + ', maximum-scale=1');
+    return () => {
+      viewport.setAttribute('content', original);
+    };
+  }, []);
 
   const pickImage = async () => {
     if (Platform.OS === 'web') {

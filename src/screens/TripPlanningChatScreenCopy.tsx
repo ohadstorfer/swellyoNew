@@ -1002,6 +1002,9 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             data: response.data,
             searchSummary: pendingSearch.searchSummary ?? (response.data as any)?.search_summary ?? '',
           });
+          if (existingFiltersForAdd) {
+            setExistingFiltersForAdd({ data: response.data });
+          }
         }
         const msgLower = (userMessage.text || '').trim().toLowerCase();
         const userWantsSearch = /\b(send|search|go|yes|yep|yeah|sure|do it|perfect|looks good|sounds good|go ahead|let'?s\s*(go|search|do)|ready|find)\b/i.test(msgLower) && !/\b(change|edit|modify|tweak|update|remove|add|different|instead|wait|hold on|actually)\b/i.test(msgLower);
