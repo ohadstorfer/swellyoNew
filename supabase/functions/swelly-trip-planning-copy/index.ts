@@ -708,27 +708,28 @@ THIS IS YOUR PRIMARY JOB - Extract correctly, don't rely on fallback code!
 
 TYPO HANDLING - Be smart and correct automatically:
 - "Philippins" / "filipins" / "filipines" / "Philippines" → ALL mean "Philippines" → destination_country: "Philippines"
-- "Siargao, Philippins" → destination_country: "Philippines", area: "Siargao"
-- "Siargao, Philippines" → destination_country: "Philippines", area: "Siargao"
-- "Siargao, filipins" → destination_country: "Philippines", area: "Siargao" (CORRECT THE TYPO!)
-- "Siargao, the filipins" → destination_country: "Philippines", area: "Siargao"
-- "Siargao, in the Philippines" → destination_country: "Philippines", area: "Siargao"
+- "Siargao Philippins" → destination_country: "Philippines", area: "Siargao"
+- "Siargao Philippines" → destination_country: "Philippines", area: "Siargao"
+- "Siargao filipins" → destination_country: "Philippines", area: "Siargao" (CORRECT THE TYPO!)
+- "Siargao the filipins" → destination_country: "Philippines", area: "Siargao"
+- "Siargao in the Philippines" → destination_country: "Philippines", area: "Siargao"
 - "in the Philippines" → destination_country: "Philippines", area: null
 
 CRITICAL RULES FOR DESTINATION EXTRACTION:
 1. ALWAYS extract destination_country when a location is mentioned - NEVER leave it as null!
-2. If user mentions both area and country (e.g., "Siargao, filipins"), extract BOTH immediately
+2. If user mentions both area and country (e.g., "Siargao filipins"), extract BOTH immediately
 3. Correct typos automatically - "filipins" → "Philippines", "Isreal" → "Israel", "Brasil" → "Brazil"
-4. Be flexible with formatting - "Siargao, filipins" and "Siargao, the Philippines" both mean the same thing
+4. Be flexible with formatting - "Siargao, filipins" and "Siargao the Philippines" both mean the same thing
 5. If you see a typo but understand the intent, correct it and extract properly
-6. The area is usually the first part before the comma, the country is after
+6. When the user writes two place names separated by a comma, do NOT assume a fixed order. Instead, use your geographic knowledge to figure out which one is the country and which one is the area/region within that country. For example: "Costa Rica, Pavones" → country is "Costa Rica", area is "Pavones". "Bali, Indonesia" → country is "Indonesia", area is "Bali". "Tamarindo, Costa Rica" → country is "Costa Rica", area is "Tamarindo".
+7. IMPORTANT: area must ONLY be a real geographic location (city, town, region, beach). If text after a comma is NOT a place name (e.g. "using a shortboard", "who is advanced", "around age 25"), do NOT set it as area. Only set area when it is an actual place within the destination country.
 
 US DESTINATION RULES (when user mentions a place in the United States):
 - When the user mentions a US STATE as the place they want to connect with surfers who surfed there, set destination_country to the EXACT format "United States - StateName" (e.g. "United States - California", "United States - Hawaii"). Use the exact state name after the hyphen (Alabama, Alaska, California, Florida, Hawaii, New York, Texas, etc.).
 - Set area ONLY when the user mentions a specific place WITHIN that state (city, region, beach, e.g. "San Diego", "Huntington Beach"). If they only mention the state, set area to null.
 - "California" / "surfed in California" / "I want to go to California" → destination_country: "United States - California", area: null
 - "Hawaii" / "surfed in Hawaii" → destination_country: "United States - Hawaii", area: null
-- "San Diego, California" / "Huntington Beach, California" → destination_country: "United States - California", area: "San Diego" / "Huntington Beach"
+- "San Diego California" / "Huntington Beach California" → destination_country: "United States - California", area: "San Diego" / "Huntington Beach"
 - If user says only "USA" or "United States" with no state → destination_country: "United States", area: null
 
 EXAMPLES OF CORRECT EXTRACTION:
@@ -745,6 +746,8 @@ EXAMPLES OF CORRECT EXTRACTION:
 WRONG (DON'T DO THIS):
 - User: "Siargao, filipins" → destination_country: null, area: null ❌ (You must extract!)
 - User: "Siargao, filipins" → destination_country: "filipins", area: "Siargao" ❌ (Correct the typo!)
+- User: "El Salvador, using a shortboard" → area: "using a shortboard" ❌ (That's not a place! Set area: null, put shortboard in queryFilters.surfboard_type)
+- User: "Hawaii, advanced surfer" → area: "advanced surfer" ❌ (That's not a place! Set area: null, put level in queryFilters.surf_level_category)
 
 Examples:
 - User: "Sri Lanka" → Extract: destination_country: "Sri Lanka", area: null
@@ -811,7 +814,7 @@ DATA STRUCTURE (when is_finished: true):
     "mentioned_preferences": [],
     "mentioned_deal_breakers": []
   },
-  "queryFilters": { "country_from": ["Israel"], "surfboard_type": ["shortboard"], "surf_level_category": ["advanced", "pro"], "age_min": 20, "age_max": 30 }, // Include when user specified origin, board type, level, or age. Use exact country names and enum values. When user says "around my age" or "same age", use USER PROFILE CONTEXT age and set age_min/age_max (e.g. age ±5). For a specific age (e.g. "25"), set age_min: 25, age_max: 25.
+  "queryFilters": { "country_from": ["Israel"], "surfboard_type": ["shortboard"], "surf_level_category": ["advanced", "pro"], "age_min": 20, "age_max": 30 }, // Include when user specified origin, board type, level, or age. Use exact country names and enum values. When user says "around my age" or "same age", use USER PROFILE CONTEXT age and set age_min/age_max (e.g. age ±5). For a specific age (e.g. "25"), set age_min: 25, age_max: 25. For "above X" or "older than X" (e.g. "above 30"), set age_min: 30, age_max: 99. For "below X" or "younger than X" (e.g. "below 25"), set age_min: 18, age_max: 25.
   "search_summary": "Short casual summary of what we're searching for, shown to the user before they decide whether to search or edit filters. REQUIRED when is_finished is true. First, write a one-line friendly summary of the filters (e.g. \"Sweet so we're going for American dude that surfed Hawaii and is also a shortboarder just like you!\" or \"Got it — Israeli advanced shortboarder!\"). Then add a newline (\"\\n\") and a short question asking if they want to search now or tweak filters first (e.g. \"Are you ready for me to search now, or do you want to tweak any filters first?\"). Tone: friendly, first person, no markdown. Base it ONLY on the criteria (destination_country, area, queryFilters). Do NOT mention that there is no destination, no specific destination, or that we're going global — just describe the filters.",
   "next_action": "search" | "edit" | "clarify" | null // Optional. For the FIRST user reply after you asked whether to search or edit: set to \"search\" when they clearly want to search now, \"edit\" when they clearly want to change/tweak filters first, or \"clarify\" when their intent is ambiguous and you are asking a follow-up question.
 }
@@ -2535,8 +2538,8 @@ ${getPronounInstructions(userProfile.pronoun)}`
           try {
             const prevParsed = JSON.parse(messages[i].content)
             if (prevParsed.data) {
-              if (prevParsed.data.destination_country != null) continueDestination = prevParsed.data.destination_country
-              if (prevParsed.data.area != null) continueArea = prevParsed.data.area
+              if ('destination_country' in prevParsed.data) continueDestination = prevParsed.data.destination_country
+              if ('area' in prevParsed.data) continueArea = prevParsed.data.area
             }
             break
           } catch (_e) { /* not JSON */ }
@@ -2827,23 +2830,7 @@ ${getPronounInstructions(userProfile.pronoun)}`
                 const userMsg = messages[i].content
                 const userMsgLower = userMsg.toLowerCase()
                 
-                // Extract area if missing (e.g., "Costa Rica, Pavones" -> area: "Pavones")
-                if (!tripPlanningData.area && tripPlanningData.destination_country) {
-                  const countryLower = tripPlanningData.destination_country.toLowerCase()
-                  if (userMsgLower.includes(countryLower)) {
-                    const parts = userMsg.split(',').map(p => p.trim())
-                    if (parts.length > 1) {
-                      const countryIndex = parts.findIndex(p => p.toLowerCase().includes(countryLower))
-                      if (countryIndex >= 0 && countryIndex < parts.length - 1) {
-                        const area = parts[countryIndex + 1]
-                        if (area && area.length > 0 && area.length < 50) {
-                          tripPlanningData.area = area
-                          console.log(`✅ Extracted area "${area}" from user message: "${userMsg}"`)
-                        }
-                      }
-                    }
-                  }
-                }
+                // Area extraction removed — let the AI handle it via the prompt instructions
               }
             }
             console.log('✅ Final enriched data (fallback):', JSON.stringify(tripPlanningData, null, 2))
@@ -2996,14 +2983,15 @@ ${getPronounInstructions(userProfile.pronoun)}`
         // This should happen AFTER all tripPlanningData initialization
         // CRITICAL: Always add queryFilters if they were extracted, even if tripPlanningData already exists
         // Also populate non_negotiable_criteria.age_range from queryFilters.age_min/age_max
-        if (body.adding_filters && body.existing_query_filters && typeof body.existing_query_filters === 'object') {
+        if (body.adding_filters && body.existing_query_filters !== undefined) {
           // Add-filter mode: merge existing (from client) with current message's extracted only (not accumulated)
+          const existingQF = body.existing_query_filters && typeof body.existing_query_filters === 'object' ? body.existing_query_filters : {}
           const currentExtracted = filterResult?.supabaseFilters ?? extractedQueryFilters ?? {}
           const intent = filterResult?.filterEditIntent && typeof filterResult.filterEditIntent === 'object' ? filterResult.filterEditIntent : {}
           const hasIntent = Object.keys(intent).length > 0
           const merged = hasIntent
-            ? mergeQueryFiltersEditing(body.existing_query_filters, currentExtracted, intent)
-            : mergeQueryFiltersAdding(body.existing_query_filters, currentExtracted)
+            ? mergeQueryFiltersEditing(existingQF, currentExtracted, intent)
+            : mergeQueryFiltersAdding(existingQF, currentExtracted)
           const normalizedQueryFilters = await normalizeQueryFilters(merged)
           // Merge destinations so "add Indonesia" when existing is "Sri Lanka" yields "Sri Lanka, Indonesia"
           const mergedDestination = mergeDestinations(
@@ -3026,8 +3014,10 @@ ${getPronounInstructions(userProfile.pronoun)}`
             }
           } else {
             tripPlanningData.queryFilters = normalizedQueryFilters
-            tripPlanningData.destination_country = mergedDestination ?? body.existing_destination_country ?? tripPlanningData.destination_country
-            if (body.existing_area != null) tripPlanningData.area = body.existing_area
+            // Trust client's explicit destination/area (they may be null = deleted)
+            if ('existing_destination_country' in body) tripPlanningData.destination_country = mergedDestination ?? body.existing_destination_country ?? null
+            else tripPlanningData.destination_country = mergedDestination ?? tripPlanningData.destination_country
+            if ('existing_area' in body) tripPlanningData.area = body.existing_area ?? null
           }
           console.log('✅ Merged filters (add-filter mode):', JSON.stringify(normalizedQueryFilters, null, 2))
         } else if (extractedQueryFilters && Object.keys(extractedQueryFilters).length > 0) {

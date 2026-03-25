@@ -4,6 +4,10 @@ export interface OnboardingMatch {
   user_id: string;
   conversation_id: string;
   total_score: number;
+  name: string;
+  age: number | null;
+  country_from: string | null;
+  profile_image_url: string | null;
   scores: {
     age: number;
     country: number;
@@ -16,6 +20,7 @@ export interface OnboardingMatch {
 export interface OnboardingMatchResult {
   matches: OnboardingMatch[];
   match_count: number;
+  swelly_chat_id: string | null;
 }
 
 /**

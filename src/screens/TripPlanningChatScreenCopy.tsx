@@ -216,6 +216,8 @@ interface TripPlanningChatScreenProps {
   onChatStateChange?: (chatId: string | null, matchedUsers: any[], destination: string) => void;
   /** Optional: override the swelly service instance (e.g. to target a different edge function). */
   service?: SwellyServiceType;
+  /** Optional: auto-trigger an action ('more' or 'add_filter') after chat restoration. */
+  initialAction?: 'more' | 'add_filter' | null;
 }
 
 export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
@@ -227,6 +229,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   persistedDestination,
   onChatStateChange,
   service,
+  initialAction,
 }) => {
   const svc = service ?? swellyServiceCopy;
   const { formData } = useOnboarding();
@@ -354,6 +357,21 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     }
     unresolvedActionRowMessageIdRef.current = id;
   }, [messages, messageIdsUnblockedByFilterDeletion]);
+
+  // Auto-trigger initialAction after chat restoration completes
+  const initialActionFiredRef = useRef(false);
+  useEffect(() => {
+    if (initialActionFiredRef.current || isInitializing || !initialAction) return;
+    // Find the last match_results message to trigger the action on
+    const matchMessage = [...messages].reverse().find(
+      m => m.isMatchedUsers && m.matchedUsers && m.matchedUsers.length > 0 && m.actionRow?.selectedAction == null
+    );
+    if (matchMessage) {
+      initialActionFiredRef.current = true;
+      // Delay slightly to let the UI settle after restore
+      setTimeout(() => handleMatchAction(matchMessage.id, initialAction), 300);
+    }
+  }, [isInitializing, initialAction, messages]);
 
   // Test API connection and initialize chat context on component mount
   useEffect(() => {
@@ -970,12 +988,12 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         const continuePayload: { message: string; existing_query_filters?: any; adding_filters?: boolean; existing_destination_country?: string | null; existing_area?: string | null } = {
           message: userMessage.text,
         };
-        const dataWithFilters = existingFiltersForAdd?.data ?? (awaitingSearchDecision && pendingSearch?.data?.queryFilters != null ? pendingSearch?.data : null);
-        if (dataWithFilters?.queryFilters != null) {
-          continuePayload.existing_query_filters = dataWithFilters.queryFilters;
+        const dataWithFilters = existingFiltersForAdd?.data ?? (awaitingSearchDecision && pendingSearch?.data ? pendingSearch?.data : null);
+        if (dataWithFilters) {
+          continuePayload.existing_query_filters = dataWithFilters.queryFilters ?? null;
           continuePayload.adding_filters = true;
-          if (dataWithFilters.destination_country != null) continuePayload.existing_destination_country = dataWithFilters.destination_country;
-          if (dataWithFilters.area != null) continuePayload.existing_area = dataWithFilters.area;
+          continuePayload.existing_destination_country = dataWithFilters.destination_country ?? null;
+          continuePayload.existing_area = dataWithFilters.area ?? null;
         }
         const hasExistingFilters = continuePayload.existing_query_filters != null;
         const efKeys = hasExistingFilters && typeof continuePayload.existing_query_filters === 'object' ? Object.keys(continuePayload.existing_query_filters).join(',') : 'n/a';
@@ -997,7 +1015,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
       // When awaiting a search decision and user sends a message, handle it here
       if (awaitingSearchDecision && pendingSearch) {
         // Keep pendingSearch in sync with server-merged filters so subsequent "search" uses correct data
-        if (response.data?.queryFilters != null) {
+        if (response.data != null) {
           setPendingSearch({
             data: response.data,
             searchSummary: pendingSearch.searchSummary ?? (response.data as any)?.search_summary ?? '',
@@ -1012,7 +1030,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         const effectiveSearch = nextAction === 'search' || (nextAction == null && userWantsSearch);
         if (effectiveSearch) {
           if (chatId) {
-            const dataToSearch = response.data?.queryFilters != null ? response.data : pendingSearch.data;
+            const dataToSearch = response.data != null ? response.data : pendingSearch.data;
             if (hasSearchableFilters(dataToSearch)) {
               await runFindMatches(chatId, dataToSearch);
             } else {

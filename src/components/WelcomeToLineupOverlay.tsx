@@ -1,228 +1,162 @@
-import React, { useEffect } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   View,
   StyleSheet,
   Modal,
   TouchableOpacity,
   Platform,
+  Image,
   ScrollView,
+  NativeSyntheticEvent,
+  NativeScrollEvent,
 } from 'react-native';
-import { useVideoPlayer, VideoView } from 'expo-video';
 import { Text } from './Text';
-import { colors, spacing, borderRadius } from '../styles/theme';
-import Svg, { Path } from 'react-native-svg';
-import { getVideoUrl } from '../services/media/videoService';
+import { borderRadius } from '../styles/theme';
+import { getImageUrl } from '../services/media/imageService';
+import type { OnboardingMatch } from '../services/matching/onboardingMatchingService';
 
 interface WelcomeToLineupOverlayProps {
   visible: boolean;
-  onNext: () => void;
+  matches: OnboardingMatch[];
+  onClose: () => void;
+  onConnect: (match: OnboardingMatch) => void;
+  onViewProfile: (userId: string) => void;
+  onThreeDifferent: () => void;
+  onEditFilter: () => void;
 }
 
-// Figma: backdrop #212121 80%, card white 16px radius, shadow, title #b72df2, body #333, button #212121 pill
-const BACKDROP_COLOR = 'rgba(33, 33, 33, 0.8)';
-const TITLE_COLOR = '#b72df2';
-const CARD_SHADOW = {
-  shadowColor: '#596E7C',
-  shadowOffset: { width: 0, height: 2 },
-  shadowOpacity: 0.15,
-  shadowRadius: 16,
-  elevation: 8,
-};
+const CARD_CONTAINER_WIDTH = 350;
+const CARD_HORIZONTAL_PADDING = 19;
+const INNER_WIDTH = CARD_CONTAINER_WIDTH - CARD_HORIZONTAL_PADDING * 2; // 312
+const CAROUSEL_CARD_WIDTH = INNER_WIDTH * 0.75; // ~234
+const CAROUSEL_CARD_SPACING = 10;
 
-const LOADING_VIDEO_PATH = '/Loading 4 to 5.mp4';
+const TEAL = '#2B8C96';
+const CONNECT_BTN_COLOR = '#B8A88A';
+const BACKDROP_COLOR = 'rgba(33, 33, 33, 0.8)';
+
+const coverImageUrl = getImageUrl('/COVER IMAGE.jpg');
 
 export const WelcomeToLineupOverlay: React.FC<WelcomeToLineupOverlayProps> = ({
   visible,
-  onNext,
+  matches,
+  onClose,
+  onConnect,
+  onViewProfile,
+  onThreeDifferent,
+  onEditFilter,
 }) => {
-  const videoUrl = getVideoUrl(LOADING_VIDEO_PATH);
-  const player = useVideoPlayer(videoUrl, (p) => {
-    if (p) {
-      p.loop = true;
-      p.muted = true;
-    }
+  const [activeIndex, setActiveIndex] = useState(0);
+  const scrollViewRef = useRef<ScrollView>(null);
+
+  console.log('[WelcomeOverlay] Render:', {
+    matchCount: matches.length,
+    CAROUSEL_CARD_WIDTH,
+    CAROUSEL_CARD_SPACING,
+    CARD_CONTAINER_WIDTH,
+    totalContentWidth: matches.length * (CAROUSEL_CARD_WIDTH + CAROUSEL_CARD_SPACING),
   });
 
-  // Autoplay when overlay is visible: replaceAsync then wait for ready then play (match onboarding step 2 / LoadingScreen)
-  useEffect(() => {
-    if (!visible || !videoUrl || !player) return;
-
-    if (Platform.OS === 'web' && typeof document !== 'undefined') {
-      const setPlaysInline = () => {
-        const videoElements = document.querySelectorAll('video');
-        videoElements.forEach((videoElement: HTMLVideoElement) => {
-          videoElement.setAttribute('playsinline', 'true');
-          videoElement.setAttribute('webkit-playsinline', 'true');
-          videoElement.setAttribute('x5-playsinline', 'true');
-          videoElement.playsInline = true;
-        });
-      };
-      setPlaysInline();
-      setTimeout(setPlaysInline, 50);
+  const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    console.log('[WelcomeOverlay] onScroll offset:', e.nativeEvent.contentOffset.x);
+    const offset = e.nativeEvent.contentOffset.x;
+    const index = Math.round(offset / (CAROUSEL_CARD_WIDTH + CAROUSEL_CARD_SPACING));
+    if (index >= 0 && index < matches.length) {
+      setActiveIndex(index);
     }
+  };
 
-    const replacePromise = player.replaceAsync(videoUrl);
-    if (replacePromise && typeof replacePromise.then === 'function') {
-      replacePromise.then(() => {
-        if (!player) return;
-        player.loop = true;
-        player.muted = true;
-
-        if (Platform.OS === 'web' && typeof document !== 'undefined') {
-          const setPlaysInline = () => {
-            const videoElements = document.querySelectorAll('video');
-            videoElements.forEach((videoElement: HTMLVideoElement) => {
-              videoElement.setAttribute('playsinline', 'true');
-              videoElement.setAttribute('webkit-playsinline', 'true');
-              videoElement.setAttribute('x5-playsinline', 'true');
-              videoElement.playsInline = true;
-            });
-          };
-          setPlaysInline();
-          setTimeout(setPlaysInline, 50);
-        }
-
-        const waitForVideoReady = (): Promise<void> => {
-          return new Promise<void>((resolve) => {
-            if (Platform.OS === 'web' && typeof document !== 'undefined') {
-              const findVideoElement = () => {
-                const videoElements = document.querySelectorAll('video');
-                return Array.from(videoElements).find((video: HTMLVideoElement) => {
-                  return video.src === videoUrl || video.currentSrc === videoUrl;
-                }) as HTMLVideoElement | undefined;
-              };
-              const videoElement = findVideoElement();
-              if (videoElement) {
-                const HAVE_CURRENT_DATA = 2;
-                if (videoElement.readyState >= HAVE_CURRENT_DATA) {
-                  resolve();
-                } else {
-                  const canPlayHandler = () => resolve();
-                  videoElement.addEventListener('canplay', canPlayHandler, { once: true });
-                  setTimeout(() => {
-                    videoElement.removeEventListener('canplay', canPlayHandler);
-                    resolve();
-                  }, 500);
-                }
-              } else {
-                resolve();
-              }
-            } else {
-              resolve();
-            }
-          });
-        };
-
-        waitForVideoReady().then(() => {
-          if (!player) return;
-          player.loop = true;
-          player.muted = true;
-          const playPromise = player.play();
-          if (playPromise !== undefined && typeof (playPromise as Promise<unknown>).catch === 'function') {
-            (playPromise as Promise<void>).then(() => {
-              if (__DEV__) {
-                console.log('[WelcomeToLineupOverlay] Video playing successfully after replaceAsync');
-              }
-            }).catch((playError: unknown) => {
-              const err = playError as { name?: string; message?: string };
-              if (err.name !== 'NotAllowedError') {
-                if (__DEV__) {
-                  console.warn('[WelcomeToLineupOverlay] Play failed, retrying...', err.message);
-                }
-                setTimeout(() => {
-                  if (player) {
-                    const retryPlayResult = player.play();
-                    if (retryPlayResult !== undefined && typeof (retryPlayResult as Promise<unknown>).then === 'function') {
-                      (retryPlayResult as Promise<void>).catch((retryError: unknown) => {
-                        if (__DEV__ && (retryError as { name?: string }).name !== 'NotAllowedError') {
-                          console.warn('[WelcomeToLineupOverlay] Play retry failed:', (retryError as Error).message);
-                        }
-                      });
-                    }
-                  }
-                }, 200);
-              }
-            });
-          }
-        });
-      }).catch((error: unknown) => {
-        console.error('[WelcomeToLineupOverlay] Error replacing video:', error, 'URL:', videoUrl);
-      });
-    }
-  }, [visible, videoUrl, player]);
+  const activeMatch = matches[activeIndex] || matches[0];
 
   return (
     <Modal
       visible={visible}
       transparent
       animationType="fade"
-      onRequestClose={onNext}
+      onRequestClose={onClose}
       statusBarTranslucent={Platform.OS === 'android'}
     >
       <View style={styles.backdrop}>
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-        >
-          <View style={[styles.card, CARD_SHADOW]}>
-            <Text style={styles.title}>Welcome to The Lineup!</Text>
+        <View style={styles.card}>
+          {/* Close button */}
+          <TouchableOpacity style={styles.closeButton} onPress={onClose} activeOpacity={0.7}>
+            <Text style={styles.closeButtonText}>✕</Text>
+          </TouchableOpacity>
 
-            <View style={styles.illustrationContainer}>
-              {player ? (
-                <VideoView
-                  player={player}
-                  style={styles.illustration}
-                  contentFit="cover"
-                  nativeControls={false}
-                  allowsFullscreen={false}
-                  allowsPictureInPicture={false}
-                />
-              ) : null}
+          <View style={styles.content}>
+            <Text style={styles.title}>
+              {'Congrats!\nYour first connection is\nhappening right now!'}
+            </Text>
+
+            {matches.length > 0 ? (
+              <ScrollView
+                ref={scrollViewRef}
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                snapToInterval={CAROUSEL_CARD_WIDTH + CAROUSEL_CARD_SPACING}
+                decelerationRate="fast"
+                contentContainerStyle={styles.carouselContent}
+                onScroll={onScroll}
+                scrollEventThrottle={16}
+                style={styles.carousel}
+              >
+                {matches.map((item) => {
+                  const profileImageUri = item.profile_image_url || undefined;
+                  return (
+                    <View key={item.user_id} style={styles.userCard}>
+                      <Image source={{ uri: coverImageUrl }} style={styles.coverImage} />
+                      <View style={styles.profilePicContainer}>
+                        {profileImageUri ? (
+                          <Image source={{ uri: profileImageUri }} style={styles.profilePic} />
+                        ) : (
+                          <View style={[styles.profilePic, styles.profilePicPlaceholder]}>
+                            <Text style={styles.profilePicInitial}>
+                              {(item.name || 'U').charAt(0).toUpperCase()}
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                      <View style={styles.cardInfo}>
+                        <Text style={styles.cardName}>{item.name || 'User'}</Text>
+                        <Text style={styles.cardDetails}>
+                          {item.age != null ? `${item.age} yo` : ''}
+                          {item.age != null && item.country_from ? ' | ' : ''}
+                          {item.country_from || ''}
+                        </Text>
+                        <TouchableOpacity onPress={() => onViewProfile(item.user_id)}>
+                          <Text style={styles.viewProfileLink}>View Profile</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  );
+                })}
+              </ScrollView>
+            ) : null}
+
+            <Text style={styles.subtitle}>
+              {'You and these 3 are\nEXTRA aligned!'}
+            </Text>
+
+            {activeMatch && (
+              <TouchableOpacity
+                style={styles.connectButton}
+                onPress={() => onConnect(activeMatch)}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.connectButtonText}>Connect to {activeMatch.name || 'User'}</Text>
+              </TouchableOpacity>
+            )}
+
+            <View style={styles.bottomLinks}>
+              <TouchableOpacity onPress={onThreeDifferent}>
+                <Text style={styles.bottomLink}>3 different</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={onEditFilter}>
+                <Text style={styles.bottomLink}>Edit Filter</Text>
+              </TouchableOpacity>
             </View>
-
-            <View style={styles.block}>
-              <View style={styles.blockIconRow}>
-                <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
-                  <Path
-                    d="M7.5 12H7.51M12 12H12.01M16.5 12H16.51M12 21C16.9706 21 21 16.9706 21 12C21 7.02944 16.9706 3 12 3C7.02944 3 3 7.02944 3 12C3 13.1971 3.23374 14.3397 3.65806 15.3845C3.73927 15.5845 3.77988 15.6845 3.798 15.7653C3.81572 15.8443 3.8222 15.9028 3.82221 15.9839C3.82222 16.0667 3.80718 16.1569 3.77711 16.3374L3.18413 19.8952C3.12203 20.2678 3.09098 20.4541 3.14876 20.5888C3.19933 20.7067 3.29328 20.8007 3.41118 20.8512C3.54589 20.909 3.73218 20.878 4.10476 20.8159L7.66265 20.2229C7.84309 20.1928 7.9333 20.1778 8.01613 20.1778C8.09715 20.1778 8.15566 20.1843 8.23472 20.202C8.31554 20.2201 8.41552 20.2607 8.61549 20.3419C9.6603 20.7663 10.8029 21 12 21ZM8 12C8 12.2761 7.77614 12.5 7.5 12.5C7.22386 12.5 7 12.2761 7 12C7 11.7239 7.22386 11.5 7.5 11.5C7.77614 11.5 8 11.7239 8 12ZM12.5 12C12.5 12.2761 12.2761 12.5 12 12.5C11.7239 12.5 11.5 12.2761 11.5 12C11.5 11.7239 11.7239 11.5 12 11.5C12.2761 11.5 12.5 11.7239 12.5 12ZM17 12C17 12.2761 16.7761 12.5 16.5 12.5C16.2239 12.5 16 12.2761 16 12C16 11.7239 16.2239 11.5 16.5 11.5C16.7761 11.5 17 11.7239 17 12Z"
-                    stroke="#222B30"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </Svg>
-              </View>
-              <Text style={styles.blockHeading}>Drop into The Lineup!</Text>
-              <Text style={styles.blockBody}>
-                This is your home base to chat with like minded surfers. Better connections, peer advice & community driven travel!
-              </Text>
-            </View>
-
-            <View style={styles.block}>
-              <View style={styles.blockIconRow}>
-                <Svg width={20} height={20} viewBox="0 0 20 20" fill="none">
-                  <Path
-                    d="M3.75033 18.3333V14.1666M3.75033 5.83329V1.66663M1.66699 3.74996H5.83366M1.66699 16.25H5.83366M10.8337 2.49996L9.38851 6.25734C9.1535 6.86837 9.036 7.17388 8.85327 7.43086C8.69132 7.65862 8.49232 7.85762 8.26456 8.01957C8.00758 8.2023 7.70207 8.3198 7.09104 8.55481L3.33366 9.99996L7.09104 11.4451C7.70207 11.6801 8.00758 11.7976 8.26456 11.9804C8.49232 12.1423 8.69132 12.3413 8.85327 12.5691C9.036 12.826 9.1535 13.1315 9.38851 13.7426L10.8337 17.5L12.2788 13.7426C12.5138 13.1315 12.6313 12.826 12.8141 12.5691C12.976 12.3413 13.175 12.1423 13.4028 11.9804C13.6597 11.7976 13.9652 11.6801 14.5763 11.4451L18.3337 9.99996L14.5763 8.55481C13.9652 8.3198 13.6597 8.2023 13.4028 8.01957C13.175 7.85762 12.976 7.65862 12.814 7.43086C12.6313 7.17388 12.5138 6.86837 12.2788 6.25734L10.8337 2.49996Z"
-                    stroke="#222B30"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </Svg>
-              </View>
-              <Text style={styles.blockHeading}>Talk with Swelly</Text>
-              <Text style={styles.blockBody}>
-                Swelly can introduce you to surfers who match your style and travel interests. Get peer guidance on all things surf and destinations you want to explore.
-              </Text>
-            </View>
-
-            <TouchableOpacity
-              style={styles.nextButton}
-              onPress={onNext}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.nextButtonText}>Next</Text>
-            </TouchableOpacity>
           </View>
-        </ScrollView>
+        </View>
       </View>
     </Modal>
   );
@@ -235,81 +169,159 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  scrollContent: {
-    flexGrow: 1,
+  card: {
+    width: CARD_CONTAINER_WIDTH,
+    height: 713,
+    backgroundColor: '#FFFFFF',
+    borderRadius: borderRadius.medium,
+    paddingBottom: 32,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 16,
+    elevation: 10,
+  },
+  closeButton: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    zIndex: 10,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(0, 0, 0, 0.05)',
     justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: spacing.xl,
-    paddingHorizontal: spacing.md,
   },
-  card: {
-    width: '100%',
-    maxWidth: 350,
-    backgroundColor: colors.white,
-    borderRadius: borderRadius.medium,
-    paddingTop: spacing.xl,
-    paddingHorizontal: 19,
-    paddingBottom: spacing.xl,
+  closeButtonText: {
+    fontSize: 16,
+    color: '#666',
+    fontWeight: '600',
+  },
+  content: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: CARD_HORIZONTAL_PADDING,
+    paddingTop: 40,
   },
   title: {
     fontSize: 22,
     fontWeight: '700',
-    color: TITLE_COLOR,
+    color: TEAL,
     textAlign: 'center',
-    marginBottom: spacing.lg,
+    marginBottom: 20,
+    lineHeight: 30,
     ...(Platform.OS === 'web' ? { fontFamily: 'Montserrat, sans-serif' } : {}),
   },
-  illustrationContainer: {
-    width: 244,
-    height: 244,
-    alignSelf: 'center',
-    marginBottom: spacing.lg,
-    backgroundColor: '#f5f5f5',
-    borderRadius: borderRadius.small,
+  carousel: {
+    flexGrow: 0,
+    maxHeight: 280,
+    width: CARD_CONTAINER_WIDTH,
+    marginLeft: -CARD_HORIZONTAL_PADDING,
+  },
+  carouselContent: {
+    paddingHorizontal: (CARD_CONTAINER_WIDTH - CAROUSEL_CARD_WIDTH) / 2,
+  },
+  userCard: {
+    width: CAROUSEL_CARD_WIDTH,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    borderWidth: 2.5,
+    borderColor: '#A8DDE0',
+    marginRight: CAROUSEL_CARD_SPACING,
     overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
   },
-  illustration: {
+  coverImage: {
     width: '100%',
-    height: '100%',
+    height: 110,
+    resizeMode: 'cover',
   },
-  block: {
-    marginBottom: spacing.lg,
+  profilePicContainer: {
     alignItems: 'center',
+    marginTop: -35,
   },
-  blockIconRow: {
-    marginBottom: spacing.xs,
-    alignSelf: 'center',
+  profilePic: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    borderWidth: 3,
+    borderColor: '#FFFFFF',
   },
-  blockHeading: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: colors.textPrimary,
-    marginBottom: spacing.xs,
-    textAlign: 'center',
-    ...(Platform.OS === 'web' ? { fontFamily: 'Montserrat, sans-serif' } : {}),
-  },
-  blockBody: {
-    fontSize: 14,
-    lineHeight: 18,
-    color: colors.textPrimary,
-    textAlign: 'center',
-    ...(Platform.OS === 'web' ? { fontFamily: 'Inter, sans-serif' } : {}),
-  },
-  nextButton: {
-    backgroundColor: '#212121',
-    height: 56,
-    borderRadius: borderRadius.full,
+  profilePicPlaceholder: {
+    backgroundColor: '#A8DDE0',
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: spacing.sm,
-    minWidth: 150,
-    paddingVertical: 12,
-    paddingHorizontal: spacing.lg,
   },
-  nextButtonText: {
-    fontSize: 18,
+  profilePicInitial: {
+    fontSize: 24,
     fontWeight: '700',
-    color: colors.white,
+    color: '#FFFFFF',
+  },
+  cardInfo: {
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  cardName: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#222',
+    marginBottom: 2,
     ...(Platform.OS === 'web' ? { fontFamily: 'Montserrat, sans-serif' } : {}),
+  },
+  cardDetails: {
+    fontSize: 13,
+    color: '#888',
+    marginBottom: 6,
+    ...(Platform.OS === 'web' ? { fontFamily: 'Inter, sans-serif' } : {}),
+  },
+  viewProfileLink: {
+    fontSize: 13,
+    color: '#333',
+    textDecorationLine: 'underline',
+    ...(Platform.OS === 'web' ? { fontFamily: 'Inter, sans-serif' } : {}),
+  },
+  subtitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: TEAL,
+    textAlign: 'center',
+    marginTop: 20,
+    marginBottom: 20,
+    lineHeight: 28,
+    ...(Platform.OS === 'web' ? { fontFamily: 'Montserrat, sans-serif' } : {}),
+  },
+  connectButton: {
+    backgroundColor: CONNECT_BTN_COLOR,
+    height: 52,
+    borderRadius: 26,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 32,
+    marginBottom: 16,
+    minWidth: 200,
+  },
+  connectButtonText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    ...(Platform.OS === 'web' ? { fontFamily: 'Montserrat, sans-serif' } : {}),
+  },
+  bottomLinks: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 36,
+  },
+  bottomLink: {
+    fontSize: 14,
+    color: '#333',
+    textDecorationLine: 'underline',
+    ...(Platform.OS === 'web' ? { fontFamily: 'Inter, sans-serif' } : {}),
   },
 });

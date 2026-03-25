@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Alert, Platform, View } from 'react-native';
+import { Alert, Platform, View, TouchableOpacity, Text as RNText } from 'react-native';
 import { WelcomeScreen } from '../screens/WelcomeScreen';
 import { OnboardingWelcomeScreen } from '../screens/OnboardingWelcomeScreen';
 import { OnboardingStep1Screen, OnboardingData } from '../screens/OnboardingStep1Screen';
@@ -25,7 +25,7 @@ import { useAuthGuard } from '../hooks/useAuthGuard';
 import { isFirstVideoReadyForBoardType, getVideoPreloadStatus, waitForVideoReady, preloadLoadingVideo, getLoadingVideoUrl } from '../services/media/videoPreloadService';
 import { STEP_WELCOME } from '../constants/onboardingSteps';
 import { swellyServiceCopy, swellyServiceCopyCopy } from '../services/swelly/swellyServiceCopy';
-import { findAndConnectMatches } from '../services/matching/onboardingMatchingService';
+import { findAndConnectMatches, OnboardingMatchResult } from '../services/matching/onboardingMatchingService';
 
 export const AppContent: React.FC = () => {
   const { currentStep, formData, setCurrentStep, updateFormData, saveStepToSupabase, isComplete, markOnboardingComplete, isDemoUser, setIsDemoUser, setUser, resetOnboarding, user, isRestoringSession } = useOnboarding();
@@ -500,7 +500,8 @@ export const AppContent: React.FC = () => {
   const [currentUserAvatar, setCurrentUserAvatar] = useState<string | null>(null);
   const [currentUserName, setCurrentUserName] = useState<string>('User');
   const [showWelcomeToLineupOverlay, setShowWelcomeToLineupOverlay] = useState(false);
-  const welcomeOverlayTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [onboardingMatchResult, setOnboardingMatchResult] = useState<OnboardingMatchResult | null>(null);
+  const [tripPlanningInitialAction, setTripPlanningInitialAction] = useState<'more' | 'add_filter' | null>(null);
 
   const handleChatComplete = async () => {
     console.log('[AppContent] handleChatComplete called');
@@ -547,42 +548,20 @@ export const AppContent: React.FC = () => {
   const handleSaveAndGoToConversations = useCallback(() => {
     handleProfileBack();
 
-    // Fire-and-forget: find top 3 matches and create conversations in the background
+    // Find top 3 matches, create conversations, and store result for the overlay
     findAndConnectMatches()
       .then((result) => {
         if (result && result.match_count > 0) {
           console.log(`[AppContent] Created ${result.match_count} match conversations`);
+          setOnboardingMatchResult(result);
+          setShowWelcomeToLineupOverlay(true);
         }
       })
       .catch((err) => {
         console.warn('[AppContent] Matching failed (non-blocking):', err);
       });
-
-    if (welcomeOverlayTimeoutRef.current) {
-      clearTimeout(welcomeOverlayTimeoutRef.current);
-      welcomeOverlayTimeoutRef.current = null;
-    }
-    welcomeOverlayTimeoutRef.current = setTimeout(() => {
-      welcomeOverlayTimeoutRef.current = null;
-      setShowWelcomeToLineupOverlay(true);
-    }, 3000);
   }, []);
 
-  useEffect(() => {
-    return () => {
-      if (welcomeOverlayTimeoutRef.current) {
-        clearTimeout(welcomeOverlayTimeoutRef.current);
-        welcomeOverlayTimeoutRef.current = null;
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    if (showProfile && welcomeOverlayTimeoutRef.current) {
-      clearTimeout(welcomeOverlayTimeoutRef.current);
-      welcomeOverlayTimeoutRef.current = null;
-    }
-  }, [showProfile]);
 
   const handleSwellyShaperBack = () => {
     // Navigate back from Swelly Shaper to profile
@@ -1119,7 +1098,7 @@ export const AppContent: React.FC = () => {
     if (showTripPlanningChatCopy) {
       return (
         <TripPlanningChatScreenCopy
-          onChatComplete={() => { setShowTripPlanningChatCopy(false); setShowTripPlanningChat(false); }}
+          onChatComplete={() => { setShowTripPlanningChatCopy(false); setShowTripPlanningChat(false); setTripPlanningInitialAction(null); }}
           onViewUserProfile={handleViewUserProfile}
           onStartConversation={handleStartConversation}
           persistedChatId={tripPlanningChatId}
@@ -1131,6 +1110,7 @@ export const AppContent: React.FC = () => {
             setTripPlanningDestination(destination);
           }}
           service={activeCopyService === 'copy-copy' ? swellyServiceCopyCopy : swellyServiceCopy}
+          initialAction={tripPlanningInitialAction}
         />
       );
     }
@@ -1164,9 +1144,52 @@ export const AppContent: React.FC = () => {
           onViewUserProfile={handleViewUserProfile}
           onSwellyShaperViewProfile={handleSwellyShaperViewProfile}
         />
+        {process.env.EXPO_PUBLIC_LOCAL_MODE === 'true' && (
+          <TouchableOpacity
+            style={{ position: 'absolute', top: 60, right: 10, backgroundColor: '#333', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, zIndex: 999, opacity: 0.7 }}
+            onPress={() => {
+              findAndConnectMatches()
+                .then((result) => {
+                  if (result && result.match_count > 0) {
+                    setOnboardingMatchResult(result);
+                    setShowWelcomeToLineupOverlay(true);
+                  } else {
+                    console.warn('[Debug] No matches found');
+                  }
+                })
+                .catch((err) => console.warn('[Debug] Matching failed:', err));
+            }}
+          >
+            <RNText style={{ color: '#fff', fontSize: 11 }}>Debug Overlay</RNText>
+          </TouchableOpacity>
+        )}
         <WelcomeToLineupOverlay
-          visible={showWelcomeToLineupOverlay}
-          onNext={() => setShowWelcomeToLineupOverlay(false)}
+          visible={showWelcomeToLineupOverlay && onboardingMatchResult != null && onboardingMatchResult.match_count > 0}
+          matches={onboardingMatchResult?.matches || []}
+          onClose={() => setShowWelcomeToLineupOverlay(false)}
+          onConnect={(match) => {
+            setShowWelcomeToLineupOverlay(false);
+            handleStartConversation(match.user_id);
+          }}
+          onViewProfile={(userId) => {
+            handleViewUserProfile(userId);
+          }}
+          onThreeDifferent={() => {
+            setShowWelcomeToLineupOverlay(false);
+            if (onboardingMatchResult?.swelly_chat_id) {
+              setTripPlanningChatId(onboardingMatchResult.swelly_chat_id);
+            }
+            setTripPlanningInitialAction('more');
+            setShowTripPlanningChatCopy(true);
+          }}
+          onEditFilter={() => {
+            setShowWelcomeToLineupOverlay(false);
+            if (onboardingMatchResult?.swelly_chat_id) {
+              setTripPlanningChatId(onboardingMatchResult.swelly_chat_id);
+            }
+            setTripPlanningInitialAction('add_filter');
+            setShowTripPlanningChatCopy(true);
+          }}
         />
       </>
     );

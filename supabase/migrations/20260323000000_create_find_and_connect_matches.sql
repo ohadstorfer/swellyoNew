@@ -9,6 +9,9 @@ DECLARE
   conv_id uuid;
   results jsonb := '[]'::jsonb;
   match_count int := 0;
+  swelly_chat uuid;
+  matched_users_for_chat jsonb := '[]'::jsonb;
+  now_ts text;
 BEGIN
   -- Load the input user's surfer row
   SELECT * INTO me
@@ -19,11 +22,17 @@ BEGIN
     RAISE EXCEPTION 'Surfer not found for user_id %', input_user_id;
   END IF;
 
+  now_ts := to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"');
+
   -- Score all eligible surfers and iterate top 3
   FOR match IN
     WITH scored AS (
       SELECT
         s.user_id,
+        s.name,
+        s.age,
+        s.country_from,
+        s.profile_image_url,
 
         -- TIER 1: age proximity (60 pts max)
         CASE
@@ -126,6 +135,10 @@ BEGIN
       'user_id', match.user_id,
       'conversation_id', conv_id,
       'total_score', match.total_score,
+      'name', COALESCE(match.name, 'User'),
+      'age', match.age,
+      'country_from', match.country_from,
+      'profile_image_url', match.profile_image_url,
       'scores', jsonb_build_object(
         'age', match.age_score,
         'country', match.country_score,
@@ -134,11 +147,63 @@ BEGIN
         'lifestyle', match.lifestyle_score
       )
     );
+
+    -- Build matched_users array for the swelly chat record
+    matched_users_for_chat := matched_users_for_chat || jsonb_build_object(
+      'user_id', match.user_id,
+      'name', COALESCE(match.name, 'User'),
+      'age', match.age,
+      'country_from', match.country_from,
+      'profile_image_url', match.profile_image_url,
+      'match_score', match.total_score
+    );
   END LOOP;
+
+  -- Create a swelly_chat_history record with the matches pre-attached
+  IF match_count > 0 THEN
+    swelly_chat := gen_random_uuid();
+
+    INSERT INTO swelly_chat_history (chat_id, user_id, messages, ui_messages)
+    VALUES (
+      swelly_chat,
+      input_user_id,
+      -- messages: single assistant message with matches in metadata
+      jsonb_build_array(
+        jsonb_build_object(
+          'role', 'assistant',
+          'content', '{"return_message":"Here are your top matches!","is_finished":true,"data":{"destination_country":null}}',
+          'metadata', jsonb_build_object(
+            'matchedUsers', matched_users_for_chat,
+            'destinationCountry', '',
+            'matchTimestamp', now_ts,
+            'actionRow', jsonb_build_object('requestData', null, 'selectedAction', null),
+            'totalCount', match_count
+          )
+        )
+      ),
+      -- ui_messages: single match_results entry
+      jsonb_build_array(
+        jsonb_build_object(
+          'id', gen_random_uuid()::text,
+          'order_index', 0,
+          'type', 'match_results',
+          'text', 'Found ' || match_count || ' awesome matches for you!',
+          'timestamp', now_ts,
+          'is_user', false,
+          'matched_users', matched_users_for_chat,
+          'destination_country', '',
+          'match_total_count', match_count,
+          'action_row', jsonb_build_object('request_data', null, 'selected_action', null),
+          'backend_message_index', 0
+        )
+      )
+    );
+  END IF;
 
   RETURN jsonb_build_object(
     'matches', results,
-    'match_count', match_count
+    'match_count', match_count,
+    'swelly_chat_id', swelly_chat
   );
 END;
 $$;
