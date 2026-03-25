@@ -1249,18 +1249,18 @@ export default function ConversationsScreen({
         <View style={styles.contentArea}>
         <View style={styles.contentInner}>
           {/* Search Bar */}
-          <View style={styles.searchBarContainer}>
+          {/* <View style={styles.searchBarContainer}>
             <View style={styles.searchBar}>
               <Ionicons name="search" size={24} color="#7B7B7B" style={styles.searchIcon} />
               <Text style={styles.searchPlaceholder}>Search</Text>
             </View>
-          </View>
+          </View> */}
 
           {/* Filter buttons */}
           <View style={styles.filterContainer}>
             {renderFilterButton('all', 'All')}
-            {renderFilterButton('advisor', 'Get Adv', getTotalAdvisorCount(), undefined, '#333', '#BCAC99')}
-            {renderFilterButton('seeker', 'Give Adv', getTotalSeekerCount(), undefined, '#333', '#05BCD3')}
+            {renderFilterButton('advisor', 'Out', getTotalAdvisorCount(), undefined, '#333', '#BCAC99')}
+            {renderFilterButton('seeker', 'In', getTotalSeekerCount(), undefined, '#333', '#05BCD3')}
           </View>
 
           {/* Conversations list */}
@@ -1655,8 +1655,8 @@ const styles = StyleSheet.create({
   filterContainer: {
     flexDirection: 'row',
     paddingHorizontal: 16,
-    paddingTop: 24,
-    paddingBottom: 16,
+    paddingTop: 18,
+    paddingBottom: 4,
     gap: 8,
   },
   filterButton: {

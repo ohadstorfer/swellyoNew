@@ -216,8 +216,8 @@ interface TripPlanningChatScreenProps {
   onChatStateChange?: (chatId: string | null, matchedUsers: any[], destination: string) => void;
   /** Optional: override the swelly service instance (e.g. to target a different edge function). */
   service?: SwellyServiceType;
-  /** Optional: auto-trigger an action ('more' or 'add_filter') after chat restoration. */
-  initialAction?: 'more' | 'add_filter' | null;
+  /** Optional: onboarding matches to display before starting a new conversation. */
+  onboardingMatches?: import('../services/matching/onboardingMatchingService').OnboardingMatch[];
 }
 
 export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
@@ -229,7 +229,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   persistedDestination,
   onChatStateChange,
   service,
-  initialAction,
+  onboardingMatches,
 }) => {
   const svc = service ?? swellyServiceCopy;
   const { formData } = useOnboarding();
@@ -357,21 +357,6 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     }
     unresolvedActionRowMessageIdRef.current = id;
   }, [messages, messageIdsUnblockedByFilterDeletion]);
-
-  // Auto-trigger initialAction after chat restoration completes
-  const initialActionFiredRef = useRef(false);
-  useEffect(() => {
-    if (initialActionFiredRef.current || isInitializing || !initialAction) return;
-    // Find the last match_results message to trigger the action on
-    const matchMessage = [...messages].reverse().find(
-      m => m.isMatchedUsers && m.matchedUsers && m.matchedUsers.length > 0 && m.actionRow?.selectedAction == null
-    );
-    if (matchMessage) {
-      initialActionFiredRef.current = true;
-      // Delay slightly to let the UI settle after restore
-      setTimeout(() => handleMatchAction(matchMessage.id, initialAction), 300);
-    }
-  }, [isInitializing, initialAction, messages]);
 
   // Test API connection and initialize chat context on component mount
   useEffect(() => {
@@ -670,16 +655,67 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         // Start new conversation — show the fixed first message instantly, create backend chat in background
         console.log('Initializing surfer connection conversation...');
 
-        // Show first message immediately so user sees content in <100ms
-        setMessages([
-          {
-            id: '1',
-            text: TRIP_PLANNING_FIRST_QUESTION,
+        const nowTs = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+
+        if (onboardingMatches && onboardingMatches.length > 0) {
+          // Coming from WelcomeToLineupOverlay: show onboarding matches first, then start conversation
+          const matchedUsersForDisplay = onboardingMatches.map(m => ({
+            user_id: m.user_id,
+            name: m.name || 'User',
+            age: m.age ?? undefined,
+            country_from: m.country_from ?? undefined,
+            profile_image_url: m.profile_image_url ?? undefined,
+            match_score: m.total_score,
+          }));
+
+          const matchMessage: Message = {
+            id: 'onboarding-matches',
+            text: `Found ${onboardingMatches.length} awesome match${onboardingMatches.length > 1 ? 'es' : ''} for you!`,
             isUser: false,
-            timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
-          }
-        ]);
-        setIsInitializing(false);
+            timestamp: nowTs,
+            isMatchedUsers: true,
+            matchedUsers: matchedUsersForDisplay,
+            destinationCountry: '',
+            // No actionRow → display-only cards, no action buttons
+          };
+
+          setMessages([matchMessage]);
+          setIsInitializing(false);
+          setIsLoading(true); // Show typing indicator
+          setTimeout(() => scrollToBottom(), 100);
+
+          // After 2 seconds, show the greeting + info message
+          setTimeout(() => {
+            setIsLoading(false);
+            setMessages(prev => [
+              ...prev,
+              {
+                id: 'greeting',
+                text: TRIP_PLANNING_FIRST_QUESTION,
+                isUser: false,
+                timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+              },
+              {
+                id: 'info',
+                text: 'I can match you to other surfers by origin country, age, surf level, surfboard type, and places they have surfed in.',
+                isUser: false,
+                timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+              },
+            ]);
+            setTimeout(() => scrollToBottom(), 100);
+          }, 2000);
+        } else {
+          // Normal new chat: show first message immediately
+          setMessages([
+            {
+              id: '1',
+              text: TRIP_PLANNING_FIRST_QUESTION,
+              isUser: false,
+              timestamp: nowTs,
+            }
+          ]);
+          setIsInitializing(false);
+        }
 
         // Create the backend chat in background
         const contextParts: string[] = [];
@@ -1531,7 +1567,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
 
   const renderMessage = (message: Message) => {
     // Match-result message (has action row; matchedUsers can be empty for no-matches)
-    if (message.isMatchedUsers && Array.isArray(message.matchedUsers) && message.actionRow?.requestData != null) {
+    if (message.isMatchedUsers && Array.isArray(message.matchedUsers) && message.matchedUsers.length > 0) {
       const selectedAction = message.actionRow?.selectedAction ?? null;
       const requestData = message.actionRow?.requestData;
       const hasActionRow = requestData != null;

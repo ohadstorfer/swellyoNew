@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   StyleSheet,
@@ -21,8 +21,7 @@ interface WelcomeToLineupOverlayProps {
   onClose: () => void;
   onConnect: (match: OnboardingMatch) => void;
   onViewProfile: (userId: string) => void;
-  onThreeDifferent: () => void;
-  onEditFilter: () => void;
+  onMoreMatches: () => void;
 }
 
 const CARD_CONTAINER_WIDTH = 350;
@@ -43,22 +42,27 @@ export const WelcomeToLineupOverlay: React.FC<WelcomeToLineupOverlayProps> = ({
   onClose,
   onConnect,
   onViewProfile,
-  onThreeDifferent,
-  onEditFilter,
+  onMoreMatches,
 }) => {
-  const [activeIndex, setActiveIndex] = useState(0);
+  const [activeIndex, setActiveIndex] = useState(1);
   const scrollViewRef = useRef<ScrollView>(null);
 
-  console.log('[WelcomeOverlay] Render:', {
-    matchCount: matches.length,
-    CAROUSEL_CARD_WIDTH,
-    CAROUSEL_CARD_SPACING,
-    CARD_CONTAINER_WIDTH,
-    totalContentWidth: matches.length * (CAROUSEL_CARD_WIDTH + CAROUSEL_CARD_SPACING),
-  });
+  // Scroll to middle card on mount (contentOffset doesn't work on web)
+  useEffect(() => {
+    if (visible && matches.length > 1) {
+      const timer = setTimeout(() => {
+        scrollViewRef.current?.scrollTo({
+          x: 1 * (CAROUSEL_CARD_WIDTH + CAROUSEL_CARD_SPACING),
+          animated: false,
+        });
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [visible, matches.length]);
+
+  
 
   const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    console.log('[WelcomeOverlay] onScroll offset:', e.nativeEvent.contentOffset.x);
     const offset = e.nativeEvent.contentOffset.x;
     const index = Math.round(offset / (CAROUSEL_CARD_WIDTH + CAROUSEL_CARD_SPACING));
     if (index >= 0 && index < matches.length) {
@@ -89,6 +93,7 @@ export const WelcomeToLineupOverlay: React.FC<WelcomeToLineupOverlayProps> = ({
             </Text>
 
             {matches.length > 0 ? (
+              <View style={styles.carouselClip}>
               <ScrollView
                 ref={scrollViewRef}
                 horizontal
@@ -131,6 +136,7 @@ export const WelcomeToLineupOverlay: React.FC<WelcomeToLineupOverlayProps> = ({
                   );
                 })}
               </ScrollView>
+              </View>
             ) : null}
 
             <Text style={styles.subtitle}>
@@ -147,14 +153,9 @@ export const WelcomeToLineupOverlay: React.FC<WelcomeToLineupOverlayProps> = ({
               </TouchableOpacity>
             )}
 
-            <View style={styles.bottomLinks}>
-              <TouchableOpacity onPress={onThreeDifferent}>
-                <Text style={styles.bottomLink}>3 different</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={onEditFilter}>
-                <Text style={styles.bottomLink}>Edit Filter</Text>
-              </TouchableOpacity>
-            </View>
+            <TouchableOpacity onPress={onMoreMatches}>
+              <Text style={styles.bottomLink}>More Matches</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </View>
@@ -214,11 +215,15 @@ const styles = StyleSheet.create({
     lineHeight: 30,
     ...(Platform.OS === 'web' ? { fontFamily: 'Montserrat, sans-serif' } : {}),
   },
+  carouselClip: {
+    width: CARD_CONTAINER_WIDTH,
+    overflow: 'hidden',
+    alignSelf: 'center',
+    marginHorizontal: -CARD_HORIZONTAL_PADDING,
+  },
   carousel: {
     flexGrow: 0,
     maxHeight: 280,
-    width: CARD_CONTAINER_WIDTH,
-    marginLeft: -CARD_HORIZONTAL_PADDING,
   },
   carouselContent: {
     paddingHorizontal: (CARD_CONTAINER_WIDTH - CAROUSEL_CARD_WIDTH) / 2,
@@ -312,11 +317,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#FFFFFF',
     ...(Platform.OS === 'web' ? { fontFamily: 'Montserrat, sans-serif' } : {}),
-  },
-  bottomLinks: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 36,
   },
   bottomLink: {
     fontSize: 14,

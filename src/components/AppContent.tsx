@@ -501,7 +501,7 @@ export const AppContent: React.FC = () => {
   const [currentUserName, setCurrentUserName] = useState<string>('User');
   const [showWelcomeToLineupOverlay, setShowWelcomeToLineupOverlay] = useState(false);
   const [onboardingMatchResult, setOnboardingMatchResult] = useState<OnboardingMatchResult | null>(null);
-  const [tripPlanningInitialAction, setTripPlanningInitialAction] = useState<'more' | 'add_filter' | null>(null);
+  const [pendingOnboardingMatches, setPendingOnboardingMatches] = useState<OnboardingMatchResult['matches'] | null>(null);
 
   const handleChatComplete = async () => {
     console.log('[AppContent] handleChatComplete called');
@@ -1098,7 +1098,7 @@ export const AppContent: React.FC = () => {
     if (showTripPlanningChatCopy) {
       return (
         <TripPlanningChatScreenCopy
-          onChatComplete={() => { setShowTripPlanningChatCopy(false); setShowTripPlanningChat(false); setTripPlanningInitialAction(null); }}
+          onChatComplete={() => { setShowTripPlanningChatCopy(false); setShowTripPlanningChat(false); setPendingOnboardingMatches(null); }}
           onViewUserProfile={handleViewUserProfile}
           onStartConversation={handleStartConversation}
           persistedChatId={tripPlanningChatId}
@@ -1110,7 +1110,7 @@ export const AppContent: React.FC = () => {
             setTripPlanningDestination(destination);
           }}
           service={activeCopyService === 'copy-copy' ? swellyServiceCopyCopy : swellyServiceCopy}
-          initialAction={tripPlanningInitialAction}
+          onboardingMatches={pendingOnboardingMatches || undefined}
         />
       );
     }
@@ -1174,20 +1174,10 @@ export const AppContent: React.FC = () => {
           onViewProfile={(userId) => {
             handleViewUserProfile(userId);
           }}
-          onThreeDifferent={() => {
+          onMoreMatches={() => {
             setShowWelcomeToLineupOverlay(false);
-            if (onboardingMatchResult?.swelly_chat_id) {
-              setTripPlanningChatId(onboardingMatchResult.swelly_chat_id);
-            }
-            setTripPlanningInitialAction('more');
-            setShowTripPlanningChatCopy(true);
-          }}
-          onEditFilter={() => {
-            setShowWelcomeToLineupOverlay(false);
-            if (onboardingMatchResult?.swelly_chat_id) {
-              setTripPlanningChatId(onboardingMatchResult.swelly_chat_id);
-            }
-            setTripPlanningInitialAction('add_filter');
+            setPendingOnboardingMatches(onboardingMatchResult?.matches || null);
+            setTripPlanningChatId(null); // Start fresh chat, not restore
             setShowTripPlanningChatCopy(true);
           }}
         />
