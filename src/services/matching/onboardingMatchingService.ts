@@ -10,9 +10,6 @@ export interface OnboardingMatch {
     surf_level: number;
     board: number;
     lifestyle: number;
-    travel_type: number;
-    destinations: number;
-    experience: number;
   };
 }
 

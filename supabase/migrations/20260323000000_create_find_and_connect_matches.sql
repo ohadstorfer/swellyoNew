@@ -25,13 +25,14 @@ BEGIN
       SELECT
         s.user_id,
 
-        -- TIER 1: age proximity (40 pts max)
+        -- TIER 1: age proximity (60 pts max)
         CASE
           WHEN me.age IS NULL OR s.age IS NULL THEN 0
-          WHEN ABS(me.age - s.age) = 0 THEN 40
-          WHEN ABS(me.age - s.age) <= 3 THEN 30
-          WHEN ABS(me.age - s.age) <= 5 THEN 20
-          WHEN ABS(me.age - s.age) <= 10 THEN 5
+          WHEN ABS(me.age - s.age) <= 2 THEN 60
+          WHEN ABS(me.age - s.age) <= 4 THEN 40
+          WHEN ABS(me.age - s.age) <= 7 THEN 30
+          WHEN ABS(me.age - s.age) <= 10 THEN 20
+          WHEN ABS(me.age - s.age) <= 15 THEN 10
           ELSE 0
         END AS age_score,
 
@@ -63,13 +64,13 @@ BEGIN
           ELSE 0
         END AS board_score,
 
-        -- TIER 2: lifestyle_keywords Jaccard overlap (30 pts max)
+        -- TIER 2: lifestyle_keywords Jaccard overlap (60 pts max)
         CASE
           WHEN me.lifestyle_keywords IS NULL OR s.lifestyle_keywords IS NULL
                OR array_length(me.lifestyle_keywords, 1) IS NULL
                OR array_length(s.lifestyle_keywords, 1) IS NULL THEN 0
           ELSE ROUND(
-            30.0 * (
+            60.0 * (
               SELECT COUNT(*)
               FROM unnest(me.lifestyle_keywords) mk
               WHERE mk = ANY(s.lifestyle_keywords)
@@ -82,52 +83,7 @@ BEGIN
               1
             )
           )
-        END AS lifestyle_score,
-
-        -- TIER 3: travel_type exact or adjacent (20 pts max)
-        CASE
-          WHEN me.travel_type IS NULL OR s.travel_type IS NULL THEN 0
-          WHEN me.travel_type = s.travel_type THEN 20
-          WHEN (me.travel_type = 'budget'  AND s.travel_type = 'mid')
-            OR (me.travel_type = 'mid'     AND s.travel_type = 'budget')
-            OR (me.travel_type = 'mid'     AND s.travel_type = 'high')
-            OR (me.travel_type = 'high'    AND s.travel_type = 'mid')
-            OR (me.travel_type = 'high'    AND s.travel_type = 'premium')
-            OR (me.travel_type = 'premium' AND s.travel_type = 'high')
-          THEN 10
-          ELSE 0
-        END AS travel_type_score,
-
-        -- TIER 3: destinations_array common countries (20 pts max)
-        CASE
-          WHEN me.destinations_array IS NULL OR s.destinations_array IS NULL
-               OR jsonb_array_length(me.destinations_array) = 0
-               OR jsonb_array_length(s.destinations_array) = 0 THEN 0
-          ELSE ROUND(
-            20.0 * (
-              SELECT COUNT(DISTINCT mc)
-              FROM (
-                SELECT jsonb_array_elements(me.destinations_array)->>'country' AS mc
-              ) my_countries
-              WHERE mc IN (
-                SELECT jsonb_array_elements(s.destinations_array)->>'country'
-              )
-            )::numeric / GREATEST(
-              (SELECT COUNT(DISTINCT c) FROM (
-                SELECT jsonb_array_elements(me.destinations_array)->>'country' AS c
-                UNION
-                SELECT jsonb_array_elements(s.destinations_array)->>'country' AS c
-              ) all_countries),
-              1
-            )
-          )
-        END AS destinations_score,
-
-        -- TIER 4: travel_experience proximity (10 pts max)
-        CASE
-          WHEN me.travel_experience IS NULL OR s.travel_experience IS NULL THEN 0
-          ELSE GREATEST(0, 10 - ABS(me.travel_experience - s.travel_experience))
-        END AS experience_score
+        END AS lifestyle_score
 
       FROM surfers s
       WHERE s.finished_onboarding = true
@@ -136,7 +92,7 @@ BEGIN
     )
     SELECT *,
       (age_score + country_score + surf_level_score + board_score
-       + lifestyle_score + travel_type_score + destinations_score + experience_score) AS total_score
+       + lifestyle_score) AS total_score
     FROM scored
     ORDER BY total_score DESC
     LIMIT 3
@@ -175,10 +131,7 @@ BEGIN
         'country', match.country_score,
         'surf_level', match.surf_level_score,
         'board', match.board_score,
-        'lifestyle', match.lifestyle_score,
-        'travel_type', match.travel_type_score,
-        'destinations', match.destinations_score,
-        'experience', match.experience_score
+        'lifestyle', match.lifestyle_score
       )
     );
   END LOOP;
