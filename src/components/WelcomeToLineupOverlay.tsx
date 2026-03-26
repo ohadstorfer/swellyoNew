@@ -55,15 +55,18 @@ export const WelcomeToLineupOverlay: React.FC<WelcomeToLineupOverlayProps> = ({
   const swellySlideAnim = useRef(new Animated.Value(-200)).current;
   const slideOutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const carouselContainerRef = useRef<View>(null);
+  const hasAnimatedRef = useRef(false);
 
   // Keep ref in sync with state
   useEffect(() => {
     activeIndexRef.current = activeIndex;
   }, [activeIndex]);
 
-  // Swelly character slide-in animation (2s delay), then slide out after 2s
+  // Swelly character slide-in animation (2s delay), then slide out after 2s — only plays once
   useEffect(() => {
     if (visible) {
+      if (hasAnimatedRef.current) return;
+      hasAnimatedRef.current = true;
       swellySlideAnim.setValue(-200);
       const slideInTimer = setTimeout(() => {
         Animated.timing(swellySlideAnim, {
@@ -93,16 +96,14 @@ export const WelcomeToLineupOverlay: React.FC<WelcomeToLineupOverlayProps> = ({
     }
   }, [visible]);
 
-  // Scroll to middle card on mount (contentOffset doesn't work on web)
+  // Scroll to middle card on mount
+  const initialScrollX = matches.length > 1 ? 1 * (CAROUSEL_CARD_WIDTH + CAROUSEL_CARD_SPACING) : 0;
   useEffect(() => {
-    if (visible && matches.length > 1) {
-      const timer = setTimeout(() => {
-        scrollViewRef.current?.scrollTo({
-          x: 1 * (CAROUSEL_CARD_WIDTH + CAROUSEL_CARD_SPACING),
-          animated: false,
-        });
-      }, 50);
-      return () => clearTimeout(timer);
+    if (visible && matches.length > 1 && Platform.OS === 'web') {
+      // contentOffset doesn't work on web, so use scrollTo on next frame
+      requestAnimationFrame(() => {
+        scrollViewRef.current?.scrollTo({ x: initialScrollX, animated: false });
+      });
     }
   }, [visible, matches.length]);
 
@@ -225,6 +226,7 @@ export const WelcomeToLineupOverlay: React.FC<WelcomeToLineupOverlayProps> = ({
                 scrollEnabled={false}
                 contentContainerStyle={styles.carouselContent}
                 style={styles.carousel}
+                contentOffset={{ x: initialScrollX, y: 0 }}
                 {...(Platform.OS !== 'web' ? {
                   onTouchStart: handleTouchStart,
                   onTouchMove: handleTouchMove,

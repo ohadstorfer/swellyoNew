@@ -403,7 +403,7 @@ export const TravelExperienceSlider: React.FC<TravelExperienceSliderProps> = ({
         {TRAVEL_LEVELS.map((level, index) => {
           const isLastLevel = index === TRAVEL_LEVELS.length - 1;
           const imgHeight = isLastLevel
-            ? dynamicSizes.imageSize * 1.2
+            ? dynamicSizes.imageSize * 1
             : dynamicSizes.imageSize;
           return (
             <Animated.View
