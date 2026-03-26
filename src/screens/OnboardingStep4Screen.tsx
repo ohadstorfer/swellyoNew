@@ -524,69 +524,7 @@ const CountryField: React.FC<CountryFieldProps> = ({
 };
 
 // Pronoun Field Component - similar to CountryField but with 3 simple options
-interface PronounFieldProps {
-  label: string;
-  value: string;
-  onSelect: (pronoun: string) => void;
-  placeholder?: string;
-  width?: number;
-  style?: any;
-  onOpen?: () => void;
-  error?: boolean;
-}
-
-const PRONOUN_OPTIONS = ['Bro', 'Sis', 'Name Only'];
-
-const PronounField: React.FC<PronounFieldProps> = ({
-  label,
-  value,
-  onSelect,
-  placeholder,
-  width,
-  style,
-  onOpen,
-  error,
-}) => {
-  const hasValue = value.trim().length > 0;
-  const showCheck = hasValue && !error;
-
-  // Get display text from value
-  const getDisplayText = (val: string): string => {
-    if (!val) return placeholder || label;
-    const option = PRONOUN_OPTIONS.find(opt => opt.toLowerCase() === val.toLowerCase());
-    return option || val;
-  };
-
-  // Determine text style based on state
-  const textStyle = hasValue 
-    ? styles.fieldInputFilled 
-    : styles.fieldInput;
-
-  return (
-    <>
-      <TouchableOpacity
-        style={[styles.fieldContainer, width && { width }, style, error && styles.fieldError]}
-        activeOpacity={0.7}
-        onPress={() => onOpen?.()}
-      >
-        <PencilIcon size={24} />
-        <View style={styles.inputContainer}>
-          <Text
-            style={[textStyle, Platform.OS === 'web' && styles.fieldInputWeb]}
-            numberOfLines={1}
-          >
-            {getDisplayText(value)}
-          </Text>
-        </View>
-        {showCheck && (
-          <View style={styles.checkIconContainer}>
-            <CheckIcon size={16} />
-          </View>
-        )}
-      </TouchableOpacity>
-    </>
-  );
-};
+const PRONOUN_OPTIONS = ['Name Only', 'Sis', 'Bro'];
 
 // Date of Birth Field Component
 interface DateOfBirthFieldProps {
@@ -853,15 +791,10 @@ const DateOfBirthField: React.FC<DateOfBirthFieldProps> = ({
 
                 {/* Custom calendar picker with scrollable columns - Figma wheel style */}
                 <View style={styles.webDatePickerContainer as any}>
+                  {/* Full-width center highlight bar */}
+                  <View style={styles.webPickerCenterHighlightFull as any} pointerEvents="none" />
                   {/* Month selector */}
                   <View style={styles.webDatePickerColumn as any}>
-                    <LinearGradient
-                      colors={['#00A2B6', '#0099B7']}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 0 }}
-                      style={styles.webPickerCenterHighlight as any}
-                      pointerEvents="none"
-                    />
                     <ScrollView
                       ref={webMonthScrollRef}
                       style={styles.webDatePickerScroll as any}
@@ -905,13 +838,6 @@ const DateOfBirthField: React.FC<DateOfBirthFieldProps> = ({
 
                   {/* Day selector */}
                   <View style={styles.webDatePickerColumn as any}>
-                    <LinearGradient
-                      colors={['#00A2B6', '#0099B7']}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 0 }}
-                      style={styles.webPickerCenterHighlight as any}
-                      pointerEvents="none"
-                    />
                     <ScrollView
                       ref={webDayScrollRef}
                       style={styles.webDatePickerScroll as any}
@@ -951,13 +877,6 @@ const DateOfBirthField: React.FC<DateOfBirthFieldProps> = ({
 
                   {/* Year selector */}
                   <View style={styles.webDatePickerColumn as any}>
-                    <LinearGradient
-                      colors={['#00A2B6', '#0099B7']}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 0 }}
-                      style={styles.webPickerCenterHighlight as any}
-                      pointerEvents="none"
-                    />
                     <ScrollView
                       ref={webYearScrollRef}
                       style={styles.webDatePickerScroll as any}
@@ -1363,21 +1282,47 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
               />
             </View>
 
-            {/* Pronoun Selection */}
-            <PronounField
-              label="How should we address you?"
-              value={pronoun}
-              onSelect={(selectedPronoun) => {
-                setPronoun(selectedPronoun);
-                setPronounError(false);
-                updateFormData({ pronouns: selectedPronoun });
-                setActiveModal(null);
-              }}
-              placeholder="How should we address you?*"
-              width={357}
-              onOpen={() => setActiveModal('pronoun')}
-              error={pronounError}
-            />
+            {/* Pronoun Selection - Inline Pills */}
+            <Text style={styles.pronounLabel}>How can we call you?</Text>
+            <View style={styles.pronounPillsRow}>
+              {PRONOUN_OPTIONS.map((option) => {
+                const optionValue = option.toLowerCase();
+                const isSelected = pronoun === optionValue;
+                return (
+                  <TouchableOpacity
+                    key={option}
+                    style={[
+                      styles.pronounPill,
+                      isSelected && styles.pronounPillSelected,
+                      pronounError && !pronoun && styles.pronounPillError,
+                    ]}
+                    activeOpacity={0.7}
+                    onPress={() => {
+                      setPronoun(optionValue);
+                      setPronounError(false);
+                      updateFormData({ pronouns: optionValue });
+                    }}
+                  >
+                    {isSelected && (
+                      <LinearGradient
+                        colors={['#00A2B6', '#0788B0']}
+                        start={{ x: 0, y: 0.5 }}
+                        end={{ x: 1, y: 0.5 }}
+                        style={styles.pronounPillGradient}
+                      />
+                    )}
+                    <Text
+                      style={[
+                        styles.pronounPillText,
+                        isSelected && styles.pronounPillTextSelected,
+                      ]}
+                    >
+                      {option}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
             </View>
           </View>
         </View>
@@ -1488,135 +1433,6 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
       </Modal>
     )}
 
-    {activeModal === 'pronoun' && Platform.OS === 'web' && (
-      <TouchableOpacity
-        style={styles.pronounModalOverlay}
-        activeOpacity={1}
-        onPress={() => setActiveModal(null)}
-      >
-        <TouchableOpacity
-          style={styles.pronounModalContent}
-          activeOpacity={1}
-          onPress={(e) => {
-            // Prevent closing when clicking inside the modal
-            e.stopPropagation();
-          }}
-        >
-          <View style={styles.webModalHeader}>
-            <Text style={styles.webModalTitle}>How can we call you?</Text>
-            <TouchableOpacity
-              onPress={() => setActiveModal(null)}
-              style={styles.webModalCloseButton}
-            >
-              <Ionicons name="close" size={24} color="#333" />
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.pronounModalList}>
-            {PRONOUN_OPTIONS.map((option) => {
-              const isSelected = pronoun.toLowerCase() === option.toLowerCase();
-              return (
-                <TouchableOpacity
-                  key={option}
-                  style={[
-                    styles.pronounModalItem,
-                    isSelected && styles.pronounModalItemSelected,
-                  ]}
-                  onPress={() => {
-                    const optionValue = option.toLowerCase();
-                    setPronoun(optionValue);
-                    setPronounError(false);
-                    updateFormData({ pronouns: optionValue });
-                    setActiveModal(null);
-                  }}
-                >
-                  <Text
-                    style={[
-                      styles.pronounModalText,
-                      isSelected && styles.pronounModalTextSelected,
-                    ]}
-                  >
-                    {option}
-                  </Text>
-                  {isSelected && (
-                    <View style={styles.pronounModalCheck}>
-                      <CheckIcon size={16} />
-                    </View>
-                  )}
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        </TouchableOpacity>
-      </TouchableOpacity>
-    )}
-
-    {Platform.OS !== 'web' && (
-      <Modal
-        visible={activeModal === 'pronoun'}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => setActiveModal(null)}
-      >
-        <TouchableOpacity
-          style={styles.nativePronounModalOverlay}
-          activeOpacity={1}
-          onPress={() => setActiveModal(null)}
-        >
-          <TouchableOpacity
-            style={styles.pronounModalContent}
-            activeOpacity={1}
-            onPress={(e) => e.stopPropagation()}
-          >
-            <View style={styles.webModalHeader}>
-              <Text style={styles.webModalTitle}>How can we call you?</Text>
-              <TouchableOpacity
-                onPress={() => setActiveModal(null)}
-                style={styles.webModalCloseButton}
-              >
-                <Ionicons name="close" size={24} color="#333" />
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.pronounModalList}>
-              {PRONOUN_OPTIONS.map((option) => {
-                const isSelected = pronoun.toLowerCase() === option.toLowerCase();
-                return (
-                  <TouchableOpacity
-                    key={option}
-                    style={[
-                      styles.pronounModalItem,
-                      isSelected && styles.pronounModalItemSelected,
-                    ]}
-                    onPress={() => {
-                      const optionValue = option.toLowerCase();
-                      setPronoun(optionValue);
-                      setPronounError(false);
-                      updateFormData({ pronouns: optionValue });
-                      setActiveModal(null);
-                    }}
-                  >
-                    <Text
-                      style={[
-                        styles.pronounModalText,
-                        isSelected && styles.pronounModalTextSelected,
-                      ]}
-                    >
-                      {option}
-                    </Text>
-                    {isSelected && (
-                      <View style={styles.pronounModalCheck}>
-                        <CheckIcon size={16} />
-                      </View>
-                    )}
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
-    )}
 
     {Platform.OS === 'web' && (
       <AvatarCropModal
@@ -2044,72 +1860,53 @@ const styles = StyleSheet.create({
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     color: colors.textSecondary || '#666666',
   },
-  pronounModalOverlay: {
-    position: 'fixed' as any,
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    zIndex: 9000,
-    justifyContent: 'center',
-    alignItems: 'center',
+  pronounLabel: {
+    fontSize: 22,
+    lineHeight: 32,
+    fontWeight: '700',
+    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat-Bold',
+    color: colors.textPrimary || '#333333',
+    marginBottom: 15,
   },
-  nativePronounModalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  pronounModalContent: {
-    backgroundColor: colors.white || '#FFFFFF',
-    borderRadius: 12,
-    width: '90%',
-    maxWidth: 400,
-    zIndex: 9001,
-    overflow: 'hidden',
-    // Shadow
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 20,
-    elevation: 10,
-    ...(Platform.OS === 'web' && {
-      boxShadow: '0 4px 20px rgba(0, 0, 0, 0.15)',
-    }),
-  },
-  pronounModalList: {
-    maxHeight: 300,
-    ...(Platform.OS === 'web' && {
-      overflowY: 'auto' as any,
-    }),
-  },
-  pronounModalItem: {
-    padding: spacing.md,
-    paddingHorizontal: spacing.lg,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
+  pronounPillsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    gap: 16,
+    alignSelf: 'stretch',
   },
-  pronounModalItemSelected: {
-    backgroundColor: '#F0F9FA',
+  pronounPill: {
+    flex: 1,
+    height: 56,
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#CFCFCF',
+    backgroundColor: colors.white || '#FFFFFF',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  pronounModalText: {
+  pronounPillSelected: {
+    borderColor: '#0788B0',
+    overflow: 'hidden',
+  },
+  pronounPillGradient: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 11,
+  },
+  pronounPillError: {
+    borderColor: '#FF4444',
+  },
+  pronounPillText: {
     fontSize: 16,
+    lineHeight: 20,
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     color: colors.textPrimary || '#333333',
+    fontWeight: '400',
+    textAlign: 'center',
   },
-  pronounModalTextSelected: {
-    color: '#00A2B6',
-    fontWeight: '600',
-  },
-  pronounModalCheck: {
-    width: 24,
-    height: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
+  pronounPillTextSelected: {
+    color: '#FFFFFF',
   },
   // Date picker modal styles
   datePickerOverlay: {
@@ -2214,13 +2011,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  webPickerCenterHighlight: {
+  webPickerCenterHighlightFull: {
     position: 'absolute',
     top: 100, // (250 - 50) / 2 = 100, centers in 250px container
     left: 0,
     right: 0,
     height: 50, // ITEM_HEIGHT
     borderRadius: 8,
+    backgroundColor: '#F7F7F7',
   },
   webDatePickerItemText: {
     fontSize: 16,
@@ -2238,7 +2036,7 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
-    color: '#FFFFFF',
+    color: '#1A1A1A',
     lineHeight: 22,
   },
 });

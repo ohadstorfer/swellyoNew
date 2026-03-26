@@ -17,7 +17,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import Svg, { Path } from 'react-native-svg';
+import Svg, { Path, Defs, Stop, LinearGradient as SvgLinearGradient } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../components/Text';
 import { colors, spacing } from '../styles/theme';
@@ -1677,35 +1677,6 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
               <Text style={message.isUser ? styles.userMessageText : styles.botMessageText}>
                 {message.text}
               </Text>
-              {!message.isUser && message.isSearchSummary && (
-                <View style={styles.reviewFiltersRow}>
-                  <TouchableOpacity
-                    onPress={() => setFiltersMenuVisible(true)}
-                    activeOpacity={0.8}
-                    style={styles.reviewFiltersButton}
-                  >
-                    <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-                      <Path d="M2.90186 7.73821L14.509 7.73821M14.509 7.73821C14.509 9.34082 15.8082 10.64 17.4108 10.64C19.0134 10.64 20.3126 9.34082 20.3126 7.73821C20.3126 6.1356 19.0134 4.83643 17.4108 4.83643C15.8082 4.83643 14.509 6.1356 14.509 7.73821ZM8.70543 15.4763L20.3126 15.4763M8.70543 15.4763C8.70543 17.0789 7.40625 18.3781 5.80364 18.3781C4.20103 18.3781 2.90186 17.0789 2.90186 15.4763C2.90186 13.8737 4.20103 12.5745 5.80364 12.5745C7.40625 12.5745 8.70543 13.8737 8.70543 15.4763Z" stroke="#222B30" strokeWidth={1.973} strokeLinecap="round" strokeLinejoin="round" />
-                    </Svg>
-                    <Text style={styles.reviewFiltersButtonText}>Filters</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    onPress={() => {
-                      if (chatId && pendingSearch) {
-                        setAwaitingSearchDecision(false);
-                        runFindMatches(chatId, pendingSearch.data);
-                      }
-                    }}
-                    activeOpacity={0.8}
-                    style={styles.searchNowButton}
-                  >
-                    <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-                      <Path d="M4.35273 21.2798V16.4435M4.35273 6.77088V1.93457M1.93457 4.35273H6.77088M1.93457 18.8617H6.77088M12.5745 2.90183L10.897 7.26308C10.6243 7.97231 10.4879 8.32692 10.2758 8.6252C10.0878 8.88957 9.85683 9.12054 9.59247 9.30852C9.29418 9.52062 8.93957 9.65701 8.23034 9.92979L3.86909 11.6072L8.23035 13.2846C8.93957 13.5574 9.29418 13.6938 9.59247 13.9059C9.85683 14.0938 10.0878 14.3248 10.2758 14.5892C10.4879 14.8875 10.6243 15.2421 10.897 15.9513L12.5745 20.3125L14.2519 15.9513C14.5246 15.2421 14.661 14.8875 14.8731 14.5892C15.0611 14.3248 15.2921 14.0938 15.5564 13.9059C15.8547 13.6938 16.2093 13.5574 16.9186 13.2846L21.2798 11.6072L16.9186 9.92978C16.2093 9.65701 15.8547 9.52062 15.5564 9.30852C15.2921 9.12054 15.0611 8.88957 14.8731 8.6252C14.661 8.32692 14.5246 7.97231 14.2519 7.26308L12.5745 2.90183Z" stroke="white" strokeWidth={1.973} strokeLinecap="round" strokeLinejoin="round" />
-                    </Svg>
-                    <Text style={styles.searchNowButtonText}>Search</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
             </View>
             <View style={styles.timestampContainer}>
               <Text style={[
@@ -1717,6 +1688,41 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             </View>
           </View>
         </View>
+        {!message.isUser && message.isSearchSummary && (
+          <View style={styles.reviewFiltersRow}>
+            <TouchableOpacity
+              onPress={() => {
+                if (chatId && pendingSearch) {
+                  setAwaitingSearchDecision(false);
+                  runFindMatches(chatId, pendingSearch.data);
+                }
+              }}
+              activeOpacity={0.8}
+              style={styles.searchNowButton}
+            >
+              <Svg width={15} height={15} viewBox="0 0 15 15" fill="none">
+                <Path d="M2.16667 13.8333V10.5M2.16667 3.83333V0.5M0.5 2.16667H3.83333M0.5 12.1667H3.83333M7.83333 1.16667L6.67721 4.17257C6.48921 4.66139 6.3952 4.9058 6.24902 5.11139C6.11946 5.2936 5.96026 5.45279 5.77806 5.58235C5.57247 5.72854 5.32806 5.82254 4.83924 6.01055L1.83333 7.16667L4.83924 8.32278C5.32806 8.51079 5.57247 8.6048 5.77806 8.75098C5.96027 8.88054 6.11946 9.03973 6.24902 9.22194C6.3952 9.42753 6.48921 9.67194 6.67722 10.1608L7.83333 13.1667L8.98945 10.1608C9.17746 9.67194 9.27146 9.42753 9.41765 9.22194C9.54721 9.03973 9.7064 8.88054 9.88861 8.75098C10.0942 8.6048 10.3386 8.51079 10.8274 8.32278L13.8333 7.16667L10.8274 6.01055C10.3386 5.82254 10.0942 5.72854 9.88861 5.58235C9.7064 5.45279 9.54721 5.2936 9.41765 5.11139C9.27146 4.9058 9.17746 4.66139 8.98945 4.17257L7.83333 1.16667Z" stroke="url(#searchGradient)" strokeLinecap="round" strokeLinejoin="round" />
+                <Defs>
+                  <SvgLinearGradient id="searchGradient" x1="0.5" y1="7.16667" x2="13.8333" y2="7.16667" gradientUnits="userSpaceOnUse">
+                    <Stop stopColor="#B72DF2" />
+                    <Stop offset="1" stopColor="#FF5367" />
+                  </SvgLinearGradient>
+                </Defs>
+              </Svg>
+              <Text style={styles.searchNowButtonText}>Search</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => setFiltersMenuVisible(true)}
+              activeOpacity={0.8}
+              style={styles.reviewFiltersButton}
+            >
+              <Svg width={16} height={16} viewBox="0 0 16 16" fill="none">
+                <Path d="M2 5.3335L10 5.3335M10 5.3335C10 6.43807 10.8954 7.3335 12 7.3335C13.1046 7.3335 14 6.43807 14 5.3335C14 4.22893 13.1046 3.3335 12 3.3335C10.8954 3.3335 10 4.22893 10 5.3335ZM6 10.6668L14 10.6668M6 10.6668C6 11.7714 5.10457 12.6668 4 12.6668C2.89543 12.6668 2 11.7714 2 10.6668C2 9.56226 2.89543 8.66683 4 8.66683C5.10457 8.66683 6 9.56226 6 10.6668Z" stroke="#333333" strokeLinecap="round" strokeLinejoin="round" />
+              </Svg>
+              <Text style={styles.reviewFiltersButtonText}>Review filters</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </View>
     );
   };
@@ -2503,10 +2509,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#333333',
   },
   reviewFiltersRow: {
-    marginTop: 8,
     flexDirection: 'row',
-    gap: 8,
-    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 16,
+    paddingHorizontal: 16,
+    marginTop: 12,
   },
   reviewFiltersButton: {
     flex: 1,
@@ -2514,18 +2521,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 9999,
-    borderWidth: 1.5,
-    borderColor: '#00A2B6',
-    backgroundColor: '#FFF',
+    height: 48,
+    paddingHorizontal: 21,
+    borderRadius: 32,
+    borderWidth: 1,
+    borderColor: '#E4E4E4',
+    backgroundColor: 'rgba(255, 255, 255, 0.20)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.09,
+    shadowRadius: 24,
+    elevation: 3,
+    overflow: 'hidden',
   },
   reviewFiltersButtonText: {
     fontSize: 14,
-    color: '#222B30',
-    fontWeight: '700',
-    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat',
+    color: '#333333',
+    fontWeight: '400',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    lineHeight: 22,
   },
   searchNowButton: {
     flex: 1,
@@ -2533,16 +2547,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 9999,
-    backgroundColor: '#0788B0',
+    height: 48,
+    paddingHorizontal: 21,
+    borderRadius: 32,
+    borderWidth: 1,
+    borderColor: '#B72DF2',
+    backgroundColor: 'rgba(255, 255, 255, 0.20)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.09,
+    shadowRadius: 24,
+    elevation: 3,
+    overflow: 'hidden',
   },
   searchNowButtonText: {
     fontSize: 14,
-    color: '#FFFFFF',
-    fontWeight: '700',
-    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat',
+    color: '#333333',
+    fontWeight: '400',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    lineHeight: 22,
   },
   searchButtonWrapper: {
     marginTop: 12,

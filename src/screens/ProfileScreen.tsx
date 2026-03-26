@@ -1382,16 +1382,6 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
                   <EditButtonIcon />
                 </View>
               </TouchableOpacity>
-            ) : userId && onMessage ? (
-              <TouchableOpacity 
-                style={styles.messageButton}
-                onPress={() => onMessage(userId)}
-              >
-                <View style={styles.messageButtonContainer}>
-                  <Ionicons name="chatbubble-outline" size={18} color="#222B30" />
-                  <Text style={styles.messageButtonText}>Message</Text>
-                </View>
-              </TouchableOpacity>
             ) : null}
           </>
         )}
@@ -1787,7 +1777,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
           </TouchableOpacity>
         )}
 
-        <ScrollView 
+        <ScrollView
           style={styles.scrollView}
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
@@ -1841,21 +1831,6 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
               <TouchableOpacity style={styles.editButton} onPress={onEdit}>
                 <View style={styles.editButtonContainer}>
                   <EditButtonIcon />
-                </View>
-              </TouchableOpacity>
-            ) : userId && onMessage ? (
-              // Message Button - Visible when viewing other user's profile
-              <TouchableOpacity 
-                style={styles.messageButton}
-                onPress={() => {
-                  if (userId && onMessage) {
-                    onMessage(userId);
-                  }
-                }}
-              >
-                <View style={styles.messageButtonContainer}>
-                  <Ionicons name="chatbubble-outline" size={18} color="#222B30" />
-                  <Text style={styles.messageButtonText}>Message</Text>
                 </View>
               </TouchableOpacity>
             ) : null}
@@ -2228,10 +2203,36 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
               })}
             </View>
           )}
+          {!isViewingOwnProfile && userId && onMessage && (
+            <View style={{ height: 100 }} />
+          )}
           </View>
         </View>
       </ScrollView>
       </ImageBackground>
+      {/* Connect Button with fading overlay - Floating at bottom when viewing other user's profile */}
+      {!isViewingOwnProfile && userId && onMessage && (
+        <>
+          <View style={styles.connectOverlay} pointerEvents="none">
+            <LinearGradient
+              colors={['rgba(250, 250, 250, 0)', 'rgba(250, 250, 250, 0.4)', 'rgba(250, 250, 250, 0.75)', '#FAFAFA']}
+              locations={[0, 0.35, 0.6, 0.87]}
+              style={styles.connectOverlayGradient}
+            />
+          </View>
+          <TouchableOpacity
+            style={styles.connectButton}
+            onPress={() => onMessage(userId)}
+            activeOpacity={0.8}
+          >
+            <View style={styles.connectButtonInner}>
+              <Text style={styles.connectButtonText}>
+                Connect to {profileData.name?.split(' ')[0] || 'User'}
+              </Text>
+            </View>
+          </TouchableOpacity>
+        </>
+      )}
     </View>
     {Platform.OS === 'web' && (
       <AvatarCropModal
@@ -2468,6 +2469,52 @@ const styles = StyleSheet.create({
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
     lineHeight: 15,
     color: colors.textPrimary,
+  },
+  connectOverlay: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 230,
+    zIndex: 9,
+    overflow: 'hidden',
+    ...(Platform.OS === 'web' && {
+      backdropFilter: 'blur(3.5px)',
+      WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, black 50%)',
+      maskImage: 'linear-gradient(to bottom, transparent 0%, black 50%)',
+    }),
+  },
+  connectOverlayGradient: {
+    flex: 1,
+  },
+  connectButton: {
+    position: 'absolute',
+    bottom: 40,
+    left: 16,
+    right: 16,
+    zIndex: 10,
+    alignItems: 'center',
+  },
+  connectButtonInner: {
+    height: 56,
+    minWidth: 150,
+    width: '100%',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 999,
+    backgroundColor: '#333',
+    justifyContent: 'center',
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 10,
+  },
+  connectButtonText: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : undefined,
+    lineHeight: 24,
+    textAlign: 'center',
   },
   profilePictureContainer: {
     position: 'absolute',
