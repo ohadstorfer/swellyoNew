@@ -670,7 +670,7 @@ export class SwellyService {
     chatId: string,
     tripPlanningData: any,
     excludePrevious: boolean = false
-  ): Promise<{ matches: MatchedUser[]; totalCount: number }> {
+  ): Promise<{ matches: MatchedUser[]; totalCount: number; messageIndex?: number }> {
     // Normalize: ensure queryFilters is set when backend sent query_filters
     const payload = tripPlanningData && typeof tripPlanningData === 'object'
       ? { ...tripPlanningData, queryFilters: tripPlanningData.queryFilters ?? tripPlanningData.query_filters ?? null }
@@ -702,8 +702,9 @@ export class SwellyService {
     const serverMatches = data.matches || [];
     const matches: MatchedUser[] = serverMatches.map((m: any) => mapServerMatchToMatchedUser(m));
     const totalCount = typeof data.totalCount === 'number' ? data.totalCount : (data.matches?.length ?? 0);
-    console.log('[SwellyServiceCopy] Server returned', matches.length, 'matches (totalCount=', totalCount, ')');
-    return { matches, totalCount };
+    const messageIndex = typeof data.messageIndex === 'number' ? data.messageIndex : undefined;
+    console.log('[SwellyServiceCopy] Server returned', matches.length, 'matches (totalCount=', totalCount, ', messageIndex=', messageIndex, ')');
+    return { matches, totalCount, messageIndex };
   }
 }
 

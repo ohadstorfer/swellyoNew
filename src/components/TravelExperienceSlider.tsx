@@ -403,7 +403,7 @@ export const TravelExperienceSlider: React.FC<TravelExperienceSliderProps> = ({
         {TRAVEL_LEVELS.map((level, index) => {
           const isLastLevel = index === TRAVEL_LEVELS.length - 1;
           const imgHeight = isLastLevel
-            ? dynamicSizes.imageSize * 1.3
+            ? dynamicSizes.imageSize * 1.2
             : dynamicSizes.imageSize;
           return (
             <Animated.View
@@ -416,6 +416,7 @@ export const TravelExperienceSlider: React.FC<TravelExperienceSliderProps> = ({
                   opacity: imageOpacity[index],
                   zIndex: index === currentCategory ? 10 : 1,
                 },
+                isLastLevel && { overflow: 'visible', borderRadius: 0 },
               ]}
             >
               <Image
@@ -423,8 +424,8 @@ export const TravelExperienceSlider: React.FC<TravelExperienceSliderProps> = ({
                 style={[styles.image, {
                   width: dynamicSizes.imageSize,
                   height: imgHeight,
-                }]}
-                resizeMode="cover"
+                }, isLastLevel && { borderRadius: 0 }]}
+                resizeMode={isLastLevel ? 'contain' : 'cover'}
               />
             </Animated.View>
           );

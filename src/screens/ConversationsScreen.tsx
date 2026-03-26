@@ -486,8 +486,8 @@ export default function ConversationsScreen({
   };
 
   const getFilteredConversations = () => {
-    let filtered = conversations;
-    
+    let filtered = conversations.filter(conv => conv.other_user?.name);
+
     if (filter !== 'all' && currentUserId) {
       filtered = conversations.filter(conv => {
         // Skip welcome conversation for filters

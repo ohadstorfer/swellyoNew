@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef, useCallback } from 'react';
 import {
   View,
   StyleSheet,
@@ -21,6 +21,22 @@ export const MatchedUsersCarousel: React.FC<MatchedUsersCarouselProps> = ({
   onViewProfile,
 }) => {
   const containerWidth = Math.min(Dimensions.get('window').width, 400);
+  const isFewCards = users.length < 3;
+  const sidePadding = isFewCards
+    ? 16
+    : (containerWidth - CAROUSEL_CARD_WIDTH) / 2;
+
+  const scrollRef = useRef<ScrollView>(null);
+  const hasScrolledRef = useRef(false);
+
+  // Scroll to middle card once the ScrollView lays out
+  const handleLayout = useCallback(() => {
+    if (hasScrolledRef.current || users.length < 3) return;
+    hasScrolledRef.current = true;
+    const middleIndex = Math.floor(users.length / 2);
+    const offset = middleIndex * (CAROUSEL_CARD_WIDTH + CAROUSEL_CARD_SPACING);
+    scrollRef.current?.scrollTo({ x: offset, animated: false });
+  }, [users.length]);
 
   if (users.length === 0) return null;
 
@@ -37,6 +53,7 @@ export const MatchedUsersCarousel: React.FC<MatchedUsersCarouselProps> = ({
     <View style={styles.container}>
       <View style={[styles.carouselClip, { width: containerWidth }]}>
         <ScrollView
+          ref={scrollRef}
           horizontal
           showsHorizontalScrollIndicator={false}
           scrollEnabled
@@ -44,9 +61,10 @@ export const MatchedUsersCarousel: React.FC<MatchedUsersCarouselProps> = ({
           decelerationRate="fast"
           contentContainerStyle={[
             styles.carouselContent,
-            { paddingHorizontal: (containerWidth - CAROUSEL_CARD_WIDTH) / 2 },
+            { paddingHorizontal: sidePadding },
           ]}
           style={styles.carousel}
+          onLayout={handleLayout}
         >
           {users.map((user) => (
             <MatchedUserCard

@@ -358,6 +358,13 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     unresolvedActionRowMessageIdRef.current = id;
   }, [messages, messageIdsUnblockedByFilterDeletion]);
 
+  // Scroll to bottom whenever messages change (new message, restore, cards, buttons)
+  useEffect(() => {
+    if (!isInitializing && messages.length > 0) {
+      setTimeout(() => scrollToBottom(), 100);
+    }
+  }, [messages]);
+
   // Test API connection and initialize chat context on component mount
   useEffect(() => {
     const initializeChat = async () => {
@@ -368,24 +375,44 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         // Health check: fire-and-forget, never blocks init
         svc.healthCheck().then(h => console.log('API health check ok:', h)).catch(e => console.warn('API health check failed:', e));
 
-        // If we have a persisted chatId, restore the conversation
-        if (persistedChatId) {
-          console.log('Restoring trip planning conversation from chatId:', persistedChatId);
+        // If no persisted chatId, try to fetch the latest one from the backend
+        let chatIdToRestore = persistedChatId;
+        if (!chatIdToRestore) {
+          try {
+            const latest = await svc.getLatestTripPlanningChat();
+            if (latest?.chat_id) {
+              const chatDate = latest.updated_at ? new Date(latest.updated_at) : null;
+              const oneWeekAgo = new Date();
+              oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+              if (!chatDate || chatDate >= oneWeekAgo) {
+                chatIdToRestore = latest.chat_id;
+                setChatId(latest.chat_id);
+                if (onChatStateChange) onChatStateChange(latest.chat_id, [], '');
+              }
+            }
+          } catch (e) {
+            console.warn('Failed to fetch latest chat, starting new:', e);
+          }
+        }
+
+        // If we have a chatId to restore, restore the conversation
+        if (chatIdToRestore) {
+          console.log('Restoring trip planning conversation from chatId:', chatIdToRestore);
 
           // AsyncStorage migration: fire-and-forget in background, never blocks restore
           (async () => {
             try {
               const { loadMatchedUsers } = await import('../utils/tripPlanningStorage');
-              const storedMatchedUsers = await loadMatchedUsers(persistedChatId);
+              const storedMatchedUsers = await loadMatchedUsers(chatIdToRestore);
               if (storedMatchedUsers && storedMatchedUsers.length > 0) {
                 console.log('[TripPlanningChatScreen] Migrating AsyncStorage data in background:', storedMatchedUsers.length, 'entries');
                 await Promise.all(
                   storedMatchedUsers
                     .filter(s => s.matchedUsers && s.matchedUsers.length > 0)
-                    .map(s => svc.attachMatchedUsersToMessage(persistedChatId!, s.matchedUsers, s.destinationCountry).catch(() => {}))
+                    .map(s => svc.attachMatchedUsersToMessage(chatIdToRestore!, s.matchedUsers, s.destinationCountry).catch(() => {}))
                 );
                 const { clearMatchedUsers } = await import('../utils/tripPlanningStorage');
-                await clearMatchedUsers(persistedChatId!);
+                await clearMatchedUsers(chatIdToRestore!);
                 console.log('[TripPlanningChatScreen] Background migration complete');
               }
             } catch (e) {
@@ -395,7 +422,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
 
           try {
             // Try UI messages first (new ordered format), fall back to legacy restore
-            const uiMessages = await svc.getUIMessages(persistedChatId);
+            const uiMessages = await svc.getUIMessages(chatIdToRestore);
 
             if (uiMessages && uiMessages.length > 0) {
               console.log('[TripPlanningChatScreen] Restoring from ui_messages:', uiMessages.length, 'entries');
@@ -480,7 +507,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
                     }
                   }
                 }
-                onChatStateChange(persistedChatId, allRestoredMatchedUsers, latestRestoredDestination);
+                onChatStateChange(chatIdToRestore, allRestoredMatchedUsers, latestRestoredDestination);
               }
 
               setMessages(restoredMessages);
@@ -490,7 +517,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
 
             // Fallback: legacy restore from GPT messages + metadata
             console.log('[TripPlanningChatScreen] No ui_messages found, falling back to legacy restore');
-            const history = await svc.getTripPlanningHistory(persistedChatId);
+            const history = await svc.getTripPlanningHistory(chatIdToRestore);
             console.log('Restored history:', history);
 
             if (history && history.messages && history.messages.length > 0) {
@@ -639,7 +666,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
                     }
                   }
                 }
-                onChatStateChange(persistedChatId, allRestoredMatchedUsers, latestRestoredDestination);
+                onChatStateChange(chatIdToRestore, allRestoredMatchedUsers, latestRestoredDestination);
               }
 
               setMessages(restoredMessages);
@@ -796,7 +823,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     };
 
     try {
-      const { matches: matchedUsers, totalCount } = await svc.findMatchingUsersServer(currentChatId, tripPlanningData, excludePrevious);
+      const { matches: matchedUsers, totalCount, messageIndex: backendMsgIndex } = await svc.findMatchingUsersServer(currentChatId, tripPlanningData, excludePrevious);
       console.log('Matched users found (server):', matchedUsers.length, 'totalCount:', totalCount);
       const needsConfirmation = (matchedUsers as any).__needsConfirmation === true;
       const isSingleCriterion = (matchedUsers as any).__singleCriterion === true;
@@ -845,16 +872,11 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             }
           });
           if (onChatStateChange) setTimeout(() => onChatStateChange(currentChatId, allMatchedUsers, latestDestination), 0);
-          if (currentChatId) {
-            svc.attachMatchedUsersToMessage(currentChatId, matchedUsers, matchesDestination, tripPlanningData, totalCount).then(res => {
-              if (res?.messageIndex != null) {
-                setMessages(prevMsgs => prevMsgs.map(m => m.id === newMatchMessageId ? { ...m, backendMessageIndex: res!.messageIndex } : m));
-              }
-            }).catch(err =>
-              console.error('[TripPlanningChatScreen] Failed to save exact matches to backend:', err));
-          }
           return updated;
         });
+        if (backendMsgIndex != null) {
+          setMessages(prevMsgs => prevMsgs.map(m => m.id === newMatchMessageId ? { ...m, backendMessageIndex: backendMsgIndex } : m));
+        }
         setMatchedUsers(matchedUsers);
         setDestinationCountry(matchesDestination);
         setLastMatchRequestData(null);
@@ -879,16 +901,11 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             matchTotalCount: 0,
           };
           const updated = [...filtered, noMatchesMessage];
-          if (currentChatId) {
-            svc.attachMatchedUsersToMessage(currentChatId, [], matchesDestination, tripPlanningData, 0).then(res => {
-              if (res?.messageIndex != null) {
-                setMessages(prevMsgs => prevMsgs.map(m => m.id === newNoMatchMessageId ? { ...m, backendMessageIndex: res!.messageIndex } : m));
-              }
-            }).catch(err =>
-              console.error('[TripPlanningChatScreen] Failed to save no-matches to backend:', err));
-          }
           return updated;
         });
+        if (backendMsgIndex != null) {
+          setMessages(prevMsgs => prevMsgs.map(m => m.id === newNoMatchMessageId ? { ...m, backendMessageIndex: backendMsgIndex } : m));
+        }
         setLastMatchRequestData(null);
         setLastMatchActionPressed(null);
       }
@@ -977,18 +994,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             }, 0);
           }
           
-          // Save matched users to backend
-          if (chatId) {
-            console.log('[TripPlanningChatScreen] Saving single criterion matches - matchedUsersCount:', pendingSingleCriterionMatches.length);
-            svc.attachMatchedUsersToMessage(chatId, pendingSingleCriterionMatches, destinationCountry, lastMatchRequestData ?? undefined).then(res => {
-              if (res?.messageIndex != null) {
-                setMessages(prevMsgs => prevMsgs.map(m => m.id === newMatchMessageId ? { ...m, backendMessageIndex: res!.messageIndex } : m));
-              }
-            }).catch(err => {
-              console.error('[TripPlanningChatScreen] Failed to save single criterion matches to backend:', err);
-            });
-          }
-          
+          // Match metadata already saved by find-matches endpoint
           return updated;
         });
         

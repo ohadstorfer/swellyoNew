@@ -4268,11 +4268,96 @@ ${getPronounInstructions(userProfile.pronoun)}`
 
         console.log('[find-matches] Successfully found and saved', matches.length, 'matches (totalCount=', totalCount, '). Path:', pathDesc, '| Filters:', tripPlanningData.queryFilters ? Object.keys(tripPlanningData.queryFilters).join(', ') : 'none')
 
+        // --- Persist match metadata to chat history + UI messages (previously done by /attach-matches) ---
+        let messageIndex: number | undefined
+        try {
+          const messages = await getChatHistory(body.chatId, supabaseAdmin)
+          if (messages.length > 0) {
+            // Find target assistant message (same logic as attach-matches)
+            let targetAssistantIndex = -1
+            for (let i = messages.length - 1; i >= 0; i--) {
+              if (messages[i].role === 'assistant') {
+                if (messages[i].metadata?.isRestartAfterNewChat || messages[i].metadata?.isAddFilterPrompt) continue
+                if (messages[i].metadata?.matchedUsers) continue
+                try {
+                  const parsed = JSON.parse(messages[i].content)
+                  if (parsed.is_finished === true) {
+                    targetAssistantIndex = i
+                    break
+                  }
+                } catch { /* not JSON */ }
+              }
+            }
+            // Fallback: last assistant without metadata
+            if (targetAssistantIndex === -1) {
+              for (let i = messages.length - 1; i >= 0; i--) {
+                if (messages[i].role === 'assistant' && !messages[i].metadata?.matchedUsers && !messages[i].metadata?.isRestartAfterNewChat && !messages[i].metadata?.isAddFilterPrompt) {
+                  targetAssistantIndex = i
+                  break
+                }
+              }
+            }
+            // Last resort: append placeholder
+            if (targetAssistantIndex === -1) {
+              for (let j = messages.length - 1; j >= 0; j--) {
+                if (messages[j].metadata?.matchedUsers && messages[j].metadata?.actionRow) {
+                  if (!messages[j].metadata!.actionRow!.selectedAction) {
+                    messages[j].metadata!.actionRow!.selectedAction = 'more'
+                  }
+                  break
+                }
+              }
+              const matchCount = matches.length
+              const placeholderContent = JSON.stringify({
+                return_message: `Found ${matchCount} more match${matchCount !== 1 ? 'es' : ''} for you!`,
+                is_finished: true,
+                data: { destination_country: tripPlanningData.destination_country || null }
+              })
+              messages.push({ role: 'assistant', content: placeholderContent, metadata: {} })
+              targetAssistantIndex = messages.length - 1
+            }
+
+            messages[targetAssistantIndex].metadata = {
+              matchedUsers: matches,
+              destinationCountry: tripPlanningData.destination_country || '',
+              matchTimestamp: new Date().toISOString(),
+              actionRow: { requestData: tripPlanningData, selectedAction: null },
+              totalCount: totalCount ?? matches.length
+            }
+            await saveChatHistory(body.chatId, messages, user.id, null, supabaseAdmin)
+            messageIndex = targetAssistantIndex
+            console.log('[find-matches] Attached match metadata at message index:', targetAssistantIndex)
+          }
+
+          // Append UI message
+          const uiMsgs = await getUIMessages(body.chatId, supabaseAdmin)
+          const matchType = matches.length > 0 ? 'match_results' : 'no_matches'
+          const matchText = matches.length > 0
+            ? `Found ${matches.length} awesome match${matches.length > 1 ? 'es' : ''} for you!`
+            : 'No surfers match your criteria right now. Try adjusting your destination or filters.'
+          appendUIMessage(uiMsgs, {
+            type: matchType as 'match_results' | 'no_matches',
+            text: matchText,
+            timestamp: makeTimestamp(),
+            is_user: false,
+            matched_users: matches,
+            destination_country: tripPlanningData.destination_country || '',
+            match_total_count: totalCount ?? matches.length,
+            action_row: { request_data: tripPlanningData, selected_action: null },
+            backend_message_index: messageIndex,
+          })
+          await saveUIMessages(body.chatId, uiMsgs, supabaseAdmin)
+          console.log('[find-matches] Saved UI message for match results')
+        } catch (persistErr) {
+          console.error('[find-matches] Error persisting match metadata (non-blocking):', persistErr)
+        }
+
         return new Response(
           JSON.stringify({
             matches,
             totalCount,
             chatId: body.chatId,
+            messageIndex,
           }),
           {
             status: 200,

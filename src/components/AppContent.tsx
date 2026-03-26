@@ -629,8 +629,6 @@ export const AppContent: React.FC = () => {
   const handleSwellyPress = () => {
     setActiveCopyService('copy');
     setShowTripPlanningChatCopy(true);
-    // Restore chat in background - don't block navigation
-    restoreLatestChatIfNeeded();
   };
 
   const handleSwellyPressCopy = async () => {
