@@ -1391,16 +1391,11 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
             disabled={isLoading || isUploading}
             style={(isLoading || isUploading) && styles.buttonDisabled}
           >
-            <LinearGradient
-              colors={['#00A2B6', '#0788B0']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={styles.gradientButton}
-            >
+            <View style={styles.gradientButton}>
               <Text style={styles.buttonText}>
                 {isUploading ? 'Uploading...' : isLoading ? 'Loading...' : 'Next'}
               </Text>
-            </LinearGradient>
+            </View>
           </TouchableOpacity>
         </View>
         </View>
@@ -1670,8 +1665,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: spacing.md,
-    height: 24,
-    position: 'relative', // ensures content stays on top of gradient
+    height: 44,
+    position: 'relative',
     zIndex: 1,
   },
   progressContainer: {
@@ -1911,6 +1906,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: spacing.lg,
+    backgroundColor: '#212121',
   },
   buttonText: {
     fontSize: 20,

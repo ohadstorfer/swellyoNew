@@ -499,6 +499,7 @@ export const AppContent: React.FC = () => {
     fromTripPlanning: boolean;
     fromTripPlanningCopy?: boolean;
     fromWelcomeOverlay?: boolean;
+    conversationId?: string;
   } | null>(null);
   const [currentUserAvatar, setCurrentUserAvatar] = useState<string | null>(null);
   const [currentUserName, setCurrentUserName] = useState<string>('User');
@@ -891,7 +892,7 @@ export const AppContent: React.FC = () => {
     if (pendingConversation) {
       console.log('[AppContent] Navigating to conversation after loading screen');
       setSelectedConversation({
-        // No id - this is a pending conversation
+        id: pendingConversation.conversationId,
         otherUserId: pendingConversation.otherUserId,
         otherUserName: pendingConversation.otherUserName,
         otherUserAvatar: pendingConversation.otherUserAvatar,
@@ -908,12 +909,6 @@ export const AppContent: React.FC = () => {
   };
 
   const handleBackFromChat = () => {
-    // If user came from WelcomeToLineupOverlay, return to overlay
-    if (selectedConversation?.fromWelcomeOverlay) {
-      setSelectedConversation(null);
-      setShowWelcomeToLineupOverlay(true);
-      return;
-    }
     // If user came from trip planning, return there
     if (selectedConversation?.fromTripPlanning) {
       const goBackToCopy = selectedConversation?.fromTripPlanningCopy;
@@ -1211,7 +1206,14 @@ export const AppContent: React.FC = () => {
               fromWelcomeOverlay: true,
             });
             setShowConversationLoading(true);
-            // Load current user data in background (animation takes ~4.6s)
+            // Create conversation and load current user data in background (animation takes ~4.6s)
+            messagingService.createDirectConversation(match.user_id, false).then((conversation) => {
+              console.log('[AppContent] Conversation created/found for welcome overlay match:', conversation.id);
+              // Update pendingConversation with the real conversation ID
+              setPendingConversation(prev => prev ? { ...prev, conversationId: conversation.id } : null);
+            }).catch((error) => {
+              console.error('[AppContent] Error creating conversation:', error);
+            });
             supabaseAuthService.getCurrentUser().then((currentUser) => {
               if (currentUser) {
                 setCurrentUserAvatar(currentUser.photo || null);

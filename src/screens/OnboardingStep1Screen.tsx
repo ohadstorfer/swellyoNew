@@ -306,16 +306,11 @@ export const OnboardingStep1Screen: React.FC<OnboardingStep1ScreenProps> = ({
             disabled={isLoading}
             style={isLoading && styles.buttonDisabled}
           >
-            <LinearGradient
-              colors={['#00A2B6', '#0788B0']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={styles.gradientButton}
-            >
+            <View style={styles.gradientButton}>
               <Text style={styles.buttonText}>
                 {isLoading ? 'Loading...' : 'Next'}
               </Text>
-            </LinearGradient>
+            </View>
           </TouchableOpacity>
         </View>
       </View>
@@ -482,6 +477,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: spacing.lg,
+    backgroundColor: '#212121',
   },
   buttonText: {
     fontSize: 16,

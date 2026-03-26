@@ -24,7 +24,7 @@ import { colors, spacing } from '../styles/theme';
 import { swellyServiceCopy, SwellyChatResponse, UIMessage, type SwellyService as SwellyServiceType } from '../services/swelly/swellyServiceCopy';
 import { useOnboarding } from '../context/OnboardingContext';
 import { getImageUrl } from '../services/media/imageService';
-import { MatchedUserCard } from '../components/MatchedUserCard';
+import { MatchedUsersCarousel } from '../components/MatchedUsersCarousel';
 import { messagingService } from '../services/messaging/messagingService';
 import { MatchedUser, TripPlanningRequest } from '../types/tripPlanning';
 import { analyticsService } from '../services/analytics/analyticsService';
@@ -1595,19 +1595,12 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             </View>
           </View>
           
-          {/* Render matched user cards (only when there are matches) */}
+          {/* Render matched user cards carousel (only when there are matches) */}
           {message.matchedUsers.length > 0 && (
-          <View style={styles.matchedUsersCards}>
-            {message.matchedUsers.map((user) => (
-              <MatchedUserCard
-                key={user.user_id}
-                user={user}
-                destinationCountry={message.destinationCountry || destinationCountry}
-                onSendMessage={handleSendMessage}
-                onViewProfile={handleViewProfile}
-              />
-            ))}
-          </View>
+            <MatchedUsersCarousel
+              users={message.matchedUsers}
+              onViewProfile={handleViewProfile}
+            />
           )}
 
           {/* Per-message action row (New Chat, Filters, More Matches) */}

@@ -621,7 +621,7 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={handleBack} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color="#212121" />
+          <Ionicons name="arrow-back" size={24} color="#222B30" />
         </TouchableOpacity>
         <View style={styles.skipButton} />
       </View>

@@ -484,14 +484,9 @@ export const OnboardingVideoUploadScreen: React.FC<OnboardingVideoUploadScreenPr
             onPress={hasUserVideo ? handleNext : onSkip}
             activeOpacity={0.8}
           >
-            <LinearGradient
-              colors={['#00A2B6', '#0788B0']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={[styles.gradientButton, { width: buttonWidth }]}
-            >
+            <View style={[styles.gradientButton, { width: buttonWidth }]}>
               <Text style={styles.buttonText}>{hasUserVideo ? 'Next' : 'Skip'}</Text>
-            </LinearGradient>
+            </View>
           </TouchableOpacity>
         </View>
       </View>
@@ -699,6 +694,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: '#212121',
   },
   buttonText: {
     fontSize: 16,

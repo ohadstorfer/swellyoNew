@@ -446,11 +446,11 @@ height: 221 * 1.2, // 331.5
   },
   viewProfileButton: {
     alignItems: 'center',
-    top:14,
-    marginBottom: 16,
+    paddingTop: 14,
+    paddingBottom: 12,
   },
   viewProfileLink: {
-    fontSize: 15,
+    fontSize: 13.5,
     color: '#333',
     ...(Platform.OS === 'web' ? { fontFamily: 'Inter, sans-serif' } : {}),
   },

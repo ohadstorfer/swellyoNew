@@ -118,7 +118,7 @@ export const OnboardingWelcomeScreen: React.FC<OnboardingWelcomeScreenProps> = (
               style={styles.backButton}
               hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
             >
-              <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />
+              <Ionicons name="arrow-back" size={24} color="#222B30" />
             </TouchableOpacity>
           ) : (
             <View style={styles.backPlaceholder} />
@@ -193,10 +193,7 @@ export const OnboardingWelcomeScreen: React.FC<OnboardingWelcomeScreenProps> = (
           })}
         </View>
 
-        {/* Affirmation */}
-        <Text style={styles.affirmation}>
-          Nice 🤙 You're building your vibe.
-        </Text>
+        
       </ScrollView>
 
       {/* Next button */}
@@ -221,7 +218,7 @@ const styles = StyleSheet.create({
   },
   stepHeader: {
     paddingHorizontal: 16,
-    paddingTop: 8,
+    paddingTop: Platform.OS === 'web' ? 16 : 8,
     paddingBottom: 0,
     gap: 8,
   },
@@ -229,13 +226,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    minHeight: 29,
+    height: 44,
     position: 'relative',
   },
   backButton: {
     width: 60,
     alignItems: 'flex-start',
-    justifyContent: 'center',
     zIndex: 1,
   },
   backPlaceholder: {

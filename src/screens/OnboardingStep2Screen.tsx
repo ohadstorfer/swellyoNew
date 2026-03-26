@@ -374,16 +374,11 @@ export const OnboardingStep2Screen: React.FC<OnboardingStep2ScreenProps> = ({
             disabled={isLoading}
             style={isLoading && styles.buttonDisabled}
           >
-            <LinearGradient
-              colors={['#00A2B6', '#0788B0']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={[styles.gradientButton, { width: buttonWidth }]}
-            >
+            <View style={[styles.gradientButton, { width: buttonWidth }]}>
               <Text style={styles.buttonText}>
                 {isLoading ? 'Loading...' : 'Next'}
               </Text>
-            </LinearGradient>
+            </View>
           </TouchableOpacity>
         </View>
       </View>
@@ -415,9 +410,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: spacing.md,
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.md,
-    minHeight: 44,
+    paddingTop: Platform.OS === 'web' ? spacing.md : spacing.sm,
+    height: 44,
   },
   headerDesktop: {
     paddingTop: spacing.sm,
@@ -426,7 +420,6 @@ const styles = StyleSheet.create({
   backButton: {
     width: 60,
     alignItems: 'flex-start',
-    padding: 10,
   },
   stepText: {
     fontSize: 12,
@@ -519,6 +512,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: spacing.lg,
+    backgroundColor: '#212121',
   },
   buttonText: {
     fontSize: 16,
