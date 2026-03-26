@@ -7,9 +7,10 @@ import {
   Platform,
   Image,
   ScrollView,
-  NativeSyntheticEvent,
-  NativeScrollEvent,
+  Animated,
+  Easing,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { Text } from './Text';
 import { borderRadius } from '../styles/theme';
 import { getImageUrl } from '../services/media/imageService';
@@ -27,14 +28,14 @@ interface WelcomeToLineupOverlayProps {
 const CARD_CONTAINER_WIDTH = 350;
 const CARD_HORIZONTAL_PADDING = 19;
 const INNER_WIDTH = CARD_CONTAINER_WIDTH - CARD_HORIZONTAL_PADDING * 2; // 312
-const CAROUSEL_CARD_WIDTH = INNER_WIDTH * 0.75; // ~234
+const CAROUSEL_CARD_WIDTH = 274 // ~234
 const CAROUSEL_CARD_SPACING = 10;
 
 const TEAL = '#2B8C96';
-const CONNECT_BTN_COLOR = '#B8A88A';
 const BACKDROP_COLOR = 'rgba(33, 33, 33, 0.8)';
 
 const coverImageUrl = getImageUrl('/COVER IMAGE.jpg');
+const swellyImageUrl = getImageUrl('/swelly-welcome-to-lineup.png');
 
 export const WelcomeToLineupOverlay: React.FC<WelcomeToLineupOverlayProps> = ({
   visible,
@@ -46,6 +47,33 @@ export const WelcomeToLineupOverlay: React.FC<WelcomeToLineupOverlayProps> = ({
 }) => {
   const [activeIndex, setActiveIndex] = useState(1);
   const scrollViewRef = useRef<ScrollView>(null);
+  const swipeTouchStartX = useRef(0);
+  const swipeHandledRef = useRef(false);
+  const activeIndexRef = useRef(1);
+  const swellySlideAnim = useRef(new Animated.Value(-200)).current;
+
+  // Keep ref in sync with state
+  useEffect(() => {
+    activeIndexRef.current = activeIndex;
+  }, [activeIndex]);
+
+  // Swelly character slide-in animation (2s delay)
+  useEffect(() => {
+    if (visible) {
+      swellySlideAnim.setValue(-200);
+      const timer = setTimeout(() => {
+        Animated.timing(swellySlideAnim, {
+          toValue: 0,
+          duration: 500,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }).start();
+      }, 2000);
+      return () => clearTimeout(timer);
+    } else {
+      swellySlideAnim.setValue(-200);
+    }
+  }, [visible]);
 
   // Scroll to middle card on mount (contentOffset doesn't work on web)
   useEffect(() => {
@@ -60,13 +88,30 @@ export const WelcomeToLineupOverlay: React.FC<WelcomeToLineupOverlayProps> = ({
     }
   }, [visible, matches.length]);
 
-  
+  const scrollToIndex = (index: number) => {
+    const clamped = Math.max(0, Math.min(index, matches.length - 1));
+    const offset = clamped * (CAROUSEL_CARD_WIDTH + CAROUSEL_CARD_SPACING);
+    scrollViewRef.current?.scrollTo({ x: offset, animated: true });
+    setActiveIndex(clamped);
+  };
 
-  const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const offset = e.nativeEvent.contentOffset.x;
-    const index = Math.round(offset / (CAROUSEL_CARD_WIDTH + CAROUSEL_CARD_SPACING));
-    if (index >= 0 && index < matches.length) {
-      setActiveIndex(index);
+  const handleTouchStart = (e: any) => {
+    const touch = e.nativeEvent?.touches?.[0] ?? e.nativeEvent;
+    swipeTouchStartX.current = touch?.pageX ?? 0;
+    swipeHandledRef.current = false;
+  };
+
+  const handleTouchMove = (e: any) => {
+    if (swipeHandledRef.current) return;
+    const touch = e.nativeEvent?.touches?.[0] ?? e.nativeEvent;
+    const currentX = touch?.pageX ?? 0;
+    const dx = currentX - swipeTouchStartX.current;
+    if (Math.abs(dx) >= 20) {
+      swipeHandledRef.current = true;
+      const nextIndex = dx < 0
+        ? activeIndexRef.current + 1
+        : activeIndexRef.current - 1;
+      scrollToIndex(nextIndex);
     }
   };
 
@@ -80,16 +125,24 @@ export const WelcomeToLineupOverlay: React.FC<WelcomeToLineupOverlayProps> = ({
       onRequestClose={onClose}
       statusBarTranslucent={Platform.OS === 'android'}
     >
-      <View style={styles.backdrop}>
-        <View style={styles.card}>
-          {/* Close button */}
-          <TouchableOpacity style={styles.closeButton} onPress={onClose} activeOpacity={0.7}>
-            <Text style={styles.closeButtonText}>✕</Text>
-          </TouchableOpacity>
-
+      <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={onClose}>
+        {/* Swelly character slide-in */}
+        <Animated.Image
+          source={{ uri: swellyImageUrl }}
+          style={[
+            styles.swellyImage,
+            { transform: [{ translateX: swellySlideAnim }] },
+          ]}
+          pointerEvents="none"
+        />
+        <View style={styles.card} onStartShouldSetResponder={() => true}>
           <View style={styles.content}>
-            <Text style={styles.title}>
-              {'Congrats!\nYour first connection is\nhappening right now!'}
+            <Text style={styles.title}>Stoked!</Text>
+            <Text style={styles.subtitle}>
+              Found strong matches{'\n'}for you
+            </Text>
+            <Text style={styles.subText}>
+              You and these {matches.length || 3}  are on the same wave!
             </Text>
 
             {matches.length > 0 ? (
@@ -98,37 +151,42 @@ export const WelcomeToLineupOverlay: React.FC<WelcomeToLineupOverlayProps> = ({
                 ref={scrollViewRef}
                 horizontal
                 showsHorizontalScrollIndicator={false}
-                snapToInterval={CAROUSEL_CARD_WIDTH + CAROUSEL_CARD_SPACING}
-                decelerationRate="fast"
+                scrollEnabled={false}
                 contentContainerStyle={styles.carouselContent}
-                onScroll={onScroll}
-                scrollEventThrottle={16}
                 style={styles.carousel}
+                onTouchStart={handleTouchStart}
+                onTouchMove={handleTouchMove}
               >
                 {matches.map((item) => {
                   const profileImageUri = item.profile_image_url || undefined;
                   return (
                     <View key={item.user_id} style={styles.userCard}>
-                      <Image source={{ uri: coverImageUrl }} style={styles.coverImage} />
-                      <View style={styles.profilePicContainer}>
-                        {profileImageUri ? (
-                          <Image source={{ uri: profileImageUri }} style={styles.profilePic} />
-                        ) : (
-                          <View style={[styles.profilePic, styles.profilePicPlaceholder]}>
-                            <Text style={styles.profilePicInitial}>
-                              {(item.name || 'U').charAt(0).toUpperCase()}
-                            </Text>
-                          </View>
-                        )}
-                      </View>
-                      <View style={styles.cardInfo}>
-                        <Text style={styles.cardName}>{item.name || 'User'}</Text>
-                        <Text style={styles.cardDetails}>
-                          {item.age != null ? `${item.age} yo` : ''}
-                          {item.age != null && item.country_from ? ' | ' : ''}
-                          {item.country_from || ''}
-                        </Text>
-                        <TouchableOpacity onPress={() => onViewProfile(item.user_id)}>
+                      <View style={styles.userCardInner}>
+                        <Image source={{ uri: coverImageUrl }} style={styles.coverImage} />
+                        <View style={styles.profilePicContainer}>
+                          {profileImageUri ? (
+                            <Image source={{ uri: profileImageUri }} style={styles.profilePic} />
+                          ) : (
+                            <View style={[styles.profilePic, styles.profilePicPlaceholder]}>
+                              <Text style={styles.profilePicInitial}>
+                                {(item.name || 'U').charAt(0).toUpperCase()}
+                              </Text>
+                            </View>
+                          )}
+                        </View>
+                        <View style={styles.cardInfo}>
+                          <Text style={styles.cardName}>{item.name || 'User'}</Text>
+                          <Text style={styles.cardDetails}>
+                            {item.age != null ? `${item.age} yo` : ''}
+                            {item.age != null && item.country_from ? ' | ' : ''}
+                            {item.country_from || ''}
+                          </Text>
+                        </View>
+                        <View style={styles.viewProfileDivider} />
+                        <TouchableOpacity
+                          style={styles.viewProfileButton}
+                          onPress={() => onViewProfile(item.user_id)}
+                        >
                           <Text style={styles.viewProfileLink}>View Profile</Text>
                         </TouchableOpacity>
                       </View>
@@ -139,9 +197,20 @@ export const WelcomeToLineupOverlay: React.FC<WelcomeToLineupOverlayProps> = ({
               </View>
             ) : null}
 
-            <Text style={styles.subtitle}>
-              {'You and these 3 are\nEXTRA aligned!'}
-            </Text>
+            {/* Pagination dots */}
+            {matches.length > 1 && (
+              <View style={styles.paginationContainer}>
+                {matches.map((_, index) => (
+                  <View
+                    key={index}
+                    style={[
+                      styles.paginationDot,
+                      index === activeIndex && styles.paginationDotActive,
+                    ]}
+                  />
+                ))}
+              </View>
+            )}
 
             {activeMatch && (
               <TouchableOpacity
@@ -153,12 +222,13 @@ export const WelcomeToLineupOverlay: React.FC<WelcomeToLineupOverlayProps> = ({
               </TouchableOpacity>
             )}
 
-            <TouchableOpacity onPress={onMoreMatches}>
-              <Text style={styles.bottomLink}>More Matches</Text>
+            <TouchableOpacity style={styles.bottomLinkContainer} onPress={onMoreMatches}>
+              <Ionicons name="sync-outline" size={18} color="#333" style={styles.bottomLinkIcon} />
+              <Text style={styles.bottomLink}>find others</Text>
             </TouchableOpacity>
           </View>
         </View>
-      </View>
+      </TouchableOpacity>
     </Modal>
   );
 };
@@ -170,9 +240,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  swellyImage: {
+    position: 'absolute',
+    top: 25,
+    left: -70,
+    width: 331 * 1.2,  // 496.5
+height: 221 * 1.2, // 331.5
+    resizeMode: 'contain',
+    zIndex: 20,
+  },
   card: {
     width: CARD_CONTAINER_WIDTH,
-    height: 713,
     backgroundColor: '#FFFFFF',
     borderRadius: borderRadius.medium,
     paddingBottom: 32,
@@ -182,38 +260,35 @@ const styles = StyleSheet.create({
     shadowRadius: 16,
     elevation: 10,
   },
-  closeButton: {
-    position: 'absolute',
-    top: 12,
-    right: 12,
-    zIndex: 10,
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(0, 0, 0, 0.05)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  closeButtonText: {
-    fontSize: 16,
-    color: '#666',
-    fontWeight: '600',
-  },
   content: {
-    flex: 1,
     alignItems: 'center',
-    justifyContent: 'space-between',
     paddingHorizontal: CARD_HORIZONTAL_PADDING,
     paddingTop: 40,
   },
   title: {
-    fontSize: 22,
+    fontSize: 24,
     fontWeight: '700',
     color: TEAL,
     textAlign: 'center',
-    marginBottom: 20,
-    lineHeight: 30,
+    marginBottom: 8,
+    lineHeight: 28.8,
     ...(Platform.OS === 'web' ? { fontFamily: 'Montserrat, sans-serif' } : {}),
+  },
+  subtitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#222',
+    textAlign: 'center',
+    marginBottom: 12,
+    lineHeight: 28,
+    ...(Platform.OS === 'web' ? { fontFamily: 'Montserrat, sans-serif' } : {}),
+  },
+  subText: {
+    fontSize: 14,
+    color: '#888',
+    textAlign: 'center',
+    marginBottom: 16,
+    ...(Platform.OS === 'web' ? { fontFamily: 'Inter, sans-serif' } : {}),
   },
   carouselClip: {
     width: CARD_CONTAINER_WIDTH,
@@ -227,35 +302,39 @@ const styles = StyleSheet.create({
   },
   carouselContent: {
     paddingHorizontal: (CARD_CONTAINER_WIDTH - CAROUSEL_CARD_WIDTH) / 2,
+    paddingVertical: 14,
   },
   userCard: {
     width: CAROUSEL_CARD_WIDTH,
     backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    borderWidth: 2.5,
-    borderColor: '#A8DDE0',
+    borderRadius: 20,
+    padding: 10,
     marginRight: CAROUSEL_CARD_SPACING,
-    overflow: 'hidden',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 8,
     elevation: 4,
   },
+  userCardInner: {
+    flex: 1,
+    overflow: 'hidden',
+    borderRadius: 12,
+  },
   coverImage: {
     width: '100%',
-    height: 110,
+    height: 102,
     resizeMode: 'cover',
   },
   profilePicContainer: {
     alignItems: 'center',
-    marginTop: -35,
+    marginTop: -75,
   },
   profilePic: {
-    width: 70,
-    height: 70,
-    borderRadius: 35,
-    borderWidth: 3,
+    width: 99,
+    height: 99,
+    borderRadius: 64,
+    borderWidth: 3.5,
     borderColor: '#FFFFFF',
   },
   profilePicPlaceholder: {
@@ -286,40 +365,66 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     ...(Platform.OS === 'web' ? { fontFamily: 'Inter, sans-serif' } : {}),
   },
+  viewProfileDivider: {
+    height: 1,
+    backgroundColor: '#E5E5E5',
+    marginHorizontal: 4,
+  },
+  viewProfileButton: {
+    alignItems: 'center',
+    paddingVertical: 14,
+    bottom: 4,
+  },
   viewProfileLink: {
-    fontSize: 13,
+    fontSize: 15,
     color: '#333',
-    textDecorationLine: 'underline',
     ...(Platform.OS === 'web' ? { fontFamily: 'Inter, sans-serif' } : {}),
   },
-  subtitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: TEAL,
-    textAlign: 'center',
-    marginTop: 20,
+  paginationContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 14,
     marginBottom: 20,
-    lineHeight: 28,
-    ...(Platform.OS === 'web' ? { fontFamily: 'Montserrat, sans-serif' } : {}),
+    gap: 6,
+  },
+  paginationDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#D1D1D1',
+  },
+  paginationDotActive: {
+    width: 20,
+    borderRadius: 4,
+    backgroundColor: TEAL,
   },
   connectButton: {
-    backgroundColor: CONNECT_BTN_COLOR,
-    height: 52,
-    borderRadius: 26,
+    backgroundColor: TEAL,
+    height: 56,
+    borderRadius: 28,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 32,
     marginBottom: 16,
-    minWidth: 200,
+    width: '100%',
   },
   connectButtonText: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: '700',
     color: '#FFFFFF',
     ...(Platform.OS === 'web' ? { fontFamily: 'Montserrat, sans-serif' } : {}),
   },
+  bottomLinkContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  bottomLinkIcon: {
+    marginRight: 6,
+  },
   bottomLink: {
     fontSize: 14,
+    fontWeight: '700',
     color: '#333',
     textDecorationLine: 'underline',
     ...(Platform.OS === 'web' ? { fontFamily: 'Inter, sans-serif' } : {}),

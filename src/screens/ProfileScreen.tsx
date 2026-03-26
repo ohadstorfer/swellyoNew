@@ -114,6 +114,9 @@ const BOARD_VIDEO_DEFINITIONS: { [boardType: number]: Array<{ name: string; vide
     { name: 'Cross Stepping', videoFileName: 'CrossStepping.mp4', thumbnailFileName: 'CrossStepping thumbnail.PNG' },
     { name: 'Hanging Toes', videoFileName: 'Hanging Toes.mp4', thumbnailFileName: 'Hanging Toes thumbnail.PNG' },
   ],
+  3: [ // Soft Top
+    { name: 'Dipping My Toes', videoFileName: 'Dipping My Toes.mp4', thumbnailFileName: 'Dipping My Toes thumbnail.PNG' },
+  ],
 };
 
 // Helper function to get board folder name from board type
@@ -1556,7 +1559,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
 
   return (
     <>
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
       <ImageBackground
         source={{ uri: getImageUrl('/chat background.png') }}
         style={styles.backgroundImage}
@@ -2229,7 +2232,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
         </View>
       </ScrollView>
       </ImageBackground>
-    </SafeAreaView>
+    </View>
     {Platform.OS === 'web' && (
       <AvatarCropModal
         visible={cropModalVisible}

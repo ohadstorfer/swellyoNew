@@ -50,7 +50,7 @@ export function mapBoardTypeEnumToNumber(boardTypeEnum: BoardTypeEnum): number {
  */
 const SURF_LEVEL_MAP: Record<BoardTypeEnum, Record<number, SurfLevelMapping>> = {
   soft_top: {
-    0: { description: null, category: 'beginner' }, // Softtop skips level - always beginner
+    0: { description: 'Dipping My Toes', category: 'beginner' }, // Softtop skips level selection - always beginner
   },
   shortboard: {
     0: { description: 'Dipping My Toes', category: 'beginner' },

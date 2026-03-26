@@ -311,7 +311,7 @@ export const AppContent: React.FC = () => {
 
       // Soft Top (id: 3) skips step 2 and goes directly to step 3
       if (data.boardType === 3) {
-        updateFormData({ surfLevel: 3 });
+        updateFormData({ surfLevel: 0 });
         setCurrentStep(3);
       } else {
         // Navigate immediately — headless player warms AVPlayer's cache in background.
@@ -324,7 +324,7 @@ export const AppContent: React.FC = () => {
       console.error('Error in Step 1 Next:', error);
       // Still allow navigation even if save fails
       if (data.boardType === 3) {
-        updateFormData({ surfLevel: 3 });
+        updateFormData({ surfLevel: 0 });
         setCurrentStep(3);
       } else {
         setCurrentStep(2);
@@ -473,7 +473,8 @@ export const AppContent: React.FC = () => {
   const [profileFromSwellyShaper, setProfileFromSwellyShaper] = useState(false); // Track if profile was opened from Swelly Shaper
   const [profileFromTripPlanningChat, setProfileFromTripPlanningChat] = useState(false); // Track if profile was opened from trip planning chat
   const [profileFromOnboardingChat, setProfileFromOnboardingChat] = useState(false); // Track if profile was opened right after Swelly onboarding chat (special header)
-  
+  const [profileFromWelcomeOverlay, setProfileFromWelcomeOverlay] = useState(false); // Track if profile was opened from WelcomeToLineupOverlay
+
   // Trip planning chat state - persisted between navigations
   const [tripPlanningChatId, setTripPlanningChatId] = useState<string | null>(null);
   const [tripPlanningMatchedUsers, setTripPlanningMatchedUsers] = useState<any[]>([]);
@@ -486,6 +487,7 @@ export const AppContent: React.FC = () => {
     otherUserAvatar: string | null;
     fromTripPlanning?: boolean; // If true, conversation was created from trip planning recommendations
     fromTripPlanningCopy?: boolean; // If true, conversation was created from the Copy variant of trip planning
+    fromWelcomeOverlay?: boolean; // If true, conversation was created from WelcomeToLineupOverlay
   } | null>(null);
   
   // State for conversation loading screen
@@ -496,6 +498,7 @@ export const AppContent: React.FC = () => {
     otherUserAvatar: string | null;
     fromTripPlanning: boolean;
     fromTripPlanningCopy?: boolean;
+    fromWelcomeOverlay?: boolean;
   } | null>(null);
   const [currentUserAvatar, setCurrentUserAvatar] = useState<string | null>(null);
   const [currentUserName, setCurrentUserName] = useState<string>('User');
@@ -523,10 +526,20 @@ export const AppContent: React.FC = () => {
   const handleProfileBack = () => {
     console.log('[AppContent] handleProfileBack called');
     console.log('[AppContent] profileFromTripPlanningChat:', profileFromTripPlanningChat);
-    
+
     // Clear any selected conversation to prevent it from showing when profile closes
     setSelectedConversation(null);
-    
+
+    // If profile was opened from WelcomeToLineupOverlay, return to overlay
+    if (profileFromWelcomeOverlay) {
+      console.log('[AppContent] Returning to WelcomeToLineupOverlay');
+      setShowProfile(false);
+      setViewingUserId(null);
+      setProfileFromWelcomeOverlay(false);
+      // showWelcomeToLineupOverlay is still true, so overlay will re-appear
+      return;
+    }
+
     // If profile was opened from trip planning chat, return to chat
     if (profileFromTripPlanningChat) {
       console.log('[AppContent] Returning to trip planning chat');
@@ -536,7 +549,7 @@ export const AppContent: React.FC = () => {
       setShowTripPlanningChat(true); // Return to chat
       return;
     }
-    
+
     // Otherwise, navigate back to conversations/home (homepage)
     console.log('[AppContent] Navigating to conversations/home');
     setShowProfile(false);
@@ -697,6 +710,9 @@ export const AppContent: React.FC = () => {
               { name: 'Cruising Around', videoFileName: 'Cruising Around.mp4', thumbnailFileName: 'Cruising Around thumbnail.PNG' },
               { name: 'Cross Stepping', videoFileName: 'CrossStepping.mp4', thumbnailFileName: 'CrossStepping thumbnail.PNG' },
               { name: 'Hanging Toes', videoFileName: 'Hanging Toes.mp4', thumbnailFileName: 'Hanging Toes thumbnail.PNG' },
+            ],
+            3: [
+              { name: 'Dipping My Toes', videoFileName: 'Dipping My Toes.mp4', thumbnailFileName: 'Dipping My Toes thumbnail.PNG' },
             ],
           };
           
@@ -881,6 +897,7 @@ export const AppContent: React.FC = () => {
         otherUserAvatar: pendingConversation.otherUserAvatar,
         fromTripPlanning: pendingConversation.fromTripPlanning,
         fromTripPlanningCopy: pendingConversation.fromTripPlanningCopy,
+        fromWelcomeOverlay: pendingConversation.fromWelcomeOverlay,
       });
       setShowConversationLoading(false);
       setPendingConversation(null);
@@ -891,6 +908,12 @@ export const AppContent: React.FC = () => {
   };
 
   const handleBackFromChat = () => {
+    // If user came from WelcomeToLineupOverlay, return to overlay
+    if (selectedConversation?.fromWelcomeOverlay) {
+      setSelectedConversation(null);
+      setShowWelcomeToLineupOverlay(true);
+      return;
+    }
     // If user came from trip planning, return there
     if (selectedConversation?.fromTripPlanning) {
       const goBackToCopy = selectedConversation?.fromTripPlanningCopy;
@@ -1147,17 +1170,27 @@ export const AppContent: React.FC = () => {
         {process.env.EXPO_PUBLIC_LOCAL_MODE === 'true' && (
           <TouchableOpacity
             style={{ position: 'absolute', top: 60, right: 10, backgroundColor: '#333', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, zIndex: 999, opacity: 0.7 }}
-            onPress={() => {
-              findAndConnectMatches()
-                .then((result) => {
-                  if (result && result.match_count > 0) {
-                    setOnboardingMatchResult(result);
-                    setShowWelcomeToLineupOverlay(true);
-                  } else {
-                    console.warn('[Debug] No matches found');
-                  }
-                })
-                .catch((err) => console.warn('[Debug] Matching failed:', err));
+            onPress={async () => {
+              try {
+                const { conversations } = await messagingService.getConversations(3, 0);
+                const matches = conversations
+                  .filter(c => c.other_user)
+                  .slice(0, 3)
+                  .map(c => ({
+                    user_id: c.other_user!.user_id,
+                    conversation_id: c.id,
+                    total_score: 90,
+                    name: c.other_user!.name || 'User',
+                    age: null,
+                    country_from: null,
+                    profile_image_url: c.other_user!.profile_image_url || null,
+                    scores: { age: 0, country: 0, surf_level: 0, board_type: 0 },
+                  }));
+                setOnboardingMatchResult({ matches, match_count: matches.length, swelly_chat_id: null });
+                setShowWelcomeToLineupOverlay(true);
+              } catch (err) {
+                console.warn('[Debug] Failed to load conversations:', err);
+              }
             }}
           >
             <RNText style={{ color: '#fff', fontSize: 11 }}>Debug Overlay</RNText>
@@ -1169,9 +1202,28 @@ export const AppContent: React.FC = () => {
           onClose={() => setShowWelcomeToLineupOverlay(false)}
           onConnect={(match) => {
             setShowWelcomeToLineupOverlay(false);
-            handleStartConversation(match.user_id);
+            // Show loading screen immediately
+            setPendingConversation({
+              otherUserId: match.user_id,
+              otherUserName: match.name || 'User',
+              otherUserAvatar: match.profile_image_url || null,
+              fromTripPlanning: false,
+              fromWelcomeOverlay: true,
+            });
+            setShowConversationLoading(true);
+            // Load current user data in background (animation takes ~4.6s)
+            supabaseAuthService.getCurrentUser().then((currentUser) => {
+              if (currentUser) {
+                setCurrentUserAvatar(currentUser.photo || null);
+                setCurrentUserName(currentUser.nickname || currentUser.email?.split('@')[0] || 'User');
+              }
+            }).catch((error) => {
+              console.error('[AppContent] Error loading current user data:', error);
+            });
           }}
           onViewProfile={(userId) => {
+            // Keep overlay state so it re-appears on back
+            setProfileFromWelcomeOverlay(true);
             handleViewUserProfile(userId);
           }}
           onMoreMatches={() => {

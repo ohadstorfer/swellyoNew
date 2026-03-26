@@ -21,6 +21,9 @@ const BOARD_VIDEO_DEFINITIONS: { [boardType: number]: Array<{ name: string; vide
     { name: 'Cross Stepping', videoFileName: 'CrossStepping.mp4', thumbnailFileName: 'CrossStepping thumbnail.PNG' },
     { name: 'Hanging Toes', videoFileName: 'Hanging Toes.mp4', thumbnailFileName: 'Hanging Toes thumbnail.PNG' },
   ],
+  3: [
+    { name: 'Dipping My Toes', videoFileName: 'Dipping My Toes.mp4', thumbnailFileName: 'Dipping My Toes thumbnail.PNG' },
+  ],
 };
 
 const getBoardFolder = (boardType: number): string => {
