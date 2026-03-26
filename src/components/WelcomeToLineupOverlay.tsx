@@ -45,13 +45,18 @@ export const WelcomeToLineupOverlay: React.FC<WelcomeToLineupOverlayProps> = ({
   onViewProfile,
   onMoreMatches,
 }) => {
-  console.log('[WelcomeToLineupOverlay] Rendered with', matches.length, 'matches:', matches.map(m => ({ user_id: m.user_id, name: m.name, profile_image_url: m.profile_image_url })));
+  // Reorder: move first card to middle so the carousel starts centered on the "best" match
+  const reorderedMatches = matches.length >= 3
+    ? [matches[1], matches[0], ...matches.slice(2)]
+    : matches;
 
-  const [activeIndex, setActiveIndex] = useState(1);
+  console.log('[WelcomeToLineupOverlay] Rendered with', reorderedMatches.length, 'matches:', reorderedMatches.map(m => ({ user_id: m.user_id, name: m.name, profile_image_url: m.profile_image_url })));
+
+  const [activeIndex, setActiveIndex] = useState(0);
   const scrollViewRef = useRef<ScrollView>(null);
   const swipeTouchStartX = useRef(0);
   const swipeHandledRef = useRef(false);
-  const activeIndexRef = useRef(1);
+  const activeIndexRef = useRef(0);
   const swellySlideAnim = useRef(new Animated.Value(-200)).current;
   const slideOutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const carouselContainerRef = useRef<View>(null);
@@ -96,16 +101,7 @@ export const WelcomeToLineupOverlay: React.FC<WelcomeToLineupOverlayProps> = ({
     }
   }, [visible]);
 
-  // Scroll to middle card on mount
-  const initialScrollX = matches.length > 1 ? 1 * (CAROUSEL_CARD_WIDTH + CAROUSEL_CARD_SPACING) : 0;
-  useEffect(() => {
-    if (visible && matches.length > 1 && Platform.OS === 'web') {
-      // contentOffset doesn't work on web, so use scrollTo on next frame
-      requestAnimationFrame(() => {
-        scrollViewRef.current?.scrollTo({ x: initialScrollX, animated: false });
-      });
-    }
-  }, [visible, matches.length]);
+  // No scroll-to-middle needed — cards are reordered so the best match is already first
 
   // Web: attach native DOM touch/mouse listeners for reliable swipe in mobile emulation
   useEffect(() => {
@@ -187,7 +183,7 @@ export const WelcomeToLineupOverlay: React.FC<WelcomeToLineupOverlayProps> = ({
     handleSwipeMove(touch?.pageX ?? 0);
   };
 
-  const activeMatch = matches[activeIndex] || matches[0];
+  const activeMatch = reorderedMatches[activeIndex] || reorderedMatches[0];
 
   return (
     <Modal
@@ -226,13 +222,12 @@ export const WelcomeToLineupOverlay: React.FC<WelcomeToLineupOverlayProps> = ({
                 scrollEnabled={false}
                 contentContainerStyle={styles.carouselContent}
                 style={styles.carousel}
-                contentOffset={{ x: initialScrollX, y: 0 }}
                 {...(Platform.OS !== 'web' ? {
                   onTouchStart: handleTouchStart,
                   onTouchMove: handleTouchMove,
                 } : {})}
               >
-                {matches.map((item) => {
+                {reorderedMatches.map((item) => {
                   const profileImageUri = item.profile_image_url || undefined;
                   return (
                     <View key={item.user_id} style={styles.userCard}>
