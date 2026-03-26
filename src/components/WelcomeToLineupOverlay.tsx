@@ -45,31 +45,49 @@ export const WelcomeToLineupOverlay: React.FC<WelcomeToLineupOverlayProps> = ({
   onViewProfile,
   onMoreMatches,
 }) => {
+  console.log('[WelcomeToLineupOverlay] Rendered with', matches.length, 'matches:', matches.map(m => ({ user_id: m.user_id, name: m.name, profile_image_url: m.profile_image_url })));
+
   const [activeIndex, setActiveIndex] = useState(1);
   const scrollViewRef = useRef<ScrollView>(null);
   const swipeTouchStartX = useRef(0);
   const swipeHandledRef = useRef(false);
   const activeIndexRef = useRef(1);
   const swellySlideAnim = useRef(new Animated.Value(-200)).current;
+  const slideOutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const carouselContainerRef = useRef<View>(null);
 
   // Keep ref in sync with state
   useEffect(() => {
     activeIndexRef.current = activeIndex;
   }, [activeIndex]);
 
-  // Swelly character slide-in animation (2s delay)
+  // Swelly character slide-in animation (2s delay), then slide out after 2s
   useEffect(() => {
     if (visible) {
       swellySlideAnim.setValue(-200);
-      const timer = setTimeout(() => {
+      const slideInTimer = setTimeout(() => {
         Animated.timing(swellySlideAnim, {
           toValue: 0,
           duration: 500,
           easing: Easing.out(Easing.cubic),
           useNativeDriver: true,
-        }).start();
+        }).start(() => {
+          // After slide-in completes, wait 2s then slide out
+          const slideOutTimer = setTimeout(() => {
+            Animated.timing(swellySlideAnim, {
+              toValue: -200,
+              duration: 500,
+              easing: Easing.in(Easing.cubic),
+              useNativeDriver: true,
+            }).start();
+          }, 2000);
+          slideOutTimerRef.current = slideOutTimer;
+        });
       }, 2000);
-      return () => clearTimeout(timer);
+      return () => {
+        clearTimeout(slideInTimer);
+        if (slideOutTimerRef.current) clearTimeout(slideOutTimerRef.current);
+      };
     } else {
       swellySlideAnim.setValue(-200);
     }
@@ -88,6 +106,52 @@ export const WelcomeToLineupOverlay: React.FC<WelcomeToLineupOverlayProps> = ({
     }
   }, [visible, matches.length]);
 
+  // Web: attach native DOM touch/mouse listeners for reliable swipe in mobile emulation
+  useEffect(() => {
+    if (Platform.OS !== 'web' || !visible) return;
+    const node = (carouselContainerRef.current as any);
+    if (!node) return;
+    // React Native Web exposes the DOM node directly or via a property
+    const domNode: HTMLElement | null = node instanceof HTMLElement ? node : node._nativeTag ?? null;
+    if (!domNode) return;
+
+    const onStart = (pageX: number) => {
+      swipeTouchStartX.current = pageX;
+      swipeHandledRef.current = false;
+    };
+    const onMove = (pageX: number) => {
+      if (swipeHandledRef.current) return;
+      const dx = pageX - swipeTouchStartX.current;
+      if (Math.abs(dx) >= 20) {
+        swipeHandledRef.current = true;
+        const clamped = Math.max(0, Math.min(
+          dx < 0 ? activeIndexRef.current + 1 : activeIndexRef.current - 1,
+          matches.length - 1
+        ));
+        const offset = clamped * (CAROUSEL_CARD_WIDTH + CAROUSEL_CARD_SPACING);
+        scrollViewRef.current?.scrollTo({ x: offset, animated: true });
+        setActiveIndex(clamped);
+      }
+    };
+
+    const handleTouchStartWeb = (e: TouchEvent) => onStart(e.touches[0].pageX);
+    const handleTouchMoveWeb = (e: TouchEvent) => onMove(e.touches[0].pageX);
+    const handleMouseDownWeb = (e: MouseEvent) => onStart(e.pageX);
+    const handleMouseMoveWeb = (e: MouseEvent) => { if (e.buttons > 0) onMove(e.pageX); };
+
+    domNode.addEventListener('touchstart', handleTouchStartWeb, { passive: true });
+    domNode.addEventListener('touchmove', handleTouchMoveWeb, { passive: true });
+    domNode.addEventListener('mousedown', handleMouseDownWeb);
+    domNode.addEventListener('mousemove', handleMouseMoveWeb);
+
+    return () => {
+      domNode.removeEventListener('touchstart', handleTouchStartWeb);
+      domNode.removeEventListener('touchmove', handleTouchMoveWeb);
+      domNode.removeEventListener('mousedown', handleMouseDownWeb);
+      domNode.removeEventListener('mousemove', handleMouseMoveWeb);
+    };
+  }, [visible, matches.length]);
+
   const scrollToIndex = (index: number) => {
     const clamped = Math.max(0, Math.min(index, matches.length - 1));
     const offset = clamped * (CAROUSEL_CARD_WIDTH + CAROUSEL_CARD_SPACING);
@@ -95,17 +159,14 @@ export const WelcomeToLineupOverlay: React.FC<WelcomeToLineupOverlayProps> = ({
     setActiveIndex(clamped);
   };
 
-  const handleTouchStart = (e: any) => {
-    const touch = e.nativeEvent?.touches?.[0] ?? e.nativeEvent;
-    swipeTouchStartX.current = touch?.pageX ?? 0;
+  const handleSwipeStart = (pageX: number) => {
+    swipeTouchStartX.current = pageX;
     swipeHandledRef.current = false;
   };
 
-  const handleTouchMove = (e: any) => {
+  const handleSwipeMove = (pageX: number) => {
     if (swipeHandledRef.current) return;
-    const touch = e.nativeEvent?.touches?.[0] ?? e.nativeEvent;
-    const currentX = touch?.pageX ?? 0;
-    const dx = currentX - swipeTouchStartX.current;
+    const dx = pageX - swipeTouchStartX.current;
     if (Math.abs(dx) >= 20) {
       swipeHandledRef.current = true;
       const nextIndex = dx < 0
@@ -113,6 +174,16 @@ export const WelcomeToLineupOverlay: React.FC<WelcomeToLineupOverlayProps> = ({
         : activeIndexRef.current - 1;
       scrollToIndex(nextIndex);
     }
+  };
+
+  const handleTouchStart = (e: any) => {
+    const touch = e.nativeEvent?.touches?.[0] ?? e.nativeEvent;
+    handleSwipeStart(touch?.pageX ?? 0);
+  };
+
+  const handleTouchMove = (e: any) => {
+    const touch = e.nativeEvent?.touches?.[0] ?? e.nativeEvent;
+    handleSwipeMove(touch?.pageX ?? 0);
   };
 
   const activeMatch = matches[activeIndex] || matches[0];
@@ -125,7 +196,7 @@ export const WelcomeToLineupOverlay: React.FC<WelcomeToLineupOverlayProps> = ({
       onRequestClose={onClose}
       statusBarTranslucent={Platform.OS === 'android'}
     >
-      <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={onClose}>
+      <View style={styles.backdrop}>
         {/* Swelly character slide-in */}
         <Animated.Image
           source={{ uri: swellyImageUrl }}
@@ -146,7 +217,7 @@ export const WelcomeToLineupOverlay: React.FC<WelcomeToLineupOverlayProps> = ({
             </Text>
 
             {matches.length > 0 ? (
-              <View style={styles.carouselClip}>
+              <View style={styles.carouselClip} ref={carouselContainerRef}>
               <ScrollView
                 ref={scrollViewRef}
                 horizontal
@@ -154,8 +225,10 @@ export const WelcomeToLineupOverlay: React.FC<WelcomeToLineupOverlayProps> = ({
                 scrollEnabled={false}
                 contentContainerStyle={styles.carouselContent}
                 style={styles.carousel}
-                onTouchStart={handleTouchStart}
-                onTouchMove={handleTouchMove}
+                {...(Platform.OS !== 'web' ? {
+                  onTouchStart: handleTouchStart,
+                  onTouchMove: handleTouchMove,
+                } : {})}
               >
                 {matches.map((item) => {
                   const profileImageUri = item.profile_image_url || undefined;
@@ -218,7 +291,9 @@ export const WelcomeToLineupOverlay: React.FC<WelcomeToLineupOverlayProps> = ({
                 onPress={() => onConnect(activeMatch)}
                 activeOpacity={0.8}
               >
-                <Text style={styles.connectButtonText}>Connect to {activeMatch.name || 'User'}</Text>
+                <Text style={styles.connectButtonText}>
+  Connect to {(activeMatch?.name?.trim().split(' ')[0]) || 'User'}
+</Text>
               </TouchableOpacity>
             )}
 
@@ -228,7 +303,7 @@ export const WelcomeToLineupOverlay: React.FC<WelcomeToLineupOverlayProps> = ({
             </TouchableOpacity>
           </View>
         </View>
-      </TouchableOpacity>
+      </View>
     </Modal>
   );
 };
@@ -317,7 +392,6 @@ height: 221 * 1.2, // 331.5
     elevation: 4,
   },
   userCardInner: {
-    flex: 1,
     overflow: 'hidden',
     borderRadius: 12,
   },
@@ -372,8 +446,8 @@ height: 221 * 1.2, // 331.5
   },
   viewProfileButton: {
     alignItems: 'center',
-    paddingVertical: 14,
-    bottom: 4,
+    top:14,
+    marginBottom: 16,
   },
   viewProfileLink: {
     fontSize: 15,

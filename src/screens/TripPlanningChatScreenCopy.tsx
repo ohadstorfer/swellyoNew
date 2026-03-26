@@ -697,7 +697,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
               },
               {
                 id: 'info',
-                text: 'I can match you to other surfers by origin country, age, surf level, surfboard type, and places they have surfed in.',
+                text: 'I can connect you to surfers based on surf lvl, board type, age, origin country, and any destination they’ve surfed at.',
                 isUser: false,
                 timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
               },
@@ -1685,10 +1685,10 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
                     activeOpacity={0.8}
                     style={styles.reviewFiltersButton}
                   >
-                    <Svg width={18} height={18} viewBox="0 -960 960 960" fill="#555">
-                      <Path d="M440-120v-240h80v80h320v80H520v80h-80Zm-320-80v-80h240v80H120Zm160-160v-80H120v-80h160v-80h80v240h-80Zm160-80v-80h400v80H440Zm160-160v-240h80v80h160v80H680v80h-80Zm-480-80v-80h400v80H120Z" />
+                    <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+                      <Path d="M2.90186 7.73821L14.509 7.73821M14.509 7.73821C14.509 9.34082 15.8082 10.64 17.4108 10.64C19.0134 10.64 20.3126 9.34082 20.3126 7.73821C20.3126 6.1356 19.0134 4.83643 17.4108 4.83643C15.8082 4.83643 14.509 6.1356 14.509 7.73821ZM8.70543 15.4763L20.3126 15.4763M8.70543 15.4763C8.70543 17.0789 7.40625 18.3781 5.80364 18.3781C4.20103 18.3781 2.90186 17.0789 2.90186 15.4763C2.90186 13.8737 4.20103 12.5745 5.80364 12.5745C7.40625 12.5745 8.70543 13.8737 8.70543 15.4763Z" stroke="#222B30" strokeWidth={1.973} strokeLinecap="round" strokeLinejoin="round" />
                     </Svg>
-                    <Text style={styles.reviewFiltersButtonText}>Review filters</Text>
+                    <Text style={styles.reviewFiltersButtonText}>Filters</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     onPress={() => {
@@ -1701,7 +1701,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
                     style={styles.searchNowButton}
                   >
                     <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-                      <Path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" fill="#555" />
+                      <Path d="M4.35273 21.2798V16.4435M4.35273 6.77088V1.93457M1.93457 4.35273H6.77088M1.93457 18.8617H6.77088M12.5745 2.90183L10.897 7.26308C10.6243 7.97231 10.4879 8.32692 10.2758 8.6252C10.0878 8.88957 9.85683 9.12054 9.59247 9.30852C9.29418 9.52062 8.93957 9.65701 8.23034 9.92979L3.86909 11.6072L8.23035 13.2846C8.93957 13.5574 9.29418 13.6938 9.59247 13.9059C9.85683 14.0938 10.0878 14.3248 10.2758 14.5892C10.4879 14.8875 10.6243 15.2421 10.897 15.9513L12.5745 20.3125L14.2519 15.9513C14.5246 15.2421 14.661 14.8875 14.8731 14.5892C15.0611 14.3248 15.2921 14.0938 15.5564 13.9059C15.8547 13.6938 16.2093 13.5574 16.9186 13.2846L21.2798 11.6072L16.9186 9.92978C16.2093 9.65701 15.8547 9.52062 15.5564 9.30852C15.2921 9.12054 15.0611 8.88957 14.8731 8.6252C14.661 8.32692 14.5246 7.97231 14.2519 7.26308L12.5745 2.90183Z" stroke="white" strokeWidth={1.973} strokeLinecap="round" strokeLinejoin="round" />
                     </Svg>
                     <Text style={styles.searchNowButtonText}>Search</Text>
                   </TouchableOpacity>
@@ -1887,7 +1887,11 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
               <View style={styles.filtersOverlayTop}>
                 <View style={styles.filtersChipsRow}>
                   {filterDisplayList.length === 0 ? (
-                    <Text style={styles.filtersMenuEmpty}>No filters applied</Text>
+                    <View style={styles.filtersEmptyCard}>
+                      <Text style={styles.filtersEmptyCardText}>
+                        You can filter and search for other users based on - surf lvl, board type, age, origin country, and any destination they've been to.
+                      </Text>
+                    </View>
                   ) : (
                     filterDisplayList.map(item => {
                       const parts = getLabelParts(item.label);
@@ -1927,12 +1931,10 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
                   style={[styles.filtersButtonPill, styles.filtersOverlayClose]}
                   hitSlop={12}
                 >
-                  {filterCount > 0 && (
                     <View style={styles.filtersButtonCountWrap}>
-                      <View style={styles.filtersButtonRedDot} />
+                      
                       <Text style={styles.filtersButtonCountText}>{filterCount}</Text>
                     </View>
-                  )}
                   <Ionicons name="options-outline" size={24} color="#333" />
                 </TouchableOpacity>
               </View>
@@ -2398,11 +2400,25 @@ const styles = StyleSheet.create({
   filtersOverlaySpacer: {
     flex: 1,
   },
-  filtersMenuEmpty: {
+  filtersEmptyCard: {
+    width: '100%',
+    paddingTop: 6,
+    paddingBottom: 4,
+    paddingHorizontal: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 6,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#E4E4E4',
+    backgroundColor: 'rgba(255, 255, 255, 0.10)',
+  },
+  filtersEmptyCardText: {
     fontFamily: Platform.OS === 'web' ? 'var(--Family-Body, Inter), sans-serif' : 'Inter',
-    fontSize: 14,
+    fontSize: 13,
+    lineHeight: 18,
     color: '#7B7B7B',
-    paddingVertical: 8,
+    textAlign: 'left',
   },
   filtersChipsRow: {
     flex: 1,
@@ -2491,41 +2507,42 @@ const styles = StyleSheet.create({
     marginTop: 8,
     flexDirection: 'row',
     gap: 8,
+    justifyContent: 'center',
   },
   reviewFiltersButton: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    alignSelf: 'flex-start',
+    justifyContent: 'center',
     gap: 6,
     paddingVertical: 8,
     paddingHorizontal: 12,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#999',
-    backgroundColor: 'rgba(255, 255, 255, 0.80)',
+    borderRadius: 9999,
+    borderWidth: 1.5,
+    borderColor: '#00A2B6',
+    backgroundColor: '#FFF',
   },
   reviewFiltersButtonText: {
     fontSize: 14,
-    color: '#555',
-    fontWeight: '500',
+    color: '#222B30',
+    fontWeight: '700',
     fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat',
   },
   searchNowButton: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    alignSelf: 'flex-start',
+    justifyContent: 'center',
     gap: 6,
     paddingVertical: 8,
     paddingHorizontal: 12,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#999',
-    backgroundColor: 'rgba(255, 255, 255, 0.80)',
+    borderRadius: 9999,
+    backgroundColor: '#0788B0',
   },
   searchNowButtonText: {
     fontSize: 14,
-    color: '#555',
-    fontWeight: '500',
+    color: '#FFFFFF',
+    fontWeight: '700',
     fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat',
   },
   searchButtonWrapper: {

@@ -36,31 +36,26 @@ export const ONBOARDING_WELCOME_IMAGE_URLS = Object.values(CARD_IMAGES);
 const JOURNEY_OPTIONS: Array<{
   id: string;
   title: string;
-  subtitle: string;
   imageUri: string;
 }> = [
   {
     id: 'share_wisdom',
-    title: 'Share your surf wisdom',
-    subtitle: 'Give & Get Travel Advice',
+    title: 'Give & Get Travel Advice',
     imageUri: CARD_IMAGES.share_wisdom,
   },
   {
     id: 'find_crew',
-    title: 'Find your surf crew',
-    subtitle: 'Connect with aligned Surfers',
+    title: 'Connect with Like-Minded Travelers',
     imageUri: CARD_IMAGES.find_crew,
   },
   {
     id: 'plan_trip',
-    title: 'Plan your next trip',
-    subtitle: 'Meet Potential Travel Partners',
+    title: 'Meet Potential Travel Partners',
     imageUri: CARD_IMAGES.plan_trip,
   },
   {
     id: 'just_waves',
-    title: 'Just here for the waves',
-    subtitle: 'General Surf Guidance',
+    title: 'General Surf Guidance',
     imageUri: CARD_IMAGES.just_waves,
   },
 ];
@@ -154,7 +149,7 @@ export const OnboardingWelcomeScreen: React.FC<OnboardingWelcomeScreenProps> = (
             >
               {displayName ? `Yo ${displayName}!` : 'Yo!'}
             </Text>
-          <Text style={styles.title}>What's your surf journey?</Text>
+          <Text style={styles.title}>What are you here for?</Text>
           <Text style={styles.subtitle}>Pick at least two!</Text>
         </View>
 
@@ -192,9 +187,6 @@ export const OnboardingWelcomeScreen: React.FC<OnboardingWelcomeScreenProps> = (
                 </View>
                 <Text style={styles.cardTitle} numberOfLines={2}>
                   {option.title}
-                </Text>
-                <Text style={styles.cardSubtitle} numberOfLines={2}>
-                  {option.subtitle}
                 </Text>
               </TouchableOpacity>
             );
@@ -381,17 +373,9 @@ const styles = StyleSheet.create({
   cardTitle: {
     fontFamily: Platform.OS === 'web' ? 'var(--Family-Headings, Montserrat), sans-serif' : 'Montserrat',
     fontWeight: '700',
-    fontSize: 12,
-    lineHeight: 16,
-    color: colors.textPrimary,
-    marginBottom: 2,
-  },
-  cardSubtitle: {
-    fontFamily: Platform.OS === 'web' ? 'var(--Family-Body, Inter), sans-serif' : 'Inter',
-    fontWeight: '400',
-    fontSize: 10,
+    fontSize: 14,
     lineHeight: 20,
-    color: colors.textSecondary,
+    color: colors.textPrimary,
   },
   affirmation: {
     fontFamily: Platform.OS === 'web' ? 'var(--Family-Body, Inter), sans-serif' : 'Inter',

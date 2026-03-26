@@ -383,10 +383,11 @@ export const TravelExperienceSlider: React.FC<TravelExperienceSliderProps> = ({
 
   return (
     <View style={styles.container}>
-      <Text style={[styles.title, { 
-        fontSize: dynamicSizes.titleFontSize, 
+      <Text style={[styles.title, {
+        fontSize: dynamicSizes.titleFontSize,
         lineHeight: dynamicSizes.titleFontSize * 1.2,
-        marginBottom: 8 
+        marginBottom: 8,
+        zIndex: 20,
       }]}>What is your Travel Experience?</Text>
 
       {/* <Text style={[styles.subtitle, {
@@ -399,29 +400,35 @@ export const TravelExperienceSlider: React.FC<TravelExperienceSliderProps> = ({
         height: dynamicSizes.imageSize,
         marginBottom: dynamicSizes.imageMarginBottom,
       }]}>
-        {TRAVEL_LEVELS.map((level, index) => (
-          <Animated.View
-            key={level.id}
-            style={[
-              styles.imageWrapper,
-              {
-                width: dynamicSizes.imageSize,
-                height: dynamicSizes.imageSize,
-                opacity: imageOpacity[index],
-                zIndex: index === currentCategory ? 10 : 1,
-              },
-            ]}
-          >
-            <Image
-              source={{ uri: level.imageUrl }}
-              style={[styles.image, {
-                width: dynamicSizes.imageSize,
-                height: dynamicSizes.imageSize,
-              }]}
-              resizeMode="cover"
-            />
-          </Animated.View>
-        ))}
+        {TRAVEL_LEVELS.map((level, index) => {
+          const isLastLevel = index === TRAVEL_LEVELS.length - 1;
+          const imgHeight = isLastLevel
+            ? dynamicSizes.imageSize * 1.3
+            : dynamicSizes.imageSize;
+          return (
+            <Animated.View
+              key={level.id}
+              style={[
+                styles.imageWrapper,
+                {
+                  width: dynamicSizes.imageSize,
+                  height: imgHeight,
+                  opacity: imageOpacity[index],
+                  zIndex: index === currentCategory ? 10 : 1,
+                },
+              ]}
+            >
+              <Image
+                source={{ uri: level.imageUrl }}
+                style={[styles.image, {
+                  width: dynamicSizes.imageSize,
+                  height: imgHeight,
+                }]}
+                resizeMode="cover"
+              />
+            </Animated.View>
+          );
+        })}
       </View>
 
       {/* Level Info */}
@@ -530,14 +537,14 @@ const styles = StyleSheet.create({
     // width, height, and marginBottom are set dynamically via inline style
     position: 'relative',
     alignItems: 'center',
-    justifyContent: 'center',
     backgroundColor: 'transparent',
+    overflow: 'visible',
   },
   imageWrapper: {
     // width and height are set dynamically via inline style
     position: 'absolute',
+    bottom: 0,
     alignItems: 'center',
-    justifyContent: 'center',
     backgroundColor: 'transparent',
     borderRadius: 16,
     overflow: 'hidden',
