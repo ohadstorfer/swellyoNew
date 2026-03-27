@@ -839,11 +839,22 @@ export const AppContent: React.FC = () => {
           otherUserAvatar: surferData?.profile_image_url || null,
           fromTripPlanning: isFromTripPlanning,
           fromTripPlanningCopy: isFromTripPlanning && showTripPlanningChatCopy,
+          fromWelcomeOverlay: profileFromWelcomeOverlay || false,
         });
         console.log('[AppContent] pendingConversation state updated');
         console.log('[AppContent] Setting showConversationLoading to true...');
         setShowConversationLoading(true);
         console.log('[AppContent] ✓ showConversationLoading set to true');
+
+        // Create conversation immediately in background (same as WelcomeToLineupOverlay connect flow)
+        if (profileFromWelcomeOverlay) {
+          messagingService.createDirectConversation(userId, false).then((conversation) => {
+            console.log('[AppContent] Conversation created/found for welcome overlay profile connect:', conversation.id);
+            setPendingConversation(prev => prev ? { ...prev, conversationId: conversation.id } : null);
+          }).catch((error) => {
+            console.error('[AppContent] Error creating conversation from profile:', error);
+          });
+        }
       }
       
       // If profile was opened from the WelcomeToLineupOverlay, dismiss the overlay
