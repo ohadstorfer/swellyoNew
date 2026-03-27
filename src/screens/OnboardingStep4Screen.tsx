@@ -1067,6 +1067,14 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
 
   const keyboardAwareScrollViewRef = useRef<any>(null);
 
+  // Scroll to bottom on mount so user sees the full form
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      keyboardAwareScrollViewRef.current?.scrollToEnd?.({ animated: true });
+    }, 300);
+    return () => clearTimeout(timer);
+  }, []);
+
   const handleNext = async () => {
     // Validate all required fields at once so user sees all errors
     let hasError = false;
