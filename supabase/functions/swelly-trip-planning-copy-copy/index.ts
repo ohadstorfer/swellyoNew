@@ -1,395 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-
-// === GEO MATCHING (inlined: types, geohashUtils, geoScaleUtils, filterService, databaseService, geoMatchingService) ===
-interface MatchResult {
-  user_id: string
-  name: string
-  profile_image_url?: string | null
-  match_score: number
-  priority_score?: number
-  general_score?: number
-  matched_areas?: string[]
-  matched_towns?: string[]
-  common_lifestyle_keywords?: string[]
-  common_wave_keywords?: string[]
-  surfboard_type?: string
-  surf_level?: number
-  travel_experience?: string
-  country_from?: string
-  age?: number
-  days_in_destination?: number
-  destinations_array?: Array<{ country: string; area: string[]; time_in_days: number; time_in_text?: string }>
-  match_quality?: any
-}
-
-
-const GEOHASH_BASE32 = '0123456789bcdefghjkmnpqrstuvwxyz'
-function encodeGeohash(lat: number, lng: number, precision: number): string {
-  let latitude = Math.max(-90, Math.min(90, lat))
-  let longitude = Math.max(-180, Math.min(180, lng))
-  let latMin = -90.0, latMax = 90.0, lngMin = -180.0, lngMax = 180.0
-  let hash = '', isEvenBit = true, bit = 0, ch = 0
-  while (hash.length < precision) {
-    if (isEvenBit) {
-      const mid = (lngMin + lngMax) / 2
-      if (longitude >= mid) { ch |= 1 << (4 - bit); lngMin = mid } else { lngMax = mid }
-    } else {
-      const mid = (latMin + latMax) / 2
-      if (latitude >= mid) { ch |= 1 << (4 - bit); latMin = mid } else { latMax = mid }
-    }
-    isEvenBit = !isEvenBit
-    if (bit < 4) bit++
-    else { hash += GEOHASH_BASE32[ch]; bit = 0; ch = 0 }
-  }
-  return hash
-}
-function decodeGeohash(geohash: string): { lat: number; lng: number; latDelta: number; lngDelta: number } {
-  let latMin = -90.0, latMax = 90.0, lngMin = -180.0, lngMax = 180.0
-  let isEvenBit = true
-  for (const c of geohash) {
-    const idx = GEOHASH_BASE32.indexOf(c)
-    if (idx === -1) continue
-    for (let i = 4; i >= 0; i--) {
-      if (isEvenBit) {
-        const mid = (lngMin + lngMax) / 2
-        if (idx & (1 << i)) lngMin = mid
-        else lngMax = mid
-      } else {
-        const mid = (latMin + latMax) / 2
-        if (idx & (1 << i)) latMin = mid
-        else latMax = mid
-      }
-      isEvenBit = !isEvenBit
-    }
-  }
-  return {
-    lat: (latMin + latMax) / 2,
-    lng: (lngMin + lngMax) / 2,
-    latDelta: (latMax - latMin) / 2,
-    lngDelta: (lngMax - lngMin) / 2,
-  }
-}
-function getGeohashNeighbors(geohash: string): string[] {
-  if (!geohash || geohash.length === 0) return []
-  const precision = geohash.length
-  const { lat, lng, latDelta, lngDelta } = decodeGeohash(geohash)
-  const out = new Set<string>()
-  for (const dlat of [-1, 0, 1]) {
-    for (const dlng of [-1, 0, 1]) {
-      const nlat = lat + dlat * latDelta * 2
-      const nlng = lng + dlng * lngDelta * 2
-      if (nlat >= -90 && nlat <= 90 && nlng >= -180 && nlng <= 180) out.add(encodeGeohash(nlat, nlng, precision))
-    }
-  }
-  return Array.from(out)
-}
-
-type GeoScale = 'country' | 'region' | 'admin1' | 'town' | 'spot'
-interface GeoTarget {
-  country: string
-  admin_level_1?: string
-  admin_level_2?: string
-  locality?: string
-  place_id?: string
-  lat?: number
-  lng?: number
-  geo_bucket_4?: string
-  geo_bucket_5?: string
-  geo_bucket_6?: string
-}
-interface GeoScaleResult { scale: GeoScale; target: GeoTarget }
-interface AddressComponent { long_name: string; short_name: string; types: string[] }
-interface GeocodingResult {
-  place_id?: string
-  types?: string[]
-  address_components?: AddressComponent[]
-  geometry?: {
-    location?: { lat: number; lng: number }
-    viewport?: { northeast?: { lat: number; lng: number }; southwest?: { lat: number; lng: number } }
-  }
-  formatted_address?: string
-}
-function getComponent(components: AddressComponent[] | undefined, type: string): string | null {
-  if (!components?.length) return null
-  const c = components.find((x) => x.types.includes(type))
-  return c ? c.long_name : null
-}
-function viewportSpanDegrees(result: GeocodingResult): number {
-  const v = result.geometry?.viewport
-  if (!v?.northeast || !v?.southwest) return 180
-  const latSpan = Math.abs((v.northeast.lat ?? 0) - (v.southwest.lat ?? 0))
-  const lngSpan = Math.abs((v.northeast.lng ?? 0) - (v.southwest.lng ?? 0))
-  return Math.max(latSpan, lngSpan)
-}
-function determineGeoScale(geocodingResult: GeocodingResult): GeoScaleResult {
-  const types = geocodingResult.types ?? []
-  const components = geocodingResult.address_components ?? []
-  const country = getComponent(components, 'country')
-  const admin1 = getComponent(components, 'administrative_area_level_1')
-  const admin2 = getComponent(components, 'administrative_area_level_2')
-  const locality = getComponent(components, 'locality') ?? getComponent(components, 'sublocality')
-  const lat = geocodingResult.geometry?.location?.lat
-  const lng = geocodingResult.geometry?.location?.lng
-  const placeId = geocodingResult.place_id ?? undefined
-  const target: GeoTarget = { country: country ?? '' }
-  if (admin1) target.admin_level_1 = admin1
-  if (admin2) target.admin_level_2 = admin2
-  if (locality) target.locality = locality
-  if (placeId) target.place_id = placeId
-  if (lat != null && lng != null) {
-    target.lat = lat
-    target.lng = lng
-    target.geo_bucket_4 = encodeGeohash(lat, lng, 4)
-    target.geo_bucket_5 = encodeGeohash(lat, lng, 5)
-    target.geo_bucket_6 = encodeGeohash(lat, lng, 6)
-  }
-  const span = viewportSpanDegrees(geocodingResult)
-  if (types.includes('country') || (span > 10 && country)) return { scale: 'country', target }
-  if (types.some((t) => ['point_of_interest', 'establishment', 'natural_feature', 'tourist_attraction'].includes(t)) || span < 0.05)
-    return { scale: 'spot', target }
-  if (types.includes('administrative_area_level_1') || (admin1 && span > 1)) return { scale: 'admin1', target }
-  if (types.some((t) => ['locality', 'sublocality', 'administrative_area_level_2'].includes(t)) || (locality && span < 2))
-    return { scale: 'town', target }
-  if (target.geo_bucket_4) return { scale: 'region', target }
-  return { scale: 'country', target }
-}
-
-function applyQueryFiltersGeo(query: any, queryFilters: any): any {
-  if (!queryFilters || typeof queryFilters !== 'object') return query
-  if (queryFilters.country_from && Array.isArray(queryFilters.country_from) && queryFilters.country_from.length > 0)
-    query = query.in('country_from', queryFilters.country_from)
-  if (typeof queryFilters.age_min === 'number') query = query.gte('age', queryFilters.age_min)
-  if (typeof queryFilters.age_max === 'number') query = query.lte('age', queryFilters.age_max)
-  if (queryFilters.surfboard_type) {
-    const types = Array.isArray(queryFilters.surfboard_type) ? queryFilters.surfboard_type : [queryFilters.surfboard_type]
-    if (types.length > 0) query = query.in('surfboard_type', types)
-  }
-  if (queryFilters.surf_level_category != null) {
-    const arr = Array.isArray(queryFilters.surf_level_category) ? queryFilters.surf_level_category : [queryFilters.surf_level_category]
-    if (arr.length === 1) query = query.eq('surf_level_category', arr[0])
-    else if (arr.length > 1) query = query.in('surf_level_category', arr)
-  } else if (queryFilters.surf_level_min != null || queryFilters.surf_level_max != null) {
-    if (typeof queryFilters.surf_level_min === 'number') query = query.gte('surf_level', queryFilters.surf_level_min)
-    if (typeof queryFilters.surf_level_max === 'number') query = query.lte('surf_level', queryFilters.surf_level_max)
-  }
-  return query
-}
-function filterExcludedUsersInMemory(surfers: any[], excludedUserIds: string[]): any[] {
-  if (!excludedUserIds?.length) return surfers
-  return surfers.filter((s: any) => !excludedUserIds.includes(s.user_id))
-}
-
-async function getPreviouslyMatchedUserIds(chatId: string, supabaseAdmin: any): Promise<string[]> {
-  const { data, error } = await supabaseAdmin.from('matching_users').select('matched_user_id').eq('chat_id', chatId)
-  if (error) return []
-  return (data || []).map((r: any) => r.matched_user_id)
-}
-
-const GOOGLE_GEOCODING_API_KEY = Deno.env.get('GOOGLE_GEOCODING_API_KEY')
-const GEO_TIER_SCORE: Record<string, number> = {
-  place_id: 100, bucket_6: 80, bucket_5: 60, bucket_4: 40, admin1: 20, country: 10,
-}
-interface UserDestinationRow {
-  user_id: string
-  place_id: string | null
-  geo_bucket_4: string | null
-  geo_bucket_5: string | null
-  geo_bucket_6: string | null
-  country: string | null
-  admin_level_1: string | null
-}
-async function geocodeDestination(
-  destinationCountry: string,
-  area: string | null | undefined
-): Promise<{ place_id?: string; types?: string[]; address_components?: any[]; geometry?: any } | null> {
-  if (!GOOGLE_GEOCODING_API_KEY) {
-    console.warn('[geoMatching] GOOGLE_GEOCODING_API_KEY not set')
-    return null
-  }
-  const address = area
-    ? `${encodeURIComponent(area.trim())}, ${encodeURIComponent(destinationCountry.trim())}`
-    : encodeURIComponent(destinationCountry.trim())
-  const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${address}&key=${GOOGLE_GEOCODING_API_KEY}`
-  try {
-    const res = await fetch(url)
-    const data = await res.json()
-    if (data.status !== 'OK' && data.status !== 'ZERO_RESULTS') {
-      console.warn('[geoMatching] Geocode API status:', data.status)
-      return null
-    }
-    if (!data.results?.length) return null
-    return data.results[0]
-  } catch (e) {
-    console.warn('[geoMatching] Geocode failed:', e)
-    return null
-  }
-}
-function normalizeCountryForMatch(c: string | null | undefined): string {
-  if (!c) return ''
-  const s = c.trim().toLowerCase()
-  if (s === 'usa' || s === 'united states') return 'United States'
-  if (s === 'uk' || s === 'united kingdom') return 'United Kingdom'
-  return c.trim()
-}
-function tierForRow(row: UserDestinationRow, target: GeoTarget): { tier: string; score: number } | null {
-  const countryMatch =
-    target.country && row.country && normalizeCountryForMatch(row.country) === normalizeCountryForMatch(target.country)
-  if (!countryMatch) return null
-  if (target.place_id && row.place_id === target.place_id) return { tier: 'place_id', score: GEO_TIER_SCORE.place_id }
-  if (target.geo_bucket_6 && row.geo_bucket_6 === target.geo_bucket_6) return { tier: 'bucket_6', score: GEO_TIER_SCORE.bucket_6 }
-  if (target.geo_bucket_5 && row.geo_bucket_5 === target.geo_bucket_5) return { tier: 'bucket_5', score: GEO_TIER_SCORE.bucket_5 }
-  if (target.geo_bucket_4 && row.geo_bucket_4 === target.geo_bucket_4) return { tier: 'bucket_4', score: GEO_TIER_SCORE.bucket_4 }
-  if (target.admin_level_1 && row.admin_level_1 && row.admin_level_1 === target.admin_level_1)
-    return { tier: 'admin1', score: GEO_TIER_SCORE.admin1 }
-  return { tier: 'country', score: GEO_TIER_SCORE.country }
-}
-function totalDaysInDestinations(destinationsArray: any[] | null | undefined): number {
-  if (!destinationsArray?.length) return 0
-  let total = 0
-  for (const d of destinationsArray) total += d.time_in_days || 0
-  return total
-}
-async function findMatchingUsersGeo(
-  request: any,
-  requestingUserId: string,
-  chatId: string,
-  supabaseAdmin: any,
-  excludePrevious: boolean = false
-): Promise<{ results: MatchResult[]; totalCount: number }> {
-  const destinationCountry = request.destination_country && String(request.destination_country).trim()
-  const area = request.area || null
-  const queryFilters = request.queryFilters || null
-  if (!destinationCountry) return { results: [], totalCount: 0 }
-  console.log('[geoMatching] Geocoding destination:', destinationCountry, area || '')
-  const geocodeResult = await geocodeDestination(destinationCountry, area)
-  if (!geocodeResult) {
-    console.log('[geoMatching] No geocode result; returning empty')
-    return { results: [], totalCount: 0 }
-  }
-  const { scale, target } = determineGeoScale(geocodeResult)
-  console.log('[geoMatching] Scale:', scale, 'Target country:', target.country)
-  const excludedUserIds = excludePrevious ? await getPreviouslyMatchedUserIds(chatId, supabaseAdmin) : []
-  let rows: UserDestinationRow[] = []
-  if (scale === 'country') {
-    const { data, error } = await supabaseAdmin
-      .from('user_destinations')
-      .select('user_id, place_id, geo_bucket_4, geo_bucket_5, geo_bucket_6, country, admin_level_1')
-      .eq('country', target.country)
-    if (error) {
-      console.error('[geoMatching] user_destinations query error:', error)
-      return { results: [], totalCount: 0 }
-    }
-    rows = (data ?? []) as UserDestinationRow[]
-  } else if (scale === 'region' && target.geo_bucket_4) {
-    const { data, error } = await supabaseAdmin
-      .from('user_destinations')
-      .select('user_id, place_id, geo_bucket_4, geo_bucket_5, geo_bucket_6, country, admin_level_1')
-      .eq('country', target.country)
-      .eq('geo_bucket_4', target.geo_bucket_4)
-    if (error) {
-      console.error('[geoMatching] user_destinations query error:', error)
-      return { results: [], totalCount: 0 }
-    }
-    rows = (data ?? []) as UserDestinationRow[]
-  } else if (scale === 'admin1' && target.admin_level_1) {
-    const { data, error } = await supabaseAdmin
-      .from('user_destinations')
-      .select('user_id, place_id, geo_bucket_4, geo_bucket_5, geo_bucket_6, country, admin_level_1')
-      .eq('country', target.country)
-      .eq('admin_level_1', target.admin_level_1)
-    if (error) {
-      console.error('[geoMatching] user_destinations query error:', error)
-      return { results: [], totalCount: 0 }
-    }
-    rows = (data ?? []) as UserDestinationRow[]
-  } else if (scale === 'town' && target.geo_bucket_5) {
-    const bucket5Neighbors = getGeohashNeighbors(target.geo_bucket_5)
-    const { data, error } = await supabaseAdmin
-      .from('user_destinations')
-      .select('user_id, place_id, geo_bucket_4, geo_bucket_5, geo_bucket_6, country, admin_level_1')
-      .eq('country', target.country)
-      .in('geo_bucket_5', bucket5Neighbors)
-    if (error) {
-      console.error('[geoMatching] user_destinations query error:', error)
-      return { results: [], totalCount: 0 }
-    }
-    rows = (data ?? []) as UserDestinationRow[]
-  } else if (scale === 'spot') {
-    if (target.place_id) {
-      const { data: byPlaceId, error: e1 } = await supabaseAdmin
-        .from('user_destinations')
-        .select('user_id, place_id, geo_bucket_4, geo_bucket_5, geo_bucket_6, country, admin_level_1')
-        .eq('place_id', target.place_id)
-      if (!e1 && byPlaceId?.length) rows = byPlaceId as UserDestinationRow[]
-    }
-    if (rows.length === 0 && target.geo_bucket_6) {
-      const bucket6Neighbors = getGeohashNeighbors(target.geo_bucket_6)
-      const { data, error } = await supabaseAdmin
-        .from('user_destinations')
-        .select('user_id, place_id, geo_bucket_4, geo_bucket_5, geo_bucket_6, country, admin_level_1')
-        .eq('country', target.country)
-        .in('geo_bucket_6', bucket6Neighbors)
-      if (!error) rows = (data ?? []) as UserDestinationRow[]
-    }
-  }
-  const userBestTier: Map<string, { tier: string; score: number }> = new Map()
-  for (const row of rows) {
-    const t = tierForRow(row, target)
-    if (!t) continue
-    const existing = userBestTier.get(row.user_id)
-    if (!existing || t.score > existing.score) userBestTier.set(row.user_id, t)
-  }
-  let candidateIds = Array.from(userBestTier.keys()).filter((id) => id !== requestingUserId && !excludedUserIds.includes(id))
-  console.log('[geoMatching] Candidate user_ids from user_destinations:', candidateIds.length)
-  if (candidateIds.length === 0) return { results: [], totalCount: 0 }
-  let query = supabaseAdmin
-    .from('surfers')
-    .select('*')
-    .in('user_id', candidateIds)
-    .neq('user_id', requestingUserId)
-  if (queryFilters && typeof queryFilters === 'object') query = applyQueryFiltersGeo(query, queryFilters)
-  const { data: surfers, error: surfersError } = await query
-  if (surfersError) {
-    console.error('[geoMatching] Surfers query error:', surfersError)
-    return { results: [], totalCount: 0 }
-  }
-  const filteredSurfers = filterExcludedUsersInMemory(surfers ?? [], excludedUserIds)
-  const withScores = filteredSurfers.map((surfer: any) => {
-    const tierInfo = userBestTier.get(surfer.user_id) ?? { tier: 'country', score: GEO_TIER_SCORE.country }
-    const days = totalDaysInDestinations(surfer.destinations_array)
-    return { surfer, geoScore: tierInfo.score, daysInDestination: days }
-  })
-  withScores.sort((a, b) => {
-    if (b.geoScore !== a.geoScore) return b.geoScore - a.geoScore
-    return b.daysInDestination - a.daysInDestination
-  })
-  const matchResults: MatchResult[] = withScores.map(({ surfer, geoScore, daysInDestination }) => ({
-    user_id: surfer.user_id,
-    name: surfer.name || 'User',
-    profile_image_url: surfer.profile_image_url ?? null,
-    match_score: geoScore + daysInDestination,
-    priority_score: geoScore,
-    general_score: daysInDestination,
-    matched_areas: [],
-    matched_towns: [],
-    common_lifestyle_keywords: [],
-    common_wave_keywords: [],
-    surfboard_type: surfer.surfboard_type,
-    surf_level: surfer.surf_level,
-    travel_experience: surfer.travel_experience?.toString(),
-    country_from: surfer.country_from,
-    age: surfer.age,
-    days_in_destination: daysInDestination,
-    destinations_array: surfer.destinations_array,
-    match_quality: { countryMatch: true, areaMatch: geoScore > GEO_TIER_SCORE.country, townMatch: geoScore >= GEO_TIER_SCORE.bucket_5 },
-  }))
-  const totalCount = matchResults.length
-  const results = matchResults.slice(0, 3)
-  console.log('[geoMatching] Result:', results.length, 'totalCount=', totalCount)
-  return { results, totalCount }
-}
-// === END GEO MATCHING ===
+// find-matches: inlined below (no local imports - only index.ts is deployed)
 
 const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY')
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
@@ -447,12 +58,82 @@ interface MessageMetadata {
     searchSummary?: string
     selectedAction?: 'search' | 'continue_editing' | null
   }
+  isRestartAfterNewChat?: boolean
+  isAddFilterPrompt?: boolean
+  existingFiltersData?: any
 }
 
 interface Message {
   role: 'system' | 'user' | 'assistant'
   content: string
   metadata?: MessageMetadata
+}
+
+/** First question shown when starting or restarting trip planning. */
+const TRIP_PLANNING_FIRST_QUESTION_TEXT =
+  "Yo! Let’s get you connected! So what are we looking for today?"
+
+// ========== UI MESSAGES: Ordered, typed messages for perfect conversation restore ==========
+
+interface UIMessage {
+  id: string
+  order_index: number
+  type: 'bot_text' | 'user_text' | 'search_summary' | 'match_results' | 'no_matches' | 'new_chat_restart' | 'add_filter_prompt' | 'filter_removal_ack' | 'error'
+  text: string
+  timestamp: string  // ISO 8601
+  is_user: boolean
+  // Type-specific payload
+  matched_users?: MatchedUser[]
+  destination_country?: string
+  match_total_count?: number
+  action_row?: {
+    request_data: any
+    selected_action: 'new_chat' | 'add_filter' | 'more' | null
+  }
+  search_summary_block?: {
+    request_data: any
+    search_summary: string
+    selected_action: 'search' | 'continue_editing' | null
+  }
+  is_search_summary?: boolean
+  is_restart_after_new_chat?: boolean
+  backend_message_index?: number
+}
+
+function makeTimestamp(): string {
+  return new Date().toISOString()
+}
+
+function appendUIMessage(uiMessages: UIMessage[], partial: Omit<UIMessage, 'id' | 'order_index'>): UIMessage {
+  const msg: UIMessage = {
+    ...partial,
+    id: crypto.randomUUID(),
+    order_index: uiMessages.length,
+  }
+  uiMessages.push(msg)
+  return msg
+}
+
+/** Load ui_messages from DB (returns empty array if column is null/empty). */
+async function getUIMessages(chatId: string, supabaseAdmin: any): Promise<UIMessage[]> {
+  const { data, error } = await supabaseAdmin
+    .from('swelly_chat_history')
+    .select('ui_messages')
+    .eq('chat_id', chatId)
+    .single()
+  if (error || !data) return []
+  return Array.isArray(data.ui_messages) ? data.ui_messages : []
+}
+
+/** Save ui_messages to DB (alongside existing saveChatHistory for GPT messages). */
+async function saveUIMessages(chatId: string, uiMessages: UIMessage[], supabaseAdmin: any): Promise<void> {
+  const { error } = await supabaseAdmin
+    .from('swelly_chat_history')
+    .update({ ui_messages: uiMessages, updated_at: new Date().toISOString() })
+    .eq('chat_id', chatId)
+  if (error) {
+    console.error('[saveUIMessages] Error:', error)
+  }
 }
 
 // === INLINED find-matches: full LLM destination utils, no local imports ===
@@ -518,14 +199,24 @@ function getCountryFromUserDestInline(dest: any): string {
   }
   return ''
 }
-function countryMatchesRequestInline(requestCountry: string | null, userCountry: string): boolean {
+function countryMatchesRequestInline(requestCountry: string | null, userCountry: string, userState?: string | null): boolean {
   if (!requestCountry || !userCountry) return false
   const requested = requestCountry.split(',').map((c: string) => c.trim().toLowerCase()).filter((c: string) => c.length > 0)
   const userCountryLower = userCountry.toLowerCase().trim()
+  const userStateLower = userState != null ? String(userState).toLowerCase().trim() : undefined
   return requested.some((r: string) => {
     if (userCountryLower === r) return true
     if ((r === 'usa' || r === 'united states') && (userCountryLower.includes('united states') || userCountryLower.includes('usa'))) return true
     if ((r === 'uk' || r === 'united kingdom') && (userCountryLower.includes('united kingdom') || /\buk\b/.test(userCountryLower))) return true
+    const usStatePrefix = 'united states - '
+    if (r.startsWith(usStatePrefix)) {
+      const requestedState = r.slice(usStatePrefix.length).trim()
+      const isUSUser = userCountryLower.includes('united states') || userCountryLower === 'usa'
+      if (isUSUser && requestedState.length > 0 && userStateLower) {
+        if (userStateLower === requestedState) return true
+        if (userStateLower.includes(requestedState) || requestedState.includes(userStateLower)) return true
+      }
+    }
     const escaped = r.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     return new RegExp('\\b' + escaped + '\\b', 'i').test(userCountryLower)
   })
@@ -875,7 +566,8 @@ async function findMatchingUsersV3Server(request: any, requestingUserId: string,
     if (userSurfer.destinations_array?.length) {
       for (const dest of userSurfer.destinations_array) {
         const userCountry = getCountryFromUserDestInline(dest)
-        if (!countryMatchesRequestInline(request.destination_country, userCountry)) continue
+        const userState = typeof dest === 'object' && dest !== null && 'state' in dest ? (dest as any).state : undefined
+        if (!countryMatchesRequestInline(request.destination_country, userCountry, userState)) continue
         days += dest.time_in_days || 0
         if (requestedArea && hasRequestedAreaInArrayInline(dest, requestedArea)) hasAreaMatch = true
       }
@@ -947,6 +639,8 @@ async function findMatchingUsersV3Server(request: any, requestingUserId: string,
 }
 // === END INLINED find-matches ===
 
+const FIXED_FIRST_MESSAGE = "Yo! Let\u2019s get you connected! So what are we looking for today?"
+
 const TRIP_PLANNING_PROMPT: string = `
 You are Swelly, a smart, laid-back surfer who's the ultimate go-to buddy for all things surfing and beach lifestyle. You're a cool local friend, full of knowledge about surfing destinations, techniques, and ocean safety, with insights about waves, travel tips, and coastal culture. Your tone is relaxed, friendly, and cheerful, with just the right touch of warm, uplifting energy. A sharper edge of surf-related sarcasm keeps the vibe lively and fun, like quipping about rookies wiping out or "perfect" conditions for no-shows. You're smart, resourceful, and genuinely supportive, with responses no longer than 120 words. When offering options, you keep it short with 2-3 clear choices. Responses avoid overusing words like "chill," staying vibrant and fresh, and occasionally use casual text-style abbreviations like "ngl" or "imo". Use the words dude, bro, shredder, gnarly, stoke.
 
@@ -961,9 +655,9 @@ CRITICAL: Be smart and flexible when understanding user requests:
 CONVERSATION FLOW:
 
 STEP 1 - ENTRY POINT:
-ALWAYS start with this exact question in your FIRST response: Yo! Let’s get you connected! So what are we looking for today? "
+ALWAYS start with this exact question in your FIRST response — and use ONLY this sentence, no additions: "Yo! Let’s get you connected! So what are we looking for today?" Do NOT add any other sentence after it (e.g. do not add "Do you want surfers who've surfed a specific destination..." or "or just surfers that match your vibe...").
 
-When the first message in the conversation (new_chat) is vague or just a greeting, respond with STEP 1's question. If the user's first message clearly asks for surfers or matches and includes criteria (e.g. origin, board type, level) and/or a destination, treat it as their real request: extract what you can (destination if mentioned, criteria if mentioned) and only ask for what is missing (e.g. if they did not mention a destination, ask: "Which destination do you want to connect with surfers who've been there? (e.g. El Salvador, Costa Rica)"). Do not repeat STEP 1 when they already gave a direct request.
+When the first message in the conversation (new_chat) is vague or just a greeting, respond with STEP 1's question only (the single sentence above). If the user's first message clearly asks for surfers or matches and includes criteria (e.g. origin, board type, level) and/or a destination, treat it as their real request: extract what you can (destination if mentioned, criteria if mentioned) and only ask for what is missing (e.g. if they did not mention a destination, ask: "Which destination do you want to connect with surfers who've been there? (e.g. El Salvador, Costa Rica)"). Do not repeat STEP 1 when they already gave a direct request.
 
 INTERPRET USER RESPONSE (be smart and natural):
 - If user directly asks for surfers/matches/people (e.g., "send me surfers", "find me people", "show me matches", "who surfed in [place]") → They want matches NOW → Go to STEP 6 (Quick Match)
@@ -1014,27 +708,28 @@ THIS IS YOUR PRIMARY JOB - Extract correctly, don't rely on fallback code!
 
 TYPO HANDLING - Be smart and correct automatically:
 - "Philippins" / "filipins" / "filipines" / "Philippines" → ALL mean "Philippines" → destination_country: "Philippines"
-- "Siargao, Philippins" → destination_country: "Philippines", area: "Siargao"
-- "Siargao, Philippines" → destination_country: "Philippines", area: "Siargao"
-- "Siargao, filipins" → destination_country: "Philippines", area: "Siargao" (CORRECT THE TYPO!)
-- "Siargao, the filipins" → destination_country: "Philippines", area: "Siargao"
-- "Siargao, in the Philippines" → destination_country: "Philippines", area: "Siargao"
+- "Siargao Philippins" → destination_country: "Philippines", area: "Siargao"
+- "Siargao Philippines" → destination_country: "Philippines", area: "Siargao"
+- "Siargao filipins" → destination_country: "Philippines", area: "Siargao" (CORRECT THE TYPO!)
+- "Siargao the filipins" → destination_country: "Philippines", area: "Siargao"
+- "Siargao in the Philippines" → destination_country: "Philippines", area: "Siargao"
 - "in the Philippines" → destination_country: "Philippines", area: null
 
 CRITICAL RULES FOR DESTINATION EXTRACTION:
 1. ALWAYS extract destination_country when a location is mentioned - NEVER leave it as null!
-2. If user mentions both area and country (e.g., "Siargao, filipins"), extract BOTH immediately
+2. If user mentions both area and country (e.g., "Siargao filipins"), extract BOTH immediately
 3. Correct typos automatically - "filipins" → "Philippines", "Isreal" → "Israel", "Brasil" → "Brazil"
-4. Be flexible with formatting - "Siargao, filipins" and "Siargao, the Philippines" both mean the same thing
+4. Be flexible with formatting - "Siargao, filipins" and "Siargao the Philippines" both mean the same thing
 5. If you see a typo but understand the intent, correct it and extract properly
-6. The area is usually the first part before the comma, the country is after
+6. When the user writes two place names separated by a comma, do NOT assume a fixed order. Instead, use your geographic knowledge to figure out which one is the country and which one is the area/region within that country. For example: "Costa Rica, Pavones" → country is "Costa Rica", area is "Pavones". "Bali, Indonesia" → country is "Indonesia", area is "Bali". "Tamarindo, Costa Rica" → country is "Costa Rica", area is "Tamarindo".
+7. IMPORTANT: area must ONLY be a real geographic location (city, town, region, beach). If text after a comma is NOT a place name (e.g. "using a shortboard", "who is advanced", "around age 25"), do NOT set it as area. Only set area when it is an actual place within the destination country.
 
 US DESTINATION RULES (when user mentions a place in the United States):
 - When the user mentions a US STATE as the place they want to connect with surfers who surfed there, set destination_country to the EXACT format "United States - StateName" (e.g. "United States - California", "United States - Hawaii"). Use the exact state name after the hyphen (Alabama, Alaska, California, Florida, Hawaii, New York, Texas, etc.).
 - Set area ONLY when the user mentions a specific place WITHIN that state (city, region, beach, e.g. "San Diego", "Huntington Beach"). If they only mention the state, set area to null.
 - "California" / "surfed in California" / "I want to go to California" → destination_country: "United States - California", area: null
 - "Hawaii" / "surfed in Hawaii" → destination_country: "United States - Hawaii", area: null
-- "San Diego, California" / "Huntington Beach, California" → destination_country: "United States - California", area: "San Diego" / "Huntington Beach"
+- "San Diego California" / "Huntington Beach California" → destination_country: "United States - California", area: "San Diego" / "Huntington Beach"
 - If user says only "USA" or "United States" with no state → destination_country: "United States", area: null
 
 EXAMPLES OF CORRECT EXTRACTION:
@@ -1051,6 +746,8 @@ EXAMPLES OF CORRECT EXTRACTION:
 WRONG (DON'T DO THIS):
 - User: "Siargao, filipins" → destination_country: null, area: null ❌ (You must extract!)
 - User: "Siargao, filipins" → destination_country: "filipins", area: "Siargao" ❌ (Correct the typo!)
+- User: "El Salvador, using a shortboard" → area: "using a shortboard" ❌ (That's not a place! Set area: null, put shortboard in queryFilters.surfboard_type)
+- User: "Hawaii, advanced surfer" → area: "advanced surfer" ❌ (That's not a place! Set area: null, put level in queryFilters.surf_level_category)
 
 Examples:
 - User: "Sri Lanka" → Extract: destination_country: "Sri Lanka", area: null
@@ -1078,6 +775,7 @@ When you have enough information to define a clear search (2 filters provided, o
 2. Set return_message to a short, friendly line that matches the intent of the upcoming search (e.g. "Sweet — I think I’ve got your surfer vibe dialed in.").
 3. Include in the "data" field: destination_country (required when user specified a destination; null when doing criteria-only general matching), area (if user specified one, else null), budget (null if not specified), destination_known (true/false), purpose (default: { purpose_type: "connect_traveler", specific_topics: [] }), user_context (optional). When matching without destination, include queryFilters with at least one criterion instead.
 4. ALWAYS set search_summary in data (see DATA STRUCTURE section) so the user sees exactly what would be searched, and your message implicitly hands control back to them to either search now or tweak filters first.
+5. Do NOT set is_finished: true when you have no destination_country and no meaningful queryFilters (no country_from, surfboard_type, surf_level_category, or age). In that case set is_finished: false and in your reply explain we can filter by: destination they surfed, origin, age, surf level, board type — and ask for at least one so we can search.
 
 IMPORTANT:
 - DO NOT use markdown formatting (no asterisks, no bold, no code blocks)
@@ -1116,7 +814,7 @@ DATA STRUCTURE (when is_finished: true):
     "mentioned_preferences": [],
     "mentioned_deal_breakers": []
   },
-  "queryFilters": { "country_from": ["Israel"], "surfboard_type": ["shortboard"], "surf_level_category": ["advanced", "pro"], "age_min": 20, "age_max": 30 }, // Include when user specified origin, board type, level, or age. Use exact country names and enum values. When user says "around my age" or "same age", use USER PROFILE CONTEXT age and set age_min/age_max (e.g. age ±5).
+  "queryFilters": { "country_from": ["Israel"], "surfboard_type": ["shortboard"], "surf_level_category": ["advanced", "pro"], "age_min": 20, "age_max": 30 }, // Include when user specified origin, board type, level, or age. Use exact country names and enum values. When user says "around my age" or "same age", use USER PROFILE CONTEXT age and set age_min/age_max (e.g. age ±5). For a specific age (e.g. "25"), set age_min: 25, age_max: 25. For "above X" or "older than X" (e.g. "above 30"), set age_min: 30, age_max: 99. For "below X" or "younger than X" (e.g. "below 25"), set age_min: 18, age_max: 25.
   "search_summary": "Short casual summary of what we're searching for, shown to the user before they decide whether to search or edit filters. REQUIRED when is_finished is true. First, write a one-line friendly summary of the filters (e.g. \"Sweet so we're going for American dude that surfed Hawaii and is also a shortboarder just like you!\" or \"Got it — Israeli advanced shortboarder!\"). Then add a newline (\"\\n\") and a short question asking if they want to search now or tweak filters first (e.g. \"Are you ready for me to search now, or do you want to tweak any filters first?\"). Tone: friendly, first person, no markdown. Base it ONLY on the criteria (destination_country, area, queryFilters). Do NOT mention that there is no destination, no specific destination, or that we're going global — just describe the filters.",
   "next_action": "search" | "edit" | "clarify" | null // Optional. For the FIRST user reply after you asked whether to search or edit: set to \"search\" when they clearly want to search now, \"edit\" when they clearly want to change/tweak filters first, or \"clarify\" when their intent is ambiguous and you are asking a follow-up question.
 }
@@ -1202,10 +900,10 @@ async function callOpenAI(messages: Message[]): Promise<string> {
       'Authorization': `Bearer ${OPENAI_API_KEY}`,
     },
     body: JSON.stringify({
-      model: 'gpt-5.2',
+      model: 'gpt-4o-mini',
       messages: messages,
-      temperature: 0.7,
-      max_completion_tokens: 1000, 
+      temperature: 0.2,
+      max_completion_tokens: 600, 
       response_format: { type: 'json_object' },
     }),
   })
@@ -1489,6 +1187,28 @@ async function normalizeQueryFilters(queryFilters: any): Promise<any> {
     }
   }
 
+  // Normalize single age or age_range into age_min/age_max (filtering only uses age_min/age_max)
+  if (typeof normalized.age === 'number' && (normalized.age_min === undefined || normalized.age_max === undefined)) {
+    normalized.age_min = normalized.age;
+    normalized.age_max = normalized.age;
+    delete normalized.age;
+    console.log(`✅ Normalized queryFilters: single age → age_min/age_max: ${normalized.age_min}`);
+  }
+  if (Array.isArray(normalized.age_range) && normalized.age_range.length > 0) {
+    const nums = normalized.age_range.filter((x: unknown) => typeof x === 'number') as number[];
+    if (nums.length === 2) {
+      normalized.age_min = Math.min(nums[0], nums[1]);
+      normalized.age_max = Math.max(nums[0], nums[1]);
+    } else if (nums.length === 1) {
+      normalized.age_min = nums[0];
+      normalized.age_max = nums[0];
+    }
+    if (nums.length >= 1) {
+      delete normalized.age_range;
+      console.log(`✅ Normalized queryFilters: age_range → age_min=${normalized.age_min}, age_max=${normalized.age_max}`);
+    }
+  }
+
   return normalized;
 }
 
@@ -1530,7 +1250,7 @@ async function reconcileQueryFiltersFromText(
 Rules:
 - queryFilters: object with optional keys: country_from (array of official country names), age_min (number), age_max (number), surfboard_type (array: shortboard, mid_length, longboard, soft_top), surf_level_category (string or array: beginner, intermediate, advanced, pro).
 - Use official country names (e.g. "United States" not "USA", "Israel" not "Israeli" for country_from).
-- For age: "under 20" or "13-19" → age_min: 13, age_max: 19; "over 30" → age_min: 30; "around my age" with user age given → age_min: age-5, age_max: age+5.
+- For age: "under 20" or "13-19" → age_min: 13, age_max: 19; "over 30" → age_min: 30; single age (e.g. "25") → age_min: X, age_max: X (same number); "around my age" with user age given → age_min: age-5, age_max: age+5.
 - If the text describes a destination, include destination_country and optionally area.
 - Only include in queryFilters keys that are already present in the Current JSON. Do not add new keys. Only fix or fill values for existing keys so the JSON matches the text. If the text mentions a criterion that has no key in Current JSON, omit it from your output.
 - Output ONLY a valid JSON object with keys queryFilters (object), and optionally destination_country (string) and area (string). No markdown, no explanation.`
@@ -1833,7 +1553,7 @@ ${OFFICIAL_COUNTRIES.map(c => `    - "${c}"`).join('\n')}
     - User says "San Diego, California" → destination_country: "United States - California", area: "San Diego", country_from: NOT SET
     - User says "I want surfers from the USA" → country_from: ["United States"] (normalized from "USA" to "United States")
     - User says "I want to go to Costa Rica and connect with surfers from Israel" → destination_country: "Costa Rica", country_from: ["Israel"]
-- age (integer): Age in years (0+)
+- age_min (number), age_max (number): Use BOTH for any age filter. For a single specific age X (e.g. "25 years old", "someone who is 25") set age_min: X, age_max: X. For ranges use age_min and age_max (e.g. 18-30 → age_min: 18, age_max: 30).
 - surfboard_type (enum): 'shortboard', 'mid_length', 'longboard', 'soft_top' (valid values in database)
   * "midlength" or "mid length" → 'mid_length'
   * "longboard" or "long board" → 'longboard'
@@ -1880,7 +1600,8 @@ TYPO HANDLING (be smart about common mistakes - normalize to official country na
 - "Korea" / "South Korea" → "South Korea"
 
 LOGICAL INFERENCE:
-${userAgeLine}- If user says "similar age" and you know their age (e.g., 25), infer ±5 years → age_range: [20, 30]
+${userAgeLine}- If user says "similar age" and you know their age (e.g., 25), infer ±5 years → age_min: 20, age_max: 30
+- If user says a specific age (e.g. "25", "someone who is 25", "25 years old") → age_min: 25, age_max: 25
 - If user says "around my age", infer ±5 years from their age
 - If user says "young" or "older", infer reasonable age ranges based on context
 - If user says "must be shortboarders" or "they will use shortboard" → surfboard_type: ["shortboard"]
@@ -1987,6 +1708,7 @@ CRITICAL RULES - BE SMART AND FLEXIBLE:
    - "pro" → surf_level_category: "pro" (REQUIRES surfboard_type to be specified)
 
 4. NORMALIZATION RULES:
+   - Specific age: "25 years old" or "someone who is 25" or "age 25" → age_min: 25, age_max: 25
    - Age ranges: "18-30" or "between 18 and 30" → age_min: 18, age_max: 30
    - Age ranges: "over 25" or "above 25" → age_min: 25
    - Age ranges: "under 30" or "below 30" → age_max: 30
@@ -2014,7 +1736,30 @@ CRITICAL RULES - BE SMART AND FLEXIBLE:
 
   let llmResponse = ''
   try {
-    llmResponse = await callOpenAI(messages)
+    // Use gpt-4o-mini for filter extraction (faster, sufficient for structured JSON) to reduce latency
+    if (!OPENAI_API_KEY) {
+      throw new Error('OPENAI_API_KEY is not set')
+    }
+    const extractRes = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages,
+        temperature: 0.2,
+        max_tokens: 600,
+        response_format: { type: 'json_object' },
+      }),
+    })
+    if (!extractRes.ok) {
+      const errText = await extractRes.text()
+      throw new Error(`OpenAI API error: ${extractRes.status} - ${errText}`)
+    }
+    const extractData = await extractRes.json()
+    llmResponse = extractData.choices?.[0]?.message?.content || ''
     
     // Parse JSON response
     let jsonString = llmResponse
@@ -2188,7 +1933,8 @@ async function getChatHistory(chatId: string, supabaseAdmin: any): Promise<Messa
   }
 
   const messages = data?.messages || []
-  
+  // Order is intentional (chronological append order). Do not reorder; GET and PATCH callers rely on array index.
+
   // Debug: Check if any messages have metadata
   const messagesWithMetadata = messages.filter((msg: any) => msg.metadata?.matchedUsers)
   if (messagesWithMetadata.length > 0) {
@@ -2360,7 +2106,7 @@ ${getPronounInstructions(userProfile.pronoun)}`
       const messages: Message[] = [
         { role: 'system', content: systemPrompt },
         // First message: if user already gave a clear request (surfers/matches + criteria or destination), treat it as real request and only ask for what is missing (e.g. destination). Otherwise use STEP 1.
-        { role: 'system', content: 'This is the FIRST message in a NEW conversation. If the user\'s message clearly asks for surfers or matches and includes criteria (e.g. "Israeli", "shortboard", "advanced") and/or a destination (e.g. "El Salvador"), treat it as their real request: extract destination if mentioned, extract criteria if mentioned, and only ask for what is missing (e.g. "Which destination do you want to connect with surfers who\'ve been there? (e.g. El Salvador, Costa Rica)"). If their message is vague or just a greeting, respond with STEP 1\'s question: "Travel! I can connect you with like minded surfers or surf travelers who have experience in specific destinations you are curious about. So, what are you looking for?"' },
+        { role: 'system', content: 'This is the FIRST message in a NEW conversation. If the user\'s message clearly asks for surfers or matches and includes criteria (e.g. "Israeli", "shortboard", "advanced") and/or a destination (e.g. "El Salvador"), treat it as their real request: extract destination if mentioned, extract criteria if mentioned, and only ask for what is missing (e.g. "Which destination do you want to connect with surfers who\'ve been there? (e.g. El Salvador, Costa Rica)"). If their message is vague or just a greeting, respond with ONLY this exact sentence and nothing else: "Yo! Let\'s get you connected! So what are we looking for today?" Do not add any other sentence or question after it.' },
         { role: 'user', content: body.message }
       ]
 
@@ -2446,7 +2192,7 @@ ${getPronounInstructions(userProfile.pronoun)}`
         if (tripPlanningData && typeof tripPlanningData === 'object') {
           normalizeUSDestination(tripPlanningData)
         }
-
+        
         // Second-layer check: reconcile text vs JSON filters (new_chat)
         const newChatHasFilters = tripPlanningData && (() => {
           const q = tripPlanningData.queryFilters
@@ -2487,14 +2233,14 @@ ${getPronounInstructions(userProfile.pronoun)}`
             console.warn('[reconcileQueryFiltersFromText] Reconciliation failed (new_chat), keeping current filters:', e)
           }
         }
-
+        
         parsedResponse = {
           chat_id: chatId,
-          return_message: returnMessage,
+          return_message: FIXED_FIRST_MESSAGE,
           is_finished: parsed.is_finished || false,
           data: ensureResponseDataQueryFilters(tripPlanningData) ?? null
         }
-
+        
         console.log('Final response being sent:', JSON.stringify(parsedResponse, null, 2))
       } catch (parseError) {
         console.error('Error parsing JSON from ChatGPT:', parseError)
@@ -2507,8 +2253,20 @@ ${getPronounInstructions(userProfile.pronoun)}`
         }
       }
 
+      // --- UI Messages: create initial bot message ---
+      const uiMessages: UIMessage[] = []
+      appendUIMessage(uiMessages, {
+        type: 'bot_text',
+        text: parsedResponse.return_message,
+        timestamp: makeTimestamp(),
+        is_user: false,
+        backend_message_index: messages.length - 1,
+      })
+      await saveUIMessages(chatId, uiMessages, supabaseAdmin)
+
+      const responsePayload = { ...parsedResponse, message_index: messages.length - 1 }
       return new Response(
-        JSON.stringify(parsedResponse),
+        JSON.stringify(responsePayload),
         {
           status: 200,
           headers: {
@@ -2537,9 +2295,24 @@ ${getPronounInstructions(userProfile.pronoun)}`
         )
       }
 
-      // Get existing chat history
-      let messages = await getChatHistory(chatId, supabaseAdmin)
-      
+      // Get chat history and user profile in parallel (saves one round-trip)
+      const [historyMessages, profileResult] = await Promise.all([
+        getChatHistory(chatId, supabaseAdmin),
+        (async () => {
+          try {
+            const { data, error } = await supabaseAdmin
+              .from('surfers')
+              .select('country_from, surf_level, age, surfboard_type, travel_experience')
+              .eq('user_id', user.id)
+              .single()
+            return { data, error }
+          } catch (e) {
+            return { data: null, error: e }
+          }
+        })(),
+      ])
+      let messages = historyMessages
+
       if (messages.length === 0) {
         return new Response(
           JSON.stringify({ error: 'Chat not found' }),
@@ -2553,22 +2326,11 @@ ${getPronounInstructions(userProfile.pronoun)}`
         )
       }
 
-      // Get user's surfer profile for destination discovery flow
+      // User profile for destination discovery flow (already fetched above)
       let userProfile: any = null
-      try {
-        const { data: surferData, error: surferError } = await supabaseAdmin
-          .from('surfers')
-          .select('country_from, surf_level, age, surfboard_type, travel_experience')
-          .eq('user_id', user.id)
-          .single()
-        
-        if (!surferError && surferData) {
-          userProfile = surferData
-          console.log('✅ Fetched user profile for destination discovery:', userProfile)
-        }
-      } catch (error) {
-        console.error('Error fetching user profile:', error)
-        // Continue without profile - not critical
+      if (!profileResult.error && profileResult.data) {
+        userProfile = profileResult.data
+        console.log('✅ Fetched user profile for destination discovery:', userProfile)
       }
 
       // Add user profile context to messages if available (for destination discovery flow)
@@ -2593,6 +2355,35 @@ When asking QUESTION 3 (travel distance), use their country_from to provide rele
 
 ${getPronounInstructions(userProfile.pronoun)}`
         messages.splice(0, 1, { role: 'system', content: TRIP_PLANNING_PROMPT + '\n\n' + profileContext })
+      }
+
+      // Self-healing: ensure synthetic messages exist if a match action was taken but the PATCH
+      // hasn't completed yet (race condition between updateMatchActionSelection and user typing)
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const actionRow = messages[i].metadata?.actionRow
+        if (actionRow?.selectedAction && messages[i].metadata?.matchedUsers) {
+          const hasSyntheticAfter = messages.slice(i + 1).some(
+            m => m.metadata?.isRestartAfterNewChat || m.metadata?.isAddFilterPrompt
+          )
+          if (!hasSyntheticAfter) {
+            if (actionRow.selectedAction === 'new_chat') {
+              messages.splice(i + 1, 0, {
+                role: 'assistant',
+                content: TRIP_PLANNING_FIRST_QUESTION_TEXT,
+                metadata: { isRestartAfterNewChat: true }
+              })
+              console.log('[continueConversation] Self-heal: inserted missing restart message after index', i)
+            } else if (actionRow.selectedAction === 'add_filter') {
+              messages.splice(i + 1, 0, {
+                role: 'assistant',
+                content: "Great! We can add some filters to your search. What would you like to add? For example: board type, surf level, destinations they've surfed, age, or country of origin.",
+                metadata: { isAddFilterPrompt: true, existingFiltersData: actionRow.requestData ?? null }
+              })
+              console.log('[continueConversation] Self-heal: inserted missing add-filter message after index', i)
+            }
+          }
+          break // only check the most recent match action
+        }
       }
 
       // Add new user message
@@ -2623,91 +2414,77 @@ ${getPronounInstructions(userProfile.pronoun)}`
       
       const hasStep2aDestinationMention = step2aDestinationKeywords.some(keyword => currentUserMessageLower.includes(keyword))
       
-      if (hasStep2aDestinationMention) {
-        // Check if we're still in STEP 1 or early in conversation
-        const assistantMessages = messages.filter(m => m.role === 'assistant')
-        const isEarlyConversation = assistantMessages.length <= 2
+      // if (hasStep2aDestinationMention) {
+      //   // Check if we're still in STEP 1 or early in conversation
+      //   const assistantMessages = messages.filter(m => m.role === 'assistant')
+      //   const isEarlyConversation = assistantMessages.length <= 2
         
-        if (isEarlyConversation) {
-          const step2Reminder = `CRITICAL: The user just mentioned a destination (${body.message}). Extract the destination_country immediately, ask about area if needed, then go to STEP 3 (Clarify Purpose).`
-          messages.splice(messages.length - 1, 0, { role: 'system', content: step2Reminder })
-        }
-      }
+      //   if (isEarlyConversation) {
+      //     const step2Reminder = `CRITICAL: The user just mentioned a destination (${body.message}). Extract the destination_country immediately, ask about area if needed, then go to STEP 3 (Clarify Purpose).`
+      //     messages.splice(messages.length - 1, 0, { role: 'system', content: step2Reminder })
+      //   }
+      // }
       
       // ALWAYS extract query filters from user messages throughout the conversation
       // This allows filtering by any criteria mentioned at any point
       const lastAssistantMessage = messages.filter(m => m.role === 'assistant').pop()?.content || ''
-      const isCriteriaStep = lastAssistantMessage.toLowerCase().includes('non-negotiable') || 
+      const isCriteriaStep = lastAssistantMessage.toLowerCase().includes('non-negotiable') ||
                              lastAssistantMessage.toLowerCase().includes('parameters') ||
                              lastAssistantMessage.toLowerCase().includes('criteria')
-      
+
       console.log('🔍 Extracting query filters from user message (always):', body.message)
       console.log('Is criteria step?', isCriteriaStep)
-      
+
       let extractedQueryFilters: any = null
       let unmappableCriteria: string[] = []
       let filterResult: { supabaseFilters: any; unmappableCriteria?: string[]; explanation?: string; filterEditIntent?: Record<string, 'add' | 'replace' | 'clear'>; intentUnclear?: string[] } | null = null
 
-      // Extract filters from current message
-      try {
-        // Get destination from conversation history
-        let destinationCountry = ''
-        for (let i = messages.length - 1; i >= 0; i--) {
-          if (messages[i].role === 'assistant') {
-            try {
-              const parsed = JSON.parse(messages[i].content)
-              if (parsed.data?.destination_country) {
-                destinationCountry = parsed.data.destination_country
-                break
-              }
-            } catch (e) {
-              // Not JSON, continue
+      // --- PRE-COMPUTATION: everything that does NOT depend on filter extraction ---
+
+      // Get destination from conversation history (needed by both extractQueryFilters and main LLM)
+      let destinationCountry = ''
+      for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i].role === 'assistant') {
+          try {
+            const parsed = JSON.parse(messages[i].content)
+            if (parsed.data?.destination_country) {
+              destinationCountry = parsed.data.destination_country
+              break
             }
+          } catch (e) {
+            // Not JSON, continue
           }
         }
-        
-        // Also check user messages for destination mentions
-        if (!destinationCountry) {
-          for (let i = messages.length - 1; i >= 0; i--) {
-            if (messages[i].role === 'user') {
-              const userMsg = messages[i].content
-              const userMsgLower = userMsg.toLowerCase()
-              
-              // Check for Philippines first (handle typos)
-              if (userMsgLower.includes('philippines') || userMsgLower.includes('philippins') || userMsgLower.includes('filipins') || userMsgLower.includes('filipines')) {
-                destinationCountry = 'Philippines'
-                break
-              }
-              
-              // Check other countries
-              const countries = ['el salvador', 'sri lanka', 'costa rica', 'indonesia', 'portugal', 'spain', 'france', 'brazil', 'australia', 'nicaragua', 'panama', 'mexico', 'peru', 'chile']
-              for (const country of countries) {
-                if (userMsgLower.includes(country)) {
-                  destinationCountry = country.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
-                  break
-                }
-              }
-              if (destinationCountry) break
-            }
-          }
-        }
-        
-        console.log('📍 Destination country for filter extraction:', destinationCountry)
-        const existingForExtractor = body.adding_filters && body.existing_query_filters && typeof body.existing_query_filters === 'object' ? body.existing_query_filters : undefined
-        filterResult = await extractQueryFilters(body.message, destinationCountry, messages, existingForExtractor, userProfile)
-        extractedQueryFilters = filterResult.supabaseFilters
-        unmappableCriteria = filterResult.unmappableCriteria || []
-        console.log('✅ Extracted query filters:', JSON.stringify(extractedQueryFilters, null, 2))
-        console.log('✅ Filter extraction explanation:', filterResult.explanation)
-        if (unmappableCriteria.length > 0) {
-          console.log('⚠️ Unmappable criteria found:', unmappableCriteria)
-        }
-      } catch (error) {
-        console.error('❌ Error extracting query filters:', error)
-        // Continue without filters - fallback to existing logic
       }
-      
-      // Also check previous messages for accumulated filters (prefer metadata.actionRow.requestData so manual filter removal is respected)
+      // Also check user messages for destination mentions
+      if (!destinationCountry) {
+        for (let i = messages.length - 1; i >= 0; i--) {
+          if (messages[i].role === 'user') {
+            const userMsg = messages[i].content
+            const userMsgLower = userMsg.toLowerCase()
+
+            // Check for Philippines first (handle typos)
+            if (userMsgLower.includes('philippines') || userMsgLower.includes('philippins') || userMsgLower.includes('filipins') || userMsgLower.includes('filipines')) {
+              destinationCountry = 'Philippines'
+              break
+            }
+
+            // Check other countries
+            const countries = ['el salvador', 'sri lanka', 'costa rica', 'indonesia', 'portugal', 'spain', 'france', 'brazil', 'australia', 'nicaragua', 'panama', 'mexico', 'peru', 'chile']
+            for (const country of countries) {
+              if (userMsgLower.includes(country)) {
+                destinationCountry = country.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
+                break
+              }
+            }
+            if (destinationCountry) break
+          }
+        }
+      }
+      console.log('📍 Destination country for filter extraction:', destinationCountry)
+      const existingForExtractor = body.adding_filters && body.existing_query_filters && typeof body.existing_query_filters === 'object' ? body.existing_query_filters : undefined
+
+      // Compute accumulated filters from previous messages (does NOT depend on extraction)
       let accumulatedFilters: any = null
       let accumulatedFromMessage: 'metadata' | 'content' | null = null
       try {
@@ -2747,11 +2524,95 @@ ${getPronounInstructions(userProfile.pronoun)}`
       } catch (error) {
         console.error('[accumulatedFilters] Error:', error)
       }
-      
+
       // Detect "remove all filters" / "clear all" etc. so we don't re-apply accumulated filters
       const userMessageNorm = (body.message || '').trim().toLowerCase()
       const removeAllPhrases = ['remove all filters', 'clear all', 'clear all filters', 'wipe', 'wipe the slate', 'reset', 'reset filters', 'start fresh', 'remove everything', 'clear everything', 'wipe the slate clean']
       const userRequestedRemoveAll = removeAllPhrases.some(phrase => userMessageNorm.includes(phrase))
+
+      // Compute continueDestination/continueArea from last assistant message (does NOT depend on extraction)
+      let continueDestination: string | null = null
+      let continueArea: string | null = null
+      for (let i = messages.length - 2; i >= 0; i--) {
+        if (messages[i].role === 'assistant') {
+          try {
+            const prevParsed = JSON.parse(messages[i].content)
+            if (prevParsed.data) {
+              if ('destination_country' in prevParsed.data) continueDestination = prevParsed.data.destination_country
+              if ('area' in prevParsed.data) continueArea = prevParsed.data.area
+            }
+            break
+          } catch (_e) { /* not JSON */ }
+        }
+      }
+
+      // Filter out synthetic display-only messages (restart markers, add-filter prompts) — they would confuse GPT
+      const isSyntheticMessage = (m: any) => m.metadata?.isRestartAfterNewChat || m.metadata?.isAddFilterPrompt
+      const messagesWithoutSynthetic = messages.filter(m => !isSyntheticMessage(m))
+
+      // Snapshot messages before injecting system messages — extractQueryFilters
+      // uses .slice(-5) and must not see the injected helper instructions.
+      const messagesForExtractor = [...messagesWithoutSynthetic]
+
+      // --- Inject system messages for the main LLM (none depend on extraction) ---
+
+      // Check if user message contains a destination mention and remind LLM to extract it
+      const userMessageLower = body.message.toLowerCase()
+      const destinationKeywords = ['philippines', 'philippins', 'filipins', 'filipines', 'siargao', 'el salvador', 'costa rica', 'sri lanka', 'indonesia', 'portugal', 'spain', 'france', 'brazil', 'australia', 'nicaragua', 'panama', 'mexico', 'peru', 'chile', 'bali', 'tamarindo', 'pavones', 'el tunco']
+      const hasDestinationMention = destinationKeywords.some(keyword => userMessageLower.includes(keyword))
+
+      if (hasDestinationMention) {
+        const destinationReminder = `CRITICAL REMINDER: The user just mentioned a destination location. You MUST extract destination_country in your response's "data" field. If they mentioned both area and country (e.g., "Siargao, filipins"), extract BOTH: destination_country: "Philippines", area: "Siargao". Correct typos automatically - "filipins" means "Philippines". NEVER set destination_country to null if a location was mentioned!`
+        messages.splice(messages.length - 1, 0, { role: 'system', content: destinationReminder })
+        console.log('📍 Added destination extraction reminder for LLM')
+      }
+
+      // Add a final reminder to return JSON format
+      const jsonFormatReminder = `CRITICAL: You MUST return a valid JSON object. Your response must start with { and end with }. Do NOT return plain text. The structure must be: {"return_message": "...", "is_finished": false, "data": {...}}. If you return plain text, the system will fail!`
+      messages.splice(messages.length - 1, 0, { role: 'system', content: jsonFormatReminder })
+
+      // Static unmappable criteria guidance (replaces the dynamic injection that depended on extraction results)
+      messages.splice(messages.length - 1, 0, { role: 'system', content: 'If the user mentions any criteria that cannot be mapped to database fields (physical appearance, personality traits, etc.), silently proceed with the criteria you CAN handle (country, age, surf level, board type, destination experience). Do not explain filtering limitations.' })
+
+      // Build current data with accumulated filters (not yet-extracted ones — those get merged in post-processing)
+      const currentDataForGPTContinue = {
+        destination_country: continueDestination,
+        area: continueArea,
+        queryFilters: accumulatedFilters && typeof accumulatedFilters === 'object' ? accumulatedFilters as Record<string, unknown> : null
+      }
+      messages.splice(messages.length - 1, 0, { role: 'system', content: buildCurrentDataSystemMessage(currentDataForGPTContinue) })
+      console.log('📋 Injected current data + do-not-change/add rule into main GPT')
+
+      // --- PARALLEL LLM CALLS: extractQueryFilters + main callOpenAI ---
+      // Filter synthetic display-only messages from the messages array used for OpenAI
+      const messagesForOpenAI = messages.filter(m => !isSyntheticMessage(m))
+      const [filterExtractionSettled, mainLLMResult] = await Promise.all([
+        // Call 1: Extract structured filters from user message
+        (async () => {
+          try {
+            const result = await extractQueryFilters(body.message, destinationCountry, messagesForExtractor, existingForExtractor, userProfile)
+            return { success: true as const, result }
+          } catch (error) {
+            console.error('❌ Error extracting query filters:', error)
+            return { success: false as const, result: null }
+          }
+        })(),
+        // Call 2: Main conversational LLM
+        callOpenAI(messagesForOpenAI),
+      ])
+
+      // --- POST-PROCESS filter extraction results ---
+      if (filterExtractionSettled.success && filterExtractionSettled.result) {
+        filterResult = filterExtractionSettled.result
+        extractedQueryFilters = filterResult.supabaseFilters
+        unmappableCriteria = filterResult.unmappableCriteria || []
+        console.log('✅ Extracted query filters:', JSON.stringify(extractedQueryFilters, null, 2))
+        console.log('✅ Filter extraction explanation:', filterResult.explanation)
+        if (unmappableCriteria.length > 0) {
+          console.log('⚠️ Unmappable criteria found:', unmappableCriteria)
+        }
+      }
+
       if (userRequestedRemoveAll) {
         extractedQueryFilters = null
         console.log('📦 User requested remove all filters – extractedQueryFilters set to null, will not re-apply accumulated')
@@ -2773,14 +2634,8 @@ ${getPronounInstructions(userProfile.pronoun)}`
         console.log('📦 Cleared filters (user removed filters in previous message)')
       }
 
-      // If we detected unmappable criteria, add a system message to inform the LLM
-      if (unmappableCriteria.length > 0) {
-        const unmappableMessage = `IMPORTANT: The user mentioned criteria we don't have in our database: ${unmappableCriteria.join(', ')}. Silently extract and use the criteria we DO have (country, age, surf level, board type, destination experience). DO NOT explain what we can or can't filter by - just proceed with matching.`
-        // Insert before the last user message
-        messages.splice(messages.length - 1, 0, { role: 'system', content: unmappableMessage })
-      }
-
       // When editing filters, if intent is ambiguous do not merge; return a clarification question
+      // (discards the main LLM result — acceptable since this is a rare path)
       const intentUnclearList = filterResult?.intentUnclear
       if (body.adding_filters && body.existing_query_filters && Array.isArray(intentUnclearList) && intentUnclearList.length > 0) {
         const key = intentUnclearList[0]
@@ -2793,6 +2648,11 @@ ${getPronounInstructions(userProfile.pronoun)}`
         const clarificationPayload = { return_message: clarificationText, is_finished: false, data: null }
         messages.push({ role: 'assistant', content: JSON.stringify(clarificationPayload) })
         await saveChatHistory(chatId, messages, user.id, body.conversation_id || null, supabaseAdmin)
+        // --- UI Messages: user message + clarification ---
+        const uiMsgsClarify = await getUIMessages(chatId, supabaseAdmin)
+        appendUIMessage(uiMsgsClarify, { type: 'user_text', text: body.message, timestamp: makeTimestamp(), is_user: true })
+        appendUIMessage(uiMsgsClarify, { type: 'bot_text', text: clarificationText, timestamp: makeTimestamp(), is_user: false, backend_message_index: messages.length - 1 })
+        await saveUIMessages(chatId, uiMsgsClarify, supabaseAdmin)
         console.log('🔀 Returning clarification (intentUnclear):', clarificationText)
         return new Response(JSON.stringify(clarificationPayload), {
           status: 200,
@@ -2800,57 +2660,30 @@ ${getPronounInstructions(userProfile.pronoun)}`
         })
       }
 
-      // Check if user message contains a destination mention and remind LLM to extract it
-      const userMessageLower = body.message.toLowerCase()
-      const destinationKeywords = ['philippines', 'philippins', 'filipins', 'filipines', 'siargao', 'el salvador', 'costa rica', 'sri lanka', 'indonesia', 'portugal', 'spain', 'france', 'brazil', 'australia', 'nicaragua', 'panama', 'mexico', 'peru', 'chile', 'bali', 'tamarindo', 'pavones', 'el tunco']
-      const hasDestinationMention = destinationKeywords.some(keyword => userMessageLower.includes(keyword))
+      // --- Use the main LLM result ---
+      let assistantMessage = mainLLMResult
       
-      if (hasDestinationMention) {
-        const destinationReminder = `CRITICAL REMINDER: The user just mentioned a destination location. You MUST extract destination_country in your response's "data" field. If they mentioned both area and country (e.g., "Siargao, filipins"), extract BOTH: destination_country: "Philippines", area: "Siargao". Correct typos automatically - "filipins" means "Philippines". NEVER set destination_country to null if a location was mentioned!`
-        // Insert before the last user message
-        messages.splice(messages.length - 1, 0, { role: 'system', content: destinationReminder })
-        console.log('📍 Added destination extraction reminder for LLM')
-      }
-
-      // Add a final reminder to return JSON format
-      const jsonFormatReminder = `CRITICAL: You MUST return a valid JSON object. Your response must start with { and end with }. Do NOT return plain text. The structure must be: {"return_message": "...", "is_finished": false, "data": {...}}. If you return plain text, the system will fail!`
-      messages.splice(messages.length - 1, 0, { role: 'system', content: jsonFormatReminder })
-
-      // Build current data from last assistant message + merged filters; attach to every prompt with "do not change/add" rule
-      let continueDestination: string | null = null
-      let continueArea: string | null = null
-      for (let i = messages.length - 2; i >= 0; i--) {
-        if (messages[i].role === 'assistant') {
+      // If response looks like plain text, try to extract embedded JSON before retrying (avoids extra LLM call)
+      const looksPlainText = !assistantMessage.trim().startsWith('{') && !assistantMessage.includes('```json')
+      if (looksPlainText) {
+        const jsonBlock = assistantMessage.match(/\{[\s\S]*"is_finished"[\s\S]*\}/)
+        if (jsonBlock) {
           try {
-            const prevParsed = JSON.parse(messages[i].content)
-            if (prevParsed.data) {
-              if (prevParsed.data.destination_country != null) continueDestination = prevParsed.data.destination_country
-              if (prevParsed.data.area != null) continueArea = prevParsed.data.area
-            }
-            break
-          } catch (_e) { /* not JSON */ }
+            const cleaned = jsonBlock[0].replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '')
+            JSON.parse(cleaned)
+            assistantMessage = jsonBlock[0]
+          } catch (_) {
+            // Fall through to retry
+          }
         }
       }
-      const currentDataForGPTContinue = {
-        destination_country: continueDestination,
-        area: continueArea,
-        queryFilters: extractedQueryFilters && typeof extractedQueryFilters === 'object' ? extractedQueryFilters as Record<string, unknown> : null
-      }
-      messages.splice(messages.length - 1, 0, { role: 'system', content: buildCurrentDataSystemMessage(currentDataForGPTContinue) })
-      console.log('📋 Injected current data + do-not-change/add rule into main GPT')
-
-      // Call OpenAI
-      let assistantMessage = await callOpenAI(messages)
-      
-      // Check if response is plain text (not JSON) and retry with stronger enforcement
-      const isPlainText = !assistantMessage.trim().startsWith('{') && !assistantMessage.includes('```json')
-      if (isPlainText) {
+      const stillNeedsRetry = looksPlainText && !assistantMessage.trim().startsWith('{')
+      if (stillNeedsRetry) {
         console.log('⚠️ LLM returned plain text instead of JSON - retrying with JSON enforcement...')
         console.log('Plain text response:', assistantMessage.substring(0, 200))
-        // Add a stronger system message and retry
         const strongJsonEnforcement = `ERROR: You returned plain text instead of JSON. This is a CRITICAL ERROR. You MUST return a JSON object. Your response MUST be valid JSON starting with { and ending with }. Example: {"return_message": "Your text here", "is_finished": false, "data": {"destination_country": "Philippines", "area": "Siargao", "budget": null, "destination_known": true, "purpose": {"purpose_type": "connect_traveler", "specific_topics": []}, "user_context": {}}}. Return ONLY the JSON object, nothing else.`
         messages.push({ role: 'system', content: strongJsonEnforcement })
-        assistantMessage = await callOpenAI(messages)
+        assistantMessage = await callOpenAI(messages.filter(m => !isSyntheticMessage(m)))
         console.log('Retry response:', assistantMessage.substring(0, 200))
       }
       
@@ -2997,23 +2830,7 @@ ${getPronounInstructions(userProfile.pronoun)}`
                 const userMsg = messages[i].content
                 const userMsgLower = userMsg.toLowerCase()
                 
-                // Extract area if missing (e.g., "Costa Rica, Pavones" -> area: "Pavones")
-                if (!tripPlanningData.area && tripPlanningData.destination_country) {
-                  const countryLower = tripPlanningData.destination_country.toLowerCase()
-                  if (userMsgLower.includes(countryLower)) {
-                    const parts = userMsg.split(',').map(p => p.trim())
-                    if (parts.length > 1) {
-                      const countryIndex = parts.findIndex(p => p.toLowerCase().includes(countryLower))
-                      if (countryIndex >= 0 && countryIndex < parts.length - 1) {
-                        const area = parts[countryIndex + 1]
-                        if (area && area.length > 0 && area.length < 50) {
-                          tripPlanningData.area = area
-                          console.log(`✅ Extracted area "${area}" from user message: "${userMsg}"`)
-                        }
-                      }
-                    }
-                  }
-                }
+                // Area extraction removed — let the AI handle it via the prompt instructions
               }
             }
             console.log('✅ Final enriched data (fallback):', JSON.stringify(tripPlanningData, null, 2))
@@ -3166,14 +2983,15 @@ ${getPronounInstructions(userProfile.pronoun)}`
         // This should happen AFTER all tripPlanningData initialization
         // CRITICAL: Always add queryFilters if they were extracted, even if tripPlanningData already exists
         // Also populate non_negotiable_criteria.age_range from queryFilters.age_min/age_max
-        if (body.adding_filters && body.existing_query_filters && typeof body.existing_query_filters === 'object') {
+        if (body.adding_filters && body.existing_query_filters !== undefined) {
           // Add-filter mode: merge existing (from client) with current message's extracted only (not accumulated)
+          const existingQF = body.existing_query_filters && typeof body.existing_query_filters === 'object' ? body.existing_query_filters : {}
           const currentExtracted = filterResult?.supabaseFilters ?? extractedQueryFilters ?? {}
           const intent = filterResult?.filterEditIntent && typeof filterResult.filterEditIntent === 'object' ? filterResult.filterEditIntent : {}
           const hasIntent = Object.keys(intent).length > 0
           const merged = hasIntent
-            ? mergeQueryFiltersEditing(body.existing_query_filters, currentExtracted, intent)
-            : mergeQueryFiltersAdding(body.existing_query_filters, currentExtracted)
+            ? mergeQueryFiltersEditing(existingQF, currentExtracted, intent)
+            : mergeQueryFiltersAdding(existingQF, currentExtracted)
           const normalizedQueryFilters = await normalizeQueryFilters(merged)
           // Merge destinations so "add Indonesia" when existing is "Sri Lanka" yields "Sri Lanka, Indonesia"
           const mergedDestination = mergeDestinations(
@@ -3196,8 +3014,10 @@ ${getPronounInstructions(userProfile.pronoun)}`
             }
           } else {
             tripPlanningData.queryFilters = normalizedQueryFilters
-            tripPlanningData.destination_country = mergedDestination ?? body.existing_destination_country ?? tripPlanningData.destination_country
-            if (body.existing_area != null) tripPlanningData.area = body.existing_area
+            // Trust client's explicit destination/area (they may be null = deleted)
+            if ('existing_destination_country' in body) tripPlanningData.destination_country = mergedDestination ?? body.existing_destination_country ?? null
+            else tripPlanningData.destination_country = mergedDestination ?? tripPlanningData.destination_country
+            if ('existing_area' in body) tripPlanningData.area = body.existing_area ?? null
           }
           console.log('✅ Merged filters (add-filter mode):', JSON.stringify(normalizedQueryFilters, null, 2))
         } else if (extractedQueryFilters && Object.keys(extractedQueryFilters).length > 0) {
@@ -3609,8 +3429,27 @@ ${getPronounInstructions(userProfile.pronoun)}`
         }
       }
 
+      // --- UI Messages: append user message + bot response ---
+      try {
+        const uiMsgsContinue = await getUIMessages(chatId, supabaseAdmin)
+        appendUIMessage(uiMsgsContinue, { type: 'user_text', text: body.message, timestamp: makeTimestamp(), is_user: true })
+        const hasSearchSummaryContinue = parsedResponse.data?.search_summary != null && String(parsedResponse.data.search_summary).trim() !== ''
+        appendUIMessage(uiMsgsContinue, {
+          type: hasSearchSummaryContinue ? 'search_summary' : 'bot_text',
+          text: hasSearchSummaryContinue ? parsedResponse.data.search_summary : parsedResponse.return_message,
+          timestamp: makeTimestamp(),
+          is_user: false,
+          is_search_summary: hasSearchSummaryContinue || undefined,
+          backend_message_index: messages.length - 1,
+        })
+        await saveUIMessages(chatId, uiMsgsContinue, supabaseAdmin)
+      } catch (uiErr) {
+        console.error('[continue] Error saving ui_messages:', uiErr)
+      }
+
+      const responsePayload = { ...parsedResponse, message_index: messages.length - 1 }
       return new Response(
-        JSON.stringify(parsedResponse),
+        JSON.stringify(responsePayload),
         {
           status: 200,
           headers: {
@@ -3686,9 +3525,15 @@ ${getPronounInstructions(userProfile.pronoun)}`
         // Find the most recent assistant message that doesn't already have matched users metadata
         // This ensures we attach to the message that just finished and triggered the matching
         // If a message already has metadata, it means matches were already attached, so skip it
+        // Also skip synthetic messages (restart markers, add-filter prompts)
         let targetAssistantIndex = -1
         for (let i = messages.length - 1; i >= 0; i--) {
           if (messages[i].role === 'assistant') {
+            // Skip synthetic display-only messages
+            if (messages[i].metadata?.isRestartAfterNewChat || messages[i].metadata?.isAddFilterPrompt) {
+              console.log('[attach-matches] Skipping synthetic message at index', i)
+              continue
+            }
             // Skip if this message already has matched users metadata
             if (messages[i].metadata?.matchedUsers) {
               console.log('[attach-matches] Skipping assistant message at index', i, '- already has matched users metadata')
@@ -3712,7 +3557,7 @@ ${getPronounInstructions(userProfile.pronoun)}`
         // This handles edge cases where the message format might be different
         if (targetAssistantIndex === -1) {
           for (let i = messages.length - 1; i >= 0; i--) {
-            if (messages[i].role === 'assistant' && !messages[i].metadata?.matchedUsers) {
+            if (messages[i].role === 'assistant' && !messages[i].metadata?.matchedUsers && !messages[i].metadata?.isRestartAfterNewChat && !messages[i].metadata?.isAddFilterPrompt) {
               targetAssistantIndex = i
               console.log('[attach-matches] Using fallback - last assistant message without metadata at index:', i)
               break
@@ -3720,17 +3565,30 @@ ${getPronounInstructions(userProfile.pronoun)}`
           }
         }
 
+        // Last resort: all assistant messages already have matchedUsers (e.g. "More" action).
+        // Append a new placeholder assistant message to hold this match batch.
+        // Also mark the previous match message with selectedAction: 'more' (handles the race
+        // with updateMatchActionSelection — both ops write to the same messages array).
         if (targetAssistantIndex === -1) {
-          return new Response(
-            JSON.stringify({ error: 'No assistant message found to attach matches to' }),
-            { 
-              status: 404, 
-              headers: { 
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-              } 
+          // Mark the most recent match message as 'more' so its action buttons are disabled on restore
+          for (let j = messages.length - 1; j >= 0; j--) {
+            if (messages[j].metadata?.matchedUsers && messages[j].metadata?.actionRow) {
+              if (!messages[j].metadata!.actionRow!.selectedAction) {
+                messages[j].metadata!.actionRow!.selectedAction = 'more'
+                console.log('[attach-matches] Marked previous match message at index', j, 'with selectedAction: more')
+              }
+              break
             }
-          )
+          }
+          const matchCount = body.matchedUsers?.length ?? 0
+          const placeholderContent = JSON.stringify({
+            return_message: `Found ${matchCount} more match${matchCount !== 1 ? 'es' : ''} for you!`,
+            is_finished: true,
+            data: { destination_country: body.destinationCountry || null }
+          })
+          messages.push({ role: 'assistant', content: placeholderContent, metadata: {} })
+          targetAssistantIndex = messages.length - 1
+          console.log('[attach-matches] All assistant messages have metadata - appended placeholder at index:', targetAssistantIndex)
         }
 
         // Attach metadata to the target assistant message
@@ -3766,7 +3624,7 @@ ${getPronounInstructions(userProfile.pronoun)}`
         console.log('[attach-matches] Saving', messages.length, 'messages to database')
         await saveChatHistory(chatId, messages, user.id, null, supabaseAdmin)
         console.log('[attach-matches] Save completed successfully')
-        
+
         // Verify the save by reading back
         const verifyMessages = await getChatHistory(chatId, supabaseAdmin)
         const verifyMessage = verifyMessages[targetAssistantIndex]
@@ -3774,6 +3632,30 @@ ${getPronounInstructions(userProfile.pronoun)}`
           console.log('[attach-matches] ✅ Verified: Metadata saved successfully,', verifyMessage.metadata.matchedUsers.length, 'matched users')
         } else {
           console.error('[attach-matches] ❌ ERROR: Metadata was not saved! Message at index', targetAssistantIndex, 'has no metadata after save')
+        }
+
+        // --- UI Messages: append match_results or no_matches ---
+        try {
+          const uiMsgsMatch = await getUIMessages(chatId, supabaseAdmin)
+          const matchCount = body.matchedUsers.length
+          const matchType = matchCount > 0 ? 'match_results' : 'no_matches'
+          const matchText = matchCount > 0
+            ? `Found ${matchCount} awesome match${matchCount > 1 ? 'es' : ''} for you!`
+            : 'No surfers match your criteria right now. Try adjusting your destination or filters.'
+          appendUIMessage(uiMsgsMatch, {
+            type: matchType as 'match_results' | 'no_matches',
+            text: matchText,
+            timestamp: makeTimestamp(),
+            is_user: false,
+            matched_users: body.matchedUsers,
+            destination_country: body.destinationCountry,
+            match_total_count: body.totalCount ?? matchCount,
+            action_row: { request_data: body.requestData ?? null, selected_action: null },
+            backend_message_index: targetAssistantIndex,
+          })
+          await saveUIMessages(chatId, uiMsgsMatch, supabaseAdmin)
+        } catch (uiErr) {
+          console.error('[attach-matches] Error saving ui_messages:', uiErr)
         }
 
         return new Response(
@@ -3838,12 +3720,66 @@ ${getPronounInstructions(userProfile.pronoun)}`
         if (!msg.metadata) msg.metadata = {}
         if (!msg.metadata.actionRow) msg.metadata.actionRow = { requestData: null, selectedAction: null }
         msg.metadata.actionRow.selectedAction = body.selectedAction
+        let appendedMessageIndex: number | undefined = undefined
         if (body.selectedAction === 'new_chat') {
           msg.metadata.actionRow.requestData = { queryFilters: null, destination_country: null, area: null }
           console.log('[update-match-action] New Chat: cleared requestData on message', i)
+          // Append synthetic restart message so it restores after refresh
+          messages.push({
+            role: 'assistant',
+            content: TRIP_PLANNING_FIRST_QUESTION_TEXT,
+            metadata: { isRestartAfterNewChat: true }
+          })
+          appendedMessageIndex = messages.length - 1
+          console.log('[update-match-action] Appended restart message at index', appendedMessageIndex)
+        }
+        if (body.selectedAction === 'add_filter') {
+          const existingFilters = msg.metadata.actionRow?.requestData ?? null
+          messages.push({
+            role: 'assistant',
+            content: "Great! We can add some filters to your search. What would you like to add? For example: board type, surf level, destinations they've surfed, age, or country of origin.",
+            metadata: { isAddFilterPrompt: true, existingFiltersData: existingFilters }
+          })
+          appendedMessageIndex = messages.length - 1
+          console.log('[update-match-action] Appended add-filter prompt at index', appendedMessageIndex)
         }
         await saveChatHistory(chatId, messages, user.id, null, supabaseAdmin)
-        return new Response(JSON.stringify({ success: true }), { status: 200, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } })
+
+        // --- UI Messages: update action_row on match message + append synthetic message ---
+        try {
+          const uiMsgsAction = await getUIMessages(chatId, supabaseAdmin)
+          // Find the last match_results/no_matches UI message and update its action_row
+          for (let ui = uiMsgsAction.length - 1; ui >= 0; ui--) {
+            if (uiMsgsAction[ui].type === 'match_results' || uiMsgsAction[ui].type === 'no_matches') {
+              uiMsgsAction[ui].action_row = { ...uiMsgsAction[ui].action_row!, selected_action: body.selectedAction }
+              break
+            }
+          }
+          if (body.selectedAction === 'new_chat') {
+            appendUIMessage(uiMsgsAction, {
+              type: 'new_chat_restart',
+              text: TRIP_PLANNING_FIRST_QUESTION_TEXT,
+              timestamp: makeTimestamp(),
+              is_user: false,
+              is_restart_after_new_chat: true,
+              backend_message_index: appendedMessageIndex,
+            })
+          }
+          if (body.selectedAction === 'add_filter') {
+            appendUIMessage(uiMsgsAction, {
+              type: 'add_filter_prompt',
+              text: "Great! We can add some filters to your search. What would you like to add? For example: board type, surf level, destinations they've surfed, age, or country of origin.",
+              timestamp: makeTimestamp(),
+              is_user: false,
+              backend_message_index: appendedMessageIndex,
+            })
+          }
+          await saveUIMessages(chatId, uiMsgsAction, supabaseAdmin)
+        } catch (uiErr) {
+          console.error('[update-match-action] Error saving ui_messages:', uiErr)
+        }
+
+        return new Response(JSON.stringify({ success: true, appendedMessageIndex }), { status: 200, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } })
       } catch (error) {
         console.error('Error updating match action:', error)
         return new Response(
@@ -3891,6 +3827,23 @@ ${getPronounInstructions(userProfile.pronoun)}`
         if (!msg.metadata.actionRow) msg.metadata.actionRow = { requestData: null, selectedAction: null }
         msg.metadata.actionRow.requestData = body.requestData
         await saveChatHistory(chatId, messages, user.id, null, supabaseAdmin)
+
+        // --- UI Messages: update action_row.request_data on the match UI message ---
+        try {
+          const uiMsgsFilters = await getUIMessages(chatId, supabaseAdmin)
+          for (let ui = uiMsgsFilters.length - 1; ui >= 0; ui--) {
+            if (uiMsgsFilters[ui].type === 'match_results' || uiMsgsFilters[ui].type === 'no_matches') {
+              if (uiMsgsFilters[ui].action_row) {
+                uiMsgsFilters[ui].action_row!.request_data = body.requestData
+              }
+              break
+            }
+          }
+          await saveUIMessages(chatId, uiMsgsFilters, supabaseAdmin)
+        } catch (uiErr) {
+          console.error('[update-match-filters] Error saving ui_messages:', uiErr)
+        }
+
         return new Response(JSON.stringify({ success: true }), { status: 200, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } })
       } catch (error) {
         console.error('Error updating match filters:', error)
@@ -3949,6 +3902,25 @@ ${getPronounInstructions(userProfile.pronoun)}`
           selectedAction: body.selectedAction ?? null,
         }
         await saveChatHistory(chatId, messages, user.id, null, supabaseAdmin)
+
+        // --- UI Messages: update search_summary_block on the search_summary UI message ---
+        try {
+          const uiMsgsSS = await getUIMessages(chatId, supabaseAdmin)
+          for (let ui = uiMsgsSS.length - 1; ui >= 0; ui--) {
+            if (uiMsgsSS[ui].type === 'search_summary' || uiMsgsSS[ui].is_search_summary) {
+              uiMsgsSS[ui].search_summary_block = {
+                request_data: body.requestData,
+                search_summary: body.searchSummary ?? '',
+                selected_action: body.selectedAction ?? null,
+              }
+              break
+            }
+          }
+          await saveUIMessages(chatId, uiMsgsSS, supabaseAdmin)
+        } catch (uiErr) {
+          console.error('[update-search-summary-block] Error saving ui_messages:', uiErr)
+        }
+
         return new Response(JSON.stringify({ success: true }), { status: 200, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } })
       } catch (error) {
         console.error('Error updating search summary block:', error)
@@ -4032,12 +4004,39 @@ ${getPronounInstructions(userProfile.pronoun)}`
         console.log('[ack-filter-removal] save completed')
         const now = new Date()
         const timestamp = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
+        const newMessageId = crypto.randomUUID()
         const newMessage = {
-          id: crypto.randomUUID(),
+          id: newMessageId,
           text: text,
           isUser: false,
           timestamp,
         }
+
+        // --- UI Messages: append filter_removal_ack ---
+        try {
+          const uiMsgsAck = await getUIMessages(chatId, supabaseAdmin)
+          // Also update the match message's action_row.request_data
+          for (let ui = uiMsgsAck.length - 1; ui >= 0; ui--) {
+            if (uiMsgsAck[ui].type === 'match_results' || uiMsgsAck[ui].type === 'no_matches') {
+              if (uiMsgsAck[ui].action_row) {
+                uiMsgsAck[ui].action_row!.request_data = body.requestData
+              }
+              break
+            }
+          }
+          appendUIMessage(uiMsgsAck, {
+            type: 'filter_removal_ack',
+            text: text,
+            timestamp: makeTimestamp(),
+            is_user: false,
+            is_search_summary: true,
+            backend_message_index: messages.length - 1,
+          })
+          await saveUIMessages(chatId, uiMsgsAck, supabaseAdmin)
+        } catch (uiErr) {
+          console.error('[ack-filter-removal] Error saving ui_messages:', uiErr)
+        }
+
         return new Response(JSON.stringify({ success: true, newMessage }), { status: 200, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } })
       } catch (err) {
         console.error('acknowledge-filter-removal error:', err)
@@ -4075,6 +4074,25 @@ ${getPronounInstructions(userProfile.pronoun)}`
         console.error('latest chat error:', err)
         return new Response(
           JSON.stringify({ error: 'Failed to fetch latest chat', details: err instanceof Error ? err.message : String(err) }),
+          { status: 500, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } }
+        )
+      }
+    }
+
+    // Route: GET /swelly-trip-planning/ui-messages/:chat_id — return ordered UI messages for restore
+    const uiMessagesRouteMatch = path.match(/ui-messages\/([a-f0-9-]{36})/i)
+    if (uiMessagesRouteMatch && req.method === 'GET') {
+      const chatId = uiMessagesRouteMatch[1]
+      try {
+        const uiMessages = await getUIMessages(chatId, supabaseAdmin)
+        return new Response(
+          JSON.stringify({ chat_id: chatId, ui_messages: uiMessages }),
+          { status: 200, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } }
+        )
+      } catch (err) {
+        console.error('[ui-messages] Error:', err)
+        return new Response(
+          JSON.stringify({ error: 'Failed to fetch UI messages', details: err instanceof Error ? err.message : String(err) }),
           { status: 500, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } }
         )
       }
@@ -4226,18 +4244,16 @@ ${getPronounInstructions(userProfile.pronoun)}`
           : 'general (no destination, using queryFilters)'
         console.log('[find-matches] Path:', pathDesc)
 
-        // Run server-side matching: destination path uses geo user_destinations; general path uses inlined V3
+        // Run server-side matching (same behaviour as main flow, matching on server)
         const excludePrevious = body.excludePrevious === true
         console.log('[find-matches] Starting server-side matching for chat:', body.chatId, 'excludePrevious:', excludePrevious)
-        const { results: matches, totalCount } = hasDestination
-          ? await findMatchingUsersGeo(tripPlanningData, user.id, body.chatId, supabaseAdmin, excludePrevious)
-          : await findMatchingUsersV3Server(
-              tripPlanningData,
-              user.id,
-              body.chatId,
-              supabaseAdmin,
-              excludePrevious
-            )
+        const { results: matches, totalCount } = await findMatchingUsersV3Server(
+          tripPlanningData,
+          user.id,
+          body.chatId,
+          supabaseAdmin,
+          excludePrevious
+        )
 
         // Save matches to database
         await saveMatchesInline(
@@ -4252,11 +4268,96 @@ ${getPronounInstructions(userProfile.pronoun)}`
 
         console.log('[find-matches] Successfully found and saved', matches.length, 'matches (totalCount=', totalCount, '). Path:', pathDesc, '| Filters:', tripPlanningData.queryFilters ? Object.keys(tripPlanningData.queryFilters).join(', ') : 'none')
 
+        // --- Persist match metadata to chat history + UI messages (previously done by /attach-matches) ---
+        let messageIndex: number | undefined
+        try {
+          const messages = await getChatHistory(body.chatId, supabaseAdmin)
+          if (messages.length > 0) {
+            // Find target assistant message (same logic as attach-matches)
+            let targetAssistantIndex = -1
+            for (let i = messages.length - 1; i >= 0; i--) {
+              if (messages[i].role === 'assistant') {
+                if (messages[i].metadata?.isRestartAfterNewChat || messages[i].metadata?.isAddFilterPrompt) continue
+                if (messages[i].metadata?.matchedUsers) continue
+                try {
+                  const parsed = JSON.parse(messages[i].content)
+                  if (parsed.is_finished === true) {
+                    targetAssistantIndex = i
+                    break
+                  }
+                } catch { /* not JSON */ }
+              }
+            }
+            // Fallback: last assistant without metadata
+            if (targetAssistantIndex === -1) {
+              for (let i = messages.length - 1; i >= 0; i--) {
+                if (messages[i].role === 'assistant' && !messages[i].metadata?.matchedUsers && !messages[i].metadata?.isRestartAfterNewChat && !messages[i].metadata?.isAddFilterPrompt) {
+                  targetAssistantIndex = i
+                  break
+                }
+              }
+            }
+            // Last resort: append placeholder
+            if (targetAssistantIndex === -1) {
+              for (let j = messages.length - 1; j >= 0; j--) {
+                if (messages[j].metadata?.matchedUsers && messages[j].metadata?.actionRow) {
+                  if (!messages[j].metadata!.actionRow!.selectedAction) {
+                    messages[j].metadata!.actionRow!.selectedAction = 'more'
+                  }
+                  break
+                }
+              }
+              const matchCount = matches.length
+              const placeholderContent = JSON.stringify({
+                return_message: `Found ${matchCount} more match${matchCount !== 1 ? 'es' : ''} for you!`,
+                is_finished: true,
+                data: { destination_country: tripPlanningData.destination_country || null }
+              })
+              messages.push({ role: 'assistant', content: placeholderContent, metadata: {} })
+              targetAssistantIndex = messages.length - 1
+            }
+
+            messages[targetAssistantIndex].metadata = {
+              matchedUsers: matches,
+              destinationCountry: tripPlanningData.destination_country || '',
+              matchTimestamp: new Date().toISOString(),
+              actionRow: { requestData: tripPlanningData, selectedAction: null },
+              totalCount: totalCount ?? matches.length
+            }
+            await saveChatHistory(body.chatId, messages, user.id, null, supabaseAdmin)
+            messageIndex = targetAssistantIndex
+            console.log('[find-matches] Attached match metadata at message index:', targetAssistantIndex)
+          }
+
+          // Append UI message
+          const uiMsgs = await getUIMessages(body.chatId, supabaseAdmin)
+          const matchType = matches.length > 0 ? 'match_results' : 'no_matches'
+          const matchText = matches.length > 0
+            ? `Found ${matches.length} awesome match${matches.length > 1 ? 'es' : ''} for you!`
+            : 'No surfers match your criteria right now. Try adjusting your destination or filters.'
+          appendUIMessage(uiMsgs, {
+            type: matchType as 'match_results' | 'no_matches',
+            text: matchText,
+            timestamp: makeTimestamp(),
+            is_user: false,
+            matched_users: matches,
+            destination_country: tripPlanningData.destination_country || '',
+            match_total_count: totalCount ?? matches.length,
+            action_row: { request_data: tripPlanningData, selected_action: null },
+            backend_message_index: messageIndex,
+          })
+          await saveUIMessages(body.chatId, uiMsgs, supabaseAdmin)
+          console.log('[find-matches] Saved UI message for match results')
+        } catch (persistErr) {
+          console.error('[find-matches] Error persisting match metadata (non-blocking):', persistErr)
+        }
+
         return new Response(
           JSON.stringify({
             matches,
             totalCount,
             chatId: body.chatId,
+            messageIndex,
           }),
           {
             status: 200,
@@ -4308,4 +4409,3 @@ ${getPronounInstructions(userProfile.pronoun)}`
     )
   }
 })
-

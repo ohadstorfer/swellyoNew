@@ -1036,7 +1036,7 @@ export default function ConversationsScreen({
               styles.swellyLastMessage,
               Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
             ]} numberOfLines={1}>
-              Yo! Lets get you connected!
+              Yo! Let's get you connected with some other surf travelers!
             </Text>
           </View>
         </View>

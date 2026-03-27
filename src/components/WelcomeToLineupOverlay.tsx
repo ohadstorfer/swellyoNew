@@ -14,7 +14,16 @@ import { Ionicons } from '@expo/vector-icons';
 import { Text } from './Text';
 import { borderRadius } from '../styles/theme';
 import { getImageUrl } from '../services/media/imageService';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { OnboardingMatch } from '../services/matching/onboardingMatchingService';
+
+const SLIDE_IN_STORAGE_KEY = 'swelly_lineup_slide_played';
+// Module-level cache so we don't read AsyncStorage on every render
+let hasPlayedSlideIn = false;
+// Hydrate from storage once at module load
+AsyncStorage.getItem(SLIDE_IN_STORAGE_KEY).then((val) => {
+  if (val === 'true') hasPlayedSlideIn = true;
+});
 
 interface WelcomeToLineupOverlayProps {
   visible: boolean;
@@ -60,8 +69,6 @@ export const WelcomeToLineupOverlay: React.FC<WelcomeToLineupOverlayProps> = ({
   const swellySlideAnim = useRef(new Animated.Value(-200)).current;
   const slideOutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const carouselContainerRef = useRef<View>(null);
-  const hasAnimatedRef = useRef(false);
-
   // Keep ref in sync with state
   useEffect(() => {
     activeIndexRef.current = activeIndex;
@@ -70,8 +77,9 @@ export const WelcomeToLineupOverlay: React.FC<WelcomeToLineupOverlayProps> = ({
   // Swelly character slide-in animation (2s delay), then slide out after 2s — only plays once
   useEffect(() => {
     if (visible) {
-      if (hasAnimatedRef.current) return;
-      hasAnimatedRef.current = true;
+      if (hasPlayedSlideIn) return;
+      hasPlayedSlideIn = true;
+      AsyncStorage.setItem(SLIDE_IN_STORAGE_KEY, 'true').catch(() => {});
       swellySlideAnim.setValue(-200);
       const slideInTimer = setTimeout(() => {
         Animated.timing(swellySlideAnim, {
@@ -370,7 +378,7 @@ height: 221 * 1.2, // 331.5
   },
   carousel: {
     flexGrow: 0,
-    maxHeight: 280,
+    maxHeight: 300,
   },
   carouselContent: {
     paddingHorizontal: (CARD_CONTAINER_WIDTH - CAROUSEL_CARD_WIDTH) / 2,

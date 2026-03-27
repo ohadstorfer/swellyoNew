@@ -815,53 +815,35 @@ export const AppContent: React.FC = () => {
         console.log('[AppContent] Fetched surfer data:', surferData?.name || 'Unknown');
         console.log('[AppContent] Surfer avatar:', !!surferData?.profile_image_url);
         
-        if (isFromTripPlanning) {
-          // Show loading screen first for trip planning conversations
-          console.log('[AppContent] ✓ From trip planning - preparing to show loading screen');
-          // Load current user data for loading screen
-          try {
-            console.log('[AppContent] Loading current user data for loading screen');
-            const currentUser = await supabaseAuthService.getCurrentUser();
-            if (currentUser) {
-              console.log('[AppContent] Current user loaded:', currentUser.nickname || currentUser.email);
-              setCurrentUserAvatar(currentUser.photo || null);
-              setCurrentUserName(currentUser.nickname || currentUser.email?.split('@')[0] || 'User');
-            } else {
-              console.warn('[AppContent] No current user found');
-            }
-          } catch (error) {
-            console.error('[AppContent] Error loading current user data:', error);
+        // Show loading screen for all new conversations
+        console.log('[AppContent] ✓ Preparing to show loading screen for new conversation');
+        // Load current user data for loading screen
+        try {
+          console.log('[AppContent] Loading current user data for loading screen');
+          const currentUser = await supabaseAuthService.getCurrentUser();
+          if (currentUser) {
+            console.log('[AppContent] Current user loaded:', currentUser.nickname || currentUser.email);
+            setCurrentUserAvatar(currentUser.photo || null);
+            setCurrentUserName(currentUser.nickname || currentUser.email?.split('@')[0] || 'User');
+          } else {
+            console.warn('[AppContent] No current user found');
           }
-          
-          console.log('[AppContent] Setting pending conversation...');
-          setPendingConversation({
-            otherUserId: userId,
-            otherUserName: surferData?.name || 'User',
-            otherUserAvatar: surferData?.profile_image_url || null,
-            fromTripPlanning: true,
-            fromTripPlanningCopy: showTripPlanningChatCopy,
-          });
-          console.log('[AppContent] pendingConversation state updated');
-          console.log('[AppContent] Setting showConversationLoading to true...');
-          setShowConversationLoading(true);
-          console.log('[AppContent] ✓ showConversationLoading set to true');
-          console.log('[AppContent] ✓ pendingConversation set with:', {
-            otherUserId: userId,
-            otherUserName: surferData?.name || 'User',
-            hasAvatar: !!surferData?.profile_image_url,
-            fromTripPlanning: true,
-          });
-        } else {
-          // For non-trip planning, go directly to conversation
-          console.log('[AppContent] Not from trip planning - navigating directly to conversation');
-          setSelectedConversation({
-            // No id - this is a pending conversation
-            otherUserId: userId,
-            otherUserName: surferData?.name || 'User',
-            otherUserAvatar: surferData?.profile_image_url || null,
-            fromTripPlanning: false,
-          });
+        } catch (error) {
+          console.error('[AppContent] Error loading current user data:', error);
         }
+
+        console.log('[AppContent] Setting pending conversation...');
+        setPendingConversation({
+          otherUserId: userId,
+          otherUserName: surferData?.name || 'User',
+          otherUserAvatar: surferData?.profile_image_url || null,
+          fromTripPlanning: isFromTripPlanning,
+          fromTripPlanningCopy: isFromTripPlanning && showTripPlanningChatCopy,
+        });
+        console.log('[AppContent] pendingConversation state updated');
+        console.log('[AppContent] Setting showConversationLoading to true...');
+        setShowConversationLoading(true);
+        console.log('[AppContent] ✓ showConversationLoading set to true');
       }
       
       // Close profile screen to show conversation

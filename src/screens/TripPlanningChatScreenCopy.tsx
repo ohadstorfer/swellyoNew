@@ -53,7 +53,11 @@ function getLabelParts(label: string): { prefix: string; value: string } | null 
 
 /** First question shown when starting or restarting trip planning (matches backend prompt). */
 const TRIP_PLANNING_FIRST_QUESTION =
-  "Yo! Let’s get you connected! So what are we looking for today?";
+  "Yo! Let’s get you connected with some other surf travelers! So, what are we looking for today?";
+
+/** Second initial message shown after typing animation delay. */
+const TRIP_PLANNING_SECOND_MESSAGE =
+  "I can connect you to surfers based on surf lvl, board type, age, origin country, and any destination they’ve surfed at.";
 
 /** True if we have at least one filter required for find-matches (matches backend validation). */
 function hasSearchableFilters(data: any): boolean {
@@ -724,7 +728,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
               },
               {
                 id: 'info',
-                text: 'I can connect you to surfers based on surf lvl, board type, age, origin country, and any destination they’ve surfed at.',
+                text: TRIP_PLANNING_SECOND_MESSAGE,
                 isUser: false,
                 timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
               },
@@ -732,7 +736,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             setTimeout(() => scrollToBottom(), 100);
           }, 2000);
         } else {
-          // Normal new chat: show first message immediately
+          // Normal new chat: show first message immediately, then second after typing delay
           setMessages([
             {
               id: '1',
@@ -742,6 +746,20 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             }
           ]);
           setIsInitializing(false);
+          setIsLoading(true);
+          setTimeout(() => {
+            setIsLoading(false);
+            setMessages(prev => [
+              ...prev,
+              {
+                id: 'info',
+                text: TRIP_PLANNING_SECOND_MESSAGE,
+                isUser: false,
+                timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+              },
+            ]);
+            setTimeout(() => scrollToBottom(), 100);
+          }, 2000);
         }
 
         // Create the backend chat in background
@@ -1287,6 +1305,21 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
           timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
           isRestartAfterNewChat: true,
         };
+        // Show typing indicator then append second message after 2s
+        setIsLoading(true);
+        setTimeout(() => {
+          setIsLoading(false);
+          setMessages(prev => [
+            ...prev,
+            {
+              id: (Date.now() + 2).toString(),
+              text: TRIP_PLANNING_SECOND_MESSAGE,
+              isUser: false,
+              timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+            },
+          ]);
+          setTimeout(() => scrollToBottom(), 100);
+        }, 2000);
         return [...updated, firstQuestionMessage];
       }
       if (action === 'add_filter' && requestData != null) {
@@ -1382,6 +1415,21 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
         ...(backendMessageIndex !== undefined && { backendMessageIndex }),
       }]);
+      // Show typing indicator then append second message after 2s
+      setIsLoading(true);
+      setTimeout(() => {
+        setIsLoading(false);
+        setMessages(prev => [
+          ...prev,
+          {
+            id: (Date.now() + 2).toString(),
+            text: TRIP_PLANNING_SECOND_MESSAGE,
+            isUser: false,
+            timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+          },
+        ]);
+        setTimeout(() => scrollToBottom(), 100);
+      }, 2000);
     } catch (error) {
       console.error('Failed to start new chat:', error);
       setMessages([{
@@ -1390,8 +1438,22 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         isUser: false,
         timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
       }]);
+      // Show typing indicator then append second message after 2s
+      setIsLoading(true);
+      setTimeout(() => {
+        setIsLoading(false);
+        setMessages(prev => [
+          ...prev,
+          {
+            id: (Date.now() + 2).toString(),
+            text: TRIP_PLANNING_SECOND_MESSAGE,
+            isUser: false,
+            timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+          },
+        ]);
+        setTimeout(() => scrollToBottom(), 100);
+      }, 2000);
     } finally {
-      stopLoading();
       setIsInitializing(false);
     }
   };
@@ -1698,18 +1760,27 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
                 }
               }}
               activeOpacity={0.8}
-              style={styles.searchNowButton}
+              style={styles.searchNowButtonOuter}
             >
-              <Svg width={15} height={15} viewBox="0 0 15 15" fill="none">
-                <Path d="M2.16667 13.8333V10.5M2.16667 3.83333V0.5M0.5 2.16667H3.83333M0.5 12.1667H3.83333M7.83333 1.16667L6.67721 4.17257C6.48921 4.66139 6.3952 4.9058 6.24902 5.11139C6.11946 5.2936 5.96026 5.45279 5.77806 5.58235C5.57247 5.72854 5.32806 5.82254 4.83924 6.01055L1.83333 7.16667L4.83924 8.32278C5.32806 8.51079 5.57247 8.6048 5.77806 8.75098C5.96027 8.88054 6.11946 9.03973 6.24902 9.22194C6.3952 9.42753 6.48921 9.67194 6.67722 10.1608L7.83333 13.1667L8.98945 10.1608C9.17746 9.67194 9.27146 9.42753 9.41765 9.22194C9.54721 9.03973 9.7064 8.88054 9.88861 8.75098C10.0942 8.6048 10.3386 8.51079 10.8274 8.32278L13.8333 7.16667L10.8274 6.01055C10.3386 5.82254 10.0942 5.72854 9.88861 5.58235C9.7064 5.45279 9.54721 5.2936 9.41765 5.11139C9.27146 4.9058 9.17746 4.66139 8.98945 4.17257L7.83333 1.16667Z" stroke="url(#searchGradient)" strokeLinecap="round" strokeLinejoin="round" />
-                <Defs>
-                  <SvgLinearGradient id="searchGradient" x1="0.5" y1="7.16667" x2="13.8333" y2="7.16667" gradientUnits="userSpaceOnUse">
-                    <Stop stopColor="#B72DF2" />
-                    <Stop offset="1" stopColor="#FF5367" />
-                  </SvgLinearGradient>
-                </Defs>
-              </Svg>
-              <Text style={styles.searchNowButtonText}>Search</Text>
+              <LinearGradient
+                colors={['#B72DF2', '#FF5367']}
+                start={{ x: 0, y: 0.5 }}
+                end={{ x: 1, y: 0.5 }}
+                style={styles.searchNowButtonGradientBorder}
+              >
+                <View style={styles.searchNowButtonInner}>
+                  <Svg width={15} height={15} viewBox="0 0 15 15" fill="none">
+                    <Path d="M2.16667 13.8333V10.5M2.16667 3.83333V0.5M0.5 2.16667H3.83333M0.5 12.1667H3.83333M7.83333 1.16667L6.67721 4.17257C6.48921 4.66139 6.3952 4.9058 6.24902 5.11139C6.11946 5.2936 5.96026 5.45279 5.77806 5.58235C5.57247 5.72854 5.32806 5.82254 4.83924 6.01055L1.83333 7.16667L4.83924 8.32278C5.32806 8.51079 5.57247 8.6048 5.77806 8.75098C5.96027 8.88054 6.11946 9.03973 6.24902 9.22194C6.3952 9.42753 6.48921 9.67194 6.67722 10.1608L7.83333 13.1667L8.98945 10.1608C9.17746 9.67194 9.27146 9.42753 9.41765 9.22194C9.54721 9.03973 9.7064 8.88054 9.88861 8.75098C10.0942 8.6048 10.3386 8.51079 10.8274 8.32278L13.8333 7.16667L10.8274 6.01055C10.3386 5.82254 10.0942 5.72854 9.88861 5.58235C9.7064 5.45279 9.54721 5.2936 9.41765 5.11139C9.27146 4.9058 9.17746 4.66139 8.98945 4.17257L7.83333 1.16667Z" stroke="url(#searchGradient)" strokeLinecap="round" strokeLinejoin="round" />
+                    <Defs>
+                      <SvgLinearGradient id="searchGradient" x1="0.5" y1="7.16667" x2="13.8333" y2="7.16667" gradientUnits="userSpaceOnUse">
+                        <Stop stopColor="#B72DF2" />
+                        <Stop offset="1" stopColor="#FF5367" />
+                      </SvgLinearGradient>
+                    </Defs>
+                  </Svg>
+                  <Text style={styles.searchNowButtonText}>Search</Text>
+                </View>
+              </LinearGradient>
             </TouchableOpacity>
             <TouchableOpacity
               onPress={() => setFiltersMenuVisible(true)}
@@ -2541,18 +2612,23 @@ const styles = StyleSheet.create({
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     lineHeight: 22,
   },
-  searchNowButton: {
+  searchNowButtonOuter: {
     flex: 1,
+  },
+  searchNowButtonGradientBorder: {
+    borderRadius: 32,
+    padding: 1,
+    overflow: 'hidden',
+  },
+  searchNowButtonInner: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    height: 48,
+    height: 46,
     paddingHorizontal: 21,
-    borderRadius: 32,
-    borderWidth: 1,
-    borderColor: '#B72DF2',
-    backgroundColor: 'rgba(255, 255, 255, 0.20)',
+    borderRadius: 31,
+    backgroundColor: 'rgba(255, 255, 255, 0.92)',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.09,

@@ -991,7 +991,7 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
   const [nameError, setNameError] = useState(false);
   const [locationError, setLocationError] = useState(false);
   const [pronounError, setPronounError] = useState(false);
-  const [pronoun, setPronoun] = useState<string>(initialData.pronouns || '');
+  const [pronoun, setPronoun] = useState<string>(initialData.pronouns || 'name only');
   const [isUploading, setIsUploading] = useState(false);
   
   // Modal state management - lifted to screen level for proper stacking
@@ -1480,7 +1480,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: spacing.md,
     height: 44,
     position: 'relative',
     zIndex: 1,
@@ -1866,7 +1865,8 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat-Bold',
     color: colors.textPrimary || '#333333',
-    marginBottom: 15,
+    marginBottom: 5,
+    marginTop: 20,
   },
   pronounPillsRow: {
     flexDirection: 'row',

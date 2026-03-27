@@ -14,6 +14,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 const POSTHOG_API_KEY = process.env.EXPO_PUBLIC_POSTHOG_API_KEY || '';
 const POSTHOG_HOST = process.env.EXPO_PUBLIC_POSTHOG_HOST || 'https://app.posthog.com';
+const isMVPMode = process.env.EXPO_PUBLIC_MVP_MODE === 'true';
 
 export default function App() {
   const [isNavigationReady, setIsNavigationReady] = useState(false);
@@ -45,14 +46,23 @@ export default function App() {
               debug: __DEV__, // Enable debug mode in development
             }}
           >
-            <PostHogSurveyProvider>
+            {isMVPMode ? (
+              <PostHogSurveyProvider>
+                <OnboardingProvider>
+                  <MessagingProvider>
+                    <AppContent />
+                    <StatusBar style="light" />
+                  </MessagingProvider>
+                </OnboardingProvider>
+              </PostHogSurveyProvider>
+            ) : (
               <OnboardingProvider>
                 <MessagingProvider>
                   <AppContent />
                   <StatusBar style="light" />
                 </MessagingProvider>
               </OnboardingProvider>
-            </PostHogSurveyProvider>
+            )}
           </PostHogProvider>
         ) : (
           <OnboardingProvider>
