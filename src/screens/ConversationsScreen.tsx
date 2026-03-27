@@ -306,8 +306,8 @@ export default function ConversationsScreen({
           return;
         }
         
-        // If user has sent at least one message, show bubble after a short delay
-        if (messages && messages.length > 0) {
+        // If user has sent at least one message, show bubble after a short delay (local mode only)
+        if (messages && messages.length > 0 && process.env.EXPO_PUBLIC_LOCAL_MODE === 'true') {
           setTimeout(() => {
             setShowSurveyBubble(true);
           }, 1000);
