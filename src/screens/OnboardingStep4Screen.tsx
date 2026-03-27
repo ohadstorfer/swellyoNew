@@ -1868,8 +1868,8 @@ const styles = StyleSheet.create({
     color: colors.textSecondary || '#666666',
   },
   pronounLabel: {
-    fontSize: 22,
-    lineHeight: 32,
+    fontSize: 18,
+    lineHeight: 24,
     fontWeight: '700',
     fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat-Bold',
     color: colors.textPrimary || '#333333',
@@ -1884,7 +1884,7 @@ const styles = StyleSheet.create({
   },
   pronounPill: {
     flex: 1,
-    height: 56,
+    height: 54,
     paddingVertical: 8,
     paddingHorizontal: 4,
     borderRadius: 12,
