@@ -153,7 +153,7 @@ export default function ConversationsScreen({
   const showSwellyCopyCard = (process.env.EXPO_PUBLIC_LOCAL_MODE === 'true' || __DEV__ || isDevMode) && !!onSwellyPressCopy;
   
   // Survey bubble state and animations
-  const [showSurveyBubble, setShowSurveyBubble] = useState(false);
+  const [showSurveyBubble, setShowSurveyBubble] = useState(process.env.EXPO_PUBLIC_LOCAL_MODE === 'true');
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const glowAnim = useRef(new Animated.Value(0)).current;
   
