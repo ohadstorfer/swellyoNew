@@ -160,6 +160,7 @@ export default function ConversationsScreen({
   // Arrow animation for welcome instruction
   const arrowAnim = useRef(new Animated.Value(0)).current;
   
+  
   // Use MessagingProvider for conversations state
   const { conversations, loading, refreshConversations, setCurrentConversationId, hasMoreConversations, isLoadingMoreConversations, loadMoreConversations } = useMessaging();
   const [conversationsLoaded, setConversationsLoaded] = useState(false); // Track if conversations have been loaded
