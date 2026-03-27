@@ -763,19 +763,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         }
 
         // Create the backend chat in background
-        const contextParts: string[] = [];
-        if (formData.nickname) contextParts.push(`I'm ${formData.nickname}`);
-        if (formData.age) contextParts.push(`${formData.age} years old`);
-        if (formData.location) contextParts.push(`from ${formData.location}`);
-        const boardTypeNames: { [key: number]: string } = { 0: 'shortboard', 1: 'midlength', 2: 'longboard', 3: 'soft top' };
-        if (formData.boardType !== undefined) contextParts.push(`surfing ${boardTypeNames[formData.boardType] || 'surfboard'}`);
-        if (formData.surfLevel !== undefined) {
-          const levelNames = ['beginner', 'beginner-intermediate', 'intermediate', 'intermediate-advanced', 'advanced'];
-          contextParts.push(`${levelNames[formData.surfLevel] || 'intermediate'} level`);
-        }
-        const contextMessage = contextParts.length > 0
-          ? `Hi! ${contextParts.join(', ')}. I'm looking to connect with surfers.`
-          : 'Hi! I\'m looking to connect with surfers.';
+        const contextMessage = "Hi! I'm looking to connect with surfers.";
 
         svc.startTripPlanningConversation({ message: contextMessage }).then(response => {
           console.log('Chat initialized with response:', response);
@@ -1386,18 +1374,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
 
     try {
       // Build context message same as initial mount
-      const boardTypeNames: Record<number, string> = { 0: 'shortboard', 1: 'longboard', 2: 'funboard', 3: 'fish', 4: 'gun', 5: 'SUP' };
-      const contextParts: string[] = [];
-      if (formData.age) contextParts.push(`${formData.age} years old`);
-      if (formData.country) contextParts.push(`from ${formData.country}`);
-      if (formData.boardType !== undefined) contextParts.push(`surfing ${boardTypeNames[formData.boardType] || 'surfboard'}`);
-      if (formData.surfLevel !== undefined) {
-        const levelNames = ['beginner', 'beginner-intermediate', 'intermediate', 'intermediate-advanced', 'advanced'];
-        contextParts.push(`${levelNames[formData.surfLevel] || 'intermediate'} level`);
-      }
-      const contextMessage = contextParts.length > 0
-        ? `Hi! ${contextParts.join(', ')}. I'm looking to connect with surfers.`
-        : "Hi! I'm looking to connect with surfers.";
+      const contextMessage = "Hi! I'm looking to connect with surfers.";
 
       const response = await svc.startTripPlanningConversation({ message: contextMessage });
       const newChatId = response.chat_id || null;
