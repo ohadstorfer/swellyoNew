@@ -168,7 +168,7 @@ export default function ConversationsScreen({
   const [userInfoLoading, setUserInfoLoading] = useState(false); // Track user info loading state
   const [filter, setFilter] = useState<FilterType>('all');
   // Single source of truth for header display name (derived from context)
-  const headerDisplayName = contextUser ? (contextUser.nickname || contextUser.email?.split('@')[0] || 'User') : 'User';
+  const headerDisplayName = contextUser ? (contextUser.nickname?.split(' ')[0] || contextUser.email?.split('@')[0] || 'User') : 'User';
   const [userAvatar, setUserAvatar] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(() => {
     return contextUser?.id?.toString() || null;
@@ -1214,13 +1214,24 @@ export default function ConversationsScreen({
             <HeaderSkeleton />
           ) : (
             <>
-              <ProfileImage
-                imageUrl={userAvatar}
-                name={headerDisplayName}
-                style={styles.headerAvatar}
-                showLoadingIndicator={false}
-              />
-              <Text style={styles.headerTitle}>Yo {headerDisplayName} !</Text>
+              <LinearGradient
+                colors={['#05BCD3', '#DBCDBC']}
+                locations={[0, 0.7]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.headerAvatarBorder}
+              >
+                <ProfileImage
+                  imageUrl={userAvatar}
+                  name={headerDisplayName}
+                  style={styles.headerAvatar}
+                  showLoadingIndicator={false}
+                />
+              </LinearGradient>
+              <View style={styles.headerTitleContainer}>
+                <Text style={styles.headerTitleMain}>The Lineup</Text>
+                <Text style={styles.headerTitleSub}>Yo {headerDisplayName}!</Text>
+              </View>
             </>
           )}
         </TouchableOpacity>
@@ -1632,18 +1643,36 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
   },
-  headerAvatar: {
+  headerAvatarBorder: {
     width: 40,
     height: 40,
     borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerAvatar: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     marginRight: 0,
   },
-  headerTitle: {
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter-Bold',
-    fontSize: 20,
-    fontWeight: 'bold',
+  headerTitleContainer: {
+    flexDirection: 'column' as const,
+    justifyContent: 'center',
+  },
+  headerTitleMain: {
+    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat-Bold',
+    fontSize: 18,
+    fontWeight: '700' as const,
     color: '#FFFFFF',
-    lineHeight: 28,
+    lineHeight: 24,
+  },
+  headerTitleSub: {
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter-Regular',
+    fontSize: 14,
+    fontWeight: '400' as const,
+    color: '#FFFFFF',
+    lineHeight: 18,
   },
   headerButton: {
     width: 44,
