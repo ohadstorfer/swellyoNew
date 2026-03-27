@@ -846,6 +846,12 @@ export const AppContent: React.FC = () => {
         console.log('[AppContent] ✓ showConversationLoading set to true');
       }
       
+      // If profile was opened from the WelcomeToLineupOverlay, dismiss the overlay
+      if (profileFromWelcomeOverlay) {
+        setShowWelcomeToLineupOverlay(false);
+        setProfileFromWelcomeOverlay(false);
+      }
+
       // Close profile screen to show conversation
       console.log('[AppContent] Closing profile screen...');
       setShowProfile(false);
