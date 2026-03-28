@@ -1396,7 +1396,7 @@ export default function ConversationsScreen({
 
       {/* Swelly conversation card - positioned at bottom */}
       <View style={styles.swellyCardWrapper}>
-        {/* {showSwellyCopyCard && (
+        {showSwellyCopyCard && (
           <TouchableOpacity
             style={[styles.swellyContainer, { marginBottom: 4, borderColor: '#00BCD4' }]}
             onPress={onSwellyPressCopy}
@@ -1404,11 +1404,9 @@ export default function ConversationsScreen({
             <View style={styles.conversationContent}>
               <View style={styles.swellyAvatarContainer}>
                 <View style={styles.swellyAvatarRing}>
-                  <Image
-                    source={{ uri: getImageUrl('/Ellipse 11.svg') }}
-                    style={styles.swellyEllipseBackground}
-                    resizeMode="contain"
-                  />
+                  <View style={styles.swellyEllipseBackground}>
+                    <SwellyEllipse />
+                  </View>
                   <View style={styles.swellyAvatarImageContainer}>
                     <Image
                       source={{ uri: getImageUrl('/Swelly avatar onboarding.png') }}
@@ -1419,17 +1417,17 @@ export default function ConversationsScreen({
                 </View>
               </View>
               <View style={styles.swellyTextContainer}>
-                <Text style={styles.swellyName}>Swelly Copy (Dev)</Text>
+                <Text style={styles.swellyName}>Swelly Copy-Copy (Dev)</Text>
                 <Text style={[
                   styles.swellyLastMessage,
                   Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
                 ]} numberOfLines={1}>
-                  Testing swelly-trip-planning-copy
+                  Testing swelly-trip-planning-copy-copy
                 </Text>
               </View>
             </View>
           </TouchableOpacity>
-        )} */}
+        )}
         {renderSwellyConversation()}
       </View>
 

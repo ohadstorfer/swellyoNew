@@ -71,7 +71,10 @@ interface Message {
 
 /** First question shown when starting or restarting trip planning. */
 const TRIP_PLANNING_FIRST_QUESTION_TEXT =
-  "Yo! Let’s get you connected! So what are we looking for today?"
+  "Yo! Let’s get you connected with some other surf travelers! So, what are we looking for today?"
+
+const TRIP_PLANNING_SECOND_MESSAGE_TEXT =
+  "I can connect you to surfers based on surf lvl, board type, age, origin country, and any destination they’ve surfed at."
 
 // ========== UI MESSAGES: Ordered, typed messages for perfect conversation restore ==========
 
@@ -639,7 +642,7 @@ async function findMatchingUsersV3Server(request: any, requestingUserId: string,
 }
 // === END INLINED find-matches ===
 
-const FIXED_FIRST_MESSAGE = "Yo! Let\u2019s get you connected! So what are we looking for today?"
+const FIXED_FIRST_MESSAGE = "Yo! Let\u2019s get you connected with some other surf travelers! So, what are we looking for today?"
 
 const TRIP_PLANNING_PROMPT: string = `
 You are Swelly, a smart, laid-back surfer who's the ultimate go-to buddy for all things surfing and beach lifestyle. You're a cool local friend, full of knowledge about surfing destinations, techniques, and ocean safety, with insights about waves, travel tips, and coastal culture. Your tone is relaxed, friendly, and cheerful, with just the right touch of warm, uplifting energy. A sharper edge of surf-related sarcasm keeps the vibe lively and fun, like quipping about rookies wiping out or "perfect" conditions for no-shows. You're smart, resourceful, and genuinely supportive, with responses no longer than 120 words. When offering options, you keep it short with 2-3 clear choices. Responses avoid overusing words like "chill," staying vibrant and fresh, and occasionally use casual text-style abbreviations like "ngl" or "imo". Use the words dude, bro, shredder, gnarly, stoke.
@@ -655,7 +658,7 @@ CRITICAL: Be smart and flexible when understanding user requests:
 CONVERSATION FLOW:
 
 STEP 1 - ENTRY POINT:
-ALWAYS start with this exact question in your FIRST response — and use ONLY this sentence, no additions: "Yo! Let’s get you connected! So what are we looking for today?" Do NOT add any other sentence after it (e.g. do not add "Do you want surfers who've surfed a specific destination..." or "or just surfers that match your vibe...").
+ALWAYS start with this exact question in your FIRST response — and use ONLY this sentence, no additions: "Yo! Let’s get you connected with some other surf travelers! So, what are we looking for today?" Do NOT add any other sentence after it (e.g. do not add "Do you want surfers who’ve surfed a specific destination..." or "or just surfers that match your vibe...").
 
 When the first message in the conversation (new_chat) is vague or just a greeting, respond with STEP 1's question only (the single sentence above). If the user's first message clearly asks for surfers or matches and includes criteria (e.g. origin, board type, level) and/or a destination, treat it as their real request: extract what you can (destination if mentioned, criteria if mentioned) and only ask for what is missing (e.g. if they did not mention a destination, ask: "Which destination do you want to connect with surfers who've been there? (e.g. El Salvador, Costa Rica)"). Do not repeat STEP 1 when they already gave a direct request.
 
@@ -836,10 +839,33 @@ You MUST always return a JSON object with this structure (NO EXCEPTIONS):
     "destination_known": true | false,
     "purpose": { "purpose_type": "connect_traveler", "specific_topics": [] },
     "user_context": {},
+    "queryFilters": { // Include when user specified origin, board type, level, or age
+      "country_from": ["Israel"],        // array of official country names
+      "surfboard_type": ["shortboard"],  // array: shortboard, mid_length, longboard, soft_top
+      "surf_level_category": ["advanced", "pro"], // string or array: beginner, intermediate, advanced, pro
+      "age_min": 20,                     // number
+      "age_max": 30                      // number
+    },
+    "filterEditIntent": {},  // ONLY when editing existing filters. Per key: "add", "replace", or "clear". See FILTER EDIT rules below.
+    "intentUnclear": [],     // ONLY when editing existing filters. Array of filter keys where you cannot tell if user means add or replace.
     "search_summary": "Short casual summary of the search followed by a newline and a question asking if the user wants to search now or tweak filters first (REQUIRED when is_finished true)",
     "next_action": "search" | "edit" | "clarify" | null
   }
 }
+
+QUERYFILTERS RULES:
+- age: For a specific age X (e.g. "25 years old") → age_min: X, age_max: X. For ranges (e.g. "18-30") → age_min: 18, age_max: 30. For "over X" → age_min: X. For "under X" → age_max: X. For "around my age" use the user's profile age ±5. CRITICAL: use the exact numbers the user says — do NOT round.
+- country_from: Array of official country names. Correct typos (e.g. "Isreal" → "Israel", "Brasil" → "Brazil").
+- surfboard_type: Array of exact enum values: "shortboard", "mid_length", "longboard", "soft_top".
+- surf_level_category: When user asks for "advanced", ALWAYS include "pro": ["advanced", "pro"].
+
+FILTER EDIT RULES (only when system message says user is editing existing filters):
+- For each filter the user mentions in their message, set filterEditIntent with the key and one of:
+  - "add": user wants to ADD to existing (e.g., "also longboard", "add Indonesia too")
+  - "replace": user wants to REPLACE existing (e.g., "only shortboard", "change to 25-30", "switch to beginner")
+  - "clear": user wants to REMOVE this filter entirely (e.g., "remove age filter", "any board", "no board preference")
+- Only include keys the user actually mentioned. Do not include keys they didn't mention.
+- If you genuinely cannot tell whether the user means add or replace for a filter (e.g., user has longboard and says "shortboard" without "also" or "only"), put that key in the intentUnclear array.
 
 CRITICAL RULES:
 - ALWAYS return valid JSON. NEVER return plain text.
@@ -885,7 +911,7 @@ function buildCurrentDataSystemMessage(currentData: {
   area: string | null;
   queryFilters: Record<string, unknown> | null;
 }): string {
-  return `Current data for this turn (authoritative): ${JSON.stringify(currentData)}.\n\nCRITICAL: Do not change or add any filter, destination, area, or other criterion that is not explicitly mentioned in the user's current message below. Only update or add what the user asked for in this message. Leave everything else unchanged from the current data.`;
+  return `Current data for this turn: ${JSON.stringify(currentData)}.\n\nRules for updating filters:\n- If the user mentions a filter (age, country, board type, surf level, destination, etc.), UPDATE it in queryFilters to match exactly what they said.\n- If the user does NOT mention a filter, KEEP it unchanged from current data.\n- If the user says to remove a filter, delete that key from queryFilters.\n- CRITICAL: When the user gives specific numbers (e.g. "22 to 29"), use those exact numbers in queryFilters. Do not round or infer a different range.`;
 }
 
 async function callOpenAI(messages: Message[]): Promise<string> {
@@ -1222,97 +1248,7 @@ function ensureResponseDataQueryFilters(data: any): any {
   return { ...data, queryFilters: q }
 }
 
-/**
- * Second-layer check: ensure every filter described in the text is correctly represented in the JSON.
- * Calls a small GPT request to derive corrected queryFilters (and destination/area if relevant) from the text and current data.
- * Returns null on any error or invalid output (caller keeps current filters).
- */
-async function reconcileQueryFiltersFromText(
-  textMessage: string,
-  searchSummary: string | null | undefined,
-  currentData: { queryFilters?: any; destination_country?: string; area?: string },
-  userAge?: number,
-): Promise<{ queryFilters?: any; destination_country?: string; area?: string } | null> {
-  try {
-    const text = [textMessage?.trim(), searchSummary?.trim()].filter(Boolean).join('\n')
-    if (!text || text.length < 10) return null
-    if (!OPENAI_API_KEY) return null
-
-    const currentJson = JSON.stringify({
-      queryFilters: currentData.queryFilters ?? null,
-      destination_country: currentData.destination_country ?? null,
-      area: currentData.area ?? null,
-    })
-    const userAgeLine = userAge != null ? `\nCurrent user age (use for "around my age"): ${userAge}. For "around my age" set age_min: ${Math.max(0, userAge - 5)}, age_max: ${userAge + 5}.` : ''
-
-    const systemPrompt = `You are a filter checker. You will receive the exact text the user will see, and the current JSON for queryFilters and destination. Your job is to output a single JSON object that correctly represents filter criteria mentioned in the text.
-
-Rules:
-- queryFilters: object with optional keys: country_from (array of official country names), age_min (number), age_max (number), surfboard_type (array: shortboard, mid_length, longboard, soft_top), surf_level_category (string or array: beginner, intermediate, advanced, pro).
-- Use official country names (e.g. "United States" not "USA", "Israel" not "Israeli" for country_from).
-- For age: "under 20" or "13-19" → age_min: 13, age_max: 19; "over 30" → age_min: 30; single age (e.g. "25") → age_min: X, age_max: X (same number); "around my age" with user age given → age_min: age-5, age_max: age+5.
-- If the text describes a destination, include destination_country and optionally area.
-- Only include in queryFilters keys that are already present in the Current JSON. Do not add new keys. Only fix or fill values for existing keys so the JSON matches the text. If the text mentions a criterion that has no key in Current JSON, omit it from your output.
-- Output ONLY a valid JSON object with keys queryFilters (object), and optionally destination_country (string) and area (string). No markdown, no explanation.`
-    const userPrompt = `Text the user will see:\n${text}\n\nCurrent JSON:\n${currentJson}${userAgeLine}\n\nOutput the complete corrected JSON object (queryFilters and destination_country/area if applicable). Return only valid JSON.`
-
-    const currentDataForTurn = {
-      destination_country: currentData.destination_country ?? null,
-      area: currentData.area ?? null,
-      queryFilters: currentData.queryFilters != null && typeof currentData.queryFilters === 'object' ? currentData.queryFilters as Record<string, unknown> : null,
-    }
-    const currentDataSystemMessage = buildCurrentDataSystemMessage(currentDataForTurn)
-
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${OPENAI_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [
-          { role: 'system', content: currentDataSystemMessage },
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
-        temperature: 0.2,
-        max_tokens: 500,
-      }),
-    })
-    if (!response.ok) {
-      console.warn('[reconcileQueryFiltersFromText] OpenAI request failed:', response.status)
-      return null
-    }
-    const data = await response.json()
-    let raw = data.choices?.[0]?.message?.content?.trim() || ''
-    if (!raw) return null
-    const codeBlock = raw.match(/```(?:json)?\s*([\s\S]*?)```/)
-    if (codeBlock) raw = codeBlock[1].trim()
-    const parsed = JSON.parse(raw)
-    if (!parsed || typeof parsed !== 'object') return null
-    const hasQueryFilters = parsed.queryFilters && typeof parsed.queryFilters === 'object'
-    const hasDestination = parsed.destination_country && String(parsed.destination_country).trim()
-    if (!hasQueryFilters && !hasDestination) return null
-
-    const result: { queryFilters?: any; destination_country?: string; area?: string } = {}
-    if (hasQueryFilters) {
-      result.queryFilters = await normalizeQueryFilters(parsed.queryFilters)
-    }
-    if (hasDestination) {
-      result.destination_country = String(parsed.destination_country).trim()
-      result.area = parsed.area != null ? String(parsed.area).trim() : undefined
-      const forNorm = { destination_country: result.destination_country, area: result.area || null }
-      normalizeUSDestination(forNorm)
-      result.destination_country = forNorm.destination_country ?? result.destination_country
-      result.area = forNorm.area ?? result.area
-    }
-    return result
-  } catch (e) {
-    console.warn('[reconcileQueryFiltersFromText] Error:', e)
-    return null
-  }
-}
+// reconcileQueryFiltersFromText() — REMOVED: no longer needed, main GPT handles all filter extraction
 
 /**
  * Call GPT for a short acknowledgment after the user removes a filter in the UI.
@@ -1472,421 +1408,8 @@ function mergeDestinations(existing: string | null | undefined, ...sources: (str
   return unique.length > 0 ? unique.join(', ') : null
 }
 
-/**
- * Use LLM to convert user's natural language request into Supabase query filters.
- * When existingQueryFilters is provided (edit mode), the LLM must also return filterEditIntent and intentUnclear.
- */
-async function extractQueryFilters(
-  userMessage: string,
-  destinationCountry: string,
-  conversationHistory: Message[],
-  existingQueryFilters?: any,
-  userProfile?: { age?: number } | null
-): Promise<{
-  supabaseFilters: {
-    country_from?: string[];
-    age_min?: number;
-    age_max?: number;
-    surfboard_type?: string[]; // Valid values: 'shortboard', 'mid_length', 'longboard', 'soft_top'
-    surf_level_min?: number; // Legacy: numeric level (1-5) - prefer surf_level_category
-    surf_level_max?: number; // Legacy: numeric level (1-5) - prefer surf_level_category
-    surf_level_category?: string | string[]; // Preferred: 'beginner', 'intermediate', 'advanced', 'pro' - can be array for multiple levels
-    destination_days_min?: { destination: string; min_days: number };
-  };
-  unmappableCriteria?: string[]; // Criteria that user mentioned but can't be mapped to database fields
-  explanation: string;
-  filterEditIntent?: Record<string, 'add' | 'replace' | 'clear'>; // Only when existingQueryFilters provided
-  intentUnclear?: string[]; // Only when existingQueryFilters provided and intent is ambiguous
-}> {
-  const isEditingMode = existingQueryFilters != null && typeof existingQueryFilters === 'object'
-  const userAgeLine = userProfile?.age != null
-    ? `Current user's age from profile: ${userProfile.age}. When the user says "around my age" or "similar age", set age_min: ${Math.max(0, userProfile.age - 5)}, age_max: ${userProfile.age + 5} (or a sensible range).\n`
-    : ''
-
-  const editingModePrompt = isEditingMode
-    ? `
-EDITING MODE – You are editing existing search filters. Current filters: ${JSON.stringify(existingQueryFilters)}
-
-Interpret the user's message per filter category:
-- ADD (keep existing + add): "also X", "add X", "and X" → output new value(s), set filterEditIntent for that key to "add".
-- REPLACE (only this): "only X", "just X", "change to X", "X only", "I meant X" → output new value(s), set filterEditIntent to "replace".
-- CLEAR (remove category): "any X", "no X preference", "don't care", "all X", "remove X" → output [] or omit key, set filterEditIntent to "clear".
-
-If the user names a value for a category that already has values and does NOT use clear add/replace/clear wording, set that category in "intentUnclear" and do not assume add or replace.
-
-When the user adds another "surfed in X" / "add destination X" (e.g. "add someone who surfed Indonesia"), return that country in destination_days_min.destination (use a sensible min_days if inferrable, else 1) so the backend can merge it with the existing destination.
-
-Your response MUST include:
-- "filterEditIntent": object with one key per category you touched (e.g. surfboard_type, surf_level_category, country_from): value "add" | "replace" | "clear".
-- "intentUnclear": array of category keys (e.g. ["surfboard_type"]) when intent is ambiguous; otherwise [].
-
-Examples:
-- Current surfboard_type: ["longboard"]. User: "Also shortboard" → add → surfboard_type ["longboard","shortboard"], filterEditIntent.surfboard_type "add".
-- Current surfboard_type: ["longboard"]. User: "Only shortboard" → replace → surfboard_type ["shortboard"], filterEditIntent.surfboard_type "replace".
-- Current surfboard_type: ["longboard"]. User: "Any board" → clear → omit surfboard_type or [], filterEditIntent.surfboard_type "clear".
-- Current surfboard_type: ["longboard"]. User: "Shortboard" (no also/only) → intentUnclear: ["surfboard_type"].
-
-`
-    : ''
-
-  const schemaPrompt = `${editingModePrompt}You are a database query expert. Analyze the user's request and determine which Supabase filters to apply. Only extract criteria explicitly mentioned in the current user message; do not infer or add criteria from elsewhere.
-
-AVAILABLE SURFERS TABLE FIELDS (ONLY THESE CAN BE FILTERED):
-- country_from (string): Country of origin
-  ⚠️ CRITICAL: country_from means WHERE THE SURFER IS FROM (origin country), NOT where they want to go!
-  ⚠️ ONLY set country_from if user explicitly says they want surfers FROM a specific country (e.g., "from USA", "must be from Israel")
-  ⚠️ DO NOT set country_from just because the destination is in that country (e.g., if user wants to go to California/USA, do NOT set country_from)
-  ⚠️ CRITICAL: You MUST use EXACT country names from the official list below. Common mappings:
-    - "USA" / "US" / "U.S.A" / "United States of America" / "America" → "United States"
-    - "UK" / "United Kingdom" / "England" / "Great Britain" / "Britain" → "United Kingdom"
-    - "Isreal" (typo) → "Israel"
-    - "Brasil" → "Brazil"
-    - "Philippins" / "Phillipines" → "Philippines"
-    - "Holland" → "Netherlands"
-    - "UAE" / "United Arab Emirates" → "United Arab Emirates"
-    - "South Korea" / "Korea" → "South Korea"
-  ⚠️ OFFICIAL COUNTRY LIST (use EXACT names from this list - case-sensitive):
-${OFFICIAL_COUNTRIES.map(c => `    - "${c}"`).join('\n')}
-  ⚠️ US DESTINATION: When user wants to go to a US state, use destination_country: "United States - StateName" (e.g. "United States - California", "United States - Hawaii"). Set area only if they mention a specific place within that state (e.g. "San Diego, California" → destination_country: "United States - California", area: "San Diego").
-  ⚠️ Examples:
-    - User says "I want to go to California" → destination_country: "United States - California", area: null, country_from: NOT SET (user didn't say they want surfers FROM United States)
-    - User says "San Diego, California" → destination_country: "United States - California", area: "San Diego", country_from: NOT SET
-    - User says "I want surfers from the USA" → country_from: ["United States"] (normalized from "USA" to "United States")
-    - User says "I want to go to Costa Rica and connect with surfers from Israel" → destination_country: "Costa Rica", country_from: ["Israel"]
-- age_min (number), age_max (number): Use BOTH for any age filter. For a single specific age X (e.g. "25 years old", "someone who is 25") set age_min: X, age_max: X. For ranges use age_min and age_max (e.g. 18-30 → age_min: 18, age_max: 30).
-- surfboard_type (enum): 'shortboard', 'mid_length', 'longboard', 'soft_top' (valid values in database)
-  * "midlength" or "mid length" → 'mid_length'
-  * "longboard" or "long board" → 'longboard'
-  * "shortboard" or "short board" → 'shortboard'
-  * "soft top" or "softtop" → 'soft_top'
-- surf_level (integer): 1-5 (1=beginner, 5=expert) - LEGACY: Use surf_level_category instead
-- surf_level_category (text or array of text): 'beginner', 'intermediate', 'advanced', or 'pro' - PREFERRED for filtering
-  * Can be a single string: "advanced"
-  * Can be an array for multiple levels: ["intermediate", "advanced"]
-  * CRITICAL: When user asks for "advanced", ALWAYS include "pro": ["advanced", "pro"]
-- surf_level_description (text): Board-specific description (e.g., "Snapping", "Cross Stepping") - for display only
-- destinations_array (jsonb): Array of {country: string, area: string[], time_in_days: number, time_in_text?: string}
-
-⚠️ CRITICAL: When user mentions surf level by category (e.g., "intermediate", "advanced", "beginner", "pro"):
-- ALWAYS use surf_level_category (NOT numeric surf_level_min/max)
-- surf_level_category can be a STRING (single level) or ARRAY (multiple levels)
-- If user mentions multiple levels (e.g., "intermediate-advanced", "beginner to intermediate"), use an ARRAY: ["intermediate", "advanced"]
-- CRITICAL RULE: When user asks for "advanced" surfers, ALWAYS include "pro" as well: ["advanced", "pro"]
-- If user says "intermediate surfer" WITHOUT specifying board type, you MUST ask which board type (shortboard, longboard, mid-length)
-- Category-based filtering REQUIRES surfboard_type to be specified
-- Examples:
-  * "intermediate surfer" → surf_level_category: "intermediate", surfboard_type: ASK USER (required)
-  * "advanced shortboarder" → surf_level_category: ["advanced", "pro"], surfboard_type: ["shortboard"] (ALWAYS include "pro" with "advanced")
-  * "intermediate-advanced surfer" → surf_level_category: ["intermediate", "advanced", "pro"], surfboard_type: ASK USER (ALWAYS include "pro" when "advanced" is mentioned)
-  * "beginner longboarder" → surf_level_category: "beginner", surfboard_type: ["longboard"]
-
-IMPORTANT: Handle typos, general terms, and variations intelligently:
-
-GENERAL CATEGORIES (expand to specific countries - use EXACT names from official list):
-- "European" / "uropean" / "european" / "any European country" / "from Europe" → Include ALL (use exact names): ["France", "Spain", "Italy", "Germany", "United Kingdom", "Netherlands", "Sweden", "Norway", "Denmark", "Finland", "Ireland", "Portugal", "Greece", "Austria", "Belgium", "Switzerland", "Poland", "Czech Republic", "Hungary", "Romania", "Croatia", "Slovenia"]
-- "Asian" / "from Asia" / "any Asian country" → Include (use exact names): ["Japan", "China", "South Korea", "Thailand", "Indonesia", "Philippines", "India", "Sri Lanka", "Malaysia", "Vietnam"]
-- "Latin American" / "from Latin America" / "South American" → Include (use exact names): ["Mexico", "Brazil", "Costa Rica", "Nicaragua", "El Salvador", "Panama", "Peru", "Chile", "Argentina", "Ecuador"]
-- "Central American" / "from Central America" → Include (use exact names): ["Costa Rica", "Nicaragua", "El Salvador", "Panama", "Guatemala", "Belize", "Honduras"]
-
-TYPO HANDLING (be smart about common mistakes - normalize to official country names):
-- "Philippins" / "Philippines" / "Phillipines" → "Philippines"
-- "uropean" / "european" / "European" → Expand to all European countries (use exact names from official list)
-- "US" / "United States" / "U.S.A" / "USA" / "America" / "United States of America" → "United States" (MUST use exact name from official list)
-- "Isreal" (typo) → "Israel"
-- "Brasil" → "Brazil"
-- "UK" / "United Kingdom" / "England" / "Great Britain" / "Britain" → "United Kingdom"
-- "Holland" → "Netherlands"
-- "UAE" / "United Arab Emirates" → "United Arab Emirates"
-- "Korea" / "South Korea" → "South Korea"
-
-LOGICAL INFERENCE:
-${userAgeLine}- If user says "similar age" and you know their age (e.g., 25), infer ±5 years → age_min: 20, age_max: 30
-- If user says a specific age (e.g. "25", "someone who is 25", "25 years old") → age_min: 25, age_max: 25
-- If user says "around my age", infer ±5 years from their age
-- If user says "young" or "older", infer reasonable age ranges based on context
-- If user says "must be shortboarders" or "they will use shortboard" → surfboard_type: ["shortboard"]
-- If user says "midlength" or "mid length" or "midlength board" → surfboard_type: ["mid_length"]
-- If user says "longboard" or "long board" or "longboarders" → surfboard_type: ["longboard"]
-- If user says "soft top" or "softtop" → surfboard_type: ["soft_top"]
-- If user mentions multiple board types (e.g., "longboard/midlength") → surfboard_type: ["longboard", "mid_length"]
-- If user says "intermediate" or "advanced" or "beginner" or "pro":
-  * Use surf_level_category (NOT numeric ranges)
-  * surf_level_category can be a STRING (single level) or ARRAY (multiple levels)
-  * If user mentions multiple levels (e.g., "intermediate-advanced", "beginner to intermediate"), use an ARRAY
-  * CRITICAL RULE: When user asks for "advanced" surfers, ALWAYS include "pro" as well
-    - "advanced" → surf_level_category: ["advanced", "pro"]
-    - "intermediate-advanced" → surf_level_category: ["intermediate", "advanced", "pro"]
-    - "advanced-pro" → surf_level_category: ["advanced", "pro"]
-  * If board type is NOT specified, you MUST ask the user which board type
-  * Category-based filtering requires both surf_level_category AND surfboard_type
-  * Examples:
-    - "intermediate" → surf_level_category: "intermediate", surfboard_type: ASK USER
-    - "advanced shortboarder" → surf_level_category: ["advanced", "pro"], surfboard_type: ["shortboard"] (ALWAYS include "pro")
-    - "intermediate-advanced surfer" → surf_level_category: ["intermediate", "advanced", "pro"], surfboard_type: ASK USER (ALWAYS include "pro" when "advanced" is mentioned)
-    - "beginner" → surf_level_category: "beginner", surfboard_type: ASK USER
-
-IMPORTANT: If the user mentions criteria that CANNOT be mapped to any of the above fields (e.g., physical appearance like "blond", "tall", "blue eyes", personal details like "married", "has kids", etc.), you MUST:
-1. Include them in "unmappableCriteria" array
-2. Leave them out of "supabaseFilters"
-3. Explain in "explanation" what couldn't be filtered
-
-USER REQUEST: "${userMessage}"
-DESTINATION: "${destinationCountry}"
-
-⚠️ CRITICAL REMINDER: The DESTINATION above is where the USER WANTS TO GO, NOT where they want surfers to be FROM!
-- If destination is "USA" or "California", this means the user wants to GO TO the USA, NOT that they want surfers FROM the USA
-- ONLY set country_from in supabaseFilters if the user EXPLICITLY says they want surfers FROM a specific country
-- If user only mentions a destination (e.g., "California", "USA", "Costa Rica"), do NOT set country_from - leave it out of supabaseFilters
-
-Extract filters from the user's request. Return ONLY valid JSON in this format (NO COMMENTS - JSON.parse() cannot handle comments):
-{
-  "supabaseFilters": {
-    "country_from": ["Israel", "United States"],
-    "age_min": 18,
-    "age_max": 30,
-    "surfboard_type": ["longboard"],
-    "surf_level_category": ["advanced", "pro"],
-    "destination_days_min": {
-      "destination": "Costa Rica",
-      "min_days": 30
-    }
-  },
-  "unmappableCriteria": ["blond", "tall"],
-  "explanation": "Brief explanation of what filters were extracted and what couldn't be mapped"${isEditingMode ? `,
-  "filterEditIntent": { "surfboard_type": "add" },
-  "intentUnclear": []` : ''}
-}
-
-⚠️ CRITICAL: For country_from, ALWAYS use EXACT names from the official list above. Normalize common variations:
-- "USA" / "US" / "U.S.A" / "America" → "United States"
-- "UK" / "England" / "Britain" → "United Kingdom"
-- Any other variation → Find the matching exact name from the official list
-
-IMPORTANT: The JSON above is an example format. When you return your response:
-- DO NOT include any comments (no // or /* */)
-- DO NOT include explanatory text outside the JSON
-- Return ONLY the JSON object, nothing else
-
-CRITICAL RULES - BE SMART AND FLEXIBLE:
-
-0. ⚠️ CRITICAL: DO NOT CONFUSE destination_country WITH country_from ⚠️
-   - destination_country = WHERE THE USER WANTS TO GO. For US states use "United States - StateName" (e.g. "California" → destination_country: "United States - California", area: null)
-   - country_from = WHERE THE SURFER IS FROM (origin country) - ONLY set if user explicitly requests it
-   - If user says "I want to go to California" → destination_country: "United States - California", area: null, country_from: NOT SET
-   - If user says "I want surfers from the USA" → country_from: ["United States"]
-   - If user says "I want to go to Costa Rica and connect with surfers from Israel" → destination_country: "Costa Rica", country_from: ["Israel"]
-   - NEVER automatically set country_from based on destination_country - they are completely different things!
-
-1. HANDLE GENERAL TERMS (expand to specific countries - use EXACT names from official list):
-   - "European" / "uropean" / "european" / "any European country" / "from Europe" → Expand to ALL (use exact names): ["France", "Spain", "Italy", "Germany", "United Kingdom", "Netherlands", "Sweden", "Norway", "Denmark", "Finland", "Ireland", "Portugal", "Greece", "Austria", "Belgium", "Switzerland", "Poland", "Czech Republic", "Hungary", "Romania", "Croatia", "Slovenia"]
-   - "Asian" / "from Asia" / "any Asian country" → Expand to (use exact names): ["Japan", "China", "South Korea", "Thailand", "Indonesia", "Philippines", "India", "Sri Lanka", "Malaysia", "Vietnam"]
-   - "Latin American" / "from Latin America" / "South American" → Expand to (use exact names): ["Mexico", "Brazil", "Costa Rica", "Nicaragua", "El Salvador", "Panama", "Peru", "Chile", "Argentina", "Ecuador"]
-   - "Central American" / "from Central America" → Expand to (use exact names): ["Costa Rica", "Nicaragua", "El Salvador", "Panama", "Guatemala", "Belize", "Honduras"]
-
-2. HANDLE TYPOS INTELLIGENTLY (normalize to EXACT official country names):
-   - "uropean" / "european" / "European" → All mean the same → expand to all European countries (use exact names from official list)
-   - "Philippins" / "Philippines" / "Phillipines" → All mean "Philippines" (exact name from official list)
-   - "Isreal" (typo) → "Israel" (exact name from official list)
-   - "Brasil" → "Brazil" (exact name from official list)
-   - "US" / "United States" / "U.S.A" / "USA" / "America" / "United States of America" → "United States" (MUST use exact name from official list)
-   - "UK" / "United Kingdom" / "England" / "Great Britain" / "Britain" → "United Kingdom" (exact name from official list)
-   - "Holland" → "Netherlands" (exact name from official list)
-   - "UAE" / "United Arab Emirates" → "United Arab Emirates" (exact name from official list)
-   - "Korea" / "South Korea" → "South Korea" (exact name from official list)
-   - If you see a typo but the intent is clear, correct it to the EXACT name from the official list above
-
-3. INFER INTENT FROM CONTEXT:
-   - "similar age" + user is 25 → age_min: 20, age_max: 30 (±5 years)
-   - "around my age" + user is 25 → age_min: 20, age_max: 30 (±5 years)
-   - "young" → infer age_max: 30
-   - "older" → infer age_min: 35
-   - "must be shortboarders" / "they will use shortboard" → surfboard_type: ["shortboard"]
-   - "intermediate" → surf_level_category: "intermediate" (REQUIRES surfboard_type to be specified)
-   - "advanced" → surf_level_category: ["advanced", "pro"] (ALWAYS include "pro" when "advanced" is mentioned, REQUIRES surfboard_type)
-   - "intermediate-advanced" → surf_level_category: ["intermediate", "advanced", "pro"] (ALWAYS include "pro" when "advanced" is mentioned)
-   - "beginner" → surf_level_category: "beginner" (REQUIRES surfboard_type to be specified)
-   - "pro" → surf_level_category: "pro" (REQUIRES surfboard_type to be specified)
-
-4. NORMALIZATION RULES:
-   - Specific age: "25 years old" or "someone who is 25" or "age 25" → age_min: 25, age_max: 25
-   - Age ranges: "18-30" or "between 18 and 30" → age_min: 18, age_max: 30
-   - Age ranges: "over 25" or "above 25" → age_min: 25
-   - Age ranges: "under 30" or "below 30" → age_max: 30
-   - Destination days: "more than a month" → min_days: 30
-   - Destination days: "more than 2 months" → min_days: 60
-   - Surfboard types: match to enum exactly ('shortboard', 'longboard', 'funboard', 'fish', 'hybrid', 'gun', 'soft-top')
-
-5. UNMAPPABLE CRITERIA:
-   - If user mentions physical appearance (hair color, height, eye color, etc.), personal details (marital status, children, etc.), or other criteria NOT in available fields, add them to "unmappableCriteria"
-   - Examples: "blond", "tall", "blue eyes", "married", "has kids", "speaks Spanish", "has a car", "tattoos"
-   - Still extract what you CAN filter by, even if some criteria can't be mapped
-
-6. OUTPUT FORMAT:
-   - Return valid JSON only, no markdown, no code blocks
-   - DO NOT include comments in JSON (no // or /* */ comments)
-   - The JSON must be parseable by JSON.parse() without any preprocessing
-   - Be smart and infer intent - don't be overly literal if the user's intent is clear
-`
-
-  const messages = [
-    { role: 'system', content: schemaPrompt },
-    ...conversationHistory.slice(-5), // Last 5 messages for context
-    { role: 'user', content: userMessage }
-  ] as Message[]
-
-  let llmResponse = ''
-  try {
-    // Use gpt-4o-mini for filter extraction (faster, sufficient for structured JSON) to reduce latency
-    if (!OPENAI_API_KEY) {
-      throw new Error('OPENAI_API_KEY is not set')
-    }
-    const extractRes = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${OPENAI_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages,
-        temperature: 0.2,
-        max_tokens: 600,
-        response_format: { type: 'json_object' },
-      }),
-    })
-    if (!extractRes.ok) {
-      const errText = await extractRes.text()
-      throw new Error(`OpenAI API error: ${extractRes.status} - ${errText}`)
-    }
-    const extractData = await extractRes.json()
-    llmResponse = extractData.choices?.[0]?.message?.content || ''
-    
-    // Parse JSON response
-    let jsonString = llmResponse
-    const jsonMatch = llmResponse.match(/```json\s*([\s\S]*?)\s*```/) || llmResponse.match(/```\s*([\s\S]*?)\s*```/)
-    if (jsonMatch) {
-      jsonString = jsonMatch[1]
-    }
-    
-    // Try to extract JSON object
-    const jsonObjMatch = jsonString.match(/\{[\s\S]*\}/)
-    if (jsonObjMatch) {
-      jsonString = jsonObjMatch[0]
-    }
-    
-    // Remove single-line comments (// ...) and multi-line comments (/* ... */)
-    // This handles cases where the LLM includes comments in JSON
-    jsonString = jsonString
-      .replace(/\/\/.*$/gm, '') // Remove single-line comments
-      .replace(/\/\*[\s\S]*?\*\//g, '') // Remove multi-line comments
-    
-    const extracted = JSON.parse(jsonString)
-    
-    // Validate structure
-    if (!extracted.supabaseFilters) {
-      extracted.supabaseFilters = {}
-    }
-    if (!extracted.unmappableCriteria) {
-      extracted.unmappableCriteria = []
-    }
-    
-    // CRITICAL RULE: If "advanced" is in surf_level_category, ALWAYS include "pro"
-    if (extracted.supabaseFilters.surf_level_category) {
-      const categories = Array.isArray(extracted.supabaseFilters.surf_level_category)
-        ? extracted.supabaseFilters.surf_level_category
-        : [extracted.supabaseFilters.surf_level_category];
-      
-      // Check if "advanced" is in the array
-      const hasAdvanced = categories.some((cat: string) => 
-        cat && cat.toLowerCase() === 'advanced'
-      );
-      
-      // Check if "pro" is already in the array
-      const hasPro = categories.some((cat: string) => 
-        cat && cat.toLowerCase() === 'pro'
-      );
-      
-      // If "advanced" is present but "pro" is not, add "pro"
-      if (hasAdvanced && !hasPro) {
-        categories.push('pro');
-        extracted.supabaseFilters.surf_level_category = categories.length === 1 
-          ? categories[0] 
-          : categories;
-        console.log('✅ Added "pro" to surf_level_category because "advanced" was present');
-      } else if (hasAdvanced && hasPro) {
-        // Ensure it's an array if both are present
-        extracted.supabaseFilters.surf_level_category = categories.length === 1 
-          ? categories[0] 
-          : categories;
-      }
-    }
-    
-    // Normalize country_from array to ensure all country names match official list
-    if (extracted.supabaseFilters.country_from && Array.isArray(extracted.supabaseFilters.country_from)) {
-      const normalizedCountries = await Promise.all(
-        extracted.supabaseFilters.country_from.map(async (country: string) => {
-          if (!country || typeof country !== 'string') {
-            return null;
-          }
-
-          // First validate directly against official list
-          if (validateCountryName(country)) {
-            // Country is valid, use it as-is
-            console.log(`✅ Country "${country}" is valid, using as-is`);
-            return country;
-          }
-          
-          // Country not in list, ask AI to correct it
-          console.log(`⚠️ Country "${country}" not found in official list, asking AI to correct...`);
-          const corrected = await correctCountryNameWithAI(country);
-          
-          // Validate the AI-corrected result
-          if (corrected && validateCountryName(corrected)) {
-            return corrected;
-          } else {
-            console.warn(`❌ Country "${country}" couldn't be corrected by AI, removing from filters`);
-            return null;
-          }
-        })
-      );
-      
-      // Filter out null values and remove duplicates
-      const validCountries = normalizedCountries.filter(
-        (country): country is string => country !== null
-      );
-      const uniqueCountries = Array.from(new Set(validCountries));
-      
-      if (uniqueCountries.length > 0) {
-        extracted.supabaseFilters.country_from = uniqueCountries;
-        console.log(`✅ Final normalized country_from: ${JSON.stringify(uniqueCountries)}`);
-      } else {
-        // Remove country_from if all countries were invalid
-        delete extracted.supabaseFilters.country_from;
-        console.warn(`⚠️ All countries in country_from were invalid, removed filter`);
-      }
-    }
-    
-    if (isEditingMode) {
-      if (!extracted.filterEditIntent || typeof extracted.filterEditIntent !== 'object') extracted.filterEditIntent = {}
-      if (!Array.isArray(extracted.intentUnclear)) extracted.intentUnclear = []
-    }
-    console.log('✅ Extracted query filters:', JSON.stringify(extracted, null, 2))
-    if (extracted.unmappableCriteria && extracted.unmappableCriteria.length > 0) {
-      console.log('⚠️ Unmappable criteria detected:', extracted.unmappableCriteria)
-    }
-    return extracted
-  } catch (error) {
-    console.error('Error extracting query filters:', error)
-    console.log('Raw LLM response:', llmResponse)
-    // Return empty filters on error
-    return {
-      supabaseFilters: {},
-      unmappableCriteria: [],
-      explanation: 'Failed to extract filters from user message',
-      ...(isEditingMode ? { filterEditIntent: {}, intentUnclear: [] } : {})
-    }
-  }
-}
+// extractQueryFilters() — REMOVED: main GPT handles all filter extraction now
+// The function below (saveChatHistory) is the next active function.
 
 /**
  * Save chat history to database
@@ -2107,6 +1630,8 @@ ${getPronounInstructions(userProfile.pronoun)}`
         { role: 'system', content: systemPrompt },
         // First message: if user already gave a clear request (surfers/matches + criteria or destination), treat it as real request and only ask for what is missing (e.g. destination). Otherwise use STEP 1.
         { role: 'system', content: 'This is the FIRST message in a NEW conversation. If the user\'s message clearly asks for surfers or matches and includes criteria (e.g. "Israeli", "shortboard", "advanced") and/or a destination (e.g. "El Salvador"), treat it as their real request: extract destination if mentioned, extract criteria if mentioned, and only ask for what is missing (e.g. "Which destination do you want to connect with surfers who\'ve been there? (e.g. El Salvador, Costa Rica)"). If their message is vague or just a greeting, respond with ONLY this exact sentence and nothing else: "Yo! Let\'s get you connected! So what are we looking for today?" Do not add any other sentence or question after it.' },
+        { role: 'assistant', content: FIXED_FIRST_MESSAGE },
+        { role: 'assistant', content: TRIP_PLANNING_SECOND_MESSAGE_TEXT },
         { role: 'user', content: body.message }
       ]
 
@@ -2193,46 +1718,9 @@ ${getPronounInstructions(userProfile.pronoun)}`
           normalizeUSDestination(tripPlanningData)
         }
         
-        // Second-layer check: reconcile text vs JSON filters (new_chat)
-        const newChatHasFilters = tripPlanningData && (() => {
-          const q = tripPlanningData.queryFilters
-          const hasQF = q && typeof q === 'object' && Object.keys(q).length > 0
-          const hasDest = tripPlanningData.destination_country && String(tripPlanningData.destination_country).trim()
-          return hasQF || !!hasDest
-        })()
-        const newChatHasText = (returnMessage?.trim() || tripPlanningData?.search_summary?.trim()) || ''
-        if (parsed.is_finished && newChatHasFilters && newChatHasText) {
-          try {
-            console.log('[reconcileQueryFiltersFromText] Running text-vs-JSON reconciliation (new_chat)')
-            const reconciled = await reconcileQueryFiltersFromText(
-              returnMessage || '',
-              tripPlanningData?.search_summary,
-              tripPlanningData,
-              userProfile?.age,
-            )
-            if (reconciled) {
-              if (reconciled.queryFilters != null) {
-                const allowedKeys = new Set(Object.keys(tripPlanningData.queryFilters || {}))
-                const filtered: Record<string, any> = {}
-                for (const key of Object.keys(reconciled.queryFilters)) {
-                  if (allowedKeys.has(key)) filtered[key] = reconciled.queryFilters[key]
-                }
-                const isEmpty = Object.keys(filtered).length === 0
-                if (!isEmpty) {
-                  tripPlanningData.queryFilters = filtered
-                  console.log('[reconcileQueryFiltersFromText] Updated queryFilters from text (new_chat); keys:', Object.keys(filtered))
-                }
-              }
-              if (reconciled.destination_country != null) {
-                tripPlanningData.destination_country = reconciled.destination_country
-                if (reconciled.area !== undefined) tripPlanningData.area = reconciled.area
-                console.log('[reconcileQueryFiltersFromText] Updated destination_country/area from text (new_chat)')
-              }
-            }
-          } catch (e) {
-            console.warn('[reconcileQueryFiltersFromText] Reconciliation failed (new_chat), keeping current filters:', e)
-          }
-        }
+        // Skip reconciliation — the conversation GPT already returned structured queryFilters in JSON.
+        // A second LLM re-extracting from text can override accurate values with rounded/inferred ones.
+        // reconcileQueryFiltersFromText removed — main GPT is the single source of truth
         
         parsedResponse = {
           chat_id: chatId,
@@ -2253,7 +1741,7 @@ ${getPronounInstructions(userProfile.pronoun)}`
         }
       }
 
-      // --- UI Messages: create initial bot message ---
+      // --- UI Messages: create initial bot messages ---
       const uiMessages: UIMessage[] = []
       appendUIMessage(uiMessages, {
         type: 'bot_text',
@@ -2261,6 +1749,12 @@ ${getPronounInstructions(userProfile.pronoun)}`
         timestamp: makeTimestamp(),
         is_user: false,
         backend_message_index: messages.length - 1,
+      })
+      appendUIMessage(uiMessages, {
+        type: 'bot_text',
+        text: TRIP_PLANNING_SECOND_MESSAGE_TEXT,
+        timestamp: makeTimestamp(),
+        is_user: false,
       })
       await saveUIMessages(chatId, uiMessages, supabaseAdmin)
 
@@ -2392,9 +1886,22 @@ ${getPronounInstructions(userProfile.pronoun)}`
       // When adding filters, inject context so LLM interprets "also X" / "any X" correctly
       if (body.adding_filters && body.existing_query_filters && typeof body.existing_query_filters === 'object') {
         const filterSummary = JSON.stringify(body.existing_query_filters)
-        let addFilterContent = `The user is adding to existing search filters. Current filters: ${filterSummary}. Interpret their message as additional or broadening criteria (e.g. "also longboard" = add longboard; "any board" or "all boards" = remove board filter).`
+        let addFilterContent = `The user is editing existing search filters. Current filters: ${filterSummary}.
+
+For each filter the user mentions, decide the intent and set it in data.filterEditIntent:
+- "add": user wants to ADD to existing (e.g., "also longboard", "add Indonesia too")
+- "replace": user wants to REPLACE existing (e.g., "only shortboard", "change to 25-30")
+- "clear": user wants to REMOVE this filter (e.g., "remove age filter", "any board", "no board preference")
+
+If you genuinely cannot tell whether the user means add or replace for a filter (e.g., user has longboard and just says "shortboard" without "also" or "only"), put that key in data.intentUnclear array.
+
+Examples:
+- Current: {surfboard_type: ["longboard"]}, user says "also shortboard" → queryFilters: {surfboard_type: ["shortboard"]}, filterEditIntent: {surfboard_type: "add"}
+- Current: {surfboard_type: ["longboard"]}, user says "only shortboard" → queryFilters: {surfboard_type: ["shortboard"]}, filterEditIntent: {surfboard_type: "replace"}
+- Current: {age_min: 20, age_max: 30}, user says "change age to 35-40" → queryFilters: {age_min: 35, age_max: 40}, filterEditIntent: {age_min: "replace", age_max: "replace"}
+- Current: {surfboard_type: ["longboard"]}, user says "shortboard" → queryFilters: {surfboard_type: ["shortboard"]}, intentUnclear: ["surfboard_type"]`
         if (body.existing_destination_country != null && String(body.existing_destination_country).trim() !== '') {
-          addFilterContent += ` Current destination: ${body.existing_destination_country}. If the user adds another destination (e.g. "add Indonesia", "surfed Indo too"), include ALL destinations in data.destination_country as a comma-separated string (e.g. "Sri Lanka, Indonesia").`
+          addFilterContent += `\nCurrent destination: ${body.existing_destination_country}. If the user adds another destination (e.g. "add Indonesia", "surfed Indo too"), include ALL destinations in data.destination_country as a comma-separated string (e.g. "Sri Lanka, Indonesia").`
         }
         messages.splice(messages.length - 1, 0, {
           role: 'system',
@@ -2435,9 +1942,7 @@ ${getPronounInstructions(userProfile.pronoun)}`
       console.log('🔍 Extracting query filters from user message (always):', body.message)
       console.log('Is criteria step?', isCriteriaStep)
 
-      let extractedQueryFilters: any = null
-      let unmappableCriteria: string[] = []
-      let filterResult: { supabaseFilters: any; unmappableCriteria?: string[]; explanation?: string; filterEditIntent?: Record<string, 'add' | 'replace' | 'clear'>; intentUnclear?: string[] } | null = null
+      // extractedQueryFilters, filterResult removed — main GPT handles all filter extraction now
 
       // --- PRE-COMPUTATION: everything that does NOT depend on filter extraction ---
 
@@ -2482,7 +1987,7 @@ ${getPronounInstructions(userProfile.pronoun)}`
         }
       }
       console.log('📍 Destination country for filter extraction:', destinationCountry)
-      const existingForExtractor = body.adding_filters && body.existing_query_filters && typeof body.existing_query_filters === 'object' ? body.existing_query_filters : undefined
+      // existingForExtractor removed — no longer using separate extractor
 
       // Compute accumulated filters from previous messages (does NOT depend on extraction)
       let accumulatedFilters: any = null
@@ -2550,11 +2055,7 @@ ${getPronounInstructions(userProfile.pronoun)}`
       const isSyntheticMessage = (m: any) => m.metadata?.isRestartAfterNewChat || m.metadata?.isAddFilterPrompt
       const messagesWithoutSynthetic = messages.filter(m => !isSyntheticMessage(m))
 
-      // Snapshot messages before injecting system messages — extractQueryFilters
-      // uses .slice(-5) and must not see the injected helper instructions.
-      const messagesForExtractor = [...messagesWithoutSynthetic]
-
-      // --- Inject system messages for the main LLM (none depend on extraction) ---
+      // --- Inject system messages for the main LLM ---
 
       // Check if user message contains a destination mention and remind LLM to extract it
       const userMessageLower = body.message.toLowerCase()
@@ -2583,82 +2084,11 @@ ${getPronounInstructions(userProfile.pronoun)}`
       messages.splice(messages.length - 1, 0, { role: 'system', content: buildCurrentDataSystemMessage(currentDataForGPTContinue) })
       console.log('📋 Injected current data + do-not-change/add rule into main GPT')
 
-      // --- PARALLEL LLM CALLS: extractQueryFilters + main callOpenAI ---
-      // Filter synthetic display-only messages from the messages array used for OpenAI
+      // --- SINGLE LLM CALL: main GPT handles everything (filters, intent, conversation) ---
       const messagesForOpenAI = messages.filter(m => !isSyntheticMessage(m))
-      const [filterExtractionSettled, mainLLMResult] = await Promise.all([
-        // Call 1: Extract structured filters from user message
-        (async () => {
-          try {
-            const result = await extractQueryFilters(body.message, destinationCountry, messagesForExtractor, existingForExtractor, userProfile)
-            return { success: true as const, result }
-          } catch (error) {
-            console.error('❌ Error extracting query filters:', error)
-            return { success: false as const, result: null }
-          }
-        })(),
-        // Call 2: Main conversational LLM
-        callOpenAI(messagesForOpenAI),
-      ])
+      const mainLLMResult = await callOpenAI(messagesForOpenAI)
 
-      // --- POST-PROCESS filter extraction results ---
-      if (filterExtractionSettled.success && filterExtractionSettled.result) {
-        filterResult = filterExtractionSettled.result
-        extractedQueryFilters = filterResult.supabaseFilters
-        unmappableCriteria = filterResult.unmappableCriteria || []
-        console.log('✅ Extracted query filters:', JSON.stringify(extractedQueryFilters, null, 2))
-        console.log('✅ Filter extraction explanation:', filterResult.explanation)
-        if (unmappableCriteria.length > 0) {
-          console.log('⚠️ Unmappable criteria found:', unmappableCriteria)
-        }
-      }
-
-      if (userRequestedRemoveAll) {
-        extractedQueryFilters = null
-        console.log('📦 User requested remove all filters – extractedQueryFilters set to null, will not re-apply accumulated')
-      }
-
-      // Merge current filters with accumulated filters (current takes precedence)
-      console.log('[accumulatedFilters] Before merge: extractedQueryFilters=' + (extractedQueryFilters ? JSON.stringify(extractedQueryFilters) : 'null') + ' accumulatedFilters=' + (accumulatedFilters ? JSON.stringify(accumulatedFilters) : 'null'))
-      if (accumulatedFilters && extractedQueryFilters) {
-        extractedQueryFilters = {
-          ...accumulatedFilters,
-          ...extractedQueryFilters, // Current filters override accumulated ones
-        }
-        console.log('🔄 Merged filters (accumulated + current):', JSON.stringify(extractedQueryFilters, null, 2))
-      } else if (accumulatedFilters && !extractedQueryFilters && !userRequestedRemoveAll) {
-        extractedQueryFilters = accumulatedFilters
-        console.log('📦 Using accumulated filters only:', JSON.stringify(extractedQueryFilters, null, 2))
-      } else if (accumulatedFilters === null && accumulatedFromMessage != null) {
-        extractedQueryFilters = null
-        console.log('📦 Cleared filters (user removed filters in previous message)')
-      }
-
-      // When editing filters, if intent is ambiguous do not merge; return a clarification question
-      // (discards the main LLM result — acceptable since this is a rare path)
-      const intentUnclearList = filterResult?.intentUnclear
-      if (body.adding_filters && body.existing_query_filters && Array.isArray(intentUnclearList) && intentUnclearList.length > 0) {
-        const key = intentUnclearList[0]
-        const existing = body.existing_query_filters[key]
-        const extracted = extractedQueryFilters?.[key]
-        const currentVal = Array.isArray(existing) ? existing.join(', ') : (existing ?? '')
-        const newVal = Array.isArray(extracted) ? extracted.join(', ') : (extracted ?? '')
-        const categoryLabel = key === 'surfboard_type' ? 'board type' : key === 'surf_level_category' ? 'surf level' : key === 'country_from' ? 'origin country' : key
-        const clarificationText = `Do you want to **add** ${newVal} to your current ${categoryLabel} (${currentVal}) or **replace** with only ${newVal}?`
-        const clarificationPayload = { return_message: clarificationText, is_finished: false, data: null }
-        messages.push({ role: 'assistant', content: JSON.stringify(clarificationPayload) })
-        await saveChatHistory(chatId, messages, user.id, body.conversation_id || null, supabaseAdmin)
-        // --- UI Messages: user message + clarification ---
-        const uiMsgsClarify = await getUIMessages(chatId, supabaseAdmin)
-        appendUIMessage(uiMsgsClarify, { type: 'user_text', text: body.message, timestamp: makeTimestamp(), is_user: true })
-        appendUIMessage(uiMsgsClarify, { type: 'bot_text', text: clarificationText, timestamp: makeTimestamp(), is_user: false, backend_message_index: messages.length - 1 })
-        await saveUIMessages(chatId, uiMsgsClarify, supabaseAdmin)
-        console.log('🔀 Returning clarification (intentUnclear):', clarificationText)
-        return new Response(JSON.stringify(clarificationPayload), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
-        })
-      }
+      // intentUnclear handling moved to after main GPT response parsing (see below)
 
       // --- Use the main LLM result ---
       let assistantMessage = mainLLMResult
@@ -2979,145 +2409,57 @@ ${getPronounInstructions(userProfile.pronoun)}`
           }
         }
         
-        // Add extracted query filters to tripPlanningData if available
-        // This should happen AFTER all tripPlanningData initialization
-        // CRITICAL: Always add queryFilters if they were extracted, even if tripPlanningData already exists
-        // Also populate non_negotiable_criteria.age_range from queryFilters.age_min/age_max
-        if (body.adding_filters && body.existing_query_filters !== undefined) {
-          // Add-filter mode: merge existing (from client) with current message's extracted only (not accumulated)
+        // --- FILTER HANDLING: Trust main GPT's queryFilters directly ---
+
+        // Handle intentUnclear: if main GPT flagged ambiguous intent, return clarification
+        const intentUnclearList = tripPlanningData?.intentUnclear
+        if (body.adding_filters && body.existing_query_filters && Array.isArray(intentUnclearList) && intentUnclearList.length > 0) {
+          const key = intentUnclearList[0]
+          const existing = body.existing_query_filters[key]
+          const newVal = tripPlanningData?.queryFilters?.[key]
+          const currentVal = Array.isArray(existing) ? existing.join(', ') : (existing ?? '')
+          const newValStr = Array.isArray(newVal) ? newVal.join(', ') : (newVal ?? '')
+          const categoryLabel = key === 'surfboard_type' ? 'board type' : key === 'surf_level_category' ? 'surf level' : key === 'country_from' ? 'origin country' : key
+          const clarificationText = `Do you want to **add** ${newValStr} to your current ${categoryLabel} (${currentVal}) or **replace** with only ${newValStr}?`
+          const clarificationPayload = { return_message: clarificationText, is_finished: false, data: null }
+          messages.push({ role: 'assistant', content: JSON.stringify(clarificationPayload) })
+          await saveChatHistory(chatId, messages, user.id, body.conversation_id || null, supabaseAdmin)
+          const uiMsgsClarify = await getUIMessages(chatId, supabaseAdmin)
+          appendUIMessage(uiMsgsClarify, { type: 'user_text', text: body.message, timestamp: makeTimestamp(), is_user: true })
+          appendUIMessage(uiMsgsClarify, { type: 'bot_text', text: clarificationText, timestamp: makeTimestamp(), is_user: false, backend_message_index: messages.length - 1 })
+          await saveUIMessages(chatId, uiMsgsClarify, supabaseAdmin)
+          console.log('🔀 Returning clarification (intentUnclear):', clarificationText)
+          return new Response(JSON.stringify(clarificationPayload), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+          })
+        }
+
+        if (body.adding_filters && body.existing_query_filters !== undefined && tripPlanningData) {
+          // Add-filter mode: merge existing (from client) with main GPT's new filters using intent
           const existingQF = body.existing_query_filters && typeof body.existing_query_filters === 'object' ? body.existing_query_filters : {}
-          const currentExtracted = filterResult?.supabaseFilters ?? extractedQueryFilters ?? {}
-          const intent = filterResult?.filterEditIntent && typeof filterResult.filterEditIntent === 'object' ? filterResult.filterEditIntent : {}
+          const newFilters = tripPlanningData.queryFilters ?? {}
+          const intent = tripPlanningData.filterEditIntent && typeof tripPlanningData.filterEditIntent === 'object' ? tripPlanningData.filterEditIntent : {}
           const hasIntent = Object.keys(intent).length > 0
           const merged = hasIntent
-            ? mergeQueryFiltersEditing(existingQF, currentExtracted, intent)
-            : mergeQueryFiltersAdding(existingQF, currentExtracted)
-          const normalizedQueryFilters = await normalizeQueryFilters(merged)
-          // Merge destinations so "add Indonesia" when existing is "Sri Lanka" yields "Sri Lanka, Indonesia"
+            ? mergeQueryFiltersEditing(existingQF, newFilters, intent)
+            : mergeQueryFiltersAdding(existingQF, newFilters)
+          tripPlanningData.queryFilters = await normalizeQueryFilters(merged)
+          // Merge destinations
           const mergedDestination = mergeDestinations(
             body.existing_destination_country ?? null,
             tripPlanningData?.destination_country ?? null,
             parsed?.data?.destination_country ?? null,
-            filterResult?.supabaseFilters?.destination_days_min?.destination ?? null
+            null
           )
-          if (!tripPlanningData) {
-            tripPlanningData = {
-              destination_country: mergedDestination ?? body.existing_destination_country ?? null,
-              area: body.existing_area ?? null,
-              budget: null,
-              destination_known: true,
-              purpose: { purpose_type: 'connect_traveler', specific_topics: [] },
-              non_negotiable_criteria: {},
-              user_context: {},
-              queryFilters: normalizedQueryFilters,
-              filtersFromNonNegotiableStep: false,
-            }
-          } else {
-            tripPlanningData.queryFilters = normalizedQueryFilters
-            // Trust client's explicit destination/area (they may be null = deleted)
-            if ('existing_destination_country' in body) tripPlanningData.destination_country = mergedDestination ?? body.existing_destination_country ?? null
-            else tripPlanningData.destination_country = mergedDestination ?? tripPlanningData.destination_country
-            if ('existing_area' in body) tripPlanningData.area = body.existing_area ?? null
-          }
-          console.log('✅ Merged filters (add-filter mode):', JSON.stringify(normalizedQueryFilters, null, 2))
-        } else if (extractedQueryFilters && Object.keys(extractedQueryFilters).length > 0) {
-          // If age filters were extracted, also populate non_negotiable_criteria.age_range
-          if (extractedQueryFilters.age_min !== undefined && extractedQueryFilters.age_max !== undefined) {
-            if (!tripPlanningData) {
-              tripPlanningData = {
-                destination_country: null,
-                area: null,
-                budget: null,
-                destination_known: true,
-                purpose: { purpose_type: 'connect_traveler', specific_topics: [] },
-                non_negotiable_criteria: {},
-                user_context: {},
-                queryFilters: null,
-                filtersFromNonNegotiableStep: false,
-              };
-            }
-            if (!tripPlanningData.non_negotiable_criteria) {
-              tripPlanningData.non_negotiable_criteria = {};
-            }
-            tripPlanningData.non_negotiable_criteria.age_range = [
-              extractedQueryFilters.age_min,
-              extractedQueryFilters.age_max
-            ];
-            console.log('✅ Populated non_negotiable_criteria.age_range from queryFilters:', tripPlanningData.non_negotiable_criteria.age_range);
-          }
-          if (!tripPlanningData) {
-            // Get destination from conversation history if tripPlanningData doesn't exist
-            let fallbackDestination = ''
-            for (let i = messages.length - 1; i >= 0; i--) {
-              if (messages[i].role === 'assistant') {
-                try {
-                  const prevParsed = JSON.parse(messages[i].content)
-                  if (prevParsed.data?.destination_country) {
-                    fallbackDestination = prevParsed.data.destination_country
-                    break
-                  }
-                } catch (e) {
-                  // Not JSON, continue
-                }
-              }
-            }
-            
-            // Create tripPlanningData if it doesn't exist
-            // Normalize queryFilters before assigning to ensure country names are correct
-            const normalizedQueryFilters = await normalizeQueryFilters(extractedQueryFilters);
-            tripPlanningData = {
-              destination_country: fallbackDestination || null,
-              area: null,
-              budget: null,
-              destination_known: true,
-              purpose: {
-                purpose_type: 'connect_traveler',
-                specific_topics: []
-              },
-              non_negotiable_criteria: {},
-              user_context: {},
-              queryFilters: normalizedQueryFilters,
-              filtersFromNonNegotiableStep: isCriteriaStep, // Mark if filters came from non-negotiable step
-            }
-            console.log('✅ Created tripPlanningData with query filters (from non-negotiable step:', isCriteriaStep, ')')
-          } else {
-            // Merge filters: if tripPlanningData already has filters, merge them (current takes precedence)
-            // Normalize queryFilters before assigning to ensure country names are correct
-            const normalizedQueryFilters = await normalizeQueryFilters(extractedQueryFilters);
-            
-            // Last assistant wins: when we have accumulatedFilters (from prior assistant message), use it as base and only add extractor keys not in it; do not overlay main GPT
-            if (accumulatedFilters && Object.keys(accumulatedFilters).length > 0) {
-              tripPlanningData.queryFilters = { ...accumulatedFilters };
-              for (const key of Object.keys(normalizedQueryFilters)) {
-                if (!(key in tripPlanningData.queryFilters)) {
-                  tripPlanningData.queryFilters[key] = normalizedQueryFilters[key];
-                }
-              }
-              console.log('✅ Last assistant wins: query filters from accumulated + extractor-only keys')
-            } else {
-              // Merge filters: main GPT wins, extractor fills gaps (extractor base, then overlay GPT)
-              if (tripPlanningData.queryFilters) {
-                tripPlanningData.queryFilters = {
-                  ...normalizedQueryFilters,
-                  ...(tripPlanningData.queryFilters || {}),
-                }
-              } else {
-                tripPlanningData.queryFilters = normalizedQueryFilters
-              }
-            }
-            // Update flag: if current step is non-negotiable, mark it
-            if (isCriteriaStep) {
-              tripPlanningData.filtersFromNonNegotiableStep = true
-            }
-            console.log('✅ Added/updated query filters in tripPlanningData (from non-negotiable step:', isCriteriaStep, ')')
-          }
-          console.log('Query filters being stored:', JSON.stringify(extractedQueryFilters, null, 2))
-        } else if (extractedQueryFilters && Object.keys(extractedQueryFilters).length === 0) {
-          console.log('⚠️ Query filters were extracted but are empty - skipping')
-        } else if (accumulatedFilters && Object.keys(accumulatedFilters).length > 0 && tripPlanningData) {
-          // User sent e.g. "search" with no new extraction; last assistant wins
-          tripPlanningData.queryFilters = { ...accumulatedFilters };
-          console.log('✅ Last assistant wins (no new extraction): query filters from accumulated only')
+          if ('existing_destination_country' in body) tripPlanningData.destination_country = mergedDestination ?? body.existing_destination_country ?? null
+          else tripPlanningData.destination_country = mergedDestination ?? tripPlanningData.destination_country
+          if ('existing_area' in body) tripPlanningData.area = body.existing_area ?? null
+          console.log('✅ Merged filters (add-filter mode):', JSON.stringify(tripPlanningData.queryFilters, null, 2))
+        } else if (tripPlanningData?.queryFilters && typeof tripPlanningData.queryFilters === 'object' && Object.keys(tripPlanningData.queryFilters).length > 0) {
+          // Normal mode: trust main GPT's queryFilters directly, just normalize
+          tripPlanningData.queryFilters = await normalizeQueryFilters(tripPlanningData.queryFilters)
+          console.log('✅ Using main GPT queryFilters directly:', JSON.stringify(tripPlanningData.queryFilters, null, 2))
         }
         
         // FALLBACK: Build queryFilters from non_negotiable_criteria if queryFilters is null/empty
@@ -3243,48 +2585,9 @@ ${getPronounInstructions(userProfile.pronoun)}`
           console.log('✅ Decision reply: user said "send"/"go" etc. — forcing next_action to "search"')
         }
         
-        // Second-layer check: reconcile text vs JSON filters when we have filter-describing text and queryFilters/destination
-        const hasFiltersToValidate = tripPlanningData && (() => {
-          const q = tripPlanningData.queryFilters
-          const hasQF = q && typeof q === 'object' && Object.keys(q).length > 0
-          const hasDest = tripPlanningData.destination_country && String(tripPlanningData.destination_country).trim()
-          return hasQF || !!hasDest
-        })()
-        const hasTextToValidate = (returnMessage?.trim() || tripPlanningData?.search_summary?.trim()) || ''
-        if (shouldBeFinished && hasFiltersToValidate && hasTextToValidate) {
-          try {
-            console.log('[reconcileQueryFiltersFromText] Running text-vs-JSON reconciliation (continue)')
-            const reconciled = await reconcileQueryFiltersFromText(
-              returnMessage || '',
-              tripPlanningData?.search_summary,
-              tripPlanningData,
-              userProfile?.age,
-            )
-            if (reconciled) {
-              if (reconciled.queryFilters != null) {
-                const allowedKeys = new Set(Object.keys(tripPlanningData.queryFilters || {}))
-                const filtered: Record<string, any> = {}
-                for (const key of Object.keys(reconciled.queryFilters)) {
-                  if (allowedKeys.has(key)) filtered[key] = reconciled.queryFilters[key]
-                }
-                const isEmpty = Object.keys(filtered).length === 0
-                if (!isEmpty) {
-                  tripPlanningData.queryFilters = filtered
-                  console.log('[reconcileQueryFiltersFromText] Updated queryFilters from text; keys:', Object.keys(filtered))
-                }
-              }
-              if (reconciled.destination_country != null) {
-                tripPlanningData.destination_country = reconciled.destination_country
-                if (reconciled.area !== undefined) tripPlanningData.area = reconciled.area
-                console.log('[reconcileQueryFiltersFromText] Updated destination_country/area from text')
-              }
-            } else {
-              console.log('[reconcileQueryFiltersFromText] No update (validator returned null)')
-            }
-          } catch (e) {
-            console.warn('[reconcileQueryFiltersFromText] Reconciliation failed, keeping current filters:', e)
-          }
-        }
+        // Skip reconciliation — the conversation GPT already returned structured queryFilters in JSON.
+        // A second LLM re-extracting from text can override accurate values with rounded/inferred ones.
+        // reconcileQueryFiltersFromText removed — main GPT is the single source of truth
         
         parsedResponse = {
           return_message: returnMessage,
@@ -3763,6 +3066,12 @@ ${getPronounInstructions(userProfile.pronoun)}`
               is_user: false,
               is_restart_after_new_chat: true,
               backend_message_index: appendedMessageIndex,
+            })
+            appendUIMessage(uiMsgsAction, {
+              type: 'bot_text',
+              text: TRIP_PLANNING_SECOND_MESSAGE_TEXT,
+              timestamp: makeTimestamp(),
+              is_user: false,
             })
           }
           if (body.selectedAction === 'add_filter') {

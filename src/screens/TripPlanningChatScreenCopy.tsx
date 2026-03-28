@@ -900,10 +900,9 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             text: noMatchesText,
             isUser: false,
             timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
-            isMatchedUsers: true,
+            isMatchedUsers: false,
             matchedUsers: [],
             destinationCountry: matchesDestination,
-            actionRow: { requestData: tripPlanningData, selectedAction: null },
             matchTotalCount: 0,
           };
           const updated = [...filtered, noMatchesMessage];
