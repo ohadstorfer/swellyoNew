@@ -530,13 +530,17 @@ class MessagingService {
     try {
       // Fetch limit+1 to determine if there are more messages
       const fetchLimit = limit + 1;
-      
+
+      // For afterMessageId (incremental sync): ascending order to get messages after cursor
+      // For initial load and beforeMessageId (pagination): descending order to get newest messages first
+      const useAscending = !!afterMessageId;
+
       let query = supabase
         .from('messages')
         .select('id, conversation_id, sender_id, body, rendered_body, attachments, is_system, edited, deleted, created_at, updated_at, type, image_metadata')
         .eq('conversation_id', conversationId)
         // Note: We include deleted messages so they can be displayed with "deleted" placeholder
-        .order('created_at', { ascending: true })
+        .order('created_at', { ascending: useAscending })
         .limit(fetchLimit);
 
       // If afterMessageId is provided, fetch only messages after it (incremental sync)
@@ -589,7 +593,23 @@ class MessagingService {
 
       // Check if there are more messages (if we got limit+1, there are more)
       const hasMore = messages.length > limit;
-      const paginatedMessages = hasMore ? messages.slice(0, limit) : messages;
+      let paginatedMessages: typeof messages;
+      if (hasMore) {
+        if (useAscending) {
+          // Ascending: extra message is at the end, drop it
+          paginatedMessages = messages.slice(0, limit);
+        } else {
+          // Descending: extra message is the oldest (at the end), drop it
+          paginatedMessages = messages.slice(0, limit);
+        }
+      } else {
+        paginatedMessages = messages;
+      }
+
+      // For descending queries, reverse to chronological order (oldest first)
+      if (!useAscending) {
+        paginatedMessages = paginatedMessages.reverse();
+      }
 
       // Fetch sender info separately for each unique sender (already batched)
       const senderIds = [...new Set(paginatedMessages.map(msg => msg.sender_id))];

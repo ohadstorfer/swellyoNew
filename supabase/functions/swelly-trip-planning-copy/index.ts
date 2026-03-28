@@ -2198,46 +2198,9 @@ ${getPronounInstructions(userProfile.pronoun)}`
           normalizeUSDestination(tripPlanningData)
         }
         
-        // Second-layer check: reconcile text vs JSON filters (new_chat)
-        const newChatHasFilters = tripPlanningData && (() => {
-          const q = tripPlanningData.queryFilters
-          const hasQF = q && typeof q === 'object' && Object.keys(q).length > 0
-          const hasDest = tripPlanningData.destination_country && String(tripPlanningData.destination_country).trim()
-          return hasQF || !!hasDest
-        })()
-        const newChatHasText = (returnMessage?.trim() || tripPlanningData?.search_summary?.trim()) || ''
-        if (parsed.is_finished && newChatHasFilters && newChatHasText) {
-          try {
-            console.log('[reconcileQueryFiltersFromText] Running text-vs-JSON reconciliation (new_chat)')
-            const reconciled = await reconcileQueryFiltersFromText(
-              returnMessage || '',
-              tripPlanningData?.search_summary,
-              tripPlanningData,
-              userProfile?.age,
-            )
-            if (reconciled) {
-              if (reconciled.queryFilters != null) {
-                const allowedKeys = new Set(Object.keys(tripPlanningData.queryFilters || {}))
-                const filtered: Record<string, any> = {}
-                for (const key of Object.keys(reconciled.queryFilters)) {
-                  if (allowedKeys.has(key)) filtered[key] = reconciled.queryFilters[key]
-                }
-                const isEmpty = Object.keys(filtered).length === 0
-                if (!isEmpty) {
-                  tripPlanningData.queryFilters = filtered
-                  console.log('[reconcileQueryFiltersFromText] Updated queryFilters from text (new_chat); keys:', Object.keys(filtered))
-                }
-              }
-              if (reconciled.destination_country != null) {
-                tripPlanningData.destination_country = reconciled.destination_country
-                if (reconciled.area !== undefined) tripPlanningData.area = reconciled.area
-                console.log('[reconcileQueryFiltersFromText] Updated destination_country/area from text (new_chat)')
-              }
-            }
-          } catch (e) {
-            console.warn('[reconcileQueryFiltersFromText] Reconciliation failed (new_chat), keeping current filters:', e)
-          }
-        }
+        // Skip reconciliation — the conversation GPT already returned structured queryFilters in JSON.
+        // A second LLM re-extracting from text can override accurate values with rounded/inferred ones.
+        console.log('[reconcileQueryFiltersFromText] Skipped (new_chat) — trusting conversation GPT queryFilters directly')
         
         parsedResponse = {
           chat_id: chatId,
@@ -3254,48 +3217,9 @@ ${getPronounInstructions(userProfile.pronoun)}`
           console.log('✅ Decision reply: user said "send"/"go" etc. — forcing next_action to "search"')
         }
         
-        // Second-layer check: reconcile text vs JSON filters when we have filter-describing text and queryFilters/destination
-        const hasFiltersToValidate = tripPlanningData && (() => {
-          const q = tripPlanningData.queryFilters
-          const hasQF = q && typeof q === 'object' && Object.keys(q).length > 0
-          const hasDest = tripPlanningData.destination_country && String(tripPlanningData.destination_country).trim()
-          return hasQF || !!hasDest
-        })()
-        const hasTextToValidate = (returnMessage?.trim() || tripPlanningData?.search_summary?.trim()) || ''
-        if (shouldBeFinished && hasFiltersToValidate && hasTextToValidate) {
-          try {
-            console.log('[reconcileQueryFiltersFromText] Running text-vs-JSON reconciliation (continue)')
-            const reconciled = await reconcileQueryFiltersFromText(
-              returnMessage || '',
-              tripPlanningData?.search_summary,
-              tripPlanningData,
-              userProfile?.age,
-            )
-            if (reconciled) {
-              if (reconciled.queryFilters != null) {
-                const allowedKeys = new Set(Object.keys(tripPlanningData.queryFilters || {}))
-                const filtered: Record<string, any> = {}
-                for (const key of Object.keys(reconciled.queryFilters)) {
-                  if (allowedKeys.has(key)) filtered[key] = reconciled.queryFilters[key]
-                }
-                const isEmpty = Object.keys(filtered).length === 0
-                if (!isEmpty) {
-                  tripPlanningData.queryFilters = filtered
-                  console.log('[reconcileQueryFiltersFromText] Updated queryFilters from text; keys:', Object.keys(filtered))
-                }
-              }
-              if (reconciled.destination_country != null) {
-                tripPlanningData.destination_country = reconciled.destination_country
-                if (reconciled.area !== undefined) tripPlanningData.area = reconciled.area
-                console.log('[reconcileQueryFiltersFromText] Updated destination_country/area from text')
-              }
-            } else {
-              console.log('[reconcileQueryFiltersFromText] No update (validator returned null)')
-            }
-          } catch (e) {
-            console.warn('[reconcileQueryFiltersFromText] Reconciliation failed, keeping current filters:', e)
-          }
-        }
+        // Skip reconciliation — the conversation GPT already returned structured queryFilters in JSON.
+        // A second LLM re-extracting from text can override accurate values with rounded/inferred ones.
+        console.log('[reconcileQueryFiltersFromText] Skipped (continue) — trusting conversation GPT queryFilters directly')
         
         parsedResponse = {
           return_message: returnMessage,

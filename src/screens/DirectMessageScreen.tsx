@@ -1,8 +1,8 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import {
   View,
   StyleSheet,
-  ScrollView,
+  FlatList,
   TouchableOpacity,
   KeyboardAvoidingView,
   Platform,
@@ -72,6 +72,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const [loadingMessage, setLoadingMessage] = useState<string>('');
   const [isFetchingMessages, setIsFetchingMessages] = useState(false); // Start as false, only set true when actually fetching
   const [hasMoreMessages, setHasMoreMessages] = useState(false);
+  const hasMoreMessagesRef = useRef(false);
   const [isLoadingOlderMessages, setIsLoadingOlderMessages] = useState(false);
   const oldestMessageIdRef = useRef<string | null>(null);
   const isLoadingOlderRef = useRef<boolean>(false); // Ref-based lock to prevent race conditions
@@ -100,8 +101,8 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const isPickerOpenRef = useRef(false);
   const pickerFallbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isProcessingImage, setIsProcessingImage] = useState(false);
-  const scrollViewRef = useRef<ScrollView>(null);
-  const { handleScroll: handleKeyboardScroll, handleContentSizeChange, handleLayout, scrollToBottom } = useChatKeyboardScroll(scrollViewRef);
+  const flatListRef = useRef<FlatList<Message>>(null);
+  const { handleScroll: handleKeyboardScroll, handleLayout, scrollToBottom } = useChatKeyboardScroll(flatListRef, { inverted: true });
   const chatInputRef = useRef<ChatTextInputRef>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const typingDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -120,6 +121,9 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   useEffect(() => {
     currentConversationIdRef.current = currentConversationId;
   }, [currentConversationId]);
+  useEffect(() => {
+    hasMoreMessagesRef.current = hasMoreMessages;
+  }, [hasMoreMessages]);
 
   // Clean up file input and fallback timeout if user navigates away while picker is open (web only)
   useEffect(() => {
@@ -484,11 +488,11 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       // Load in parallel but await it before rendering messages
       const advRolePromise = loadOtherUserAdvRole();
       
-      // Set pagination state
+      // Set pagination cursor from cache (will be corrected by background sync)
       if (cachedMessages.length > 0) {
         oldestMessageIdRef.current = cachedMessages[0].id;
-        // Assume there might be more messages if we have exactly the cache limit
-        setHasMoreMessages(cachedMessages.length >= 30);
+        // Don't enable pagination yet — wait for background sync to set the correct
+        // cursor and hasMore from the server, avoiding race conditions with stale cache data
       }
       
       // Wait for adv_role to load, then set messages
@@ -533,79 +537,39 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       setIsFetchingMessages(false);
       setShowSkeletons(false);  // Binary: cache exists = no skeleton
       
-      scrollToBottom();
-      
-      // CRITICAL: Always check server for updated messages when loading from cache
-      // This ensures image messages are loaded even if cache is stale
-      // Also fetch ALL messages (including deleted) to ensure deleted messages are included
-      // Do this in background so it doesn't block UI
-      console.log('[DirectMessageScreen] Starting background sync to fetch deleted messages...');
+      // CRITICAL: Always fetch newest messages from server after cache hit
+      // This ensures we have the right messages even if cache is stale
       (async () => {
         try {
-          console.log('[DirectMessageScreen] Fetching full message list from server...');
-          // Fetch full message list from server to ensure deleted messages are included
-          // getMessagesUpdatedSince might miss deleted messages if cache was saved after deletion
-          // Fetch more messages (100) to ensure we get deleted messages even if they're older
-          const fullResult = await messagingService.getMessages(currentConversationId, 100);
-          const deletedInFull = fullResult.messages.filter(m => m.deleted).length;
-          console.log('[DirectMessageScreen] ✅ Full server fetch for deleted messages:', {
-            totalMessages: fullResult.messages.length,
-            deletedMessages: deletedInFull,
-            deletedMessageIds: fullResult.messages.filter(m => m.deleted).map(m => m.id),
+          const serverResult = await messagingService.getMessages(currentConversationId, 30);
+          console.log('[DirectMessageScreen] ✅ Server sync after cache hit:', {
+            serverMessages: serverResult.messages.length,
+            hasMore: serverResult.hasMore,
           });
-          
-          const lastSync = await chatHistoryCache.getLastSyncTimestamp(currentConversationId);
-          const serverMessages = await messagingService.getMessagesUpdatedSince(
-            currentConversationId,
-            lastSync || 0,
-            30 // Check all recent messages
-          );
-          
-          // Merge full message list (includes deleted) with cache to ensure deleted messages are present
+
+          // Update pagination state from server
+          setHasMoreMessages(serverResult.hasMore);
+
+          // Set pagination cursor to oldest message from SERVER result (not the merge)
+          // This prevents stale cache messages from poisoning the cursor
+          // Example: cache has M1-M41 (stale), server has M51-M80 (newest 30)
+          // Cursor should be M51, so pagination fetches M21-M50 (filling the gap)
+          // NOT M1, which would find nothing older and stop pagination
+          if (serverResult.messages.length > 0) {
+            oldestMessageIdRef.current = serverResult.messages[0].id;
+          }
+
+          // Merge server messages with cached messages
           setMessages((prev) => {
-            const deletedInPrev = prev.filter(m => m.deleted).length;
-            const deletedInFull = fullResult.messages.filter(m => m.deleted).length;
-            
-            // Merge full server messages with cache (ensures deleted messages are included)
-            const merged = chatHistoryCache.mergeMessages(prev, fullResult.messages);
-            const deletedInMerged = merged.filter(m => m.deleted).length;
-            
-            console.log('[DirectMessageScreen] After full merge:', {
-              prevDeleted: deletedInPrev,
-              fullDeleted: deletedInFull,
-              mergedDeleted: deletedInMerged,
-              totalMerged: merged.length,
-            });
-            
+            const merged = chatHistoryCache.mergeMessages(prev, serverResult.messages);
             chatHistoryCache.saveMessages(currentConversationId, merged).catch(() => {});
             return merged;
           });
-          
-          // Also handle incremental updates if any
-          if (serverMessages.length > 0) {
-            const deletedInServer = serverMessages.filter(m => m.deleted).length;
-            console.log('[DirectMessageScreen] Server sync after cache load:', {
-              totalMessages: serverMessages.length,
-              deletedMessages: deletedInServer,
-              deletedMessageIds: serverMessages.filter(m => m.deleted).map(m => m.id),
-            });
-            
-            // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/6b4e2d69-2c76-430d-914a-aa3116b97922',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'DirectMessageScreen.tsx:400',message:'Found updated messages from server after cache load',data:{totalMessages:serverMessages.length,imageMessages:serverMessages.filter(m=>m.type==='image'||m.image_metadata).length,allMessages:serverMessages.map((msg,idx)=>({index:idx,id:msg.id,type:msg.type,hasImageMetadata:!!msg.image_metadata}))},timestamp:Date.now()})}).catch(()=>{});
-            // #endregion
-            
-            // Merge incremental updates
-            setMessages((prev) => {
-              const merged = chatHistoryCache.mergeMessages(prev, serverMessages);
-              chatHistoryCache.saveMessages(currentConversationId, merged).catch(() => {});
-              return merged;
-            });
-          }
         } catch (error) {
-          console.error('[DirectMessageScreen] ❌ Error checking for updated messages (including deleted):', error);
+          console.error('[DirectMessageScreen] ❌ Error syncing with server after cache hit:', error);
         }
       })();
-      
+
       // Also run regular background sync
       syncWithServerInBackground();
       return;
@@ -630,11 +594,9 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         const totalTime = Date.now() - loadStartTime;
         console.log(`[DirectMessageScreen] ✅ ASYNCSTORAGE CACHE HIT - Showing ${asyncCachedMessages.length} messages (${totalTime}ms total)`);
         
-        // Set pagination state
+        // Set pagination cursor from cache
         if (asyncCachedMessages.length > 0) {
           oldestMessageIdRef.current = asyncCachedMessages[0].id;
-          // Assume there might be more messages if we have exactly the cache limit
-          setHasMoreMessages(asyncCachedMessages.length >= 30);
         }
         
         // CRITICAL: Load adv_role BEFORE setting messages to ensure correct color on first render
@@ -677,10 +639,25 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         setMessages(asyncCachedMessages);
         setIsFetchingMessages(false);
         setShowSkeletons(false);  // Binary: cache exists = no skeleton
-        
-        scrollToBottom();
-        
-        // Sync with server in background
+
+        // Fetch newest messages from server to set correct pagination state
+        (async () => {
+          try {
+            const serverResult = await messagingService.getMessages(currentConversationId, 30);
+            setHasMoreMessages(serverResult.hasMore);
+            if (serverResult.messages.length > 0) {
+              oldestMessageIdRef.current = serverResult.messages[0].id;
+            }
+            setMessages((prev) => {
+              const merged = chatHistoryCache.mergeMessages(prev, serverResult.messages);
+              chatHistoryCache.saveMessages(currentConversationId, merged).catch(() => {});
+              return merged;
+            });
+          } catch (error) {
+            console.error('[DirectMessageScreen] ❌ Error syncing after AsyncStorage cache hit:', error);
+          }
+        })();
+
         syncWithServerInBackground();
       } else {
         console.log('[DirectMessageScreen] ⚠️ Both caches MISS - fetching from server');
@@ -718,8 +695,6 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         setMessages(result.messages);
         setIsFetchingMessages(false);
         setShowSkeletons(false);
-        
-        scrollToBottom();
       }
     } catch (error) {
       console.error('[DirectMessageScreen] ❌ Error loading messages:', error);
@@ -731,7 +706,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   // Load older messages (pagination)
   const loadOlderMessages = async () => {
     // Ref-based lock to prevent race conditions (synchronous check)
-    if (!currentConversationId || isLoadingOlderRef.current || isLoadingOlderMessages || !hasMoreMessages || !oldestMessageIdRef.current) {
+    if (!currentConversationId || isLoadingOlderRef.current || !hasMoreMessagesRef.current || !oldestMessageIdRef.current) {
       return;
     }
     
@@ -1539,6 +1514,45 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     );
   };
 
+  // For inverted FlatList, data must be newest-first (first item renders at bottom)
+  // State keeps messages chronological (oldest-first) for easy append/merge
+  const invertedMessages = useMemo(() => [...messages].reverse(), [messages]);
+
+  // FlatList helpers for inverted list
+  const renderItem = useCallback(({ item }: { item: Message }) => {
+    return renderMessage(item);
+  }, [currentUserId, editingMessageId, otherUserAdvRole, isDirect, menuVisible, selectedMessage]);
+
+  const keyExtractor = useCallback((item: Message) => item.id, []);
+
+  // In inverted FlatList: ListHeaderComponent renders at bottom, ListFooterComponent renders at top
+  const listHeaderComponent = useMemo(() => <TypingIndicator />, [isTyping]);
+
+  const listFooterComponent = useMemo(() => {
+    if (!isLoadingOlderMessages) return null;
+    return (
+      <View style={styles.loadOlderContainer}>
+        <ActivityIndicator size="small" color="#A0A0A0" />
+        <Text style={styles.loadOlderText}>Loading older messages...</Text>
+      </View>
+    );
+  }, [isLoadingOlderMessages]);
+
+  const listEmptyComponent = useMemo(() => {
+    if (isFetchingMessages) {
+      return (
+        <View>
+          <MessageListSkeleton count={5} />
+        </View>
+      );
+    }
+    return (
+      <View style={styles.emptyContainerWelcome}>
+        <WelcomeIntroMessage />
+      </View>
+    );
+  }, [isFetchingMessages]);
+
   const formatTime = (timestamp: string) => {
     const date = new Date(timestamp);
     const hours = date.getHours().toString().padStart(2, '0');
@@ -1877,59 +1891,37 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
           style={styles.backgroundImage}
           resizeMode="cover"
         >
-          <ScrollView
-            ref={scrollViewRef}
+          <FlatList
+            ref={flatListRef}
+            data={invertedMessages}
+            renderItem={renderItem}
+            keyExtractor={keyExtractor}
+            inverted
             style={styles.messagesList}
-            contentContainerStyle={styles.messagesContent}
+            contentContainerStyle={[
+              styles.messagesContent,
+              messages.length === 0 && { flexGrow: 1, justifyContent: 'flex-end' },
+            ]}
             showsVerticalScrollIndicator={false}
             onScroll={(event) => {
               handleKeyboardScroll(event);
-              const { contentOffset } = event.nativeEvent;
-              if (contentOffset.y <= 200 && hasMoreMessages && !isLoadingOlderMessages) {
+              // Manual pagination: in inverted list, high offset = scrolled toward older messages
+              const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+              const maxOffset = contentSize.height - layoutMeasurement.height;
+              const distanceFromTop = maxOffset - contentOffset.y;
+              if (distanceFromTop < 200 && hasMoreMessagesRef.current && !isLoadingOlderRef.current) {
                 loadOlderMessages();
               }
             }}
             scrollEventThrottle={16}
-            onContentSizeChange={handleContentSizeChange}
             onLayout={handleLayout}
-          >
-          {messages.length === 0 && isFetchingMessages ? (
-            // Show skeletons only when fetching AND no messages
-            <MessageListSkeleton count={5} />
-          ) : messages.length === 0 && !isFetchingMessages ? (
-            <View style={styles.emptyContainerWelcome}>
-              <WelcomeIntroMessage />
-            </View>
-          ) : (
-            <>
-              {/* Loading indicator for older messages */}
-              {isLoadingOlderMessages && (
-                <View style={styles.loadOlderContainer}>
-                  <ActivityIndicator size="small" color="#A0A0A0" />
-                  <Text style={styles.loadOlderText}>Loading older messages...</Text>
-                </View>
-              )}
-              {messages
-                .map((msg, idx) => {
-                  // Log deleted messages being rendered
-                  
-                  return renderMessage(msg);
-                })
-                .filter(msg => msg !== null) // Filter out null messages (when variables not ready)
-              }
-              <TypingIndicator />
-            </>
-          )}
-          {/* {isLoading && (
-            <View style={[styles.messageContainer, styles.botMessageContainer]}>
-              <View style={[styles.messageBubble, styles.botMessageBubble]}>
-                <Text style={styles.botMessageText}>
-                  {loadingMessage || (currentConversationId ? 'Sending...' : 'Creating conversation...')}
-                </Text>
-              </View>
-            </View>
-          )} */}
-          </ScrollView>
+            initialNumToRender={50}
+            maxToRenderPerBatch={50}
+            windowSize={21}
+            ListHeaderComponent={listHeaderComponent}
+            ListFooterComponent={listFooterComponent}
+            ListEmptyComponent={listEmptyComponent}
+          />
         </ImageBackground>
 
         {/* Input Area */}
