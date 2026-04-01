@@ -41,6 +41,7 @@ interface ConversationsScreenProps {
   onProfilePress?: () => void;
   onViewUserProfile?: (userId: string) => void;
   onSwellyShaperViewProfile?: () => void; // Callback for viewing profile from Swelly Shaper
+  onSettingsPress?: () => void;
 }
 
 type FilterType = 'all' | 'advisor' | 'seeker';
@@ -141,6 +142,7 @@ export default function ConversationsScreen({
   onProfilePress,
   onViewUserProfile,
   onSwellyShaperViewProfile,
+  onSettingsPress,
 }: ConversationsScreenProps) {
   const { resetOnboarding, setCurrentStep, setUser, setIsDemoUser, user: contextUser } = useOnboarding();
   const posthog = usePostHog();
@@ -1489,20 +1491,41 @@ export default function ConversationsScreen({
                   <Text style={styles.menuItemText}>My Shaper</Text>
                 </TouchableOpacity>
 
-                {/* Swellyo Team Welcome - Testing */}
-                {/* <TouchableOpacity
+                <View style={styles.menuDivider} />
+
+                {/* New Chat */}
+                <TouchableOpacity
                   style={styles.menuItem}
                   onPress={(e) => {
                     e.stopPropagation();
-                    console.log('Swellyo Team Welcome menu item pressed');
+                    console.log('New Chat menu item pressed');
                     setShowMenu(false);
-                    setShowSwellyoTeamWelcome(true);
+                    // TODO: implement new chat action
                   }}
                   activeOpacity={0.7}
                 >
-                  <Ionicons name="chatbubbles-outline" size={20} color="#222B30" />
-                  <Text style={styles.menuItemText}>Swellyo Team Welcome</Text>
-                </TouchableOpacity> */}
+                  <Ionicons name="create-outline" size={20} color="#222B30" />
+                  <Text style={styles.menuItemText}>New Chat</Text>
+                </TouchableOpacity>
+
+                <View style={styles.menuDivider} />
+
+                {/* Setting */}
+                <TouchableOpacity
+                  style={styles.menuItem}
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    console.log('Setting menu item pressed');
+                    setShowMenu(false);
+                    if (onSettingsPress) {
+                      onSettingsPress();
+                    }
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="settings-outline" size={20} color="#222B30" />
+                  <Text style={styles.menuItemText}>Setting</Text>
+                </TouchableOpacity>
 
                 {/* Logout */}
                 <TouchableOpacity
@@ -1519,7 +1542,7 @@ export default function ConversationsScreen({
                   {isLoggingOut ? (
                     <ActivityIndicator size="small" color="#222B30" />
                   ) : (
-                    <Ionicons name="arrow-forward-circle-outline" size={20} color="#222B30" />
+                    <Ionicons name="log-in-outline" size={20} color="#222B30" />
                   )}
                   <Text style={styles.menuItemText}>Logout</Text>
                 </TouchableOpacity>
@@ -2077,9 +2100,9 @@ const styles = StyleSheet.create({
   },
   menuContainer: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    minWidth: 200,
-    shadowColor: '#000',
+    borderRadius: 16,
+    minWidth: 203,
+    shadowColor: '#596E7C',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.15,
     shadowRadius: 16,
@@ -2091,9 +2114,15 @@ const styles = StyleSheet.create({
   menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    gap: 12,
+    paddingLeft: 12,
+    paddingRight: 8,
+    paddingVertical: 10,
+    gap: 8,
+  },
+  menuDivider: {
+    height: 1,
+    backgroundColor: '#D5D7DA',
+    marginHorizontal: 0,
   },
   menuItemIcon: {
     width: 20,
@@ -2104,7 +2133,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '400',
     color: '#222B30',
-    lineHeight: 20,
+    lineHeight: 18,
     flex: 1,
   },
   menuItemDisabled: {

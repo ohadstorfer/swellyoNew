@@ -15,6 +15,7 @@ import ConversationsScreen from '../screens/ConversationsScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
 import { DirectMessageScreen } from '../screens/DirectMessageScreen';
 import { SwellyShaperScreen } from '../screens/SwellyShaperScreen';
+import { SettingsScreen } from '../screens/SettingsScreen';
 import { ConversationLoadingScreen } from '../components/ConversationLoadingScreen';
 import { WelcomeToLineupOverlay } from '../components/WelcomeToLineupOverlay';
 import { messagingService } from '../services/messaging/messagingService';
@@ -470,6 +471,7 @@ export const AppContent: React.FC = () => {
   const [showTripPlanningChat, setShowTripPlanningChat] = useState(false);
   const [showTripPlanningChatCopy, setShowTripPlanningChatCopy] = useState(false);
   const [showSwellyShaper, setShowSwellyShaper] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [viewingUserId, setViewingUserId] = useState<string | null>(null);
   const [profileFromSwellyShaper, setProfileFromSwellyShaper] = useState(false); // Track if profile was opened from Swelly Shaper
   const [profileFromTripPlanningChat, setProfileFromTripPlanningChat] = useState(false); // Track if profile was opened from trip planning chat
@@ -1019,15 +1021,38 @@ export const AppContent: React.FC = () => {
   // CRITICAL: Must check user !== null to prevent showing conversations screen after logout
   // Also validate that session exists (unless Supabase not configured or demo user)
   // Don't show if we're currently validating (wait for validation to complete)
-  const shouldShowConversations = isComplete && user !== null && 
+  const shouldShowConversations = isComplete && user !== null &&
     !sessionValidationRef.current && // Don't show while validating
     (isDemoUser || isSupabaseConfigured === false || hasValidatedSession); // Show if demo user, Supabase not configured, or session validated
-  
+
+  // Load current user profile data (name + avatar) when entering main app
+  useEffect(() => {
+    if (shouldShowConversations && currentUserName === 'User') {
+      supabaseAuthService.getCurrentUser().then((currentUser) => {
+        if (currentUser) {
+          setCurrentUserAvatar(currentUser.photo || null);
+          setCurrentUserName(currentUser.nickname || currentUser.email?.split('@')[0] || 'User');
+        }
+      }).catch(() => {});
+    }
+  }, [shouldShowConversations]);
+
   if (shouldShowConversations) {
     console.log('[AppContent] Rendering check - showProfile:', showProfile, 'viewingUserId:', viewingUserId);
     console.log('[AppContent] Rendering check - selectedConversation:', selectedConversation ? 'exists' : 'null');
     console.log('[AppContent] Rendering check - showTripPlanningChat:', showTripPlanningChat);
     
+    // Show Settings screen if requested
+    if (showSettings) {
+      return (
+        <SettingsScreen
+          onBack={() => setShowSettings(false)}
+          userName={currentUserName}
+          userAvatar={currentUserAvatar}
+        />
+      );
+    }
+
     // Show Swelly Shaper screen if requested (check before profile)
     if (showSwellyShaper) {
       console.log('[AppContent] Rendering SwellyShaperScreen');
@@ -1157,6 +1182,7 @@ export const AppContent: React.FC = () => {
           onSwellyPress={handleSwellyPress}
           onSwellyPressCopy={handleSwellyPressCopy}
           onProfilePress={handleProfilePress}
+          onSettingsPress={() => setShowSettings(true)}
           onViewUserProfile={handleViewUserProfile}
           onSwellyShaperViewProfile={handleSwellyShaperViewProfile}
         />

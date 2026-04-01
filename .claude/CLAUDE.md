@@ -108,13 +108,35 @@ EXPO_PUBLIC_GOOGLE_CLIENT_SECRET
 EXPO_PUBLIC_POSTHOG_API_KEY
 EXPO_PUBLIC_POSTHOG_HOST
 EXPO_PUBLIC_MVP_MODE          # "true" = onboarding-only mode
+EXPO_PUBLIC_DEV_MODE          # "true" = dev mode (shows demo button)
+EXPO_PUBLIC_LOCAL_MODE         # "true" = local dev (shows demo button + debug panel)
 ```
+
+### App Modes
+
+| Mode | Flag | Demo Button | Swelly Edge Function | Post-Onboarding |
+|------|------|-------------|---------------------|-----------------|
+| **Production** | all false | No | `swelly-chat` | Full app |
+| **MVP** | `MVP_MODE=true` | No | `swelly-chat-demo` | Thank-you screen (blocks app) |
+| **Dev** | `DEV_MODE=true` | Yes | `swelly-chat-demo` | Full app |
+| **Local** | `LOCAL_MODE=true` | Yes | `swelly-chat` | Full app + debug panel |
 
 ## Team & Workflow
 
-- Two developers: Eyal (branch: `eyal`) and one other
-- Eyal pushes through the `eyal` branch
+**At the start of every session, ask: "Are you Eyal or Ohad?"** — each developer has their own branch and context.
+
+- **Eyal** — pushes through the `eyal` branch
+- **Ohad** — (branch TBD)
 - Coding conventions: TBD — not yet aligned
+
+### Eyal's preferences
+- Keep responses short. Brief summary after changes. Longer explanations only for large implementations.
+- English only — code, comments, and conversation.
+- If you see a better pattern, propose it — but ask before refactoring existing code.
+- Research best practices online before building features, fixing complex bugs, or working with unfamiliar tech. Skip only if trivially simple.
+- Be autonomous. Try to solve problems yourself. Only stop and ask when your judgment says input will prevent going in circles.
+- When you spot an unrelated bug: finish current task first, flag it at the end. Don't interrupt your own work.
+- Do NOT commit. Eyal reviews and commits manually.
 
 ## Common Gotchas
 
