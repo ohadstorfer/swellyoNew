@@ -138,6 +138,7 @@ export const AppContent: React.FC = () => {
   // Check if MVP and dev modes are enabled
   const isMVPMode = process.env.EXPO_PUBLIC_MVP_MODE === 'true';
   const isDevMode = process.env.EXPO_PUBLIC_DEV_MODE === 'true';
+  const isLocalMode = process.env.EXPO_PUBLIC_LOCAL_MODE === 'true';
 
   // Helper function to stop checking auth after minimum duration
   const stopCheckingAuth = useCallback(() => {
@@ -1408,7 +1409,7 @@ export const AppContent: React.FC = () => {
   // This handles: initial load, or when user hasn't started onboarding yet
   // Auth guard ensures unauthenticated users are redirected here
   // Demo button visible only when EXPO_PUBLIC_DEV_MODE is true
-  const showDemoButton = isDevMode;
+  const showDemoButton = isDevMode || isLocalMode;
   return (
     <WelcomeScreen
       onGetStarted={handleGetStarted}
