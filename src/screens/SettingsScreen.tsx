@@ -8,10 +8,12 @@ import {
   Platform,
   ScrollView,
   Animated,
+  Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { ProfileImage } from '../components/ProfileImage';
 import { DeleteAccountScreen } from './DeleteAccountScreen';
+import { ReportBugOverlay } from '../components/ReportBugOverlay';
 
 interface SettingsScreenProps {
   onBack: () => void;
@@ -22,6 +24,7 @@ interface SettingsScreenProps {
 
 export function SettingsScreen({ onBack, userName, userAvatar, userEmail }: SettingsScreenProps) {
   const [showDeleteAccount, setShowDeleteAccount] = useState(false);
+  const [showReportBug, setShowReportBug] = useState(false);
   const slideAnim = useRef(new Animated.Value(600)).current;
 
   useEffect(() => {
@@ -85,27 +88,28 @@ export function SettingsScreen({ onBack, userName, userAvatar, userEmail }: Sett
             <Text style={styles.menuRowText}>Delete account</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.menuRow} activeOpacity={0.7}>
+          <TouchableOpacity style={styles.menuRow} activeOpacity={0.7} onPress={() => Linking.openURL('https://www.swellyo.com/terms-and-conditions')}>
             <Ionicons name="document-text-outline" size={24} color="#222B30" />
-            <Text style={styles.menuRowText}>Terms of service</Text>
+            <Text style={[styles.menuRowText, styles.linkText]}>Terms of service</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.menuRow} activeOpacity={0.7}>
+          <TouchableOpacity style={styles.menuRow} activeOpacity={0.7} onPress={() => Linking.openURL('https://www.swellyo.com/privacy-policy')}>
             <Ionicons name="shield-checkmark-outline" size={24} color="#222B30" />
-            <Text style={styles.menuRowText}>Privacy policy</Text>
+            <Text style={[styles.menuRowText, styles.linkText]}>Privacy policy</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.menuRow} activeOpacity={0.7}>
+          <TouchableOpacity style={styles.menuRow} activeOpacity={0.7} onPress={() => setShowReportBug(true)}>
             <Ionicons name="chatbubble-ellipses-outline" size={24} color="#222B30" />
             <Text style={styles.menuRowText}>Report bug</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.menuRow} activeOpacity={0.7}>
+          <TouchableOpacity style={styles.menuRow} activeOpacity={0.7} onPress={() => Linking.openURL('https://www.swellyo.com/about')}>
             <Ionicons name="information-circle-outline" size={24} color="#222B30" />
-            <Text style={styles.menuRowText}>About us</Text>
+            <Text style={[styles.menuRowText, styles.linkText]}>About us</Text>
           </TouchableOpacity>
         </ScrollView>
       </Animated.View>
+      <ReportBugOverlay visible={showReportBug} onClose={() => setShowReportBug(false)} />
     </View>
   );
 }
@@ -228,5 +232,8 @@ const styles = StyleSheet.create({
     color: '#222B30',
     lineHeight: 18,
     flex: 1,
+  },
+  linkText: {
+    color: '#0788B0',
   },
 });

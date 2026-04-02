@@ -57,8 +57,11 @@ async function sendDeleteNotification(userName: string, userEmail: string, reaso
 export function DeleteAccountScreen({ onBack, userName, userEmail }: DeleteAccountScreenProps) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [selectedReason, setSelectedReason] = useState<string | null>(null);
+  const [showAreYouSure, setShowAreYouSure] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [showConfirmation, setShowConfirmation] = useState(false);
+  const areYouSureFade = useRef(new Animated.Value(0)).current;
+  const areYouSureScale = useRef(new Animated.Value(0.9)).current;
   const overlayFade = useRef(new Animated.Value(0)).current;
   const overlayScale = useRef(new Animated.Value(0.9)).current;
 
@@ -70,32 +73,50 @@ export function DeleteAccountScreen({ onBack, userName, userEmail }: DeleteAccou
     setDropdownOpen(false);
   };
 
-  const handleDelete = async () => {
-    if (!selectedReason || isDeleting) return;
+  const handleDelete = () => {
+    if (!selectedReason) return;
+    // Show "are you sure?" dialog
+    setShowAreYouSure(true);
+    areYouSureFade.setValue(0);
+    areYouSureScale.setValue(0.9);
+    Animated.parallel([
+      Animated.timing(areYouSureFade, { toValue: 1, duration: 250, useNativeDriver: true }),
+      Animated.spring(areYouSureScale, { toValue: 1, tension: 80, friction: 10, useNativeDriver: true }),
+    ]).start();
+  };
+
+  const handleCancelAreYouSure = () => {
+    Animated.timing(areYouSureFade, { toValue: 0, duration: 200, useNativeDriver: true }).start(() => {
+      setShowAreYouSure(false);
+    });
+  };
+
+  const handleConfirmDelete = async () => {
+    if (isDeleting) return;
     setIsDeleting(true);
 
     try {
       await sendDeleteNotification(
         userName || 'Unknown',
         userEmail || 'No email provided',
-        selectedReason,
+        selectedReason!,
       );
-      setShowConfirmation(true);
-      Animated.parallel([
-        Animated.timing(overlayFade, { toValue: 1, duration: 300, useNativeDriver: true }),
-        Animated.spring(overlayScale, { toValue: 1, tension: 80, friction: 10, useNativeDriver: true }),
-      ]).start();
     } catch (error) {
       console.error('[DeleteAccountScreen] Error sending notification:', error);
-      // Show confirmation anyway so the user isn't stuck
+    }
+    setIsDeleting(false);
+
+    // Hide "are you sure", show "request received"
+    Animated.timing(areYouSureFade, { toValue: 0, duration: 200, useNativeDriver: true }).start(() => {
+      setShowAreYouSure(false);
       setShowConfirmation(true);
+      overlayFade.setValue(0);
+      overlayScale.setValue(0.9);
       Animated.parallel([
         Animated.timing(overlayFade, { toValue: 1, duration: 300, useNativeDriver: true }),
         Animated.spring(overlayScale, { toValue: 1, tension: 80, friction: 10, useNativeDriver: true }),
       ]).start();
-    } finally {
-      setIsDeleting(false);
-    }
+    });
   };
 
   const handleConfirmationClose = () => {
@@ -206,6 +227,46 @@ export function DeleteAccountScreen({ onBack, userName, userEmail }: DeleteAccou
             : 'Please choose a reason before deleting your account'}
         </Text>
       </View>
+
+      {/* "Are you sure?" overlay */}
+      <Modal visible={showAreYouSure} transparent animationType="none">
+        <Animated.View style={[styles.overlayBackdrop, { opacity: areYouSureFade }]}>
+          <Animated.View style={[styles.areYouSureCard, { transform: [{ scale: areYouSureScale }] }]}>
+            {/* Trash icon */}
+            <View style={styles.trashIconCircle}>
+              <Ionicons name="trash-outline" size={24} color="#FB3748" />
+            </View>
+
+            {/* Close button */}
+            <TouchableOpacity style={styles.areYouSureClose} onPress={handleCancelAreYouSure} activeOpacity={0.7}>
+              <Ionicons name="close" size={22} color="#333" />
+            </TouchableOpacity>
+
+            <Text style={styles.areYouSureTitle}>Delete this account?</Text>
+            <Text style={styles.areYouSureMessage}>
+              Your account will be permanently deleted{'\n'}within 30 days
+            </Text>
+
+            <View style={styles.areYouSureButtons}>
+              <TouchableOpacity style={styles.cancelButton} onPress={handleCancelAreYouSure} activeOpacity={0.7}>
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.confirmDeleteButton, isDeleting && { opacity: 0.7 }]}
+                onPress={handleConfirmDelete}
+                activeOpacity={0.7}
+                disabled={isDeleting}
+              >
+                {isDeleting ? (
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                ) : (
+                  <Text style={styles.confirmDeleteButtonText}>Delete</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </Animated.View>
+        </Animated.View>
+      </Modal>
 
       {/* Confirmation overlay */}
       <Modal visible={showConfirmation} transparent animationType="none">
@@ -401,10 +462,91 @@ const styles = StyleSheet.create({
     lineHeight: 15,
     textAlign: 'center',
   },
+  // "Are you sure?" dialog
+  areYouSureCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    paddingHorizontal: 24,
+    paddingTop: 24,
+    paddingBottom: 24,
+    width: '100%',
+    maxWidth: 360,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
+    shadowRadius: 24,
+    elevation: 12,
+  },
+  trashIconCircle: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#FFEBEE',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  areYouSureClose: {
+    position: 'absolute',
+    top: 20,
+    right: 20,
+    padding: 4,
+  },
+  areYouSureTitle: {
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    fontSize: 18,
+    fontWeight: '700' as const,
+    color: '#333',
+    lineHeight: 24,
+    marginBottom: 8,
+  },
+  areYouSureMessage: {
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    fontSize: 14,
+    fontWeight: '400' as const,
+    color: '#999',
+    lineHeight: 20,
+    marginBottom: 24,
+  },
+  areYouSureButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  cancelButton: {
+    flex: 1,
+    backgroundColor: '#F5F5F5',
+    borderRadius: 999,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cancelButtonText: {
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    fontSize: 15,
+    fontWeight: '500' as const,
+    color: '#333',
+    lineHeight: 20,
+  },
+  confirmDeleteButton: {
+    flex: 1,
+    backgroundColor: '#D32F2F',
+    borderRadius: 999,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 48,
+  },
+  confirmDeleteButtonText: {
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    fontSize: 15,
+    fontWeight: '600' as const,
+    color: '#FFFFFF',
+    lineHeight: 20,
+  },
   // Confirmation overlay
   overlayBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 32,

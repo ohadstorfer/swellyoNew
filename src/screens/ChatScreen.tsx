@@ -12,6 +12,7 @@ import {
   Animated,
   Dimensions,
   ScrollView as RNScrollView,
+  Pressable,
 } from 'react-native';
 
 // On native, use RN's built-in ScrollView with nestedScrollEnabled.
@@ -29,6 +30,7 @@ import { analyticsService } from '../services/analytics/analyticsService';
 import { DestinationCardsCarouselCopy } from '../components/DestinationCardsCarouselCopy';
 import { BudgetCardsCarousel, type BudgetOption } from '../components/BudgetCardsCarousel';
 import { ChatTextInput } from '../components/ChatTextInput';
+import { ReportAISheet } from '../components/ReportAISheet';
 import { useChatKeyboardScroll } from '../hooks/useChatKeyboardScroll';
 
 // Resolve image URLs once at module level to avoid heavy manifest inspection +
@@ -157,6 +159,10 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
   const [pendingBudgetUiHints, setPendingBudgetUiHints] = useState<{
     messageId: string;
   } | null>(null);
+
+  // AI report state
+  const [reportSheetVisible, setReportSheetVisible] = useState(false);
+  const [reportMessageText, setReportMessageText] = useState('');
 
   // Initial welcome: show typing bubble after 1s, then second message after 2s more
   const [showInitialTypingBubble, setShowInitialTypingBubble] = useState(false);
@@ -727,8 +733,37 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
     }
   };
 
+  const handleLongPressMessage = (message: Message) => {
+    if (message.isUser) return;
+    setReportMessageText(message.text);
+    setReportSheetVisible(true);
+  };
+
   const renderMessage = (message: Message) => {
     // Regular message rendering
+    const bubbleContent = (
+      <View
+        style={[
+          styles.messageBubble,
+          message.isUser ? styles.userMessageBubble : styles.botMessageBubble,
+        ]}
+      >
+        <View style={styles.messageTextContainer}>
+          <Text style={message.isUser ? styles.userMessageText : styles.botMessageText}>
+            {message.text}
+          </Text>
+        </View>
+        <View style={styles.timestampContainer}>
+          <Text style={[
+            styles.timestamp,
+            message.isUser ? styles.userTimestamp : styles.botTimestamp,
+          ]}>
+            {message.timestamp}
+          </Text>
+        </View>
+      </View>
+    );
+
     return (
       <View key={message.id}>
         <View
@@ -737,26 +772,11 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
             message.isUser ? styles.userMessageContainer : styles.botMessageContainer,
           ]}
         >
-          <View
-            style={[
-              styles.messageBubble,
-              message.isUser ? styles.userMessageBubble : styles.botMessageBubble,
-            ]}
-          >
-            <View style={styles.messageTextContainer}>
-              <Text style={message.isUser ? styles.userMessageText : styles.botMessageText}>
-                {message.text}
-              </Text>
-            </View>
-            <View style={styles.timestampContainer}>
-              <Text style={[
-                styles.timestamp,
-                message.isUser ? styles.userTimestamp : styles.botTimestamp,
-              ]}>
-                {message.timestamp}
-              </Text>
-            </View>
-          </View>
+          {message.isUser ? bubbleContent : (
+            <Pressable onLongPress={() => handleLongPressMessage(message)} delayLongPress={400}>
+              {bubbleContent}
+            </Pressable>
+          )}
         </View>
         
         {/* Render destination cards carousel if this is the message that originally requested them */}
@@ -795,6 +815,7 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
   };
 
   return (
+    <>
     <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.headerContainer}>
@@ -904,6 +925,13 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
+    <ReportAISheet
+      visible={reportSheetVisible}
+      messageText={reportMessageText}
+      chatType="onboarding"
+      onClose={() => setReportSheetVisible(false)}
+    />
+    </>
   );
 };
 

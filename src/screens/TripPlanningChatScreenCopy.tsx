@@ -29,6 +29,7 @@ import { messagingService } from '../services/messaging/messagingService';
 import { MatchedUser, TripPlanningRequest } from '../types/tripPlanning';
 import { analyticsService } from '../services/analytics/analyticsService';
 import { ChatTextInput } from '../components/ChatTextInput';
+import { ReportAISheet } from '../components/ReportAISheet';
 import {
   queryFiltersToDisplayList,
   removeFilterFromRequestData,
@@ -254,6 +255,10 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   const [existingFiltersForAdd, setExistingFiltersForAdd] = useState<{ data: any } | null>(null);
   const [filtersMenuVisible, setFiltersMenuVisible] = useState(false);
   const [isAwaitingFilterRemovalResponse, setAwaitingFilterRemovalResponse] = useState(false);
+
+  // AI report state
+  const [reportSheetVisible, setReportSheetVisible] = useState(false);
+  const [reportMessageText, setReportMessageText] = useState('');
   const [messageIdsUnblockedByFilterDeletion, setMessageIdsUnblockedByFilterDeletion] = useState<Record<string, true>>({});
   const [trashHoverProgress, setTrashHoverProgress] = useState(0);
   const [showNewChatModal, setShowNewChatModal] = useState(false);
@@ -1609,6 +1614,12 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     return map;
   }, [filterDisplayList, handleRemoveFilter]);
 
+  const handleLongPressMessage = (message: Message) => {
+    if (message.isUser) return;
+    setReportMessageText(message.text);
+    setReportSheetVisible(true);
+  };
+
   const renderMessage = (message: Message) => {
     // Match-result message (has action row; matchedUsers can be empty for no-matches)
     if (message.isMatchedUsers && Array.isArray(message.matchedUsers) && message.matchedUsers.length > 0) {
@@ -1697,6 +1708,29 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     }
 
     // Regular message rendering
+    const bubbleContent = (
+      <View
+        style={[
+          styles.messageBubble,
+          message.isUser ? styles.userMessageBubble : styles.botMessageBubble,
+        ]}
+      >
+        <View style={styles.messageTextContainer}>
+          <Text style={message.isUser ? styles.userMessageText : styles.botMessageText}>
+            {message.text}
+          </Text>
+        </View>
+        <View style={styles.timestampContainer}>
+          <Text style={[
+            styles.timestamp,
+            message.isUser ? styles.userTimestamp : styles.botTimestamp,
+          ]}>
+            {message.timestamp}
+          </Text>
+        </View>
+      </View>
+    );
+
     return (
       <View key={message.id}>
         <View
@@ -1705,26 +1739,11 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             message.isUser ? styles.userMessageContainer : styles.botMessageContainer,
           ]}
         >
-          <View
-            style={[
-              styles.messageBubble,
-              message.isUser ? styles.userMessageBubble : styles.botMessageBubble,
-            ]}
-          >
-            <View style={styles.messageTextContainer}>
-              <Text style={message.isUser ? styles.userMessageText : styles.botMessageText}>
-                {message.text}
-              </Text>
-            </View>
-            <View style={styles.timestampContainer}>
-              <Text style={[
-                styles.timestamp,
-                message.isUser ? styles.userTimestamp : styles.botTimestamp,
-              ]}>
-                {message.timestamp}
-              </Text>
-            </View>
-          </View>
+          {message.isUser ? bubbleContent : (
+            <Pressable onLongPress={() => handleLongPressMessage(message)} delayLongPress={400}>
+              {bubbleContent}
+            </Pressable>
+          )}
         </View>
         {!message.isUser && message.isSearchSummary && (
           <View style={styles.reviewFiltersRow}>
@@ -1775,6 +1794,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   };
 
   return (
+    <>
     <SafeAreaView style={styles.container} edges={['top']}>
       {/* Header */}
       <View style={styles.headerContainer}>
@@ -2123,6 +2143,13 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         </Pressable>
       </Modal>
     </SafeAreaView>
+    <ReportAISheet
+      visible={reportSheetVisible}
+      messageText={reportMessageText}
+      chatType="matching"
+      onClose={() => setReportSheetVisible(false)}
+    />
+    </>
   );
 };
 
