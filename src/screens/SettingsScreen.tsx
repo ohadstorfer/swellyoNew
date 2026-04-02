@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -7,16 +7,42 @@ import {
   Image,
   Platform,
   ScrollView,
+  Animated,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { ProfileImage } from '../components/ProfileImage';
+import { DeleteAccountScreen } from './DeleteAccountScreen';
 
 interface SettingsScreenProps {
   onBack: () => void;
   userName: string;
   userAvatar: string | null;
+  userEmail?: string;
 }
 
-export function SettingsScreen({ onBack, userName, userAvatar }: SettingsScreenProps) {
+export function SettingsScreen({ onBack, userName, userAvatar, userEmail }: SettingsScreenProps) {
+  const [showDeleteAccount, setShowDeleteAccount] = useState(false);
+  const slideAnim = useRef(new Animated.Value(600)).current;
+
+  useEffect(() => {
+    Animated.spring(slideAnim, {
+      toValue: 0,
+      tension: 65,
+      friction: 11,
+      useNativeDriver: true,
+    }).start();
+  }, []);
+
+  if (showDeleteAccount) {
+    return (
+      <DeleteAccountScreen
+        onBack={() => setShowDeleteAccount(false)}
+        userName={userName}
+        userEmail={userEmail}
+      />
+    );
+  }
+
   return (
     <View style={styles.container}>
       {/* Back button - floating on top */}
@@ -26,20 +52,19 @@ export function SettingsScreen({ onBack, userName, userAvatar }: SettingsScreenP
       </TouchableOpacity>
 
       {/* Profile image - floating above the white card */}
-      <View style={styles.profileImageWrapper}>
+      <Animated.View style={[styles.profileImageWrapper, { transform: [{ translateY: slideAnim }] }]}>
         <View style={styles.avatarBorder}>
-          {userAvatar ? (
-            <Image source={{ uri: userAvatar }} style={styles.avatar} />
-          ) : (
-            <View style={[styles.avatar, styles.avatarPlaceholder]}>
-              <Ionicons name="person" size={40} color="#ccc" />
-            </View>
-          )}
+          <ProfileImage
+            imageUrl={userAvatar}
+            name={userName}
+            style={styles.avatar}
+            showLoadingIndicator={false}
+          />
         </View>
-      </View>
+      </Animated.View>
 
       {/* White bottom card */}
-      <View style={styles.bottomCard}>
+      <Animated.View style={[styles.bottomCard, { transform: [{ translateY: slideAnim }] }]}>
         {/* Spacer for the avatar overlap */}
         <View style={styles.avatarSpacer} />
 
@@ -55,7 +80,7 @@ export function SettingsScreen({ onBack, userName, userAvatar }: SettingsScreenP
         <ScrollView style={styles.settingsList} contentContainerStyle={styles.settingsListContent}>
           <Text style={styles.sectionTitle}>Settings</Text>
 
-          <TouchableOpacity style={styles.menuRow} activeOpacity={0.7}>
+          <TouchableOpacity style={styles.menuRow} activeOpacity={0.7} onPress={() => setShowDeleteAccount(true)}>
             <Ionicons name="trash-outline" size={24} color="#222B30" />
             <Text style={styles.menuRowText}>Delete account</Text>
           </TouchableOpacity>
@@ -80,7 +105,7 @@ export function SettingsScreen({ onBack, userName, userAvatar }: SettingsScreenP
             <Text style={styles.menuRowText}>About us</Text>
           </TouchableOpacity>
         </ScrollView>
-      </View>
+      </Animated.View>
     </View>
   );
 }
@@ -137,7 +162,7 @@ const styles = StyleSheet.create({
     borderRadius: 80,
   },
   avatarPlaceholder: {
-    backgroundColor: '#F0F0F0',
+    backgroundColor: '#C8D6DE',
     alignItems: 'center',
     justifyContent: 'center',
   },

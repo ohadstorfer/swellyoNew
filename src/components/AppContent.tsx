@@ -1000,6 +1000,27 @@ export const AppContent: React.FC = () => {
   };
 
 
+  // If onboarding is complete AND user is authenticated, show conversations screen as home page
+  // This check must come FIRST before any step checks
+  // CRITICAL: Must check user !== null to prevent showing conversations screen after logout
+  // Also validate that session exists (unless Supabase not configured or demo user)
+  // Don't show if we're currently validating (wait for validation to complete)
+  const shouldShowConversations = isComplete && user !== null &&
+    !sessionValidationRef.current && // Don't show while validating
+    (isDemoUser || isSupabaseConfigured === false || hasValidatedSession); // Show if demo user, Supabase not configured, or session validated
+
+  // Load current user profile data (name + avatar) when entering main app
+  useEffect(() => {
+    if (shouldShowConversations && (currentUserName === 'User' || !currentUserAvatar)) {
+      supabaseAuthService.getCurrentUser().then((currentUser) => {
+        if (currentUser) {
+          setCurrentUserAvatar(currentUser.photo || null);
+          setCurrentUserName(currentUser.nickname || currentUser.email?.split('@')[0] || 'User');
+        }
+      }).catch(() => {});
+    }
+  }, [shouldShowConversations]);
+
   // Wait for session restoration to complete before rendering
   // This prevents premature redirects before we know if user has a valid session
   if (isRestoringSession) {
@@ -1016,27 +1037,6 @@ export const AppContent: React.FC = () => {
   // Note: Removed premature WelcomeScreen redirect check
   // The auth guard now handles all authentication redirects after session restoration completes
 
-  // If onboarding is complete AND user is authenticated, show conversations screen as home page
-  // This check must come FIRST before any step checks
-  // CRITICAL: Must check user !== null to prevent showing conversations screen after logout
-  // Also validate that session exists (unless Supabase not configured or demo user)
-  // Don't show if we're currently validating (wait for validation to complete)
-  const shouldShowConversations = isComplete && user !== null &&
-    !sessionValidationRef.current && // Don't show while validating
-    (isDemoUser || isSupabaseConfigured === false || hasValidatedSession); // Show if demo user, Supabase not configured, or session validated
-
-  // Load current user profile data (name + avatar) when entering main app
-  useEffect(() => {
-    if (shouldShowConversations && currentUserName === 'User') {
-      supabaseAuthService.getCurrentUser().then((currentUser) => {
-        if (currentUser) {
-          setCurrentUserAvatar(currentUser.photo || null);
-          setCurrentUserName(currentUser.nickname || currentUser.email?.split('@')[0] || 'User');
-        }
-      }).catch(() => {});
-    }
-  }, [shouldShowConversations]);
-
   if (shouldShowConversations) {
     console.log('[AppContent] Rendering check - showProfile:', showProfile, 'viewingUserId:', viewingUserId);
     console.log('[AppContent] Rendering check - selectedConversation:', selectedConversation ? 'exists' : 'null');
@@ -1049,6 +1049,7 @@ export const AppContent: React.FC = () => {
           onBack={() => setShowSettings(false)}
           userName={currentUserName}
           userAvatar={currentUserAvatar}
+          userEmail={user?.email}
         />
       );
     }
