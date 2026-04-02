@@ -1259,6 +1259,41 @@ class MessagingService {
   }
 
   /**
+   * Clear all messages in a conversation (client-side delete).
+   * Deletes messages from the database for the current user.
+   */
+  async clearConversationMessages(conversationId: string): Promise<void> {
+    if (!isSupabaseConfigured()) {
+      throw new Error('Supabase is not configured');
+    }
+
+    try {
+      const { error } = await supabase
+        .from('messages')
+        .delete()
+        .eq('conversation_id', conversationId);
+
+      if (error) {
+        console.error('[MessagingService] Error clearing messages:', error);
+        throw error;
+      }
+
+      // Also clear the local cache so messages don't reappear
+      try {
+        const { chatHistoryCache } = await import('./chatHistoryCache');
+        chatHistoryCache.clearConversation(conversationId);
+      } catch (cacheErr) {
+        console.warn('[MessagingService] Error clearing cache:', cacheErr);
+      }
+
+      console.log(`[MessagingService] Cleared messages for conversation ${conversationId}`);
+    } catch (error) {
+      console.error('[MessagingService] Error in clearConversationMessages:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Edit a message (with 15-minute edit window)
    */
   async editMessage(conversationId: string, messageId: string, newBody: string): Promise<Message> {

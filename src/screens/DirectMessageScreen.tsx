@@ -38,6 +38,8 @@ import { ImagePreviewModal } from '../components/ImagePreviewModal';
 import { ChatTextInput, ChatTextInputRef } from '../components/ChatTextInput';
 import { WelcomeIntroMessage } from '../components/WelcomeIntroMessage';
 import { useChatKeyboardScroll } from '../hooks/useChatKeyboardScroll';
+import { BlockUserOverlay } from '../components/BlockUserOverlay';
+import { ReportUserOverlay } from '../components/ReportUserOverlay';
 
 interface DirectMessageScreenProps {
   conversationId?: string; // Optional: undefined for pending conversations (will be created on first message)
@@ -65,6 +67,9 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   // Get markAsRead and setCurrentConversationId from MessagingProvider
   const { markAsRead, setCurrentConversationId: setMessagingCurrentConversationId } = useMessaging();
   
+  const [showBlockOverlay, setShowBlockOverlay] = useState(false);
+  const [showDmMenu, setShowDmMenu] = useState(false);
+  const [showReportUser, setShowReportUser] = useState(false);
   const [currentConversationId, setCurrentConversationId] = useState<string | undefined>(conversationId);
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
@@ -1817,6 +1822,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   };
 
   return (
+    <>
     <SafeAreaView style={styles.container} edges={['top']}>
       {/* Header */}
       <View style={styles.headerContainer}>
@@ -1874,14 +1880,33 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             }, [otherUserIsOnline])}
           </TouchableOpacity>
           
-          {/* <TouchableOpacity style={styles.menuButton}>
+          <TouchableOpacity style={styles.menuButton} onPress={() => setShowDmMenu(!showDmMenu)}>
             <Ionicons name="ellipsis-vertical" size={24} color="#FFFFFF" />
-          </TouchableOpacity> */}
+          </TouchableOpacity>
         </View>
       </View>
 
+      {/* DM menu dropdown - rendered outside header to avoid overflow clipping */}
+      {showDmMenu && (
+        <View style={styles.dmMenuDropdown}>
+          <TouchableOpacity style={styles.dmMenuItem} activeOpacity={0.7} onPress={() => { setShowDmMenu(false); setShowReportUser(true); }}>
+            <Ionicons name="alert-circle-outline" size={20} color="#222B30" />
+            <Text style={styles.dmMenuItemText}>Report</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.dmMenuItem} activeOpacity={0.7} onPress={() => { setShowDmMenu(false); setShowBlockOverlay(true); }}>
+            <Ionicons name="ban-outline" size={20} color="#222B30" />
+            <Text style={styles.dmMenuItemText}>Block</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Dismiss menu on tap outside */}
+      {showDmMenu && (
+        <TouchableOpacity style={[StyleSheet.absoluteFill, { zIndex: 9998 }]} activeOpacity={1} onPress={() => setShowDmMenu(false)} />
+      )}
+
       {/* Chat Messages */}
-      <KeyboardAvoidingView 
+      <KeyboardAvoidingView
         style={styles.chatContainer}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
@@ -2085,6 +2110,27 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         />
       )}
     </SafeAreaView>
+    <BlockUserOverlay
+      visible={showBlockOverlay}
+      userId={otherUserId}
+      userName={otherUserName}
+      onClose={() => setShowBlockOverlay(false)}
+      onBlocked={() => {
+        setShowBlockOverlay(false);
+        onBack();
+      }}
+    />
+    <ReportUserOverlay
+      visible={showReportUser}
+      reportedUserId={otherUserId}
+      reportedUserName={otherUserName}
+      onClose={() => setShowReportUser(false)}
+      onBlocked={() => {
+        setShowReportUser(false);
+        onBack();
+      }}
+    />
+    </>
   );
 };
 
@@ -2191,6 +2237,42 @@ const styles = StyleSheet.create({
     height: 24,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  dmMenuDropdown: {
+    position: 'absolute',
+    top: 92,
+    right: 12,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    minWidth: 180,
+    shadowColor: '#596E7C',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 16,
+    elevation: 999,
+    zIndex: 9999,
+    paddingVertical: 8,
+  },
+  dmMenuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingLeft: 16,
+    paddingRight: 12,
+    paddingVertical: 12,
+    gap: 10,
+  },
+  dmMenuItemText: {
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    fontSize: 14,
+    fontWeight: '400' as const,
+    color: '#222B30',
+    lineHeight: 18,
+    flex: 1,
+  },
+  dmMenuDivider: {
+    height: 1,
+    backgroundColor: '#E8E8E8',
+    marginHorizontal: 0,
   },
   chatContainer: {
     flex: 1,

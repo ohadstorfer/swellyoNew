@@ -16,6 +16,7 @@ import { avatarCacheService } from '../services/media/avatarCacheService';
 import { clearSwellyShaperChatId } from '../screens/SwellyShaperScreen';
 import { swellyShaperService } from '../services/swelly/swellyShaperService';
 import { messagingService } from '../services/messaging/messagingService';
+import { blockingService } from '../services/blocking/blockingService';
 
 let registered = false;
 
@@ -51,6 +52,9 @@ export function registerLogoutHandlers(): void {
 
   // Messaging in-memory state (channels, typing, subscriptions)
   logoutRegistry.register(() => messagingService.resetAll());
+
+  // Block list cache
+  logoutRegistry.register(() => blockingService.clear());
 
   // Web-only: clear localStorage user data
   if (Platform.OS === 'web') {

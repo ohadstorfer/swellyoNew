@@ -231,6 +231,18 @@ async function sendSingleEmail(
 ): Promise<void> {
   console.log(`[sendSingleEmail] Sending email - recipient: ${recipientId}, sender: ${senderId}, message: ${messageId}`);
 
+  // Check if either user has blocked the other — skip email if so
+  const { data: blockExists } = await supabase
+    .from('user_blocks')
+    .select('id')
+    .or(`and(blocker_id.eq.${recipientId},blocked_id.eq.${senderId}),and(blocker_id.eq.${senderId},blocked_id.eq.${recipientId})`)
+    .limit(1);
+
+  if (blockExists && blockExists.length > 0) {
+    console.log(`[Email Notification] Skipping - block exists between ${recipientId} and ${senderId}`);
+    return;
+  }
+
   // Get the message
   const { data: msg, error: msgError } = await supabase
     .from('messages')

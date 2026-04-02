@@ -15,6 +15,7 @@ import ConversationsScreen from '../screens/ConversationsScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
 import { DirectMessageScreen } from '../screens/DirectMessageScreen';
 import { SwellyShaperScreen } from '../screens/SwellyShaperScreen';
+import { SettingsScreen } from '../screens/SettingsScreen';
 import { ConversationLoadingScreen } from '../components/ConversationLoadingScreen';
 import { WelcomeToLineupOverlay } from '../components/WelcomeToLineupOverlay';
 import { messagingService } from '../services/messaging/messagingService';
@@ -138,6 +139,7 @@ export const AppContent: React.FC = () => {
   // Check if MVP and dev modes are enabled
   const isMVPMode = process.env.EXPO_PUBLIC_MVP_MODE === 'true';
   const isDevMode = process.env.EXPO_PUBLIC_DEV_MODE === 'true';
+  const isLocalMode = process.env.EXPO_PUBLIC_LOCAL_MODE === 'true';
 
   // Helper function to stop checking auth after minimum duration
   const stopCheckingAuth = useCallback(() => {
@@ -469,6 +471,7 @@ export const AppContent: React.FC = () => {
   const [showTripPlanningChat, setShowTripPlanningChat] = useState(false);
   const [showTripPlanningChatCopy, setShowTripPlanningChatCopy] = useState(false);
   const [showSwellyShaper, setShowSwellyShaper] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [viewingUserId, setViewingUserId] = useState<string | null>(null);
   const [profileFromSwellyShaper, setProfileFromSwellyShaper] = useState(false); // Track if profile was opened from Swelly Shaper
   const [profileFromTripPlanningChat, setProfileFromTripPlanningChat] = useState(false); // Track if profile was opened from trip planning chat
@@ -997,6 +1000,27 @@ export const AppContent: React.FC = () => {
   };
 
 
+  // If onboarding is complete AND user is authenticated, show conversations screen as home page
+  // This check must come FIRST before any step checks
+  // CRITICAL: Must check user !== null to prevent showing conversations screen after logout
+  // Also validate that session exists (unless Supabase not configured or demo user)
+  // Don't show if we're currently validating (wait for validation to complete)
+  const shouldShowConversations = isComplete && user !== null &&
+    !sessionValidationRef.current && // Don't show while validating
+    (isDemoUser || isSupabaseConfigured === false || hasValidatedSession); // Show if demo user, Supabase not configured, or session validated
+
+  // Load current user profile data (name + avatar) when entering main app
+  useEffect(() => {
+    if (shouldShowConversations && (currentUserName === 'User' || !currentUserAvatar)) {
+      supabaseAuthService.getCurrentUser().then((currentUser) => {
+        if (currentUser) {
+          setCurrentUserAvatar(currentUser.photo || null);
+          setCurrentUserName(currentUser.nickname || currentUser.email?.split('@')[0] || 'User');
+        }
+      }).catch(() => {});
+    }
+  }, [shouldShowConversations]);
+
   // Wait for session restoration to complete before rendering
   // This prevents premature redirects before we know if user has a valid session
   if (isRestoringSession) {
@@ -1013,20 +1037,23 @@ export const AppContent: React.FC = () => {
   // Note: Removed premature WelcomeScreen redirect check
   // The auth guard now handles all authentication redirects after session restoration completes
 
-  // If onboarding is complete AND user is authenticated, show conversations screen as home page
-  // This check must come FIRST before any step checks
-  // CRITICAL: Must check user !== null to prevent showing conversations screen after logout
-  // Also validate that session exists (unless Supabase not configured or demo user)
-  // Don't show if we're currently validating (wait for validation to complete)
-  const shouldShowConversations = isComplete && user !== null && 
-    !sessionValidationRef.current && // Don't show while validating
-    (isDemoUser || isSupabaseConfigured === false || hasValidatedSession); // Show if demo user, Supabase not configured, or session validated
-  
   if (shouldShowConversations) {
     console.log('[AppContent] Rendering check - showProfile:', showProfile, 'viewingUserId:', viewingUserId);
     console.log('[AppContent] Rendering check - selectedConversation:', selectedConversation ? 'exists' : 'null');
     console.log('[AppContent] Rendering check - showTripPlanningChat:', showTripPlanningChat);
     
+    // Show Settings screen if requested
+    if (showSettings) {
+      return (
+        <SettingsScreen
+          onBack={() => setShowSettings(false)}
+          userName={currentUserName}
+          userAvatar={currentUserAvatar}
+          userEmail={user?.email}
+        />
+      );
+    }
+
     // Show Swelly Shaper screen if requested (check before profile)
     if (showSwellyShaper) {
       console.log('[AppContent] Rendering SwellyShaperScreen');
@@ -1156,12 +1183,13 @@ export const AppContent: React.FC = () => {
           onSwellyPress={handleSwellyPress}
           onSwellyPressCopy={handleSwellyPressCopy}
           onProfilePress={handleProfilePress}
+          onSettingsPress={() => setShowSettings(true)}
           onViewUserProfile={handleViewUserProfile}
           onSwellyShaperViewProfile={handleSwellyShaperViewProfile}
         />
         {process.env.EXPO_PUBLIC_LOCAL_MODE === 'true' && (
           <TouchableOpacity
-            style={{ position: 'absolute', top: 60, right: 10, backgroundColor: '#333', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, zIndex: 999, opacity: 0.7 }}
+            style={{ position: 'absolute', top: 60, right: 10, backgroundColor: '#333', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, zIndex: 999, opacity: 0.7, display: 'none' }}
             onPress={async () => {
               try {
                 const { conversations } = await messagingService.getConversations(3, 0);
@@ -1408,7 +1436,7 @@ export const AppContent: React.FC = () => {
   // This handles: initial load, or when user hasn't started onboarding yet
   // Auth guard ensures unauthenticated users are redirected here
   // Demo button visible only when EXPO_PUBLIC_DEV_MODE is true
-  const showDemoButton = isDevMode;
+  const showDemoButton = isDevMode || isLocalMode;
   return (
     <WelcomeScreen
       onGetStarted={handleGetStarted}

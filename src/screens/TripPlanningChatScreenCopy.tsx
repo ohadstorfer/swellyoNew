@@ -17,7 +17,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import Svg, { Path, Defs, Stop, LinearGradient as SvgLinearGradient } from 'react-native-svg';
+import Svg, { Path, Defs, Stop, LinearGradient as SvgLinearGradient, Rect } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../components/Text';
 import { colors, spacing } from '../styles/theme';
@@ -29,6 +29,8 @@ import { messagingService } from '../services/messaging/messagingService';
 import { MatchedUser, TripPlanningRequest } from '../types/tripPlanning';
 import { analyticsService } from '../services/analytics/analyticsService';
 import { ChatTextInput } from '../components/ChatTextInput';
+import { ReportAISheet } from '../components/ReportAISheet';
+import { blockingService } from '../services/blocking/blockingService';
 import {
   queryFiltersToDisplayList,
   removeFilterFromRequestData,
@@ -249,11 +251,16 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   const [singleCriterionType, setSingleCriterionType] = useState<string | null>(null);
   const [pendingSearch, setPendingSearch] = useState<{ data: any; searchSummary: string } | null>(null);
   const [awaitingSearchDecision, setAwaitingSearchDecision] = useState(false);
+  const [searchBtnSize, setSearchBtnSize] = useState({ w: 0, h: 0 });
   const [lastMatchRequestData, setLastMatchRequestData] = useState<any | null>(null);
   const [lastMatchActionPressed, setLastMatchActionPressed] = useState<'new_chat' | 'add_filter' | 'more' | null>(null);
   const [existingFiltersForAdd, setExistingFiltersForAdd] = useState<{ data: any } | null>(null);
   const [filtersMenuVisible, setFiltersMenuVisible] = useState(false);
   const [isAwaitingFilterRemovalResponse, setAwaitingFilterRemovalResponse] = useState(false);
+
+  // AI report state
+  const [reportSheetVisible, setReportSheetVisible] = useState(false);
+  const [reportMessageText, setReportMessageText] = useState('');
   const [messageIdsUnblockedByFilterDeletion, setMessageIdsUnblockedByFilterDeletion] = useState<Record<string, true>>({});
   const [trashHoverProgress, setTrashHoverProgress] = useState(0);
   const [showNewChatModal, setShowNewChatModal] = useState(false);
@@ -829,8 +836,11 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     };
 
     try {
-      const { matches: matchedUsers, totalCount, messageIndex: backendMsgIndex } = await svc.findMatchingUsersServer(currentChatId, tripPlanningData, excludePrevious);
-      console.log('Matched users found (server):', matchedUsers.length, 'totalCount:', totalCount);
+      const { matches: rawMatches, totalCount, messageIndex: backendMsgIndex } = await svc.findMatchingUsersServer(currentChatId, tripPlanningData, excludePrevious);
+      // Filter out blocked users from match results (both directions)
+      const blockedSet = blockingService.getAllHiddenIdsSet();
+      const matchedUsers = blockedSet.size > 0 ? rawMatches.filter(u => !blockedSet.has(u.user_id)) : rawMatches;
+      console.log('Matched users found (server):', matchedUsers.length, 'totalCount:', totalCount, 'filtered:', rawMatches.length - matchedUsers.length);
       const needsConfirmation = (matchedUsers as any).__needsConfirmation === true;
       const isSingleCriterion = (matchedUsers as any).__singleCriterion === true;
       if (needsConfirmation && isSingleCriterion && matchedUsers.length > 0) {
@@ -1609,6 +1619,12 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     return map;
   }, [filterDisplayList, handleRemoveFilter]);
 
+  const handleLongPressMessage = (message: Message) => {
+    if (message.isUser) return;
+    setReportMessageText(message.text);
+    setReportSheetVisible(true);
+  };
+
   const renderMessage = (message: Message) => {
     // Match-result message (has action row; matchedUsers can be empty for no-matches)
     if (message.isMatchedUsers && Array.isArray(message.matchedUsers) && message.matchedUsers.length > 0) {
@@ -1639,13 +1655,19 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             </View>
           </View>
           
-          {/* Render matched user cards carousel (only when there are matches) */}
-          {message.matchedUsers.length > 0 && (
-            <MatchedUsersCarousel
-              users={message.matchedUsers}
-              onViewProfile={handleViewProfile}
-            />
-          )}
+          {/* Render matched user cards carousel (only when there are matches, filtered for blocked) */}
+          {(() => {
+            const blocked = blockingService.getAllHiddenIdsSet();
+            const filteredUsers = blocked.size > 0
+              ? message.matchedUsers.filter(u => !blocked.has(u.user_id))
+              : message.matchedUsers;
+            return filteredUsers.length > 0 ? (
+              <MatchedUsersCarousel
+                users={filteredUsers}
+                onViewProfile={handleViewProfile}
+              />
+            ) : null;
+          })()}
 
           {/* Per-message action row (New Chat, Filters, More Matches) */}
           {hasActionRow && (
@@ -1697,6 +1719,29 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     }
 
     // Regular message rendering
+    const bubbleContent = (
+      <View
+        style={[
+          styles.messageBubble,
+          message.isUser ? styles.userMessageBubble : styles.botMessageBubble,
+        ]}
+      >
+        <View style={styles.messageTextContainer}>
+          <Text style={message.isUser ? styles.userMessageText : styles.botMessageText}>
+            {message.text}
+          </Text>
+        </View>
+        <View style={styles.timestampContainer}>
+          <Text style={[
+            styles.timestamp,
+            message.isUser ? styles.userTimestamp : styles.botTimestamp,
+          ]}>
+            {message.timestamp}
+          </Text>
+        </View>
+      </View>
+    );
+
     return (
       <View key={message.id}>
         <View
@@ -1705,26 +1750,11 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             message.isUser ? styles.userMessageContainer : styles.botMessageContainer,
           ]}
         >
-          <View
-            style={[
-              styles.messageBubble,
-              message.isUser ? styles.userMessageBubble : styles.botMessageBubble,
-            ]}
-          >
-            <View style={styles.messageTextContainer}>
-              <Text style={message.isUser ? styles.userMessageText : styles.botMessageText}>
-                {message.text}
-              </Text>
-            </View>
-            <View style={styles.timestampContainer}>
-              <Text style={[
-                styles.timestamp,
-                message.isUser ? styles.userTimestamp : styles.botTimestamp,
-              ]}>
-                {message.timestamp}
-              </Text>
-            </View>
-          </View>
+          {message.isUser ? bubbleContent : (
+            <Pressable onLongPress={() => handleLongPressMessage(message)} delayLongPress={400}>
+              {bubbleContent}
+            </Pressable>
+          )}
         </View>
         {!message.isUser && message.isSearchSummary && (
           <View style={styles.reviewFiltersRow}>
@@ -1738,25 +1768,43 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
               activeOpacity={0.8}
               style={styles.searchNowButtonOuter}
             >
-              <LinearGradient
-                colors={['#B72DF2', '#FF5367']}
-                start={{ x: 0, y: 0.5 }}
-                end={{ x: 1, y: 0.5 }}
-                style={styles.searchNowButtonGradientBorder}
+              <View
+                style={styles.searchNowButtonInner}
+                onLayout={(e) => {
+                  const { width, height } = e.nativeEvent.layout;
+                  if (width !== searchBtnSize.w || height !== searchBtnSize.h) {
+                    setSearchBtnSize({ w: width, h: height });
+                  }
+                }}
               >
-                <View style={styles.searchNowButtonInner}>
-                  <Svg width={15} height={15} viewBox="0 0 15 15" fill="none">
-                    <Path d="M2.16667 13.8333V10.5M2.16667 3.83333V0.5M0.5 2.16667H3.83333M0.5 12.1667H3.83333M7.83333 1.16667L6.67721 4.17257C6.48921 4.66139 6.3952 4.9058 6.24902 5.11139C6.11946 5.2936 5.96026 5.45279 5.77806 5.58235C5.57247 5.72854 5.32806 5.82254 4.83924 6.01055L1.83333 7.16667L4.83924 8.32278C5.32806 8.51079 5.57247 8.6048 5.77806 8.75098C5.96027 8.88054 6.11946 9.03973 6.24902 9.22194C6.3952 9.42753 6.48921 9.67194 6.67722 10.1608L7.83333 13.1667L8.98945 10.1608C9.17746 9.67194 9.27146 9.42753 9.41765 9.22194C9.54721 9.03973 9.7064 8.88054 9.88861 8.75098C10.0942 8.6048 10.3386 8.51079 10.8274 8.32278L13.8333 7.16667L10.8274 6.01055C10.3386 5.82254 10.0942 5.72854 9.88861 5.58235C9.7064 5.45279 9.54721 5.2936 9.41765 5.11139C9.27146 4.9058 9.17746 4.66139 8.98945 4.17257L7.83333 1.16667Z" stroke="url(#searchGradient)" strokeLinecap="round" strokeLinejoin="round" />
+                {/* SVG gradient border — stroke only, no fill, so nothing bleeds through */}
+                {searchBtnSize.w > 0 && (
+                  <Svg
+                    style={{ position: 'absolute', top: 0, left: 0 }}
+                    width={searchBtnSize.w}
+                    height={searchBtnSize.h}
+                    pointerEvents="none"
+                  >
                     <Defs>
-                      <SvgLinearGradient id="searchGradient" x1="0.5" y1="7.16667" x2="13.8333" y2="7.16667" gradientUnits="userSpaceOnUse">
+                      <SvgLinearGradient id="searchBorderGrad" x1="0" y1="0" x2={searchBtnSize.w} y2="0" gradientUnits="userSpaceOnUse">
                         <Stop stopColor="#B72DF2" />
                         <Stop offset="1" stopColor="#FF5367" />
                       </SvgLinearGradient>
                     </Defs>
+                    <Rect x={0.5} y={0.5} width={searchBtnSize.w - 1} height={searchBtnSize.h - 1} rx={23.5} ry={23.5} stroke="url(#searchBorderGrad)" strokeWidth={1} fill="none" />
                   </Svg>
-                  <Text style={styles.searchNowButtonText}>Search</Text>
-                </View>
-              </LinearGradient>
+                )}
+                <Svg width={15} height={15} viewBox="0 0 15 15" fill="none">
+                  <Path d="M2.16667 13.8333V10.5M2.16667 3.83333V0.5M0.5 2.16667H3.83333M0.5 12.1667H3.83333M7.83333 1.16667L6.67721 4.17257C6.48921 4.66139 6.3952 4.9058 6.24902 5.11139C6.11946 5.2936 5.96026 5.45279 5.77806 5.58235C5.57247 5.72854 5.32806 5.82254 4.83924 6.01055L1.83333 7.16667L4.83924 8.32278C5.32806 8.51079 5.57247 8.6048 5.77806 8.75098C5.96027 8.88054 6.11946 9.03973 6.24902 9.22194C6.3952 9.42753 6.48921 9.67194 6.67722 10.1608L7.83333 13.1667L8.98945 10.1608C9.17746 9.67194 9.27146 9.42753 9.41765 9.22194C9.54721 9.03973 9.7064 8.88054 9.88861 8.75098C10.0942 8.6048 10.3386 8.51079 10.8274 8.32278L13.8333 7.16667L10.8274 6.01055C10.3386 5.82254 10.0942 5.72854 9.88861 5.58235C9.7064 5.45279 9.54721 5.2936 9.41765 5.11139C9.27146 4.9058 9.17746 4.66139 8.98945 4.17257L7.83333 1.16667Z" stroke="url(#searchGradient)" strokeLinecap="round" strokeLinejoin="round" />
+                  <Defs>
+                    <SvgLinearGradient id="searchGradient" x1="0.5" y1="7.16667" x2="13.8333" y2="7.16667" gradientUnits="userSpaceOnUse">
+                      <Stop stopColor="#B72DF2" />
+                      <Stop offset="1" stopColor="#FF5367" />
+                    </SvgLinearGradient>
+                  </Defs>
+                </Svg>
+                <Text style={styles.searchNowButtonText}>Search</Text>
+              </View>
             </TouchableOpacity>
             <TouchableOpacity
               onPress={() => setFiltersMenuVisible(true)}
@@ -1775,6 +1823,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   };
 
   return (
+    <>
     <SafeAreaView style={styles.container} edges={['top']}>
       {/* Header */}
       <View style={styles.headerContainer}>
@@ -2123,6 +2172,13 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         </Pressable>
       </Modal>
     </SafeAreaView>
+    <ReportAISheet
+      visible={reportSheetVisible}
+      messageText={reportMessageText}
+      chatType="matching"
+      onClose={() => setReportSheetVisible(false)}
+    />
+    </>
   );
 };
 
@@ -2590,27 +2646,22 @@ const styles = StyleSheet.create({
   },
   searchNowButtonOuter: {
     flex: 1,
-  },
-  searchNowButtonGradientBorder: {
-    borderRadius: 32,
-    padding: 1,
-    overflow: 'hidden',
+    position: 'relative' as const,
   },
   searchNowButtonInner: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    height: 46,
+    height: 48,
     paddingHorizontal: 21,
-    borderRadius: 31,
-    backgroundColor: 'rgba(255, 255, 255, 0.92)',
+    borderRadius: 32,
+    backgroundColor: 'rgba(255, 255, 255, 0.20)',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.09,
     shadowRadius: 24,
     elevation: 3,
-    overflow: 'hidden',
   },
   searchNowButtonText: {
     fontSize: 14,

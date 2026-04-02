@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -19,6 +19,7 @@ import { Ionicons } from '@expo/vector-icons';
 import Svg, { Path, G, ClipPath, Defs, Rect } from 'react-native-svg';
 import { usePostHog } from 'posthog-react-native';
 import { messagingService, Conversation } from '../services/messaging/messagingService';
+import { blockingService } from '../services/blocking/blockingService';
 import { useMessaging } from '../context/MessagingProvider';
 import { supabaseAuthService } from '../services/auth/supabaseAuthService';
 import { authService } from '../services/auth/authService';
@@ -41,6 +42,7 @@ interface ConversationsScreenProps {
   onProfilePress?: () => void;
   onViewUserProfile?: (userId: string) => void;
   onSwellyShaperViewProfile?: () => void; // Callback for viewing profile from Swelly Shaper
+  onSettingsPress?: () => void;
 }
 
 type FilterType = 'all' | 'advisor' | 'seeker';
@@ -141,6 +143,7 @@ export default function ConversationsScreen({
   onProfilePress,
   onViewUserProfile,
   onSwellyShaperViewProfile,
+  onSettingsPress,
 }: ConversationsScreenProps) {
   const { resetOnboarding, setCurrentStep, setUser, setIsDemoUser, user: contextUser } = useOnboarding();
   const posthog = usePostHog();
@@ -152,17 +155,25 @@ export default function ConversationsScreen({
   // Show Swelly Copy card: when LOCAL_MODE, __DEV__, or EXPO_PUBLIC_DEV_MODE is true (so it works in dev builds and deployed dev)
   const showSwellyCopyCard = (process.env.EXPO_PUBLIC_LOCAL_MODE === 'true' || __DEV__ || isDevMode) && !!onSwellyPressCopy;
   
-  // Survey bubble state and animations
-  const [showSurveyBubble, setShowSurveyBubble] = useState(process.env.EXPO_PUBLIC_LOCAL_MODE === 'true');
-  const pulseAnim = useRef(new Animated.Value(1)).current;
-  const glowAnim = useRef(new Animated.Value(0)).current;
-  
   // Arrow animation for welcome instruction
   const arrowAnim = useRef(new Animated.Value(0)).current;
   
   
   // Use MessagingProvider for conversations state
-  const { conversations, loading, refreshConversations, setCurrentConversationId, hasMoreConversations, isLoadingMoreConversations, loadMoreConversations } = useMessaging();
+  const { conversations: rawConversations, loading, refreshConversations, setCurrentConversationId, hasMoreConversations, isLoadingMoreConversations, loadMoreConversations } = useMessaging();
+
+  // Filter out conversations with blocked users (both directions)
+  const conversations = useMemo(() => {
+    const blocked = blockingService.getAllHiddenIdsSet();
+    if (blocked.size === 0) return rawConversations;
+    return rawConversations.filter(c => {
+      if (c.is_direct && c.other_user?.user_id) {
+        return !blocked.has(c.other_user.user_id);
+      }
+      return true;
+    });
+  }, [rawConversations]);
+
   const [conversationsLoaded, setConversationsLoaded] = useState(false); // Track if conversations have been loaded
   const [showSkeletons, setShowSkeletons] = useState(false); // Delayed skeleton display to avoid flicker
   const [userInfoLoading, setUserInfoLoading] = useState(false); // Track user info loading state
@@ -279,49 +290,6 @@ export default function ConversationsScreen({
     setConversationsLoaded(true);
   }, [refreshConversations, contextUser]);
 
-  // Check if user has sent any direct messages to show survey bubble (MVP mode only)
-  // This runs when component mounts, when user ID changes, or when returning from a conversation
-  useEffect(() => {
-    if (!isMVPMode || !currentUserId) return;
-    
-    // Don't check if we're currently viewing a conversation
-    if (selectedConversation) return;
-    
-    const checkIfUserHasSentMessages = async () => {
-      try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
-        
-        // Check if user has sent any messages (non-system, non-deleted)
-        const { data: messages, error } = await supabase
-          .from('messages')
-          .select('id')
-          .eq('sender_id', user.id)
-          .eq('is_system', false)
-          .eq('deleted', false)
-          .limit(1);
-        
-        if (error) {
-          console.error('Error checking if user has sent messages:', error);
-          return;
-        }
-        
-        // If user has sent at least one message, show bubble after a short delay (local mode only)
-        if (messages && messages.length > 0 && process.env.EXPO_PUBLIC_LOCAL_MODE === 'true') {
-          setTimeout(() => {
-            setShowSurveyBubble(true);
-          }, 1000);
-        } else {
-          // Hide bubble if user hasn't sent messages
-          setShowSurveyBubble(false);
-        }
-      } catch (error) {
-        console.error('Error checking if user has sent messages:', error);
-      }
-    };
-    
-    checkIfUserHasSentMessages();
-  }, [isMVPMode, currentUserId, selectedConversation]);
 
   // Arrow animation effect for welcome instruction
   useEffect(() => {
@@ -349,42 +317,6 @@ export default function ConversationsScreen({
     };
   }, [arrowAnim]);
 
-  // Pulse animation effect for survey bubble
-  useEffect(() => {
-    if (showSurveyBubble) {
-      // Create a pulsing scale animation
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(pulseAnim, {
-            toValue: 1.05,
-            duration: 1000,
-            useNativeDriver: true,
-          }),
-          Animated.timing(pulseAnim, {
-            toValue: 1,
-            duration: 1000,
-            useNativeDriver: true,
-          }),
-        ])
-      ).start();
-
-      // Create a glowing animation
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(glowAnim, {
-            toValue: 1,
-            duration: 1500,
-            useNativeDriver: false,
-          }),
-          Animated.timing(glowAnim, {
-            toValue: 0,
-            duration: 1500,
-            useNativeDriver: false,
-          }),
-        ])
-      ).start();
-    }
-  }, [showSurveyBubble]);
 
   const loadUserInfo = async () => {
     // Only show skeleton if we don't have cached data
@@ -1136,73 +1068,6 @@ export default function ConversationsScreen({
 
   const content = (
     <Container style={styles.container} {...(Platform.OS !== 'web' && { edges: ['top'] as const })}>
-      {/* Survey Bubble - Fixed position, above everything (MVP mode only) */}
-      {showSurveyBubble && isMVPMode && (
-        <TouchableOpacity 
-          onPress={async () => {
-            // Ensure user is identified with their name before triggering survey
-            if (currentUserId) {
-              let userEmail = contextUser?.email;
-              let displayName = contextUser?.nickname || headerDisplayName || 'User';
-              
-              // If we don't have email, try to fetch user data
-              if (!userEmail && currentUserId) {
-                try {
-                  const user = await supabaseAuthService.getCurrentUser();
-                  if (user) {
-                    userEmail = user.email;
-                    displayName = user.nickname || user.email?.split('@')[0] || 'User';
-                  }
-                } catch (error) {
-                  console.error('[ConversationsScreen] Error fetching user data for PostHog identification:', error);
-                }
-              }
-              
-              const userId = currentUserId;
-              const userProperties = {
-                $email: userEmail,
-                $name: displayName,
-                email: userEmail,
-                name: displayName,
-              };
-              
-              // Identify user with PostHog to ensure name is shown in survey
-              analyticsService.identify(userId, userProperties);
-              console.log('[ConversationsScreen] User identified with PostHog before survey:', userId, userProperties);
-            }
-            
-            // Trigger PostHog survey
-            if (posthog) {
-              posthog.capture('mvp_full_product_survey_cohort_a_viewed', {
-                // This event triggers the "MVP Full Product Survey - Cohort A" survey
-              });
-            }
-            setShowSurveyBubble(false);
-          }}
-          activeOpacity={0.8}
-          style={styles.surveyBubble}
-        >
-          <Animated.View 
-            style={{
-              transform: [{ scale: pulseAnim }],
-            }}
-          >
-            <LinearGradient
-              colors={['#4A90E2', '#357ABD']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={styles.surveyBubbleGradient}
-            >
-              <View style={styles.surveyBubbleContent}>
-                <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
-                <Text style={styles.surveyBubbleText}> Ready to start final survey?</Text>
-                <Ionicons name="chatbubble-ellipses" size={20} color="#FFFFFF" />
-              </View>
-            </LinearGradient>
-          </Animated.View>
-        </TouchableOpacity>
-      )}
-      
       {/* Header - Dark background */}
       <View style={styles.header}>
         <TouchableOpacity 
@@ -1489,20 +1354,41 @@ export default function ConversationsScreen({
                   <Text style={styles.menuItemText}>My Shaper</Text>
                 </TouchableOpacity>
 
-                {/* Swellyo Team Welcome - Testing */}
-                {/* <TouchableOpacity
+                <View style={styles.menuDivider} />
+
+                {/* New Chat */}
+                <TouchableOpacity
                   style={styles.menuItem}
                   onPress={(e) => {
                     e.stopPropagation();
-                    console.log('Swellyo Team Welcome menu item pressed');
+                    console.log('New Chat menu item pressed');
                     setShowMenu(false);
-                    setShowSwellyoTeamWelcome(true);
+                    // TODO: implement new chat action
                   }}
                   activeOpacity={0.7}
                 >
-                  <Ionicons name="chatbubbles-outline" size={20} color="#222B30" />
-                  <Text style={styles.menuItemText}>Swellyo Team Welcome</Text>
-                </TouchableOpacity> */}
+                  <Ionicons name="create-outline" size={20} color="#222B30" />
+                  <Text style={styles.menuItemText}>New Chat</Text>
+                </TouchableOpacity>
+
+                <View style={styles.menuDivider} />
+
+                {/* Setting */}
+                <TouchableOpacity
+                  style={styles.menuItem}
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    console.log('Setting menu item pressed');
+                    setShowMenu(false);
+                    if (onSettingsPress) {
+                      onSettingsPress();
+                    }
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="settings-outline" size={20} color="#222B30" />
+                  <Text style={styles.menuItemText}>Setting</Text>
+                </TouchableOpacity>
 
                 {/* Logout */}
                 <TouchableOpacity
@@ -1519,7 +1405,7 @@ export default function ConversationsScreen({
                   {isLoggingOut ? (
                     <ActivityIndicator size="small" color="#222B30" />
                   ) : (
-                    <Ionicons name="arrow-forward-circle-outline" size={20} color="#222B30" />
+                    <Ionicons name="log-in-outline" size={20} color="#222B30" />
                   )}
                   <Text style={styles.menuItemText}>Logout</Text>
                 </TouchableOpacity>
@@ -2077,9 +1963,9 @@ const styles = StyleSheet.create({
   },
   menuContainer: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    minWidth: 200,
-    shadowColor: '#000',
+    borderRadius: 16,
+    minWidth: 203,
+    shadowColor: '#596E7C',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.15,
     shadowRadius: 16,
@@ -2091,9 +1977,15 @@ const styles = StyleSheet.create({
   menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    gap: 12,
+    paddingLeft: 12,
+    paddingRight: 8,
+    paddingVertical: 10,
+    gap: 8,
+  },
+  menuDivider: {
+    height: 1,
+    backgroundColor: '#D5D7DA',
+    marginHorizontal: 0,
   },
   menuItemIcon: {
     width: 20,
@@ -2104,7 +1996,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '400',
     color: '#222B30',
-    lineHeight: 20,
+    lineHeight: 18,
     flex: 1,
   },
   menuItemDisabled: {
@@ -2211,45 +2103,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: 8,
     // Purple glow will be applied via shadowColor in animated style
-  },
-  surveyBubble: {
-    position: 'absolute',
-    top: 120,
-    // left: 16,
-    width: '90%',
-    alignSelf: 'center',
-    zIndex: 9999, // Very high z-index to be above everything
-    borderRadius: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-    elevation: 999, // Very high elevation for Android
-    ...(Platform.OS === 'web' && {
-      boxShadow: '0px 8px 24px rgba(0, 0, 0, 0.25)',
-      // @ts-ignore - fixed position is valid CSS for web
-      position: 'fixed' as any,
-    }),
-  },
-  surveyBubbleGradient: {
-    borderRadius: 16,
-    overflow: 'hidden',
-  },
-  surveyBubbleContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 16,
-    paddingHorizontal: 20,
-    gap: 12,
-  },
-  surveyBubbleText: {
-    flex: 1,
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif' : undefined,
-    textAlign: 'center',
   },
 });
 
