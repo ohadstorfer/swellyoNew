@@ -5,7 +5,14 @@
       "Bash(ls:*)",
       "mcp__figma__get_design_context",
       "WebFetch(domain:www.figma.com)",
-      "mcp__figma__get_screenshot"
+      "mcp__figma__get_screenshot",
+      "WebSearch",
+      "WebFetch(domain:supabase.com)",
+      "WebFetch(domain:help.instagram.com)",
+      "WebFetch(domain:www.coderbased.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:neon.com)",
+      "WebFetch(domain:buddyboss.com)"
     ]
   }
 }

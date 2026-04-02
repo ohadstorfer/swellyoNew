@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -19,6 +19,7 @@ import { Ionicons } from '@expo/vector-icons';
 import Svg, { Path, G, ClipPath, Defs, Rect } from 'react-native-svg';
 import { usePostHog } from 'posthog-react-native';
 import { messagingService, Conversation } from '../services/messaging/messagingService';
+import { blockingService } from '../services/blocking/blockingService';
 import { useMessaging } from '../context/MessagingProvider';
 import { supabaseAuthService } from '../services/auth/supabaseAuthService';
 import { authService } from '../services/auth/authService';
@@ -164,7 +165,20 @@ export default function ConversationsScreen({
   
   
   // Use MessagingProvider for conversations state
-  const { conversations, loading, refreshConversations, setCurrentConversationId, hasMoreConversations, isLoadingMoreConversations, loadMoreConversations } = useMessaging();
+  const { conversations: rawConversations, loading, refreshConversations, setCurrentConversationId, hasMoreConversations, isLoadingMoreConversations, loadMoreConversations } = useMessaging();
+
+  // Filter out conversations with blocked users (both directions)
+  const conversations = useMemo(() => {
+    const blocked = blockingService.getAllHiddenIdsSet();
+    if (blocked.size === 0) return rawConversations;
+    return rawConversations.filter(c => {
+      if (c.is_direct && c.other_user?.user_id) {
+        return !blocked.has(c.other_user.user_id);
+      }
+      return true;
+    });
+  }, [rawConversations]);
+
   const [conversationsLoaded, setConversationsLoaded] = useState(false); // Track if conversations have been loaded
   const [showSkeletons, setShowSkeletons] = useState(false); // Delayed skeleton display to avoid flicker
   const [userInfoLoading, setUserInfoLoading] = useState(false); // Track user info loading state

@@ -131,6 +131,13 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
               });
           }
 
+          // Load block list in background (non-blocking)
+          import('../services/blocking/blockingService').then(({ blockingService }) =>
+            blockingService.loadBlocks().catch(err =>
+              console.warn('[OnboardingContext] Block list load failed (non-blocking):', err)
+            )
+          );
+
           // Success - exit retry loop
           setIsRestoringSession(false);
           console.log('[OnboardingContext] Session restoration complete');

@@ -710,6 +710,17 @@ class ChatHistoryCache {
   }
 
   /**
+   * Clear cached messages for a single conversation
+   */
+  clearConversation(conversationId: string): void {
+    const key = this.getCacheKey(conversationId);
+    this.memoryCache.delete(key);
+    AsyncStorage.removeItem(key).catch(err =>
+      console.warn('[chatHistoryCache] Error clearing conversation cache:', err)
+    );
+  }
+
+  /**
    * Clear all cached conversations
    */
   async clearAll(): Promise<void> {

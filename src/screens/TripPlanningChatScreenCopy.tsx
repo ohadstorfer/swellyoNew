@@ -30,6 +30,7 @@ import { MatchedUser, TripPlanningRequest } from '../types/tripPlanning';
 import { analyticsService } from '../services/analytics/analyticsService';
 import { ChatTextInput } from '../components/ChatTextInput';
 import { ReportAISheet } from '../components/ReportAISheet';
+import { blockingService } from '../services/blocking/blockingService';
 import {
   queryFiltersToDisplayList,
   removeFilterFromRequestData,
@@ -834,8 +835,11 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     };
 
     try {
-      const { matches: matchedUsers, totalCount, messageIndex: backendMsgIndex } = await svc.findMatchingUsersServer(currentChatId, tripPlanningData, excludePrevious);
-      console.log('Matched users found (server):', matchedUsers.length, 'totalCount:', totalCount);
+      const { matches: rawMatches, totalCount, messageIndex: backendMsgIndex } = await svc.findMatchingUsersServer(currentChatId, tripPlanningData, excludePrevious);
+      // Filter out blocked users from match results (both directions)
+      const blockedSet = blockingService.getAllHiddenIdsSet();
+      const matchedUsers = blockedSet.size > 0 ? rawMatches.filter(u => !blockedSet.has(u.user_id)) : rawMatches;
+      console.log('Matched users found (server):', matchedUsers.length, 'totalCount:', totalCount, 'filtered:', rawMatches.length - matchedUsers.length);
       const needsConfirmation = (matchedUsers as any).__needsConfirmation === true;
       const isSingleCriterion = (matchedUsers as any).__singleCriterion === true;
       if (needsConfirmation && isSingleCriterion && matchedUsers.length > 0) {
@@ -1650,13 +1654,19 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             </View>
           </View>
           
-          {/* Render matched user cards carousel (only when there are matches) */}
-          {message.matchedUsers.length > 0 && (
-            <MatchedUsersCarousel
-              users={message.matchedUsers}
-              onViewProfile={handleViewProfile}
-            />
-          )}
+          {/* Render matched user cards carousel (only when there are matches, filtered for blocked) */}
+          {(() => {
+            const blocked = blockingService.getAllHiddenIdsSet();
+            const filteredUsers = blocked.size > 0
+              ? message.matchedUsers.filter(u => !blocked.has(u.user_id))
+              : message.matchedUsers;
+            return filteredUsers.length > 0 ? (
+              <MatchedUsersCarousel
+                users={filteredUsers}
+                onViewProfile={handleViewProfile}
+              />
+            ) : null;
+          })()}
 
           {/* Per-message action row (New Chat, Filters, More Matches) */}
           {hasActionRow && (

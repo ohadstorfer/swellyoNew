@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   StyleSheet,
@@ -36,6 +36,8 @@ import { updateCachedUserProfilePhoto } from '../utils/userProfileCache';
 import { useOnboarding } from '../context/OnboardingContext';
 import { calculateAgeFromDOB } from '../utils/ageCalculation';
 import AvatarCropModal from '../components/AvatarCropModal';
+import { BlockUserOverlay } from '../components/BlockUserOverlay';
+import { ReportUserOverlay } from '../components/ReportUserOverlay';
 
 interface ProfileScreenProps {
   onBack?: () => void;
@@ -830,6 +832,9 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
   // Check if MVP mode is enabled
   const isMVPMode = process.env.EXPO_PUBLIC_MVP_MODE === 'true';
   
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const [showBlockOverlay, setShowBlockOverlay] = useState(false);
+  const [showReportOverlay, setShowReportOverlay] = useState(false);
   const [profileData, setProfileData] = useState<SupabaseSurfer | null>(null);
   const [loading, setLoading] = useState(true);
   const [authChecking, setAuthChecking] = useState(false);
@@ -1834,6 +1839,30 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
                 </View>
               </TouchableOpacity>
             ) : null}
+
+            {/* Three-dot menu - Only visible when viewing another user's profile */}
+            {!isViewingOwnProfile && userId && (
+              <>
+                <TouchableOpacity style={styles.profileMenuButton} onPress={() => setShowProfileMenu(!showProfileMenu)}>
+                  <Ionicons name="ellipsis-vertical" size={20} color="#333" />
+                </TouchableOpacity>
+                {showProfileMenu && (
+                  <>
+                    <TouchableOpacity style={styles.profileMenuDismiss} activeOpacity={1} onPress={() => setShowProfileMenu(false)} />
+                    <View style={styles.profileMenuDropdown}>
+                      <TouchableOpacity style={styles.profileMenuItem} activeOpacity={0.7} onPress={() => { setShowProfileMenu(false); setShowReportOverlay(true); }}>
+                        <Ionicons name="alert-circle-outline" size={20} color="#222B30" />
+                        <RNText style={styles.profileMenuItemText}>Report</RNText>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={styles.profileMenuItem} activeOpacity={0.7} onPress={() => { setShowProfileMenu(false); setShowBlockOverlay(true); }}>
+                        <Ionicons name="ban-outline" size={20} color="#222B30" />
+                        <RNText style={styles.profileMenuItemText}>Block</RNText>
+                      </TouchableOpacity>
+                    </View>
+                  </>
+                )}
+              </>
+            )}
           </>
         )}
 
@@ -2245,6 +2274,30 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
         onCancel={() => setCropModalVisible(false)}
       />
     )}
+    {!isViewingOwnProfile && userId && (
+      <>
+        <BlockUserOverlay
+          visible={showBlockOverlay}
+          userId={userId}
+          userName={profileData?.name || 'User'}
+          onClose={() => setShowBlockOverlay(false)}
+          onBlocked={() => {
+            setShowBlockOverlay(false);
+            onBack?.();
+          }}
+        />
+        <ReportUserOverlay
+          visible={showReportOverlay}
+          reportedUserId={userId}
+          reportedUserName={profileData?.name || 'User'}
+          onClose={() => setShowReportOverlay(false)}
+          onBlocked={() => {
+            setShowReportOverlay(false);
+            onBack?.();
+          }}
+        />
+      </>
+    )}
     </>
   );
 };
@@ -2332,6 +2385,62 @@ const styles = StyleSheet.create({
     left: spacing.md, // 16px gap from left edge
     top: 54,
     zIndex: 10,
+  },
+  profileMenuButton: {
+    position: 'absolute',
+    right: spacing.md,
+    top: 54,
+    zIndex: 10,
+    width: 44,
+    height: 44,
+    borderRadius: 48,
+    backgroundColor: colors.white,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  profileMenuDismiss: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 9998,
+  },
+  profileMenuDropdown: {
+    position: 'absolute',
+    top: 104,
+    right: spacing.md,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    minWidth: 180,
+    shadowColor: '#596E7C',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 16,
+    elevation: 999,
+    zIndex: 9999,
+    paddingVertical: 8,
+  },
+  profileMenuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingLeft: 16,
+    paddingRight: 12,
+    paddingVertical: 12,
+    gap: 10,
+  },
+  profileMenuItemText: {
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    fontSize: 14,
+    fontWeight: '400' as const,
+    color: '#222B30',
+    lineHeight: 18,
+    flex: 1,
   },
   backButtonContainer: {
     width: 44, // 24px icon + 10px padding on each side
