@@ -12,7 +12,8 @@
       "WebFetch(domain:www.coderbased.com)",
       "WebFetch(domain:github.com)",
       "WebFetch(domain:neon.com)",
-      "WebFetch(domain:buddyboss.com)"
+      "WebFetch(domain:buddyboss.com)",
+      "WebFetch(domain:medium.com)"
     ]
   }
 }

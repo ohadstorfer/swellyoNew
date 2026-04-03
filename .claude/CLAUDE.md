@@ -11,8 +11,17 @@ Cross-platform social app for surfers. React Native + Expo (web, iOS, Android) w
 - **AI:** OpenAI GPT via Supabase Edge Functions (NOT the Python backend)
 - **Analytics:** PostHog
 - **Auth:** Google OAuth (Supabase Auth)
-- **Web deploy:** Netlify (via GitHub Actions)
+- **Web deploy:** Netlify (auto-deploys on push to GitHub)
 - **API deploy:** Supabase Edge Functions (copy-paste from repo to Supabase dashboard)
+
+## Deploying to SwellyoLove
+
+There are two GitHub repos with the same code: `swellyoNew` (primary) and `SwellyoLove` (secondary). Both are connected to Netlify. After merging to `main` on `swellyoNew`, push the same code to `SwellyoLove`:
+
+1. Make sure you're on `main` and it's up to date: `git pull origin main`
+2. Push to SwellyoLove: `git push love main --force`
+
+The `love` remote is already configured: `https://github.com/ohadstorfer/SwellyoLove.git`. The `--force` is needed because the repos have different git histories. Netlify will auto-deploy on push.
 
 ## Commands
 

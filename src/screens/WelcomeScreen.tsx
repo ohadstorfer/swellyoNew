@@ -8,6 +8,7 @@ import {
   Image,
   Text as RNText,
   Animated,
+  Linking,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Logo } from '../components/Logo';
@@ -46,7 +47,7 @@ if (Platform.OS !== 'web') {
 
 // Native inline SVG for the Google logo
 const NativeGoogleIcon: React.FC = () => (
-  <GoogSvg width={18.174} height={19} viewBox="0 0 19 19" fill="none" style={{ marginRight: 10 }}>
+  <GoogSvg width={24} height={24} viewBox="0 0 19 19" fill="none" style={{ marginRight: 15 }}>
     <GoogDefs>
       <GoogClipPath id="clip0">
         <GoogRect width="18.1739" height="19" rx="9.08696" fill="white" />
@@ -95,9 +96,50 @@ const GoogleIcon: React.FC = () => {
   );
 };
 
+// Apple Icon Component
+const APPLE_SVG_PATH = "M14.94 10.567c-.024-2.543 2.073-3.765 2.166-3.823-1.178-1.724-3.014-1.96-3.667-1.988-1.561-.158-3.048.92-3.84.92-.792 0-2.016-.896-3.312-.872-1.704.025-3.276.99-4.152 2.517-1.77 3.072-.453 7.625 1.273 10.117.843 1.22 1.849 2.59 3.17 2.54 1.272-.05 1.753-.823 3.29-.823 1.537 0 1.97.823 3.312.797 1.368-.025 2.232-1.242 3.072-2.465.968-1.414 1.367-2.783 1.391-2.855-.03-.013-2.67-1.024-2.696-4.065h-.007zM12.372 3.14C13.072 2.29 13.54 1.118 13.41 0c-.97.04-2.146.647-2.842 1.462-.625.724-1.172 1.88-1.025 2.99 1.082.085 2.186-.55 2.829-1.312z";
+
+const AppleIcon: React.FC = () => {
+  if (Platform.OS === 'web') {
+    // Web: use inline SVG via dangerouslySetInnerHTML workaround
+    return (
+      <View style={{ width: 24, height: 24, marginRight: 15 }}>
+        {/* @ts-ignore */}
+        <svg width="24" height="24" viewBox="0 0 17 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d={APPLE_SVG_PATH} fill="white" />
+        </svg>
+      </View>
+    );
+  }
+  const RNSvg = require('react-native-svg');
+  const Svg = RNSvg.Svg;
+  const Path = RNSvg.Path;
+  return (
+    <Svg width={24} height={24} viewBox="0 0 17 20" fill="none" style={{ marginRight: 15 }}>
+      <Path d={APPLE_SVG_PATH} fill="white" />
+    </Svg>
+  );
+};
+
+// Checkbox Icon Component
+const CheckboxIcon: React.FC<{ checked: boolean }> = ({ checked }) => {
+  if (checked) {
+    return (
+      <View style={welcomeStyles.checkboxChecked}>
+        <RNText style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '700', lineHeight: 18 }}>✓</RNText>
+      </View>
+    );
+  }
+  return <View style={welcomeStyles.checkboxUnchecked} />;
+};
+
+const TERMS_URL = 'https://www.swellyo.com/terms-of-service';
+const PRIVACY_URL = 'https://www.swellyo.com/privacy-policy';
+
 export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDemoChat, isCheckingAuth = false }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [isDemoLoading, setIsDemoLoading] = useState(false);
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
   const { setUser, updateFormData, checkOnboardingStatus } = useOnboarding();
   
   // Use responsive hook for accurate mobile detection
@@ -514,6 +556,11 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
 
   console.log('WelcomeScreen rendering - Platform:', Platform.OS);
   
+  const handleAppleSignIn = () => {
+    // Mockup — Apple Sign In not yet implemented
+    Alert.alert('Coming Soon', 'Apple Sign In will be available soon.');
+  };
+
   return (
     <View style={styles.container}>
       {/* Background Video */}
@@ -531,8 +578,8 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
           {/* Centered logo and tagline */}
           <View style={styles.topContent}>
             {/* Logo - only icon spins, text stays static */}
-            <Logo 
-              size={112} 
+            <Logo
+              size={112}
               iconWrapperStyle={isCheckingAuth ? { transform: [{ rotate: spin }] } : undefined}
             />
 
@@ -543,57 +590,97 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
           </View>
 
           {/* Bottom section with buttons */}
+          {!isCheckingAuth && (
           <View style={styles.bottomContent}>
-            {/* Call to Action */}
-            <View style={styles.buttonContainer}>
-            {!isCheckingAuth && (
+            {/* Login Buttons */}
+            <View style={welcomeStyles.buttonsContainer}>
+              {/* Apple Sign In Button */}
+              <TouchableOpacity
+                onPress={handleAppleSignIn}
+                disabled={!agreedToTerms || isLoading}
+                style={[welcomeStyles.appleButton, (!agreedToTerms || isLoading) && styles.buttonDisabled]}
+                activeOpacity={0.8}
+              >
+                <View style={styles.buttonContent}>
+                  <AppleIcon />
+                  <RNText style={welcomeStyles.appleButtonText} numberOfLines={1}>
+                    Log In with Apple
+                  </RNText>
+                </View>
+              </TouchableOpacity>
+
+              {/* Google Sign In Button */}
               <TouchableOpacity
                 onPress={handleGoogleSignIn}
-                disabled={isLoading}
-                style={[styles.getStartedButton, { width: buttonWidth }, isLoading && styles.buttonDisabled]}
+                disabled={!agreedToTerms || isLoading}
+                style={[welcomeStyles.googleButton, (!agreedToTerms || isLoading) && styles.buttonDisabled]}
                 activeOpacity={0.8}
               >
                 <View style={styles.buttonContent}>
                   <GoogleIcon />
-                  <RNText style={styles.getStartedButtonText} numberOfLines={1}>
-                    {isLoading ? "Signing in..." : "Continue with Google"}
+                  <RNText style={welcomeStyles.googleButtonText} numberOfLines={1}>
+                    {isLoading ? "Signing in..." : "Log In with Google"}
                   </RNText>
                 </View>
               </TouchableOpacity>
-            )}
-            
+            </View>
+
+            {/* Terms & Privacy Card */}
+            <View style={welcomeStyles.termsCard}>
+              <TouchableOpacity
+                style={welcomeStyles.checkboxRow}
+                onPress={() => setAgreedToTerms(!agreedToTerms)}
+                activeOpacity={0.7}
+              >
+                <CheckboxIcon checked={agreedToTerms} />
+                <RNText style={welcomeStyles.termsText}>
+                  I agree to the{' '}
+                  <RNText
+                    style={welcomeStyles.termsLink}
+                    onPress={() => Linking.openURL(TERMS_URL)}
+                  >
+                    Terms of Service
+                  </RNText>
+                  {' '}and{' '}
+                  <RNText
+                    style={welcomeStyles.termsLink}
+                    onPress={() => Linking.openURL(PRIVACY_URL)}
+                  >
+                    Privacy Policy
+                  </RNText>
+                </RNText>
+              </TouchableOpacity>
+
+              {/* OpenAI Disclaimer */}
+              <View style={welcomeStyles.disclaimerRow}>
+                <View style={welcomeStyles.infoIcon}>
+                  <RNText style={welcomeStyles.infoIconText}>i</RNText>
+                </View>
+                <RNText style={welcomeStyles.disclaimerText}>
+                  Swellyo uses OpenAI to power our surf partner matching and profile creation.
+                </RNText>
+              </View>
+            </View>
+
             {/* Demo Chat Button */}
-            {onDemoChat && !isCheckingAuth && (
+            {onDemoChat && (
               <TouchableOpacity
                 onPress={handleDemoChat}
                 disabled={isDemoLoading || isLoading}
                 style={[
-                  styles.getStartedButton, 
-                  { width: buttonWidth }, 
-                  styles.demoButton,
+                  welcomeStyles.appleButton,
+                  { backgroundColor: '#8B5CF6', marginTop: 12 },
                   (isDemoLoading || isLoading) && styles.buttonDisabled
                 ]}
                 activeOpacity={0.8}
               >
-                <RNText style={styles.getStartedButtonText} numberOfLines={1}>
+                <RNText style={welcomeStyles.appleButtonText} numberOfLines={1}>
                   {isDemoLoading ? "Loading..." : "Demo"}
                 </RNText>
               </TouchableOpacity>
             )}
-            </View>
-
-            {/* Login Prompt */}
-            {/* <View style={styles.loginContainer}>
-              <Text variant="body" style={styles.loginText}>
-                Do you have an account?{' '}
-                <TouchableOpacity onPress={handleGoogleSignIn}>
-                  <Text variant="link" style={styles.loginLink}>
-                    {isLoading ? 'Signing in...' : 'Log in'}
-                  </Text>
-                </TouchableOpacity>
-              </Text>
-            </View> */}
           </View>
+          )}
         </View>
     </View>
   );
@@ -628,7 +715,7 @@ const styles = StyleSheet.create({
     paddingTop: spacing.xxxxl,
   },
   bottomContent: {
-    paddingBottom: spacing.lg,
+    paddingBottom: 63,
     alignItems: 'center',
     width: '100%',
   },
@@ -675,9 +762,9 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   googleIcon: {
-    width: 18.174,
-    height: 19,
-    marginRight: 10,
+    width: 24,
+    height: 24,
+    marginRight: 15,
     flexShrink: 0,
     ...(Platform.OS === 'web' && {
       objectFit: 'contain' as any,
@@ -685,9 +772,9 @@ const styles = StyleSheet.create({
     }),
   },
   googleIconFallback: {
-    width: 18.174,
-    height: 19,
-    marginRight: 10,
+    width: 24,
+    height: 24,
+    marginRight: 15,
     flexShrink: 0,
     backgroundColor: '#4285F4',
     borderRadius: 2,
@@ -733,4 +820,117 @@ const styles = StyleSheet.create({
     backgroundColor: '#8B5CF6',
     marginTop: spacing.sm,
   },
-}); 
+});
+
+const welcomeStyles = StyleSheet.create({
+  buttonsContainer: {
+    width: 346,
+    alignSelf: 'center',
+    gap: 16,
+  },
+  appleButton: {
+    backgroundColor: '#000000',
+    borderRadius: 12,
+    height: 54,
+    width: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    flexDirection: 'row',
+  },
+  appleButtonText: {
+    color: '#FFFFFF',
+    fontSize: 20,
+    fontWeight: '400',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    lineHeight: 24,
+  },
+  googleButton: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    height: 54,
+    width: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    flexDirection: 'row',
+  },
+  googleButtonText: {
+    color: '#7b7b7b',
+    fontSize: 20,
+    fontWeight: '400',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    lineHeight: 24,
+  },
+  termsCard: {
+    width: 346,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    gap: 16,
+    marginTop: 16,
+  },
+  checkboxRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  checkboxUnchecked: {
+    width: 20,
+    height: 20,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.4)',
+    backgroundColor: 'transparent',
+  },
+  checkboxChecked: {
+    width: 20,
+    height: 20,
+    borderRadius: 6,
+    backgroundColor: '#0788B0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  termsText: {
+    flex: 1,
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    fontWeight: '400',
+    lineHeight: 22,
+  },
+  termsLink: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    textDecorationLine: 'underline',
+  },
+  disclaimerRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  infoIcon: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  infoIconText: {
+    color: 'rgba(255, 255, 255, 0.6)',
+    fontSize: 11,
+    fontWeight: '700',
+    fontStyle: 'italic',
+    marginTop: -1,
+  },
+  disclaimerText: {
+    flex: 1,
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    fontWeight: '400',
+    lineHeight: 22,
+  },
+});
