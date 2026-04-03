@@ -37,6 +37,7 @@ import { useOnboarding } from '../context/OnboardingContext';
 import { calculateAgeFromDOB } from '../utils/ageCalculation';
 import AvatarCropModal from '../components/AvatarCropModal';
 import { BlockUserOverlay } from '../components/BlockUserOverlay';
+import { useMessaging } from '../context/MessagingProvider';
 import { ReportUserOverlay } from '../components/ReportUserOverlay';
 
 interface ProfileScreenProps {
@@ -808,6 +809,12 @@ const PlusIcon: React.FC<{ size?: number }> = ({ size = 40 }) => {
 export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, onMessage, onContinueEdit, onEdit, fromOnboardingChat = false, onSaveAndGoToConversations }) => {
   // Get onboarding context for logout
   const { resetOnboarding, setUser, setCurrentStep, setIsDemoUser } = useOnboarding();
+
+  // Check if already connected to this user
+  const { conversations } = useMessaging();
+  const isAlreadyConnected = userId ? conversations.some(
+    c => c.is_direct && c.other_user?.user_id === userId
+  ) : false;
   
   // Load Inter font from Google Fonts for web
   useEffect(() => {
@@ -858,6 +865,25 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
   // Animation for upload spinner
   const uploadSpinnerAnim = useRef(new Animated.Value(0)).current;
   const uploadPulseAnim = useRef(new Animated.Value(1)).current;
+
+  // Shimmer animation for Connect button
+  const shimmerAnim = useRef(new Animated.Value(-1)).current;
+  useEffect(() => {
+    if (!isAlreadyConnected && !isViewingOwnProfile && userId) {
+      const loop = Animated.loop(
+        Animated.sequence([
+          Animated.timing(shimmerAnim, {
+            toValue: 2,
+            duration: 2500,
+            useNativeDriver: true,
+          }),
+          Animated.delay(2000),
+        ])
+      );
+      loop.start();
+      return () => loop.stop();
+    }
+  }, [isAlreadyConnected, isViewingOwnProfile, userId]);
 
   // Upload spinner animation
   useEffect(() => {
@@ -2254,9 +2280,32 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
             onPress={() => onMessage(userId)}
             activeOpacity={0.8}
           >
-            <View style={styles.connectButtonInner}>
+            <View style={[styles.connectButtonInner, isAlreadyConnected && styles.messageButtonInner]}>
+              {!isAlreadyConnected && (
+                <Animated.View
+                  pointerEvents="none"
+                  style={[
+                    styles.shimmer,
+                    {
+                      transform: [{
+                        translateX: shimmerAnim.interpolate({
+                          inputRange: [-1, 2],
+                          outputRange: [-200, 500],
+                        }),
+                      }],
+                    },
+                  ]}
+                >
+                  <LinearGradient
+                    colors={['transparent', 'rgba(255,255,255,0.15)', 'transparent']}
+                    start={{ x: 0, y: 0.5 }}
+                    end={{ x: 1, y: 0.5 }}
+                    style={styles.shimmerGradient}
+                  />
+                </Animated.View>
+              )}
               <Text style={styles.connectButtonText}>
-                Connect to {profileData.name?.split(' ')[0] || 'User'}
+                {isAlreadyConnected ? `Message ${profileData.name?.split(' ')[0] || 'User'}` : `Connect to ${profileData.name?.split(' ')[0] || 'User'}`}
               </Text>
             </View>
           </TouchableOpacity>
@@ -2584,7 +2633,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    height: 230,
+    height: 180,
     zIndex: 9,
     overflow: 'hidden',
     ...(Platform.OS === 'web' && {
@@ -2616,6 +2665,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flexDirection: 'row',
     gap: 10,
+    overflow: 'hidden',
   },
   connectButtonText: {
     fontSize: 18,
@@ -2624,6 +2674,18 @@ const styles = StyleSheet.create({
     fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : undefined,
     lineHeight: 24,
     textAlign: 'center',
+  },
+  messageButtonInner: {
+    backgroundColor: '#0788B0',
+  },
+  shimmer: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    width: 90,
+  },
+  shimmerGradient: {
+    flex: 1,
   },
   profilePictureContainer: {
     position: 'absolute',
