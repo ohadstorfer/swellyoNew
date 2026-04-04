@@ -1,0 +1,93 @@
+Git Guide for Working with Another Developer
+=============================================
+
+The Problem:
+If you both push to main at the same time, you'll overwrite each other's work.
+
+The Solution: Branches
+A branch is like a copy of your code where you work alone. When you're done, you merge it back.
+
+
+The Basic Flow
+--------------
+
+1. Before starting any new work, pull the latest code:
+
+   git pull
+
+2. Create a new branch for your task:
+
+   git checkout -b my-feature-name
+
+   This creates a new branch AND moves you into it. Give it a short name
+   that describes what you're doing, like "add-login-page" or "fix-header-bug".
+
+3. Do your work normally:
+
+   git add .
+   git commit -m "what I did"
+
+4. Push your branch (not main!):
+
+   git push -u origin my-feature-name
+
+5. Go to GitHub and create a "Pull Request" (PR).
+   This lets the other developer see your changes before they go into main.
+   They can review it and approve it.
+
+6. After the PR is approved, merge it on GitHub (there's a green button).
+
+7. Go back to main and pull the latest:
+
+   git checkout main
+   git pull
+
+   Then start again from step 2 for your next task.
+
+
+What if you both changed the same file?
+---------------------------------------
+
+Git is actually smart about this. If you changed line 10 and they changed
+line 50, Git merges both automatically.
+
+A conflict only happens when you both changed the same lines. Git will show
+you both versions and ask you to pick which one to keep (or combine them).
+Don't worry - it's not as scary as it sounds.
+
+
+Simple Rules for You and Your Teammate
+--------------------------------------
+
+1. Never push directly to main. Always use a branch.
+2. Pull main often (git checkout main && git pull) before creating a new
+   branch, so you start with the latest code.
+3. Keep branches small. Don't work on a branch for 2 weeks - small changes
+   are easier to merge.
+4. Talk to each other - "I'm working on the header today" avoids conflicts.
+
+
+How to Name Your Branches
+--------------------------
+
+Keep it simple. Use this format:
+
+   feature/short-description    - for new stuff
+   fix/short-description        - for bug fixes
+
+Examples for your project (Swellyo):
+
+   feature/trip-planning         - adding or changing trip planning
+   feature/chat-screen           - working on the chat screen
+   feature/filters               - adding new filters
+   feature/notifications         - working on notifications
+   fix/login-bug                 - fixing a login problem
+   fix/video-not-loading         - fixing video playback
+   feature/backend-auth          - backend authentication changes
+   feature/new-api-endpoint      - adding a new API endpoint
+
+Tips:
+- Use lowercase letters only
+- Use dashes (-) instead of spaces
+- Keep it short (2-4 words max)
+- One branch = one task. Don't mix two different features in one branch.

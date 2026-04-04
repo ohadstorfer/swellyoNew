@@ -18,7 +18,8 @@
       "supportsTablet": true,
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "This app needs access to your photo library to select profile pictures.",
-        "NSCameraUsageDescription": "This app needs access to your camera to take profile pictures."
+        "NSCameraUsageDescription": "This app needs access to your camera to take profile pictures.",
+        "NSMicrophoneUsageDescription": "This app needs access to your microphone to record video with audio."
       }
     },
     "android": {
@@ -29,8 +30,11 @@
       "edgeToEdgeEnabled": true,
       "permissions": [
         "android.permission.CAMERA",
-        "android.permission.READ_EXTERNAL_STORAGE",
-        "android.permission.WRITE_EXTERNAL_STORAGE"
+        "android.permission.RECORD_AUDIO"
+      ],
+      "blockedPermissions": [
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_VIDEO"
       ]
     },
     "web": {
@@ -46,7 +50,19 @@
           "cameraPermission": "The app accesses your camera to let you take photos."
         }
       ],
-      "@react-native-google-signin/google-signin"
-    ]
+      "@react-native-google-signin/google-signin",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/adaptive-icon.png",
+          "color": "#05BCD3"
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "c14ee9e6-bad8-43e2-b37a-d196b49f638f"
+      }
+    }
   }
 }
