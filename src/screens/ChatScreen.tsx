@@ -2,7 +2,6 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   View,
   StyleSheet,
-  SafeAreaView,
   TouchableOpacity,
   Alert,
   KeyboardAvoidingView,
@@ -14,6 +13,7 @@ import {
   ScrollView as RNScrollView,
   Pressable,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 // On native, use RN's built-in ScrollView with nestedScrollEnabled.
 // GestureDetector + gesture-handler ScrollView causes Expo Go crashes on scroll.
@@ -816,7 +816,7 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
 
   return (
     <>
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       {/* Header */}
       <View style={styles.headerContainer}>
         <View style={styles.header}>

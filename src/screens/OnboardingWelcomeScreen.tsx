@@ -2,18 +2,18 @@ import React, { useState } from 'react';
 import {
   View,
   StyleSheet,
-  SafeAreaView,
   ScrollView,
   TouchableOpacity,
   Image,
   Platform,
   Alert,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../components/Text';
 import { useOnboarding } from '../context/OnboardingContext';
 import { useScreenDimensions } from '../utils/responsive';
-import { colors, borderRadius } from '../styles/theme';
+import { colors, borderRadius, spacing } from '../styles/theme';
 
 const STEP_HEADER_HEIGHT = 60;
 const BUTTON_CONTAINER_HEIGHT = 92;
@@ -215,6 +215,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#FAFAFA',
+    paddingHorizontal: Platform.OS !== 'web' ? spacing.md : 0,
   },
   stepHeader: {
     paddingHorizontal: 16,

@@ -2,11 +2,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   StyleSheet,
-  SafeAreaView,
   TouchableOpacity,
   Platform,
   Dimensions,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../components/Text';
@@ -325,11 +325,13 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+    paddingHorizontal: Platform.OS !== 'web' ? spacing.md : 0,
   },
   contentDesktop: {
     maxWidth: 800,
     alignSelf: 'center',
     width: '100%',
+    paddingHorizontal: 0,
   },
   header: {
     flexDirection: 'row',
