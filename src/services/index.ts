@@ -49,3 +49,6 @@ export { formatUserDisplayName, getUserInitials, isUserSignedIn } from './user/u
 export { messagingService } from './messaging/messagingService';
 export type { Conversation, ConversationMember, Message, MessageReaction } from './messaging/messagingService';
 
+// Push notification services
+export { pushNotificationService } from './notifications/pushNotificationService';
+

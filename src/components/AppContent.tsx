@@ -27,6 +27,8 @@ import { isFirstVideoReadyForBoardType, getVideoPreloadStatus, waitForVideoReady
 import { STEP_WELCOME } from '../constants/onboardingSteps';
 import { swellyServiceCopy, swellyServiceCopyCopy } from '../services/swelly/swellyServiceCopy';
 import { findAndConnectMatches, OnboardingMatchResult } from '../services/matching/onboardingMatchingService';
+import { pushNotificationService } from '../services/notifications/pushNotificationService';
+import { useMessaging } from '../context/MessagingProvider';
 
 export const AppContent: React.FC = () => {
   const { currentStep, formData, setCurrentStep, updateFormData, saveStepToSupabase, isComplete, markOnboardingComplete, isDemoUser, setIsDemoUser, setUser, resetOnboarding, user, isRestoringSession } = useOnboarding();
@@ -47,6 +49,10 @@ export const AppContent: React.FC = () => {
   // Refs to prevent race conditions from multiple rapid clicks
   const isNavigatingRef = useRef(false);
   const isLoggingOutRef = useRef(false);
+
+  // Push notification: pending conversation to open from notification tap
+  const [pendingNotificationConversationId, setPendingNotificationConversationId] = useState<string | null>(null);
+  const { getCurrentConversationId } = useMessaging();
   
   // State to track session validation
   const [hasValidatedSession, setHasValidatedSession] = useState(false);
@@ -115,6 +121,15 @@ export const AppContent: React.FC = () => {
     }
   }, [isComplete, user, isDemoUser, isRestoringSession, isSupabaseConfigured, resetOnboarding, setUser, setCurrentStep, setIsDemoUser]);
   
+  // Set up push notification handlers (foreground suppression + tap navigation)
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    pushNotificationService.setupNotificationHandlers(
+      getCurrentConversationId,
+      (conversationId) => setPendingNotificationConversationId(conversationId)
+    );
+  }, [getCurrentConversationId]);
+
   // Preload loading video when arriving at step 4 (not after submitting)
   // This reduces loading time after step 4 submission
   useEffect(() => {
@@ -465,6 +480,10 @@ export const AppContent: React.FC = () => {
     setCurrentStep(5); // Go to step 5 (Swelly chat screen)
     // Start tracking onboarding abandonment (12 min timer)
     analyticsService.startOnboardingAbandonTracking();
+    // Register for push notifications (non-blocking)
+    pushNotificationService.registerForPushNotifications().catch(err =>
+      console.warn('[AppContent] Push registration failed (non-blocking):', err)
+    );
   };
 
   const [showProfile, setShowProfile] = useState(false);
@@ -1186,6 +1205,8 @@ export const AppContent: React.FC = () => {
           onSettingsPress={() => setShowSettings(true)}
           onViewUserProfile={handleViewUserProfile}
           onSwellyShaperViewProfile={handleSwellyShaperViewProfile}
+          pendingNotificationConversationId={pendingNotificationConversationId}
+          onPendingNotificationHandled={() => setPendingNotificationConversationId(null)}
         />
         {process.env.EXPO_PUBLIC_LOCAL_MODE === 'true' && (
           <TouchableOpacity

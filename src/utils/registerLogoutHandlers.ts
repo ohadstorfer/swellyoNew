@@ -17,6 +17,7 @@ import { clearSwellyShaperChatId } from '../screens/SwellyShaperScreen';
 import { swellyShaperService } from '../services/swelly/swellyShaperService';
 import { messagingService } from '../services/messaging/messagingService';
 import { blockingService } from '../services/blocking/blockingService';
+import { pushNotificationService } from '../services/notifications/pushNotificationService';
 
 let registered = false;
 
@@ -55,6 +56,9 @@ export function registerLogoutHandlers(): void {
 
   // Block list cache
   logoutRegistry.register(() => blockingService.clear());
+
+  // Push notification token
+  logoutRegistry.register(() => pushNotificationService.clearToken());
 
   // Web-only: clear localStorage user data
   if (Platform.OS === 'web') {

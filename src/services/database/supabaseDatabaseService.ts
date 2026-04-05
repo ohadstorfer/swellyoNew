@@ -46,6 +46,7 @@ export interface SupabaseSurfer {
   wave_type_keywords?: string[]; // text[], nullable
   is_demo_user?: boolean; // boolean, default false
   finished_onboarding?: boolean; // boolean, default false
+  expo_push_token?: string; // text, nullable - Expo push notification token
   created_at: string; // timestamptz
   updated_at: string; // timestamptz
 }

@@ -19,7 +19,9 @@
       "Bash(find:*)",
       "WebFetch(domain:docs.expo.dev)",
       "WebFetch(domain:gist.github.com)",
-      "Bash(npx expo:*)"
+      "Bash(npx expo:*)",
+      "Bash(git stash:*)",
+      "Bash(git checkout:*)"
     ]
   }
 }
