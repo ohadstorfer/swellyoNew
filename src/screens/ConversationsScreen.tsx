@@ -43,6 +43,8 @@ interface ConversationsScreenProps {
   onViewUserProfile?: (userId: string) => void;
   onSwellyShaperViewProfile?: () => void; // Callback for viewing profile from Swelly Shaper
   onSettingsPress?: () => void;
+  pendingNotificationConversationId?: string | null;
+  onPendingNotificationHandled?: () => void;
 }
 
 type FilterType = 'all' | 'advisor' | 'seeker';
@@ -144,6 +146,8 @@ export default function ConversationsScreen({
   onViewUserProfile,
   onSwellyShaperViewProfile,
   onSettingsPress,
+  pendingNotificationConversationId,
+  onPendingNotificationHandled,
 }: ConversationsScreenProps) {
   const { resetOnboarding, setCurrentStep, setUser, setIsDemoUser, user: contextUser } = useOnboarding();
   const posthog = usePostHog();
@@ -676,6 +680,16 @@ export default function ConversationsScreen({
     // Also call the callback if provided
     onConversationPress?.(conv.id);
   };
+
+  // Handle push notification tap — open the target conversation
+  useEffect(() => {
+    if (!pendingNotificationConversationId || conversations.length === 0) return;
+    const conv = conversations.find(c => c.id === pendingNotificationConversationId);
+    if (conv) {
+      handleConversationPress(conv);
+    }
+    onPendingNotificationHandled?.();
+  }, [pendingNotificationConversationId, conversations]);
 
   const renderWelcomeConversation = (conv: Conversation) => {
     // Check if last message is an image

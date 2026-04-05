@@ -138,6 +138,13 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             )
           );
 
+          // Register for push notifications in background (non-blocking)
+          import('../services/notifications/pushNotificationService').then(({ pushNotificationService }) =>
+            pushNotificationService.registerForPushNotifications().catch(err =>
+              console.warn('[OnboardingContext] Push registration failed (non-blocking):', err)
+            )
+          );
+
           // Success - exit retry loop
           setIsRestoringSession(false);
           console.log('[OnboardingContext] Session restoration complete');

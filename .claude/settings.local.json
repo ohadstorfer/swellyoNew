@@ -12,7 +12,16 @@
       "WebFetch(domain:www.coderbased.com)",
       "WebFetch(domain:github.com)",
       "WebFetch(domain:neon.com)",
-      "WebFetch(domain:buddyboss.com)"
+      "WebFetch(domain:buddyboss.com)",
+      "WebFetch(domain:medium.com)",
+      "Bash(curl -s \"https://support.google.com/googleplay/android-developer/answer/14115180\")",
+      "Bash(curl -s \"https://developer.apple.com/documentation/photokit/phpickerviewcontroller\")",
+      "Bash(find:*)",
+      "WebFetch(domain:docs.expo.dev)",
+      "WebFetch(domain:gist.github.com)",
+      "Bash(npx expo:*)",
+      "Bash(git stash:*)",
+      "Bash(git checkout:*)"
     ]
   }
 }

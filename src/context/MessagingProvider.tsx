@@ -342,6 +342,7 @@ interface MessagingContextType {
   refreshConversations: () => Promise<void>;
   loading: boolean;
   setCurrentConversationId: (conversationId: string | null) => void;
+  getCurrentConversationId: () => string | null;
   hasMoreConversations: boolean;
   isLoadingMoreConversations: boolean;
   loadMoreConversations: () => Promise<void>;
@@ -1500,6 +1501,10 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
     currentConversationIdRef.current = conversationId;
   }, []);
 
+  const getCurrentConversationId = useCallback(() => {
+    return currentConversationIdRef.current;
+  }, []);
+
   // CRITICAL: Memoize context value to ensure React detects changes
   // Only recreate when conversations array reference changes (reducer returns new array)
   const value: MessagingContextType = useMemo(() => ({
@@ -1510,10 +1515,11 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
     refreshConversations,
     loading,
     setCurrentConversationId,
+    getCurrentConversationId,
     hasMoreConversations,
     isLoadingMoreConversations,
     loadMoreConversations,
-  }), [conversations, unreadTotal, dispatch, markAsRead, refreshConversations, loading, setCurrentConversationId, hasMoreConversations, isLoadingMoreConversations, loadMoreConversations]);
+  }), [conversations, unreadTotal, dispatch, markAsRead, refreshConversations, loading, setCurrentConversationId, getCurrentConversationId, hasMoreConversations, isLoadingMoreConversations, loadMoreConversations]);
 
   return (
     <MessagingContext.Provider value={value}>
