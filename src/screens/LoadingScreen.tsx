@@ -2,11 +2,11 @@ import React, { useRef, useEffect, useState } from 'react';
 import {
   View,
   StyleSheet,
-  SafeAreaView,
   TouchableOpacity,
   Platform,
   Image,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../components/Text';
@@ -699,7 +699,7 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.backgroundGray,
+    backgroundColor: Platform.OS === 'web' ? colors.backgroundGray : '#FFFFFF',
   },
   header: {
     flexDirection: 'row',
@@ -732,7 +732,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     width: '100%',
     flexShrink: 0,
-    backgroundColor: colors.backgroundGray,
+    backgroundColor: Platform.OS === 'web' ? colors.backgroundGray : '#FFFFFF',
     zIndex: 2,
     paddingTop: 12,
   },

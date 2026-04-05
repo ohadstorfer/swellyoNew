@@ -2,7 +2,6 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   StyleSheet,
-  SafeAreaView,
   TouchableOpacity,
   Platform,
   TextInput,
@@ -11,7 +10,9 @@ import {
   ScrollView,
   NativeSyntheticEvent,
   NativeScrollEvent,
+  Alert,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { TextInput as PaperTextInput } from 'react-native-paper';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -571,7 +572,8 @@ const DateOfBirthField: React.FC<DateOfBirthFieldProps> = ({
   const dateValue = value ? (parseISODateLocal(value) ?? defaultPickerDate) : defaultPickerDate;
 
   // Format date for display
-  const displayValue = hasValue ? formatDateOfBirth(value) : (placeholder || label);
+  const age = hasValue ? calculateAgeFromDOB(value) : null;
+  const displayValue = hasValue && age !== null ? `${age}` : (placeholder || label);
 
   const handleContainerPress = () => {
     setTempDate(dateValue);
@@ -1036,30 +1038,50 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
       };
       input.click();
     } else {
-      // For native, try to use expo-image-picker if available
+      const launchPicker = async () => {
+        try {
+          const ImagePicker = require('expo-image-picker');
+          const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+          if (status !== 'granted') {
+            Alert.alert('Permission Required', 'Sorry, we need media library permissions to set your profile picture!');
+            return;
+          }
+
+          const result = await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: ['images'],
+            allowsEditing: false,
+            aspect: [1, 1],
+            quality: 1,
+          });
+
+          if (!result.canceled && result.assets[0]) {
+            const imageUri = result.assets[0].uri;
+            setProfilePicture(imageUri);
+          }
+        } catch (error) {
+          console.warn('expo-image-picker not available:', error);
+          Alert.alert('Image Picker Not Available', 'Please install expo-image-picker for native platforms.');
+        }
+      };
+
+      // Check if permission already granted — skip the explanation alert
       try {
         const ImagePicker = require('expo-image-picker');
-        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (status !== 'granted') {
-          alert('Sorry, we need camera roll permissions!');
-          return;
+        const { status } = await ImagePicker.getMediaLibraryPermissionsAsync();
+        if (status === 'granted') {
+          await launchPicker();
+        } else {
+          Alert.alert(
+            'Access Your Gallery',
+            'Swellyo needs access to your photos and videos to let you personalize your profile.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Continue', onPress: launchPicker },
+            ]
+          );
         }
-
-        const result = await ImagePicker.launchImageLibraryAsync({
-          mediaTypes: ImagePicker.MediaTypeOptions.Images,
-          allowsEditing: true,
-          aspect: [1, 1],
-          quality: 1,
-        });
-
-        if (!result.canceled && result.assets[0]) {
-          const imageUri = result.assets[0].uri;
-          // Only set local state for preview - upload happens in handleNext
-          setProfilePicture(imageUri);
-        }
-      } catch (error) {
-        console.warn('expo-image-picker not available, please install it for native image picking');
-        alert('Image picker not available. Please install expo-image-picker for native platforms.');
+      } catch {
+        await launchPicker();
       }
     }
   };
@@ -1069,10 +1091,12 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
 
   // Scroll to bottom on mount so user sees the full form
   useEffect(() => {
-    const timer = setTimeout(() => {
-      keyboardAwareScrollViewRef.current?.scrollToEnd?.({ animated: true });
-    }, 300);
-    return () => clearTimeout(timer);
+    if (Platform.OS === 'web') {
+      const timer = setTimeout(() => {
+        keyboardAwareScrollViewRef.current?.scrollToEnd?.({ animated: true });
+      }, 300);
+      return () => clearTimeout(timer);
+    }
   }, []);
 
   const handleNext = async () => {
@@ -1196,7 +1220,7 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
             ref={keyboardAwareScrollViewRef}
             extraHeight={180}
             enableOnAndroid={true}
-            enableAutomaticScroll={true}
+            enableAutomaticScroll={Platform.OS !== 'android'}
             keyboardOpeningTime={0}
             extraScrollHeight={0}
             scrollEventThrottle={0}
@@ -1252,6 +1276,7 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
             />
 
             <View style={styles.rowContainer}>
+              <View style={Platform.OS !== 'web' ? { flex: 3, minWidth: 0 } : undefined}>
               <CountryField
                 label="Location"
                 value={location}
@@ -1262,10 +1287,12 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
                   setActiveModal(null);
                 }}
                 placeholder="Where are you from?*"
-                width={212}
+                width={Platform.OS === 'web' ? 212 : undefined}
                 onOpen={() => setActiveModal('country')}
                 error={locationError}
               />
+              </View>
+              <View style={Platform.OS !== 'web' ? { flex: 2, minWidth: 0 } : undefined}>
               <DateOfBirthField
                 label="Age"
                 value={dateOfBirth}
@@ -1284,10 +1311,11 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
                   }
                 }}
                 placeholder="Age*"
-                    width={118}
+                    width={Platform.OS === 'web' ? 118 : undefined}
                 style={styles.ageField}
                 error={dateOfBirthError}
               />
+              </View>
             </View>
 
             {/* Pronoun Selection - Inline Pills */}
@@ -1471,7 +1499,7 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
     paddingBottom: 100, // Space for button
-    paddingTop: 80, // Space for sticky header (header + progress bar + gradient)
+    paddingTop: 80, // Space for sticky header
   },
   stickyHeader: {
     position: 'absolute',
@@ -1541,14 +1569,15 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
   },
   mainContainer: {
-    width: 357,
+    width: Platform.OS === 'web' ? 357 : '92%',
+    maxWidth: 357,
     alignSelf: 'center',
     marginTop: 0,
-    gap: 32,
+    gap: Platform.OS === 'web' ? 32 : 16,
   },
   profilePictureContainer: {
     alignItems: 'center',
-    gap: 24,
+    gap: Platform.OS === 'web' ? 24 : 12,
     paddingTop: 2,
     width: '100%',
   },
@@ -1577,22 +1606,22 @@ const styles = StyleSheet.create({
     width: 351,
   },
   profilePictureWrapper: {
-    width: 161.105,
-    height: 163,
-    borderRadius: 81.5,
+    width: Platform.OS === 'web' ? 161.105 : 120,
+    height: Platform.OS === 'web' ? 163 : 120,
+    borderRadius: Platform.OS === 'web' ? 81.5 : 60,
     position: 'relative',
     overflow: 'visible',
   },
   profilePicture: {
-    width: 161.105,
-    height: 163,
-    borderRadius: 81.5,
+    width: Platform.OS === 'web' ? 161.105 : 120,
+    height: Platform.OS === 'web' ? 163 : 120,
+    borderRadius: Platform.OS === 'web' ? 81.5 : 60,
     overflow: 'hidden',
   } as const,
   profilePicturePlaceholder: {
-    width: 161.105,
-    height: 163,
-    borderRadius: 81.5,
+    width: Platform.OS === 'web' ? 161.105 : 120,
+    height: Platform.OS === 'web' ? 163 : 120,
+    borderRadius: Platform.OS === 'web' ? 81.5 : 60,
     backgroundColor: colors.white,
     borderWidth: 1,
     borderColor: '#CFCFCF',
@@ -1635,6 +1664,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     minHeight: 56,
+    maxWidth: '100%',
   },
   inputContainer: {
     flex: 1,

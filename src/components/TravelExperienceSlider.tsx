@@ -35,8 +35,9 @@ if (Platform.OS !== 'web') {
     runOnJS = reanimated.runOnJS;
     withTiming = reanimated.withTiming;
     hasNativeGestures = true;
+    console.log('[Slider] Using NativeSlider (RNGH + Reanimated)');
   } catch (e) {
-    console.warn('Native gesture modules not available, using fallback slider');
+    console.log('[Slider] Using FallbackNativeSlider (PanResponder)');
   }
 }
 
@@ -114,31 +115,16 @@ const NativeSlider: React.FC<{ currentTrips: number; updateTrips: (trips: number
   updateTrips,
 }) => {
   const thumbX = useSharedValue((currentTrips / MAX_TRIPS) * BAR_WIDTH);
-  const startX = useSharedValue(0);
-  const lastRoundedTrips = useSharedValue(Math.round(currentTrips));
-
-  // Sync shared value when currentTrips changes externally (e.g. initial load)
-  useEffect(() => {
-    thumbX.value = (currentTrips / MAX_TRIPS) * BAR_WIDTH;
-    lastRoundedTrips.value = Math.round(currentTrips);
-  }, [currentTrips]);
+  const trackLeftX = useSharedValue(0);
 
   const panGesture = Gesture.Pan()
-    .onStart(() => {
-      'worklet';
-      startX.value = thumbX.value;
-    })
     .onUpdate((e) => {
       'worklet';
-      const newX = Math.min(Math.max(startX.value + e.translationX, 0), BAR_WIDTH);
-      thumbX.value = newX;
-
-      const trips = Math.round((newX / BAR_WIDTH) * MAX_TRIPS);
-      // Only bridge to JS when the rounded trip value changes
-      if (trips !== lastRoundedTrips.value) {
-        lastRoundedTrips.value = trips;
-        runOnJS(updateTrips)(trips);
-      }
+      const localX = e.absoluteX - trackLeftX.value;
+      const clamped = Math.min(Math.max(localX, 0), BAR_WIDTH);
+      thumbX.value = clamped;
+      const trips = Math.round((clamped / BAR_WIDTH) * MAX_TRIPS);
+      runOnJS(updateTrips)(trips);
     })
     .onEnd(() => {
       'worklet';
@@ -155,9 +141,15 @@ const NativeSlider: React.FC<{ currentTrips: number; updateTrips: (trips: number
     width: thumbX.value,
   }));
 
+  const handleLayout = (e: any) => {
+    e.target.measureInWindow((x: number) => {
+      trackLeftX.value = x;
+    });
+  };
+
   return (
     <GestureDetector gesture={panGesture}>
-      <View style={styles.sliderWrapper}>
+      <View style={styles.sliderWrapper} onLayout={handleLayout}>
         {/* Track background */}
         <View style={styles.trackBackground} />
 
@@ -173,8 +165,8 @@ const NativeSlider: React.FC<{ currentTrips: number; updateTrips: (trips: number
           </ReanimatedAnimated.View>
         </View>
 
-        {/* Custom thumb */}
-        <ReanimatedAnimated.View style={[styles.nativeThumb, thumbStyle]} />
+        {/* Custom thumb — pointerEvents none so touches pass through to the wrapper */}
+        <ReanimatedAnimated.View pointerEvents="none" style={[styles.nativeThumb, thumbStyle]} />
       </View>
     </GestureDetector>
   );
@@ -187,28 +179,35 @@ const FallbackNativeSlider: React.FC<{ currentTrips: number; updateTrips: (trips
 }) => {
   const updateTripsRef = useRef(updateTrips);
   updateTripsRef.current = updateTrips;
-  const startXRef = useRef(0);
+  const trackLeftRef = useRef(0);
 
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
       onPanResponderGrant: (evt) => {
-        const x = evt.nativeEvent.locationX;
-        startXRef.current = x;
-        const trips = Math.round(Math.max(0, Math.min(MAX_TRIPS, (x / BAR_WIDTH) * MAX_TRIPS)));
+        const x = evt.nativeEvent.pageX - trackLeftRef.current;
+        const clamped = Math.max(0, Math.min(BAR_WIDTH, x));
+        const trips = Math.round((clamped / BAR_WIDTH) * MAX_TRIPS);
         updateTripsRef.current(trips);
       },
-      onPanResponderMove: (_evt, gestureState) => {
-        const newX = Math.max(0, Math.min(BAR_WIDTH, startXRef.current + gestureState.dx));
-        const trips = Math.round((newX / BAR_WIDTH) * MAX_TRIPS);
+      onPanResponderMove: (evt) => {
+        const x = evt.nativeEvent.pageX - trackLeftRef.current;
+        const clamped = Math.max(0, Math.min(BAR_WIDTH, x));
+        const trips = Math.round((clamped / BAR_WIDTH) * MAX_TRIPS);
         updateTripsRef.current(trips);
       },
     })
   ).current;
 
+  const handleLayout = (e: any) => {
+    e.target.measureInWindow((x: number) => {
+      trackLeftRef.current = x;
+    });
+  };
+
   return (
-    <View style={styles.sliderWrapper} {...panResponder.panHandlers}>
+    <View style={styles.sliderWrapper} {...panResponder.panHandlers} onLayout={handleLayout}>
       {/* Track background */}
       <View style={styles.trackBackground} />
 

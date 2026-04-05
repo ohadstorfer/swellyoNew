@@ -2,11 +2,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   StyleSheet,
-  SafeAreaView,
   TouchableOpacity,
   Platform,
   Alert,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -315,6 +315,39 @@ export const OnboardingVideoUploadScreen: React.FC<OnboardingVideoUploadScreenPr
     return () => clearTimeout(timeoutId);
   }, [previewPlayer, userVideoUri, defaultVideoUrl]);
 
+  const launchVideoPicker = async () => {
+    try {
+      const ImagePicker = require('expo-image-picker');
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Required', 'Sorry, we need media library permissions to upload your video!');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['videos'],
+        allowsEditing: false,
+        quality: 1.0,
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        const videoAsset = result.assets[0];
+        const assetMimeType = videoAsset.mimeType || undefined;
+
+        const validation = await validateVideoComplete(videoAsset.uri, assetMimeType);
+        if (!validation.valid) {
+          setError(validation.error || 'Please select a valid video file.');
+          return;
+        }
+        setUserVideoUri(videoAsset.uri);
+        setMimeType(assetMimeType);
+      }
+    } catch (err) {
+      console.warn('expo-image-picker not available:', err);
+      Alert.alert('Video Picker Not Available', 'Please install expo-image-picker for native platforms.');
+    }
+  };
+
   const pickVideo = async () => {
     setError(null);
 
@@ -354,33 +387,21 @@ export const OnboardingVideoUploadScreen: React.FC<OnboardingVideoUploadScreenPr
     } else {
       try {
         const ImagePicker = require('expo-image-picker');
-        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (status !== 'granted') {
-          Alert.alert('Permission Required', 'Sorry, we need media library permissions to upload your video!');
-          return;
+        const { status } = await ImagePicker.getMediaLibraryPermissionsAsync();
+        if (status === 'granted') {
+          await launchVideoPicker();
+        } else {
+          Alert.alert(
+            'Access Your Gallery',
+            'Swellyo needs access to your photos and videos to let you personalize your profile.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Continue', onPress: launchVideoPicker },
+            ]
+          );
         }
-
-        const result = await ImagePicker.launchImageLibraryAsync({
-          mediaTypes: ImagePicker.MediaTypeOptions.Videos,
-          allowsEditing: false,
-          quality: 1.0,
-        });
-
-        if (!result.canceled && result.assets[0]) {
-          const videoAsset = result.assets[0];
-          const assetMimeType = videoAsset.mimeType || undefined;
-
-          const validation = await validateVideoComplete(videoAsset.uri, assetMimeType);
-          if (!validation.valid) {
-            setError(validation.error || 'Please select a valid video file.');
-            return;
-          }
-          setUserVideoUri(videoAsset.uri);
-          setMimeType(assetMimeType);
-        }
-      } catch (err) {
-        console.warn('expo-image-picker not available:', err);
-        Alert.alert('Video Picker Not Available', 'Please install expo-image-picker for native platforms.');
+      } catch {
+        await launchVideoPicker();
       }
     }
   };
@@ -501,10 +522,12 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+    paddingHorizontal: Platform.OS !== 'web' ? spacing.md : 0,
   },
   contentDesktop: {
     maxWidth: 800,
     alignSelf: 'center',
+    paddingHorizontal: 0,
     width: '100%',
   },
   header: {

@@ -2,10 +2,10 @@ import React, { useState } from 'react';
 import {
   View,
   StyleSheet,
-  SafeAreaView,
   TouchableOpacity,
   Platform,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../components/Text';
@@ -399,6 +399,7 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: '100%',
     overflow: Platform.OS === 'web' ? 'hidden' : 'visible',
+    paddingHorizontal: Platform.OS !== 'web' ? spacing.md : 0,
   },
   contentDesktop: {
     overflow: 'visible',

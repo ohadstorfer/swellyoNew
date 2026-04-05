@@ -2,10 +2,10 @@ import React, { useState } from 'react';
 import {
   View,
   StyleSheet,
-  SafeAreaView,
   TouchableOpacity,
   Platform,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { TravelExperienceSlider } from '../components/TravelExperienceSlider';
@@ -164,11 +164,13 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+    paddingHorizontal: Platform.OS !== 'web' ? spacing.md : 0,
   },
   contentDesktop: {
     maxWidth: 800,
     alignSelf: 'center',
     width: '100%',
+    paddingHorizontal: 0,
   },
   header: {
     flexDirection: 'row',

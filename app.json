@@ -23,6 +23,7 @@
       }
     },
     "android": {
+      "package": "com.swellyo.app",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
@@ -47,7 +48,8 @@
         "expo-image-picker",
         {
           "photosPermission": "The app accesses your photos to let you share them.",
-          "cameraPermission": "The app accesses your camera to let you take photos."
+          "cameraPermission": "The app accesses your camera to let you take photos.",
+          "preferNativeMediaPicker": true
         }
       ],
       "@react-native-google-signin/google-signin",

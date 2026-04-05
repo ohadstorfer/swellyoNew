@@ -7,8 +7,8 @@ import {
   StyleSheet,
   Platform,
   BackHandler,
-  SafeAreaView,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Text } from './Text';
 
 // WebView is native-only; wrap in try/catch so Expo Go (which lacks the native module) doesn't crash
