@@ -1635,7 +1635,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     gap: 10,
-    borderRadius: 999,
+    borderRadius: 28,
     // Background color is set inline via badgeColor prop
   },
   filterBadgeText: {

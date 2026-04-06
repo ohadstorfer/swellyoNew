@@ -152,7 +152,7 @@ const styles = StyleSheet.create({
   cancelButton: {
     flex: 1,
     backgroundColor: '#F5F5F5',
-    borderRadius: 999,
+    borderRadius: 28,
     paddingVertical: 14,
     alignItems: 'center',
     justifyContent: 'center',
@@ -167,7 +167,7 @@ const styles = StyleSheet.create({
   blockButton: {
     flex: 1,
     backgroundColor: '#D32F2F',
-    borderRadius: 999,
+    borderRadius: 28,
     paddingVertical: 14,
     alignItems: 'center',
     justifyContent: 'center',

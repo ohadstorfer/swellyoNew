@@ -435,7 +435,7 @@ const styles = StyleSheet.create({
   },
   deleteButton: {
     backgroundColor: '#FB3748',
-    borderRadius: 999,
+    borderRadius: 28,
     paddingVertical: 16,
     paddingHorizontal: 24,
     width: '100%',
@@ -515,7 +515,7 @@ const styles = StyleSheet.create({
   cancelButton: {
     flex: 1,
     backgroundColor: '#F5F5F5',
-    borderRadius: 999,
+    borderRadius: 28,
     paddingVertical: 14,
     alignItems: 'center',
     justifyContent: 'center',
@@ -530,7 +530,7 @@ const styles = StyleSheet.create({
   confirmDeleteButton: {
     flex: 1,
     backgroundColor: '#D32F2F',
-    borderRadius: 999,
+    borderRadius: 28,
     paddingVertical: 14,
     alignItems: 'center',
     justifyContent: 'center',
@@ -595,7 +595,7 @@ const styles = StyleSheet.create({
   },
   overlayButton: {
     backgroundColor: '#0788B0',
-    borderRadius: 999,
+    borderRadius: 28,
     paddingVertical: 14,
     paddingHorizontal: 24,
     width: '100%',

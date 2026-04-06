@@ -1049,7 +1049,7 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
 
           const result = await ImagePicker.launchImageLibraryAsync({
             mediaTypes: ['images'],
-            allowsEditing: false,
+            allowsEditing: true,
             aspect: [1, 1],
             quality: 1,
           });
@@ -1755,7 +1755,7 @@ const styles = StyleSheet.create({
   gradientButton: {
     width: 330,
     height: 56,
-    borderRadius: 999,
+    borderRadius: 28,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: spacing.lg,

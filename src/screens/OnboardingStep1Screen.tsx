@@ -6,7 +6,7 @@ import {
   Platform,
   Dimensions,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../components/Text';
@@ -84,6 +84,7 @@ export const OnboardingStep1Screen: React.FC<OnboardingStep1ScreenProps> = ({
   const { markOnboardingComplete } = useOnboarding();
   const isDesktop = useIsDesktopWeb();
   const { height: screenHeight } = useScreenDimensions();
+  const insets = useSafeAreaInsets();
   const defaultBoardType = (initialData.boardType !== undefined && initialData.boardType >= 0 && initialData.boardType <= 3) 
     ? initialData.boardType 
     : 0;
@@ -130,15 +131,16 @@ export const OnboardingStep1Screen: React.FC<OnboardingStep1ScreenProps> = ({
     const buttonHeight = 56 + spacing.xl; // button + padding
     
     // Carousel marginTop (negative, adds space)
-    const carouselMarginTop = isDesktop ? spacing.lg : spacing.xl;
+    // Reclaim most of the negative margin, but reserve 4px minimum gap from subtitle
+    const carouselMarginTop = isDesktop ? spacing.lg : (spacing.xl - 16);
     
     // Calculate available space for board
     // Total used space = everything above subtitle + subtitle + label + button
     const totalUsedSpace = headerHeight + progressHeight + titleHeight + subtitleTotalHeight + labelHeight + buttonHeight;
     
-    // On native, SafeAreaView consumes top/bottom insets (status bar ~50px, home indicator ~34px)
+    // On native, SafeAreaView consumes top/bottom insets
     // but screenHeight is the full window height. Subtract these so boards fit within safe area.
-    const safeAreaInsets = Platform.OS === 'web' ? 0 : 90;
+    const safeAreaInsets = Platform.OS === 'web' ? 0 : (insets.top + insets.bottom);
 
     // Available space = screen height - safe area - used space + carousel margin (negative margin adds space)
     // Subtract a small buffer (8px) for visual spacing
@@ -458,6 +460,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     marginTop: -spacing.xl,
+    marginHorizontal: Platform.OS !== 'web' ? -spacing.md : 0,
     zIndex: 1,
   },
   carouselContainerDesktop: {
@@ -475,7 +478,7 @@ const styles = StyleSheet.create({
   },
   gradientButton: {
     height: 56,
-    borderRadius: 999,
+    borderRadius: 28,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: spacing.lg,

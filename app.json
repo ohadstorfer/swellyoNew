@@ -49,7 +49,9 @@
         {
           "photosPermission": "The app accesses your photos to let you share them.",
           "cameraPermission": "The app accesses your camera to let you take photos.",
-          "preferNativeMediaPicker": true
+          "preferNativeMediaPicker": true,
+          "androidCropToolbarColor": "#ffffff",
+          "androidCropToolbarWidgetColor": "#000000"
         }
       ],
       "@react-native-google-signin/google-signin",

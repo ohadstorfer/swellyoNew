@@ -5,7 +5,7 @@ import {
   TouchableOpacity,
   Platform,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../components/Text';
@@ -125,8 +125,8 @@ export const OnboardingStep2Screen: React.FC<OnboardingStep2ScreenProps> = ({
 }) => {
   const isDesktop = useIsDesktopWeb();
   const { height: rawScreenHeight, width: screenWidth } = useScreenDimensions();
-  // On native, SafeAreaView consumes ~90px of insets but Dimensions returns full window height
-  const screenHeight = Platform.OS === 'web' ? rawScreenHeight : rawScreenHeight - 90;
+  const insets = useSafeAreaInsets();
+  const screenHeight = Platform.OS === 'web' ? rawScreenHeight : rawScreenHeight - (insets.top + insets.bottom);
   
   // Get board type from initial data (default to 0 if not set)
   const boardType = initialData.boardType ?? 0;
@@ -213,7 +213,9 @@ export const OnboardingStep2Screen: React.FC<OnboardingStep2ScreenProps> = ({
     }
     
     // Cap at reasonable maximum (smaller on smaller screens)
-    const maxHeight = screenWidth <= 375 ? 400 : (screenWidth <= 414 ? 450 : 500);
+    // Android has smaller safe area insets, so allow more space for the video
+    const androidBonus = Platform.OS === 'android' ? 40 : 0;
+    const maxHeight = (screenWidth <= 375 ? 400 : (screenWidth <= 414 ? 450 : 500)) + androidBonus;
     if (availableSpace > maxHeight) {
       return maxHeight;
     }
@@ -509,7 +511,7 @@ const styles = StyleSheet.create({
   gradientButton: {
     height: 56,
     // Width is set dynamically via inline style using responsiveWidth
-    borderRadius: 999,
+    borderRadius: 28,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: spacing.lg,

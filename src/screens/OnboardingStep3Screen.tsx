@@ -242,7 +242,7 @@ const styles = StyleSheet.create({
   gradientButton: {
     height: 56,
     // Width is set dynamically via inline style using responsiveWidth
-    borderRadius: 999,
+    borderRadius: 28,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: spacing.lg,

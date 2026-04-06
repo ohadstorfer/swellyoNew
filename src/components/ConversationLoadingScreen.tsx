@@ -810,7 +810,7 @@ const styles = StyleSheet.create({
   profileImage: {
     width: 132,
     height: 132,
-    borderRadius: 999, // Full circle
+    borderRadius: 66, // Full circle (half of 132px)
     backgroundColor: '#D3D3D3', // lightgray fallback - should be visible even without image
     // Ensure the image container is visible
     overflow: 'hidden',

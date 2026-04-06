@@ -688,7 +688,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,
     shadowRadius: 4,
-    elevation: 5,
+    elevation: Platform.OS === 'android' ? 0 : 5,
     zIndex: 30,
   },
   messageText: {
@@ -714,7 +714,7 @@ const styles = StyleSheet.create({
   },
   gradientButton: {
     height: 56,
-    borderRadius: 999,
+    borderRadius: 28,
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#212121',

@@ -5,6 +5,7 @@ import {
   TouchableOpacity,
   Alert,
   KeyboardAvoidingView,
+  Keyboard,
   Platform,
   Image,
   ImageBackground,
@@ -133,6 +134,18 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
   const [onboardingStartTime] = useState<number>(Date.now()); // Track when onboarding chat started
   const scrollViewRef = useRef<ScrollView>(null);
   const { handleScroll, handleContentSizeChange, handleLayout } = useChatKeyboardScroll(scrollViewRef);
+  const [androidKeyboardHeight, setAndroidKeyboardHeight] = useState(0);
+
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const showSub = Keyboard.addListener('keyboardDidShow', (e) => {
+      setAndroidKeyboardHeight(e.endCoordinates.height);
+    });
+    const hideSub = Keyboard.addListener('keyboardDidHide', () => {
+      setAndroidKeyboardHeight(0);
+    });
+    return () => { showSub.remove(); hideSub.remove(); };
+  }, []);
   const chatInitializedRef = useRef(false);
   
   // State for destination cards
@@ -870,10 +883,10 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
       </View>
 
       {/* Chat Messages */}
-      <KeyboardAvoidingView 
-        style={styles.chatContainer}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+      <KeyboardAvoidingView
+        style={[styles.chatContainer, Platform.OS === 'android' && androidKeyboardHeight > 0 && { paddingBottom: androidKeyboardHeight }]}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={0}
       >
         <ImageBackground
           source={{ uri: CHAT_BG_IMAGE_URI }}
@@ -1083,7 +1096,6 @@ const styles = StyleSheet.create({
   backgroundImage: {
     flex: 1,
     width: '100%',
-    height: '100%',
   },
   messagesList: {
     flex: 1,
@@ -1173,7 +1185,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     paddingHorizontal: 8,
-    paddingBottom: Platform.OS === 'web' ? 35 : 8,
+    paddingBottom: 35,
     paddingTop: 0,
   },
   attachButtonWrapper: {

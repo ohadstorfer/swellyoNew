@@ -128,7 +128,7 @@ const styles = StyleSheet.create({
   },
   gradientButton: {
     height: 56,
-    borderRadius: 999,
+    borderRadius: 28,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: spacing.lg,

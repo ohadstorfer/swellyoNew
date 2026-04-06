@@ -242,7 +242,7 @@ const styles = StyleSheet.create({
   },
   sendButton: {
     backgroundColor: '#0788B0',
-    borderRadius: 999,
+    borderRadius: 28,
     paddingVertical: 14,
     alignItems: 'center',
     justifyContent: 'center',
@@ -298,7 +298,7 @@ const styles = StyleSheet.create({
   },
   confirmButton: {
     backgroundColor: '#0788B0',
-    borderRadius: 999,
+    borderRadius: 28,
     paddingVertical: 14,
     paddingHorizontal: 24,
     width: '100%',
