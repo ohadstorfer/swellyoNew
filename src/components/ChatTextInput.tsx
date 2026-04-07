@@ -180,7 +180,8 @@ export const ChatTextInput = forwardRef<ChatTextInputRef, ChatTextInputProps>(fu
                   maxHeight: MAX_INPUT_HEIGHT,
                   lineHeight: LINE_HEIGHT,
                   // Single line: nudge text up so it looks vertically centered (helps when textAlignVertical is ignored, e.g. Web)
-                  ...(inputHeight <= MIN_INPUT_HEIGHT && {
+                  // Skip on Android — textAlignVertical handles centering and toggling padding causes flicker
+                  ...(Platform.OS !== 'android' && inputHeight <= MIN_INPUT_HEIGHT && {
                     paddingTop: 8,
                     paddingBottom: 12,
                   }),
@@ -318,7 +319,8 @@ const styles = StyleSheet.create({
     fontFamily: Platform.OS === 'web' ? undefined : 'Inter',
     padding: 0,
     paddingLeft: 8,
-    paddingVertical: INPUT_PADDING_VERTICAL,
+    paddingVertical: 8,
+    ...(Platform.OS === 'android' && { includeFontPadding: false }),
     margin: 0,
     ...(Platform.OS === 'web' && ({
       outlineStyle: 'none',

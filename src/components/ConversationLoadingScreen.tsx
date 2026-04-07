@@ -654,6 +654,7 @@ export const ConversationLoadingScreen: React.FC<ConversationLoadingScreenProps>
       </View>
       
       {/* Animated Text Slider - Positioned at bottom */}
+      <View style={styles.textSliderWrapper}>
       <View style={styles.textSliderContainer}>
         {/* First Text Set */}
         <Animated.View
@@ -713,6 +714,7 @@ export const ConversationLoadingScreen: React.FC<ConversationLoadingScreenProps>
           </Text>
         </Animated.View>
       </View>
+      </View>
     </View>
   );
 };
@@ -744,15 +746,18 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     lineHeight: 28.8, // 120% of 24
   },
+  textSliderWrapper: {
+    position: 'absolute',
+    bottom: 60,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    zIndex: 10,
+  },
   textSliderContainer: {
     width: 350,
     height: 120,
-    position: 'absolute',
-    bottom: 60, // Gap from bottom
-    left: '50%',
-    marginLeft: -175, // Half of width to center
     overflow: 'hidden',
-    zIndex: 10,
   },
   textSet: {
     position: 'absolute',

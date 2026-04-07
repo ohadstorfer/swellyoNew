@@ -54,7 +54,7 @@
     <key>NSCameraUsageDescription</key>
     <string>The app accesses your camera to let you take photos.</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>Allow $(PRODUCT_NAME) to access your microphone</string>
+    <string>This app needs access to your microphone to record video with audio.</string>
     <key>NSPhotoLibraryUsageDescription</key>
     <string>The app accesses your photos to let you share them.</string>
     <key>RCTNewArchEnabled</key>

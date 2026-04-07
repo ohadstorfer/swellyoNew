@@ -2951,7 +2951,7 @@ const styles = StyleSheet.create({
   },
   travelExperienceIllustration: {
     position: 'absolute',
-    left: 71,
+    right: 0,
     top: 34,
     width: 96,
     height: 96,
@@ -3115,7 +3115,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,
     shadowRadius: 4,
-    elevation: 4,
+    elevation: Platform.OS === 'android' ? 0 : 4,
   },
   surfSkillContentOverlay: {
     position: 'absolute',

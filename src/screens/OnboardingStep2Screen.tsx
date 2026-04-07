@@ -126,7 +126,7 @@ export const OnboardingStep2Screen: React.FC<OnboardingStep2ScreenProps> = ({
   const isDesktop = useIsDesktopWeb();
   const { height: rawScreenHeight, width: screenWidth } = useScreenDimensions();
   const insets = useSafeAreaInsets();
-  const screenHeight = Platform.OS === 'web' ? rawScreenHeight : rawScreenHeight - (insets.top + insets.bottom);
+  const screenHeight = Platform.OS === 'web' ? rawScreenHeight : rawScreenHeight - (insets.top + (Platform.OS === 'android' ? 0 : insets.bottom));
   
   // Get board type from initial data (default to 0 if not set)
   const boardType = initialData.boardType ?? 0;

@@ -21,7 +21,15 @@
       "WebFetch(domain:gist.github.com)",
       "Bash(npx expo:*)",
       "Bash(git stash:*)",
-      "Bash(git checkout:*)"
+      "Bash(git checkout:*)",
+      "Bash(git push:*)",
+      "Bash(eas build:list:*)",
+      "WebFetch(domain:forum.ionicframework.com)",
+      "WebFetch(domain:lightrun.com)",
+      "WebFetch(domain:grouchingtiger.com)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git merge:*)"
     ]
   }
 }

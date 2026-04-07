@@ -699,7 +699,7 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Platform.OS === 'web' ? colors.backgroundGray : '#FFFFFF',
+    backgroundColor: '#FCFCFC',
   },
   header: {
     flexDirection: 'row',
@@ -732,7 +732,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     width: '100%',
     flexShrink: 0,
-    backgroundColor: Platform.OS === 'web' ? colors.backgroundGray : '#FFFFFF',
+    backgroundColor: '#FCFCFC',
     zIndex: 2,
     paddingTop: 12,
   },
@@ -839,7 +839,7 @@ const styles = StyleSheet.create({
       display: 'block' as any,
       opacity: 1,
       mixBlendMode: 'darken' as any,
-      // backgroundColor: colors.backgroundGray, // Match container background to avoid flashing/poster artifacts
+      // backgroundColor: '#FCFCFC', // Match container background to avoid flashing/poster artifacts
   
       // Prevent any browser interaction/overlay
       userSelect: 'none' as any,
@@ -857,7 +857,7 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     backgroundColor: 'transparent',
-    // backgroundColor: colors.backgroundGray,
+    // backgroundColor: '#FCFCFC',
     zIndex: 10,
     // pointerEvents: 'auto' is implicit, will block all interactions with video
   },
@@ -865,7 +865,7 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
     // backgroundColor: colors.backgroundMedium,
-    backgroundColor: colors.backgroundGray,
+    backgroundColor: '#FCFCFC',
     alignItems: 'center',
     justifyContent: 'center',
   },

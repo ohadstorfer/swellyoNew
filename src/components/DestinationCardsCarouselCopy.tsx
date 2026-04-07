@@ -283,7 +283,7 @@ const styles = StyleSheet.create({
   container: {
     width: '100%',
     alignItems: 'center',
-    paddingVertical: spacing.md,
+    
   },
   carouselContainer: {
     width: '100%',

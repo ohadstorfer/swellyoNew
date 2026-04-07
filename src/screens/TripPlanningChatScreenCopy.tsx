@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   Alert,
   KeyboardAvoidingView,
+  Keyboard,
   Platform,
   Image,
   ImageBackground,
@@ -267,6 +268,25 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   const scrollViewRef = useRef<ScrollView>(null);
   const loadingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { handleScroll, handleContentSizeChange, handleLayout, scrollToBottom } = useChatKeyboardScroll(scrollViewRef);
+  const [androidKeyboardHeight, setAndroidKeyboardHeight] = useState(0);
+
+  useEffect(() => {
+    const subs: { remove: () => void }[] = [];
+    if (Platform.OS === 'android') {
+      subs.push(Keyboard.addListener('keyboardDidShow', (e) => {
+        setAndroidKeyboardHeight(e.endCoordinates.height);
+      }));
+      subs.push(Keyboard.addListener('keyboardDidHide', () => {
+        setAndroidKeyboardHeight(0);
+      }));
+    }
+    if (Platform.OS === 'ios') {
+      subs.push(Keyboard.addListener('keyboardDidShow', () => {
+        setTimeout(() => scrollToBottom(), 100);
+      }));
+    }
+    return () => subs.forEach(s => s.remove());
+  }, [scrollToBottom]);
   // Drag-to-delete: ghost chip position and dragged item
   const [dragState, setDragState] = useState<{
     item: FilterDisplayItem;
@@ -1874,10 +1894,10 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
       </View>
 
       {/* Chat Messages */}
-      <KeyboardAvoidingView 
-        style={styles.chatContainer}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+      <KeyboardAvoidingView
+        style={[styles.chatContainer, Platform.OS === 'android' && androidKeyboardHeight > 0 && { paddingBottom: androidKeyboardHeight }]}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={0}
       >
         <ImageBackground
           source={{ uri: getImageUrl('/chat background.png') }}
@@ -2306,7 +2326,6 @@ const styles = StyleSheet.create({
   backgroundImage: {
     flex: 1,
     width: '100%',
-    height: '100%',
   },
   messagesList: {
     flex: 1,
@@ -2407,7 +2426,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     paddingHorizontal: 8,
-    paddingBottom: Platform.OS === 'web' ? 35 : 8,
+    paddingBottom: Platform.OS === 'android' ? 50 : 35,
     paddingTop: 0,
   },
   attachButtonWrapper: {

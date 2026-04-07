@@ -133,19 +133,26 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
   const [isFinished, setIsFinished] = useState(false);
   const [onboardingStartTime] = useState<number>(Date.now()); // Track when onboarding chat started
   const scrollViewRef = useRef<ScrollView>(null);
-  const { handleScroll, handleContentSizeChange, handleLayout } = useChatKeyboardScroll(scrollViewRef);
+  const { handleScroll, handleContentSizeChange, handleLayout, scrollToBottom: keyboardScrollToBottom } = useChatKeyboardScroll(scrollViewRef);
   const [androidKeyboardHeight, setAndroidKeyboardHeight] = useState(0);
 
   useEffect(() => {
-    if (Platform.OS !== 'android') return;
-    const showSub = Keyboard.addListener('keyboardDidShow', (e) => {
-      setAndroidKeyboardHeight(e.endCoordinates.height);
-    });
-    const hideSub = Keyboard.addListener('keyboardDidHide', () => {
-      setAndroidKeyboardHeight(0);
-    });
-    return () => { showSub.remove(); hideSub.remove(); };
-  }, []);
+    const subs: { remove: () => void }[] = [];
+    if (Platform.OS === 'android') {
+      subs.push(Keyboard.addListener('keyboardDidShow', (e) => {
+        setAndroidKeyboardHeight(e.endCoordinates.height);
+      }));
+      subs.push(Keyboard.addListener('keyboardDidHide', () => {
+        setAndroidKeyboardHeight(0);
+      }));
+    }
+    if (Platform.OS === 'ios') {
+      subs.push(Keyboard.addListener('keyboardDidShow', () => {
+        setTimeout(() => keyboardScrollToBottom(), 50);
+      }));
+    }
+    return () => subs.forEach(s => s.remove());
+  }, [keyboardScrollToBottom]);
   const chatInitializedRef = useRef(false);
   
   // State for destination cards
@@ -1185,7 +1192,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     paddingHorizontal: 8,
-    paddingBottom: 35,
+    paddingBottom: Platform.OS === 'android' ? 50 : 35, 
     paddingTop: 0,
   },
   attachButtonWrapper: {
@@ -1213,7 +1220,7 @@ const styles = StyleSheet.create({
   uiComponentContainer: {
     paddingHorizontal: spacing.md,
     paddingTop: 0,
-    paddingBottom: spacing.md,
+    paddingBottom: spacing.xs,
   },
   destinationCarouselFullWidth: {
     marginHorizontal: -(spacing.md * 2),

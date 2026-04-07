@@ -140,7 +140,9 @@ export const OnboardingStep1Screen: React.FC<OnboardingStep1ScreenProps> = ({
     
     // On native, SafeAreaView consumes top/bottom insets
     // but screenHeight is the full window height. Subtract these so boards fit within safe area.
-    const safeAreaInsets = Platform.OS === 'web' ? 0 : (insets.top + insets.bottom);
+    // On Android with edge-to-edge, insets.bottom (nav bar) is large and over-shrinks boards.
+    // Only subtract top inset on Android; SafeAreaView already pads the bottom.
+    const safeAreaInsets = Platform.OS === 'web' ? 0 : (insets.top + (Platform.OS === 'android' ? 0 : insets.bottom));
 
     // Available space = screen height - safe area - used space + carousel margin (negative margin adds space)
     // Subtract a small buffer (8px) for visual spacing

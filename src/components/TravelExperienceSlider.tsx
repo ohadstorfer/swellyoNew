@@ -3,6 +3,7 @@ import {
   View,
   StyleSheet,
   Animated,
+  Dimensions,
   Image,
   Platform,
   PanResponder,
@@ -103,7 +104,8 @@ interface TravelExperienceSliderProps {
   availableHeight?: number; // Available space for content to dynamically size
 }
 
-const BAR_WIDTH = 330;
+const SCREEN_WIDTH = Dimensions.get('window').width;
+const BAR_WIDTH = Math.min(330, SCREEN_WIDTH - 2 * spacing.xl);
 const BAR_HEIGHT = 4;
 const KNOB_SIZE = 28;
 
