@@ -330,7 +330,7 @@ export const AppContent: React.FC = () => {
       // 4. Save steps 1-4 data (creates users + surfers rows)
       const { supabaseDatabaseService } = await import('../services/database/supabaseDatabaseService');
       await supabaseDatabaseService.saveOnboardingData({
-        nickname: 'Demo Surfer',
+        nickname: `Demo Surfer ${Math.floor(10000 + Math.random() * 90000)}`,
         age: 25,
         pronouns: 'Bro',
         location: 'Israel',
@@ -356,7 +356,7 @@ export const AppContent: React.FC = () => {
 
       // 6. Update local form data
       updateFormData({
-        nickname: 'Demo Surfer',
+        nickname: `Demo Surfer ${Math.floor(10000 + Math.random() * 90000)}`,
         boardType: 0,
         surfLevel: 2,
         travelExperience: 10,
