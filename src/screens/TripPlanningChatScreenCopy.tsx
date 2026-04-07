@@ -2426,7 +2426,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     paddingHorizontal: 8,
-    paddingBottom: Platform.OS === 'android' ? 50 : 35,
+    paddingBottom: Platform.OS === 'android' ? 0 : 0,
     paddingTop: 0,
   },
   attachButtonWrapper: {

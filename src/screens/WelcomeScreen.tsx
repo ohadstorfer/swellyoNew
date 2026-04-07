@@ -27,6 +27,7 @@ import { ONBOARDING_WELCOME_IMAGE_URLS } from './OnboardingWelcomeScreen';
 interface WelcomeScreenProps {
   onGetStarted: () => void;
   onDemoChat?: () => void | Promise<void>;
+  onSkipDemo?: () => void | Promise<void>;
   isCheckingAuth?: boolean;
 }
 
@@ -136,9 +137,10 @@ const CheckboxIcon: React.FC<{ checked: boolean }> = ({ checked }) => {
 const TERMS_URL = 'https://www.swellyo.com/terms-of-service';
 const PRIVACY_URL = 'https://www.swellyo.com/privacy-policy';
 
-export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDemoChat, isCheckingAuth = false }) => {
+export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDemoChat, onSkipDemo, isCheckingAuth = false }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [isDemoLoading, setIsDemoLoading] = useState(false);
+  const [isSkipDemoLoading, setIsSkipDemoLoading] = useState(false);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const { setUser, updateFormData, checkOnboardingStatus } = useOnboarding();
   
@@ -553,6 +555,19 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
     // The component will unmount when navigating to onboarding
   };
 
+  const handleSkipDemo = async () => {
+    if (!onSkipDemo || isSkipDemoLoading) return;
+
+    try {
+      setIsSkipDemoLoading(true);
+      await onSkipDemo();
+    } catch (error: any) {
+      console.error('Error in skip demo:', error);
+      Alert.alert('Error', 'Failed to create demo profile. Please try again.');
+      setIsSkipDemoLoading(false);
+    }
+  };
+
 
   console.log('WelcomeScreen rendering - Platform:', Platform.OS);
   
@@ -676,6 +691,24 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
               >
                 <RNText style={welcomeStyles.appleButtonText} numberOfLines={1}>
                   {isDemoLoading ? "Loading..." : "Demo"}
+                </RNText>
+              </TouchableOpacity>
+            )}
+
+            {/* Skip Demo Button - creates full demo profile and goes straight to profile */}
+            {onSkipDemo && (
+              <TouchableOpacity
+                onPress={handleSkipDemo}
+                disabled={isSkipDemoLoading || isLoading}
+                style={[
+                  welcomeStyles.appleButton,
+                  { backgroundColor: '#F59E0B', marginTop: 12 },
+                  (isSkipDemoLoading || isLoading) && styles.buttonDisabled
+                ]}
+                activeOpacity={0.8}
+              >
+                <RNText style={welcomeStyles.appleButtonText} numberOfLines={1}>
+                  {isSkipDemoLoading ? "Loading..." : "Skip Demo"}
                 </RNText>
               </TouchableOpacity>
             )}

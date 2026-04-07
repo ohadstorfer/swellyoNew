@@ -29,7 +29,11 @@
       "WebFetch(domain:grouchingtiger.com)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(git merge:*)"
+      "Bash(git merge:*)",
+      "Bash(~/Library/Android/sdk/platform-tools/adb shell:*)",
+      "Bash(lsof -ti:8081)",
+      "Bash(xargs kill:*)",
+      "Bash(~/Library/Android/sdk/platform-tools/adb reverse:*)"
     ]
   }
 }

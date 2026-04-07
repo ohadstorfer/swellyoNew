@@ -1844,7 +1844,8 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
 
   return (
     <>
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={{ backgroundColor: '#212121' }} edges={['top']} />
+    <View style={styles.container}>
       {/* Header */}
       <View style={styles.headerContainer}>
         <View style={styles.headerGradientBorder} />
@@ -1946,7 +1947,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             style={styles.messagesList}
             contentContainerStyle={[
               styles.messagesContent,
-              messages.length === 0 && { flexGrow: 1, justifyContent: 'flex-end' },
+              { flexGrow: 1, justifyContent: 'flex-end' },
             ]}
             showsVerticalScrollIndicator={false}
             onScroll={(event) => {
@@ -2130,7 +2131,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
           isProcessing={isProcessingImage}
         />
       )}
-    </SafeAreaView>
+    </View>
     <BlockUserOverlay
       visible={showBlockOverlay}
       userId={otherUserId}
@@ -2504,7 +2505,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     paddingHorizontal: 8,
-    paddingBottom: Platform.OS === 'android' ? 50 : 35,
+   // paddingBottom: Platform.OS === 'android' ? 50 : 35,
     paddingTop: 0,
   },
   attachButtonWrapper: {

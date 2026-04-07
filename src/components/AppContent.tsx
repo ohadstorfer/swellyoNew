@@ -306,6 +306,75 @@ export const AppContent: React.FC = () => {
     }
   };
 
+  const handleSkipDemo = async () => {
+    try {
+      // 1. Clear cached onboarding data
+      const AsyncStorage = await import('@react-native-async-storage/async-storage');
+      await AsyncStorage.default.removeItem('@swellyo_onboarding');
+
+      // 2. Create demo user
+      const { supabaseAuthService } = await import('../services/auth/supabaseAuthService');
+      const demoUser = await supabaseAuthService.createDemoUser();
+
+      // 3. Set user in context
+      setUser({
+        id: demoUser.id,
+        email: demoUser.email,
+        nickname: demoUser.nickname,
+        googleId: demoUser.googleId || demoUser.id,
+        createdAt: demoUser.createdAt,
+        updatedAt: demoUser.updatedAt,
+      });
+      setIsDemoUser(true);
+
+      // 4. Save steps 1-4 data (creates users + surfers rows)
+      const { supabaseDatabaseService } = await import('../services/database/supabaseDatabaseService');
+      await supabaseDatabaseService.saveOnboardingData({
+        nickname: 'Demo Surfer',
+        age: 25,
+        pronouns: 'Bro',
+        location: 'Israel',
+        boardType: 0,        // shortboard
+        surfLevel: 2,        // 0-indexed → DB stores 3 → "Snapping" / "advanced"
+        travelExperience: 10,
+        isDemoUser: true,
+      });
+
+      // 5. Save step 5 (Swelly chat) data
+      await supabaseDatabaseService.saveSurfer({
+        destinationsArray: [
+          { country: 'Indonesia', area: ['Bali'], time_in_days: 14, time_in_text: '2 weeks' },
+          { country: 'United States', area: ['Hawaii'], time_in_days: 14, time_in_text: '2 weeks' },
+          { country: 'El Salvador', area: [], time_in_days: 14, time_in_text: '2 weeks' },
+        ],
+        travelBuddies: 'solo',
+        travelType: 'budget',
+        lifestyleKeywords: ['yoga', 'gym'],
+        finishedOnboarding: true,
+        isDemoUser: true,
+      });
+
+      // 6. Update local form data
+      updateFormData({
+        nickname: 'Demo Surfer',
+        boardType: 0,
+        surfLevel: 2,
+        travelExperience: 10,
+        pronouns: 'Bro',
+      });
+
+      // 7. Navigate to profile (MUST be before markOnboardingComplete to prevent race condition)
+      setProfileFromOnboardingChat(true);
+      setShowProfile(true);
+
+      // 8. Mark onboarding complete
+      await markOnboardingComplete();
+    } catch (error: any) {
+      console.error('Error in skip demo:', error);
+      Alert.alert('Error', 'Failed to create demo profile. Please try again.');
+    }
+  };
+
   const handleStep1Next = async (data: OnboardingData) => {
     if (isSavingStep1) return; // Prevent multiple clicks
 
@@ -1462,6 +1531,7 @@ export const AppContent: React.FC = () => {
     <WelcomeScreen
       onGetStarted={handleGetStarted}
       onDemoChat={showDemoButton ? handleDemoChat : undefined}
+      onSkipDemo={showDemoButton ? handleSkipDemo : undefined}
       isCheckingAuth={isCheckingAuth}
     />
   );
