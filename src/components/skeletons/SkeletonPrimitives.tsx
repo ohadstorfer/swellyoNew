@@ -50,11 +50,18 @@ export const AvatarSkeleton: React.FC<AvatarSkeletonProps> = ({
   style,
 }) => {
   return (
-    <SkeletonBase
-      width={size}
-      height={size}
-      borderRadius={size / 2}
-      style={style}
+    <View
+      style={[
+        {
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          backgroundColor: '#E4E4E4',
+        },
+        style,
+      ]}
+      accessibilityRole="none"
+      importantForAccessibility="no"
     />
   );
 };

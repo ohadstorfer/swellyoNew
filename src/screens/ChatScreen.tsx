@@ -4,7 +4,6 @@ import {
   StyleSheet,
   TouchableOpacity,
   Alert,
-  KeyboardAvoidingView,
   Keyboard,
   Platform,
   Image,
@@ -14,7 +13,8 @@ import {
   ScrollView as RNScrollView,
   Pressable,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { KeyboardAvoidingView, isExpoGo } from '../utils/keyboardAvoidingView';
 
 // On native, use RN's built-in ScrollView with nestedScrollEnabled.
 // GestureDetector + gesture-handler ScrollView causes Expo Go crashes on scroll.
@@ -33,6 +33,7 @@ import { BudgetCardsCarousel, type BudgetOption } from '../components/BudgetCard
 import { ChatTextInput } from '../components/ChatTextInput';
 import { ReportAISheet } from '../components/ReportAISheet';
 import { useChatKeyboardScroll } from '../hooks/useChatKeyboardScroll';
+import { useKeyboardVisible, useKeyboardHeight } from '../hooks/useKeyboardVisible';
 
 // Resolve image URLs once at module level to avoid heavy manifest inspection +
 // console.log spam on every render (getImageUrl does extensive Constants lookups).
@@ -132,27 +133,18 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
   const [chatId, setChatId] = useState<string | null>(null);
   const [isFinished, setIsFinished] = useState(false);
   const [onboardingStartTime] = useState<number>(Date.now()); // Track when onboarding chat started
+  const insets = useSafeAreaInsets();
+  const keyboardVisible = useKeyboardVisible();
+  const androidKeyboardHeight = useKeyboardHeight();
   const scrollViewRef = useRef<ScrollView>(null);
   const { handleScroll, handleContentSizeChange, handleLayout, scrollToBottom: keyboardScrollToBottom } = useChatKeyboardScroll(scrollViewRef);
-  const [androidKeyboardHeight, setAndroidKeyboardHeight] = useState(0);
 
   useEffect(() => {
-    const subs: { remove: () => void }[] = [];
-    if (Platform.OS === 'android') {
-      subs.push(Keyboard.addListener('keyboardDidShow', (e) => {
-        setAndroidKeyboardHeight(e.endCoordinates.height);
-      }));
-      subs.push(Keyboard.addListener('keyboardDidHide', () => {
-        setAndroidKeyboardHeight(0);
-      }));
-    }
-    if (Platform.OS === 'ios') {
-      subs.push(Keyboard.addListener('keyboardDidShow', () => {
-        setTimeout(() => keyboardScrollToBottom(), 50);
-      }));
-    }
-    return () => subs.forEach(s => s.remove());
+    if (Platform.OS === 'web') return;
+    const sub = Keyboard.addListener('keyboardDidShow', () => setTimeout(() => keyboardScrollToBottom(), Platform.OS === 'android' ? 300 : 100));
+    return () => sub.remove();
   }, [keyboardScrollToBottom]);
+
   const chatInitializedRef = useRef(false);
   
   // State for destination cards
@@ -891,8 +883,8 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
 
       {/* Chat Messages */}
       <KeyboardAvoidingView
-        style={[styles.chatContainer, Platform.OS === 'android' && androidKeyboardHeight > 0 && { paddingBottom: androidKeyboardHeight }]}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={[styles.chatContainer, isExpoGo && Platform.OS === 'android' && androidKeyboardHeight > 0 && { paddingBottom: androidKeyboardHeight }]}
+        behavior={isExpoGo && Platform.OS === 'android' ? undefined : 'padding'}
         keyboardVerticalOffset={0}
       >
         <ImageBackground
@@ -927,7 +919,7 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
         </ImageBackground>
 
         {/* Input Area */}
-        <View style={styles.inputWrapper}>
+        <View style={[styles.inputWrapper, { paddingBottom: keyboardVisible ? 4 : insets.bottom }]}>
           <ChatTextInput
             value={inputText}
             onChangeText={setInputText}

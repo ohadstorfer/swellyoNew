@@ -5,7 +5,6 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
-  KeyboardAvoidingView,
   Keyboard,
   Platform,
   Image,
@@ -16,7 +15,8 @@ import {
   PanResponder,
   Modal,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { KeyboardAvoidingView, isExpoGo } from '../utils/keyboardAvoidingView';
 import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Path, Defs, Stop, LinearGradient as SvgLinearGradient, Rect } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons';
@@ -38,6 +38,7 @@ import {
   type FilterDisplayItem,
 } from '../utils/tripPlanningFilters';
 import { useChatKeyboardScroll } from '../hooks/useChatKeyboardScroll';
+import { useKeyboardVisible, useKeyboardHeight } from '../hooks/useKeyboardVisible';
 
 /** Split filter label into prefix and value for chip display (e.g. "Origin – Israel" -> prefix "Origin", value "Israel"). */
 function getLabelParts(label: string): { prefix: string; value: string } | null {
@@ -265,28 +266,19 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   const [messageIdsUnblockedByFilterDeletion, setMessageIdsUnblockedByFilterDeletion] = useState<Record<string, true>>({});
   const [trashHoverProgress, setTrashHoverProgress] = useState(0);
   const [showNewChatModal, setShowNewChatModal] = useState(false);
+  const insets = useSafeAreaInsets();
+  const keyboardVisible = useKeyboardVisible();
+  const androidKeyboardHeight = useKeyboardHeight();
   const scrollViewRef = useRef<ScrollView>(null);
   const loadingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { handleScroll, handleContentSizeChange, handleLayout, scrollToBottom } = useChatKeyboardScroll(scrollViewRef);
-  const [androidKeyboardHeight, setAndroidKeyboardHeight] = useState(0);
 
   useEffect(() => {
-    const subs: { remove: () => void }[] = [];
-    if (Platform.OS === 'android') {
-      subs.push(Keyboard.addListener('keyboardDidShow', (e) => {
-        setAndroidKeyboardHeight(e.endCoordinates.height);
-      }));
-      subs.push(Keyboard.addListener('keyboardDidHide', () => {
-        setAndroidKeyboardHeight(0);
-      }));
-    }
-    if (Platform.OS === 'ios') {
-      subs.push(Keyboard.addListener('keyboardDidShow', () => {
-        setTimeout(() => scrollToBottom(), 100);
-      }));
-    }
-    return () => subs.forEach(s => s.remove());
+    if (Platform.OS === 'web') return;
+    const sub = Keyboard.addListener('keyboardDidShow', () => setTimeout(() => scrollToBottom(), Platform.OS === 'android' ? 300 : 100));
+    return () => sub.remove();
   }, [scrollToBottom]);
+
   // Drag-to-delete: ghost chip position and dragged item
   const [dragState, setDragState] = useState<{
     item: FilterDisplayItem;
@@ -1895,8 +1887,8 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
 
       {/* Chat Messages */}
       <KeyboardAvoidingView
-        style={[styles.chatContainer, Platform.OS === 'android' && androidKeyboardHeight > 0 && { paddingBottom: androidKeyboardHeight }]}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={[styles.chatContainer, isExpoGo && Platform.OS === 'android' && androidKeyboardHeight > 0 && { paddingBottom: androidKeyboardHeight }]}
+        behavior={isExpoGo && Platform.OS === 'android' ? undefined : 'padding'}
         keyboardVerticalOffset={0}
       >
         <ImageBackground
@@ -1945,7 +1937,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         </View>
 
         {/* Input Area */}
-        <View style={styles.inputWrapper}>
+        <View style={[styles.inputWrapper, { paddingBottom: keyboardVisible ? 4 : insets.bottom }]}>
           <ChatTextInput
             value={inputText}
             onChangeText={setInputText}
@@ -2139,7 +2131,6 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             </View>
           </Animated.View>
         )}
-        <SafeAreaView edges={['bottom']} />
       </KeyboardAvoidingView>
       {/* New Chat Confirmation Modal */}
       <Modal
@@ -2648,7 +2639,7 @@ const styles = StyleSheet.create({
     borderRadius: 32,
     borderWidth: 1,
     borderColor: '#E4E4E4',
-    backgroundColor: 'rgba(255, 255, 255, 0.20)',
+    backgroundColor: Platform.OS === 'android' ? '#FFFFFF' : 'rgba(255, 255, 255, 0.20)',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.09,
@@ -2675,7 +2666,7 @@ const styles = StyleSheet.create({
     height: 48,
     paddingHorizontal: 21,
     borderRadius: 32,
-    backgroundColor: 'rgba(255, 255, 255, 0.20)',
+    backgroundColor: Platform.OS === 'android' ? '#FFFFFF' : 'rgba(255, 255, 255, 0.20)',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.09,

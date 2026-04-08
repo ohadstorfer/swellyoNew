@@ -5,3 +5,4 @@
 - [Expo Push Notifications + Supabase](research_push_notifications.md) — SDK 54 setup, token storage, FCM v1, APNs via EAS, Edge Function code, DM trigger via DB Webhook, foreground suppression
 - [RNGH Custom Slider Thumb Jump Bug](research_rngh_custom_slider.md) — Root cause: use event.x + onLayout, not startX + translationX; definitive fix with code
 - [expo-image-picker Android allowsEditing](research_expo_image_picker_android.md) — Crop overlay invisible on Android (light mode, transparent toolbar bug), workarounds: config plugin, Platform.OS gate, or expo-image-manipulator post-crop
+- [Android Keyboard Handling — Chat Apps + Expo SDK 54](research_android_keyboard_chat.md) — adjustResize+edgeToEdge=broken on Android 15+; use react-native-keyboard-controller; dynamic behavior hook as fallback

@@ -68,12 +68,38 @@ const dataURLtoBlob = (dataURL: string): Blob => {
 };
 
 /**
- * Fetch a file URI and convert to Blob (for React Native)
+ * Fetch a file URI and convert to Blob
+ * On native, uses XMLHttpRequest (fetch().blob() doesn't exist in React Native)
  */
 const uriToBlob = async (uri: string): Promise<Blob> => {
-  const response = await fetch(uri);
-  const blob = await response.blob();
-  return blob;
+  if (Platform.OS === 'web') {
+    const response = await fetch(uri);
+    return response.blob();
+  }
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.onload = () => resolve(xhr.response);
+    xhr.onerror = () => reject(new Error('Failed to convert URI to blob'));
+    xhr.responseType = 'blob';
+    xhr.open('GET', uri, true);
+    xhr.send(null);
+  });
+};
+
+/**
+ * Build a FormData body from a native file URI.
+ * React Native's networking layer can read file:// URIs directly from FormData,
+ * bypassing the need to convert to a Blob first.
+ */
+const nativeFileFormData = (uri: string, contentType: string): FormData => {
+  const formData = new FormData();
+  const extension = contentType.split('/')[1] || 'jpg';
+  formData.append('', {
+    uri,
+    name: `upload.${extension}`,
+    type: contentType,
+  } as any);
+  return formData;
 };
 
 /**
@@ -85,9 +111,8 @@ export const getFileSize = async (uri: string): Promise<number> => {
     const arr = uri.split(',');
     return Math.round(arr[1].length * 0.75); // Approximate size
   } else {
-    // File URI - fetch and get size
-    const response = await fetch(uri);
-    const blob = await response.blob();
+    // File URI - convert to blob and get size
+    const blob = await uriToBlob(uri);
     return blob.size;
   }
 };
@@ -356,16 +381,19 @@ export async function uploadImageToStorage(
   }
 
   try {
-    // Convert URI to Blob
-    let blob: Blob;
-    if (imageUri.startsWith('data:')) {
-      blob = dataURLtoBlob(imageUri);
-    } else if (imageUri.startsWith('blob:')) {
-      blob = await uriToBlob(imageUri);
-    } else if (imageUri.startsWith('file://') || imageUri.startsWith('content://') || imageUri.startsWith('ph://')) {
-      blob = await uriToBlob(imageUri);
+    const contentType = 'image/jpeg';
+
+    // On native, use FormData with the file URI directly (avoids Blob issues)
+    const isNativeFileUri = Platform.OS !== 'web' &&
+      (imageUri.startsWith('file://') || imageUri.startsWith('content://') || imageUri.startsWith('ph://'));
+
+    let uploadBody: Blob | FormData;
+    if (isNativeFileUri) {
+      uploadBody = nativeFileFormData(imageUri, contentType);
+    } else if (imageUri.startsWith('data:')) {
+      uploadBody = dataURLtoBlob(imageUri);
     } else {
-      blob = await uriToBlob(imageUri);
+      uploadBody = await uriToBlob(imageUri);
     }
 
     // Construct storage path: {conversation_id}/{message_id}/original.jpg or thumbnail.jpg
@@ -373,12 +401,10 @@ export async function uploadImageToStorage(
     const storagePath = `${conversationId}/${messageId}/${fileName}`;
 
     // Upload to storage
-    // Note: Supabase Storage doesn't support progress callbacks directly
-    // We'll simulate progress for now
     const { data, error } = await supabase.storage
       .from('message-images')
-      .upload(storagePath, blob, {
-        contentType: 'image/jpeg',
+      .upload(storagePath, uploadBody, {
+        contentType,
         upsert: false,
       });
 

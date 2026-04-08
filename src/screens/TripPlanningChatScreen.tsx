@@ -5,13 +5,14 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
-  KeyboardAvoidingView,
+  Keyboard,
   Platform,
   Image,
   ImageBackground,
   Animated,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { KeyboardAvoidingView } from '../utils/keyboardAvoidingView';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Path } from 'react-native-svg';
 import { Text } from '../components/Text';
@@ -28,6 +29,7 @@ import { MatchedUser, TripPlanningRequest } from '../types/tripPlanning';
 import { analyticsService } from '../services/analytics/analyticsService';
 import { ChatTextInput } from '../components/ChatTextInput';
 import { useChatKeyboardScroll } from '../hooks/useChatKeyboardScroll';
+import { useKeyboardVisible, useKeyboardHeight } from '../hooks/useKeyboardVisible';
 
 /**
  * Count how many criteria are requested (helper function for UI)
@@ -246,8 +248,17 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   const [pendingPartialMatches, setPendingPartialMatches] = useState<MatchedUser[] | null>(null);
   const [pendingSingleCriterionMatches, setPendingSingleCriterionMatches] = useState<MatchedUser[] | null>(null);
   const [singleCriterionType, setSingleCriterionType] = useState<string | null>(null);
+  const insets = useSafeAreaInsets();
+  const keyboardVisible = useKeyboardVisible();
+  const androidKeyboardHeight = useKeyboardHeight();
   const scrollViewRef = useRef<ScrollView>(null);
   const { handleScroll, handleContentSizeChange, handleLayout, scrollToBottom } = useChatKeyboardScroll(scrollViewRef);
+
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    const sub = Keyboard.addListener('keyboardDidShow', () => setTimeout(() => scrollToBottom(), Platform.OS === 'android' ? 300 : 100));
+    return () => sub.remove();
+  }, [scrollToBottom]);
 
   // Test API connection and initialize chat context on component mount
   useEffect(() => {
@@ -1226,10 +1237,10 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
       </View>
 
       {/* Chat Messages */}
-      <KeyboardAvoidingView 
-        style={styles.chatContainer}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+      <KeyboardAvoidingView
+        style={[styles.chatContainer, Platform.OS === 'android' && androidKeyboardHeight > 0 && { paddingBottom: androidKeyboardHeight }]}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={0}
       >
         <ImageBackground
           source={{ uri: getImageUrl('/chat background.png') }}
@@ -1260,7 +1271,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         </ImageBackground>
 
         {/* Input Area */}
-        <View style={styles.inputWrapper}>
+        <View style={[styles.inputWrapper, { paddingBottom: keyboardVisible ? 4 : insets.bottom }]}>
           <ChatTextInput
             value={inputText}
             onChangeText={setInputText}
@@ -1276,7 +1287,6 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             }
           />
         </View>
-        <SafeAreaView edges={['bottom']} />
       </KeyboardAvoidingView>
     </SafeAreaView>
   );

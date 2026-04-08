@@ -2,7 +2,7 @@ import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { View, Image, StyleSheet, Platform, ActivityIndicator } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { Text } from './Text';
-import { Shimmer } from './skeletons/Shimmer';
+
 
 interface ProfileImageProps {
   imageUrl?: string | null;
@@ -167,19 +167,17 @@ export const ProfileImage: React.FC<ProfileImageProps> = React.memo(({
       {/* Show avatar icon while loading with shimmer animation */}
       {isLoading && (
         <View style={[styles.loadingIconContainer, { borderRadius }]}>
-          <Shimmer>
-            <View style={styles.iconWrapper}>
-              <Svg width={containerSize * 0.7} height={containerSize * 0.7} viewBox="0 0 24 24" fill="none">
-                <Path
-                  d="M3 20C5.33579 17.5226 8.50702 16 12 16C15.493 16 18.6642 17.5226 21 20M16.5 7.5C16.5 9.98528 14.4853 12 12 12C9.51472 12 7.5 9.98528 7.5 7.5C7.5 5.01472 9.51472 3 12 3C14.4853 3 16.5 5.01472 16.5 7.5Z"
-                  stroke="#222B30"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </Svg>
-            </View>
-          </Shimmer>
+          <View style={styles.iconWrapper}>
+            <Svg width={containerSize * 0.7} height={containerSize * 0.7} viewBox="0 0 24 24" fill="none">
+              <Path
+                d="M3 20C5.33579 17.5226 8.50702 16 12 16C15.493 16 18.6642 17.5226 21 20M16.5 7.5C16.5 9.98528 14.4853 12 12 12C9.51472 12 7.5 9.98528 7.5 7.5C7.5 5.01472 9.51472 3 12 3C14.4853 3 16.5 5.01472 16.5 7.5Z"
+                stroke="#222B30"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </Svg>
+          </View>
         </View>
       )}
       

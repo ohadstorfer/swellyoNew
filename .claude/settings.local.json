@@ -33,7 +33,8 @@
       "Bash(~/Library/Android/sdk/platform-tools/adb shell:*)",
       "Bash(lsof -ti:8081)",
       "Bash(xargs kill:*)",
-      "Bash(~/Library/Android/sdk/platform-tools/adb reverse:*)"
+      "Bash(~/Library/Android/sdk/platform-tools/adb reverse:*)",
+      "Bash(eas build:*)"
     ]
   }
 }

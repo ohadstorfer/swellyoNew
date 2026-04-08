@@ -4,14 +4,14 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  KeyboardAvoidingView,
   Keyboard,
   Platform,
   Image,
   ImageBackground,
   Animated,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { KeyboardAvoidingView, isExpoGo } from '../utils/keyboardAvoidingView';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Text } from '../components/Text';
@@ -25,6 +25,7 @@ import { MessageListSkeleton } from '../components/skeletons';
 import { SKELETON_DELAY_MS } from '../constants/loading';
 import { ChatTextInput } from '../components/ChatTextInput';
 import { useChatKeyboardScroll } from '../hooks/useChatKeyboardScroll';
+import { useKeyboardVisible, useKeyboardHeight } from '../hooks/useKeyboardVisible';
 
 interface Message {
   id: string;
@@ -57,26 +58,16 @@ export const SwellyShaperScreen: React.FC<SwellyShaperScreenProps> = ({ onBack, 
   const [isInitializing, setIsInitializing] = useState(true);
   const [showSkeletons, setShowSkeletons] = useState(false); // Delayed skeleton display to avoid flicker
   const [profileData, setProfileData] = useState<SupabaseSurfer | null>(null);
+  const insets = useSafeAreaInsets();
+  const keyboardVisible = useKeyboardVisible();
+  const androidKeyboardHeight = useKeyboardHeight();
   const scrollViewRef = useRef<ScrollView>(null);
   const { handleScroll, handleContentSizeChange, handleLayout, scrollToBottom } = useChatKeyboardScroll(scrollViewRef);
-  const [androidKeyboardHeight, setAndroidKeyboardHeight] = useState(0);
 
   useEffect(() => {
-    const subs: { remove: () => void }[] = [];
-    if (Platform.OS === 'android') {
-      subs.push(Keyboard.addListener('keyboardDidShow', (e) => {
-        setAndroidKeyboardHeight(e.endCoordinates.height);
-      }));
-      subs.push(Keyboard.addListener('keyboardDidHide', () => {
-        setAndroidKeyboardHeight(0);
-      }));
-    }
-    if (Platform.OS === 'ios') {
-      subs.push(Keyboard.addListener('keyboardDidShow', () => {
-        setTimeout(() => scrollToBottom(), 100);
-      }));
-    }
-    return () => subs.forEach(s => s.remove());
+    if (Platform.OS === 'web') return;
+    const sub = Keyboard.addListener('keyboardDidShow', () => setTimeout(() => scrollToBottom(), Platform.OS === 'android' ? 300 : 100));
+    return () => sub.remove();
   }, [scrollToBottom]);
 
   // Load chat_id from storage and profile data on mount
@@ -448,8 +439,8 @@ export const SwellyShaperScreen: React.FC<SwellyShaperScreenProps> = ({ onBack, 
 
       {/* Chat Messages */}
       <KeyboardAvoidingView
-        style={[styles.chatContainer, Platform.OS === 'android' && androidKeyboardHeight > 0 && { paddingBottom: androidKeyboardHeight }]}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={[styles.chatContainer, isExpoGo && Platform.OS === 'android' && androidKeyboardHeight > 0 && { paddingBottom: androidKeyboardHeight }]}
+        behavior={isExpoGo && Platform.OS === 'android' ? undefined : 'padding'}
         keyboardVerticalOffset={0}
       >
         <ImageBackground
@@ -489,7 +480,7 @@ export const SwellyShaperScreen: React.FC<SwellyShaperScreenProps> = ({ onBack, 
         </ImageBackground>
 
         {/* Input Area */}
-        <View style={styles.inputWrapper}>
+        <View style={[styles.inputWrapper, { paddingBottom: keyboardVisible ? 4 : insets.bottom }]}>
           <ChatTextInput
             value={inputText}
             onChangeText={setInputText}
@@ -505,7 +496,6 @@ export const SwellyShaperScreen: React.FC<SwellyShaperScreenProps> = ({ onBack, 
             }
           />
         </View>
-        <SafeAreaView edges={['bottom']} />
       </KeyboardAvoidingView>
     </SafeAreaView>
   );

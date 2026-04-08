@@ -11,6 +11,13 @@ import { PostHogErrorBoundary } from './src/components/PostHogErrorBoundary';
 import { registerLogoutHandlers } from './src/utils/registerLogoutHandlers';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import Constants from 'expo-constants';
+
+// KeyboardProvider requires native code — skip in Expo Go
+const isExpoGo = Constants.appOwnership === 'expo';
+const MaybeKeyboardProvider = isExpoGo
+  ? ({ children }: { children: React.ReactNode }) => <>{children}</>
+  : require('react-native-keyboard-controller').KeyboardProvider;
 
 const POSTHOG_API_KEY = process.env.EXPO_PUBLIC_POSTHOG_API_KEY || '';
 const POSTHOG_HOST = process.env.EXPO_PUBLIC_POSTHOG_HOST || 'https://app.posthog.com';
@@ -31,6 +38,7 @@ export default function App() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
+    <MaybeKeyboardProvider>
     <SafeAreaProvider>
     <NavigationContainer independent={true} onReady={handleNavigationReady}>
       <PostHogErrorBoundary>
@@ -75,6 +83,7 @@ export default function App() {
       </PostHogErrorBoundary>
     </NavigationContainer>
     </SafeAreaProvider>
+    </MaybeKeyboardProvider>
     </GestureHandlerRootView>
   );
 }

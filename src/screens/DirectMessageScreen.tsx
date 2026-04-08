@@ -4,7 +4,6 @@ import {
   StyleSheet,
   FlatList,
   TouchableOpacity,
-  KeyboardAvoidingView,
   Keyboard,
   Platform,
   Image,
@@ -15,7 +14,8 @@ import {
   Modal,
   Dimensions,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { KeyboardAvoidingView, isExpoGo } from '../utils/keyboardAvoidingView';
 import { TextInput as PaperTextInput } from 'react-native-paper';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Path } from 'react-native-svg';
@@ -39,6 +39,7 @@ import { ImagePreviewModal } from '../components/ImagePreviewModal';
 import { ChatTextInput, ChatTextInputRef } from '../components/ChatTextInput';
 import { WelcomeIntroMessage } from '../components/WelcomeIntroMessage';
 import { useChatKeyboardScroll } from '../hooks/useChatKeyboardScroll';
+import { useKeyboardVisible, useKeyboardHeight } from '../hooks/useKeyboardVisible';
 import { BlockUserOverlay } from '../components/BlockUserOverlay';
 import { ReportUserOverlay } from '../components/ReportUserOverlay';
 
@@ -107,26 +108,16 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const isPickerOpenRef = useRef(false);
   const pickerFallbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isProcessingImage, setIsProcessingImage] = useState(false);
+  const insets = useSafeAreaInsets();
+  const keyboardVisible = useKeyboardVisible();
+  const androidKeyboardHeight = useKeyboardHeight();
   const flatListRef = useRef<FlatList<Message>>(null);
   const { handleScroll: handleKeyboardScroll, handleLayout, scrollToBottom } = useChatKeyboardScroll(flatListRef, { inverted: true });
-  const [androidKeyboardHeight, setAndroidKeyboardHeight] = useState(0);
 
   useEffect(() => {
-    const subs: { remove: () => void }[] = [];
-    if (Platform.OS === 'android') {
-      subs.push(Keyboard.addListener('keyboardDidShow', (e) => {
-        setAndroidKeyboardHeight(e.endCoordinates.height);
-      }));
-      subs.push(Keyboard.addListener('keyboardDidHide', () => {
-        setAndroidKeyboardHeight(0);
-      }));
-    }
-    if (Platform.OS === 'ios') {
-      subs.push(Keyboard.addListener('keyboardDidShow', () => {
-        setTimeout(() => scrollToBottom(), 100);
-      }));
-    }
-    return () => subs.forEach(s => s.remove());
+    if (Platform.OS === 'web') return;
+    const sub = Keyboard.addListener('keyboardDidShow', () => setTimeout(() => scrollToBottom(), Platform.OS === 'android' ? 300 : 100));
+    return () => sub.remove();
   }, [scrollToBottom]);
 
   const chatInputRef = useRef<ChatTextInputRef>(null);
@@ -1843,9 +1834,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   };
 
   return (
-    <>
-    <SafeAreaView style={{ backgroundColor: '#212121' }} edges={['top']} />
-    <View style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: '#212121' }]} edges={['top']}>
       {/* Header */}
       <View style={styles.headerContainer}>
         <View style={styles.headerGradientBorder} />
@@ -1929,8 +1918,8 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
 
       {/* Chat Messages */}
       <KeyboardAvoidingView
-        style={[styles.chatContainer, Platform.OS === 'android' && androidKeyboardHeight > 0 && { paddingBottom: androidKeyboardHeight }]}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={[styles.chatContainer, isExpoGo && Platform.OS === 'android' && androidKeyboardHeight > 0 && { paddingBottom: androidKeyboardHeight }]}
+        behavior={isExpoGo && Platform.OS === 'android' ? undefined : 'padding'}
         keyboardVerticalOffset={0}
       >
         <ImageBackground
@@ -1972,7 +1961,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         </ImageBackground>
 
         {/* Input Area */}
-        <View style={styles.inputWrapper}>
+        <View style={[styles.inputWrapper, { paddingBottom: keyboardVisible ? 4 : insets.bottom }]}>
           <ChatTextInput
             ref={chatInputRef}
             value={inputText}
@@ -1989,7 +1978,6 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             }
           />
         </View>
-        <SafeAreaView edges={['bottom']} />
       </KeyboardAvoidingView>
 
       {/* Message Actions Menu */}
@@ -2131,28 +2119,27 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
           isProcessing={isProcessingImage}
         />
       )}
-    </View>
-    <BlockUserOverlay
-      visible={showBlockOverlay}
-      userId={otherUserId}
-      userName={otherUserName}
-      onClose={() => setShowBlockOverlay(false)}
-      onBlocked={() => {
-        setShowBlockOverlay(false);
-        onBack();
-      }}
-    />
-    <ReportUserOverlay
-      visible={showReportUser}
-      reportedUserId={otherUserId}
-      reportedUserName={otherUserName}
-      onClose={() => setShowReportUser(false)}
-      onBlocked={() => {
-        setShowReportUser(false);
-        onBack();
-      }}
-    />
-    </>
+      <BlockUserOverlay
+        visible={showBlockOverlay}
+        userId={otherUserId}
+        userName={otherUserName}
+        onClose={() => setShowBlockOverlay(false)}
+        onBlocked={() => {
+          setShowBlockOverlay(false);
+          onBack();
+        }}
+      />
+      <ReportUserOverlay
+        visible={showReportUser}
+        reportedUserId={otherUserId}
+        reportedUserName={otherUserName}
+        onClose={() => setShowReportUser(false)}
+        onBlocked={() => {
+          setShowReportUser(false);
+          onBack();
+        }}
+      />
+    </SafeAreaView>
   );
 };
 
@@ -2298,6 +2285,7 @@ const styles = StyleSheet.create({
   },
   chatContainer: {
     flex: 1,
+    backgroundColor: '#F5F5F5',
   },
   backgroundImage: {
     flex: 1,
