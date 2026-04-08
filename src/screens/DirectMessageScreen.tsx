@@ -40,7 +40,7 @@ import { WelcomeIntroMessage } from '../components/WelcomeIntroMessage';
 import { useChatKeyboardScroll } from '../hooks/useChatKeyboardScroll';
 import { useKeyboardVisible, useKeyboardHeight } from '../hooks/useKeyboardVisible';
 import { BlockUserOverlay } from '../components/BlockUserOverlay';
-import { ReportUserOverlay } from '../components/ReportUserOverlay';
+import { ReportUserScreen } from './ReportUserScreen';
 
 interface DirectMessageScreenProps {
   conversationId?: string; // Optional: undefined for pending conversations (will be created on first message)
@@ -1563,6 +1563,20 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     );
   }, [isFetchingMessages]);
 
+  const onlineStatusElement = useMemo(() => {
+    if (otherUserIsOnline === true) {
+      return (
+        <View style={styles.statusContainer}>
+          <View style={styles.onlineDot} />
+          <Text style={styles.profileTagline}>Available</Text>
+        </View>
+      );
+    } else if (otherUserIsOnline === false) {
+      return <Text style={styles.profileTagline}>Offline</Text>;
+    }
+    return null;
+  }, [otherUserIsOnline]);
+
   const formatTime = (timestamp: string) => {
     const date = new Date(timestamp);
     const hours = date.getHours().toString().padStart(2, '0');
@@ -1826,6 +1840,24 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     );
   };
 
+  if (showReportUser) {
+    return (
+      <ReportUserScreen
+        reportedUserId={otherUserId}
+        reportedUserName={otherUserName}
+        onBack={() => setShowReportUser(false)}
+        onReturnHome={() => {
+          setShowReportUser(false);
+          onBack();
+        }}
+        onBlocked={() => {
+          setShowReportUser(false);
+          onBack();
+        }}
+      />
+    );
+  }
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: '#212121' }]} edges={['top']}>
       {/* Header */}
@@ -1869,19 +1901,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             activeOpacity={0.7}
           >
             <Text style={styles.profileName}>{otherUserName}</Text>
-            {useMemo(() => {
-              if (otherUserIsOnline === true) {
-                return (
-                  <View style={styles.statusContainer}>
-                    <View style={styles.onlineDot} />
-                    <Text style={styles.profileTagline}>Available</Text>
-                  </View>
-                );
-              } else if (otherUserIsOnline === false) {
-                return <Text style={styles.profileTagline}>Offline</Text>;
-              }
-              return null; // Don't show anything while loading
-            }, [otherUserIsOnline])}
+            {onlineStatusElement}
           </TouchableOpacity>
           
           <TouchableOpacity style={styles.menuButton} onPress={() => setShowDmMenu(!showDmMenu)}>
