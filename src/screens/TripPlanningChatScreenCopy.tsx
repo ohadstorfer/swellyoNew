@@ -1,11 +1,10 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import {
   View,
   StyleSheet,
-  ScrollView,
+  FlatList,
   TouchableOpacity,
   Alert,
-  Keyboard,
   Platform,
   Image,
   ImageBackground,
@@ -269,15 +268,9 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   const insets = useSafeAreaInsets();
   const keyboardVisible = useKeyboardVisible();
   const androidKeyboardHeight = useKeyboardHeight();
-  const scrollViewRef = useRef<ScrollView>(null);
+  const flatListRef = useRef<FlatList<Message>>(null);
   const loadingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const { handleScroll, handleContentSizeChange, handleLayout, scrollToBottom } = useChatKeyboardScroll(scrollViewRef);
-
-  useEffect(() => {
-    if (Platform.OS === 'web') return;
-    const sub = Keyboard.addListener('keyboardDidShow', () => setTimeout(() => scrollToBottom(), Platform.OS === 'android' ? 300 : 100));
-    return () => sub.remove();
-  }, [scrollToBottom]);
+  const { handleScroll, handleLayout, scrollToBottom } = useChatKeyboardScroll(flatListRef, { inverted: true });
 
   // Drag-to-delete: ghost chip position and dragged item
   const [dragState, setDragState] = useState<{
@@ -1645,7 +1638,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
       const hasActionRow = requestData != null;
       const disabled = selectedAction !== null;
       return (
-        <View key={message.id}>
+        <View>
           <View style={[
             styles.messageContainer,
             styles.botMessageContainer,
@@ -1755,7 +1748,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     );
 
     return (
-      <View key={message.id}>
+      <View>
         <View
           style={[
             styles.messageContainer,
@@ -1834,6 +1827,25 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     );
   };
 
+  const invertedMessages = useMemo(() => [...messages].reverse(), [messages]);
+
+  const renderItem = useCallback(({ item }: { item: Message }) => {
+    return renderMessage(item);
+  }, [messages, matchedUsers, filtersMenuVisible, pendingSearch, chatId, searchBtnSize, filterDisplayList]);
+
+  const listHeaderComponent = useMemo(() => {
+    if (!isLoading && !isInitializing && !isAwaitingFilterRemovalResponse) return null;
+    return (
+      <View style={[styles.messageContainer, styles.botMessageContainer]}>
+        <View style={[styles.messageBubble, styles.botMessageBubble]}>
+          <View style={styles.messageTextContainer}>
+            <TypingIndicator />
+          </View>
+        </View>
+      </View>
+    );
+  }, [isLoading, isInitializing, isAwaitingFilterRemovalResponse]);
+
   return (
     <>
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -1896,27 +1908,23 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
           style={styles.backgroundImage}
           resizeMode="cover"
         >
-          <ScrollView
-            ref={scrollViewRef}
+          <FlatList
+            ref={flatListRef}
+            data={invertedMessages}
+            renderItem={renderItem}
+            keyExtractor={(item) => item.id}
+            inverted
             style={styles.messagesList}
-            contentContainerStyle={styles.messagesContent}
+            contentContainerStyle={[styles.messagesContent, { flexGrow: 1, justifyContent: 'flex-end' }]}
             showsVerticalScrollIndicator={false}
             onScroll={handleScroll}
             scrollEventThrottle={16}
-            onContentSizeChange={handleContentSizeChange}
             onLayout={handleLayout}
-          >
-            {messages.map(renderMessage)}
-            {(isLoading || isInitializing || isAwaitingFilterRemovalResponse) && (
-              <View style={[styles.messageContainer, styles.botMessageContainer]}>
-                <View style={[styles.messageBubble, styles.botMessageBubble]}>
-                  <View style={styles.messageTextContainer}>
-                    <TypingIndicator />
-                  </View>
-                </View>
-              </View>
-            )}
-          </ScrollView>
+            ListHeaderComponent={listHeaderComponent}
+            initialNumToRender={50}
+            maxToRenderPerBatch={50}
+            windowSize={21}
+          />
         </ImageBackground>
 
         {/* Floating filters button: 7px from top (below header), 14px from right */}

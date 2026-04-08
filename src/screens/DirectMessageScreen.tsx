@@ -4,7 +4,6 @@ import {
   StyleSheet,
   FlatList,
   TouchableOpacity,
-  Keyboard,
   Platform,
   Image,
   ActivityIndicator,
@@ -113,12 +112,6 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const androidKeyboardHeight = useKeyboardHeight();
   const flatListRef = useRef<FlatList<Message>>(null);
   const { handleScroll: handleKeyboardScroll, handleLayout, scrollToBottom } = useChatKeyboardScroll(flatListRef, { inverted: true });
-
-  useEffect(() => {
-    if (Platform.OS === 'web') return;
-    const sub = Keyboard.addListener('keyboardDidShow', () => setTimeout(() => scrollToBottom(), Platform.OS === 'android' ? 300 : 100));
-    return () => sub.remove();
-  }, [scrollToBottom]);
 
   const chatInputRef = useRef<ChatTextInputRef>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);

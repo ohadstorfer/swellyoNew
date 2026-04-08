@@ -1,10 +1,9 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import {
   View,
   StyleSheet,
-  ScrollView,
+  FlatList,
   TouchableOpacity,
-  Keyboard,
   Platform,
   Image,
   ImageBackground,
@@ -61,14 +60,8 @@ export const SwellyShaperScreen: React.FC<SwellyShaperScreenProps> = ({ onBack, 
   const insets = useSafeAreaInsets();
   const keyboardVisible = useKeyboardVisible();
   const androidKeyboardHeight = useKeyboardHeight();
-  const scrollViewRef = useRef<ScrollView>(null);
-  const { handleScroll, handleContentSizeChange, handleLayout, scrollToBottom } = useChatKeyboardScroll(scrollViewRef);
-
-  useEffect(() => {
-    if (Platform.OS === 'web') return;
-    const sub = Keyboard.addListener('keyboardDidShow', () => setTimeout(() => scrollToBottom(), Platform.OS === 'android' ? 300 : 100));
-    return () => sub.remove();
-  }, [scrollToBottom]);
+  const flatListRef = useRef<FlatList<Message>>(null);
+  const { handleScroll, handleLayout, scrollToBottom } = useChatKeyboardScroll(flatListRef, { inverted: true });
 
   // Load chat_id from storage and profile data on mount
   useEffect(() => {
@@ -315,6 +308,8 @@ export const SwellyShaperScreen: React.FC<SwellyShaperScreenProps> = ({ onBack, 
     );
   };
 
+  const invertedMessages = useMemo(() => [...messages].reverse(), [messages]);
+
   const renderMessage = (message: Message) => {
     // Check if this is the welcome message
     const isWelcomeMessage = message.id === 'welcome';
@@ -322,7 +317,7 @@ export const SwellyShaperScreen: React.FC<SwellyShaperScreenProps> = ({ onBack, 
     if (isWelcomeMessage) {
       // Welcome card: original design (pill bubble, smaller text, image on right) — only this card; conversation messages use normal bot styles below
       return (
-        <View key={message.id} style={styles.botMessageContainer}>
+        <View style={styles.botMessageContainer}>
           <View style={styles.botMessageBubble}>
             <Text style={styles.botMessageText}>Yo! Welcome to the shaping bay! This is where we edit your profile! Let me know what you would like to edit!</Text>
             <View style={styles.botMessageImageContainer}>
@@ -339,7 +334,7 @@ export const SwellyShaperScreen: React.FC<SwellyShaperScreenProps> = ({ onBack, 
 
     // Regular message rendering - match ChatScreen style
     return (
-      <React.Fragment key={message.id}>
+      <React.Fragment>
         <View
           style={[
             styles.messageContainer,
@@ -392,6 +387,23 @@ export const SwellyShaperScreen: React.FC<SwellyShaperScreenProps> = ({ onBack, 
       </React.Fragment>
     );
   };
+
+  const renderItem = useCallback(({ item }: { item: Message }) => {
+    return renderMessage(item);
+  }, [profileData, onViewProfile, onBack]);
+
+  const listHeaderComponent = useMemo(() => {
+    if (!isLoading) return null;
+    return (
+      <View style={[styles.messageContainer, styles.normalBotMessageContainer]}>
+        <View style={[styles.messageBubble, styles.normalBotMessageBubble]}>
+          <View style={styles.messageTextContainer}>
+            <TypingIndicator />
+          </View>
+        </View>
+      </View>
+    );
+  }, [isLoading]);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -448,35 +460,29 @@ export const SwellyShaperScreen: React.FC<SwellyShaperScreenProps> = ({ onBack, 
           style={styles.backgroundImage}
           resizeMode="cover"
         >
-          <ScrollView
-            ref={scrollViewRef}
-            style={styles.messagesList}
-            contentContainerStyle={styles.messagesContent}
-            showsVerticalScrollIndicator={false}
-            onScroll={handleScroll}
-            scrollEventThrottle={16}
-            onContentSizeChange={handleContentSizeChange}
-            onLayout={handleLayout}
-          >
-            {isInitializing && showSkeletons ? (
+          {isInitializing && showSkeletons ? (
+            <View style={styles.messagesList}>
               <MessageListSkeleton count={5} />
-            ) : (
-              <>
-                {messages.map(renderMessage)}
-                {isLoading && (
-                  <View style={[styles.messageContainer, styles.normalBotMessageContainer]}>
-                    <View style={[styles.messageBubble, styles.normalBotMessageBubble]}>
-                      <View style={styles.messageTextContainer}>
-                        <TypingIndicator />
-                      </View>
-                    </View>
-                  </View>
-                )}
-              </>
-            )}
-          </ScrollView>
-          
-          
+            </View>
+          ) : (
+            <FlatList
+              ref={flatListRef}
+              data={invertedMessages}
+              renderItem={renderItem}
+              keyExtractor={(item) => item.id}
+              inverted
+              style={styles.messagesList}
+              contentContainerStyle={[styles.messagesContent, { flexGrow: 1, justifyContent: 'flex-end', alignItems: 'stretch' }]}
+              showsVerticalScrollIndicator={false}
+              onScroll={handleScroll}
+              scrollEventThrottle={16}
+              onLayout={handleLayout}
+              ListHeaderComponent={listHeaderComponent}
+              initialNumToRender={50}
+              maxToRenderPerBatch={50}
+              windowSize={21}
+            />
+          )}
         </ImageBackground>
 
         {/* Input Area */}

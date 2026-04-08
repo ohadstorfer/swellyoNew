@@ -5,7 +5,6 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
-  Keyboard,
   Platform,
   Image,
   ImageBackground,
@@ -253,12 +252,6 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   const androidKeyboardHeight = useKeyboardHeight();
   const scrollViewRef = useRef<ScrollView>(null);
   const { handleScroll, handleContentSizeChange, handleLayout, scrollToBottom } = useChatKeyboardScroll(scrollViewRef);
-
-  useEffect(() => {
-    if (Platform.OS === 'web') return;
-    const sub = Keyboard.addListener('keyboardDidShow', () => setTimeout(() => scrollToBottom(), Platform.OS === 'android' ? 300 : 100));
-    return () => sub.remove();
-  }, [scrollToBottom]);
 
   // Test API connection and initialize chat context on component mount
   useEffect(() => {

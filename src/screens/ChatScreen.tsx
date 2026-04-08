@@ -1,24 +1,19 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import {
   View,
   StyleSheet,
+  FlatList,
   TouchableOpacity,
   Alert,
-  Keyboard,
   Platform,
   Image,
   ImageBackground,
   Animated,
   Dimensions,
-  ScrollView as RNScrollView,
   Pressable,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { KeyboardAvoidingView, isExpoGo } from '../utils/keyboardAvoidingView';
-
-// On native, use RN's built-in ScrollView with nestedScrollEnabled.
-// GestureDetector + gesture-handler ScrollView causes Expo Go crashes on scroll.
-const ScrollView = RNScrollView;
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../components/Text';
 import { colors, spacing, typography, borderRadius } from '../styles/theme';
@@ -136,14 +131,8 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
   const insets = useSafeAreaInsets();
   const keyboardVisible = useKeyboardVisible();
   const androidKeyboardHeight = useKeyboardHeight();
-  const scrollViewRef = useRef<ScrollView>(null);
-  const { handleScroll, handleContentSizeChange, handleLayout, scrollToBottom: keyboardScrollToBottom } = useChatKeyboardScroll(scrollViewRef);
-
-  useEffect(() => {
-    if (Platform.OS === 'web') return;
-    const sub = Keyboard.addListener('keyboardDidShow', () => setTimeout(() => keyboardScrollToBottom(), Platform.OS === 'android' ? 300 : 100));
-    return () => sub.remove();
-  }, [keyboardScrollToBottom]);
+  const flatListRef = useRef<FlatList<Message>>(null);
+  const { handleScroll, handleLayout, scrollToBottom: keyboardScrollToBottom } = useChatKeyboardScroll(flatListRef, { inverted: true });
 
   const chatInitializedRef = useRef(false);
   
@@ -535,7 +524,7 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
 
   const scrollToBottom = () => {
     setTimeout(() => {
-      scrollViewRef.current?.scrollToEnd({ animated: true });
+      keyboardScrollToBottom();
     }, 100);
   };
 
@@ -777,7 +766,7 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
     );
 
     return (
-      <View key={message.id}>
+      <View>
         <View
           style={[
             styles.messageContainer,
@@ -826,6 +815,25 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
     );
   };
 
+  const invertedMessages = useMemo(() => [...messages].reverse(), [messages]);
+
+  const renderItem = useCallback(({ item }: { item: Message }) => {
+    return renderMessage(item);
+  }, [messages, destinationCardsMessageId, destinationList, destinationsSubmitted, budgetButtonsMessageId, budgetSubmitted, selectedBudget]);
+
+  const listHeaderComponent = useMemo(() => {
+    if (!isLoading && !isInitializing && !showInitialTypingBubble && !isUiDelayLoading) return null;
+    return (
+      <View style={[styles.messageContainer, styles.botMessageContainer]}>
+        <View style={[styles.messageBubble, styles.botMessageBubble]}>
+          <View style={styles.messageTextContainer}>
+            <TypingIndicator />
+          </View>
+        </View>
+      </View>
+    );
+  }, [isLoading, isInitializing, showInitialTypingBubble, isUiDelayLoading]);
+
   return (
     <>
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -833,7 +841,7 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
       <View style={styles.headerContainer}>
         <View style={styles.header}>
           <View style={styles.headerLeft}>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.backButton}
               onPress={() => {
                 // Go back to onboarding step 4
@@ -891,31 +899,27 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
           source={{ uri: CHAT_BG_IMAGE_URI }}
           style={styles.backgroundImage}
           resizeMode="cover"
-      >
-        <ScrollView
-          ref={scrollViewRef}
-          style={styles.messagesList}
-          contentContainerStyle={styles.messagesContent}
-          showsVerticalScrollIndicator={false}
-          nestedScrollEnabled
-          directionalLockEnabled
-          keyboardShouldPersistTaps="handled"
-          onScroll={handleScroll}
-          scrollEventThrottle={16}
-          onContentSizeChange={handleContentSizeChange}
-          onLayout={handleLayout}
         >
-          {messages.map(renderMessage)}
-          {(isLoading || isInitializing || showInitialTypingBubble || isUiDelayLoading) && (
-            <View style={[styles.messageContainer, styles.botMessageContainer]}>
-              <View style={[styles.messageBubble, styles.botMessageBubble]}>
-                <View style={styles.messageTextContainer}>
-                  <TypingIndicator />
-                </View>
-              </View>
-            </View>
-          )}
-        </ScrollView>
+          <FlatList
+            ref={flatListRef}
+            data={invertedMessages}
+            renderItem={renderItem}
+            keyExtractor={(item) => item.id}
+            inverted
+            style={styles.messagesList}
+            contentContainerStyle={[styles.messagesContent, { flexGrow: 1, justifyContent: 'flex-end' }]}
+            showsVerticalScrollIndicator={false}
+            nestedScrollEnabled
+            directionalLockEnabled
+            keyboardShouldPersistTaps="handled"
+            onScroll={handleScroll}
+            scrollEventThrottle={16}
+            onLayout={handleLayout}
+            ListHeaderComponent={listHeaderComponent}
+            initialNumToRender={50}
+            maxToRenderPerBatch={50}
+            windowSize={21}
+          />
         </ImageBackground>
 
         {/* Input Area */}
