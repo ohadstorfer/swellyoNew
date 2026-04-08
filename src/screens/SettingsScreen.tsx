@@ -15,6 +15,14 @@ import { ProfileImage } from '../components/ProfileImage';
 import { DeleteAccountScreen } from './DeleteAccountScreen';
 import { ReportBugOverlay } from '../components/ReportBugOverlay';
 
+// Settings menu icons
+const iconPrivacyPreferences = require('../assets/icons/privacy-preferences.png');
+const iconTermsOfService = require('../assets/icons/terms-of-service.png');
+const iconPrivacyPolicy = require('../assets/icons/privacy-policy.png');
+const iconAboutUs = require('../assets/icons/about-us.png');
+const iconReportBug = require('../assets/icons/report-bug.png');
+const iconDeleteAccount = require('../assets/icons/delete-account.png');
+
 interface SettingsScreenProps {
   onBack: () => void;
   userName: string;
@@ -83,29 +91,34 @@ export function SettingsScreen({ onBack, userName, userAvatar, userEmail }: Sett
         <ScrollView style={styles.settingsList} contentContainerStyle={styles.settingsListContent}>
           <Text style={styles.sectionTitle}>Settings</Text>
 
-          <TouchableOpacity style={styles.menuRow} activeOpacity={0.7} onPress={() => setShowDeleteAccount(true)}>
-            <Ionicons name="trash-outline" size={24} color="#222B30" />
-            <Text style={styles.menuRowText}>Delete account</Text>
+          <TouchableOpacity style={styles.menuRow} activeOpacity={0.7}>
+            <Image source={iconPrivacyPreferences} style={styles.menuIcon} resizeMode="contain" />
+            <Text style={styles.menuRowText}>Privacy preferences</Text>
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.menuRow} activeOpacity={0.7} onPress={() => Linking.openURL('https://www.swellyo.com/terms-and-conditions')}>
-            <Ionicons name="document-text-outline" size={24} color="#222B30" />
+            <Image source={iconTermsOfService} style={styles.menuIcon} resizeMode="contain" />
             <Text style={[styles.menuRowText, styles.linkText]}>Terms of service</Text>
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.menuRow} activeOpacity={0.7} onPress={() => Linking.openURL('https://www.swellyo.com/privacy-policy')}>
-            <Ionicons name="shield-checkmark-outline" size={24} color="#222B30" />
+            <Image source={iconPrivacyPolicy} style={styles.menuIcon} resizeMode="contain" />
             <Text style={[styles.menuRowText, styles.linkText]}>Privacy policy</Text>
           </TouchableOpacity>
 
+          <TouchableOpacity style={styles.menuRow} activeOpacity={0.7} onPress={() => Linking.openURL('https://www.swellyo.com/about')}>
+            <Image source={iconAboutUs} style={styles.menuIcon} resizeMode="contain" />
+            <Text style={[styles.menuRowText, styles.linkText]}>About us</Text>
+          </TouchableOpacity>
+
           <TouchableOpacity style={styles.menuRow} activeOpacity={0.7} onPress={() => setShowReportBug(true)}>
-            <Ionicons name="chatbubble-ellipses-outline" size={24} color="#222B30" />
+            <Image source={iconReportBug} style={styles.menuIcon} resizeMode="contain" />
             <Text style={styles.menuRowText}>Report bug</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.menuRow} activeOpacity={0.7} onPress={() => Linking.openURL('https://www.swellyo.com/about')}>
-            <Ionicons name="information-circle-outline" size={24} color="#222B30" />
-            <Text style={[styles.menuRowText, styles.linkText]}>About us</Text>
+          <TouchableOpacity style={styles.menuRow} activeOpacity={0.7} onPress={() => setShowDeleteAccount(true)}>
+            <Image source={iconDeleteAccount} style={styles.menuIcon} resizeMode="contain" />
+            <Text style={styles.menuRowText}>Delete account</Text>
           </TouchableOpacity>
         </ScrollView>
       </Animated.View>
@@ -139,7 +152,7 @@ const styles = StyleSheet.create({
   },
   backButtonText: {
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
-    fontSize: 16,
+    fontSize: 12,
     fontWeight: '400' as const,
     color: '#333',
     lineHeight: 15,
@@ -153,8 +166,8 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
   avatarBorder: {
-    width: 120,
-    height: 120,
+    width: 101,
+    height: 101,
     borderRadius: 80,
     borderWidth: 6,
     borderColor: '#FFFFFF',
@@ -183,7 +196,7 @@ const styles = StyleSheet.create({
     paddingBottom: 24,
   },
   avatarSpacer: {
-    height: 76,
+    height: 58,
   },
   nameContainer: {
     alignItems: 'center',
@@ -191,10 +204,10 @@ const styles = StyleSheet.create({
   },
   userName: {
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
-    fontSize: 18,
-    fontWeight: '500' as const,
+    fontSize: 16,
+    fontWeight: '400' as const,
     color: '#333',
-    lineHeight: 24,
+    lineHeight: 22,
   },
   divider: {
     height: 1,
@@ -216,6 +229,10 @@ const styles = StyleSheet.create({
     color: '#333',
     lineHeight: 24,
     marginBottom: 8,
+  },
+  menuIcon: {
+    width: 24,
+    height: 24,
   },
   menuRow: {
     flexDirection: 'row',

@@ -38,7 +38,7 @@ import { calculateAgeFromDOB } from '../utils/ageCalculation';
 import AvatarCropModal from '../components/AvatarCropModal';
 import { BlockUserOverlay } from '../components/BlockUserOverlay';
 import { useMessaging } from '../context/MessagingProvider';
-import { ReportUserOverlay } from '../components/ReportUserOverlay';
+import { ReportUserScreen } from './ReportUserScreen';
 
 interface ProfileScreenProps {
   onBack?: () => void;
@@ -1578,6 +1578,24 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
     return (progressPercentage / 100) * progressBarWidth;
   };
 
+  if (showReportOverlay && userId) {
+    return (
+      <ReportUserScreen
+        reportedUserId={userId}
+        reportedUserName={profileData?.name || 'User'}
+        onBack={() => setShowReportOverlay(false)}
+        onReturnHome={() => {
+          setShowReportOverlay(false);
+          onBack?.();
+        }}
+        onBlocked={() => {
+          setShowReportOverlay(false);
+          onBack?.();
+        }}
+      />
+    );
+  }
+
   return (
     <>
     <View style={styles.container}>
@@ -2332,16 +2350,6 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
           onClose={() => setShowBlockOverlay(false)}
           onBlocked={() => {
             setShowBlockOverlay(false);
-            onBack?.();
-          }}
-        />
-        <ReportUserOverlay
-          visible={showReportOverlay}
-          reportedUserId={userId}
-          reportedUserName={profileData?.name || 'User'}
-          onClose={() => setShowReportOverlay(false)}
-          onBlocked={() => {
-            setShowReportOverlay(false);
             onBack?.();
           }}
         />
