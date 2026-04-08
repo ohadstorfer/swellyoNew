@@ -7,6 +7,7 @@ import { supabaseDatabaseService } from '../services/database/supabaseDatabaseSe
 import { isSupabaseConfigured, supabase } from '../config/supabase';
 import { Platform } from 'react-native';
 import { STEP_WELCOME } from '../constants/onboardingSteps';
+import { analyticsService } from '../services/analytics/analyticsService';
 
 interface OnboardingContextType {
   currentStep: number;
@@ -242,6 +243,10 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           if (surfer?.finished_onboarding) {
             dbOnboardingComplete = true;
             console.log('User has finished onboarding (from database)');
+          }
+          // Sync analytics opt-out preference from server
+          if (surfer) {
+            analyticsService.syncOptOutFromServer(surfer.analytics_opt_out);
           }
         } catch (error) {
           console.log('Error checking database for onboarding status:', error);

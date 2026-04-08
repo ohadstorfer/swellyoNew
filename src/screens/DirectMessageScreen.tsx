@@ -12,6 +12,7 @@ import {
   Animated,
   Modal,
   Dimensions,
+  Linking,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { KeyboardAvoidingView, isExpoGo } from '../utils/keyboardAvoidingView';
@@ -19,6 +20,8 @@ import { TextInput as PaperTextInput } from 'react-native-paper';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Path } from 'react-native-svg';
 import { Text } from '../components/Text';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { GalleryPermissionOverlay } from '../components/GalleryPermissionOverlay';
 import { colors, spacing, typography, borderRadius } from '../styles/theme';
 import { messagingService, Message, RealtimeSubscriptionStatus } from '../services/messaging/messagingService';
 import { supabaseAuthService } from '../services/auth/supabaseAuthService';
@@ -94,6 +97,8 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const [realtimeHealthy, setRealtimeHealthy] = useState(true); // Track realtime subscription health
   const [editingText, setEditingText] = useState('');
   const [menuVisible, setMenuVisible] = useState(false);
+  const [showPermissionOverlay, setShowPermissionOverlay] = useState(false);
+  const pendingPickerRef = useRef<(() => void) | null>(null);
   const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
   const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
   const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
@@ -1277,37 +1282,55 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         input.click();
       } else {
         // For native, use expo-image-picker (allowsEditing: true so iOS returns file:// URI instead of ph://)
-        try {
-          const ImagePicker = require('expo-image-picker');
-          const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-          if (status !== 'granted') {
+        const launchNativeImagePicker = async () => {
+          try {
+            const ImagePicker = require('expo-image-picker');
+            const { status, canAskAgain } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+            if (status !== 'granted') {
+              if (!canAskAgain) {
+                Alert.alert(
+                  'Permission Required',
+                  'Swellyo needs access to your photos. Please enable it in your device settings.',
+                  [
+                    { text: 'Cancel', style: 'cancel' },
+                    { text: 'Open Settings', onPress: () => Linking.openSettings() },
+                  ]
+                );
+              } else {
+                Alert.alert('Permission Required', 'Sorry, we need camera roll permissions to send images!');
+              }
+              return;
+            }
+
+            const result = await ImagePicker.launchImageLibraryAsync({
+              mediaTypes: ImagePicker.MediaTypeOptions.Images,
+              allowsEditing: true,
+              aspect: [4, 3],
+              quality: 1,
+            });
+
+            const uri = result.assets?.[0]?.uri ?? (result as { uri?: string }).uri;
+            const canceled = result.canceled === true || (result as { cancelled?: boolean }).cancelled === true;
+            if (uri && !canceled) {
+              selectedImageUriForUploadRef.current = uri;
+              setSelectedImageUri(uri);
+              setImagePreviewVisible(true);
+            }
+          } catch (error) {
+            console.warn('expo-image-picker not available:', error);
             Alert.alert(
-              'Permission Required',
-              'Sorry, we need camera roll permissions to send images!'
+              'Image Picker Not Available',
+              'Please install expo-image-picker for native platforms.'
             );
-            return;
           }
+        };
 
-          const result = await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ImagePicker.MediaTypeOptions.Images,
-            allowsEditing: true,
-            aspect: [4, 3],
-            quality: 1,
-          });
-
-          const uri = result.assets?.[0]?.uri ?? (result as { uri?: string }).uri;
-          const canceled = result.canceled === true || (result as { cancelled?: boolean }).cancelled === true;
-          if (uri && !canceled) {
-            selectedImageUriForUploadRef.current = uri;
-            setSelectedImageUri(uri);
-            setImagePreviewVisible(true);
-          }
-        } catch (error) {
-          console.warn('expo-image-picker not available:', error);
-          Alert.alert(
-            'Image Picker Not Available',
-            'Please install expo-image-picker for native platforms.'
-          );
+        const primerShown = await AsyncStorage.getItem('@swellyo_gallery_primer_shown');
+        if (primerShown) {
+          await launchNativeImagePicker();
+        } else {
+          pendingPickerRef.current = () => launchNativeImagePicker();
+          setShowPermissionOverlay(true);
         }
       }
     } catch (error) {
@@ -1859,6 +1882,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   }
 
   return (
+    <>
     <SafeAreaView style={[styles.container, { backgroundColor: '#212121' }]} edges={['top']}>
       {/* Header */}
       <View style={styles.headerContainer}>
@@ -2142,17 +2166,23 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
           onBack();
         }}
       />
-      <ReportUserOverlay
-        visible={showReportUser}
-        reportedUserId={otherUserId}
-        reportedUserName={otherUserName}
-        onClose={() => setShowReportUser(false)}
-        onBlocked={() => {
-          setShowReportUser(false);
-          onBack();
+    </SafeAreaView>
+    {Platform.OS !== 'web' && (
+      <GalleryPermissionOverlay
+        visible={showPermissionOverlay}
+        onAllow={async () => {
+          await AsyncStorage.setItem('@swellyo_gallery_primer_shown', 'true');
+          setShowPermissionOverlay(false);
+          pendingPickerRef.current?.();
+          pendingPickerRef.current = null;
+        }}
+        onDismiss={() => {
+          setShowPermissionOverlay(false);
+          pendingPickerRef.current = null;
         }}
       />
-    </SafeAreaView>
+    )}
+    </>
   );
 };
 

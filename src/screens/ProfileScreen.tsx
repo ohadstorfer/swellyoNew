@@ -10,6 +10,7 @@ import {
   Dimensions,
   Alert,
   Animated,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -17,6 +18,8 @@ import { Ionicons } from '@expo/vector-icons';
 import Svg, { Circle, Rect, Defs, Filter, FeFlood, FeColorMatrix, FeOffset, FeGaussianBlur, FeComposite, FeBlend, Path } from 'react-native-svg';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { Text } from '../components/Text';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { GalleryPermissionOverlay } from '../components/GalleryPermissionOverlay';
 import { Text as RNText } from 'react-native';
 import { colors, spacing, typography } from '../styles/theme';
 import { supabaseDatabaseService, SupabaseSurfer } from '../services/database/supabaseDatabaseService';
@@ -853,6 +856,8 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
   const [cropModalVisible, setCropModalVisible] = useState(false);
   const [rawImageUri, setRawImageUri] = useState<string>('');
   const [showVideoUploadModal, setShowVideoUploadModal] = useState(false);
+  const [showPermissionOverlay, setShowPermissionOverlay] = useState(false);
+  const pendingPickerRef = useRef<(() => void) | null>(null);
   const [videoUploadError, setVideoUploadError] = useState<string | null>(null);
   const [uploadFailureError, setUploadFailureError] = useState<string | null>(null);
   const [retryVideoData, setRetryVideoData] = useState<{ uri: string; mimeType?: string } | null>(null);
@@ -1068,20 +1073,29 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
         input.click();
       } else {
         // For native, use expo-image-picker
-        try {
-          const ImagePicker = require('expo-image-picker');
-          const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-          if (status !== 'granted') {
-            Alert.alert(
-              'Permission Required',
-              'Sorry, we need camera roll permissions to upload your profile picture!'
-            );
-            return;
-          }
+        const launchNativeImagePicker = async () => {
+          try {
+            const ImagePicker = require('expo-image-picker');
+            const { status, canAskAgain } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+            if (status !== 'granted') {
+              if (!canAskAgain) {
+                Alert.alert(
+                  'Permission Required',
+                  'Swellyo needs access to your photos. Please enable it in your device settings.',
+                  [
+                    { text: 'Cancel', style: 'cancel' },
+                    { text: 'Open Settings', onPress: () => Linking.openSettings() },
+                  ]
+                );
+              } else {
+                Alert.alert('Permission Required', 'Sorry, we need camera roll permissions to upload your profile picture!');
+              }
+              return;
+            }
 
-          const result = await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ImagePicker.MediaTypeOptions.Images,
-            allowsEditing: true,
+            const result = await ImagePicker.launchImageLibraryAsync({
+              mediaTypes: ImagePicker.MediaTypeOptions.Images,
+              allowsEditing: true,
             aspect: [1, 1],
             quality: 0.8,
           });
@@ -1090,12 +1104,21 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
             const imageUri = result.assets[0].uri;
             await uploadAndUpdateProfile(imageUri);
           }
-        } catch (error) {
-          console.warn('expo-image-picker not available:', error);
-          Alert.alert(
-            'Image Picker Not Available',
-            'Please install expo-image-picker for native platforms.'
-          );
+          } catch (error) {
+            console.warn('expo-image-picker not available:', error);
+            Alert.alert(
+              'Image Picker Not Available',
+              'Please install expo-image-picker for native platforms.'
+            );
+          }
+        };
+
+        const primerShown = await AsyncStorage.getItem('@swellyo_gallery_primer_shown');
+        if (primerShown) {
+          await launchNativeImagePicker();
+        } else {
+          pendingPickerRef.current = () => launchNativeImagePicker();
+          setShowPermissionOverlay(true);
         }
       }
     } catch (error) {
@@ -1221,63 +1244,74 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
         input.click();
       } else {
         // For mobile, use expo-image-picker
-        try {
-          const ImagePicker = require('expo-image-picker');
-          const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-          if (status !== 'granted') {
-            Alert.alert(
-              'Permission Required',
-              'Sorry, we need media library permissions to upload your video!'
-            );
-            setShowVideoUploadModal(false); // Close modal on permission denial
-            return;
-          }
-
-          const result = await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ImagePicker.MediaTypeOptions.Videos,
-            allowsEditing: false,
-            quality: 1.0,
-          });
-
-          if (!result.canceled && result.assets[0]) {
-            // NOW set loading state - user has selected a file
-            setIsUploadingVideo(true);
-            setUploadFailureError(null); // Clear previous failures
-            setVideoUploadError(null); // Clear validation errors
-
-            const videoAsset = result.assets[0];
-            const videoUri = videoAsset.uri;
-            // Get MIME type from asset if available (helps with validation)
-            const mimeType = videoAsset.mimeType || undefined;
-            
-            // Store video data for potential retry
-            setRetryVideoData({ uri: videoUri, mimeType });
-            
-            // Validate video before uploading
-            const validation = await validateVideoComplete(videoUri, mimeType);
-            
-            if (!validation.valid) {
-              // Show error in modal instead of closing it
-              setIsUploadingVideo(false);
-              setVideoUploadError(validation.error || 'Please select a valid video file.');
-              setRetryVideoData(null); // Clear retry data on validation error
+        const launchNativeVideoPicker = async () => {
+          try {
+            const ImagePicker = require('expo-image-picker');
+            const { status, canAskAgain } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+            if (status !== 'granted') {
+              if (!canAskAgain) {
+                Alert.alert(
+                  'Permission Required',
+                  'Swellyo needs access to your photos. Please enable it in your device settings.',
+                  [
+                    { text: 'Cancel', style: 'cancel' },
+                    { text: 'Open Settings', onPress: () => Linking.openSettings() },
+                  ]
+                );
+              } else {
+                Alert.alert('Permission Required', 'Sorry, we need media library permissions to upload your video!');
+              }
+              setShowVideoUploadModal(false);
               return;
             }
-            
-            // Clear any previous errors and proceed with upload
-            setVideoUploadError(null);
-            await uploadAndUpdateVideo(videoUri, mimeType);
-          } else {
-            // User canceled - don't show loading, just close modal
+
+            const result = await ImagePicker.launchImageLibraryAsync({
+              mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+              allowsEditing: false,
+              quality: 1.0,
+            });
+
+            if (!result.canceled && result.assets[0]) {
+              setIsUploadingVideo(true);
+              setUploadFailureError(null);
+              setVideoUploadError(null);
+
+              const videoAsset = result.assets[0];
+              const videoUri = videoAsset.uri;
+              const mimeType = videoAsset.mimeType || undefined;
+
+              setRetryVideoData({ uri: videoUri, mimeType });
+
+              const validation = await validateVideoComplete(videoUri, mimeType);
+
+              if (!validation.valid) {
+                setIsUploadingVideo(false);
+                setVideoUploadError(validation.error || 'Please select a valid video file.');
+                setRetryVideoData(null);
+                return;
+              }
+
+              setVideoUploadError(null);
+              await uploadAndUpdateVideo(videoUri, mimeType);
+            } else {
+              setShowVideoUploadModal(false);
+            }
+          } catch (error) {
+            console.warn('expo-image-picker not available:', error);
+            Alert.alert(
+              'Video Picker Not Available',
+              'Please install expo-image-picker for native platforms.'
+            );
             setShowVideoUploadModal(false);
           }
-        } catch (error) {
-          console.warn('expo-image-picker not available:', error);
-          Alert.alert(
-            'Video Picker Not Available',
-            'Please install expo-image-picker for native platforms.'
-          );
-          setShowVideoUploadModal(false); // Close modal on error
+        };
+
+        const primerShown = await AsyncStorage.getItem('@swellyo_gallery_primer_shown');
+        if (primerShown) {
+          await launchNativeVideoPicker();
+        } else {
+          pendingPickerRef.current = () => launchNativeVideoPicker();
+          setShowPermissionOverlay(true);
         }
       }
     } catch (error) {
@@ -2354,6 +2388,21 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
           }}
         />
       </>
+    )}
+    {Platform.OS !== 'web' && (
+      <GalleryPermissionOverlay
+        visible={showPermissionOverlay}
+        onAllow={async () => {
+          await AsyncStorage.setItem('@swellyo_gallery_primer_shown', 'true');
+          setShowPermissionOverlay(false);
+          pendingPickerRef.current?.();
+          pendingPickerRef.current = null;
+        }}
+        onDismiss={() => {
+          setShowPermissionOverlay(false);
+          pendingPickerRef.current = null;
+        }}
+      />
     )}
     </>
   );

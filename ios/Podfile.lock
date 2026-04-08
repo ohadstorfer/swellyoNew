@@ -9,18 +9,20 @@ PODS:
     - GoogleUtilities/Environment (~> 8.0)
     - GoogleUtilities/UserDefaults (~> 8.0)
     - PromisesObjC (~> 2.4)
-  - EXApplication (7.0.7):
+  - EXApplication (7.0.8):
     - ExpoModulesCore
   - EXAV (16.0.7):
     - ExpoModulesCore
     - ReactCommon/turbomodule/core
-  - EXConstants (18.0.10):
+  - EXConstants (18.0.13):
     - ExpoModulesCore
   - EXImageLoader (6.0.0):
     - ExpoModulesCore
     - React-Core
   - EXJSONUtils (0.15.0)
   - EXManifests (1.0.10):
+    - ExpoModulesCore
+  - EXNotifications (0.32.16):
     - ExpoModulesCore
   - Expo (54.0.22):
     - ExpoModulesCore
@@ -225,6 +227,8 @@ PODS:
   - ExpoAsset (12.0.9):
     - ExpoModulesCore
   - ExpoCrypto (15.0.7):
+    - ExpoModulesCore
+  - ExpoDevice (8.0.10):
     - ExpoModulesCore
   - ExpoFileSystem (19.0.17):
     - ExpoModulesCore
@@ -1585,6 +1589,51 @@ PODS:
     - React-RCTFBReactNativeSpec
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
+  - react-native-keyboard-controller (1.18.5):
+    - hermes-engine
+    - RCTRequired
+    - RCTTypeSafety
+    - React-Core
+    - React-Core-prebuilt
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - React-jsi
+    - react-native-keyboard-controller/common (= 1.18.5)
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - ReactNativeDependencies
+    - Yoga
+  - react-native-keyboard-controller/common (1.18.5):
+    - hermes-engine
+    - RCTRequired
+    - RCTTypeSafety
+    - React-Core
+    - React-Core-prebuilt
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - ReactNativeDependencies
+    - Yoga
   - react-native-safe-area-context (5.6.2):
     - hermes-engine
     - RCTRequired
@@ -2406,6 +2455,7 @@ DEPENDENCIES:
   - EXImageLoader (from `../node_modules/expo-image-loader/ios`)
   - EXJSONUtils (from `../node_modules/expo-json-utils/ios`)
   - EXManifests (from `../node_modules/expo-manifests/ios`)
+  - EXNotifications (from `../node_modules/expo-notifications/ios`)
   - Expo (from `../node_modules/expo`)
   - expo-dev-client (from `../node_modules/expo-dev-client/ios`)
   - expo-dev-launcher (from `../node_modules/expo-dev-launcher`)
@@ -2414,6 +2464,7 @@ DEPENDENCIES:
   - "ExpoAdapterGoogleSignIn (from `../node_modules/@react-native-google-signin/google-signin/expo/ios`)"
   - ExpoAsset (from `../node_modules/expo-asset/ios`)
   - ExpoCrypto (from `../node_modules/expo-crypto/ios`)
+  - ExpoDevice (from `../node_modules/expo-device/ios`)
   - ExpoFileSystem (from `../node_modules/expo-file-system/ios`)
   - ExpoFont (from `../node_modules/expo-font/ios`)
   - ExpoImageManipulator (from `../node_modules/expo-image-manipulator/ios`)
@@ -2461,6 +2512,7 @@ DEPENDENCIES:
   - React-logger (from `../node_modules/react-native/ReactCommon/logger`)
   - React-Mapbuffer (from `../node_modules/react-native/ReactCommon`)
   - React-microtasksnativemodule (from `../node_modules/react-native/ReactCommon/react/nativemodule/microtasks`)
+  - react-native-keyboard-controller (from `../node_modules/react-native-keyboard-controller`)
   - react-native-safe-area-context (from `../node_modules/react-native-safe-area-context`)
   - "react-native-slider (from `../node_modules/@react-native-community/slider`)"
   - react-native-webview (from `../node_modules/react-native-webview`)
@@ -2531,6 +2583,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/expo-json-utils/ios"
   EXManifests:
     :path: "../node_modules/expo-manifests/ios"
+  EXNotifications:
+    :path: "../node_modules/expo-notifications/ios"
   Expo:
     :path: "../node_modules/expo"
   expo-dev-client:
@@ -2547,6 +2601,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/expo-asset/ios"
   ExpoCrypto:
     :path: "../node_modules/expo-crypto/ios"
+  ExpoDevice:
+    :path: "../node_modules/expo-device/ios"
   ExpoFileSystem:
     :path: "../node_modules/expo-file-system/ios"
   ExpoFont:
@@ -2640,6 +2696,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/react-native/ReactCommon"
   React-microtasksnativemodule:
     :path: "../node_modules/react-native/ReactCommon/react/nativemodule/microtasks"
+  react-native-keyboard-controller:
+    :path: "../node_modules/react-native-keyboard-controller"
   react-native-safe-area-context:
     :path: "../node_modules/react-native-safe-area-context"
   react-native-slider:
@@ -2730,12 +2788,13 @@ EXTERNAL SOURCES:
 SPEC CHECKSUMS:
   AppAuth: 1c1a8afa7e12f2ec3a294d9882dfa5ab7d3cb063
   AppCheckCore: cc8fd0a3a230ddd401f326489c99990b013f0c4f
-  EXApplication: a9d1c46d473d36f61302a9a81db2379441f3f094
+  EXApplication: 13420f8139864183f8a04fd6099077bdf8cfb186
   EXAV: f33ecd2d85522045cb1f0cc2fae3aa53e4e0c3c0
-  EXConstants: e6e50cdfcb4524f40121d1fdcff24e97b7dcd2fd
+  EXConstants: 3feb66fd1d94202fc1f0946d74e029d8b224b60e
   EXImageLoader: e501c001bc40b8326605e82e6e80363c80fe06b5
   EXJSONUtils: 1d3e4590438c3ee593684186007028a14b3686cd
   EXManifests: 83ef0844fcf06d6099b12a7bdbd7d36fc0e1dd16
+  EXNotifications: 2a3feb7af6194828d9aafda72f63a9a03866230a
   Expo: 6a34bc084aa55beac2628ed1332def9505a791a1
   expo-dev-client: 12ef7d5b14d93e309922acea78dcd851db583a87
   expo-dev-launcher: 47994056008ffdc30a6a5e328a375b3e30a8db05
@@ -2744,6 +2803,7 @@ SPEC CHECKSUMS:
   ExpoAdapterGoogleSignIn: bf36536501f7d1472951f2e227492435c7add98b
   ExpoAsset: 3c3b7dd9b1318846a02ef05ce420e63d542aeb9f
   ExpoCrypto: 4c50a152f5939e16a2ca10be77b002a3a391c4d3
+  ExpoDevice: 0773c782b055558ca9b40b74aa4a8133a66cd0d2
   ExpoFileSystem: 56f081328f5b48a6dcc8302eee51d4f2d9d0049b
   ExpoFont: b881d43057dceb7b31ff767b24f612609e80f60f
   ExpoImageManipulator: 099b82d913588b3984253f186b84b129792cf2e3
@@ -2796,6 +2856,7 @@ SPEC CHECKSUMS:
   React-logger: c3e2f8a2e284341205f61eef3d4677ab5a309dfd
   React-Mapbuffer: 603c18db65844bb81dbe62fee8fcc976eaeb7108
   React-microtasksnativemodule: d77e0c426fce34c23227394c96ca1033b30c813c
+  react-native-keyboard-controller: 5587bad7f102125e2020720c4e37e0b58ff5e52e
   react-native-safe-area-context: 53f796cb6c814661bbe99fbdfd0585d07b996cdd
   react-native-slider: b76fa3dd989d25e8c2751c2a546674dfc0c2b6f8
   react-native-webview: a4f0775a31b73cf13cfc3d2d2b119aa94ec76e49

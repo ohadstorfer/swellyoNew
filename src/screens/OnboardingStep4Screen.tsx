@@ -11,6 +11,7 @@ import {
   NativeSyntheticEvent,
   NativeScrollEvent,
   Alert,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { TextInput as PaperTextInput } from 'react-native-paper';
@@ -22,6 +23,8 @@ import Svg, { Circle, Rect, Defs, Filter, FeFlood, FeColorMatrix, FeOffset, FeGa
 // CountryPicker import removed - using custom searchable modal on all platforms
 // Image picker will be conditionally imported
 import { Text } from '../components/Text';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { GalleryPermissionOverlay } from '../components/GalleryPermissionOverlay';
 import { colors, spacing, typography } from '../styles/theme';
 import { OnboardingData } from './OnboardingStep1Screen';
 import { uploadProfileImage } from '../services/storage/storageService';
@@ -981,6 +984,8 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
   updateFormData,
   isLoading = false,
 }) => {
+  const [showPermissionOverlay, setShowPermissionOverlay] = useState(false);
+  const pendingPickerRef = useRef<(() => void) | null>(null);
   const [profilePicture, setProfilePicture] = useState<string | null>(
     initialData.profilePicture || null
   );
@@ -1041,9 +1046,20 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
       const launchPicker = async () => {
         try {
           const ImagePicker = require('expo-image-picker');
-          const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+          const { status, canAskAgain } = await ImagePicker.requestMediaLibraryPermissionsAsync();
           if (status !== 'granted') {
-            Alert.alert('Permission Required', 'Sorry, we need media library permissions to set your profile picture!');
+            if (!canAskAgain) {
+              Alert.alert(
+                'Permission Required',
+                'Swellyo needs access to your photos. Please enable it in your device settings.',
+                [
+                  { text: 'Cancel', style: 'cancel' },
+                  { text: 'Open Settings', onPress: () => Linking.openSettings() },
+                ]
+              );
+            } else {
+              Alert.alert('Permission Required', 'Sorry, we need media library permissions to set your profile picture!');
+            }
             return;
           }
 
@@ -1064,24 +1080,12 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
         }
       };
 
-      // Check if permission already granted — skip the explanation alert
-      try {
-        const ImagePicker = require('expo-image-picker');
-        const { status } = await ImagePicker.getMediaLibraryPermissionsAsync();
-        if (status === 'granted') {
-          await launchPicker();
-        } else {
-          Alert.alert(
-            'Access Your Gallery',
-            'Swellyo needs access to your photos and videos to let you personalize your profile.',
-            [
-              { text: 'Cancel', style: 'cancel' },
-              { text: 'Continue', onPress: launchPicker },
-            ]
-          );
-        }
-      } catch {
+      const primerShown = await AsyncStorage.getItem('@swellyo_gallery_primer_shown');
+      if (primerShown) {
         await launchPicker();
+      } else {
+        pendingPickerRef.current = () => launchPicker();
+        setShowPermissionOverlay(true);
       }
     }
   };
@@ -1479,6 +1483,21 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
           setCropModalVisible(false);
         }}
         onCancel={() => setCropModalVisible(false)}
+      />
+    )}
+    {Platform.OS !== 'web' && (
+      <GalleryPermissionOverlay
+        visible={showPermissionOverlay}
+        onAllow={async () => {
+          await AsyncStorage.setItem('@swellyo_gallery_primer_shown', 'true');
+          setShowPermissionOverlay(false);
+          pendingPickerRef.current?.();
+          pendingPickerRef.current = null;
+        }}
+        onDismiss={() => {
+          setShowPermissionOverlay(false);
+          pendingPickerRef.current = null;
+        }}
       />
     )}
   </>

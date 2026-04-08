@@ -1,5 +1,7 @@
 import PostHog from 'posthog-react-native';
 import { Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { supabase, isSupabaseConfigured } from '../../config/supabase';
 
 // PostHog configuration
 const POSTHOG_API_KEY = process.env.EXPO_PUBLIC_POSTHOG_API_KEY || '';
@@ -10,10 +12,13 @@ interface QueuedEvent {
   properties?: Record<string, any>;
 }
 
+const ANALYTICS_OPT_OUT_KEY = 'swellyo_privacy_analytics';
+
 class AnalyticsService {
   private posthogInstance: PostHog | null = null;
   private isInitialized = false;
   private isInitializing = false;
+  private isOptedOut = false;
   private eventQueue: QueuedEvent[] = [];
   private hasCompletedOnboarding = false;
   private hasEnteredSwellyChat = false;
@@ -37,6 +42,17 @@ class AnalyticsService {
     this.isInitializing = true;
 
     try {
+      // Check opt-out preference
+      const optOutValue = await AsyncStorage.getItem(ANALYTICS_OPT_OUT_KEY);
+      // Key stores whether analytics is enabled (true = opted in, false = opted out)
+      // Default is opted in (true) when no value is stored
+      if (optOutValue !== null && JSON.parse(optOutValue) === false) {
+        this.isOptedOut = true;
+        this.isInitializing = false;
+        console.log('[Analytics] 🚫 User opted out of analytics — skipping PostHog init');
+        return;
+      }
+
       console.log('[Analytics] 🚀 Starting PostHog initialization...', {
         hasApiKey: !!POSTHOG_API_KEY,
         host: POSTHOG_HOST,
@@ -150,7 +166,12 @@ class AnalyticsService {
    */
   track(eventName: string, properties?: Record<string, any>) {
     const logPrefix = `[Analytics] ${eventName}`;
-    
+
+    if (this.isOptedOut) {
+      console.log(`${logPrefix} 🚫 Skipped (user opted out)`);
+      return;
+    }
+
     if (this.isInitialized && this.posthogInstance) {
       // PostHog is ready, track immediately
       try {
@@ -191,6 +212,52 @@ class AnalyticsService {
   setUserProperties(properties: Record<string, any>) {
     if (!this.isInitialized || !this.posthogInstance) return;
     this.posthogInstance.setPersonProperties(properties);
+  }
+
+  /**
+   * Opt out or back in to analytics tracking.
+   * Called when user toggles the Analytics preference.
+   * Writes to both AsyncStorage (immediate local gate) and Supabase (persists across devices).
+   */
+  async setOptOut(optedOut: boolean) {
+    this.isOptedOut = optedOut;
+    await AsyncStorage.setItem(ANALYTICS_OPT_OUT_KEY, JSON.stringify(!optedOut));
+    console.log(`[Analytics] ${optedOut ? '🚫 Opted out' : '✅ Opted back in'}`);
+
+    // Sync to Supabase so preference survives reinstalls and follows user across devices
+    if (isSupabaseConfigured()) {
+      try {
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        if (authUser) {
+          await supabase
+            .from('surfers')
+            .update({ analytics_opt_out: optedOut })
+            .eq('user_id', authUser.id);
+          console.log('[Analytics] Synced opt-out preference to Supabase');
+        }
+      } catch (error) {
+        console.error('[Analytics] Failed to sync opt-out to Supabase:', error);
+      }
+    }
+  }
+
+  /**
+   * Sync opt-out preference from server (called after login/session restore).
+   * Server value wins over local — ensures a user who opted out on another device stays opted out.
+   */
+  async syncOptOutFromServer(serverOptOut: boolean | undefined) {
+    if (serverOptOut === undefined || serverOptOut === null) return;
+
+    const localValue = await AsyncStorage.getItem(ANALYTICS_OPT_OUT_KEY);
+    const localOptedIn = localValue === null ? true : JSON.parse(localValue);
+    const localOptedOut = !localOptedIn;
+
+    // Server wins if there's a mismatch
+    if (serverOptOut !== localOptedOut) {
+      this.isOptedOut = serverOptOut;
+      await AsyncStorage.setItem(ANALYTICS_OPT_OUT_KEY, JSON.stringify(!serverOptOut));
+      console.log(`[Analytics] Synced from server: ${serverOptOut ? 'opted out' : 'opted in'}`);
+    }
   }
 
   /**

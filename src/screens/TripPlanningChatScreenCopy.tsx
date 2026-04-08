@@ -262,6 +262,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   // AI report state
   const [reportSheetVisible, setReportSheetVisible] = useState(false);
   const [reportMessageText, setReportMessageText] = useState('');
+  const [reportMessageId, setReportMessageId] = useState<string | null>(null);
   const [messageIdsUnblockedByFilterDeletion, setMessageIdsUnblockedByFilterDeletion] = useState<Record<string, true>>({});
   const [trashHoverProgress, setTrashHoverProgress] = useState(0);
   const [showNewChatModal, setShowNewChatModal] = useState(false);
@@ -1627,6 +1628,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   const handleLongPressMessage = (message: Message) => {
     if (message.isUser) return;
     setReportMessageText(message.text);
+    setReportMessageId(message.id);
     setReportSheetVisible(true);
   };
 
@@ -1637,8 +1639,9 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
       const requestData = message.actionRow?.requestData;
       const hasActionRow = requestData != null;
       const disabled = selectedAction !== null;
+      const isDimmedMatch = reportSheetVisible && reportMessageId !== message.id;
       return (
-        <View>
+        <View style={isDimmedMatch ? styles.dimmedMessage : undefined}>
           <View style={[
             styles.messageContainer,
             styles.botMessageContainer,
@@ -1747,8 +1750,10 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
       </View>
     );
 
+    const isDimmed = reportSheetVisible && reportMessageId !== message.id;
+
     return (
-      <View>
+      <View style={isDimmed ? styles.dimmedMessage : undefined}>
         <View
           style={[
             styles.messageContainer,
@@ -1831,7 +1836,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
 
   const renderItem = useCallback(({ item }: { item: Message }) => {
     return renderMessage(item);
-  }, [messages, matchedUsers, filtersMenuVisible, pendingSearch, chatId, searchBtnSize, filterDisplayList]);
+  }, [messages, matchedUsers, filtersMenuVisible, pendingSearch, chatId, searchBtnSize, filterDisplayList, reportSheetVisible, reportMessageId]);
 
   const listHeaderComponent = useMemo(() => {
     if (!isLoading && !isInitializing && !isAwaitingFilterRemovalResponse) return null;
@@ -1850,7 +1855,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     <>
     <SafeAreaView style={styles.container} edges={['top']}>
       {/* Header */}
-      <View style={styles.headerContainer}>
+      <View style={[styles.headerContainer, reportSheetVisible && styles.dimmedMessage]}>
         <View style={styles.header}>
           <View style={styles.headerLeft}>
             <TouchableOpacity 
@@ -1907,12 +1912,14 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
           source={{ uri: getImageUrl('/chat background.png') }}
           style={styles.backgroundImage}
           resizeMode="cover"
+          imageStyle={reportSheetVisible ? { opacity: 0.15 } : undefined}
         >
           <FlatList
             ref={flatListRef}
             data={invertedMessages}
             renderItem={renderItem}
             keyExtractor={(item) => item.id}
+            extraData={reportMessageId}
             inverted
             style={styles.messagesList}
             contentContainerStyle={[styles.messagesContent, { flexGrow: 1, justifyContent: 'flex-end' }]}
@@ -1928,7 +1935,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         </ImageBackground>
 
         {/* Floating filters button: 7px from top (below header), 14px from right */}
-        <View style={styles.filtersButtonFloating} pointerEvents="box-none">
+        <View style={[styles.filtersButtonFloating, reportSheetVisible && styles.dimmedMessage]} pointerEvents="box-none">
           <TouchableOpacity
             onPress={() => setFiltersMenuVisible(true)}
             activeOpacity={1}
@@ -1945,7 +1952,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         </View>
 
         {/* Input Area */}
-        <View style={[styles.inputWrapper, { paddingBottom: keyboardVisible ? 4 : insets.bottom }]}>
+        <View style={[styles.inputWrapper, { paddingBottom: keyboardVisible ? 4 : insets.bottom }, reportSheetVisible && styles.dimmedMessage]}>
           <ChatTextInput
             value={inputText}
             onChangeText={setInputText}
@@ -2195,7 +2202,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
       visible={reportSheetVisible}
       messageText={reportMessageText}
       chatType="matching"
-      onClose={() => setReportSheetVisible(false)}
+      onClose={() => { setReportSheetVisible(false); setReportMessageId(null); }}
     />
     </>
   );
@@ -2874,5 +2881,8 @@ const styles = StyleSheet.create({
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     lineHeight: 22,
     color: colors.white,
+  },
+  dimmedMessage: {
+    opacity: 0.25,
   },
 });

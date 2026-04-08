@@ -5,12 +5,15 @@ import {
   TouchableOpacity,
   Platform,
   Alert,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Text } from '../components/Text';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { GalleryPermissionOverlay } from '../components/GalleryPermissionOverlay';
 import { colors, spacing } from '../styles/theme';
 import { useIsDesktopWeb, responsiveWidth } from '../utils/responsive';
 import { getSurfLevelMapping } from '../utils/surfLevelMapping';
@@ -81,6 +84,7 @@ export const OnboardingVideoUploadScreen: React.FC<OnboardingVideoUploadScreenPr
   const [userVideoUri, setUserVideoUri] = useState<string | null>(null);
   const [mimeType, setMimeType] = useState<string | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
+  const [showPermissionOverlay, setShowPermissionOverlay] = useState(false);
 
   const hasUserVideo = userVideoUri !== null;
 
@@ -318,9 +322,20 @@ export const OnboardingVideoUploadScreen: React.FC<OnboardingVideoUploadScreenPr
   const launchVideoPicker = async () => {
     try {
       const ImagePicker = require('expo-image-picker');
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      const { status, canAskAgain } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission Required', 'Sorry, we need media library permissions to upload your video!');
+        if (!canAskAgain) {
+          Alert.alert(
+            'Permission Required',
+            'Swellyo needs access to your photos. Please enable it in your device settings.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Open Settings', onPress: () => Linking.openSettings() },
+            ]
+          );
+        } else {
+          Alert.alert('Permission Required', 'Sorry, we need media library permissions to upload your video!');
+        }
         return;
       }
 
@@ -385,23 +400,11 @@ export const OnboardingVideoUploadScreen: React.FC<OnboardingVideoUploadScreenPr
       document.body.appendChild(input);
       input.click();
     } else {
-      try {
-        const ImagePicker = require('expo-image-picker');
-        const { status } = await ImagePicker.getMediaLibraryPermissionsAsync();
-        if (status === 'granted') {
-          await launchVideoPicker();
-        } else {
-          Alert.alert(
-            'Access Your Gallery',
-            'Swellyo needs access to your photos and videos to let you personalize your profile.',
-            [
-              { text: 'Cancel', style: 'cancel' },
-              { text: 'Continue', onPress: launchVideoPicker },
-            ]
-          );
-        }
-      } catch {
+      const primerShown = await AsyncStorage.getItem('@swellyo_gallery_primer_shown');
+      if (primerShown) {
         await launchVideoPicker();
+      } else {
+        setShowPermissionOverlay(true);
       }
     }
   };
@@ -415,6 +418,7 @@ export const OnboardingVideoUploadScreen: React.FC<OnboardingVideoUploadScreenPr
   };
 
   return (
+    <>
     <SafeAreaView style={styles.container}>
       <View style={[styles.content, isDesktop && styles.contentDesktop]}>
         {/* Header */}
@@ -512,6 +516,18 @@ export const OnboardingVideoUploadScreen: React.FC<OnboardingVideoUploadScreenPr
         </View>
       </View>
     </SafeAreaView>
+    {Platform.OS !== 'web' && (
+      <GalleryPermissionOverlay
+        visible={showPermissionOverlay}
+        onAllow={async () => {
+          await AsyncStorage.setItem('@swellyo_gallery_primer_shown', 'true');
+          setShowPermissionOverlay(false);
+          launchVideoPicker();
+        }}
+        onDismiss={() => setShowPermissionOverlay(false)}
+      />
+    )}
+    </>
   );
 };
 

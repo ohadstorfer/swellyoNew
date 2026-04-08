@@ -46,6 +46,7 @@ export interface SupabaseSurfer {
   wave_type_keywords?: string[]; // text[], nullable
   is_demo_user?: boolean; // boolean, default false
   finished_onboarding?: boolean; // boolean, default false
+  analytics_opt_out?: boolean; // boolean, default false - user opted out of PostHog analytics
   expo_push_token?: string; // text, nullable - Expo push notification token
   created_at: string; // timestamptz
   updated_at: string; // timestamptz
@@ -225,6 +226,7 @@ class SupabaseDatabaseService {
     lifestyleImageUrls?: Record<string, string> | null;
     waveTypeKeywords?: string[];
     isDemoUser?: boolean; // Whether this is a demo user
+    analyticsOptOut?: boolean; // Whether user opted out of analytics
   }): Promise<SupabaseSurfer> {
     if (!isSupabaseConfigured()) {
       throw new Error('Supabase is not configured. Please set up your Supabase credentials.');
@@ -382,6 +384,7 @@ class SupabaseDatabaseService {
         ...(surferData.lifestyleImageUrls !== undefined && { lifestyle_image_urls: surferData.lifestyleImageUrls ?? null }),
         wave_type_keywords: surferData.waveTypeKeywords,
         is_demo_user: surferData.isDemoUser ?? false, // Set is_demo_user flag
+        analytics_opt_out: surferData.analyticsOptOut,
       };
 
       let savedSurfer: SupabaseSurfer;

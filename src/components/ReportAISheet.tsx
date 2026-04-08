@@ -193,7 +193,7 @@ export function ReportAISheet({ visible, messageText, chatType, onClose, onRepor
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    backgroundColor: 'transparent',
     justifyContent: 'flex-end',
   },
   sheet: {

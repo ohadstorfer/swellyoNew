@@ -13,6 +13,8 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { ProfileImage } from '../components/ProfileImage';
 import { DeleteAccountScreen } from './DeleteAccountScreen';
+import { PrivacyPreferencesScreen } from './PrivacyPreferencesScreen';
+import { BlockedUsersScreen } from './BlockedUsersScreen';
 import { ReportBugOverlay } from '../components/ReportBugOverlay';
 
 // Settings menu icons
@@ -32,6 +34,8 @@ interface SettingsScreenProps {
 
 export function SettingsScreen({ onBack, userName, userAvatar, userEmail }: SettingsScreenProps) {
   const [showDeleteAccount, setShowDeleteAccount] = useState(false);
+  const [showPrivacyPreferences, setShowPrivacyPreferences] = useState(false);
+  const [showBlockedUsers, setShowBlockedUsers] = useState(false);
   const [showReportBug, setShowReportBug] = useState(false);
   const slideAnim = useRef(new Animated.Value(600)).current;
 
@@ -43,6 +47,22 @@ export function SettingsScreen({ onBack, userName, userAvatar, userEmail }: Sett
       useNativeDriver: true,
     }).start();
   }, []);
+
+  if (showPrivacyPreferences) {
+    return (
+      <PrivacyPreferencesScreen
+        onBack={() => setShowPrivacyPreferences(false)}
+      />
+    );
+  }
+
+  if (showBlockedUsers) {
+    return (
+      <BlockedUsersScreen
+        onBack={() => setShowBlockedUsers(false)}
+      />
+    );
+  }
 
   if (showDeleteAccount) {
     return (
@@ -91,9 +111,16 @@ export function SettingsScreen({ onBack, userName, userAvatar, userEmail }: Sett
         <ScrollView style={styles.settingsList} contentContainerStyle={styles.settingsListContent}>
           <Text style={styles.sectionTitle}>Settings</Text>
 
-          <TouchableOpacity style={styles.menuRow} activeOpacity={0.7}>
+          <TouchableOpacity style={styles.menuRow} activeOpacity={0.7} onPress={() => setShowPrivacyPreferences(true)}>
             <Image source={iconPrivacyPreferences} style={styles.menuIcon} resizeMode="contain" />
             <Text style={styles.menuRowText}>Privacy preferences</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.menuRow} activeOpacity={0.7} onPress={() => setShowBlockedUsers(true)}>
+            <View style={styles.menuIconContainer}>
+              <Ionicons name="ban-outline" size={20} color="#222B30" />
+            </View>
+            <Text style={styles.menuRowText}>Blocked users</Text>
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.menuRow} activeOpacity={0.7} onPress={() => Linking.openURL('https://www.swellyo.com/terms-and-conditions')}>
@@ -233,6 +260,12 @@ const styles = StyleSheet.create({
   menuIcon: {
     width: 24,
     height: 24,
+  },
+  menuIconContainer: {
+    width: 24,
+    height: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   menuRow: {
     flexDirection: 'row',
