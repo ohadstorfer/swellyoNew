@@ -263,6 +263,10 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   const [reportSheetVisible, setReportSheetVisible] = useState(false);
   const [reportMessageText, setReportMessageText] = useState('');
   const [reportMessageId, setReportMessageId] = useState<string | null>(null);
+  const [reportMessageTimestamp, setReportMessageTimestamp] = useState('');
+  const [reportMessageY, setReportMessageY] = useState<number | null>(null);
+  const [reportMessageX, setReportMessageX] = useState<number | null>(null);
+  const messageBubbleRefs = useRef<Record<string, View | null>>({});
   const [messageIdsUnblockedByFilterDeletion, setMessageIdsUnblockedByFilterDeletion] = useState<Record<string, true>>({});
   const [trashHoverProgress, setTrashHoverProgress] = useState(0);
   const [showNewChatModal, setShowNewChatModal] = useState(false);
@@ -1627,9 +1631,22 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
 
   const handleLongPressMessage = (message: Message) => {
     if (message.isUser) return;
-    setReportMessageText(message.text);
-    setReportMessageId(message.id);
-    setReportSheetVisible(true);
+    const ref = messageBubbleRefs.current[message.id];
+    if (ref) {
+      ref.measureInWindow((x, y, _w, _h) => {
+        setReportMessageX(x);
+        setReportMessageY(y);
+        setReportMessageText(message.text);
+        setReportMessageTimestamp(message.timestamp);
+        setReportMessageId(message.id);
+        setReportSheetVisible(true);
+      });
+    } else {
+      setReportMessageText(message.text);
+      setReportMessageTimestamp(message.timestamp);
+      setReportMessageId(message.id);
+      setReportSheetVisible(true);
+    }
   };
 
   const renderMessage = (message: Message) => {
@@ -1639,9 +1656,9 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
       const requestData = message.actionRow?.requestData;
       const hasActionRow = requestData != null;
       const disabled = selectedAction !== null;
-      const isDimmedMatch = reportSheetVisible && reportMessageId !== message.id;
+      const isSelectedMatch = reportSheetVisible && reportMessageId === message.id;
       return (
-        <View style={isDimmedMatch ? styles.dimmedMessage : undefined}>
+        <View style={isSelectedMatch ? styles.hiddenMessage : undefined}>
           <View style={[
             styles.messageContainer,
             styles.botMessageContainer,
@@ -1729,6 +1746,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     // Regular message rendering
     const bubbleContent = (
       <View
+        ref={(r) => { if (!message.isUser) messageBubbleRefs.current[message.id] = r; }}
         style={[
           styles.messageBubble,
           message.isUser ? styles.userMessageBubble : styles.botMessageBubble,
@@ -1750,10 +1768,10 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
       </View>
     );
 
-    const isDimmed = reportSheetVisible && reportMessageId !== message.id;
+    const isSelected = reportSheetVisible && reportMessageId === message.id;
 
     return (
-      <View style={isDimmed ? styles.dimmedMessage : undefined}>
+      <View style={isSelected ? styles.hiddenMessage : undefined}>
         <View
           style={[
             styles.messageContainer,
@@ -1855,7 +1873,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     <>
     <SafeAreaView style={styles.container} edges={['top']}>
       {/* Header */}
-      <View style={[styles.headerContainer, reportSheetVisible && styles.dimmedMessage]}>
+      <View style={styles.headerContainer}>
         <View style={styles.header}>
           <View style={styles.headerLeft}>
             <TouchableOpacity 
@@ -1912,7 +1930,6 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
           source={{ uri: getImageUrl('/chat background.png') }}
           style={styles.backgroundImage}
           resizeMode="cover"
-          imageStyle={reportSheetVisible ? { opacity: 0.15 } : undefined}
         >
           <FlatList
             ref={flatListRef}
@@ -1935,7 +1952,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         </ImageBackground>
 
         {/* Floating filters button: 7px from top (below header), 14px from right */}
-        <View style={[styles.filtersButtonFloating, reportSheetVisible && styles.dimmedMessage]} pointerEvents="box-none">
+        <View style={styles.filtersButtonFloating} pointerEvents="box-none">
           <TouchableOpacity
             onPress={() => setFiltersMenuVisible(true)}
             activeOpacity={1}
@@ -1952,7 +1969,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         </View>
 
         {/* Input Area */}
-        <View style={[styles.inputWrapper, { paddingBottom: keyboardVisible ? 4 : insets.bottom }, reportSheetVisible && styles.dimmedMessage]}>
+        <View style={[styles.inputWrapper, { paddingBottom: keyboardVisible ? 4 : insets.bottom }]}>
           <ChatTextInput
             value={inputText}
             onChangeText={setInputText}
@@ -2197,13 +2214,16 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
           </Pressable>
         </Pressable>
       </Modal>
+      <ReportAISheet
+        visible={reportSheetVisible}
+        messageText={reportMessageText}
+        messageTimestamp={reportMessageTimestamp}
+        messageX={reportMessageX}
+        messageY={reportMessageY}
+        chatType="matching"
+        onClose={() => { setReportSheetVisible(false); setReportMessageId(null); setReportMessageY(null); setReportMessageX(null); }}
+      />
     </SafeAreaView>
-    <ReportAISheet
-      visible={reportSheetVisible}
-      messageText={reportMessageText}
-      chatType="matching"
-      onClose={() => { setReportSheetVisible(false); setReportMessageId(null); }}
-    />
     </>
   );
 };
@@ -2882,7 +2902,7 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     color: colors.white,
   },
-  dimmedMessage: {
-    opacity: 0.25,
+  hiddenMessage: {
+    opacity: 0,
   },
 });

@@ -11,17 +11,14 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { analyticsService } from '../services/analytics/analyticsService';
+import { BlockedUsersScreen } from './BlockedUsersScreen';
 
 const STORAGE_KEYS = {
   analytics: 'swellyo_privacy_analytics',
-  camera: 'swellyo_privacy_camera',
-  profileExpansion: 'swellyo_privacy_profile_expansion',
 };
 
 const DEFAULTS = {
   analytics: true,
-  camera: true,
-  profileExpansion: false,
 };
 
 interface ToggleSwitchProps {
@@ -68,21 +65,14 @@ interface PrivacyPreferencesScreenProps {
 
 export function PrivacyPreferencesScreen({ onBack }: PrivacyPreferencesScreenProps) {
   const [analytics, setAnalytics] = useState(DEFAULTS.analytics);
-  const [camera, setCamera] = useState(DEFAULTS.camera);
-  const [profileExpansion, setProfileExpansion] = useState(DEFAULTS.profileExpansion);
+  const [showBlockedUsers, setShowBlockedUsers] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     (async () => {
       try {
-        const [a, c, p] = await Promise.all([
-          AsyncStorage.getItem(STORAGE_KEYS.analytics),
-          AsyncStorage.getItem(STORAGE_KEYS.camera),
-          AsyncStorage.getItem(STORAGE_KEYS.profileExpansion),
-        ]);
+        const a = await AsyncStorage.getItem(STORAGE_KEYS.analytics);
         if (a !== null) setAnalytics(JSON.parse(a));
-        if (c !== null) setCamera(JSON.parse(c));
-        if (p !== null) setProfileExpansion(JSON.parse(p));
       } catch (e) {
         console.error('Error loading privacy preferences:', e);
       }
@@ -101,6 +91,14 @@ export function PrivacyPreferencesScreen({ onBack }: PrivacyPreferencesScreenPro
   };
 
   if (!loaded) return null;
+
+  if (showBlockedUsers) {
+    return (
+      <BlockedUsersScreen
+        onBack={() => setShowBlockedUsers(false)}
+      />
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -130,31 +128,12 @@ export function PrivacyPreferencesScreen({ onBack }: PrivacyPreferencesScreenPro
             </Text>
           </View>
 
-          <View style={styles.row}>
-            <View style={styles.rowHeader}>
-              <Text style={styles.rowTitle}>Allow camera access</Text>
-              <ToggleSwitch
-                value={camera}
-                onToggle={() => toggle(STORAGE_KEYS.camera, camera, setCamera)}
-              />
-            </View>
-            <Text style={styles.rowDescription}>
-              We use your camera to upload profile photos and share surf moments. We never access your camera without your action.
-            </Text>
-          </View>
+          <View style={styles.sectionDivider} />
 
-          <View style={styles.row}>
-            <View style={styles.rowHeader}>
-              <Text style={styles.rowTitle}>Allow profile picture expansion</Text>
-              <ToggleSwitch
-                value={profileExpansion}
-                onToggle={() => toggle(STORAGE_KEYS.profileExpansion, profileExpansion, setProfileExpansion)}
-              />
-            </View>
-            <Text style={styles.rowDescription}>
-              Let people see a large version of your profile picture to help them know it's you.
-            </Text>
-          </View>
+          <TouchableOpacity style={styles.contactsSection} activeOpacity={0.7} onPress={() => setShowBlockedUsers(true)}>
+            <Text style={styles.rowTitle}>Contacts</Text>
+            <Text style={styles.rowDescription}>Blocked accounts</Text>
+          </TouchableOpacity>
         </ScrollView>
       </View>
     </View>
@@ -250,6 +229,16 @@ const styles = StyleSheet.create({
     fontWeight: '400' as const,
     color: '#333',
     lineHeight: 18,
+  },
+  sectionDivider: {
+    height: 1,
+    backgroundColor: '#E3E3E3',
+  },
+  contactsSection: {
+    paddingLeft: 12,
+    paddingRight: 8,
+    paddingVertical: 10,
+    gap: 4,
   },
   toggleTrack: {
     width: 43,

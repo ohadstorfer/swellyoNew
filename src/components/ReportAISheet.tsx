@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   Platform,
   Animated,
-  Modal,
   Pressable,
   ActivityIndicator,
 } from 'react-native';
@@ -23,6 +22,9 @@ const REPORT_REASONS = [
 interface ReportAISheetProps {
   visible: boolean;
   messageText: string;
+  messageTimestamp?: string;
+  messageX?: number | null;
+  messageY?: number | null;
   chatType: 'onboarding' | 'matching';
   onClose: () => void;
   onReported?: () => void;
@@ -62,7 +64,7 @@ async function sendAIReport(messageText: string, reason: string, chatType: strin
   }
 }
 
-export function ReportAISheet({ visible, messageText, chatType, onClose, onReported }: ReportAISheetProps) {
+export function ReportAISheet({ visible, messageText, messageTimestamp, messageX, messageY, chatType, onClose, onReported }: ReportAISheetProps) {
   const slideAnim = useRef(new Animated.Value(300)).current;
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [isSending, setIsSending] = useState(false);
@@ -131,12 +133,31 @@ export function ReportAISheet({ visible, messageText, chatType, onClose, onRepor
   if (!visible) return null;
 
   return (
-    <Modal visible={visible} transparent animationType="none">
+    <>
       {!showConfirmation ? (
-        <Pressable style={styles.backdrop} onPress={handleClose}>
+        <>
+          {/* Dark backdrop — absolute positioned, zIndex 5 */}
+          <Pressable style={styles.backdrop} onPress={handleClose} />
+
+          {/* Highlighted message — positioned at exact original location, zIndex 10 */}
+          {messageText && messageY != null ? (
+            <View style={[styles.highlightedMessageWrapper, { top: messageY, left: messageX ?? 16 }]} pointerEvents="none">
+              <View style={styles.highlightedBubble}>
+                <View style={styles.highlightedTextContainer}>
+                  <Text style={styles.highlightedText}>{messageText}</Text>
+                </View>
+                {messageTimestamp ? (
+                  <View style={styles.highlightedTimestampContainer}>
+                    <Text style={styles.highlightedTimestamp}>{messageTimestamp}</Text>
+                  </View>
+                ) : null}
+              </View>
+            </View>
+          ) : null}
+
+          {/* Bottom sheet — absolute positioned, zIndex 15 */}
           <Animated.View
             style={[styles.sheet, { transform: [{ translateY: slideAnim }] }]}
-            onStartShouldSetResponder={() => true}
           >
             {/* Drag handle */}
             <View style={styles.handleContainer}>
@@ -169,7 +190,7 @@ export function ReportAISheet({ visible, messageText, chatType, onClose, onRepor
             {/* Bottom spacing for safe area */}
             <View style={styles.bottomSpacer} />
           </Animated.View>
-        </Pressable>
+        </>
       ) : (
         <Animated.View style={[styles.confirmBackdrop, { opacity: confirmFade }]}>
           <Animated.View style={[styles.confirmCard, { transform: [{ scale: confirmScale }] }]}>
@@ -186,21 +207,30 @@ export function ReportAISheet({ visible, messageText, chatType, onClose, onRepor
           </Animated.View>
         </Animated.View>
       )}
-    </Modal>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
   backdrop: {
-    flex: 1,
-    backgroundColor: 'transparent',
-    justifyContent: 'flex-end',
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(33, 33, 33, 0.6)',
+    zIndex: 5,
   },
   sheet: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
     backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     paddingHorizontal: 24,
+    zIndex: 15,
   },
   handleContainer: {
     alignItems: 'center',
@@ -247,11 +277,16 @@ const styles = StyleSheet.create({
   },
   // Confirmation overlay
   confirmBackdrop: {
-    flex: 1,
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 32,
+    zIndex: 20,
   },
   confirmCard: {
     backgroundColor: '#FFFFFF',
@@ -309,5 +344,45 @@ const styles = StyleSheet.create({
     fontWeight: '600' as const,
     color: '#FFFFFF',
     lineHeight: 22,
+  },
+  highlightedMessageWrapper: {
+    position: 'absolute',
+    zIndex: 10,
+  },
+  highlightedBubble: {
+    maxWidth: 268,
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 2,
+    borderTopRightRadius: 16,
+    borderBottomLeftRadius: 16,
+    borderBottomRightRadius: 16,
+    paddingTop: 16,
+    paddingBottom: 8,
+    paddingHorizontal: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.08,
+    shadowRadius: 20,
+    elevation: 3,
+  },
+  highlightedTextContainer: {
+    marginBottom: 10,
+  },
+  highlightedText: {
+    color: '#333333',
+    fontSize: 18,
+    fontWeight: '400' as const,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    lineHeight: 22,
+  },
+  highlightedTimestampContainer: {
+    alignItems: 'flex-start',
+  },
+  highlightedTimestamp: {
+    fontSize: 14,
+    fontWeight: '400' as const,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    lineHeight: 20,
+    color: 'rgba(123, 123, 123, 0.5)',
   },
 });
