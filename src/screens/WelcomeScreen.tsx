@@ -454,6 +454,15 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
 
   const handleGoogleSignIn = async (ageVerified = false) => {
     if (!ageVerified) {
+      // Skip age sheet if DOB already verified on this device
+      const existingDob = await ageGateService.getDOB();
+      if (existingDob) {
+        const age = calculateAgeFromDOB(existingDob);
+        if (age !== null && age >= 18) {
+          handleGoogleSignIn(true);
+          return;
+        }
+      }
       openAgeSheet('google');
       return;
     }
@@ -712,8 +721,17 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
 
   console.log('WelcomeScreen rendering - Platform:', Platform.OS);
   
-  const handleAppleSignIn = (ageVerified = false) => {
+  const handleAppleSignIn = async (ageVerified = false) => {
     if (!ageVerified) {
+      // Skip age sheet if DOB already verified on this device
+      const existingDob = await ageGateService.getDOB();
+      if (existingDob) {
+        const age = calculateAgeFromDOB(existingDob);
+        if (age !== null && age >= 18) {
+          handleAppleSignIn(true);
+          return;
+        }
+      }
       openAgeSheet('apple');
       return;
     }
@@ -754,7 +772,8 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
           <View style={styles.bottomContent}>
             {/* Login Buttons */}
             <View style={welcomeStyles.buttonsContainer}>
-              {/* Apple Sign In Button */}
+              {/* Apple Sign In Button — hidden on Android */}
+              {Platform.OS !== 'android' && (
               <TouchableOpacity
                 onPress={() => handleAppleSignIn()}
                 disabled={!agreedToTerms || isLoading || isAgeBlocked}
@@ -768,6 +787,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
                   </RNText>
                 </View>
               </TouchableOpacity>
+              )}
 
               {/* Google Sign In Button */}
               <TouchableOpacity
