@@ -3,12 +3,15 @@ import {
   View,
   StyleSheet,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   Platform,
   Alert,
   Image,
   Text as RNText,
   Animated,
   Linking,
+  ScrollView,
+  Dimensions,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Logo } from '../components/Logo';
@@ -23,6 +26,8 @@ import { useOnboarding } from '../context/OnboardingContext';
 import { getImageUrl } from '../services/media/imageService';
 import { useIsMobile, responsiveWidth } from '../utils/responsive';
 import { ONBOARDING_WELCOME_IMAGE_URLS } from './OnboardingWelcomeScreen';
+import { calculateAgeFromDOB, dateToISOString } from '../utils/ageCalculation';
+import { ageGateService } from '../services/ageGate/ageGateService';
 
 interface WelcomeScreenProps {
   onGetStarted: () => void;
@@ -136,12 +141,19 @@ const CheckboxIcon: React.FC<{ checked: boolean }> = ({ checked }) => {
 
 const TERMS_URL = 'https://www.swellyo.com/terms-of-service';
 const PRIVACY_URL = 'https://www.swellyo.com/privacy-policy';
+const AGE_PICKER_ITEM_HEIGHT = 50;
 
 export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDemoChat, onSkipDemo, isCheckingAuth = false }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [isDemoLoading, setIsDemoLoading] = useState(false);
   const [isSkipDemoLoading, setIsSkipDemoLoading] = useState(false);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
+  const [isAgeBlocked, setIsAgeBlocked] = useState(false);
+  const [showAgeSheet, setShowAgeSheet] = useState(false);
+  const [ageSheetError, setAgeSheetError] = useState(false);
+  const [pendingProvider, setPendingProvider] = useState<'google' | 'apple' | null>(null);
+  const sheetAnim = useRef(new Animated.Value(0)).current;
+  const overlayAnim = useRef(new Animated.Value(0)).current;
   const { setUser, updateFormData, checkOnboardingStatus } = useOnboarding();
   
   // Use responsive hook for accurate mobile detection
@@ -174,6 +186,131 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
     inputRange: [0, 1],
     outputRange: ['0deg', '360deg'],
   });
+
+  // Check age gate on mount
+  useEffect(() => {
+    ageGateService.checkBlocked().then(({ blocked }) => {
+      if (blocked) setIsAgeBlocked(true);
+    });
+  }, []);
+
+  // Age verification scroll picker state
+  const ITEM_HEIGHT = AGE_PICKER_ITEM_HEIGHT;
+  const currentYear = new Date().getFullYear();
+  const defaultDate = new Date(currentYear - 18, 0, 1);
+  const [pickerDate, setPickerDate] = useState<Date>(defaultDate);
+  const monthScrollRef = useRef<ScrollView>(null);
+  const dayScrollRef = useRef<ScrollView>(null);
+  const yearScrollRef = useRef<ScrollView>(null);
+  const isSnapping = useRef(false);
+  const monthScrollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dayScrollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const yearScrollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+  const getDaysInMonth = (month: number, year: number) => new Date(year, month + 1, 0).getDate();
+
+  const snapToItem = (ref: React.RefObject<ScrollView | null>, index: number) => {
+    if (ref.current) {
+      isSnapping.current = true;
+      ref.current.scrollTo({ y: index * ITEM_HEIGHT, animated: true });
+      setTimeout(() => { isSnapping.current = false; }, 350);
+    }
+  };
+
+  const openAgeSheet = (provider: 'google' | 'apple') => {
+    setPendingProvider(provider);
+    setAgeSheetError(false);
+    setPickerDate(defaultDate);
+    setShowAgeSheet(true);
+    Animated.parallel([
+      Animated.timing(overlayAnim, { toValue: 1, duration: 250, useNativeDriver: true }),
+      Animated.spring(sheetAnim, { toValue: 1, tension: 65, friction: 11, useNativeDriver: true }),
+    ]).start();
+    // Scroll to default position after sheet opens
+    setTimeout(() => {
+      const monthIndex = defaultDate.getMonth();
+      const dayIndex = defaultDate.getDate() - 1;
+      const yearIndex = defaultDate.getFullYear() - (currentYear - 120);
+      isSnapping.current = true;
+      monthScrollRef.current?.scrollTo({ y: monthIndex * ITEM_HEIGHT, animated: false });
+      dayScrollRef.current?.scrollTo({ y: dayIndex * ITEM_HEIGHT, animated: false });
+      yearScrollRef.current?.scrollTo({ y: yearIndex * ITEM_HEIGHT, animated: false });
+      setTimeout(() => { isSnapping.current = false; }, 100);
+    }, 300);
+  };
+
+  const closeAgeSheet = () => {
+    Animated.parallel([
+      Animated.timing(overlayAnim, { toValue: 0, duration: 200, useNativeDriver: true }),
+      Animated.timing(sheetAnim, { toValue: 0, duration: 200, useNativeDriver: true }),
+    ]).start(() => {
+      setShowAgeSheet(false);
+      setPendingProvider(null);
+    });
+  };
+
+  const [isVerifying, setIsVerifying] = useState(false);
+
+  const handleAgeVerifyContinue = async () => {
+    if (isVerifying) return;
+    setIsVerifying(true);
+
+    const dob = dateToISOString(pickerDate);
+    const age = calculateAgeFromDOB(dob);
+    const provider = pendingProvider;
+
+    if (age !== null && age >= 18) {
+      // Store DOB for later use in onboarding step 4
+      await ageGateService.setDOB(dob);
+      closeAgeSheet();
+      // Proceed with sign-in after sheet closes
+      setTimeout(() => {
+        setIsVerifying(false);
+        if (provider === 'google') {
+          handleGoogleSignIn(true);
+        } else if (provider === 'apple') {
+          handleAppleSignIn(true);
+        }
+      }, 250);
+    } else {
+      // Underage — block
+      await ageGateService.setBlocked(dob);
+      setAgeSheetError(true);
+      setIsAgeBlocked(true);
+      setIsVerifying(false);
+    }
+  };
+
+  const handleScrollEnd = (
+    ref: React.RefObject<ScrollView | null>,
+    timerRef: React.MutableRefObject<ReturnType<typeof setTimeout> | null>,
+    type: 'month' | 'day' | 'year',
+    offsetY: number,
+  ) => {
+    if (isSnapping.current) return;
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => {
+      const index = Math.round(offsetY / ITEM_HEIGHT);
+      snapToItem(ref, index);
+      setPickerDate(prev => {
+        const newDate = new Date(prev);
+        if (type === 'month') {
+          newDate.setMonth(index);
+          const maxDay = getDaysInMonth(index, newDate.getFullYear());
+          if (newDate.getDate() > maxDay) newDate.setDate(maxDay);
+        } else if (type === 'day') {
+          newDate.setDate(index + 1);
+        } else {
+          newDate.setFullYear((currentYear - 120) + index);
+          const maxDay = getDaysInMonth(newDate.getMonth(), (currentYear - 120) + index);
+          if (newDate.getDate() > maxDay) newDate.setDate(maxDay);
+        }
+        return newDate;
+      });
+    }, 80);
+  };
 
   useEffect(() => {
     // Load Montserrat font from Google Fonts for web
@@ -315,7 +452,11 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
     checkAuthState();
   }, [setUser, onGetStarted, updateFormData]);
 
-  const handleGoogleSignIn = async () => {
+  const handleGoogleSignIn = async (ageVerified = false) => {
+    if (!ageVerified) {
+      openAgeSheet('google');
+      return;
+    }
     console.log('Google Sign-In button pressed');
     let redirectTimeout: ReturnType<typeof setTimeout> | null = null;
     
@@ -571,7 +712,11 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
 
   console.log('WelcomeScreen rendering - Platform:', Platform.OS);
   
-  const handleAppleSignIn = () => {
+  const handleAppleSignIn = (ageVerified = false) => {
+    if (!ageVerified) {
+      openAgeSheet('apple');
+      return;
+    }
     // Mockup — Apple Sign In not yet implemented
     Alert.alert('Coming Soon', 'Apple Sign In will be available soon.');
   };
@@ -611,9 +756,9 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
             <View style={welcomeStyles.buttonsContainer}>
               {/* Apple Sign In Button */}
               <TouchableOpacity
-                onPress={handleAppleSignIn}
-                disabled={!agreedToTerms || isLoading}
-                style={[welcomeStyles.appleButton, (!agreedToTerms || isLoading) && styles.buttonDisabled]}
+                onPress={() => handleAppleSignIn()}
+                disabled={!agreedToTerms || isLoading || isAgeBlocked}
+                style={[welcomeStyles.appleButton, (!agreedToTerms || isLoading || isAgeBlocked) && styles.buttonDisabled]}
                 activeOpacity={0.8}
               >
                 <View style={styles.buttonContent}>
@@ -626,9 +771,9 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
 
               {/* Google Sign In Button */}
               <TouchableOpacity
-                onPress={handleGoogleSignIn}
-                disabled={!agreedToTerms || isLoading}
-                style={[welcomeStyles.googleButton, (!agreedToTerms || isLoading) && styles.buttonDisabled]}
+                onPress={() => handleGoogleSignIn()}
+                disabled={!agreedToTerms || isLoading || isAgeBlocked}
+                style={[welcomeStyles.googleButton, (!agreedToTerms || isLoading || isAgeBlocked) && styles.buttonDisabled]}
                 activeOpacity={0.8}
               >
                 <View style={styles.buttonContent}>
@@ -715,9 +860,245 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
           </View>
           )}
         </View>
+
+      {/* Age Verification Bottom Sheet */}
+      {showAgeSheet && (
+        <>
+          <TouchableWithoutFeedback onPress={ageSheetError ? closeAgeSheet : undefined}>
+            <Animated.View style={[ageStyles.overlay, { opacity: overlayAnim }]} />
+          </TouchableWithoutFeedback>
+          <Animated.View
+            style={[
+              ageStyles.sheet,
+              {
+                transform: [{
+                  translateY: sheetAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [600, 0],
+                  }),
+                }],
+              },
+            ]}
+          >
+            <View style={ageStyles.sheetHandle} />
+
+            {/* Title */}
+            {ageSheetError ? (
+              <RNText style={ageStyles.sheetTitleError}>
+                Sorry, but you are not eligible to use Swellyo at this time.
+              </RNText>
+            ) : (
+              <>
+                <RNText style={ageStyles.sheetTitle}>Age verification</RNText>
+                <RNText style={ageStyles.sheetSubtitle}>Please enter your date of birth.</RNText>
+              </>
+            )}
+
+            <View style={ageStyles.sheetDivider} />
+
+            {/* Date Picker */}
+            <RNText style={ageStyles.pickerLabel}>What's your date of birth?</RNText>
+
+            <View style={ageStyles.pickerContainer}>
+              {/* Month */}
+              <View style={ageStyles.pickerColumn}>
+                <ScrollView
+                  ref={monthScrollRef}
+                  showsVerticalScrollIndicator={false}
+                  snapToInterval={ITEM_HEIGHT}
+                  decelerationRate="fast"
+                  scrollEnabled={!ageSheetError}
+                  onScroll={(e) => handleScrollEnd(monthScrollRef, monthScrollTimer, 'month', e.nativeEvent.contentOffset.y)}
+                  scrollEventThrottle={16}
+                  contentContainerStyle={{ paddingVertical: ITEM_HEIGHT * 2 }}
+                >
+                  {MONTHS.map((m, i) => (
+                    <View key={m} style={ageStyles.pickerItem}>
+                      <RNText style={[ageStyles.pickerItemText, i === pickerDate.getMonth() && ageStyles.pickerItemSelected]}>{m}</RNText>
+                    </View>
+                  ))}
+                </ScrollView>
+              </View>
+
+              {/* Day */}
+              <View style={ageStyles.pickerColumn}>
+                <ScrollView
+                  ref={dayScrollRef}
+                  showsVerticalScrollIndicator={false}
+                  snapToInterval={ITEM_HEIGHT}
+                  decelerationRate="fast"
+                  scrollEnabled={!ageSheetError}
+                  onScroll={(e) => handleScrollEnd(dayScrollRef, dayScrollTimer, 'day', e.nativeEvent.contentOffset.y)}
+                  scrollEventThrottle={16}
+                  contentContainerStyle={{ paddingVertical: ITEM_HEIGHT * 2 }}
+                >
+                  {Array.from({ length: getDaysInMonth(pickerDate.getMonth(), pickerDate.getFullYear()) }, (_, i) => (
+                    <View key={i} style={ageStyles.pickerItem}>
+                      <RNText style={[ageStyles.pickerItemText, i === pickerDate.getDate() - 1 && ageStyles.pickerItemSelected]}>{i + 1}</RNText>
+                    </View>
+                  ))}
+                </ScrollView>
+              </View>
+
+              {/* Year */}
+              <View style={ageStyles.pickerColumn}>
+                <ScrollView
+                  ref={yearScrollRef}
+                  showsVerticalScrollIndicator={false}
+                  snapToInterval={ITEM_HEIGHT}
+                  decelerationRate="fast"
+                  scrollEnabled={!ageSheetError}
+                  onScroll={(e) => handleScrollEnd(yearScrollRef, yearScrollTimer, 'year', e.nativeEvent.contentOffset.y)}
+                  scrollEventThrottle={16}
+                  contentContainerStyle={{ paddingVertical: ITEM_HEIGHT * 2 }}
+                >
+                  {Array.from({ length: 121 }, (_, i) => {
+                    const y = (currentYear - 120) + i;
+                    return (
+                      <View key={y} style={ageStyles.pickerItem}>
+                        <RNText style={[ageStyles.pickerItemText, y === pickerDate.getFullYear() && ageStyles.pickerItemSelected]}>{y}</RNText>
+                      </View>
+                    );
+                  })}
+                </ScrollView>
+              </View>
+
+              {/* Center highlight */}
+              <View style={ageStyles.pickerHighlight} pointerEvents="none" />
+            </View>
+
+            {/* Continue Button */}
+            <TouchableOpacity
+              style={ageStyles.continueButton}
+              activeOpacity={0.8}
+              onPress={ageSheetError ? closeAgeSheet : handleAgeVerifyContinue}
+            >
+              <RNText style={ageStyles.continueButtonText}>Continue</RNText>
+            </TouchableOpacity>
+          </Animated.View>
+        </>
+      )}
     </View>
   );
 };
+
+const ageStyles = StyleSheet.create({
+  overlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    zIndex: 50,
+  },
+  sheet: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 24,
+    paddingBottom: 40,
+    paddingTop: 12,
+    zIndex: 60,
+  },
+  sheetHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#D9D9D9',
+    alignSelf: 'center',
+    marginBottom: 20,
+  },
+  sheetTitle: {
+    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat',
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#333',
+    lineHeight: 24,
+  },
+  sheetTitleError: {
+    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat',
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#E53935',
+    lineHeight: 24,
+    textAlign: 'center',
+  },
+  sheetSubtitle: {
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    fontSize: 14,
+    fontWeight: '400',
+    color: '#333',
+    lineHeight: 18,
+    marginTop: 4,
+  },
+  sheetDivider: {
+    height: 1,
+    backgroundColor: '#E3E3E3',
+    marginVertical: 20,
+  },
+  pickerLabel: {
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#333',
+    lineHeight: 22,
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  pickerContainer: {
+    flexDirection: 'row',
+    height: AGE_PICKER_ITEM_HEIGHT * 5,
+    overflow: 'hidden',
+    marginBottom: 24,
+  },
+  pickerColumn: {
+    flex: 1,
+  },
+  pickerItem: {
+    height: AGE_PICKER_ITEM_HEIGHT,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  pickerItemText: {
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    fontSize: 16,
+    fontWeight: '400',
+    color: '#AAAAAA',
+    lineHeight: 22,
+  },
+  pickerItemSelected: {
+    color: '#333',
+    fontWeight: '700',
+    fontSize: 18,
+  },
+  pickerHighlight: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    top: AGE_PICKER_ITEM_HEIGHT * 2,
+    height: AGE_PICKER_ITEM_HEIGHT,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E3E3E3',
+    backgroundColor: 'transparent',
+  },
+  continueButton: {
+    backgroundColor: '#222B30',
+    borderRadius: 16,
+    height: 54,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginHorizontal: 16,
+  },
+  continueButtonText: {
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    lineHeight: 20,
+  },
+});
 
 const styles = StyleSheet.create({
   container: {

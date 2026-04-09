@@ -25,6 +25,7 @@ import { analyticsService } from '../services/analytics/analyticsService';
 import { useAuthGuard } from '../hooks/useAuthGuard';
 import { isFirstVideoReadyForBoardType, getVideoPreloadStatus, waitForVideoReady, preloadLoadingVideo, getLoadingVideoUrl } from '../services/media/videoPreloadService';
 import { STEP_WELCOME } from '../constants/onboardingSteps';
+import { ageGateService } from '../services/ageGate/ageGateService';
 import { swellyServiceCopy, swellyServiceCopyCopy } from '../services/swelly/swellyServiceCopy';
 import { findAndConnectMatches, OnboardingMatchResult } from '../services/matching/onboardingMatchingService';
 import { pushNotificationService } from '../services/notifications/pushNotificationService';
@@ -42,6 +43,7 @@ export const AppContent: React.FC = () => {
   const [isSavingStep3, setIsSavingStep3] = useState(false);
   const [isSavingStep4, setIsSavingStep4] = useState(false);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+  const [showAgeBlockOverlay, setShowAgeBlockOverlay] = useState(false);
   const authCheckStartTime = useRef<number>(Date.now());
   const stopTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const minLoadingDuration = 0; // No artificial delay — branded loading shows during session restoration
@@ -72,7 +74,14 @@ export const AppContent: React.FC = () => {
     };
     checkSupabaseConfig();
   }, []);
-  
+
+  // Check age gate device flag on mount
+  useEffect(() => {
+    ageGateService.checkBlocked().then(({ blocked }) => {
+      if (blocked) setShowAgeBlockOverlay(true);
+    });
+  }, []);
+
   // Validate session before showing ConversationsScreen
   useEffect(() => {
     // Only validate if onboarding is complete, user exists, not demo user, not already validating, and Supabase is configured
@@ -1109,6 +1118,36 @@ export const AppContent: React.FC = () => {
     }
   }, [shouldShowConversations]);
 
+  // Age block overlay — shown when device flag is set (underage user)
+  const handleAgeBlockOK = async () => {
+    setShowAgeBlockOverlay(false);
+    try {
+      await supabaseAuthService.signOut();
+    } catch {}
+    resetOnboarding();
+    setUser(null);
+    setCurrentStep(STEP_WELCOME);
+  };
+
+  if (showAgeBlockOverlay) {
+    return (
+      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center', padding: 24 }}>
+        <View style={{ backgroundColor: '#fff', borderRadius: 16, padding: 28, maxWidth: 340, width: '100%', alignItems: 'center' }}>
+          <RNText style={{ fontSize: 17, lineHeight: 25, textAlign: 'center', color: '#333', marginBottom: 24, fontWeight: '500' }}>
+            We're sorry, but you are not eligible to use Swellyo as you are under the permitted age for using our app.
+          </RNText>
+          <TouchableOpacity
+            onPress={handleAgeBlockOK}
+            style={{ backgroundColor: '#333', borderRadius: 24, paddingVertical: 14, paddingHorizontal: 48 }}
+            activeOpacity={0.8}
+          >
+            <RNText style={{ color: '#fff', fontSize: 16, fontWeight: '700' }}>OK</RNText>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
   // Wait for session restoration to complete before rendering
   // This prevents premature redirects before we know if user has a valid session
   if (isRestoringSession) {
@@ -1508,6 +1547,7 @@ export const AppContent: React.FC = () => {
         initialData={formData}
         updateFormData={updateFormData}
         isLoading={isSavingStep4}
+        onAgeBlocked={() => setShowAgeBlockOverlay(true)}
       />
     );
   }

@@ -34,7 +34,21 @@
       "Bash(lsof -ti:8081)",
       "Bash(xargs kill:*)",
       "Bash(~/Library/Android/sdk/platform-tools/adb reverse:*)",
-      "Bash(eas build:*)"
+      "Bash(eas build:*)",
+      "Bash(git pull:*)",
+      "Bash(git fetch:*)",
+      "WebFetch(domain:posthog.com)",
+      "WebFetch(domain:support.google.com)",
+      "WebFetch(domain:android-developers.googleblog.com)",
+      "WebFetch(domain:swiftsenpai.com)",
+      "Bash(npx tsc:*)",
+      "WebFetch(domain:www.help.tinder.com)",
+      "WebFetch(domain:bumble.com)",
+      "WebFetch(domain:support.bumble.com)",
+      "WebFetch(domain:appbot.co)",
+      "WebFetch(domain:roast.dating)",
+      "Bash(rm -f src/screens/AgeGateScreen.tsx src/services/ageGate/ageGateService.ts)",
+      "Bash(rmdir src/services/ageGate)"
     ]
   }
 }

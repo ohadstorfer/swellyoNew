@@ -120,9 +120,9 @@ export function isValidDateOfBirth(date: string | Date): { valid: boolean; error
     return { valid: false, error: 'Please enter a valid date of birth' };
   }
   
-  // Check minimum age (13 years - COPPA compliance)
-  if (age < 13) {
-    return { valid: false, error: 'You must be at least 13 years old to use this service' };
+  // Check minimum age (18 years - app store requirement for matching apps)
+  if (age < 18) {
+    return { valid: false, error: 'You must be at least 18 years old to use this service' };
   }
   
   // Check maximum age (120 years - reasonable upper bound)

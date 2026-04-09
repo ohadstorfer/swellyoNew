@@ -164,6 +164,11 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
   // AI report state
   const [reportSheetVisible, setReportSheetVisible] = useState(false);
   const [reportMessageText, setReportMessageText] = useState('');
+  const [reportMessageId, setReportMessageId] = useState<string | null>(null);
+  const [reportMessageTimestamp, setReportMessageTimestamp] = useState('');
+  const [reportMessageX, setReportMessageX] = useState<number | null>(null);
+  const [reportMessageY, setReportMessageY] = useState<number | null>(null);
+  const messageBubbleRefs = useRef<Record<string, View | null>>({});
 
   // Initial welcome: show typing bubble after 1s, then second message after 2s more
   const [showInitialTypingBubble, setShowInitialTypingBubble] = useState(false);
@@ -736,14 +741,30 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
 
   const handleLongPressMessage = (message: Message) => {
     if (message.isUser) return;
-    setReportMessageText(message.text);
-    setReportSheetVisible(true);
+    const ref = messageBubbleRefs.current[message.id];
+    if (ref) {
+      ref.measureInWindow((x, y, _w, _h) => {
+        setReportMessageX(x);
+        setReportMessageY(y);
+        setReportMessageText(message.text);
+        setReportMessageTimestamp(message.timestamp);
+        setReportMessageId(message.id);
+        setReportSheetVisible(true);
+      });
+    } else {
+      setReportMessageText(message.text);
+      setReportMessageTimestamp(message.timestamp);
+      setReportMessageId(message.id);
+      setReportSheetVisible(true);
+    }
   };
 
   const renderMessage = (message: Message) => {
     // Regular message rendering
+    const isSelected = reportSheetVisible && reportMessageId === message.id;
     const bubbleContent = (
       <View
+        ref={(r) => { if (!message.isUser) messageBubbleRefs.current[message.id] = r; }}
         style={[
           styles.messageBubble,
           message.isUser ? styles.userMessageBubble : styles.botMessageBubble,
@@ -766,7 +787,7 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
     );
 
     return (
-      <View>
+      <View style={isSelected ? styles.hiddenMessage : undefined}>
         <View
           style={[
             styles.messageContainer,
@@ -819,7 +840,7 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
 
   const renderItem = useCallback(({ item }: { item: Message }) => {
     return renderMessage(item);
-  }, [messages, destinationCardsMessageId, destinationList, destinationsSubmitted, budgetButtonsMessageId, budgetSubmitted, selectedBudget]);
+  }, [messages, destinationCardsMessageId, destinationList, destinationsSubmitted, budgetButtonsMessageId, budgetSubmitted, selectedBudget, reportSheetVisible, reportMessageId]);
 
   const listHeaderComponent = useMemo(() => {
     if (!isLoading && !isInitializing && !showInitialTypingBubble && !isUiDelayLoading) return null;
@@ -905,6 +926,7 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
             data={invertedMessages}
             renderItem={renderItem}
             keyExtractor={(item) => item.id}
+            extraData={reportMessageId}
             inverted
             style={styles.messagesList}
             contentContainerStyle={[styles.messagesContent, { flexGrow: 1, justifyContent: 'flex-end' }]}
@@ -940,13 +962,16 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
           />
         </View>
       </KeyboardAvoidingView>
+      <ReportAISheet
+        visible={reportSheetVisible}
+        messageText={reportMessageText}
+        messageTimestamp={reportMessageTimestamp}
+        messageX={reportMessageX}
+        messageY={reportMessageY}
+        chatType="onboarding"
+        onClose={() => { setReportSheetVisible(false); setReportMessageId(null); setReportMessageX(null); setReportMessageY(null); }}
+      />
     </SafeAreaView>
-    <ReportAISheet
-      visible={reportSheetVisible}
-      messageText={reportMessageText}
-      chatType="onboarding"
-      onClose={() => setReportSheetVisible(false)}
-    />
     </>
   );
 };
@@ -1222,6 +1247,9 @@ const styles = StyleSheet.create({
     marginHorizontal: -(spacing.md * 2),
     width: Dimensions.get('window').width,
     paddingHorizontal: 0,
+  },
+  hiddenMessage: {
+    opacity: 0,
   },
 });
 

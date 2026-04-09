@@ -38,6 +38,7 @@ interface OnboardingStep4ScreenProps {
   initialData?: Partial<OnboardingData>;
   updateFormData: (data: Partial<OnboardingData>) => void;
   isLoading?: boolean;
+  onAgeBlocked?: () => void;
 }
 
 interface FieldProps {
@@ -539,6 +540,7 @@ interface DateOfBirthFieldProps {
   width?: number;
   style?: any;
   error?: string;
+  disabled?: boolean;
 }
 
 const DateOfBirthField: React.FC<DateOfBirthFieldProps> = ({
@@ -549,6 +551,7 @@ const DateOfBirthField: React.FC<DateOfBirthFieldProps> = ({
   width,
   style,
   error,
+  disabled,
 }) => {
   const [isFocused, setIsFocused] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
@@ -579,6 +582,7 @@ const DateOfBirthField: React.FC<DateOfBirthFieldProps> = ({
   const displayValue = hasValue && age !== null ? `${age}` : (placeholder || label);
 
   const handleContainerPress = () => {
+    if (disabled) return;
     setTempDate(dateValue);
     setShowPicker(true);
   };
@@ -983,6 +987,7 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
   initialData = {},
   updateFormData,
   isLoading = false,
+  onAgeBlocked,
 }) => {
   const [showPermissionOverlay, setShowPermissionOverlay] = useState(false);
   const pendingPickerRef = useRef<(() => void) | null>(null);
@@ -994,6 +999,7 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
   const [dateOfBirth, setDateOfBirth] = useState<string>(
     initialData.dateOfBirth || ''
   );
+  const [dobReadOnly, setDobReadOnly] = useState(false);
   const [dateOfBirthError, setDateOfBirthError] = useState<string>('');
   const [nameError, setNameError] = useState(false);
   const [locationError, setLocationError] = useState(false);
@@ -1017,6 +1023,23 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
     return () => {
       viewport.setAttribute('content', original);
     };
+  }, []);
+
+  // Pre-populate DOB from age gate (set on welcome screen)
+  useEffect(() => {
+    if (dateOfBirth) return; // Already has a value
+    (async () => {
+      const { ageGateService } = await import('../services/ageGate/ageGateService');
+      const storedDob = await ageGateService.getDOB();
+      if (storedDob) {
+        setDateOfBirth(storedDob);
+        setDobReadOnly(true);
+        const age = calculateAgeFromDOB(storedDob);
+        if (age !== null) {
+          updateFormData({ dateOfBirth: storedDob, age });
+        }
+      }
+    })();
   }, []);
 
   const pickImage = async () => {
@@ -1110,19 +1133,22 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
     if (!location.trim()) { setLocationError(true); hasError = true; }
     if (!pronoun.trim()) { setPronounError(true); hasError = true; }
 
-    // Validate date of birth
+    // Validate date of birth (only check presence — age check happens after via hard block)
     if (!dateOfBirth || dateOfBirth.trim() === '') {
       setDateOfBirthError('Date of birth is required');
       hasError = true;
-    } else {
-      const validation = isValidDateOfBirth(dateOfBirth);
-      if (!validation.valid) {
-        setDateOfBirthError(validation.error || 'Invalid date of birth');
-        hasError = true;
-      }
     }
 
     if (hasError) return;
+
+    // Hard block: if underage, store device flag and bail — nothing gets sent to server
+    const age = calculateAgeFromDOB(dateOfBirth);
+    if (age !== null && age < 18) {
+      const { ageGateService } = await import('../services/ageGate/ageGateService');
+      await ageGateService.setBlocked(dateOfBirth);
+      onAgeBlocked?.();
+      return;
+    }
 
     setDateOfBirthError('');
 
@@ -1303,21 +1329,16 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
                 onChange={(dob) => {
                   setDateOfBirth(dob);
                   setDateOfBirthError('');
-                  // Validate DOB
-                  const validation = isValidDateOfBirth(dob);
-                  if (!validation.valid) {
-                    setDateOfBirthError(validation.error || 'Invalid date of birth');
-                  } else {
-                    const calculatedAge = calculateAgeFromDOB(dob);
-                    if (calculatedAge !== null) {
-                      updateFormData({ dateOfBirth: dob, age: calculatedAge });
-                    }
+                  const calculatedAge = calculateAgeFromDOB(dob);
+                  if (calculatedAge !== null) {
+                    updateFormData({ dateOfBirth: dob, age: calculatedAge });
                   }
                 }}
                 placeholder="Age*"
                     width={Platform.OS === 'web' ? 118 : undefined}
                 style={styles.ageField}
                 error={dateOfBirthError}
+                disabled={dobReadOnly}
               />
               </View>
             </View>

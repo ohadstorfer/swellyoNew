@@ -4,6 +4,7 @@ import {
   StyleSheet,
   FlatList,
   TouchableOpacity,
+  Pressable,
   Platform,
   Image,
   ImageBackground,
@@ -25,6 +26,7 @@ import { SKELETON_DELAY_MS } from '../constants/loading';
 import { ChatTextInput } from '../components/ChatTextInput';
 import { useChatKeyboardScroll } from '../hooks/useChatKeyboardScroll';
 import { useKeyboardVisible, useKeyboardHeight } from '../hooks/useKeyboardVisible';
+import { ReportAISheet } from '../components/ReportAISheet';
 
 interface Message {
   id: string;
@@ -57,6 +59,13 @@ export const SwellyShaperScreen: React.FC<SwellyShaperScreenProps> = ({ onBack, 
   const [isInitializing, setIsInitializing] = useState(true);
   const [showSkeletons, setShowSkeletons] = useState(false); // Delayed skeleton display to avoid flicker
   const [profileData, setProfileData] = useState<SupabaseSurfer | null>(null);
+  const [reportSheetVisible, setReportSheetVisible] = useState(false);
+  const [reportMessageText, setReportMessageText] = useState('');
+  const [reportMessageId, setReportMessageId] = useState<string | null>(null);
+  const [reportMessageTimestamp, setReportMessageTimestamp] = useState('');
+  const [reportMessageX, setReportMessageX] = useState<number | null>(null);
+  const [reportMessageY, setReportMessageY] = useState<number | null>(null);
+  const messageBubbleRefs = useRef<Record<string, View | null>>({});
   const insets = useSafeAreaInsets();
   const keyboardVisible = useKeyboardVisible();
   const androidKeyboardHeight = useKeyboardHeight();
@@ -310,6 +319,26 @@ export const SwellyShaperScreen: React.FC<SwellyShaperScreenProps> = ({ onBack, 
 
   const invertedMessages = useMemo(() => [...messages].reverse(), [messages]);
 
+  const handleLongPressMessage = (message: Message) => {
+    if (message.isUser) return;
+    const ref = messageBubbleRefs.current[message.id];
+    if (ref) {
+      ref.measureInWindow((x, y, _w, _h) => {
+        setReportMessageX(x);
+        setReportMessageY(y);
+        setReportMessageText(message.text);
+        setReportMessageTimestamp(formatTime(message.timestamp));
+        setReportMessageId(message.id);
+        setReportSheetVisible(true);
+      });
+    } else {
+      setReportMessageText(message.text);
+      setReportMessageTimestamp(formatTime(message.timestamp));
+      setReportMessageId(message.id);
+      setReportSheetVisible(true);
+    }
+  };
+
   const renderMessage = (message: Message) => {
     // Check if this is the welcome message
     const isWelcomeMessage = message.id === 'welcome';
@@ -333,34 +362,45 @@ export const SwellyShaperScreen: React.FC<SwellyShaperScreenProps> = ({ onBack, 
     }
 
     // Regular message rendering - match ChatScreen style
+    const isSelected = reportSheetVisible && reportMessageId === message.id;
+    const bubbleContent = (
+      <View
+        ref={(r) => { if (!message.isUser) messageBubbleRefs.current[message.id] = r; }}
+        style={[
+          styles.messageBubble,
+          message.isUser ? styles.userMessageBubble : styles.normalBotMessageBubble,
+        ]}
+      >
+        <View style={styles.messageTextContainer}>
+          <Text style={message.isUser ? styles.userMessageText : styles.normalBotMessageText}>
+            {message.text}
+          </Text>
+        </View>
+        <View style={styles.timestampContainer}>
+          <Text style={[
+            styles.timestamp,
+            message.isUser ? styles.userTimestamp : styles.botTimestamp,
+          ]}>
+            {formatTime(message.timestamp)}
+          </Text>
+        </View>
+      </View>
+    );
+
     return (
       <React.Fragment>
+        <View style={isSelected ? styles.hiddenMessage : undefined}>
         <View
           style={[
             styles.messageContainer,
             message.isUser ? styles.userMessageContainer : styles.normalBotMessageContainer,
           ]}
         >
-          <View
-            style={[
-              styles.messageBubble,
-              message.isUser ? styles.userMessageBubble : styles.normalBotMessageBubble,
-            ]}
-          >
-            <View style={styles.messageTextContainer}>
-              <Text style={message.isUser ? styles.userMessageText : styles.normalBotMessageText}>
-                {message.text}
-              </Text>
-            </View>
-            <View style={styles.timestampContainer}>
-              <Text style={[
-                styles.timestamp,
-                message.isUser ? styles.userTimestamp : styles.botTimestamp,
-              ]}>
-                {formatTime(message.timestamp)}
-              </Text>
-            </View>
-          </View>
+          {message.isUser ? bubbleContent : (
+            <Pressable onLongPress={() => handleLongPressMessage(message)} delayLongPress={400}>
+              {bubbleContent}
+            </Pressable>
+          )}
         </View>
         {/* Show UserProfileCard after successful profile update - rendered separately to not affect message layout */}
         {message.showProfileCard && profileData && (
@@ -384,13 +424,14 @@ export const SwellyShaperScreen: React.FC<SwellyShaperScreenProps> = ({ onBack, 
             />
           </View>
         )}
+        </View>
       </React.Fragment>
     );
   };
 
   const renderItem = useCallback(({ item }: { item: Message }) => {
     return renderMessage(item);
-  }, [profileData, onViewProfile, onBack]);
+  }, [profileData, onViewProfile, onBack, reportSheetVisible, reportMessageId]);
 
   const listHeaderComponent = useMemo(() => {
     if (!isLoading) return null;
@@ -406,6 +447,7 @@ export const SwellyShaperScreen: React.FC<SwellyShaperScreenProps> = ({ onBack, 
   }, [isLoading]);
 
   return (
+    <>
     <SafeAreaView style={styles.container} edges={['top']}>
       {/* Header */}
       <View style={styles.headerContainer}>
@@ -470,6 +512,7 @@ export const SwellyShaperScreen: React.FC<SwellyShaperScreenProps> = ({ onBack, 
               data={invertedMessages}
               renderItem={renderItem}
               keyExtractor={(item) => item.id}
+              extraData={reportMessageId}
               inverted
               style={styles.messagesList}
               contentContainerStyle={[styles.messagesContent, { flexGrow: 1, justifyContent: 'flex-end', alignItems: 'stretch' }]}
@@ -503,7 +546,17 @@ export const SwellyShaperScreen: React.FC<SwellyShaperScreenProps> = ({ onBack, 
           />
         </View>
       </KeyboardAvoidingView>
+      <ReportAISheet
+        visible={reportSheetVisible}
+        messageText={reportMessageText}
+        messageTimestamp={reportMessageTimestamp}
+        messageX={reportMessageX}
+        messageY={reportMessageY}
+        chatType="onboarding"
+        onClose={() => { setReportSheetVisible(false); setReportMessageId(null); setReportMessageX(null); setReportMessageY(null); }}
+      />
     </SafeAreaView>
+    </>
   );
 };
 
@@ -824,5 +877,8 @@ const styles = StyleSheet.create({
     height: 8,
     borderRadius: 4,
     backgroundColor: '#333333',
+  },
+  hiddenMessage: {
+    opacity: 0,
   },
 });
