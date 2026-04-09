@@ -120,9 +120,10 @@ export function DeleteAccountScreen({ onBack, userName, userEmail }: DeleteAccou
   };
 
   const handleConfirmationClose = () => {
-    Animated.timing(overlayFade, { toValue: 0, duration: 200, useNativeDriver: true }).start(() => {
+    Animated.timing(overlayFade, { toValue: 0, duration: 200, useNativeDriver: true }).start(async () => {
       setShowConfirmation(false);
-      onBack();
+      const { performLogout } = await import('../utils/logout');
+      await performLogout({});
     });
   };
 
