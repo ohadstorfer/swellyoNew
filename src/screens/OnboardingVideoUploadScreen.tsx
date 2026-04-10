@@ -322,21 +322,25 @@ export const OnboardingVideoUploadScreen: React.FC<OnboardingVideoUploadScreenPr
   const launchVideoPicker = async () => {
     try {
       const ImagePicker = require('expo-image-picker');
-      const { status, canAskAgain } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== 'granted') {
-        if (!canAskAgain) {
-          Alert.alert(
-            'Permission Required',
-            'Swellyo needs access to your photos. Please enable it in your device settings.',
-            [
-              { text: 'Cancel', style: 'cancel' },
-              { text: 'Open Settings', onPress: () => Linking.openSettings() },
-            ]
-          );
-        } else {
-          Alert.alert('Permission Required', 'Sorry, we need media library permissions to upload your video!');
+      const usePhotoPicker = Platform.OS === 'android' && Platform.Version >= 33;
+
+      if (!usePhotoPicker) {
+        const { status, canAskAgain } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (status !== 'granted') {
+          if (!canAskAgain) {
+            Alert.alert(
+              'Permission Required',
+              'Swellyo needs access to your photos. Please enable it in your device settings.',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Open Settings', onPress: () => Linking.openSettings() },
+              ]
+            );
+          } else {
+            Alert.alert('Permission Required', 'Sorry, we need media library permissions to upload your video!');
+          }
+          return;
         }
-        return;
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
@@ -400,11 +404,16 @@ export const OnboardingVideoUploadScreen: React.FC<OnboardingVideoUploadScreenPr
       document.body.appendChild(input);
       input.click();
     } else {
-      const primerShown = await AsyncStorage.getItem('@swellyo_gallery_primer_shown');
-      if (primerShown) {
+      const usePhotoPicker = Platform.OS === 'android' && Platform.Version >= 33;
+      if (usePhotoPicker) {
         await launchVideoPicker();
       } else {
-        setShowPermissionOverlay(true);
+        const primerShown = await AsyncStorage.getItem('@swellyo_gallery_primer_shown');
+        if (primerShown) {
+          await launchVideoPicker();
+        } else {
+          setShowPermissionOverlay(true);
+        }
       }
     }
   };

@@ -1069,21 +1069,25 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
       const launchPicker = async () => {
         try {
           const ImagePicker = require('expo-image-picker');
-          const { status, canAskAgain } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-          if (status !== 'granted') {
-            if (!canAskAgain) {
-              Alert.alert(
-                'Permission Required',
-                'Swellyo needs access to your photos. Please enable it in your device settings.',
-                [
-                  { text: 'Cancel', style: 'cancel' },
-                  { text: 'Open Settings', onPress: () => Linking.openSettings() },
-                ]
-              );
-            } else {
-              Alert.alert('Permission Required', 'Sorry, we need media library permissions to set your profile picture!');
+          const usePhotoPicker = Platform.OS === 'android' && Platform.Version >= 33;
+
+          if (!usePhotoPicker) {
+            const { status, canAskAgain } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+            if (status !== 'granted') {
+              if (!canAskAgain) {
+                Alert.alert(
+                  'Permission Required',
+                  'Swellyo needs access to your photos. Please enable it in your device settings.',
+                  [
+                    { text: 'Cancel', style: 'cancel' },
+                    { text: 'Open Settings', onPress: () => Linking.openSettings() },
+                  ]
+                );
+              } else {
+                Alert.alert('Permission Required', 'Sorry, we need media library permissions to set your profile picture!');
+              }
+              return;
             }
-            return;
           }
 
           const result = await ImagePicker.launchImageLibraryAsync({
@@ -1103,12 +1107,17 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
         }
       };
 
-      const primerShown = await AsyncStorage.getItem('@swellyo_gallery_primer_shown');
-      if (primerShown) {
+      const usePhotoPicker = Platform.OS === 'android' && Platform.Version >= 33;
+      if (usePhotoPicker) {
         await launchPicker();
       } else {
-        pendingPickerRef.current = () => launchPicker();
-        setShowPermissionOverlay(true);
+        const primerShown = await AsyncStorage.getItem('@swellyo_gallery_primer_shown');
+        if (primerShown) {
+          await launchPicker();
+        } else {
+          pendingPickerRef.current = () => launchPicker();
+          setShowPermissionOverlay(true);
+        }
       }
     }
   };

@@ -33,10 +33,7 @@
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO"
       ],
-      "blockedPermissions": [
-        "android.permission.READ_MEDIA_IMAGES",
-        "android.permission.READ_MEDIA_VIDEO"
-      ]
+      "blockedPermissions": []
     },
     "web": {
       "favicon": "./assets/favicon.png",

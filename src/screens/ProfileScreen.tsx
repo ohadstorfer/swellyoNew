@@ -1076,21 +1076,25 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
         const launchNativeImagePicker = async () => {
           try {
             const ImagePicker = require('expo-image-picker');
-            const { status, canAskAgain } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-            if (status !== 'granted') {
-              if (!canAskAgain) {
-                Alert.alert(
-                  'Permission Required',
-                  'Swellyo needs access to your photos. Please enable it in your device settings.',
-                  [
-                    { text: 'Cancel', style: 'cancel' },
-                    { text: 'Open Settings', onPress: () => Linking.openSettings() },
-                  ]
-                );
-              } else {
-                Alert.alert('Permission Required', 'Sorry, we need camera roll permissions to upload your profile picture!');
+            const usePhotoPicker = Platform.OS === 'android' && Platform.Version >= 33;
+
+            if (!usePhotoPicker) {
+              const { status, canAskAgain } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+              if (status !== 'granted') {
+                if (!canAskAgain) {
+                  Alert.alert(
+                    'Permission Required',
+                    'Swellyo needs access to your photos. Please enable it in your device settings.',
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      { text: 'Open Settings', onPress: () => Linking.openSettings() },
+                    ]
+                  );
+                } else {
+                  Alert.alert('Permission Required', 'Sorry, we need camera roll permissions to upload your profile picture!');
+                }
+                return;
               }
-              return;
             }
 
             const result = await ImagePicker.launchImageLibraryAsync({
@@ -1113,12 +1117,17 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
           }
         };
 
-        const primerShown = await AsyncStorage.getItem('@swellyo_gallery_primer_shown');
-        if (primerShown) {
+        const usePhotoPicker = Platform.OS === 'android' && Platform.Version >= 33;
+        if (usePhotoPicker) {
           await launchNativeImagePicker();
         } else {
-          pendingPickerRef.current = () => launchNativeImagePicker();
-          setShowPermissionOverlay(true);
+          const primerShown = await AsyncStorage.getItem('@swellyo_gallery_primer_shown');
+          if (primerShown) {
+            await launchNativeImagePicker();
+          } else {
+            pendingPickerRef.current = () => launchNativeImagePicker();
+            setShowPermissionOverlay(true);
+          }
         }
       }
     } catch (error) {
@@ -1247,22 +1256,26 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
         const launchNativeVideoPicker = async () => {
           try {
             const ImagePicker = require('expo-image-picker');
-            const { status, canAskAgain } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-            if (status !== 'granted') {
-              if (!canAskAgain) {
-                Alert.alert(
-                  'Permission Required',
-                  'Swellyo needs access to your photos. Please enable it in your device settings.',
-                  [
-                    { text: 'Cancel', style: 'cancel' },
-                    { text: 'Open Settings', onPress: () => Linking.openSettings() },
-                  ]
-                );
-              } else {
-                Alert.alert('Permission Required', 'Sorry, we need media library permissions to upload your video!');
+            const usePhotoPicker = Platform.OS === 'android' && Platform.Version >= 33;
+
+            if (!usePhotoPicker) {
+              const { status, canAskAgain } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+              if (status !== 'granted') {
+                if (!canAskAgain) {
+                  Alert.alert(
+                    'Permission Required',
+                    'Swellyo needs access to your photos. Please enable it in your device settings.',
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      { text: 'Open Settings', onPress: () => Linking.openSettings() },
+                    ]
+                  );
+                } else {
+                  Alert.alert('Permission Required', 'Sorry, we need media library permissions to upload your video!');
+                }
+                setShowVideoUploadModal(false);
+                return;
               }
-              setShowVideoUploadModal(false);
-              return;
             }
 
             const result = await ImagePicker.launchImageLibraryAsync({
@@ -1306,12 +1319,17 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
           }
         };
 
-        const primerShown = await AsyncStorage.getItem('@swellyo_gallery_primer_shown');
-        if (primerShown) {
+        const usePhotoPicker = Platform.OS === 'android' && Platform.Version >= 33;
+        if (usePhotoPicker) {
           await launchNativeVideoPicker();
         } else {
-          pendingPickerRef.current = () => launchNativeVideoPicker();
-          setShowPermissionOverlay(true);
+          const primerShown = await AsyncStorage.getItem('@swellyo_gallery_primer_shown');
+          if (primerShown) {
+            await launchNativeVideoPicker();
+          } else {
+            pendingPickerRef.current = () => launchNativeVideoPicker();
+            setShowPermissionOverlay(true);
+          }
         }
       }
     } catch (error) {

@@ -1285,21 +1285,25 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         const launchNativeImagePicker = async () => {
           try {
             const ImagePicker = require('expo-image-picker');
-            const { status, canAskAgain } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-            if (status !== 'granted') {
-              if (!canAskAgain) {
-                Alert.alert(
-                  'Permission Required',
-                  'Swellyo needs access to your photos. Please enable it in your device settings.',
-                  [
-                    { text: 'Cancel', style: 'cancel' },
-                    { text: 'Open Settings', onPress: () => Linking.openSettings() },
-                  ]
-                );
-              } else {
-                Alert.alert('Permission Required', 'Sorry, we need camera roll permissions to send images!');
+            const usePhotoPicker = Platform.OS === 'android' && Platform.Version >= 33;
+
+            if (!usePhotoPicker) {
+              const { status, canAskAgain } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+              if (status !== 'granted') {
+                if (!canAskAgain) {
+                  Alert.alert(
+                    'Permission Required',
+                    'Swellyo needs access to your photos. Please enable it in your device settings.',
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      { text: 'Open Settings', onPress: () => Linking.openSettings() },
+                    ]
+                  );
+                } else {
+                  Alert.alert('Permission Required', 'Sorry, we need camera roll permissions to send images!');
+                }
+                return;
               }
-              return;
             }
 
             const result = await ImagePicker.launchImageLibraryAsync({
@@ -1325,12 +1329,17 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
           }
         };
 
-        const primerShown = await AsyncStorage.getItem('@swellyo_gallery_primer_shown');
-        if (primerShown) {
+        const usePhotoPicker = Platform.OS === 'android' && Platform.Version >= 33;
+        if (usePhotoPicker) {
           await launchNativeImagePicker();
         } else {
-          pendingPickerRef.current = () => launchNativeImagePicker();
-          setShowPermissionOverlay(true);
+          const primerShown = await AsyncStorage.getItem('@swellyo_gallery_primer_shown');
+          if (primerShown) {
+            await launchNativeImagePicker();
+          } else {
+            pendingPickerRef.current = () => launchNativeImagePicker();
+            setShowPermissionOverlay(true);
+          }
         }
       }
     } catch (error) {
