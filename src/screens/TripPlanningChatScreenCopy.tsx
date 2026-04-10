@@ -1292,11 +1292,16 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
       ? (Date.now() + 1).toString()
       : null;
     setMessages(prev => {
-      const updated = prev.map(m =>
-        m.id === messageId && m.actionRow
-          ? { ...m, actionRow: { ...m.actionRow, selectedAction: action } }
-          : m
-      );
+      const updated = prev.map(m => {
+        if (m.id === messageId && m.actionRow) {
+          return { ...m, actionRow: { ...m.actionRow, selectedAction: action } };
+        }
+        // Auto-resolve any other unresolved action rows (stale from previous match batches)
+        if (m.isMatchedUsers && m.actionRow && m.actionRow.selectedAction == null) {
+          return { ...m, actionRow: { ...m.actionRow, selectedAction: 'more' } };
+        }
+        return m;
+      });
       const msg = updated.find(m => m.id === messageId);
       const requestData = msg?.actionRow?.requestData;
       const backendIdx = msg?.backendMessageIndex;
@@ -1354,9 +1359,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
       setFiltersMenuVisible(false);
       scrollToBottom();
     }
-    // For 'more' action, skip the separate PATCH — attach-matches handles both
-    // the selectedAction marking and the placeholder append atomically, avoiding race conditions.
-    if (action !== 'more' && messageIndexForPatch != null && messageIndexForPatch >= 0 && chatId) {
+    if (messageIndexForPatch != null && messageIndexForPatch >= 0 && chatId) {
       svc.updateMatchActionSelection(chatId, messageIndexForPatch, action)
         .then(result => {
           if (result?.appendedMessageIndex != null && syntheticMessageId) {
