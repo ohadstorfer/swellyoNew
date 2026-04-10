@@ -24,6 +24,7 @@
     },
     "android": {
       "package": "com.swellyo.app",
+      "versionCode": 3,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
