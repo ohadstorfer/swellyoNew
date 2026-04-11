@@ -18,6 +18,7 @@ import { Text } from '../components/Text';
 import { colors, spacing } from '../styles/theme';
 import { swellyShaperService } from '../services/swelly/swellyShaperService';
 import { getImageUrl } from '../services/media/imageService';
+import { Images } from '../assets/images';
 import { UserProfileCard } from '../components/UserProfileCard';
 import { supabaseDatabaseService, SupabaseSurfer } from '../services/database/supabaseDatabaseService';
 import { supabase } from '../config/supabase';
@@ -351,7 +352,7 @@ export const SwellyShaperScreen: React.FC<SwellyShaperScreenProps> = ({ onBack, 
             <Text style={styles.botMessageText}>Yo! Welcome to the shaping bay! This is where we edit your profile! Let me know what you would like to edit!</Text>
             <View style={styles.botMessageImageContainer}>
               <Image
-                source={{ uri: getImageUrl('/Swelly Shaper.png') }}
+                source={Images.swellyShaper}
                 style={styles.botMessageImage}
                 resizeMode="cover"
               />
@@ -475,7 +476,7 @@ export const SwellyShaperScreen: React.FC<SwellyShaperScreenProps> = ({ onBack, 
               <View style={styles.avatarImageContainer}>
                 <View style={styles.avatarImageWrapper}>
                   <Image
-                    source={{ uri: getImageUrl('/Swelly Shaper.png') }}
+                    source={Images.swellyShaper}
                     style={styles.avatarImage}
                     resizeMode="cover"
                   />
@@ -498,7 +499,7 @@ export const SwellyShaperScreen: React.FC<SwellyShaperScreenProps> = ({ onBack, 
         keyboardVerticalOffset={0}
       >
         <ImageBackground
-          source={{ uri: getImageUrl('/chat background.png') }}
+          source={Images.chatBackground}
           style={styles.backgroundImage}
           resizeMode="cover"
         >

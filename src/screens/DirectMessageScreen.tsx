@@ -26,6 +26,7 @@ import { colors, spacing, typography, borderRadius } from '../styles/theme';
 import { messagingService, Message, RealtimeSubscriptionStatus } from '../services/messaging/messagingService';
 import { supabaseAuthService } from '../services/auth/supabaseAuthService';
 import { getImageUrl } from '../services/media/imageService';
+import { Images } from '../assets/images';
 import { supabase } from '../config/supabase';
 import { ProfileImage } from '../components/ProfileImage';
 import { MessageListSkeleton } from '../components/skeletons';
@@ -1969,7 +1970,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         keyboardVerticalOffset={0}
       >
         <ImageBackground
-          source={{ uri: getImageUrl('/chat background.png') }}
+          source={Images.chatBackground}
           style={styles.backgroundImage}
           resizeMode="cover"
         >

@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Text } from './Text';
-import { getImageUrl } from '../services/media/imageService';
+import { Images } from '../assets/images';
 import { spacing } from '../styles/theme';
 
 export type BudgetOption = 'budget' | 'mid' | 'high' | 'premium';
@@ -59,40 +59,40 @@ const BUDGET_GRADIENTS: Record<BudgetOption, { colors: string[]; start?: { x: nu
   },
 };
 
-const BUDGET_ITEMS: { value: BudgetOption; imagePath: string; label: string }[] = [
-  { value: 'budget', imagePath: '/budget/low_budget.png', label: 'Low budget' },
-  { value: 'mid', imagePath: '/budget/medium_budget.png', label: 'Medium' },
-  { value: 'high', imagePath: '/budget/high_budget.png', label: 'High' },
-  { value: 'premium', imagePath: '/budget/premium_budget.png', label: 'Premium' },
+const BUDGET_ITEMS: { value: BudgetOption; imageSource: any; label: string }[] = [
+  { value: 'budget', imageSource: Images.budget.low, label: 'Low budget' },
+  { value: 'mid', imageSource: Images.budget.medium, label: 'Medium' },
+  { value: 'high', imageSource: Images.budget.high, label: 'High' },
+  { value: 'premium', imageSource: Images.budget.premium, label: 'Premium' },
 ];
 
 const NUM_REAL = BUDGET_ITEMS.length;
 
 // Figma structured cards – same layout, different copy and coin image
-const STRUCTURED_CARDS: Record<BudgetOption, { title: string; tagline: string; description: string; coinImagePath: string }> = {
+const STRUCTURED_CARDS: Record<BudgetOption, { title: string; tagline: string; description: string; coinImageSource: any }> = {
   budget: {
     title: 'Barefoot Mode',
     tagline: 'Light, simple, flexible.',
     description: 'Hostels, cheap local food, shared boards, counting sessions not coins.',
-    coinImagePath: '/budget/low_budget.png',
+    coinImageSource: Images.budget.low,
   },
   mid: {
     title: 'Cruise Control',
     tagline: 'Balanced and easy.',
     description: 'Comfort stays, decent gear, sunset dinners after long sessions.',
-    coinImagePath: '/budget/medium_budget.png',
+    coinImageSource: Images.budget.medium,
   },
   high: {
     title: 'Premium Swell',
     tagline: 'Smooth rides all around.',
     description: 'Quality boards, ocean-view rooms, and the chef’s special.',
-    coinImagePath: '/budget/high_budget.png',
+    coinImageSource: Images.budget.high,
   },
   premium: {
     title: 'Endless Summer',
     tagline: 'No limits.',
     description: 'Chasing perfect swell windows, boutique villas, custom quivers waiting on arrival.',
-    coinImagePath: '/budget/premium_budget.png',
+    coinImageSource: Images.budget.premium,
   },
 };
 
@@ -279,7 +279,7 @@ export const BudgetCardsCarousel: React.FC<BudgetCardsCarouselProps> = ({
                           <Text style={styles.structuredCardTitle}>{structuredCard.title}</Text>
                           <View style={styles.structuredCardCoin}>
                             <Image
-                              source={{ uri: getImageUrl(structuredCard.coinImagePath) }}
+                              source={structuredCard.coinImageSource}
                               style={styles.structuredCardCoinImage}
                               resizeMode="contain"
                             />
@@ -297,7 +297,7 @@ export const BudgetCardsCarousel: React.FC<BudgetCardsCarouselProps> = ({
                         </View>
                       ) : (
                         <Image
-                          source={{ uri: getImageUrl(budgetItem.imagePath) }}
+                          source={budgetItem.imageSource}
                           style={[styles.cardImage, { width: cardWidth - FIGMA_OUTER_PADDING * 2, height: CARD_HEIGHT - FIGMA_OUTER_PADDING * 2, borderRadius: FIGMA_INNER_RADIUS }]}
                           resizeMode="cover"
                         />

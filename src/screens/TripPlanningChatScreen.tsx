@@ -19,6 +19,7 @@ import { colors, spacing } from '../styles/theme';
 import { swellyService, SwellyChatResponse } from '../services/swelly/swellyService';
 import { useOnboarding } from '../context/OnboardingContext';
 import { getImageUrl } from '../services/media/imageService';
+import { Images } from '../assets/images';
 import { MatchedUserCard } from '../components/MatchedUserCard';
 import { messagingService } from '../services/messaging/messagingService';
 import { findMatchingUsers } from '../services/matching/matchingService';
@@ -1207,7 +1208,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
                 )}
                 <View style={styles.avatarImageContainer}>
                   <Image
-                    source={{ uri: getImageUrl('/Swelly avatar onboarding.png') }}
+                    source={Images.swellyAvatar}
                     style={styles.avatarImage}
                     resizeMode="cover"
                   />
@@ -1236,7 +1237,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         keyboardVerticalOffset={0}
       >
         <ImageBackground
-          source={{ uri: getImageUrl('/chat background.png') }}
+          source={Images.chatBackground}
           style={styles.backgroundImage}
           resizeMode="cover"
         >

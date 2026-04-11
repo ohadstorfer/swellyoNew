@@ -29,7 +29,7 @@ const isDesktopWeb = () => {
 export interface VideoLevel {
   id: number;
   name: string;
-  thumbnailUrl: string;
+  thumbnailSource?: any;
   videoUrl?: string;
 }
 
@@ -511,7 +511,7 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
           </View>
 
           {/* Thumbnail overlay — shown briefly on first load, skipped when video is pre-buffered */}
-          {selectedVideo.thumbnailUrl ? (
+          {selectedVideo.thumbnailSource ? (
             <Animated.View
               style={{
                 position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
@@ -520,7 +520,7 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
               pointerEvents="none"
             >
               <Image
-                source={{ uri: selectedVideo.thumbnailUrl }}
+                source={selectedVideo.thumbnailSource}
                 style={styles.videoPlayer}
                 resizeMode="cover"
               />
@@ -626,9 +626,9 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
                           style={styles.activeGradientBorder}
                         />
                         <View style={styles.activeGradientInner}>
-                          {video.thumbnailUrl ? (
+                          {video.thumbnailSource ? (
                             <Image
-                              source={{ uri: video.thumbnailUrl }}
+                              source={video.thumbnailSource}
                               style={styles.thumbnailImage}
                               resizeMode="cover"
                             />
@@ -637,9 +637,9 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
                       </View>
                     ) : (
                       <View style={styles.thumbnailImageWrapper}>
-                        {video.thumbnailUrl ? (
+                        {video.thumbnailSource ? (
                           <Image
-                            source={{ uri: video.thumbnailUrl }}
+                            source={video.thumbnailSource}
                             style={styles.thumbnailImage}
                             resizeMode="cover"
                           />

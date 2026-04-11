@@ -12,7 +12,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import Slider from '@react-native-community/slider';
 import { colors, spacing, typography } from '../styles/theme';
 import { Text } from './Text';
-import { getImageUrl } from '../services/media/imageService';
+import { Images } from '../assets/images';
 
 // Native-only imports for smooth gesture-based slider (conditional to avoid crash when native modules are unavailable)
 let Gesture: any = null;
@@ -46,38 +46,33 @@ interface TravelExperienceLevel {
   id: number;
   title: string;
   subtitle: string;
-  imageUrl: string;
+  imageSource: any;
 }
-
-// Helper to get travel level image URL with proper platform handling
-const getTravelLevelImageUrl = (path: string): string => {
-  return getImageUrl(path);
-};
 
 const TRAVEL_LEVELS: TravelExperienceLevel[] = [
   {
     id: 0,
     title: 'New Nomad',
     subtitle: '0-3 surf trips',
-    imageUrl: getTravelLevelImageUrl('/Travel levels/Travel 111.png'),
+    imageSource: Images.travelLevels.level1,
   },
   {
     id: 1,
     title: 'Rising Voyager',
     subtitle: '4-9 surf trips',
-    imageUrl: getTravelLevelImageUrl('/Travel levels/Travel 222.png'),
+    imageSource: Images.travelLevels.level2,
   },
   {
     id: 2,
     title: 'Wave Hunter',
     subtitle: '10-19 surf trips',
-    imageUrl: getTravelLevelImageUrl('/Travel levels/Travel 333.png'),
+    imageSource: Images.travelLevels.level3,
   },
   {
     id: 3,
     title: 'Chicken Joe',
     subtitle: '20+ surf trips',
-    imageUrl: getTravelLevelImageUrl('/Travel levels/Travel 444.png'),
+    imageSource: Images.travelLevels.level4,
   },
 ];
 
@@ -421,7 +416,7 @@ export const TravelExperienceSlider: React.FC<TravelExperienceSliderProps> = ({
               ]}
             >
               <Image
-                source={{ uri: level.imageUrl }}
+                source={level.imageSource}
                 style={[styles.image, {
                   width: dynamicSizes.imageSize,
                   height: imgHeight,

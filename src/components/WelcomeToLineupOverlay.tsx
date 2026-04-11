@@ -13,7 +13,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from './Text';
 import { borderRadius } from '../styles/theme';
-import { getImageUrl } from '../services/media/imageService';
+import { Images } from '../assets/images';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { OnboardingMatch } from '../services/matching/onboardingMatchingService';
 
@@ -43,8 +43,8 @@ const CAROUSEL_CARD_SPACING = 10;
 const TEAL = '#2B8C96';
 const BACKDROP_COLOR = 'rgba(33, 33, 33, 0.8)';
 
-const coverImageUrl = getImageUrl('/COVER IMAGE.jpg');
-const swellyImageUrl = getImageUrl('/swelly-welcome-to-lineup.png');
+const coverImageSource = Images.coverImage;
+const swellyImageSource = Images.welcomeToLineup;
 
 export const WelcomeToLineupOverlay: React.FC<WelcomeToLineupOverlayProps> = ({
   visible,
@@ -204,7 +204,7 @@ export const WelcomeToLineupOverlay: React.FC<WelcomeToLineupOverlayProps> = ({
       <View style={styles.backdrop}>
         {/* Swelly character slide-in */}
         <Animated.Image
-          source={{ uri: swellyImageUrl }}
+          source={swellyImageSource}
           style={[
             styles.swellyImage,
             { transform: [{ translateX: swellySlideAnim }] },
@@ -240,7 +240,7 @@ export const WelcomeToLineupOverlay: React.FC<WelcomeToLineupOverlayProps> = ({
                   return (
                     <View key={item.user_id} style={styles.userCard}>
                       <View style={styles.userCardInner}>
-                        <Image source={{ uri: coverImageUrl }} style={styles.coverImage} />
+                        <Image source={coverImageSource} style={styles.coverImage} />
                         <View style={styles.profilePicContainer}>
                           {profileImageUri ? (
                             <Image source={{ uri: profileImageUri }} style={styles.profilePic} />

@@ -25,6 +25,7 @@ import { supabaseAuthService } from '../services/auth/supabaseAuthService';
 import { authService } from '../services/auth/authService';
 import { useOnboarding } from '../context/OnboardingContext';
 import { getImageUrl } from '../services/media/imageService';
+import { Images } from '../assets/images';
 import { UserSearchModal } from '../components/UserSearchModal';
 import { analyticsService } from '../services/analytics/analyticsService';
 import { DirectMessageScreen } from './DirectMessageScreen';
@@ -713,7 +714,7 @@ export default function ConversationsScreen({
             {/* First avatar - behind */}
             <View style={[styles.welcomeAvatar, styles.welcomeAvatarBack]}>
               <Image
-                source={{ uri: getImageUrl('/User Avatar 1.png') }}
+                source={Images.userAvatar1}
                 style={styles.welcomeAvatarImage}
                 resizeMode="cover"
               />
@@ -721,7 +722,7 @@ export default function ConversationsScreen({
             {/* Second avatar - in front with negative margin for overlap */}
             <View style={[styles.welcomeAvatar, styles.welcomeAvatarFront]}>
               <Image
-                source={{ uri: getImageUrl('/User Avatar 2.png') }}
+                source={Images.userAvatar2}
                 style={styles.welcomeAvatarImage}
                 resizeMode="cover"
               />
@@ -968,7 +969,7 @@ export default function ConversationsScreen({
               </View>
               <View style={styles.swellyAvatarImageContainer}>
                 <Image
-                  source={{ uri: getImageUrl('/Swelly avatar onboarding.png') }}
+                  source={Images.swellyAvatar}
                   style={styles.swellyAvatarImage}
                   resizeMode="cover"
                 />
@@ -1288,7 +1289,7 @@ export default function ConversationsScreen({
                   </View>
                   <View style={styles.swellyAvatarImageContainer}>
                     <Image
-                      source={{ uri: getImageUrl('/Swelly avatar onboarding.png') }}
+                      source={Images.swellyAvatar}
                       style={styles.swellyAvatarImage}
                       resizeMode="cover"
                     />
@@ -1629,7 +1630,7 @@ const styles = StyleSheet.create({
   },
   filterBadge: {
     display: 'flex',
-    width: 18,
+    minWidth: 18,
     paddingVertical: 2,
     paddingHorizontal: 4,
     justifyContent: 'center',
@@ -1760,7 +1761,7 @@ const styles = StyleSheet.create({
   },
   textContainer: {
     flex: 1,
-    maxWidth: 246,
+    flexShrink: 1,
     gap: 8,
   },
   conversationName: {
@@ -1789,9 +1790,9 @@ const styles = StyleSheet.create({
   timeContainer: {
     alignItems: 'flex-end',
     gap: 4,
-    width: 37,
-    height: 39,
+    minWidth: 50,
     justifyContent: 'flex-start',
+    flexShrink: 0,
   },
   timeText: {
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',

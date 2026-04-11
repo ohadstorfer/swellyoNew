@@ -12,7 +12,7 @@ import {
   Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { getImageUrl } from '../services/media/imageService';
+import { Images } from '../assets/images';
 import { supabase } from '../config/supabase';
 
 const REASONS = [
@@ -22,7 +22,7 @@ const REASONS = [
   "No reason",
 ];
 
-const SURFER_IMAGE = getImageUrl('/delete-account-surfer.png');
+const SURFER_IMAGE = Images.deleteAccountSurfer;
 
 interface DeleteAccountScreenProps {
   onBack: () => void;
@@ -202,7 +202,7 @@ export function DeleteAccountScreen({ onBack, userName, userEmail }: DeleteAccou
       {/* Sad surfer illustration - positioned absolutely so dropdown doesn't push it */}
       <View style={styles.illustrationContainer} pointerEvents="none">
         <Image
-          source={{ uri: SURFER_IMAGE }}
+          source={SURFER_IMAGE}
           style={styles.illustration}
           resizeMode="contain"
         />

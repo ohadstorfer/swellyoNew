@@ -25,6 +25,7 @@ import { colors, spacing, typography } from '../styles/theme';
 import { supabaseDatabaseService, SupabaseSurfer } from '../services/database/supabaseDatabaseService';
 import { supabase } from '../config/supabase';
 import { getImageUrl, getCountryImageFromStorage, getCountryImageFallback, getCountryImageFromPexels, getLifestyleImageFromPexels, uploadCountryImageToStorage } from '../services/media/imageService';
+import { Images } from '../assets/images';
 import { getSurfLevelVideoFromStorage } from '../services/media/videoService';
 import { getVideoPreloadStatus } from '../services/media/videoPreloadService';
 import { getCountryFlag } from '../utils/countryFlags';
@@ -87,17 +88,12 @@ const getTravelExperienceInfo = (trips: number | undefined | null) => {
   }
 };
 
-// Helper function to get travel level image URL based on number of trips
-const getTravelLevelImageUrl = (trips: number): string => {
-  if (trips <= 3) {
-    return getImageUrl('/Travel levels/Travel 111.png');
-  } else if (trips <= 9) {
-    return getImageUrl('/Travel levels/Travel 222.png');
-  } else if (trips <= 19) {
-    return getImageUrl('/Travel levels/Travel 333.png');
-  } else {
-    return getImageUrl('/Travel levels/Travel 444.png');
-  }
+// Helper function to get travel level image source based on number of trips
+const getTravelLevelImage = (trips: number) => {
+  if (trips <= 3) return Images.travelLevels.level1;
+  if (trips <= 9) return Images.travelLevels.level2;
+  if (trips <= 19) return Images.travelLevels.level3;
+  return Images.travelLevels.level4;
 };
 
 // Board-specific video definitions (same as OnboardingStep2Screen)
@@ -1652,7 +1648,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
     <>
     <View style={styles.container}>
       <ImageBackground
-        source={{ uri: getImageUrl('/chat background.png') }}
+        source={Images.chatBackground}
         style={styles.backgroundImage}
         resizeMode="cover"
       >
@@ -1886,9 +1882,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
         {/* Cover Image */}
         <View style={styles.coverContainer}>
           <ImageBackground
-            source={{ 
-              uri: getImageUrl('/COVER IMAGE.jpg') // Default cover image from public folder
-            }}
+            source={Images.coverImage}
             style={styles.coverImage}
             resizeMode="cover"
           >
@@ -2084,7 +2078,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
               {/* Travel Illustration */}
               <View style={styles.travelExperienceIllustration}>
                 <Image
-                  source={{ uri: getTravelLevelImageUrl(travelExpInfo.trips) }}
+                  source={getTravelLevelImage(travelExpInfo.trips)}
                   style={styles.travelExperienceImage}
                   resizeMode="contain"
                 />
