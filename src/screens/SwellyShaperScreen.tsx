@@ -24,7 +24,7 @@ import { supabaseDatabaseService, SupabaseSurfer } from '../services/database/su
 import { supabase } from '../config/supabase';
 import { MessageListSkeleton } from '../components/skeletons';
 import { SKELETON_DELAY_MS } from '../constants/loading';
-import { ChatTextInput } from '../components/ChatTextInput';
+import { ChatTextInput, ChatTextInputRef } from '../components/ChatTextInput';
 import { useChatKeyboardScroll } from '../hooks/useChatKeyboardScroll';
 import { useKeyboardVisible, useKeyboardHeight } from '../hooks/useKeyboardVisible';
 import { ReportAISheet } from '../components/ReportAISheet';
@@ -71,6 +71,7 @@ export const SwellyShaperScreen: React.FC<SwellyShaperScreenProps> = ({ onBack, 
   const keyboardVisible = useKeyboardVisible();
   const androidKeyboardHeight = useKeyboardHeight();
   const flatListRef = useRef<FlatList<Message>>(null);
+  const chatInputRef = useRef<ChatTextInputRef>(null);
   const { handleScroll, handleLayout, scrollToBottom } = useChatKeyboardScroll(flatListRef, { inverted: true });
 
   // Load chat_id from storage and profile data on mount
@@ -191,6 +192,7 @@ export const SwellyShaperScreen: React.FC<SwellyShaperScreenProps> = ({ onBack, 
 
     const userMessage = inputText.trim();
     setInputText('');
+    chatInputRef.current?.focus();
 
     // Add user message
     const userMsg: Message = {
@@ -525,6 +527,7 @@ export const SwellyShaperScreen: React.FC<SwellyShaperScreenProps> = ({ onBack, 
               initialNumToRender={50}
               maxToRenderPerBatch={50}
               windowSize={21}
+              keyboardShouldPersistTaps="handled"
             />
           )}
         </ImageBackground>
@@ -532,6 +535,7 @@ export const SwellyShaperScreen: React.FC<SwellyShaperScreenProps> = ({ onBack, 
         {/* Input Area */}
         <View style={[styles.inputWrapper, { paddingBottom: keyboardVisible ? 4 : Math.max(insets.bottom, 16) }]}>
           <ChatTextInput
+            ref={chatInputRef}
             value={inputText}
             onChangeText={setInputText}
             onSend={handleSend}

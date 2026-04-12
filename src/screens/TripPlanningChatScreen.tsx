@@ -27,7 +27,7 @@ import { findMatchingUsersV3 } from '../services/matching/matchingServiceV3';
 import { supabaseAuthService } from '../services/auth/supabaseAuthService';
 import { MatchedUser, TripPlanningRequest } from '../types/tripPlanning';
 import { analyticsService } from '../services/analytics/analyticsService';
-import { ChatTextInput } from '../components/ChatTextInput';
+import { ChatTextInput, ChatTextInputRef } from '../components/ChatTextInput';
 import { useChatKeyboardScroll } from '../hooks/useChatKeyboardScroll';
 import { useKeyboardVisible, useKeyboardHeight } from '../hooks/useKeyboardVisible';
 
@@ -252,6 +252,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   const keyboardVisible = useKeyboardVisible();
   const androidKeyboardHeight = useKeyboardHeight();
   const scrollViewRef = useRef<ScrollView>(null);
+  const chatInputRef = useRef<ChatTextInputRef>(null);
   const { handleScroll, handleContentSizeChange, handleLayout, scrollToBottom } = useChatKeyboardScroll(scrollViewRef);
 
   // Test API connection and initialize chat context on component mount
@@ -689,6 +690,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     
     setMessages(prev => [...prev, userMessage]);
     setInputText('');
+    chatInputRef.current?.focus();
     scrollToBottom();
     setIsLoading(true);
 
@@ -1250,6 +1252,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             scrollEventThrottle={16}
             onContentSizeChange={handleContentSizeChange}
             onLayout={handleLayout}
+            keyboardShouldPersistTaps="handled"
           >
             {messages.map(renderMessage)}
             {(isLoading || isInitializing) && (
@@ -1267,6 +1270,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         {/* Input Area */}
         <View style={[styles.inputWrapper, { paddingBottom: keyboardVisible ? 4 : Math.max(insets.bottom, 16) }]}>
           <ChatTextInput
+            ref={chatInputRef}
             value={inputText}
             onChangeText={setInputText}
             onSend={sendMessage}

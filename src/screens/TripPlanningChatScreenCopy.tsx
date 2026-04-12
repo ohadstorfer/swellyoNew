@@ -29,7 +29,7 @@ import { MatchedUsersCarousel } from '../components/MatchedUsersCarousel';
 import { messagingService } from '../services/messaging/messagingService';
 import { MatchedUser, TripPlanningRequest } from '../types/tripPlanning';
 import { analyticsService } from '../services/analytics/analyticsService';
-import { ChatTextInput } from '../components/ChatTextInput';
+import { ChatTextInput, ChatTextInputRef } from '../components/ChatTextInput';
 import { ReportAISheet } from '../components/ReportAISheet';
 import { blockingService } from '../services/blocking/blockingService';
 import {
@@ -275,6 +275,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   const keyboardVisible = useKeyboardVisible();
   const androidKeyboardHeight = useKeyboardHeight();
   const flatListRef = useRef<FlatList<Message>>(null);
+  const chatInputRef = useRef<ChatTextInputRef>(null);
   const loadingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { handleScroll, handleLayout, scrollToBottom } = useChatKeyboardScroll(flatListRef, { inverted: true });
 
@@ -1045,6 +1046,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     
     setMessages(prev => [...prev, userMessage]);
     setInputText('');
+    chatInputRef.current?.focus();
     scrollToBottom();
     startLoadingWithTimeout();
 
@@ -1952,6 +1954,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             initialNumToRender={50}
             maxToRenderPerBatch={50}
             windowSize={21}
+            keyboardShouldPersistTaps="handled"
           />
         </ImageBackground>
 
@@ -1975,6 +1978,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         {/* Input Area */}
         <View style={[styles.inputWrapper, { paddingBottom: keyboardVisible ? 4 : Math.max(insets.bottom, 16) }]}>
           <ChatTextInput
+            ref={chatInputRef}
             value={inputText}
             onChangeText={setInputText}
             onSend={sendMessage}

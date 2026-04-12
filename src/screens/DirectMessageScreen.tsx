@@ -851,7 +851,10 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
 
     setMessages((prev) => [...prev, optimisticMessage]);
     setInputText('');
-    
+
+    // Keep keyboard open after sending
+    chatInputRef.current?.focus();
+
     // Scroll to bottom immediately
     scrollToBottom();
     
@@ -1988,6 +1991,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             ListHeaderComponent={listHeaderComponent}
             ListFooterComponent={listFooterComponent}
             ListEmptyComponent={listEmptyComponent}
+            keyboardShouldPersistTaps="handled"
           />
         </ImageBackground>
 

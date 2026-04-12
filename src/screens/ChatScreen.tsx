@@ -26,7 +26,7 @@ import { supabaseDatabaseService } from '../services/database/supabaseDatabaseSe
 import { analyticsService } from '../services/analytics/analyticsService';
 import { DestinationCardsCarouselCopy } from '../components/DestinationCardsCarouselCopy';
 import { BudgetCardsCarousel, type BudgetOption } from '../components/BudgetCardsCarousel';
-import { ChatTextInput } from '../components/ChatTextInput';
+import { ChatTextInput, ChatTextInputRef } from '../components/ChatTextInput';
 import { ReportAISheet } from '../components/ReportAISheet';
 import { useChatKeyboardScroll } from '../hooks/useChatKeyboardScroll';
 import { useKeyboardVisible, useKeyboardHeight } from '../hooks/useKeyboardVisible';
@@ -133,6 +133,7 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
   const keyboardVisible = useKeyboardVisible();
   const androidKeyboardHeight = useKeyboardHeight();
   const flatListRef = useRef<FlatList<Message>>(null);
+  const chatInputRef = useRef<ChatTextInputRef>(null);
   const { handleScroll, handleLayout, scrollToBottom: keyboardScrollToBottom } = useChatKeyboardScroll(flatListRef, { inverted: true });
 
   const chatInitializedRef = useRef(false);
@@ -376,6 +377,7 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
     console.log('Sending message:', userMessage.text);
     setMessages(prev => [...prev, userMessage]);
     setInputText('');
+    chatInputRef.current?.focus();
     setIsLoading(true);
 
     try {
@@ -948,6 +950,7 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
         {/* Input Area */}
         <View style={[styles.inputWrapper, { paddingBottom: keyboardVisible ? 4 : Math.max(insets.bottom, 16) }]}>
           <ChatTextInput
+            ref={chatInputRef}
             value={inputText}
             onChangeText={setInputText}
             onSend={sendMessage}

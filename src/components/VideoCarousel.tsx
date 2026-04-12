@@ -66,7 +66,7 @@ const VideoSlot: React.FC<VideoSlotProps> = React.memo(({ videoUrl, isActive, st
   isActiveRef.current = isActive;
 
   const source = videoUrl
-    ? (Platform.OS === 'web' ? videoUrl : { uri: videoUrl, useCaching: true })
+    ? (Platform.OS === 'web' ? videoUrl : { uri: videoUrl })
     : null;
 
   const player = useVideoPlayer(source, (p: any) => {
@@ -489,25 +489,42 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
             },
           } as any)}
         >
-          {/* Video players — one per video, all pre-buffered, only active one visible */}
+          {/* Video players — on Android only mount the active one (SurfaceView + opacity bugs);
+              on web/iOS pre-buffer all with opacity toggling */}
           <View style={styles.mainVideo} pointerEvents="none">
-            {videos.map((video) => (
+            {Platform.OS === 'android' ? (
               <VideoSlot
-                key={video.id}
-                videoUrl={video.videoUrl || null}
-                isActive={video.id === selectedVideoId}
+                key={selectedVideoId}
+                videoUrl={videos.find(v => v.id === selectedVideoId)?.videoUrl || null}
+                isActive={true}
                 style={{
                   position: 'absolute' as const,
                   top: 0,
                   left: 0,
                   right: 0,
                   bottom: 0,
-                  zIndex: video.id === selectedVideoId ? 1 : 0,
-                  opacity: video.id === selectedVideoId ? 1 : 0,
                 }}
-                onReady={() => handleSlotReady(video.id)}
+                onReady={() => handleSlotReady(selectedVideoId)}
               />
-            ))}
+            ) : (
+              videos.map((video) => (
+                <VideoSlot
+                  key={video.id}
+                  videoUrl={video.videoUrl || null}
+                  isActive={video.id === selectedVideoId}
+                  style={{
+                    position: 'absolute' as const,
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    zIndex: video.id === selectedVideoId ? 1 : 0,
+                    opacity: video.id === selectedVideoId ? 1 : 0,
+                  }}
+                  onReady={() => handleSlotReady(video.id)}
+                />
+              ))
+            )}
           </View>
 
           {/* Thumbnail overlay — shown briefly on first load, skipped when video is pre-buffered */}
