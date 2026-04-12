@@ -8,3 +8,4 @@
 - [Android Keyboard Handling — Chat Apps + Expo SDK 54](research_android_keyboard_chat.md) — adjustResize+edgeToEdge=broken on Android 15+; use react-native-keyboard-controller; dynamic behavior hook as fallback
 - [Photo/Media Permissions — iOS & Android Store Requirements](research_photo_permissions.md) — Apple NSPhotoLibraryUsageDescription rules, Google Play May 2025 enforcement, expo-image-picker READ_MEDIA injection bug (SDK 54), permission primer UX, canAskAgain=false/Open Settings pattern
 - [Age Gate + DOB Onboarding — Industry Patterns](research_age_gate_dob_onboarding.md) — Ask DOB once, pre-fill+lock profile field; underage in Step 2 = terminate session; Tinder/Bumble/Hinge all lock DOB after signup; Apple/Google API requirements
+- [Force LTR Layout — React Native / Expo](research_force_ltr.md) — Multi-layer: JS module level + guarded reload + native MainApplication.kt + AndroidManifest supportsRtl=false + iOS AppDelegate

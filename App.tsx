@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Platform } from 'react-native';
+import { Platform, I18nManager } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { PostHogProvider, PostHogSurveyProvider } from 'posthog-react-native';
 import { NavigationContainer } from '@react-navigation/native';
@@ -22,6 +22,12 @@ const MaybeKeyboardProvider = isExpoGo
 const POSTHOG_API_KEY = process.env.EXPO_PUBLIC_POSTHOG_API_KEY || '';
 const POSTHOG_HOST = process.env.EXPO_PUBLIC_POSTHOG_HOST || 'https://app.posthog.com';
 const isMVPMode = process.env.EXPO_PUBLIC_MVP_MODE === 'true';
+
+// Force LTR layout — app is English-only
+if (I18nManager.isRTL) {
+  I18nManager.allowRTL(false);
+  I18nManager.forceRTL(false);
+}
 
 export default function App() {
   const [isNavigationReady, setIsNavigationReady] = useState(false);
