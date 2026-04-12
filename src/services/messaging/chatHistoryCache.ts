@@ -714,7 +714,7 @@ class ChatHistoryCache {
    */
   clearConversation(conversationId: string): void {
     const key = this.getCacheKey(conversationId);
-    this.memoryCache.delete(key);
+    this.memoryCache.delete(conversationId);
     AsyncStorage.removeItem(key).catch(err =>
       console.warn('[chatHistoryCache] Error clearing conversation cache:', err)
     );

@@ -17,6 +17,7 @@ import {
   saveCachedConversationList,
   getLastSyncTimestamp,
   updateLastSyncTimestamp,
+  clearConversationListCache,
 } from '../services/messaging/conversationListCache';
 import { chatHistoryCache } from '../services/messaging/chatHistoryCache';
 import { supabase } from '../config/supabase';
@@ -750,6 +751,9 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
       cleanup();
     }
     dispatch({ type: 'REPLACE_ALL', payload: { conversations: [] } });
+    // Clear persistent caches so next user doesn't see old user's data
+    clearConversationListCache().catch((err) => console.error('[MessagingProvider] Error clearing conversation list cache on logout:', err));
+    chatHistoryCache.clearAll().catch((err) => console.error('[MessagingProvider] Error clearing chat history cache on logout:', err));
     imageUploadResetForLogout().catch((err) => console.error('[MessagingProvider] Error resetting uploads on logout:', err));
   }, [user]);
 
@@ -768,69 +772,6 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
       const first = lastProcessedMessageIds.current.values().next().value;
       lastProcessedMessageIds.current.delete(first);
     }
-  }, []);
-
-  // Preload message histories from SERVER (not just disk)
-  // This ensures instant experience even on fresh install
-  const preloadMessageHistoriesFromServer = useCallback(async (conversations: Conversation[]) => {
-    console.log('[MessagingProvider] 🚀 PRELOAD START - conversations count:', conversations.length);
-    
-    const topConversations = conversations.slice(0, 10);
-    console.log('[MessagingProvider] 📋 Preloading top 10 conversations:', topConversations.map(c => c.id));
-    
-    const preloadStartTime = Date.now();
-    
-    InteractionManager.runAfterInteractions(() => {
-      console.log('[MessagingProvider] ⏱️ InteractionManager callback executed, starting parallel fetches');
-      
-      const preloadPromises = topConversations.map(async (conv) => {
-        const convStartTime = Date.now();
-        console.log(`[MessagingProvider] 📥 Starting fetch for conversation ${conv.id}`);
-        
-        try {
-          const messages = await messagingService.getMessages(conv.id, 20);
-          const fetchTime = Date.now() - convStartTime;
-          console.log(`[MessagingProvider] ✅ Fetched ${messages?.length || 0} messages for ${conv.id} in ${fetchTime}ms`);
-          
-          if (messages && messages.length > 0) {
-            const saveStartTime = Date.now();
-            await chatHistoryCache.saveMessages(conv.id, messages);
-            const saveTime = Date.now() - saveStartTime;
-            console.log(`[MessagingProvider] 💾 Saved ${result.messages.length} messages to cache for ${conv.id} in ${saveTime}ms`);
-            
-            // Verify memory cache
-            const memoryCached = chatHistoryCache.loadCachedMessages(conv.id);
-            console.log(`[MessagingProvider] 🔍 Memory cache check after save for ${conv.id}:`, {
-              inMemory: !!memoryCached,
-              messageCount: memoryCached?.length || 0
-            });
-            
-            if (!memoryCached) {
-              console.warn(`[MessagingProvider] ⚠️ Memory cache MISS after save for ${conv.id} - warming explicitly`);
-              chatHistoryCache.warmMemoryCache(conv.id, result.messages, Date.now());
-              
-              // Verify again
-              const afterWarm = chatHistoryCache.loadCachedMessages(conv.id);
-              console.log(`[MessagingProvider] 🔍 Memory cache check after warm for ${conv.id}:`, {
-                inMemory: !!afterWarm,
-                messageCount: afterWarm?.length || 0
-              });
-            }
-          } else {
-            console.log(`[MessagingProvider] ⚠️ No messages returned for conversation ${conv.id}`);
-          }
-        } catch (error) {
-          console.error(`[MessagingProvider] ❌ Error preloading messages from server for ${conv.id}:`, error);
-        }
-      });
-      
-      Promise.all(preloadPromises).then(() => {
-        const totalTime = Date.now() - preloadStartTime;
-        console.log(`[MessagingProvider] 🎉 PRELOAD COMPLETE - Total time: ${totalTime}ms`);
-      }).catch(err => {
-        console.error('[MessagingProvider] ❌ Error in parallel message preload:', err);
-      });
-    });
   }, []);
 
   // Load conversations from cache first, then from server
@@ -869,70 +810,63 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
             });
           }
           
-          // CRITICAL: Start preload IMMEDIATELY with cached data (don't wait for server)
-          // This ensures messages are preloaded even if server fetch is slow
-          console.log(`[MessagingProvider] 🚀 Triggering preload IMMEDIATELY with ${cached.length} cached conversations`);
-          preloadMessageHistoriesFromServer(cached);
         } else {
           console.log('[MessagingProvider] 📦 No cached conversations found');
           // Keep loading true if no cache (will show skeletons)
         }
       }
 
-      // Then fetch from server (non-blocking for UI - loading already false if cache exists)
-      const serverStartTime = Date.now();
-      const result = await messagingService.getConversations(50, offset);
-      const serverTime = Date.now() - serverStartTime;
-      console.log(`[MessagingProvider] 📥 Fetched ${result.conversations.length} conversations from server in ${serverTime}ms (hasMore: ${result.hasMore}, offset: ${offset})`);
-      
-      // Update hasMore state
-      setHasMoreConversations(result.hasMore);
-      
-      if (offset === 0) {
-        // First page - replace all
-        dispatch({ type: 'REPLACE_ALL', payload: { conversations: result.conversations } });
-        conversationsOffsetRef.current = result.conversations.length;
-        
-        // Update cache with first page
-        await saveCachedConversationList(result.conversations);
-        await updateLastSyncTimestamp();
+      // Skip server fetch if cache is fresh (< 5 minutes old) — reduces egress
+      const lastSync = await getLastSyncTimestamp();
+      const cacheAge = lastSync ? Date.now() - lastSync : Infinity;
+      const cacheFresh = cached && cached.length > 0 && cacheAge < 5 * 60 * 1000;
+
+      if (offset === 0 && cacheFresh) {
+        console.log(`[MessagingProvider] ⏭️ Cache is fresh (${Math.round(cacheAge / 1000)}s old) — skipping server fetch`);
+        conversationsOffsetRef.current = cached!.length;
       } else {
-        // Subsequent pages - append
-        dispatch({ type: 'APPEND_CONVERSATIONS', payload: { conversations: result.conversations } });
-        conversationsOffsetRef.current += result.conversations.length;
-        
-        // Merge with existing cache (deduplicate to prevent duplicates)
-        const existingCached = await loadCachedConversationList();
-        if (existingCached && existingCached.length > 0) {
-          const existingIds = new Set(existingCached.map(c => c.id));
-          const uniqueNew = result.conversations.filter(c => !existingIds.has(c.id));
-          const merged = [...existingCached, ...uniqueNew];
-          await saveCachedConversationList(merged);
-        } else {
+        // Fetch from server (non-blocking for UI if cache exists)
+        const serverStartTime = Date.now();
+        const result = await messagingService.getConversations(50, offset);
+        const serverTime = Date.now() - serverStartTime;
+        console.log(`[MessagingProvider] 📥 Fetched ${result.conversations.length} conversations from server in ${serverTime}ms (hasMore: ${result.hasMore}, offset: ${offset})`);
+
+        setHasMoreConversations(result.hasMore);
+
+        if (offset === 0) {
+          dispatch({ type: 'REPLACE_ALL', payload: { conversations: result.conversations } });
+          conversationsOffsetRef.current = result.conversations.length;
           await saveCachedConversationList(result.conversations);
-        }
-      }
-      
-      // Prefetch avatars from server conversations
-      const serverAvatarUrls = result.conversations
-        .map(conv => conv.other_user?.profile_image_url)
-        .filter((url): url is string => !!url);
-      if (serverAvatarUrls.length > 0) {
-        avatarCacheService.prefetchAvatars(serverAvatarUrls).catch(err => {
-          console.error('[MessagingProvider] Error prefetching avatars from server:', err);
-        });
-      }
-      
-      // If preload wasn't triggered earlier (no cache), trigger it now
-      if (offset === 0 && (!cached || cached.length === 0)) {
-        if (result.conversations.length > 0) {
-          console.log(`[MessagingProvider] 🚀 Triggering preload for ${result.conversations.length} conversations (no cache)`);
-          preloadMessageHistoriesFromServer(result.conversations);
+          await updateLastSyncTimestamp();
         } else {
-          console.log('[MessagingProvider] ⚠️ No conversations to preload');
+          dispatch({ type: 'APPEND_CONVERSATIONS', payload: { conversations: result.conversations } });
+          conversationsOffsetRef.current += result.conversations.length;
+
+          const existingCached = await loadCachedConversationList();
+          if (existingCached && existingCached.length > 0) {
+            const existingIds = new Set(existingCached.map(c => c.id));
+            const uniqueNew = result.conversations.filter(c => !existingIds.has(c.id));
+            const merged = [...existingCached, ...uniqueNew];
+            await saveCachedConversationList(merged);
+          } else {
+            await saveCachedConversationList(result.conversations);
+          }
         }
-        // Set loading to false after server fetch completes (no cache case)
-        setLoading(false);
+
+        // Prefetch avatars from server conversations
+        const serverAvatarUrls = result.conversations
+          .map(conv => conv.other_user?.profile_image_url)
+          .filter((url): url is string => !!url);
+        if (serverAvatarUrls.length > 0) {
+          avatarCacheService.prefetchAvatars(serverAvatarUrls).catch(err => {
+            console.error('[MessagingProvider] Error prefetching avatars from server:', err);
+          });
+        }
+
+        // No cache case — set loading false after server fetch
+        if (offset === 0 && (!cached || cached.length === 0)) {
+          setLoading(false);
+        }
       }
       
       const totalTime = Date.now() - loadStartTime;
@@ -952,7 +886,7 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
       isLoadingMoreRef.current = false;
       setIsLoadingMoreConversations(false);
     }
-  }, [preloadMessageHistoriesFromServer]);
+  }, []);
 
   // Mark conversation as read
   const markAsRead = useCallback(async (conversationId: string) => {
