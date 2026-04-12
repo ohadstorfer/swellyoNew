@@ -20,6 +20,7 @@ import { colors, spacing, typography, borderRadius } from '../styles/theme';
 import { swellyService, SwellyChatResponse } from '../services/swelly/swellyService';
 import { useOnboarding } from '../context/OnboardingContext';
 import { getImageUrl, getLifestyleImageBucketUrlForFilename, getLifestyleImageFromPexels } from '../services/media/imageService';
+import { Images } from '../assets/images';
 import { supabase, isSupabaseConfigured } from '../config/supabase';
 import { supabaseDatabaseService } from '../services/database/supabaseDatabaseService';
 import { analyticsService } from '../services/analytics/analyticsService';
@@ -33,8 +34,8 @@ import { useKeyboardVisible, useKeyboardHeight } from '../hooks/useKeyboardVisib
 // Resolve image URLs once at module level to avoid heavy manifest inspection +
 // console.log spam on every render (getImageUrl does extensive Constants lookups).
 const ELLIPSE_IMAGE_URI = getImageUrl('/Ellipse 11.svg');
-const AVATAR_IMAGE_URI = getImageUrl('/Swelly avatar onboarding.png');
-const CHAT_BG_IMAGE_URI = getImageUrl('/chat background.png');
+const AVATAR_IMAGE_URI = Images.swellyAvatar;
+const CHAT_BG_IMAGE_URI = Images.chatBackground;
 
 interface Message {
   id: string;
@@ -886,7 +887,7 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
                 )}
                 <View style={styles.avatarImageContainer}>
                   <Image
-                    source={{ uri: AVATAR_IMAGE_URI }}
+                    source={AVATAR_IMAGE_URI}
                     style={styles.avatarImage}
                     resizeMode="cover"
                   />
@@ -917,7 +918,7 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
         keyboardVerticalOffset={0}
       >
         <ImageBackground
-          source={{ uri: CHAT_BG_IMAGE_URI }}
+          source={CHAT_BG_IMAGE_URI}
           style={styles.backgroundImage}
           resizeMode="cover"
         >

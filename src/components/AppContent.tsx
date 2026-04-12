@@ -1565,14 +1565,16 @@ export const AppContent: React.FC = () => {
   // Note: currentStep === 0 shows OnboardingWelcomeScreen (handled above)
   // This handles: initial load, or when user hasn't started onboarding yet
   // Auth guard ensures unauthenticated users are redirected here
-  // Demo button visible only when EXPO_PUBLIC_DEV_MODE is true
-  const showDemoButton = isDevMode || isLocalMode;
+  // Demo buttons always passed; WelcomeScreen controls visibility via showDemoByDefault
+  // or a secret long-press gesture on the logo (for testers on production).
+  const showDemoByDefault = isDevMode || isLocalMode;
   return (
     <WelcomeScreen
       onGetStarted={handleGetStarted}
-      onDemoChat={showDemoButton ? handleDemoChat : undefined}
-      onSkipDemo={showDemoButton ? handleSkipDemo : undefined}
+      onDemoChat={handleDemoChat}
+      onSkipDemo={handleSkipDemo}
       isCheckingAuth={isCheckingAuth}
+      showDemoByDefault={showDemoByDefault}
     />
   );
 };

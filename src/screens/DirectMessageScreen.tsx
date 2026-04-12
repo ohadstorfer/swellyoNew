@@ -26,6 +26,7 @@ import { colors, spacing, typography, borderRadius } from '../styles/theme';
 import { messagingService, Message, RealtimeSubscriptionStatus } from '../services/messaging/messagingService';
 import { supabaseAuthService } from '../services/auth/supabaseAuthService';
 import { getImageUrl } from '../services/media/imageService';
+import { Images } from '../assets/images';
 import { supabase } from '../config/supabase';
 import { ProfileImage } from '../components/ProfileImage';
 import { MessageListSkeleton } from '../components/skeletons';
@@ -552,41 +553,26 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       setIsFetchingMessages(false);
       setShowSkeletons(false);  // Binary: cache exists = no skeleton
       
-      // CRITICAL: Always fetch newest messages from server after cache hit
-      // This ensures we have the right messages even if cache is stale
-      (async () => {
-        try {
-          const serverResult = await messagingService.getMessages(currentConversationId, 30);
-          console.log('[DirectMessageScreen] ✅ Server sync after cache hit:', {
-            serverMessages: serverResult.messages.length,
-            hasMore: serverResult.hasMore,
-          });
+      setHasMoreMessages(true);
 
-          // Update pagination state from server
-          setHasMoreMessages(serverResult.hasMore);
-
-          // Set pagination cursor to oldest message from SERVER result (not the merge)
-          // This prevents stale cache messages from poisoning the cursor
-          // Example: cache has M1-M41 (stale), server has M51-M80 (newest 30)
-          // Cursor should be M51, so pagination fetches M21-M50 (filling the gap)
-          // NOT M1, which would find nothing older and stop pagination
-          if (serverResult.messages.length > 0) {
-            oldestMessageIdRef.current = serverResult.messages[0].id;
-          }
-
-          // Merge server messages with cached messages
-          setMessages((prev) => {
-            const merged = chatHistoryCache.mergeMessages(prev, serverResult.messages);
-            chatHistoryCache.saveMessages(currentConversationId, merged).catch(() => {});
-            return merged;
-          });
-        } catch (error) {
-          console.error('[DirectMessageScreen] ❌ Error syncing with server after cache hit:', error);
-        }
-      })();
-
-      // Also run regular background sync
-      syncWithServerInBackground();
+      // Lightweight catch-up: fetch messages newer than the newest cached message
+      // This covers messages that arrived while the app was closed (realtime wasn't connected)
+      // Typically returns 0 rows — cheap call
+      const newestCachedTimestamp = cachedMessages[cachedMessages.length - 1]?.created_at;
+      if (newestCachedTimestamp) {
+        messagingService.getMessagesUpdatedSince(currentConversationId, new Date(newestCachedTimestamp).getTime(), 50)
+          .then((newMessages) => {
+            if (newMessages.length > 0) {
+              console.log(`[DirectMessageScreen] 📬 Catch-up found ${newMessages.length} missed messages`);
+              setMessages((prev) => {
+                const merged = chatHistoryCache.mergeMessages(prev, newMessages);
+                chatHistoryCache.saveMessages(currentConversationId, merged).catch(() => {});
+                return merged;
+              });
+            }
+          })
+          .catch((err) => console.error('[DirectMessageScreen] Catch-up sync error:', err));
+      }
       return;
     }
     
@@ -655,25 +641,24 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         setIsFetchingMessages(false);
         setShowSkeletons(false);  // Binary: cache exists = no skeleton
 
-        // Fetch newest messages from server to set correct pagination state
-        (async () => {
-          try {
-            const serverResult = await messagingService.getMessages(currentConversationId, 30);
-            setHasMoreMessages(serverResult.hasMore);
-            if (serverResult.messages.length > 0) {
-              oldestMessageIdRef.current = serverResult.messages[0].id;
-            }
-            setMessages((prev) => {
-              const merged = chatHistoryCache.mergeMessages(prev, serverResult.messages);
-              chatHistoryCache.saveMessages(currentConversationId, merged).catch(() => {});
-              return merged;
-            });
-          } catch (error) {
-            console.error('[DirectMessageScreen] ❌ Error syncing after AsyncStorage cache hit:', error);
-          }
-        })();
+        setHasMoreMessages(true);
 
-        syncWithServerInBackground();
+        // Lightweight catch-up: fetch messages newer than the newest cached message
+        const newestCachedTimestamp = asyncCachedMessages[asyncCachedMessages.length - 1]?.created_at;
+        if (newestCachedTimestamp) {
+          messagingService.getMessagesUpdatedSince(currentConversationId, new Date(newestCachedTimestamp).getTime(), 50)
+            .then((newMessages) => {
+              if (newMessages.length > 0) {
+                console.log(`[DirectMessageScreen] 📬 Catch-up found ${newMessages.length} missed messages (AsyncStorage path)`);
+                setMessages((prev) => {
+                  const merged = chatHistoryCache.mergeMessages(prev, newMessages);
+                  chatHistoryCache.saveMessages(currentConversationId, merged).catch(() => {});
+                  return merged;
+                });
+              }
+            })
+            .catch((err) => console.error('[DirectMessageScreen] Catch-up sync error:', err));
+        }
       } else {
         console.log('[DirectMessageScreen] ⚠️ Both caches MISS - fetching from server');
         setShowSkeletons(true);  // Binary: no cache = show skeleton
@@ -1969,7 +1954,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         keyboardVerticalOffset={0}
       >
         <ImageBackground
-          source={{ uri: getImageUrl('/chat background.png') }}
+          source={Images.chatBackground}
           style={styles.backgroundImage}
           resizeMode="cover"
         >

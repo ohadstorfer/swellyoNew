@@ -12,7 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../components/Text';
-import { getImageUrl } from '../services/media/imageService';
+import { Images } from '../assets/images';
 
 interface SwellyoTeamWelcomeProps {
   onBack?: () => void;
@@ -55,7 +55,7 @@ Drop in with Swelly, start connecting and help us grow the Swellyo community.
               {/* First avatar - behind */}
               <View style={[styles.avatar, styles.avatarBack]}>
                 <Image
-                  source={{ uri: getImageUrl('/User Avatar 1.png') }}
+                  source={Images.userAvatar1}
                   style={styles.avatarImage}
                   resizeMode="cover"
                 />
@@ -63,7 +63,7 @@ Drop in with Swelly, start connecting and help us grow the Swellyo community.
               {/* Second avatar - in front with negative margin for overlap */}
               <View style={[styles.avatar, styles.avatarFront]}>
                 <Image
-                  source={{ uri: getImageUrl('/User Avatar 2.png') }}
+                  source={Images.userAvatar2}
                   style={styles.avatarImage}
                   resizeMode="cover"
                 />
@@ -93,7 +93,7 @@ Drop in with Swelly, start connecting and help us grow the Swellyo community.
       {/* Chat Messages */}
       <View style={styles.chatContainer}>
         <ImageBackground
-          source={{ uri: getImageUrl('/chat background.png') }}
+          source={Images.chatBackground}
           style={styles.backgroundImage}
           resizeMode="cover"
         >

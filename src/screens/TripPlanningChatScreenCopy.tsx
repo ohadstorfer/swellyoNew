@@ -24,6 +24,7 @@ import { colors, spacing } from '../styles/theme';
 import { swellyServiceCopy, SwellyChatResponse, UIMessage, type SwellyService as SwellyServiceType } from '../services/swelly/swellyServiceCopy';
 import { useOnboarding } from '../context/OnboardingContext';
 import { getImageUrl } from '../services/media/imageService';
+import { Images } from '../assets/images';
 import { MatchedUsersCarousel } from '../components/MatchedUsersCarousel';
 import { messagingService } from '../services/messaging/messagingService';
 import { MatchedUser, TripPlanningRequest } from '../types/tripPlanning';
@@ -1901,7 +1902,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
                 )}
                 <View style={styles.avatarImageContainer}>
                   <Image
-                    source={{ uri: getImageUrl('/Swelly avatar onboarding.png') }}
+                    source={Images.swellyAvatar}
                     style={styles.avatarImage}
                     resizeMode="cover"
                   />
@@ -1930,7 +1931,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         keyboardVerticalOffset={0}
       >
         <ImageBackground
-          source={{ uri: getImageUrl('/chat background.png') }}
+          source={Images.chatBackground}
           style={styles.backgroundImage}
           resizeMode="cover"
         >
@@ -2191,7 +2192,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             {/* Swelly avatar bubble */}
             <View style={styles.modalAvatarBubble}>
               <Image
-                source={{ uri: getImageUrl('/Swelly avatar onboarding.png') }}
+                source={Images.swellyAvatar}
                 style={styles.modalAvatarImage}
                 resizeMode="cover"
               />

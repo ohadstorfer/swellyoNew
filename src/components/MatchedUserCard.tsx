@@ -8,7 +8,7 @@ import {
   Platform,
 } from 'react-native';
 import { MatchedUser } from '../types/tripPlanning';
-import { getImageUrl } from '../services/media/imageService';
+import { Images } from '../assets/images';
 import { analyticsService } from '../services/analytics/analyticsService';
 
 interface MatchedUserCardProps {
@@ -17,8 +17,8 @@ interface MatchedUserCardProps {
   isCarousel?: boolean;
 }
 
-// Default cover image from public folder
-const coverImageUrl = getImageUrl('/COVER IMAGE.jpg');
+// Default cover image
+const coverImageSource = Images.coverImage;
 
 export const MatchedUserCard: React.FC<MatchedUserCardProps> = ({
   user,
@@ -30,7 +30,7 @@ export const MatchedUserCard: React.FC<MatchedUserCardProps> = ({
   return (
     <View style={[styles.userCard, isCarousel && styles.userCardCarousel]}>
       <View style={styles.userCardInner}>
-        <Image source={{ uri: coverImageUrl }} style={styles.coverImage} />
+        <Image source={coverImageSource} style={styles.coverImage} />
         <View style={styles.profilePicContainer}>
           {profileImageUri ? (
             <Image source={{ uri: profileImageUri }} style={styles.profilePic} />

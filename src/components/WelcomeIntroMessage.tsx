@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, StyleSheet, Image, Platform } from 'react-native';
 import { Text } from './Text';
-import { getImageUrl } from '../services/media/imageService';
+import { Images } from '../assets/images';
 
 const WELCOME_INTRO_TEXT =
   "Yo shredders! You two align!  I bet if you met out in the water you would have an epic chat, maybe grab some tasty burritos after a session! Wanted to make the intro! Take it from here!";
@@ -19,7 +19,7 @@ export const WelcomeIntroMessage: React.FC = () => {
         </View>
         <View style={styles.avatarContainer}>
           <Image
-            source={{ uri: getImageUrl('/Swelly welcome message.png') }}
+            source={Images.swellyWelcomeMessage}
             style={styles.avatarImage}
             resizeMode="cover"
           />

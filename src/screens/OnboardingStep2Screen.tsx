@@ -13,7 +13,7 @@ import { VideoCarousel, VideoLevel } from '../components/VideoCarousel';
 import { colors, spacing } from '../styles/theme';
 import { OnboardingData } from './OnboardingStep1Screen';
 import { getSurfLevelVideoFromStorage } from '../services/media/videoService';
-import { getImageUrl } from '../services/media/imageService';
+import { Images } from '../assets/images';
 import { useIsDesktopWeb, useScreenDimensions, responsiveWidth, getScreenWidth } from '../utils/responsive';
 import { getVideoPreloadStatus, waitForVideoReady, getPlaybackUrl } from '../services/media/videoPreloadService';
 
@@ -63,6 +63,29 @@ const getBoardFolder = (boardType: number): string => {
   return folderMap[boardType] || 'shortboard';
 };
 
+// Thumbnail lookup by board folder and filename
+const THUMBNAIL_MAP: Record<string, Record<string, any>> = {
+  shortboard: {
+    'Dipping My Toes thumbnail.PNG': Images.surfLevel.shortboard.dippingMyToes,
+    'Cruising Around thumbnail.PNG': Images.surfLevel.shortboard.cruisingAround,
+    'Snapping thumbnail.PNG': Images.surfLevel.shortboard.snapping,
+    'Charging thumbnail.PNG': Images.surfLevel.shortboard.charging,
+  },
+  midlength: {
+    'Dipping My Toes thumbnail.PNG': Images.surfLevel.midlength.dippingMyToes,
+    'Cruising Around thumbnail.PNG': Images.surfLevel.midlength.cruisingAround,
+    'Carving Turns thumbnail.PNG': Images.surfLevel.midlength.carvingTurns,
+    'Charging thumbnail.PNG': Images.surfLevel.midlength.chargingOrCarving,
+    'Charging thumbnail.png': Images.surfLevel.midlength.chargingOrCarving,
+  },
+  longboard: {
+    'Dipping My Toes thumbnail.PNG': Images.surfLevel.longboard.dippingMyToes,
+    'Cruising Around thumbnail.PNG': Images.surfLevel.longboard.cruisingAround,
+    'CrossStepping thumbnail.PNG': Images.surfLevel.longboard.crossStepping,
+    'Hanging Toes thumbnail.PNG': Images.surfLevel.longboard.hangingToes,
+  },
+};
+
 // Cache video URLs to avoid re-computation
 const videoUrlCache = new Map<string, string>();
 
@@ -85,7 +108,7 @@ const getSurfLevelVideos = (boardType: number): VideoLevel[] => {
     .map((video, index) => {
       // Videos are served from Supabase storage bucket
       const storagePath = `${boardFolder}/${video.videoFileName}`;
-      const thumbnailPath = `/surf level/${boardFolder}/${video.thumbnailFileName}`;
+      const thumbnailSource = THUMBNAIL_MAP[boardFolder]?.[video.thumbnailFileName];
       
       // Use cached URL if available; on Safari use blob URL when preloaded for instant playback
       let videoUrl: string;
@@ -110,7 +133,7 @@ const getSurfLevelVideos = (boardType: number): VideoLevel[] => {
       return {
         id: index, // Use index as ID to maintain order
         name: video.name,
-        thumbnailUrl: getImageUrl(thumbnailPath),
+        thumbnailSource,
         videoUrl,
       };
     });

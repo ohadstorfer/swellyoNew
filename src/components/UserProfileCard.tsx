@@ -11,7 +11,7 @@ import Svg, { Path, G, ClipPath, Defs, Rect } from 'react-native-svg';
 import { Text } from './Text';
 import { colors, spacing } from '../styles/theme';
 import { ProfileImage } from './ProfileImage';
-import { getImageUrl } from '../services/media/imageService';
+import { Images } from '../assets/images';
 import { SupabaseSurfer } from '../services/database/supabaseDatabaseService';
 
 interface UserProfileCardProps {
@@ -84,7 +84,7 @@ export const UserProfileCard: React.FC<UserProfileCardProps> = ({ profileData, o
       {/* Cover Image */}
       <View style={styles.coverContainer}>
         <ImageBackground
-          source={{ uri: getImageUrl('/COVER IMAGE.jpg') }}
+          source={Images.coverImage}
           style={styles.coverImage}
           resizeMode="cover"
         >

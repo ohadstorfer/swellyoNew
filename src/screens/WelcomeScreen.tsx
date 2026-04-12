@@ -34,6 +34,7 @@ interface WelcomeScreenProps {
   onDemoChat?: () => void | Promise<void>;
   onSkipDemo?: () => void | Promise<void>;
   isCheckingAuth?: boolean;
+  showDemoByDefault?: boolean;
 }
 
 // Google logo path from public/welcome page folder
@@ -143,10 +144,12 @@ const TERMS_URL = 'https://www.swellyo.com/terms-of-service';
 const PRIVACY_URL = 'https://www.swellyo.com/privacy-policy';
 const AGE_PICKER_ITEM_HEIGHT = 50;
 
-export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDemoChat, onSkipDemo, isCheckingAuth = false }) => {
+export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDemoChat, onSkipDemo, isCheckingAuth = false, showDemoByDefault = false }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [isDemoLoading, setIsDemoLoading] = useState(false);
   const [isSkipDemoLoading, setIsSkipDemoLoading] = useState(false);
+  const [showDevButtons, setShowDevButtons] = useState(false);
+  const demoVisible = (showDemoByDefault || showDevButtons) && !!onDemoChat;
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [isAgeBlocked, setIsAgeBlocked] = useState(false);
   const [showAgeSheet, setShowAgeSheet] = useState(false);
@@ -756,10 +759,17 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
           {/* Centered logo and tagline */}
           <View style={styles.topContent}>
             {/* Logo - only icon spins, text stays static */}
-            <Logo
-              size={112}
-              iconWrapperStyle={isCheckingAuth ? { transform: [{ rotate: spin }] } : undefined}
-            />
+            {/* Long-press (5s) toggles dev demo buttons for testers */}
+            <TouchableOpacity
+              activeOpacity={1}
+              onLongPress={() => setShowDevButtons(prev => !prev)}
+              delayLongPress={5000}
+            >
+              <Logo
+                size={112}
+                iconWrapperStyle={isCheckingAuth ? { transform: [{ rotate: spin }] } : undefined}
+              />
+            </TouchableOpacity>
 
             {/* Tagline */}
             <RNText style={styles.tagline}>
@@ -770,6 +780,40 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
           {/* Bottom section with buttons */}
           {!isCheckingAuth && (
           <View style={styles.bottomContent}>
+            {/* Demo Buttons Row - shown in dev/local mode or via secret gesture */}
+            {demoVisible && (
+              <View style={{ flexDirection: 'row', gap: 8, width: '100%', marginBottom: 12 }}>
+                <TouchableOpacity
+                  onPress={handleDemoChat}
+                  disabled={isDemoLoading || isLoading}
+                  style={[
+                    welcomeStyles.appleButton,
+                    { backgroundColor: '#8B5CF6', flex: 1, width: undefined },
+                    (isDemoLoading || isLoading) && styles.buttonDisabled
+                  ]}
+                  activeOpacity={0.8}
+                >
+                  <RNText style={welcomeStyles.appleButtonText} numberOfLines={1}>
+                    {isDemoLoading ? "Loading..." : "Demo"}
+                  </RNText>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={handleSkipDemo}
+                  disabled={isSkipDemoLoading || isLoading}
+                  style={[
+                    welcomeStyles.appleButton,
+                    { backgroundColor: '#F59E0B', flex: 1, width: undefined },
+                    (isSkipDemoLoading || isLoading) && styles.buttonDisabled
+                  ]}
+                  activeOpacity={0.8}
+                >
+                  <RNText style={welcomeStyles.appleButtonText} numberOfLines={1}>
+                    {isSkipDemoLoading ? "Loading..." : "Skip Demo"}
+                  </RNText>
+                </TouchableOpacity>
+              </View>
+            )}
+
             {/* Login Buttons */}
             <View style={welcomeStyles.buttonsContainer}>
               {/* Apple Sign In Button — hidden on Android */}
@@ -842,41 +886,6 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
               </View>
             </View>
 
-            {/* Demo Chat Button */}
-            {onDemoChat && (
-              <TouchableOpacity
-                onPress={handleDemoChat}
-                disabled={isDemoLoading || isLoading}
-                style={[
-                  welcomeStyles.appleButton,
-                  { backgroundColor: '#8B5CF6', marginTop: 12 },
-                  (isDemoLoading || isLoading) && styles.buttonDisabled
-                ]}
-                activeOpacity={0.8}
-              >
-                <RNText style={welcomeStyles.appleButtonText} numberOfLines={1}>
-                  {isDemoLoading ? "Loading..." : "Demo"}
-                </RNText>
-              </TouchableOpacity>
-            )}
-
-            {/* Skip Demo Button - creates full demo profile and goes straight to profile */}
-            {onSkipDemo && (
-              <TouchableOpacity
-                onPress={handleSkipDemo}
-                disabled={isSkipDemoLoading || isLoading}
-                style={[
-                  welcomeStyles.appleButton,
-                  { backgroundColor: '#F59E0B', marginTop: 12 },
-                  (isSkipDemoLoading || isLoading) && styles.buttonDisabled
-                ]}
-                activeOpacity={0.8}
-              >
-                <RNText style={welcomeStyles.appleButtonText} numberOfLines={1}>
-                  {isSkipDemoLoading ? "Loading..." : "Skip Demo"}
-                </RNText>
-              </TouchableOpacity>
-            )}
           </View>
           )}
         </View>

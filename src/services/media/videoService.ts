@@ -20,8 +20,7 @@ import Constants from 'expo-constants';
 // This should match EXPO_PUBLIC_SUPABASE_URL in your .env file
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL?.trim() || '';
 const SURF_LEVEL_VIDEOS_BUCKET = 'surf-level-videos';
-const LOADING_VIDEO_BUCKET = 'loading_video';
-const LOADING_VIDEO_PATH = 'Loadingvideo.mp4';
+const WELCOME_VIDEOS_BUCKET = 'welcome-screen-videos';
 
 if (!SUPABASE_URL) {
   console.error('[videoService] EXPO_PUBLIC_SUPABASE_URL is not set. Video URLs will not work correctly.');
@@ -56,11 +55,10 @@ export const getSurfLevelVideoFromStorage = (bucketPath: string): string => {
 };
 
 /**
- * Get the public URL for the loading screen video (Supabase storage, loading_video bucket)
+ * Get the public URL for the loading screen video (Supabase storage)
  */
 export const getLoadingVideoUrl = (): string => {
-  const encodedPath = encodeURIComponent(LOADING_VIDEO_PATH);
-  const url = `${SUPABASE_URL}/storage/v1/object/public/${LOADING_VIDEO_BUCKET}/${encodedPath}`;
+  const url = `${SUPABASE_URL}/storage/v1/object/public/loading_video/Loadingvideo.mp4`;
   if (__DEV__) {
     console.log('[getLoadingVideoUrl] URL:', url);
   }
@@ -270,22 +268,21 @@ export const getVideoAttributes = () => {
 
 /**
  * Get background video source
+ * Web: serves from public/ folder
+ * Native: streams from Supabase Storage
  */
 export const getBackgroundVideoSource = (): string => {
   if (Platform.OS === 'web') {
-    return '/swellyo169welcome.webm';
+    return `${SUPABASE_URL}/storage/v1/object/public/${WELCOME_VIDEOS_BUCKET}/swellyo169welcome.webm`;
   }
-  // On mobile, use the shorter filename
-  return getVideoUrl('/swellyo169welcome.mp4');
+  return `${SUPABASE_URL}/storage/v1/object/public/${WELCOME_VIDEOS_BUCKET}/swellyo169welcome.mp4`;
 };
 
 /**
  * Get background video source MP4 fallback (for mobile web compatibility)
+ * Web: serves from public/ folder
+ * Native: streams from Supabase Storage
  */
 export const getBackgroundVideoSourceMP4 = (): string => {
-  if (Platform.OS === 'web') {
-    // Use the matching MP4 file (swellyo169welcome.mp4)
-    return '/swellyo169welcome.mp4';
-  }
-  return getVideoUrl('/swellyo169welcome.mp4');
+  return `${SUPABASE_URL}/storage/v1/object/public/${WELCOME_VIDEOS_BUCKET}/swellyo169welcome.mp4`;
 };
