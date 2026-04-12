@@ -9,6 +9,7 @@ import {
   Animated,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { analyticsService } from '../services/analytics/analyticsService';
 import { BlockedUsersScreen } from './BlockedUsersScreen';
@@ -64,6 +65,7 @@ interface PrivacyPreferencesScreenProps {
 }
 
 export function PrivacyPreferencesScreen({ onBack }: PrivacyPreferencesScreenProps) {
+  const insets = useSafeAreaInsets();
   const [analytics, setAnalytics] = useState(DEFAULTS.analytics);
   const [showBlockedUsers, setShowBlockedUsers] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -107,7 +109,7 @@ export function PrivacyPreferencesScreen({ onBack }: PrivacyPreferencesScreenPro
         <Text style={styles.backButtonText}>Back</Text>
       </TouchableOpacity>
 
-      <View style={styles.bottomCard}>
+      <View style={[styles.bottomCard, { paddingBottom: Math.max(insets.bottom, 24) }]}>
         <View style={styles.topSpacer} />
 
         <View style={styles.divider} />
@@ -180,7 +182,6 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     paddingHorizontal: 16,
-    paddingBottom: 24,
   },
   topSpacer: {
     height: 20,

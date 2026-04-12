@@ -305,7 +305,7 @@ export function MapPickerModal({
 
   return (
     <Modal visible={visible} onRequestClose={onCancel} animationType="slide">
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['top']}>
         {header}
         <View style={styles.mapContainer}>
           {WebView && (

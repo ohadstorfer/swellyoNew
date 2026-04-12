@@ -5,7 +5,7 @@ import {
   TouchableOpacity,
   Platform,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { TravelExperienceSlider } from '../components/TravelExperienceSlider';
@@ -29,6 +29,7 @@ export const OnboardingStep3Screen: React.FC<OnboardingStep3ScreenProps> = ({
   updateFormData,
   isLoading = false,
 }) => {
+  const insets = useSafeAreaInsets();
   const isDesktop = useIsDesktopWeb();
   const { height: rawScreenHeight } = useScreenDimensions();
   // On native, SafeAreaView consumes ~90px of insets but Dimensions returns full window height
@@ -105,7 +106,7 @@ export const OnboardingStep3Screen: React.FC<OnboardingStep3ScreenProps> = ({
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       <View style={[styles.content, isDesktop && styles.contentDesktop]}>
         {/* Header */}
         <View style={[styles.header, isDesktop && styles.headerDesktop]}>
@@ -138,7 +139,7 @@ export const OnboardingStep3Screen: React.FC<OnboardingStep3ScreenProps> = ({
         </View>
 
         {/* Next Button - fixed at bottom */}
-        <View style={[styles.buttonContainer, isDesktop && styles.buttonContainerDesktop, buttonContainerMaxWidth && { maxWidth: buttonContainerMaxWidth }]}>
+        <View style={[styles.buttonContainer, isDesktop && styles.buttonContainerDesktop, buttonContainerMaxWidth && { maxWidth: buttonContainerMaxWidth }, { paddingBottom: Math.max(insets.bottom, 24) }]}>
           <TouchableOpacity 
             onPress={handleNext}
             activeOpacity={0.8}

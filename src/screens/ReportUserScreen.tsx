@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   ScrollView,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../config/supabase';
 import { blockingService } from '../services/blocking/blockingService';
@@ -16,6 +17,7 @@ import { blockingService } from '../services/blocking/blockingService';
 const greenSuccessImg = require('../assets/icons/green-success.png');
 
 function ReportConfirmation({ onDone }: { onDone: () => void }) {
+  const insets = useSafeAreaInsets();
   return (
     <View style={styles.container}>
       <View style={styles.topArea}>
@@ -38,7 +40,7 @@ function ReportConfirmation({ onDone }: { onDone: () => void }) {
           <Image source={greenSuccessImg} style={styles.successImage} resizeMode="contain" />
         </View>
 
-        <View style={styles.bottomButtonContainer}>
+        <View style={[styles.bottomButtonContainer, { paddingBottom: Math.max(insets.bottom, 24) }]}>
           <TouchableOpacity
             style={styles.reportButton}
             onPress={onDone}
@@ -104,6 +106,7 @@ async function sendUserReport(reportedUserId: string, reportedUserName: string, 
 }
 
 export function ReportUserScreen({ reportedUserId, reportedUserName, onBack, onReturnHome, onBlocked }: ReportUserScreenProps) {
+  const insets = useSafeAreaInsets();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [selectedReason, setSelectedReason] = useState<string | null>(null);
   const [blockUser, setBlockUser] = useState(false);
@@ -228,7 +231,7 @@ export function ReportUserScreen({ reportedUserId, reportedUserName, onBack, onR
         </ScrollView>
 
         {/* Bottom button area */}
-        <View style={styles.bottomButtonContainer}>
+        <View style={[styles.bottomButtonContainer, { paddingBottom: Math.max(insets.bottom, 24) }]}>
           <TouchableOpacity
             style={[styles.reportButton, !selectedReason && styles.reportButtonDisabled]}
             onPress={handleReport}

@@ -12,7 +12,7 @@ import {
   Animated,
   Linking,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Circle, Rect, Defs, Filter, FeFlood, FeColorMatrix, FeOffset, FeGaussianBlur, FeComposite, FeBlend, Path } from 'react-native-svg';
@@ -806,6 +806,7 @@ const PlusIcon: React.FC<{ size?: number }> = ({ size = 40 }) => {
 };
 
 export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, onMessage, onContinueEdit, onEdit, fromOnboardingChat = false, onSaveAndGoToConversations }) => {
+  const insets = useSafeAreaInsets();
   // Get onboarding context for logout
   const { resetOnboarding, setUser, setCurrentStep, setIsDemoUser } = useOnboarding();
 
@@ -2340,7 +2341,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
             />
           </View>
           <TouchableOpacity
-            style={styles.connectButton}
+            style={[styles.connectButton, { bottom: Math.max(insets.bottom, 16) + 24 }]}
             onPress={() => onMessage(userId)}
             activeOpacity={0.8}
           >

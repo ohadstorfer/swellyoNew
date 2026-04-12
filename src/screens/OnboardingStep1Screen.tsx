@@ -238,7 +238,7 @@ export const OnboardingStep1Screen: React.FC<OnboardingStep1ScreenProps> = ({
   // Removed handleHomepage - home button removed
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       <View style={[styles.content, isDesktop && styles.contentDesktop]}>
         {/* Header */}
         <View style={[styles.header, isDesktop && styles.headerDesktop]}>
@@ -303,8 +303,8 @@ export const OnboardingStep1Screen: React.FC<OnboardingStep1ScreenProps> = ({
         </View>
 
         {/* Next Button */}
-        <View style={[styles.buttonContainer, isDesktop && styles.buttonContainerDesktop, buttonContainerMaxWidth && { maxWidth: buttonContainerMaxWidth }]}>
-          <TouchableOpacity 
+        <View style={[styles.buttonContainer, isDesktop && styles.buttonContainerDesktop, buttonContainerMaxWidth && { maxWidth: buttonContainerMaxWidth }, { paddingBottom: Math.max(insets.bottom, 24) }]}>
+          <TouchableOpacity
             onPress={handleNext}
             activeOpacity={0.8}
             disabled={isLoading}

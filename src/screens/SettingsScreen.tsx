@@ -10,6 +10,7 @@ import {
   Animated,
   Linking,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { ProfileImage } from '../components/ProfileImage';
 import { DeleteAccountScreen } from './DeleteAccountScreen';
@@ -32,6 +33,7 @@ interface SettingsScreenProps {
 }
 
 export function SettingsScreen({ onBack, userName, userAvatar, userEmail }: SettingsScreenProps) {
+  const insets = useSafeAreaInsets();
   const [showDeleteAccount, setShowDeleteAccount] = useState(false);
   const [showPrivacyPreferences, setShowPrivacyPreferences] = useState(false);
   const [showReportBug, setShowReportBug] = useState(false);
@@ -85,7 +87,7 @@ export function SettingsScreen({ onBack, userName, userAvatar, userEmail }: Sett
       </Animated.View>
 
       {/* White bottom card */}
-      <Animated.View style={[styles.bottomCard, { transform: [{ translateY: slideAnim }] }]}>
+      <Animated.View style={[styles.bottomCard, { transform: [{ translateY: slideAnim }], paddingBottom: Math.max(insets.bottom, 24) }]}>
         {/* Spacer for the avatar overlap */}
         <View style={styles.avatarSpacer} />
 
@@ -203,7 +205,6 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     paddingHorizontal: 16,
-    paddingBottom: 24,
   },
   avatarSpacer: {
     height: 58,

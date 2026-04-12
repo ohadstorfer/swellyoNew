@@ -12,7 +12,7 @@ import {
   Animated,
   ActivityIndicator,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../config/supabase';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -150,6 +150,7 @@ export default function ConversationsScreen({
   pendingNotificationConversationId,
   onPendingNotificationHandled,
 }: ConversationsScreenProps) {
+  const insets = useSafeAreaInsets();
   const { resetOnboarding, setCurrentStep, setUser, setIsDemoUser, user: contextUser } = useOnboarding();
   const posthog = usePostHog();
   
@@ -609,6 +610,62 @@ export default function ConversationsScreen({
       // Reset loading state
       isLoggingOutRef.current = false;
       setIsLoggingOut(false);
+    }
+  };
+
+  const handleSwitchAccount = async () => {
+    setShowMenu(false);
+
+    try {
+      // Suppress auth guard from navigating to welcome during the switch
+      const { setIsSwitchingAccount } = require('../hooks/useAuthGuard');
+      setIsSwitchingAccount(true);
+
+      if (Platform.OS !== 'web') {
+        // Sign out Google cache so the account picker shows
+        try {
+          const { GoogleSignin } = require('@react-native-google-signin/google-signin');
+          await GoogleSignin.signOut();
+        } catch (e) { /* ignore */ }
+
+        // Show Google account picker immediately
+        const { GoogleSignin } = require('@react-native-google-signin/google-signin');
+        await GoogleSignin.hasPlayServices();
+        const result = await GoogleSignin.signIn();
+        const idToken = result?.data?.idToken;
+        if (!idToken) throw new Error('No ID token');
+
+        // Replace Supabase session with the new account (no sign-out needed)
+        const { supabase } = require('../config/supabase');
+        const { data: sessionData, error } = await supabase.auth.signInWithIdToken({
+          provider: 'google',
+          token: idToken,
+        });
+        if (error) throw error;
+
+        // Update app user context
+        const { convertSupabaseUserToAppUser } = require('../utils/userConversion');
+        const appUser = await convertSupabaseUserToAppUser(sessionData.session.user);
+        setUser(appUser);
+        console.log('Switched to account:', appUser.email);
+      } else {
+        // On web: sign out Supabase session first (so signInWithGoogle doesn't short-circuit
+        // on existing session), then redirect to Google OAuth with prompt=select_account
+        const { supabase } = require('../config/supabase');
+        await supabase.auth.signOut();
+        // Now call sign-in which will redirect to Google with account picker
+        const { supabaseAuthService } = require('../services/auth/supabaseAuthService');
+        await supabaseAuthService.signInWithGoogle();
+      }
+    } catch (error: any) {
+      if (error?.message?.includes('cancelled') || error?.code === '12501' || error?.code === 'SIGN_IN_CANCELLED') {
+        console.log('Account switch cancelled by user');
+      } else {
+        console.error('Error in handleSwitchAccount:', error);
+      }
+    } finally {
+      const { setIsSwitchingAccount } = require('../hooks/useAuthGuard');
+      setIsSwitchingAccount(false);
     }
   };
 
@@ -1275,7 +1332,7 @@ export default function ConversationsScreen({
       </View>
 
       {/* Swelly conversation card - positioned at bottom */}
-      <View style={styles.swellyCardWrapper}>
+      <View style={[styles.swellyCardWrapper, Platform.OS !== 'web' && { paddingBottom: Math.max(insets.bottom, 16) }]}>
         {showSwellyCopyCard && (
           <TouchableOpacity
             style={[styles.swellyContainer, { marginBottom: 4, borderColor: '#00BCD4' }]}
@@ -1403,6 +1460,22 @@ export default function ConversationsScreen({
                 >
                   <Ionicons name="settings-outline" size={20} color="#222B30" />
                   <Text style={styles.menuItemText}>Setting</Text>
+                </TouchableOpacity>
+
+                {/* Switch Account */}
+                <TouchableOpacity
+                  style={[styles.menuItem, isLoggingOut && styles.menuItemDisabled]}
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    if (isLoggingOut) return;
+                    console.log('Switch account pressed');
+                    handleSwitchAccount();
+                  }}
+                  activeOpacity={isLoggingOut ? 1 : 0.7}
+                  disabled={isLoggingOut}
+                >
+                  <Ionicons name="swap-horizontal-outline" size={20} color="#222B30" />
+                  <Text style={styles.menuItemText}>Switch account</Text>
                 </TouchableOpacity>
 
                 {/* Logout */}

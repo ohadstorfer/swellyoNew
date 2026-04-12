@@ -12,6 +12,7 @@ import {
   TouchableWithoutFeedback,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../config/supabase';
 import { blockingService } from '../services/blocking/blockingService';
 import { ProfileImage } from '../components/ProfileImage';
@@ -28,6 +29,7 @@ interface BlockedUsersScreenProps {
 }
 
 export function BlockedUsersScreen({ onBack }: BlockedUsersScreenProps) {
+  const insets = useSafeAreaInsets();
   const [blockedUsers, setBlockedUsers] = useState<BlockedUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [unblockingId, setUnblockingId] = useState<string | null>(null);
@@ -88,7 +90,7 @@ export function BlockedUsersScreen({ onBack }: BlockedUsersScreenProps) {
         <Text style={styles.backButtonText}>Back</Text>
       </TouchableOpacity>
 
-      <View style={styles.bottomCard}>
+      <View style={[styles.bottomCard, { paddingBottom: Math.max(insets.bottom, 24) }]}>
         <View style={styles.topSpacer} />
         <View style={styles.divider} />
 
@@ -199,7 +201,6 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     paddingHorizontal: 16,
-    paddingBottom: 24,
   },
   topSpacer: {
     height: 20,

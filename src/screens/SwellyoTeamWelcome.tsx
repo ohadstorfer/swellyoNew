@@ -8,7 +8,7 @@ import {
   ImageBackground,
   Platform,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../components/Text';
@@ -23,6 +23,7 @@ export const SwellyoTeamWelcome: React.FC<SwellyoTeamWelcomeProps> = ({
   onBack,
   onDropInWithSwelly,
 }) => {
+  const insets = useSafeAreaInsets();
   const welcomeMessage = `Hey! Welcome to Swellyo 🤙
 
 Stoked you're here. Swellyo began as a wild idea between friends who believed travel could be deeper — more connected to culture, nature, and each other.
@@ -123,8 +124,8 @@ Drop in with Swelly, start connecting and help us grow the Swellyo community.
       </View>
 
       {/* Drop In With Swelly Button */}
-      <View style={styles.buttonContainer}>
-        <TouchableOpacity 
+      <View style={[styles.buttonContainer, { paddingBottom: Math.max(insets.bottom, 24) }]}>
+        <TouchableOpacity
           style={styles.dropInButton}
           onPress={onDropInWithSwelly}
           activeOpacity={0.8}

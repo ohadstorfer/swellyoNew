@@ -12,6 +12,7 @@ import {
   Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Images } from '../assets/images';
 import { supabase } from '../config/supabase';
 
@@ -55,6 +56,7 @@ async function sendDeleteNotification(userName: string, userEmail: string, reaso
 }
 
 export function DeleteAccountScreen({ onBack, userName, userEmail }: DeleteAccountScreenProps) {
+  const insets = useSafeAreaInsets();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [selectedReason, setSelectedReason] = useState<string | null>(null);
   const [showAreYouSure, setShowAreYouSure] = useState(false);
@@ -209,7 +211,7 @@ export function DeleteAccountScreen({ onBack, userName, userEmail }: DeleteAccou
       </View>
 
       {/* Bottom area - fixed */}
-      <View style={styles.bottomArea}>
+      <View style={[styles.bottomArea, { paddingBottom: Math.max(insets.bottom, 32) }]}>
         <TouchableOpacity
           style={[styles.deleteButton, !isDeleteEnabled && styles.deleteButtonDisabled]}
           onPress={handleDelete}

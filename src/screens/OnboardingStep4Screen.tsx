@@ -13,7 +13,7 @@ import {
   Alert,
   Linking,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { TextInput as PaperTextInput } from 'react-native-paper';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -989,6 +989,7 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
   isLoading = false,
   onAgeBlocked,
 }) => {
+  const insets = useSafeAreaInsets();
   const [showPermissionOverlay, setShowPermissionOverlay] = useState(false);
   const pendingPickerRef = useRef<(() => void) | null>(null);
   const [profilePicture, setProfilePicture] = useState<string | null>(
@@ -1221,7 +1222,7 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
 
   return (
     <>
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.contentWrapper}>
           {/* Sticky Header with Gradient */}
           <View style={styles.stickyHeader}>
@@ -1399,7 +1400,7 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
           </KeyboardAwareScrollView>
 
           {/* Next Button - Fixed at bottom, moves up with keyboard */}
-        <View style={styles.buttonContainer}>
+        <View style={[styles.buttonContainer, { paddingBottom: Math.max(insets.bottom, 24) }]}>
           <TouchableOpacity 
             onPress={handleNext} 
             activeOpacity={0.8}

@@ -22,6 +22,8 @@ import { colors, spacing } from '../styles/theme';
 import { authService } from '../services/auth/authService';
 import { supabaseAuthService } from '../services/auth/supabaseAuthService';
 import { isSupabaseConfigured } from '../config/supabase';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useOnboarding } from '../context/OnboardingContext';
 import { getImageUrl } from '../services/media/imageService';
 import { useIsMobile, responsiveWidth } from '../utils/responsive';
@@ -145,12 +147,14 @@ const PRIVACY_URL = 'https://www.swellyo.com/privacy-policy';
 const AGE_PICKER_ITEM_HEIGHT = 50;
 
 export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDemoChat, onSkipDemo, isCheckingAuth = false, showDemoByDefault = false }) => {
+  const insets = useSafeAreaInsets();
   const [isLoading, setIsLoading] = useState(false);
   const [isDemoLoading, setIsDemoLoading] = useState(false);
   const [isSkipDemoLoading, setIsSkipDemoLoading] = useState(false);
   const [showDevButtons, setShowDevButtons] = useState(false);
   const demoVisible = (showDemoByDefault || showDevButtons) && !!onDemoChat;
   const [agreedToTerms, setAgreedToTerms] = useState(false);
+  const [termsLoaded, setTermsLoaded] = useState(false);
   const [isAgeBlocked, setIsAgeBlocked] = useState(false);
   const [showAgeSheet, setShowAgeSheet] = useState(false);
   const [ageSheetError, setAgeSheetError] = useState(false);
@@ -159,6 +163,23 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
   const overlayAnim = useRef(new Animated.Value(0)).current;
   const { setUser, updateFormData, checkOnboardingStatus } = useOnboarding();
   
+  // Load saved terms agreement on mount
+  useEffect(() => {
+    AsyncStorage.getItem('agreedToTerms').then(value => {
+      if (value === 'true') setAgreedToTerms(true);
+      setTermsLoaded(true);
+    });
+  }, []);
+
+  // Save terms agreement when user checks the box
+  const handleToggleTerms = () => {
+    const newValue = !agreedToTerms;
+    setAgreedToTerms(newValue);
+    if (newValue) {
+      AsyncStorage.setItem('agreedToTerms', 'true');
+    }
+  };
+
   // Use responsive hook for accurate mobile detection
   const isMobile = useIsMobile();
   
@@ -779,7 +800,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
 
           {/* Bottom section with buttons */}
           {!isCheckingAuth && (
-          <View style={styles.bottomContent}>
+          <View style={[styles.bottomContent, { paddingBottom: Math.max(insets.bottom, 24) }]}>
             {/* Demo Buttons Row - shown in dev/local mode or via secret gesture */}
             {demoVisible && (
               <View style={{ flexDirection: 'row', gap: 8, width: '100%', marginBottom: 12 }}>
@@ -849,11 +870,12 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
               </TouchableOpacity>
             </View>
 
-            {/* Terms & Privacy Card */}
+            {/* Terms & Privacy Card — hidden once agreed */}
+            {!agreedToTerms && (
             <View style={welcomeStyles.termsCard}>
               <TouchableOpacity
                 style={welcomeStyles.checkboxRow}
-                onPress={() => setAgreedToTerms(!agreedToTerms)}
+                onPress={handleToggleTerms}
                 activeOpacity={0.7}
               >
                 <CheckboxIcon checked={agreedToTerms} />
@@ -885,6 +907,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
                 </RNText>
               </View>
             </View>
+            )}
 
           </View>
           )}

@@ -8,7 +8,7 @@ import {
   Platform,
   Alert,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../components/Text';
 import { useOnboarding } from '../context/OnboardingContext';
@@ -71,6 +71,7 @@ export const OnboardingWelcomeScreen: React.FC<OnboardingWelcomeScreenProps> = (
   onBack,
   updateFormData,
 }) => {
+  const insets = useSafeAreaInsets();
   const { user, formData } = useOnboarding();
   const [selectedIds, setSelectedIds] = useState<string[]>(
     () => formData?.surfJourney ?? []
@@ -108,7 +109,7 @@ export const OnboardingWelcomeScreen: React.FC<OnboardingWelcomeScreenProps> = (
   );
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       {/* Step header: 16px above the title block (second headline) */}
       <View style={styles.stepHeader}>
         <View style={styles.stepHeaderRow}>
@@ -197,7 +198,7 @@ export const OnboardingWelcomeScreen: React.FC<OnboardingWelcomeScreenProps> = (
       </ScrollView>
 
       {/* Next button */}
-      <View style={styles.buttonContainer}>
+      <View style={[styles.buttonContainer, { paddingBottom: Math.max(insets.bottom, 24) }]}>
         <TouchableOpacity
           style={[styles.button, selectedIds.length < 2 && styles.buttonDisabled]}
           onPress={handleNext}

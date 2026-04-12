@@ -5,9 +5,13 @@ import { useOnboarding } from '../context/OnboardingContext';
 import { performLogout } from '../utils/logout';
 import { STEP_WELCOME } from '../constants/onboardingSteps';
 
+// Global flag to suppress auth listener during account switching
+let _isSwitchingAccount = false;
+export function setIsSwitchingAccount(value: boolean) { _isSwitchingAccount = value; }
+
 /**
  * Centralized authentication guard hook
- * 
+ *
  * Monitors authentication state and automatically redirects unauthenticated users
  * to the WelcomeScreen. Handles all edge cases including session expiration,
  * token refresh failures, and OAuth callback flows.
@@ -229,6 +233,10 @@ export function useAuthGuard() {
 
       // Handle sign out events
       if (event === 'SIGNED_OUT') {
+        if (_isSwitchingAccount) {
+          console.log('[useAuthGuard] SIGNED_OUT during account switch, ignoring');
+          return;
+        }
         console.log('[useAuthGuard] SIGNED_OUT event detected');
         await handleUnauthenticated();
         return;

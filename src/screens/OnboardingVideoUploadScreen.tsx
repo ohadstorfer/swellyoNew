@@ -7,7 +7,7 @@ import {
   Alert,
   Linking,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -80,6 +80,7 @@ export const OnboardingVideoUploadScreen: React.FC<OnboardingVideoUploadScreenPr
   surfLevel,
   userId,
 }) => {
+  const insets = useSafeAreaInsets();
   const isDesktop = useIsDesktopWeb();
   const [userVideoUri, setUserVideoUri] = useState<string | null>(null);
   const [mimeType, setMimeType] = useState<string | undefined>(undefined);
@@ -428,7 +429,7 @@ export const OnboardingVideoUploadScreen: React.FC<OnboardingVideoUploadScreenPr
 
   return (
     <>
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       <View style={[styles.content, isDesktop && styles.contentDesktop]}>
         {/* Header */}
         <View style={[styles.header, isDesktop && styles.headerDesktop]}>
@@ -513,7 +514,7 @@ export const OnboardingVideoUploadScreen: React.FC<OnboardingVideoUploadScreenPr
         </View>
 
         {/* Button */}
-        <View style={styles.buttonContainer}>
+        <View style={[styles.buttonContainer, { paddingBottom: Math.max(insets.bottom, 24) }]}>
           <TouchableOpacity
             onPress={hasUserVideo ? handleNext : onSkip}
             activeOpacity={0.8}
