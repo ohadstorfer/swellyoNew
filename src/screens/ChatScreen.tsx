@@ -948,7 +948,7 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
         </ImageBackground>
 
         {/* Input Area */}
-        <View style={[styles.inputWrapper, { paddingBottom: keyboardVisible ? 4 : Math.max(insets.bottom, 16) }]}>
+        <View style={[styles.inputWrapper, { paddingBottom: keyboardVisible ? 4 : Math.max(insets.bottom, 24) }]}>
           <ChatTextInput
             ref={chatInputRef}
             value={inputText}

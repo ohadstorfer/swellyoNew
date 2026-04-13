@@ -1,8 +1,11 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
 const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY')
 const EMAIL_FROM = Deno.env.get('EMAIL_FROM') || 'Swellyo <onboarding@resend.dev>'
 const NOTIFY_EMAIL = 'app@swellyo.com'
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 
 function generateEmailHtml(userName: string, userEmail: string, reason: string): string {
   return `
@@ -85,7 +88,7 @@ serve(async (req) => {
   }
 
   try {
-    const { userName, userEmail, reason } = await req.json();
+    const { userName, userEmail, reason, userId } = await req.json();
 
     if (!userName || !userEmail || !reason) {
       return new Response(JSON.stringify({ error: 'Missing required fields: userName, userEmail, reason' }), {
@@ -95,6 +98,23 @@ serve(async (req) => {
     }
 
     console.log(`[Delete Account] Request received - user: ${userName}, email: ${userEmail}, reason: ${reason}`);
+
+    // Flag the user as pending deletion so they're hidden from other users immediately
+    if (userId) {
+      const adminClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+      const { error: flagError } = await adminClient
+        .from('surfers')
+        .update({ pending_deletion: true })
+        .eq('user_id', userId)
+      if (flagError) {
+        console.error('[Delete Account] Failed to flag user as pending_deletion:', flagError.message)
+        // Non-fatal — continue to send the email
+      } else {
+        console.log(`[Delete Account] User ${userId} flagged as pending_deletion`)
+      }
+    } else {
+      console.warn('[Delete Account] No userId provided — skipping pending_deletion flag')
+    }
 
     if (!RESEND_API_KEY) {
       console.error('[Delete Account] RESEND_API_KEY not set');

@@ -64,6 +64,9 @@ interface VideoSlotProps {
 const VideoSlot: React.FC<VideoSlotProps> = React.memo(({ videoUrl, isActive, style, onReady }) => {
   const isActiveRef = useRef(isActive);
   isActiveRef.current = isActive;
+  // Always-current ref so statusChange listener never captures a stale onReady closure
+  const onReadyRef = useRef(onReady);
+  onReadyRef.current = onReady;
 
   const source = videoUrl
     ? (Platform.OS === 'web' ? videoUrl : { uri: videoUrl })
@@ -75,6 +78,25 @@ const VideoSlot: React.FC<VideoSlotProps> = React.memo(({ videoUrl, isActive, st
       p.muted = true;
     }
   });
+
+  // Android only: replace source on url change instead of remounting the component.
+  // This keeps the ExoPlayer instance alive and reuses its hardware decoder (~170ms saved per swap).
+  const prevVideoUrlRef = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    if (Platform.OS !== 'android' || !player) return;
+    if (prevVideoUrlRef.current === undefined) {
+      // First run — player was already initialised with this url by useVideoPlayer above
+      prevVideoUrlRef.current = videoUrl;
+      return;
+    }
+    if (prevVideoUrlRef.current === videoUrl) return;
+    prevVideoUrlRef.current = videoUrl;
+    try {
+      player.replace(videoUrl ? { uri: videoUrl } : null);
+    } catch (e) {
+      console.warn('[VideoSlot] replace error:', e);
+    }
+  }, [videoUrl, player]);
 
   // Play/pause based on active state
   // On iOS, calling play() before readyToPlay can stall loading — only play if already ready
@@ -97,14 +119,14 @@ const VideoSlot: React.FC<VideoSlotProps> = React.memo(({ videoUrl, isActive, st
     }
   }, [isActive, player]);
 
-  // When player becomes ready: notify parent AND auto-play if this is the active slot
+  // statusChange: autoplay + notify parent when ready (used by iOS/web pre-buffer logic)
   useEffect(() => {
     if (!player) return;
 
     // Check if player is ALREADY ready (event may have fired before this effect ran)
     try {
       if ((player as any).status === 'readyToPlay') {
-        onReady();
+        onReadyRef.current();
         if (isActiveRef.current) {
           player.play();
         }
@@ -112,10 +134,8 @@ const VideoSlot: React.FC<VideoSlotProps> = React.memo(({ videoUrl, isActive, st
     } catch (_) {}
 
     const sub = player.addListener('statusChange', ({ status, error }: { status: string; error?: any }) => {
-      const urlSnippet = videoUrl ? videoUrl.substring(videoUrl.lastIndexOf('/') + 1, videoUrl.lastIndexOf('/') + 30) : 'null';
-      console.log(`[VideoSlot] ${urlSnippet} status=${status} isActive=${isActiveRef.current}${error ? ` error=${JSON.stringify(error)}` : ''}`);
       if (status === 'readyToPlay') {
-        onReady();
+        onReadyRef.current();
         if (isActiveRef.current) {
           try {
             player.play();
@@ -125,10 +145,12 @@ const VideoSlot: React.FC<VideoSlotProps> = React.memo(({ videoUrl, isActive, st
             }
           }
         }
+      } else if (error) {
+        console.warn('[VideoSlot] player error:', error);
       }
     });
     return () => sub.remove();
-  }, [player, onReady]);
+  }, [player]);
 
   return (
     <View style={style} pointerEvents="none">
@@ -140,6 +162,7 @@ const VideoSlot: React.FC<VideoSlotProps> = React.memo(({ videoUrl, isActive, st
           nativeControls={false}
           allowsFullscreen={false}
           allowsPictureInPicture={false}
+          onFirstFrameRender={() => onReadyRef.current()}
           {...(Platform.OS === 'web' && {
             controls: false,
             disablePictureInPicture: true,
@@ -494,7 +517,6 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
           <View style={styles.mainVideo} pointerEvents="none">
             {Platform.OS === 'android' ? (
               <VideoSlot
-                key={selectedVideoId}
                 videoUrl={videos.find(v => v.id === selectedVideoId)?.videoUrl || null}
                 isActive={true}
                 style={{

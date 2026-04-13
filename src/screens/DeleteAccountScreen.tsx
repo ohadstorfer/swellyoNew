@@ -38,6 +38,7 @@ async function sendDeleteNotification(userName: string, userEmail: string, reaso
 
   const { data: { session } } = await supabase.auth.getSession();
   const token = session?.access_token || anonKey;
+  const userId = session?.user?.id;
 
   const response = await fetch(`${supabaseUrl}/functions/v1/delete-account-notification`, {
     method: 'POST',
@@ -46,7 +47,7 @@ async function sendDeleteNotification(userName: string, userEmail: string, reaso
       'apikey': anonKey,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ userName, userEmail, reason }),
+    body: JSON.stringify({ userName, userEmail, reason, userId }),
   });
 
   if (!response.ok) {

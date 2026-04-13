@@ -54,7 +54,7 @@ export const AppContent: React.FC = () => {
 
   // Push notification: pending conversation to open from notification tap
   const [pendingNotificationConversationId, setPendingNotificationConversationId] = useState<string | null>(null);
-  const { getCurrentConversationId } = useMessaging();
+  const { getCurrentConversationId, conversations: messagingConversations } = useMessaging();
   
   // State to track session validation
   const [hasValidatedSession, setHasValidatedSession] = useState(false);
@@ -866,7 +866,7 @@ export const AppContent: React.FC = () => {
     console.log('[AppContent] handleViewUserProfile completed');
   };
 
-  const handleStartConversation = async (userId: string) => {
+  const handleStartConversation = async (userId: string, otherUserName?: string, otherUserAvatar?: string | null) => {
     console.log('[AppContent] ========== handleStartConversation START ==========');
     console.log('[AppContent] handleStartConversation called with userId:', userId);
     console.log('[AppContent] Current state - showTripPlanningChat:', showTripPlanningChat);
@@ -880,16 +880,11 @@ export const AppContent: React.FC = () => {
       const isFromTripPlanning = profileFromTripPlanningChat || showTripPlanningChat || false;
       console.log('[AppContent] isFromTripPlanning determined as:', isFromTripPlanning, '(profileFromTripPlanningChat:', profileFromTripPlanningChat, ', showTripPlanningChat:', showTripPlanningChat, ')');
       
-      // Check if conversation already exists
+      // Check if conversation already exists using in-memory context (already loaded)
       console.log('[AppContent] Checking if conversation exists for userId:', userId);
-      const result = await messagingService.getConversations(50, 0); // Fetch first page
-      const conversations = result.conversations;
-      const existingConv = conversations.find(conv => {
-        if (conv.other_user && conv.other_user.user_id === userId) {
-          return true;
-        }
-        return false;
-      });
+      const existingConv = messagingConversations.find(conv =>
+        conv.other_user && conv.other_user.user_id === userId
+      );
       
       console.log('[AppContent] Conversation exists:', !!existingConv);
       
@@ -908,43 +903,24 @@ export const AppContent: React.FC = () => {
         });
         console.log('[AppContent] selectedConversation state updated');
       } else {
-        // No conversation exists yet - get user details for display
-        console.log('[AppContent] ✗ No conversation exists, fetching user data');
-        const { supabaseDatabaseService } = await import('../services/database/supabaseDatabaseService');
-        const surferData = await supabaseDatabaseService.getSurferByUserId(userId);
-        console.log('[AppContent] Fetched surfer data:', surferData?.name || 'Unknown');
-        console.log('[AppContent] Surfer avatar:', !!surferData?.profile_image_url);
-        
-        // Show loading screen for all new conversations
-        console.log('[AppContent] ✓ Preparing to show loading screen for new conversation');
-        // Load current user data for loading screen
-        try {
-          console.log('[AppContent] Loading current user data for loading screen');
-          const currentUser = await supabaseAuthService.getCurrentUser();
-          if (currentUser) {
-            console.log('[AppContent] Current user loaded:', currentUser.nickname || currentUser.email);
-            setCurrentUserAvatar(currentUser.photo || null);
-            setCurrentUserName(currentUser.nickname || currentUser.email?.split('@')[0] || 'User');
-          } else {
-            console.warn('[AppContent] No current user found');
-          }
-        } catch (error) {
-          console.error('[AppContent] Error loading current user data:', error);
-        }
+        // No conversation exists yet — use data passed from ProfileScreen (already loaded)
+        console.log('[AppContent] ✗ No conversation exists, showing loading screen');
 
         console.log('[AppContent] Setting pending conversation...');
         setPendingConversation({
           otherUserId: userId,
-          otherUserName: surferData?.name || 'User',
-          otherUserAvatar: surferData?.profile_image_url || null,
+          otherUserName: otherUserName || 'User',
+          otherUserAvatar: otherUserAvatar || null,
           fromTripPlanning: isFromTripPlanning,
           fromTripPlanningCopy: isFromTripPlanning && showTripPlanningChatCopy,
           fromWelcomeOverlay: profileFromWelcomeOverlay || false,
         });
         console.log('[AppContent] pendingConversation state updated');
-        console.log('[AppContent] Setting showConversationLoading to true...');
-        setShowConversationLoading(true);
-        console.log('[AppContent] ✓ showConversationLoading set to true');
+        console.log('[AppContent] Showing loading screen after 500ms...');
+        setTimeout(() => {
+          setShowConversationLoading(true);
+          console.log('[AppContent] ✓ showConversationLoading set to true');
+        }, 500);
 
         // Create conversation immediately in background (same as WelcomeToLineupOverlay connect flow)
         if (profileFromWelcomeOverlay) {

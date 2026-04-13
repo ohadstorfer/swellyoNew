@@ -533,7 +533,7 @@ export const SwellyShaperScreen: React.FC<SwellyShaperScreenProps> = ({ onBack, 
         </ImageBackground>
 
         {/* Input Area */}
-        <View style={[styles.inputWrapper, { paddingBottom: keyboardVisible ? 4 : Math.max(insets.bottom, 16) }]}>
+        <View style={[styles.inputWrapper, { paddingBottom: keyboardVisible ? 4 : Math.max(insets.bottom, 24) }]}>
           <ChatTextInput
             ref={chatInputRef}
             value={inputText}

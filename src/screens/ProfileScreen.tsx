@@ -47,7 +47,7 @@ import { ReportUserScreen } from './ReportUserScreen';
 interface ProfileScreenProps {
   onBack?: () => void;
   userId?: string; // Optional: if provided, view this user's profile instead of current user's
-  onMessage?: (userId: string) => void; // Callback when message button is clicked
+  onMessage?: (userId: string, name?: string, avatar?: string | null) => void; // Callback when message button is clicked
   onContinueEdit?: () => void; // Callback when "continue edit" button is clicked
   onEdit?: () => void; // Callback when edit button is clicked
   fromOnboardingChat?: boolean; // When true, show Edit (left) + Save (right) header buttons
@@ -2342,7 +2342,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
           </View>
           <TouchableOpacity
             style={[styles.connectButton, { bottom: Math.max(insets.bottom, 16) + 24 }]}
-            onPress={() => onMessage(userId)}
+            onPress={() => onMessage(userId, profileData.name ?? undefined, profileData.profile_image_url ?? null)}
             activeOpacity={0.8}
           >
             <View style={[styles.connectButtonInner, isAlreadyConnected && styles.messageButtonInner]}>

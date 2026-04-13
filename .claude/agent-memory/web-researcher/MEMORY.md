@@ -13,3 +13,4 @@
 - [Android Edge-to-Edge — Expo SDK 54](research_android_edge_to_edge.md) — SDK 54 defaults on, mandatory Android 16+; useSafeAreaInsets for bottom padding; Modal nav bar bug; bottom inset=0 bugs on Android 13-15; Samsung S10 defaults to 3-button nav
 - [Android Nav Bar Insets — Full Guide](research_android_nav_bar_insets.md) — edgeToEdge mechanics, 3-button(48dp)/2-button(30dp)/gesture(24dp) heights, SafeAreaView vs hook, edges prop, double-padding bug, bottom=0 fix (RNSC 5.2+)
 - [Google Sign-In Account Picker — react-native-google-signin](research_google_signin_account_picker.md) — force picker via signOut+signIn, Supabase session gotcha, signOut vs revokeAccess, v13+ API, Original vs Universal/OneTap APIs
+- [expo-video v2 Performance & Preloading](research_expo_video_performance.md) — createVideoPlayer pool + replace() for Android decoder reuse, bufferOptions tuning, HLS vs MP4, onFirstFrameRender, black-screen bug

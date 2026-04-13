@@ -694,7 +694,8 @@ export async function findMatchingUsersV2(
       .from('surfers')
       .select('*')
       .neq('user_id', requestingUserId)
-      .or('is_demo_user.is.null,is_demo_user.eq.false'); // Exclude demo users
+      .or('is_demo_user.is.null,is_demo_user.eq.false') // Exclude demo users
+      .or('pending_deletion.is.null,pending_deletion.eq.false'); // Exclude pending deletion users
 
     if (queryError) {
       throw new Error(`Error querying surfers: ${queryError.message}`);
@@ -930,7 +931,8 @@ export async function findMatchingUsers(
       .from('surfers')
       .select('*')
       .neq('user_id', requestingUserId) // Always exclude current user
-      .or('is_demo_user.is.null,is_demo_user.eq.false'); // Exclude demo users
+      .or('is_demo_user.is.null,is_demo_user.eq.false') // Exclude demo users
+      .or('pending_deletion.is.null,pending_deletion.eq.false'); // Exclude pending deletion users
     
     // Exclude previously matched users if provided
     // Note: Supabase doesn't support .not('user_id', 'in', array) directly
@@ -1049,8 +1051,9 @@ export async function findMatchingUsers(
         .from('surfers')
         .select('*')
         .neq('user_id', requestingUserId)
-        .or('is_demo_user.is.null,is_demo_user.eq.false'); // Exclude demo users
-      
+        .or('is_demo_user.is.null,is_demo_user.eq.false') // Exclude demo users
+        .or('pending_deletion.is.null,pending_deletion.eq.false'); // Exclude pending deletion users
+
       if (relaxedError) {
         console.error('Error querying all surfers for closest matches:', relaxedError);
         return [];
@@ -1112,6 +1115,7 @@ export async function findMatchingUsers(
         .select('*')
         .neq('user_id', requestingUserId)
         .or('is_demo_user.is.null,is_demo_user.eq.false') // Exclude demo users
+        .or('pending_deletion.is.null,pending_deletion.eq.false') // Exclude pending deletion users
       
       // Exclude previously matched users in relaxed query too
       // Note: We'll filter in-memory below as the primary exclusion method

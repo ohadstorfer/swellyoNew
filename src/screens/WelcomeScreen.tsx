@@ -154,6 +154,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
   const [showDevButtons, setShowDevButtons] = useState(false);
   const demoVisible = (showDemoByDefault || showDevButtons) && !!onDemoChat;
   const [agreedToTerms, setAgreedToTerms] = useState(false);
+  const [showTermsCard, setShowTermsCard] = useState(false);
   const [termsLoaded, setTermsLoaded] = useState(false);
   const [isAgeBlocked, setIsAgeBlocked] = useState(false);
   const [showAgeSheet, setShowAgeSheet] = useState(false);
@@ -166,7 +167,12 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
   // Load saved terms agreement on mount
   useEffect(() => {
     AsyncStorage.getItem('agreedToTerms').then(value => {
-      if (value === 'true') setAgreedToTerms(true);
+      if (value === 'true') {
+        setAgreedToTerms(true);
+        setShowTermsCard(false);
+      } else {
+        setShowTermsCard(true);
+      }
       setTermsLoaded(true);
     });
   }, []);
@@ -870,8 +876,8 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
               </TouchableOpacity>
             </View>
 
-            {/* Terms & Privacy Card — hidden once agreed */}
-            {!agreedToTerms && (
+            {/* Terms & Privacy Card — hidden once user has navigated past this screen */}
+            {showTermsCard && (
             <View style={welcomeStyles.termsCard}>
               <TouchableOpacity
                 style={welcomeStyles.checkboxRow}
