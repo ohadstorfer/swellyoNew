@@ -14,3 +14,4 @@
 - [Android Nav Bar Insets — Full Guide](research_android_nav_bar_insets.md) — edgeToEdge mechanics, 3-button(48dp)/2-button(30dp)/gesture(24dp) heights, SafeAreaView vs hook, edges prop, double-padding bug, bottom=0 fix (RNSC 5.2+)
 - [Google Sign-In Account Picker — react-native-google-signin](research_google_signin_account_picker.md) — force picker via signOut+signIn, Supabase session gotcha, signOut vs revokeAccess, v13+ API, Original vs Universal/OneTap APIs
 - [expo-video v2 Performance & Preloading](research_expo_video_performance.md) — createVideoPlayer pool + replace() for Android decoder reuse, bufferOptions tuning, HLS vs MP4, onFirstFrameRender, black-screen bug
+- [EAS App Variants — app.json vs app.config.js + APP_VARIANT](research_eas_app_variants.md) — plain object export silently ignores app.json; function form is required; APP_VARIANT in eas.json is the official approach
