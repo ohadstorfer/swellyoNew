@@ -67,7 +67,8 @@
       "Bash(curl -sL \"https://job-logs.eascdn.net/production/eeaa40ec-615b-434f-931c-c3c1ef2e922a/1775921005569-18b14846-1db6-4ab9-8781-247bd9ff3077.txt?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=www-production%40exponentjs.iam.gserviceaccount.com%2F20260411%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date=20260411T153310Z&X-Goog-Expires=900&X-Goog-SignedHeaders=host&X-Goog-Signature=74eafd5c3f9add5398f0ea849cb2933fd068ba51499925620476721688bc9f7a41e3e29c03d568aa40ba450a48a0139413795fa9d9307fc1cdcc2cd394cfe92cb31d6de51bc4514912bbaf7c337ed415a896900aa304167322c387de916d325b797f696b3890e84819ca65450b9af17e789ac71ef8fba294d32ab69635573339bb7bf4895fec1528bd244f5fef41f9e17480738cd55eafce1e8468742aa70362a644be39a6a1138d5c024b3186a03165e5bcf335f9e4bf4a747d8c12a6e9dfbf17cf601c87b4199dc44672edd6927ec39a057e31cc6068a520eb3dd0fe737cbb0bd979a1ba8c2fba895ff17aa425319e0f3c5af84a397d068a3c3f7ddf3da158\")",
       "Bash(git show:*)",
       "Bash(netstat -ano)",
-      "Bash(findstr :8080)"
+      "Bash(findstr :8080)",
+      "WebFetch(domain:news.ycombinator.com)"
     ]
   }
 }

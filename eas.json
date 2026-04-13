@@ -2,7 +2,10 @@
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "android": {
+        "applicationId": "com.swellyo.app.dev"
+      }
     },
     "preview": {
       "distribution": "internal"

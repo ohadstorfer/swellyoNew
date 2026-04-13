@@ -15,6 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Images } from '../assets/images';
 import { supabase } from '../config/supabase';
+import { useOnboarding } from '../context/OnboardingContext';
 
 const REASONS = [
   "I don't use Swellyo anymore",
@@ -58,6 +59,7 @@ async function sendDeleteNotification(userName: string, userEmail: string, reaso
 
 export function DeleteAccountScreen({ onBack, userName, userEmail }: DeleteAccountScreenProps) {
   const insets = useSafeAreaInsets();
+  const { resetOnboarding, setUser, setCurrentStep, setIsDemoUser } = useOnboarding();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [selectedReason, setSelectedReason] = useState<string | null>(null);
   const [showAreYouSure, setShowAreYouSure] = useState(false);
@@ -126,7 +128,7 @@ export function DeleteAccountScreen({ onBack, userName, userEmail }: DeleteAccou
     Animated.timing(overlayFade, { toValue: 0, duration: 200, useNativeDriver: true }).start(async () => {
       setShowConfirmation(false);
       const { performLogout } = await import('../utils/logout');
-      await performLogout({});
+      await performLogout({ resetOnboarding, setUser, setCurrentStep, setIsDemoUser });
     });
   };
 
