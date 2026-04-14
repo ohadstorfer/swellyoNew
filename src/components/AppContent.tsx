@@ -559,10 +559,6 @@ export const AppContent: React.FC = () => {
     setCurrentStep(5); // Go to step 5 (Swelly chat screen)
     // Start tracking onboarding abandonment (12 min timer)
     analyticsService.startOnboardingAbandonTracking();
-    // Register for push notifications (non-blocking)
-    pushNotificationService.registerForPushNotifications().catch(err =>
-      console.warn('[AppContent] Push registration failed (non-blocking):', err)
-    );
   };
 
   const [showProfile, setShowProfile] = useState(false);
@@ -1083,6 +1079,15 @@ export const AppContent: React.FC = () => {
   const shouldShowConversations = isComplete && user !== null &&
     !sessionValidationRef.current && // Don't show while validating
     (isDemoUser || isSupabaseConfigured === false || hasValidatedSession); // Show if demo user, Supabase not configured, or session validated
+
+  // Register for push notifications once user reaches home screen
+  useEffect(() => {
+    if (shouldShowConversations) {
+      pushNotificationService.registerForPushNotifications().catch(err =>
+        console.warn('[AppContent] Push registration failed (non-blocking):', err)
+      );
+    }
+  }, [shouldShowConversations]);
 
   // Load current user profile data (name + avatar) when entering main app
   useEffect(() => {

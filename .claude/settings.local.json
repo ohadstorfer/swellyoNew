@@ -76,7 +76,8 @@
       "Bash(eas whoami:*)",
       "mcp__figma__get_metadata",
       "Bash(curl:*)",
-      "Bash(ipconfig getifaddr:*)"
+      "Bash(ipconfig getifaddr:*)",
+      "WebFetch(domain:mvnrepository.com)"
     ]
   }
 }
