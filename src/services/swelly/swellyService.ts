@@ -62,7 +62,7 @@ class SwellyService {
     const isDevMode = process.env.EXPO_PUBLIC_DEV_MODE === 'true';
     const isMvpMode = process.env.EXPO_PUBLIC_MVP_MODE === 'true';
     const isDevLikeMode = isDevMode || isMvpMode;
-    const chatFunctionName = isDevLikeMode ? 'swelly-chat-demo' : 'swelly-chat';
+    const chatFunctionName = 'swelly-chat-demo'
     const functionName = conversationType === 'trip-planning' ? 'swelly-trip-planning' : chatFunctionName;
     return `${supabaseUrl}/functions/v1/${functionName}${endpoint}`;
   }
