@@ -1,0 +1,46 @@
+{
+  "project_info": {
+    "project_number": "731913999896",
+    "project_id": "swellyo-mvp",
+    "storage_bucket": "swellyo-mvp.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:731913999896:android:dc4825ae96ddf91b39156d",
+        "android_client_info": {
+          "package_name": "com.swellyo.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "731913999896-h4i7hscfdkpiibq490f4bul70qfcle8g.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAB-GkOCx3nzEqnn-EIQq08DzJSnWNeWnM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "731913999896-h4i7hscfdkpiibq490f4bul70qfcle8g.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "731913999896-l8kdj4dfd9841q7ed7kkqoqliq98t2oa.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.swellyo.app"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
