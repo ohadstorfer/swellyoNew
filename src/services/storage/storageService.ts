@@ -218,6 +218,77 @@ export const uploadProfileImage = async (
 };
 
 /**
+ * Upload a trip image (hero or accommodation) to the `trip-images` bucket.
+ * Mirrors `uploadProfileImage` — same URI handling, different bucket and path.
+ */
+export const uploadTripImage = async (
+  imageUri: string,
+  userId: string,
+  kind: 'hero' | 'accommodation' = 'hero'
+): Promise<UploadResult> => {
+  try {
+    if (!imageUri || !userId) {
+      return { success: false, error: 'Missing image or user ID' };
+    }
+
+    const fileName = `${userId}/${kind}-${Date.now()}.jpg`;
+    const contentType = 'image/jpeg';
+
+    let uploadBody: Blob | FormData;
+
+    const isNativeFileUri = Platform.OS !== 'web' &&
+      (imageUri.startsWith('file://') || imageUri.startsWith('content://') || imageUri.startsWith('ph://'));
+
+    if (isNativeFileUri) {
+      uploadBody = nativeFileFormData(imageUri, contentType);
+    } else if (imageUri.startsWith('data:')) {
+      uploadBody = dataURLtoBlob(imageUri);
+    } else if (imageUri.startsWith('blob:') || imageUri.startsWith('http://') || imageUri.startsWith('https://')) {
+      uploadBody = await uriToBlob(imageUri);
+    } else {
+      try {
+        uploadBody = await uriToBlob(imageUri);
+      } catch (fetchError) {
+        return {
+          success: false,
+          error: `Unsupported image format. URI starts with: ${imageUri.substring(0, 20)}...`
+        };
+      }
+    }
+
+    const { data, error } = await supabase.storage
+      .from('trip-images')
+      .upload(fileName, uploadBody, {
+        contentType,
+        upsert: true,
+      });
+
+    if (error) {
+      console.error('[StorageService] Trip image upload error:', error);
+      if (error.message?.includes('Bucket not found') || error.message?.includes('does not exist')) {
+        return {
+          success: false,
+          error: 'Storage bucket "trip-images" does not exist. Please run the group_trips migration.'
+        };
+      }
+      return { success: false, error: error.message || 'Upload failed' };
+    }
+
+    const { data: urlData } = supabase.storage
+      .from('trip-images')
+      .getPublicUrl(data.path);
+
+    return { success: true, url: urlData.publicUrl };
+  } catch (error) {
+    console.error('[StorageService] Trip image upload exception:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error'
+    };
+  }
+};
+
+/**
  * Upload a profile video to Supabase Storage
  * @param videoUri - The local file URI or blob URL
  * @param userId - The authenticated user's ID

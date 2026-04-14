@@ -40,3 +40,9 @@ yarn-error.*
 .next/
 
 secret/
+
+# Firebase / FCM credentials — never commit
+google-services.json
+GoogleService-Info.plist
+*-firebase-adminsdk-*.json
+fcm-service-account.json

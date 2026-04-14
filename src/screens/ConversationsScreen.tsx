@@ -44,6 +44,7 @@ interface ConversationsScreenProps {
   onViewUserProfile?: (userId: string) => void;
   onSwellyShaperViewProfile?: () => void; // Callback for viewing profile from Swelly Shaper
   onSettingsPress?: () => void;
+  onTripsPress?: () => void;
   pendingNotificationConversationId?: string | null;
   onPendingNotificationHandled?: () => void;
 }
@@ -147,6 +148,7 @@ export default function ConversationsScreen({
   onViewUserProfile,
   onSwellyShaperViewProfile,
   onSettingsPress,
+  onTripsPress,
   pendingNotificationConversationId,
   onPendingNotificationHandled,
 }: ConversationsScreenProps) {
@@ -1425,6 +1427,22 @@ export default function ConversationsScreen({
                   <ShaperIcon />
                   <Text style={styles.menuItemText}>My Shaper</Text>
                 </TouchableOpacity>
+
+                {/* Trips — local mode only */}
+                {process.env.EXPO_PUBLIC_LOCAL_MODE === 'true' && (
+                  <TouchableOpacity
+                    style={styles.menuItem}
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      setShowMenu(false);
+                      if (onTripsPress) onTripsPress();
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="airplane-outline" size={20} color="#222B30" />
+                    <Text style={styles.menuItemText}>Trips</Text>
+                  </TouchableOpacity>
+                )}
 
                 <View style={styles.menuDivider} />
 

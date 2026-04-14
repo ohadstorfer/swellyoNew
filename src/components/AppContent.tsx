@@ -12,6 +12,7 @@ import { OnboardingChatScreen } from '../screens/ChatScreen';
 import { TripPlanningChatScreen } from '../screens/TripPlanningChatScreen';
 import { TripPlanningChatScreen as TripPlanningChatScreenCopy } from '../screens/TripPlanningChatScreenCopy';
 import ConversationsScreen from '../screens/ConversationsScreen';
+import TripsScreen from '../screens/trips/TripsScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
 import { DirectMessageScreen } from '../screens/DirectMessageScreen';
 import { SwellyShaperScreen } from '../screens/SwellyShaperScreen';
@@ -569,6 +570,7 @@ export const AppContent: React.FC = () => {
   const [showTripPlanningChatCopy, setShowTripPlanningChatCopy] = useState(false);
   const [showSwellyShaper, setShowSwellyShaper] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showTrips, setShowTrips] = useState(false);
   const [viewingUserId, setViewingUserId] = useState<string | null>(null);
   const [profileFromSwellyShaper, setProfileFromSwellyShaper] = useState(false); // Track if profile was opened from Swelly Shaper
   const [profileFromTripPlanningChat, setProfileFromTripPlanningChat] = useState(false); // Track if profile was opened from trip planning chat
@@ -1145,6 +1147,11 @@ export const AppContent: React.FC = () => {
     console.log('[AppContent] Rendering check - selectedConversation:', selectedConversation ? 'exists' : 'null');
     console.log('[AppContent] Rendering check - showTripPlanningChat:', showTripPlanningChat);
     
+    // Show Trips screen if requested
+    if (showTrips) {
+      return <TripsScreen onBack={() => setShowTrips(false)} />;
+    }
+
     // Show Settings screen if requested
     if (showSettings) {
       return (
@@ -1287,6 +1294,7 @@ export const AppContent: React.FC = () => {
           onSwellyPressCopy={handleSwellyPressCopy}
           onProfilePress={handleProfilePress}
           onSettingsPress={() => setShowSettings(true)}
+          onTripsPress={() => setShowTrips(true)}
           onViewUserProfile={handleViewUserProfile}
           onSwellyShaperViewProfile={handleSwellyShaperViewProfile}
           pendingNotificationConversationId={pendingNotificationConversationId}
