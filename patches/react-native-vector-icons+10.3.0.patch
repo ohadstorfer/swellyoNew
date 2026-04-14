@@ -1,0 +1,21 @@
+diff --git a/node_modules/react-native-vector-icons/android/build.gradle b/node_modules/react-native-vector-icons/android/build.gradle
+index 3e615e9..197dded 100644
+--- a/node_modules/react-native-vector-icons/android/build.gradle
++++ b/node_modules/react-native-vector-icons/android/build.gradle
+@@ -1,14 +1,5 @@
+-buildscript {
+-    ext.safeExtGet = {prop, fallback ->
+-        rootProject.ext.has(prop) ? rootProject.ext.get(prop) : fallback
+-    }
+-    repositories {
+-        google()
+-        gradlePluginPortal()
+-    }
+-    dependencies {
+-        classpath("com.android.tools.build:gradle:7.0.4")
+-    }
++ext.safeExtGet = {prop, fallback ->
++    rootProject.ext.has(prop) ? rootProject.ext.get(prop) : fallback
+ }
+ 
+ def isNewArchitectureEnabled() {

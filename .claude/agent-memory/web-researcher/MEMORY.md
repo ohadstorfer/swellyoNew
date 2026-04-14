@@ -15,3 +15,4 @@
 - [Google Sign-In Account Picker — react-native-google-signin](research_google_signin_account_picker.md) — force picker via signOut+signIn, Supabase session gotcha, signOut vs revokeAccess, v13+ API, Original vs Universal/OneTap APIs
 - [expo-video v2 Performance & Preloading](research_expo_video_performance.md) — createVideoPlayer pool + replace() for Android decoder reuse, bufferOptions tuning, HLS vs MP4, onFirstFrameRender, black-screen bug
 - [EAS App Variants — app.json vs app.config.js + APP_VARIANT](research_eas_app_variants.md) — plain object export silently ignores app.json; function form is required; APP_VARIANT in eas.json is the official approach
+- [AGP "No Variants Exist" — Expo SDK 54 / RN 0.81](research_agp_no_variants_expo54.md) — EAS infra bump Jan 30 2026; patch-package to remove stale buildscript blocks from react-native-webview + vector-icons; root override via resolutionStrategy does NOT reliably work cross-project

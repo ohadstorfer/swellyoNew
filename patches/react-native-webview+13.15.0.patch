@@ -1,0 +1,24 @@
+diff --git a/node_modules/react-native-webview/android/build.gradle b/node_modules/react-native-webview/android/build.gradle
+index cb3476a..975b742 100644
+--- a/node_modules/react-native-webview/android/build.gradle
++++ b/node_modules/react-native-webview/android/build.gradle
+@@ -1,17 +1,7 @@
+ import java.nio.file.Paths
+ 
+-buildscript {
+-    ext.safeExtGet = {prop ->
+-        rootProject.ext.has(prop) ? rootProject.ext.get(prop) : project.properties['ReactNativeWebView_' + prop]
+-    }
+-    repositories {
+-        google()
+-        gradlePluginPortal()
+-    }
+-    dependencies {
+-        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:${safeExtGet('kotlinVersion')}")
+-        classpath("com.android.tools.build:gradle:7.0.4")
+-    }
++ext.safeExtGet = {prop ->
++    rootProject.ext.has(prop) ? rootProject.ext.get(prop) : project.properties['ReactNativeWebView_' + prop]
+ }
+ 
+ def getExtOrIntegerDefault(prop) {

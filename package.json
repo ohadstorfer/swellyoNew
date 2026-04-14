@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "main": "index.ts",
   "scripts": {
+    "postinstall": "patch-package",
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
@@ -69,6 +70,7 @@
     "@babel/core": "^7.25.2",
     "@babel/helper-define-polyfill-provider": "^0.6.5",
     "@types/react": "~19.1.10",
+    "patch-package": "^8.0.1",
     "typescript": "~5.9.2"
   },
   "private": true
