@@ -665,8 +665,8 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
       <View style={styles.surfSkillVideoContainer}>
         {isVideoUrlReady && videoUrl ? (
           <View 
-            style={styles.surfSkillVideoWrapper} 
-            pointerEvents="none"
+            style={styles.surfSkillVideoWrapper}
+            pointerEvents="box-none"
             {...(Platform.OS === 'web' && {
               'data-surf-skill-video': 'true',
             } as any)}
@@ -1695,7 +1695,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
                             setRetryVideoData(null);
                           }}
                         >
-                          <Text style={styles.uploadModalCancelText}>Cancel</Text>
+                          <Text style={styles.uploadModalCancelText} numberOfLines={1}>Cancel</Text>
                         </TouchableOpacity>
                         <TouchableOpacity
                           style={styles.uploadModalUploadButton}
@@ -1741,7 +1741,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
                             setVideoUploadError(null);
                           }}
                         >
-                          <Text style={styles.uploadModalCancelText}>Cancel</Text>
+                          <Text style={styles.uploadModalCancelText} numberOfLines={1}>Cancel</Text>
                         </TouchableOpacity>
                         <TouchableOpacity
                           style={styles.uploadModalUploadButton}
@@ -1770,7 +1770,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
                             setVideoUploadError(null);
                           }}
                         >
-                          <Text style={styles.uploadModalCancelText}>Cancel</Text>
+                          <Text style={styles.uploadModalCancelText} numberOfLines={1}>Cancel</Text>
                         </TouchableOpacity>
                         <TouchableOpacity
                           style={styles.uploadModalUploadButton}
@@ -3471,12 +3471,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
     marginTop: 8,
-    width: '100%',
+    alignSelf: 'stretch',
   },
   uploadModalCancelButton: {
     flex: 1,
+    minWidth: 0,
     paddingVertical: 12,
-    paddingHorizontal: 24,
+    paddingHorizontal: 16,
     borderRadius: 12,
     backgroundColor: colors.backgroundGray,
     alignItems: 'center',
@@ -3490,8 +3491,9 @@ const styles = StyleSheet.create({
   },
   uploadModalUploadButton: {
     flex: 1,
+    minWidth: 0,
     paddingVertical: 12,
-    paddingHorizontal: 24,
+    paddingHorizontal: 16,
     borderRadius: 12,
     backgroundColor: '#4A90E2',
     alignItems: 'center',
@@ -3501,14 +3503,12 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 4,
-    minWidth: 120, // Ensure button has minimum width
   },
   uploadModalUploadText: {
     fontSize: 16,
     fontWeight: '600',
     color: '#FFFFFF',
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
-    flexShrink: 0, // Prevent text from shrinking
   },
   uploadIconGradient: {
     width: 80,
