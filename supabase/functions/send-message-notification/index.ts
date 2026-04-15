@@ -181,6 +181,18 @@ async function shouldSendEmail(
     return false;
   }
 
+  // Skip email if recipient has logged in from a mobile device — push notification will reach them.
+  const { data: recipientSurfer } = await supabase
+    .from('surfers')
+    .select('is_mobile_user')
+    .eq('user_id', recipientId)
+    .maybeSingle();
+
+  if (recipientSurfer?.is_mobile_user) {
+    console.log(`[Email Notification] Skipping - recipient ${recipientId} is a mobile user`);
+    return false;
+  }
+
   const now = new Date();
 
   // Fetch recipient activity (used only for rate-limit reset: active after last email = allow send)

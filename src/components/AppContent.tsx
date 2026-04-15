@@ -12,6 +12,7 @@ import { OnboardingChatScreen } from '../screens/ChatScreen';
 import { TripPlanningChatScreen } from '../screens/TripPlanningChatScreen';
 import { TripPlanningChatScreen as TripPlanningChatScreenCopy } from '../screens/TripPlanningChatScreenCopy';
 import ConversationsScreen from '../screens/ConversationsScreen';
+import TripsScreen from '../screens/trips/TripsScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
 import { DirectMessageScreen } from '../screens/DirectMessageScreen';
 import { SwellyShaperScreen } from '../screens/SwellyShaperScreen';
@@ -558,10 +559,6 @@ export const AppContent: React.FC = () => {
     setCurrentStep(5); // Go to step 5 (Swelly chat screen)
     // Start tracking onboarding abandonment (12 min timer)
     analyticsService.startOnboardingAbandonTracking();
-    // Register for push notifications (non-blocking)
-    pushNotificationService.registerForPushNotifications().catch(err =>
-      console.warn('[AppContent] Push registration failed (non-blocking):', err)
-    );
   };
 
   const [showProfile, setShowProfile] = useState(false);
@@ -569,6 +566,7 @@ export const AppContent: React.FC = () => {
   const [showTripPlanningChatCopy, setShowTripPlanningChatCopy] = useState(false);
   const [showSwellyShaper, setShowSwellyShaper] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showTrips, setShowTrips] = useState(false);
   const [viewingUserId, setViewingUserId] = useState<string | null>(null);
   const [profileFromSwellyShaper, setProfileFromSwellyShaper] = useState(false); // Track if profile was opened from Swelly Shaper
   const [profileFromTripPlanningChat, setProfileFromTripPlanningChat] = useState(false); // Track if profile was opened from trip planning chat
@@ -1082,6 +1080,15 @@ export const AppContent: React.FC = () => {
     !sessionValidationRef.current && // Don't show while validating
     (isDemoUser || isSupabaseConfigured === false || hasValidatedSession); // Show if demo user, Supabase not configured, or session validated
 
+  // Register for push notifications once user reaches home screen
+  useEffect(() => {
+    if (shouldShowConversations) {
+      pushNotificationService.registerForPushNotifications().catch(err =>
+        console.warn('[AppContent] Push registration failed (non-blocking):', err)
+      );
+    }
+  }, [shouldShowConversations]);
+
   // Load current user profile data (name + avatar) when entering main app
   useEffect(() => {
     if (shouldShowConversations && (currentUserName === 'User' || !currentUserAvatar)) {
@@ -1145,6 +1152,11 @@ export const AppContent: React.FC = () => {
     console.log('[AppContent] Rendering check - selectedConversation:', selectedConversation ? 'exists' : 'null');
     console.log('[AppContent] Rendering check - showTripPlanningChat:', showTripPlanningChat);
     
+    // Show Trips screen if requested
+    if (showTrips) {
+      return <TripsScreen onBack={() => setShowTrips(false)} />;
+    }
+
     // Show Settings screen if requested
     if (showSettings) {
       return (
@@ -1287,6 +1299,7 @@ export const AppContent: React.FC = () => {
           onSwellyPressCopy={handleSwellyPressCopy}
           onProfilePress={handleProfilePress}
           onSettingsPress={() => setShowSettings(true)}
+          onTripsPress={() => setShowTrips(true)}
           onViewUserProfile={handleViewUserProfile}
           onSwellyShaperViewProfile={handleSwellyShaperViewProfile}
           pendingNotificationConversationId={pendingNotificationConversationId}

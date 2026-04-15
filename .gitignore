@@ -40,3 +40,12 @@ yarn-error.*
 .next/
 
 secret/
+
+# Firebase / FCM credentials — never commit
+google-services.json
+GoogleService-Info.plist
+*-firebase-adminsdk-*.json
+fcm-service-account.json
+# Exception: android/app/google-services.json is required for native Android FCM build.
+# It contains only public identifiers (project ID, API key, package name) and is safe to commit.
+!android/app/google-services.json
