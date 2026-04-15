@@ -351,7 +351,11 @@ export const DestinationMapPickerCard = forwardRef<
     scrollToUnitIndex(timeUnitIndex, false);
   }, []);
 
-  const handleMapSelect = useCallback((payload: { type: string; place?: MapPickerPlace }) => {
+  const handleMapSelect = useCallback((payload: { type: string; place?: MapPickerPlace; error?: string; message?: string }) => {
+    if (payload.type === 'MAP_ERROR') {
+      logMapPicker('MAP_ERROR received', { error: payload.error, message: payload.message });
+      return;
+    }
     if (payload.type === 'PLACE_SELECTED' && payload.place) {
       const place = payload.place;
       const normalized = normalizeMapPickerPlace(place);

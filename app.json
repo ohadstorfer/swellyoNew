@@ -15,7 +15,13 @@
     },
     "ios": {
       "bundleIdentifier": "com.swellyo.app",
-      "supportsTablet": true,
+      "buildNumber": "1",
+      "supportsTablet": false,
+      "usesNonExemptEncryption": false,
+      "usesAppleSignIn": true,
+      "entitlements": {
+        "aps-environment": "production"
+      },
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "This app needs access to your photo library to select profile pictures.",
         "NSCameraUsageDescription": "This app needs access to your camera to take profile pictures.",

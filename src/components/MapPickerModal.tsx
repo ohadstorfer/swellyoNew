@@ -65,6 +65,8 @@ export function InlineMapView({ htmlContent, width, height, query, onMessage }: 
         const payload = JSON.parse(data);
         if (payload.type === 'PLACE_SELECTED' && payload.place) {
           onMessage({ type: 'PLACE_SELECTED', place: payload.place as MapPickerPlace });
+        } else {
+          onMessage(payload);
         }
       } catch {
         // ignore
@@ -116,7 +118,7 @@ export function InlineMapView({ htmlContent, width, height, query, onMessage }: 
           ref={(r: { injectJavaScript: (script: string) => void } | null) => {
             webViewRef.current = r;
           }}
-          source={{ html: htmlContent }}
+          source={{ html: htmlContent, baseUrl: 'https://swellyo.com' }}
           style={[styles.inlineWebView, { width, height }]}
           onMessage={(e: { nativeEvent: { data: string } }) => handleMessage(e.nativeEvent.data)}
           onLoadEnd={handleLoad}
@@ -310,7 +312,7 @@ export function MapPickerModal({
         <View style={styles.mapContainer}>
           {WebView && (
             <WebView
-              source={{ html: htmlContent }}
+              source={{ html: htmlContent, baseUrl: 'https://swellyo.com' }}
               style={styles.webView}
               onMessage={(e: { nativeEvent: { data: string } }) => handleMessage(e.nativeEvent.data)}
               originWhitelist={['*']}

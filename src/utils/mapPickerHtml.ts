@@ -407,6 +407,15 @@ export function getMapPickerInlineHtml(
         });
       }
 
+      window.gm_authFailure = function() {
+        send({ type: 'MAP_ERROR', error: 'gm_authFailure', message: 'Google Maps auth failure - API key rejected' });
+      };
+      window.addEventListener('error', function(e) {
+        if (e.filename && e.filename.indexOf('maps.googleapis.com') !== -1) {
+          send({ type: 'MAP_ERROR', error: 'script_load_error', message: e.message || 'Maps script failed to load' });
+        }
+      });
+
       function loadScript() {
         var script = document.createElement('script');
         script.src = 'https://maps.googleapis.com/maps/api/js?key=' + API_KEY + '&libraries=places&callback=initMap';
