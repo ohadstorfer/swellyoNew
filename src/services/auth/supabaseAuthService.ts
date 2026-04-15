@@ -16,9 +16,15 @@ let GoogleSignin: any = null;
 if (Platform.OS !== 'web') {
   try {
     GoogleSignin = require('@react-native-google-signin/google-signin').GoogleSignin;
+    // On iOS, omit webClientId — passing it makes Google issue a server-bound
+    // ID token with a nonce claim that Supabase's signInWithIdToken rejects
+    // (the v16 library has no API to pass a nonce back). Android needs
+    // webClientId for idToken to be returned.
     GoogleSignin.configure({
-      webClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
       iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
+      ...(Platform.OS === 'android'
+        ? { webClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID }
+        : {}),
     });
   } catch (e) {
     console.warn('Google Sign-In native module not available (Expo Go?):', e);
