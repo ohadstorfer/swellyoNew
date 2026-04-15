@@ -32,9 +32,9 @@ export interface GroupTrip {
 
   destination_country: string | null;
   destination_area: string | null;
-  destination_spot: string | null;
+  destination_spot: string[] | null;
 
-  accommodation_type: string | null;
+  accommodation_type: string[] | null;
   accommodation_name: string | null;
   accommodation_url: string | null;
   accommodation_image_url: string | null;

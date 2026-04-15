@@ -752,6 +752,10 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
   console.log('WelcomeScreen rendering - Platform:', Platform.OS);
   
   const handleAppleSignIn = async (ageVerified = false) => {
+    if (Platform.OS !== 'ios') {
+      Alert.alert('Not available', 'Apple Sign-In is only available on iOS.');
+      return;
+    }
     if (!ageVerified) {
       // Skip age sheet if DOB already verified on this device
       const existingDob = await ageGateService.getDOB();
@@ -765,8 +769,44 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
       openAgeSheet('apple');
       return;
     }
-    // Mockup — Apple Sign In not yet implemented
-    Alert.alert('Coming Soon', 'Apple Sign In will be available soon.');
+
+    console.log('Apple Sign-In button pressed');
+    try {
+      setIsLoading(true);
+      const user = await authService.signInWithApple();
+      console.log('Apple Sign-In successful, setting user:', user);
+      setUser(user);
+
+      updateFormData({
+        nickname: user.nickname,
+        userEmail: user.email,
+      });
+
+      const { analyticsService } = await import('../services/analytics/analyticsService');
+      const userId = user.id.toString();
+      const userProperties = {
+        $email: user.email,
+        $name: user.nickname || user.email?.split('@')[0] || 'User',
+        email: user.email,
+        name: user.nickname || user.email?.split('@')[0] || 'User',
+      };
+      analyticsService.identify(userId, userProperties);
+      console.log('[WelcomeScreen] User identified with PostHog after Apple sign-in:', userId);
+
+      const hasFinishedOnboarding = await checkOnboardingStatus();
+      if (!hasFinishedOnboarding) {
+        ONBOARDING_WELCOME_IMAGE_URLS.forEach(url => Image.prefetch(url).catch(() => {}));
+        onGetStarted();
+      }
+    } catch (error: any) {
+      setIsLoading(false);
+      if (error?.message?.includes('cancelled')) {
+        console.log('Apple Sign-In cancelled by user');
+        return;
+      }
+      console.error('Apple Sign-In error:', error);
+      Alert.alert('Sign-In Error', error?.message || 'Failed to sign in with Apple. Please try again.');
+    }
   };
 
   return (

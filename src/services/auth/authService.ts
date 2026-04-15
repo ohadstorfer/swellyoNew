@@ -287,6 +287,26 @@ class AuthService {
     }
   }
 
+  async signInWithApple(): Promise<User> {
+    if (!isSupabaseConfigured()) {
+      throw new Error('Supabase is not configured.');
+    }
+    if (Platform.OS !== 'ios') {
+      throw new Error('Apple Sign-In is only available on iOS.');
+    }
+
+    await supabaseAuthService.signInWithApple();
+
+    const { convertSupabaseUserToAppUser } = await import('../../utils/userConversion');
+    const { supabase } = await import('../../config/supabase');
+
+    const { data: { user: rawSupabaseUser }, error: userError } = await supabase.auth.getUser();
+    if (userError || !rawSupabaseUser) {
+      throw new Error('Failed to get Supabase user after Apple Sign-In: ' + (userError?.message || 'No user'));
+    }
+    return convertSupabaseUserToAppUser(rawSupabaseUser);
+  }
+
   async signOut(): Promise<void> {
     try {
       if (isSupabaseConfigured()) {

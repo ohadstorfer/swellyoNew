@@ -2,6 +2,15 @@ import { Platform } from 'react-native';
 import { supabase, isSupabaseConfigured } from '../../config/supabase';
 import * as AuthSession from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
+// Lazy-load native Apple Authentication (iOS only)
+let AppleAuthentication: any = null;
+if (Platform.OS === 'ios') {
+  try {
+    AppleAuthentication = require('expo-apple-authentication');
+  } catch (e) {
+    console.warn('Apple Authentication native module not available (Expo Go?):', e);
+  }
+}
 // Lazy-load native Google Sign-In to avoid crash in Expo Go
 let GoogleSignin: any = null;
 if (Platform.OS !== 'web') {
@@ -214,6 +223,92 @@ class SupabaseAuthService {
       console.error('Error in mobile Google Sign-In:', error);
       throw error;
     }
+  }
+
+  /**
+   * Sign in with Apple (iOS native only).
+   * Mirrors the mobile Google flow: get identity token from Apple, hand it to
+   * Supabase via signInWithIdToken — no redirect URLs involved.
+   */
+  async signInWithApple(): Promise<User> {
+    if (!isSupabaseConfigured()) {
+      throw new Error('Supabase is not configured.');
+    }
+    if (Platform.OS !== 'ios' || !AppleAuthentication) {
+      throw new Error('Apple Sign-In is only available on iOS.');
+    }
+
+    const loginKey = 'current_login';
+    const ongoingLogin = this.ongoingLogins.get(loginKey);
+    if (ongoingLogin) {
+      console.log('[SupabaseAuthService] Login already in progress, returning existing promise');
+      return ongoingLogin;
+    }
+
+    const loginPromise = (async () => {
+      try {
+        const isAvailable = await AppleAuthentication.isAvailableAsync();
+        if (!isAvailable) {
+          throw new Error('Apple Sign-In is not available on this device.');
+        }
+
+        const credential = await AppleAuthentication.signInAsync({
+          requestedScopes: [
+            AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+            AppleAuthentication.AppleAuthenticationScope.EMAIL,
+          ],
+        });
+
+        const idToken = credential.identityToken;
+        if (!idToken) {
+          throw new Error('No identity token returned from Apple Sign-In');
+        }
+
+        console.log('Got Apple ID token, exchanging with Supabase...');
+
+        const { data: sessionData, error } = await supabase.auth.signInWithIdToken({
+          provider: 'apple',
+          token: idToken,
+        });
+
+        if (error) throw error;
+        if (!sessionData.session) {
+          throw new Error('No session returned from Supabase');
+        }
+
+        // Apple only returns fullName on the FIRST sign-in. Persist it into
+        // user_metadata so later logins still have a display name.
+        const fullName = credential.fullName;
+        if (fullName && (fullName.givenName || fullName.familyName)) {
+          const displayName = [fullName.givenName, fullName.familyName]
+            .filter(Boolean)
+            .join(' ')
+            .trim();
+          if (displayName) {
+            try {
+              await supabase.auth.updateUser({
+                data: { full_name: displayName, name: displayName },
+              });
+            } catch (e) {
+              console.warn('Failed to persist Apple fullName to user_metadata:', e);
+            }
+          }
+        }
+
+        return this.convertSupabaseUserToAppUser(sessionData.session.user);
+      } catch (error: any) {
+        if (error?.code === 'ERR_REQUEST_CANCELED') {
+          throw new Error('Sign in cancelled');
+        }
+        console.error('Error in Apple Sign-In:', error);
+        throw new Error('Sign in failed: ' + (error.message || String(error)));
+      } finally {
+        this.ongoingLogins.delete(loginKey);
+      }
+    })();
+
+    this.ongoingLogins.set(loginKey, loginPromise);
+    return loginPromise;
   }
 
   /**

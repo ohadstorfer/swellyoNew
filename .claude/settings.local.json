@@ -77,7 +77,10 @@
       "mcp__figma__get_metadata",
       "Bash(curl:*)",
       "Bash(ipconfig getifaddr:*)",
-      "WebFetch(domain:mvnrepository.com)"
+      "WebFetch(domain:mvnrepository.com)",
+      "Bash(git rebase *)",
+      "Bash(GIT_EDITOR=true git rebase *)",
+      "Bash(git *)"
     ]
   }
 }

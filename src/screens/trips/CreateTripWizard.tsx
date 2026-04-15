@@ -57,7 +57,7 @@ interface WizardState {
   destinationArea: string;
   destinationSpot: string;
   // 1.6
-  accommodationType: string;
+  accommodationType: string[];
   accommodationName: string;
   accommodationUrl: string;
   accommodationImageUri: string | null;
@@ -93,7 +93,7 @@ const INITIAL_STATE: WizardState = {
   destinationCountry: '',
   destinationArea: '',
   destinationSpot: '',
-  accommodationType: '',
+  accommodationType: [],
   accommodationName: '',
   accommodationUrl: '',
   accommodationImageUri: null,
@@ -207,10 +207,10 @@ export default function CreateTripWizard({ hostId, onCreated, onCancel }: Create
         }
         return null;
       case 'accommodation':
-        if (hostingStyle === 'A' && !s.accommodationType)
+        if (hostingStyle === 'A' && s.accommodationType.length === 0)
           return 'Pick an accommodation type.';
         if (hostingStyle === 'B') {
-          if (!s.accommodationType) return 'Pick a style.';
+          if (s.accommodationType.length === 0) return 'Pick a style.';
           if (!s.accommodationName.trim()) return 'Accommodation name is required.';
         }
         if (hostingStyle === 'C' && !s.accommodationName.trim())
@@ -306,9 +306,11 @@ export default function CreateTripWizard({ hostId, onCreated, onCancel }: Create
 
         destination_country: state.destinationCountry.trim() || null,
         destination_area: state.destinationArea.trim() || null,
-        destination_spot: state.destinationSpot.trim() || null,
+        destination_spot: state.destinationSpot.trim()
+          ? state.destinationSpot.split(',').map(s => s.trim()).filter(Boolean)
+          : null,
 
-        accommodation_type: state.accommodationType || null,
+        accommodation_type: state.accommodationType.length > 0 ? state.accommodationType : null,
         accommodation_name: state.accommodationName.trim() || null,
         accommodation_url: state.accommodationUrl.trim() || null,
         accommodation_image_url: accommodationImageUrl,
@@ -542,12 +544,17 @@ export default function CreateTripWizard({ hostId, onCreated, onCancel }: Create
                 <Text style={styles.label}>Type</Text>
                 <View style={styles.chipRow}>
                   {ACCOMMODATION_TYPES.map(t => {
-                    const active = state.accommodationType === t;
+                    const active = state.accommodationType.includes(t);
                     return (
                       <TouchableOpacity
                         key={t}
                         style={[styles.chip, active && styles.chipActive]}
-                        onPress={() => update('accommodationType', t)}
+                        onPress={() => update(
+                          'accommodationType',
+                          active
+                            ? state.accommodationType.filter(x => x !== t)
+                            : [...state.accommodationType, t]
+                        )}
                       >
                         <Text style={[styles.chipText, active && styles.chipTextActive]}>{t}</Text>
                       </TouchableOpacity>
