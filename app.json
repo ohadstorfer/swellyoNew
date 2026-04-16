@@ -15,7 +15,7 @@
     },
     "ios": {
       "bundleIdentifier": "com.swellyo.app",
-      "buildNumber": "5",
+      "buildNumber": "6",
       "supportsTablet": false,
       "usesNonExemptEncryption": false,
       "usesAppleSignIn": true,
