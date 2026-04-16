@@ -473,8 +473,9 @@ const getS3VideoProcessingFunctionUrl = (): string => {
 };
 
 /**
- * Upload a profile video to AWS S3 via presigned URL (LOCAL_MODE only)
- * Uses the process-profile-video-s3 Edge Function to get presigned URLs
+ * Upload a profile video to AWS S3 via presigned URL.
+ * Uses the process-profile-video-s3 Edge Function to get presigned URLs.
+ * This is the default video upload path across all app modes.
  */
 export const uploadProfileVideoS3 = async (
   videoUri: string,
@@ -516,40 +517,43 @@ export const uploadProfileVideoS3 = async (
     const { uploadUrl, s3Key, processedKey } = await presignResponse.json();
     console.log('[StorageService/S3] Got presigned URL for:', s3Key);
 
-    // Step 2: Convert video URI to uploadable body
-    let uploadBody: Blob;
-
     const isNativeFileUri = Platform.OS !== 'web' &&
       (videoUri.startsWith('file://') || videoUri.startsWith('content://') || videoUri.startsWith('ph://'));
 
     if (isNativeFileUri) {
-      // On native, fetch the file URI to get a blob
-      const response = await fetch(videoUri);
-      uploadBody = await response.blob();
-    } else if (videoUri.startsWith('data:')) {
-      uploadBody = dataURLtoBlob(videoUri);
-    } else if (videoUri.startsWith('blob:')) {
-      uploadBody = await uriToBlob(videoUri);
-    } else if (videoUri.startsWith('http://') || videoUri.startsWith('https://')) {
-      uploadBody = await uriToBlob(videoUri);
+      // On native, stream the file directly via expo-file-system uploadAsync.
+      // The RN Blob shim can produce 0-byte PUT bodies for large videos — this avoids it.
+      console.log('[StorageService/S3] Uploading to S3 via FileSystem.uploadAsync...');
+      const LegacyFS = require('expo-file-system/legacy');
+      const result = await LegacyFS.uploadAsync(uploadUrl, videoUri, {
+        httpMethod: 'PUT',
+        uploadType: LegacyFS.FileSystemUploadType.BINARY_CONTENT,
+        headers: { 'Content-Type': 'video/mp4' },
+      });
+      if (result.status < 200 || result.status >= 300) {
+        console.error('[StorageService/S3] S3 upload failed:', result.status, result.body);
+        return { success: false, error: `S3 upload failed (${result.status})` };
+      }
     } else {
-      uploadBody = await uriToBlob(videoUri);
-    }
+      let uploadBody: Blob;
+      if (videoUri.startsWith('data:')) {
+        uploadBody = dataURLtoBlob(videoUri);
+      } else {
+        uploadBody = await uriToBlob(videoUri);
+      }
 
-    // Step 3: Upload directly to S3 via presigned PUT URL
-    console.log('[StorageService/S3] Uploading to S3...');
-    const s3Response = await fetch(uploadUrl, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'video/mp4',
-      },
-      body: uploadBody,
-    });
+      console.log('[StorageService/S3] Uploading to S3 via fetch PUT...');
+      const s3Response = await fetch(uploadUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'video/mp4' },
+        body: uploadBody,
+      });
 
-    if (!s3Response.ok) {
-      const errorText = await s3Response.text();
-      console.error('[StorageService/S3] S3 upload failed:', errorText);
-      return { success: false, error: 'S3 upload failed' };
+      if (!s3Response.ok) {
+        const errorText = await s3Response.text();
+        console.error('[StorageService/S3] S3 upload failed:', errorText);
+        return { success: false, error: 'S3 upload failed' };
+      }
     }
 
     console.log('[StorageService/S3] Video uploaded to S3:', s3Key);

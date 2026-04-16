@@ -29,7 +29,7 @@ import { Images } from '../assets/images';
 import { getSurfLevelVideoFromStorage } from '../services/media/videoService';
 import { getVideoPreloadStatus } from '../services/media/videoPreloadService';
 import { getCountryFlag } from '../utils/countryFlags';
-import { uploadProfileImage, uploadProfileVideo } from '../services/storage/storageService';
+import { uploadProfileImage, uploadProfileVideoS3 } from '../services/storage/storageService';
 import { validateVideoComplete } from '../utils/videoValidation';
 import { ProfileImage } from '../components/ProfileImage';
 import { ProfileSkeleton } from '../components/skeletons';
@@ -1341,8 +1341,8 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
 
     setIsUploadingVideo(true);
     try {
-      // Upload video to storage (now uploads to temp and triggers processing)
-      const result = await uploadProfileVideo(videoUri, currentUserId, mimeType);
+      // Upload video to S3 via presigned URL (triggers MediaConvert processing)
+      const result = await uploadProfileVideoS3(videoUri, currentUserId, mimeType);
       
       if (result.success) {
         if (result.processing) {

@@ -39,6 +39,8 @@ import { userPresenceService } from '../services/presence/userPresenceService';
 import { avatarCacheService } from '../services/media/avatarCacheService';
 import { FullscreenImageViewer } from '../components/FullscreenImageViewer';
 import { ImagePreviewModal } from '../components/ImagePreviewModal';
+import { VideoPreviewModal } from '../components/VideoPreviewModal';
+import { FullscreenVideoPlayer } from '../components/FullscreenVideoPlayer';
 import { ChatTextInput, ChatTextInputRef } from '../components/ChatTextInput';
 import { WelcomeIntroMessage } from '../components/WelcomeIntroMessage';
 import { useChatKeyboardScroll } from '../hooks/useChatKeyboardScroll';
@@ -106,6 +108,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const [pendingDeleteMessageId, setPendingDeleteMessageId] = useState<string | null>(null);
   const [fullscreenImageUrl, setFullscreenImageUrl] = useState<string | null>(null);
   const [fullscreenThumbnailUrl, setFullscreenThumbnailUrl] = useState<string | null>(null);
+  const [fullscreenVideoUrl, setFullscreenVideoUrl] = useState<string | null>(null);
   const [imagePreviewVisible, setImagePreviewVisible] = useState(false);
   const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
   const selectedImageUriForUploadRef = useRef<string | null>(null);
@@ -113,6 +116,10 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const isPickerOpenRef = useRef(false);
   const pickerFallbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isProcessingImage, setIsProcessingImage] = useState(false);
+  const [selectedVideoUri, setSelectedVideoUri] = useState<string | null>(null);
+  const selectedVideoMetadataRef = useRef<{ width?: number; height?: number; duration?: number; fileSize?: number; mimeType?: string } | null>(null);
+  const [videoPreviewVisible, setVideoPreviewVisible] = useState(false);
+  const [isProcessingVideo, setIsProcessingVideo] = useState(false);
   const insets = useSafeAreaInsets();
   const keyboardVisible = useKeyboardVisible();
   const androidKeyboardHeight = useKeyboardHeight();
@@ -235,8 +242,23 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
               setHasTrackedFirstReply(true);
             }
             setMessages((prev) => {
-              const exists = prev.some(msg => msg.id === newMessage.id);
-              if (exists) return prev;
+              const existing = prev.find(msg => msg.id === newMessage.id);
+              if (existing) {
+                // Keep any local-only upload fields already on the message (we may have injected
+                // it locally when the sender pressed Send before Realtime delivered it).
+                if (existing.upload_state || existing._localPreviewUri) {
+                  return prev.map(m => m.id === newMessage.id
+                    ? {
+                        ...newMessage,
+                        upload_state: existing.upload_state,
+                        upload_progress: existing.upload_progress,
+                        upload_error: existing.upload_error,
+                        _localPreviewUri: existing._localPreviewUri,
+                      }
+                    : m);
+                }
+                return prev;
+              }
               const updated = [...prev, newMessage];
               if (convId) {
                 chatHistoryCache.saveMessages(convId, updated).catch(err => {
@@ -268,11 +290,19 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             setMessages((prev) => {
               const existingIndex = prev.findIndex(msg => msg.id === updatedMessage.id);
               let updated: typeof prev;
-              
+
               if (existingIndex !== -1) {
-                // Update existing message
-                updated = prev.map(msg => 
-                  msg.id === updatedMessage.id ? updatedMessage : msg
+                // Update existing message — preserve client-only upload fields the sender set locally
+                const existing = prev[existingIndex];
+                const merged: Message = {
+                  ...updatedMessage,
+                  upload_state: existing.upload_state,
+                  upload_progress: existing.upload_progress,
+                  upload_error: existing.upload_error,
+                  _localPreviewUri: existing._localPreviewUri,
+                };
+                updated = prev.map(msg =>
+                  msg.id === updatedMessage.id ? merged : msg
                 );
               } else {
                 const convId = currentConversationIdRef.current;
@@ -1226,7 +1256,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         // Append to DOM and use addEventListener so iOS Safari fires change (see e.g. SO 47664777).
         const input = document.createElement('input') as HTMLInputElement;
         input.type = 'file';
-        input.accept = 'image/*';
+        input.accept = 'image/*,video/*';
         Object.assign(input.style, {
           position: 'fixed',
           left: '-9999px',
@@ -1248,21 +1278,36 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             fileInputRef.current = null;
           }
           if (!file) return;
-          const reader = new FileReader();
-          reader.onload = (event: ProgressEvent<FileReader>) => {
-            const imageUri = event.target?.result as string;
-            if (!imageUri) return;
-            selectedImageUriForUploadRef.current = imageUri;
+          const isVideo = file.type.startsWith('video/');
+          if (isVideo) {
+            // Video: create blob URL for preview (avoid base64 for large files)
+            const blobUrl = URL.createObjectURL(file);
+            selectedVideoMetadataRef.current = {
+              fileSize: file.size,
+              mimeType: file.type || 'video/mp4',
+            };
             setTimeout(() => {
-              setSelectedImageUri(imageUri);
-              setImagePreviewVisible(true);
+              setSelectedVideoUri(blobUrl);
+              setVideoPreviewVisible(true);
             }, 0);
-          };
-          reader.onerror = () => {
-            console.error('[DirectMessageScreen] FileReader failed to read image');
-            Alert.alert('Error', 'Could not read the selected image. Please try another.');
-          };
-          reader.readAsDataURL(file);
+          } else {
+            // Image: read as data URL
+            const reader = new FileReader();
+            reader.onload = (event: ProgressEvent<FileReader>) => {
+              const imageUri = event.target?.result as string;
+              if (!imageUri) return;
+              selectedImageUriForUploadRef.current = imageUri;
+              setTimeout(() => {
+                setSelectedImageUri(imageUri);
+                setImagePreviewVisible(true);
+              }, 0);
+            };
+            reader.onerror = () => {
+              console.error('[DirectMessageScreen] FileReader failed to read image');
+              Alert.alert('Error', 'Could not read the selected file. Please try another.');
+            };
+            reader.readAsDataURL(file);
+          }
         };
 
         input.addEventListener('change', handleChange);
@@ -1295,18 +1340,31 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             }
 
             const result = await ImagePicker.launchImageLibraryAsync({
-              mediaTypes: ImagePicker.MediaTypeOptions.Images,
-              allowsEditing: true,
-              aspect: [4, 3],
+              mediaTypes: ImagePicker.MediaTypeOptions.All,
               quality: 1,
             });
 
-            const uri = result.assets?.[0]?.uri ?? (result as { uri?: string }).uri;
+            const asset = result.assets?.[0];
+            const uri = asset?.uri ?? (result as { uri?: string }).uri;
             const canceled = result.canceled === true || (result as { cancelled?: boolean }).cancelled === true;
             if (uri && !canceled) {
-              selectedImageUriForUploadRef.current = uri;
-              setSelectedImageUri(uri);
-              setImagePreviewVisible(true);
+              const isVideo = asset?.type === 'video' || uri.endsWith('.mp4') || uri.endsWith('.mov');
+              if (isVideo) {
+                selectedVideoMetadataRef.current = {
+                  width: asset?.width,
+                  height: asset?.height,
+                  // expo-image-picker gives duration in milliseconds
+                  duration: typeof asset?.duration === 'number' ? asset.duration / 1000 : undefined,
+                  fileSize: asset?.fileSize,
+                  mimeType: asset?.mimeType || (uri.endsWith('.mov') ? 'video/quicktime' : 'video/mp4'),
+                };
+                setSelectedVideoUri(uri);
+                setVideoPreviewVisible(true);
+              } else {
+                selectedImageUriForUploadRef.current = uri;
+                setSelectedImageUri(uri);
+                setImagePreviewVisible(true);
+              }
             }
           } catch (error) {
             console.warn('expo-image-picker not available:', error);
@@ -1343,34 +1401,56 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       return;
     }
 
-    setIsProcessingImage(true);
+    const conversationId = currentConversationId;
+    let messageId: string | null = null;
 
     try {
+      // Step 1: Create message record in DB first (to get real message ID)
+      const messageRecord = await messagingService.createImageMessage(conversationId, caption);
+      messageId = messageRecord.id;
+
+      // Close preview modal immediately — upload continues in background
+      selectedImageUriForUploadRef.current = null;
+      setImagePreviewVisible(false);
+      setSelectedImageUri(null);
+      setIsProcessingImage(false);
+
+      // Inject message into local state with uploading flag + local preview
+      setMessages((prev) => {
+        const existingIdx = prev.findIndex(m => m.id === messageRecord.id);
+        if (existingIdx !== -1) {
+          return prev.map(m =>
+            m.id === messageRecord.id
+              ? { ...m, upload_state: 'uploading', _localPreviewUri: uriToUse }
+              : m
+          );
+        }
+        return [...prev, { ...messageRecord, upload_state: 'uploading', _localPreviewUri: uriToUse }];
+      });
+      scrollToBottom();
+
       // Import image upload service functions
       const { processImage, uploadImageToStorage } = await import('../services/messaging/imageUploadService');
-      
-      // Step 1: Create message record in DB first (to get real message ID)
-      const messageRecord = await messagingService.createImageMessage(currentConversationId, caption);
-      
+
       // Step 2: Process image (compress and generate thumbnail)
       const processed = await processImage(uriToUse);
-      
+
       // Step 3: Upload original image
       const imageUrl = await uploadImageToStorage(
         processed.originalUri,
-        currentConversationId,
+        conversationId,
         messageRecord.id,
         false
       );
-      
+
       // Step 4: Upload thumbnail
       const thumbnailUrl = await uploadImageToStorage(
         processed.thumbnailUri,
-        currentConversationId,
+        conversationId,
         messageRecord.id,
         true
       );
-      
+
       // Step 5: Update message with image metadata
       const imageMetadata = {
         image_url: imageUrl,
@@ -1379,23 +1459,134 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         height: processed.height,
         file_size: processed.fileSize,
         mime_type: processed.mimeType,
-        storage_path: `${currentConversationId}/${messageRecord.id}/original.jpg`,
+        storage_path: `${conversationId}/${messageRecord.id}/original.jpg`,
       };
-      
+
       await messagingService.updateImageMessageMetadata(messageRecord.id, imageMetadata);
-      
-      // Close preview modal
-      selectedImageUriForUploadRef.current = null;
-      setImagePreviewVisible(false);
-      setSelectedImageUri(null);
-      setIsProcessingImage(false);
-      
-      // Scroll to bottom to show new message
-      scrollToBottom();
+
+      // Upload succeeded — mark message as sent and drop the local preview
+      setMessages((prev) => prev.map(m =>
+        m.id === messageRecord.id
+          ? { ...m, image_metadata: imageMetadata, upload_state: 'sent', _localPreviewUri: undefined }
+          : m
+      ));
     } catch (error: any) {
       console.error('Error sending image:', error);
+      if (messageId) {
+        setMessages((prev) => prev.map(m =>
+          m.id === messageId
+            ? { ...m, upload_state: 'failed', upload_error: error?.message }
+            : m
+        ));
+      } else {
+        // Failed before we even got a message ID — make sure the modal closes so the user isn't stuck
+        selectedImageUriForUploadRef.current = null;
+        setImagePreviewVisible(false);
+        setSelectedImageUri(null);
+        setIsProcessingImage(false);
+      }
       Alert.alert('Error', error?.message || 'Failed to send image');
-      setIsProcessingImage(false);
+    }
+  };
+
+  // Handle video send
+  const handleVideoSend = async (caption?: string) => {
+    const videoUri = selectedVideoUri;
+    if (!videoUri || !currentConversationId || !currentUserId) {
+      return;
+    }
+
+    const conversationId = currentConversationId;
+    let messageId: string | null = null;
+    // Snapshot picker hints before clearing the ref on modal close.
+    const videoHints = selectedVideoMetadataRef.current ?? undefined;
+
+    try {
+      // Step 1: Create video message record in DB
+      const messageRecord = await messagingService.createVideoMessage(conversationId, caption);
+      messageId = messageRecord.id;
+
+      // Close preview immediately — upload continues in background
+      setVideoPreviewVisible(false);
+      setSelectedVideoUri(null);
+      selectedVideoMetadataRef.current = null;
+      setIsProcessingVideo(false);
+
+      // Inject message locally with uploading flag + local preview
+      setMessages((prev) => {
+        const existingIdx = prev.findIndex(m => m.id === messageRecord.id);
+        if (existingIdx !== -1) {
+          return prev.map(m =>
+            m.id === messageRecord.id
+              ? { ...m, upload_state: 'uploading', _localPreviewUri: videoUri }
+              : m
+          );
+        }
+        return [...prev, { ...messageRecord, upload_state: 'uploading', _localPreviewUri: videoUri }];
+      });
+      scrollToBottom();
+
+      const { processVideo, uploadVideoToS3, uploadThumbnailToStorage, pollForProcessedDmVideo } = await import('../services/messaging/videoUploadService');
+
+      // Step 2: Process video (get metadata + thumbnail), feeding picker hints so native
+      // doesn't fall back to zeroed width/height/duration.
+      const processed = await processVideo(videoUri, videoHints);
+
+      // Step 3: Upload video to S3
+      const { s3Key, processedKey } = await uploadVideoToS3(
+        videoUri,
+        conversationId,
+        messageRecord.id,
+      );
+
+      // Step 4: Upload thumbnail to Supabase
+      const thumbnailUrl = await uploadThumbnailToStorage(
+        processed.thumbnailUri,
+        conversationId,
+        messageRecord.id,
+      );
+
+      // Step 5: Update message with initial video metadata (unprocessed URL for now)
+      const videoMetadata = {
+        video_url: '', // Will be populated when MediaConvert finishes
+        thumbnail_url: thumbnailUrl,
+        duration: processed.duration,
+        width: processed.width,
+        height: processed.height,
+        file_size: processed.fileSize,
+        mime_type: processed.mimeType,
+        storage_path: s3Key,
+      };
+
+      await messagingService.updateVideoMessageMetadata(messageRecord.id, videoMetadata);
+
+      // Upload phase done. Clear upload_state so the existing `!videoUrl` "Processing..." overlay
+      // takes over for the MediaConvert polling phase.
+      setMessages((prev) => prev.map(m =>
+        m.id === messageRecord.id
+          ? { ...m, video_metadata: videoMetadata, upload_state: 'sent', _localPreviewUri: undefined }
+          : m
+      ));
+
+      // Step 6: Poll for processed video in background
+      pollForProcessedDmVideo(messageRecord.id, processedKey, videoMetadata)
+        .catch(err => console.error('Background video poll error:', err));
+
+    } catch (error: any) {
+      console.error('Error sending video:', error);
+      if (messageId) {
+        setMessages((prev) => prev.map(m =>
+          m.id === messageId
+            ? { ...m, upload_state: 'failed', upload_error: error?.message }
+            : m
+        ));
+      } else {
+        setVideoPreviewVisible(false);
+        setSelectedVideoUri(null);
+        selectedVideoMetadataRef.current = null;
+        setIsProcessingVideo(false);
+      }
+      Alert.alert('Error', error?.message || 'Failed to send video');
     }
   };
 
@@ -1669,8 +1860,8 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                   otherUserAdvRole === 'adv_giver' && styles.botMessageBubbleGiveAdv,
                   otherUserAdvRole === 'adv_seeker' && styles.botMessageBubbleGetAdv,
                 ],
-            // Conditionally apply padding: 0 for images, normal for text
-            (message.type === 'image' || message.image_metadata) && styles.imageMessageBubble,
+            // Conditionally apply padding: 0 for images/videos, normal for text
+            (message.type === 'image' || message.image_metadata || message.type === 'video' || message.video_metadata) && styles.imageMessageBubble,
             // Remove maxWidth constraint for deleted messages from other user
             message.deleted && !isOwnMessage && {
               maxWidth: Dimensions.get('window').width - 120, // Screen width minus padding
@@ -1678,14 +1869,89 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             },
           ]}
         >
-          {message.type === 'image' || message.image_metadata ? (
+          {message.type === 'video' || message.video_metadata ? (
+            // Video message
+            (() => {
+              const thumbnailUri = message.video_metadata?.thumbnail_url || message._localPreviewUri || '';
+              const videoUrl = message.video_metadata?.video_url || '';
+              const aspectRatio = message.video_metadata?.width && message.video_metadata?.height
+                ? message.video_metadata.width / message.video_metadata.height : 16 / 9;
+              const isUploading = message.upload_state === 'uploading';
+              const isFailed = message.upload_state === 'failed';
+
+              return (
+                <View style={styles.imageMessageWrapper}>
+                  <TouchableOpacity
+                    activeOpacity={0.9}
+                    onPress={() => {
+                      if (videoUrl) {
+                        setFullscreenVideoUrl(videoUrl);
+                      }
+                    }}
+                    disabled={!videoUrl || isUploading || isFailed}
+                    style={styles.imageTouchable}
+                  >
+                    {thumbnailUri ? (
+                      <Image
+                        source={{ uri: thumbnailUri }}
+                        style={[
+                          styles.messageImage,
+                          { aspectRatio: aspectRatio && isFinite(aspectRatio) ? aspectRatio : 16 / 9 },
+                        ]}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <View style={[styles.messageImage, { aspectRatio: 16 / 9, backgroundColor: '#1a1a1a' }]} />
+                    )}
+                    {/* Play button overlay */}
+                    {videoUrl && !isUploading && !isFailed ? (
+                      <View style={styles.videoPlayOverlay}>
+                        <Ionicons name="play-circle" size={48} color="rgba(255,255,255,0.9)" />
+                      </View>
+                    ) : isFailed ? (
+                      <View style={styles.failedOverlay}>
+                        <Ionicons name="alert-circle" size={24} color="#FFFFFF" />
+                        <Text style={styles.failedText}>Failed to send</Text>
+                      </View>
+                    ) : (
+                      <View style={styles.uploadOverlay}>
+                        <ActivityIndicator size="large" color="#FFFFFF" />
+                        <Text style={styles.uploadProgressText}>
+                          {isUploading ? 'Uploading...' : 'Processing...'}
+                        </Text>
+                      </View>
+                    )}
+                    {/* Timestamp overlay */}
+                    <View style={styles.imageTimestampOverlay}>
+                      <Text style={styles.imageTimestamp}>
+                        {formatTime(message.created_at)}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                  {message.body && (
+                    <Text style={[
+                      styles.imageCaption,
+                      isOwnMessage ? styles.userMessageText : styles.botMessageText,
+                      !isOwnMessage && otherUserAdvRole === 'adv_giver' && styles.botMessageTextGiveAdv,
+                      !isOwnMessage && otherUserAdvRole === 'adv_seeker' && styles.botMessageTextGetAdv,
+                    ]}>
+                      {message.body}
+                    </Text>
+                  )}
+                </View>
+              );
+            })()
+          ) : message.type === 'image' || message.image_metadata ? (
             // Image message - redesigned layout
             (() => {
-              const imageUri = message.image_metadata?.thumbnail_url || message.image_metadata?.image_url || '';
+              const imageUri = message.image_metadata?.thumbnail_url
+                || message.image_metadata?.image_url
+                || message._localPreviewUri
+                || '';
               const imageWidth = message.image_metadata?.width || 1;
               const imageHeight = message.image_metadata?.height || 1;
               const aspectRatio = imageWidth > 0 && imageHeight > 0 ? imageWidth / imageHeight : 1;
-              
+
               if (!imageUri) {
                 console.warn('[DirectMessageScreen] ⚠️ Image message has no URL:', {
                   id: message.id,
@@ -2139,6 +2405,12 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         }}
       />
 
+      <FullscreenVideoPlayer
+        visible={!!fullscreenVideoUrl}
+        videoUrl={fullscreenVideoUrl || ''}
+        onClose={() => setFullscreenVideoUrl(null)}
+      />
+
       {/* Image Preview Modal */}
       {selectedImageUri && (
         <ImagePreviewModal
@@ -2152,6 +2424,22 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             setIsProcessingImage(false);
           }}
           isProcessing={isProcessingImage}
+        />
+      )}
+
+      {/* Video Preview Modal */}
+      {selectedVideoUri && (
+        <VideoPreviewModal
+          visible={videoPreviewVisible}
+          videoUri={selectedVideoUri}
+          onSend={handleVideoSend}
+          onCancel={() => {
+            setVideoPreviewVisible(false);
+            setSelectedVideoUri(null);
+            selectedVideoMetadataRef.current = null;
+            setIsProcessingVideo(false);
+          }}
+          isProcessing={isProcessingVideo}
         />
       )}
       <BlockUserOverlay
@@ -2643,6 +2931,15 @@ const styles = StyleSheet.create({
     fontWeight: '400',
     color: '#FFFFFF',
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+  },
+  videoPlayOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   uploadOverlay: {
     position: 'absolute',
