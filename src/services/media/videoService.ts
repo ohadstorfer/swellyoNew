@@ -268,14 +268,23 @@ export const getVideoAttributes = () => {
 
 /**
  * Get background video source
- * Web: serves from public/ folder
- * Native: streams from Supabase Storage
+ * Web: streams from Supabase Storage
+ * Native: returns Supabase URL (use getBackgroundVideoAsset() for bundled asset)
  */
 export const getBackgroundVideoSource = (): string => {
   if (Platform.OS === 'web') {
     return `${SUPABASE_URL}/storage/v1/object/public/${WELCOME_VIDEOS_BUCKET}/swellyo169welcome.webm`;
   }
   return `${SUPABASE_URL}/storage/v1/object/public/${WELCOME_VIDEOS_BUCKET}/swellyo169welcome.mp4`;
+};
+
+/**
+ * Get the bundled welcome video asset for native (iOS/Android).
+ * Returns a numeric asset ID from require() — pass to useVideoPlayer({ assetId }).
+ * This plays instantly without network fetch.
+ */
+export const getBackgroundVideoAsset = (): number => {
+  return require('../../../assets/videos/swellyo169welcome.mp4');
 };
 
 /**

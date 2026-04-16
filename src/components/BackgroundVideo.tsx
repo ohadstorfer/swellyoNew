@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, StyleSheet, Image, Platform } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video';
-import { getBackgroundVideoSource, getBackgroundVideoSourceMP4, getVideoUrl } from '../services/media/videoService';
+import { getBackgroundVideoSource, getBackgroundVideoSourceMP4, getVideoUrl, getBackgroundVideoAsset } from '../services/media/videoService';
 
 interface BackgroundVideoProps {
   videoSource?: string;
@@ -453,8 +453,13 @@ export const BackgroundVideo: React.FC<BackgroundVideoProps> = ({
     );
   }
 
+  // Use bundled asset on native for instant playback (web returns early above)
+  const videoPlayerSource = videoSource
+    ? { uri: videoUrl }
+    : { assetId: getBackgroundVideoAsset() };
+
   // Create video player
-  const player = useVideoPlayer({ uri: videoUrl }, (player: any) => {
+  const player = useVideoPlayer(videoPlayerSource, (player: any) => {
     if (player) {
       console.log('[BackgroundVideo] Player created:', player);
       player.loop = true;
