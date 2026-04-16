@@ -25,7 +25,8 @@
   "submit": {
     "production": {
       "ios": {
-        "appleId": "app@swellyo.com"
+        "appleId": "app@swellyo.com",
+        "ascAppId": "6762285335"
       }
     }
   }
