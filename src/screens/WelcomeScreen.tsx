@@ -148,7 +148,8 @@ const AGE_PICKER_ITEM_HEIGHT = 50;
 
 export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDemoChat, onSkipDemo, isCheckingAuth = false, showDemoByDefault = false }) => {
   const insets = useSafeAreaInsets();
-  const [isLoading, setIsLoading] = useState(false);
+  const [isAppleLoading, setIsAppleLoading] = useState(false);
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [isDemoLoading, setIsDemoLoading] = useState(false);
   const [isSkipDemoLoading, setIsSkipDemoLoading] = useState(false);
   const [showDevButtons, setShowDevButtons] = useState(false);
@@ -365,7 +366,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
         if (hasOAuthReturn && isSupabaseConfigured()) {
           console.log('Detected Supabase OAuth return (PKCE), processing session...');
           try {
-            setIsLoading(true);
+            setIsGoogleLoading(true);
             // With PKCE + detectSessionInUrl, the Supabase client already exchanged
             // the code for a session. getUser() validates against the Supabase server.
             const { supabase } = await import('../config/supabase');
@@ -416,7 +417,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
             // Clean up the URL even on error
             window.history.replaceState({}, document.title, window.location.pathname);
           } finally {
-            setIsLoading(false);
+            setIsGoogleLoading(false);
           }
         }
 
@@ -427,7 +428,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
         if (code && !isSupabaseConfigured()) {
           console.log('Detected legacy OAuth return with code, processing...');
           try {
-            setIsLoading(true);
+            setIsGoogleLoading(true);
             const user = await authService.signInWithGoogle();
             console.log('Legacy OAuth return successful, setting user:', user);
             setUser(user);
@@ -459,7 +460,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
               [{ text: 'OK' }]
             );
           } finally {
-            setIsLoading(false);
+            setIsGoogleLoading(false);
           }
           return;
         }
@@ -498,9 +499,9 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
     }
     console.log('Google Sign-In button pressed');
     let redirectTimeout: ReturnType<typeof setTimeout> | null = null;
-    
+
     try {
-      setIsLoading(true);
+      setIsGoogleLoading(true);
       
       // Supabase automatically replaces the existing session on new sign-in,
       // so no pre-login signOut is needed.
@@ -518,19 +519,19 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
         redirectTimeout = setTimeout(() => {
           // Only check if we're still on the same page if loading state is still active
           // (If redirect worked, we'd be on Google's page or back with OAuth params)
-          if (isLoading && currentUrlBeforeRedirect && typeof window !== 'undefined') {
+          if (isGoogleLoading && currentUrlBeforeRedirect && typeof window !== 'undefined') {
             const urlParams = new URLSearchParams(window.location.search);
             const isOAuthReturn = urlParams.get('code');
-            
+
             // Only show error if we're definitely still on the same page AND not in OAuth return
             // AND loading state is still active (meaning redirect didn't happen)
             const currentUrl = window.location.href;
-            const isStillOnSamePage = currentUrl === currentUrlBeforeRedirect || 
+            const isStillOnSamePage = currentUrl === currentUrlBeforeRedirect ||
                                      currentUrl.startsWith(window.location.origin + window.location.pathname);
-            
-            if (!isOAuthReturn && isStillOnSamePage && isLoading) {
+
+            if (!isOAuthReturn && isStillOnSamePage && isGoogleLoading) {
               console.warn('OAuth redirect appears to have been blocked - still on same page after timeout');
-              setIsLoading(false);
+              setIsGoogleLoading(false);
               Alert.alert(
                 'Redirect Blocked',
                 'The redirect to Google sign-in was blocked or failed.\n\n' +
@@ -590,8 +591,8 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
           if (redirectTimeout) {
             clearTimeout(redirectTimeout);
           }
-          setIsLoading(false);
-          
+          setIsGoogleLoading(false);
+
           // Check for specific redirect block error
           if (error?.message && error.message.includes('Redirect to Google OAuth was blocked')) {
             console.error('Google Sign-In redirect blocked:', error);
@@ -710,7 +711,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
       if (redirectTimeout) {
         clearTimeout(redirectTimeout);
       }
-      setIsLoading(false);
+      setIsGoogleLoading(false);
     }
   };
 
@@ -772,7 +773,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
 
     console.log('Apple Sign-In button pressed');
     try {
-      setIsLoading(true);
+      setIsAppleLoading(true);
       const user = await authService.signInWithApple();
       console.log('Apple Sign-In successful, setting user:', user);
       setUser(user);
@@ -799,7 +800,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
         onGetStarted();
       }
     } catch (error: any) {
-      setIsLoading(false);
+      setIsAppleLoading(false);
       if (error?.message?.includes('cancelled')) {
         console.log('Apple Sign-In cancelled by user');
         return;
@@ -852,11 +853,11 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
               <View style={{ flexDirection: 'row', gap: 8, width: '100%', marginBottom: 12 }}>
                 <TouchableOpacity
                   onPress={handleDemoChat}
-                  disabled={isDemoLoading || isLoading}
+                  disabled={isDemoLoading || isAppleLoading || isGoogleLoading}
                   style={[
                     welcomeStyles.appleButton,
                     { backgroundColor: '#8B5CF6', flex: 1, width: undefined },
-                    (isDemoLoading || isLoading) && styles.buttonDisabled
+                    (isDemoLoading || isAppleLoading || isGoogleLoading) && styles.buttonDisabled
                   ]}
                   activeOpacity={0.8}
                 >
@@ -866,11 +867,11 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
                 </TouchableOpacity>
                 <TouchableOpacity
                   onPress={handleSkipDemo}
-                  disabled={isSkipDemoLoading || isLoading}
+                  disabled={isSkipDemoLoading || isAppleLoading || isGoogleLoading}
                   style={[
                     welcomeStyles.appleButton,
                     { backgroundColor: '#F59E0B', flex: 1, width: undefined },
-                    (isSkipDemoLoading || isLoading) && styles.buttonDisabled
+                    (isSkipDemoLoading || isAppleLoading || isGoogleLoading) && styles.buttonDisabled
                   ]}
                   activeOpacity={0.8}
                 >
@@ -887,14 +888,14 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
               {Platform.OS !== 'android' && (
               <TouchableOpacity
                 onPress={() => handleAppleSignIn()}
-                disabled={!agreedToTerms || isLoading || isAgeBlocked}
-                style={[welcomeStyles.appleButton, (!agreedToTerms || isLoading || isAgeBlocked) && styles.buttonDisabled]}
+                disabled={!agreedToTerms || isAppleLoading || isGoogleLoading || isAgeBlocked}
+                style={[welcomeStyles.appleButton, (!agreedToTerms || isAppleLoading || isGoogleLoading || isAgeBlocked) && styles.buttonDisabled]}
                 activeOpacity={0.8}
               >
                 <View style={styles.buttonContent}>
                   <AppleIcon />
                   <RNText style={welcomeStyles.appleButtonText} numberOfLines={1}>
-                    Log In with Apple
+                    {isAppleLoading ? "Signing in..." : "Log In with Apple"}
                   </RNText>
                 </View>
               </TouchableOpacity>
@@ -903,14 +904,14 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
               {/* Google Sign In Button */}
               <TouchableOpacity
                 onPress={() => handleGoogleSignIn()}
-                disabled={!agreedToTerms || isLoading || isAgeBlocked}
-                style={[welcomeStyles.googleButton, (!agreedToTerms || isLoading || isAgeBlocked) && styles.buttonDisabled]}
+                disabled={!agreedToTerms || isAppleLoading || isGoogleLoading || isAgeBlocked}
+                style={[welcomeStyles.googleButton, (!agreedToTerms || isAppleLoading || isGoogleLoading || isAgeBlocked) && styles.buttonDisabled]}
                 activeOpacity={0.8}
               >
                 <View style={styles.buttonContent}>
                   <GoogleIcon />
                   <RNText style={welcomeStyles.googleButtonText} numberOfLines={1}>
-                    {isLoading ? "Signing in..." : "Log In with Google"}
+                    {isGoogleLoading ? "Signing in..." : "Log In with Google"}
                   </RNText>
                 </View>
               </TouchableOpacity>

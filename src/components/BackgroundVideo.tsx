@@ -454,7 +454,7 @@ export const BackgroundVideo: React.FC<BackgroundVideoProps> = ({
   }
 
   // Create video player
-  const player = useVideoPlayer({ uri: videoUrl, useCaching: true }, (player: any) => {
+  const player = useVideoPlayer({ uri: videoUrl }, (player: any) => {
     if (player) {
       console.log('[BackgroundVideo] Player created:', player);
       player.loop = true;
