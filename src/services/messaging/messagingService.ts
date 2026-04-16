@@ -39,7 +39,7 @@ export interface ConversationMember {
 }
 
 // Message type
-export type MessageType = 'text' | 'image';
+export type MessageType = 'text' | 'image' | 'video';
 
 // Message upload state (client-side only, not stored in DB)
 export type MessageUploadState = 
@@ -59,6 +59,18 @@ export interface ImageMetadata {
   storage_path: string;        // Path in Supabase Storage (for deletion)
 }
 
+// Video metadata interface
+export interface VideoMetadata {
+  video_url: string;           // Video URL (presigned S3 URL)
+  thumbnail_url?: string;       // Thumbnail frame URL
+  duration: number;            // Duration in seconds
+  width: number;               // Video width in pixels
+  height: number;              // Video height in pixels
+  file_size: number;           // File size in bytes
+  mime_type: string;           // e.g., 'video/mp4'
+  storage_path: string;        // S3 key path
+}
+
 // Message interface
 export interface Message {
   id: string;
@@ -72,7 +84,10 @@ export interface Message {
   
   // Image-specific fields (only populated for type='image')
   image_metadata?: ImageMetadata;
-  
+
+  // Video-specific fields (only populated for type='video')
+  video_metadata?: VideoMetadata;
+
   // Legacy attachments array (keep for backward compatibility)
   attachments: any[];
   
@@ -80,6 +95,7 @@ export interface Message {
   upload_state?: MessageUploadState;
   upload_progress?: number;     // 0-100, only during 'uploading'
   upload_error?: string;        // Error message if upload_state === 'failed'
+  _localPreviewUri?: string;    // Local file URI used as fallback preview while upload is in flight
   
   // Existing fields
   is_system: boolean;
@@ -453,7 +469,7 @@ class MessagingService {
       
       const { data: messages, error } = await supabase
         .from('messages')
-        .select('id, conversation_id, sender_id, body, rendered_body, attachments, is_system, edited, deleted, created_at, updated_at, type, image_metadata')
+        .select('id, conversation_id, sender_id, body, rendered_body, attachments, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata')
         .eq('conversation_id', conversationId)
         // Note: We include deleted messages so they can be displayed with "deleted" placeholder
         .gt('updated_at', lastSyncDate)
@@ -537,7 +553,7 @@ class MessagingService {
 
       let query = supabase
         .from('messages')
-        .select('id, conversation_id, sender_id, body, rendered_body, attachments, is_system, edited, deleted, created_at, updated_at, type, image_metadata')
+        .select('id, conversation_id, sender_id, body, rendered_body, attachments, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata')
         .eq('conversation_id', conversationId)
         // Note: We include deleted messages so they can be displayed with "deleted" placeholder
         .order('created_at', { ascending: useAscending })
@@ -779,6 +795,87 @@ class MessagingService {
   }
 
   /**
+   * Create a video message record in the database (metadata populated after upload)
+   */
+  async createVideoMessage(conversationId: string, caption?: string): Promise<Message> {
+    if (!isSupabaseConfigured()) {
+      throw new Error('Supabase is not configured');
+    }
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        throw new Error('Not authenticated');
+      }
+
+      const { data, error } = await supabase
+        .from('messages')
+        .insert({
+          conversation_id: conversationId,
+          sender_id: user.id,
+          type: 'video',
+          body: caption || null,
+          video_metadata: null,
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      await supabase
+        .from('conversations')
+        .update({ updated_at: new Date().toISOString() })
+        .eq('id', conversationId);
+
+      return data;
+    } catch (error) {
+      console.error('Error creating video message:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Update video message with metadata after upload completes
+   */
+  async updateVideoMessageMetadata(messageId: string, videoMetadata: VideoMetadata): Promise<Message> {
+    if (!isSupabaseConfigured()) {
+      throw new Error('Supabase is not configured');
+    }
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        throw new Error('Not authenticated');
+      }
+
+      const { data, error } = await supabase
+        .from('messages')
+        .update({
+          video_metadata: videoMetadata,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', messageId)
+        .eq('sender_id', user.id)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      if (data) {
+        await supabase
+          .from('conversations')
+          .update({ updated_at: new Date().toISOString() })
+          .eq('id', data.conversation_id);
+      }
+
+      return data;
+    } catch (error) {
+      console.error('Error updating video message metadata:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Create a new direct conversation with another user
    * @param otherUserId - The user ID to create a conversation with
    * @param fromTripPlanning - If true, sets adv_role: current user = adv_seeker, other user = adv_giver
@@ -1001,7 +1098,7 @@ class MessagingService {
             try {
               const { data: fullMessage, error } = await supabase
                 .from('messages')
-                .select('id, conversation_id, sender_id, body, rendered_body, attachments, is_system, edited, deleted, created_at, updated_at, type, image_metadata')
+                .select('id, conversation_id, sender_id, body, rendered_body, attachments, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata')
                 .eq('id', newMessage.id)
                 .single();
               
@@ -1058,7 +1155,7 @@ class MessagingService {
           try {
             const { data: fullMessage, error } = await supabase
               .from('messages')
-              .select('id, conversation_id, sender_id, body, rendered_body, attachments, is_system, edited, deleted, created_at, updated_at, type, image_metadata')
+              .select('id, conversation_id, sender_id, body, rendered_body, attachments, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata')
               .eq('id', updatedMessage.id)
               .single();
             
@@ -1767,7 +1864,7 @@ class MessagingService {
       const lastMessagesPromises = conversations.map(conv =>
         supabase
           .from('messages')
-          .select('id, conversation_id, sender_id, body, rendered_body, attachments, is_system, edited, deleted, created_at, updated_at, type, image_metadata')
+          .select('id, conversation_id, sender_id, body, rendered_body, attachments, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata')
           .eq('conversation_id', conv.id)
           // Note: We include deleted messages so they can be displayed with "deleted" placeholder
           .order('created_at', { ascending: false })

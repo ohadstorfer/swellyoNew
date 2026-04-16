@@ -1353,7 +1353,7 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
             // Fetch the most recent non-deleted message (limit 1, order by created_at DESC)
             const { data: previousMessages, error } = await supabase
               .from('messages')
-              .select('id, conversation_id, sender_id, body, rendered_body, attachments, is_system, edited, deleted, created_at, updated_at, type, image_metadata')
+              .select('id, conversation_id, sender_id, body, rendered_body, attachments, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata')
               .eq('conversation_id', conversationId)
               .eq('deleted', false)
               .order('created_at', { ascending: false })

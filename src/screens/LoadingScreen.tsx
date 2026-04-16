@@ -953,7 +953,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '200',
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
-    color: '#a0a0a0',
+    color: '#7b7b7b',
     textAlign: 'center',
     lineHeight: 18,
     width: '90%',

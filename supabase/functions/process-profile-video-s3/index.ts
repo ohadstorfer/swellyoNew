@@ -209,8 +209,9 @@ serve(async (req) => {
 
     if (action === 'get-upload-url') {
       const timestamp = Date.now()
-      const s3Key = `uploads/${userId}/profile-surf-video-${timestamp}.mp4`
-      const processedKey = `processed/${userId}/profile-surf-video-${timestamp}_compressed.mp4`
+      const prefix = body.prefix || userId  // e.g., "dm/{conversationId}/{messageId}" or just userId
+      const s3Key = `uploads/${prefix}/video-${timestamp}.mp4`
+      const processedKey = `processed/${prefix}/video-${timestamp}_compressed.mp4`
 
       const uploadUrl = await generatePresignedUrl('PUT', s3Key, 3600, 'video/mp4')
 
