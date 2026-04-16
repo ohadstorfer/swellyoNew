@@ -80,7 +80,9 @@
       "WebFetch(domain:mvnrepository.com)",
       "Bash(git rebase *)",
       "Bash(GIT_EDITOR=true git rebase *)",
-      "Bash(git *)"
+      "Bash(git *)",
+      "Bash(npm run *)",
+      "Bash(npm install *)"
     ]
   }
 }

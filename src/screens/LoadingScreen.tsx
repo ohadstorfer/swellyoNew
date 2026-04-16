@@ -5,12 +5,15 @@ import {
   TouchableOpacity,
   Platform,
   Image,
+  Modal,
+  Pressable,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../components/Text';
 import { colors, spacing, borderRadius } from '../styles/theme';
+import { Images } from '../assets/images';
 import { useOnboarding } from '../context/OnboardingContext';
 import { useScreenDimensions } from '../utils/responsive';
 import { getLoadingVideoUrl } from '../services/media/videoService';
@@ -28,6 +31,7 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
   onComplete,
   onBack,
 }) => {
+  const [showConsentModal, setShowConsentModal] = useState(false);
   const { setCurrentStep, formData } = useOnboarding();
   const userName = formData?.nickname || '';
   const shouldShowName = userName && userName.trim() !== '' && userName.toLowerCase() !== 'user';
@@ -686,12 +690,52 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
         <View style={{ height: subtitleToButtonGap }} />
         <TouchableOpacity
           style={styles.ctaButton}
-          onPress={onComplete}
+          onPress={() => setShowConsentModal(true)}
           activeOpacity={0.8}
         >
           <Text style={styles.ctaButtonText}>Drop In!</Text>
         </TouchableOpacity>
       </View>
+      {/* AI Consent Modal */}
+      <Modal
+        visible={showConsentModal}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+      >
+        <Pressable style={styles.consentBackdrop} onPress={() => {}}>
+          <View style={styles.consentCard}>
+            {/* Swelly avatar bubble */}
+            <View style={styles.consentAvatarBubble}>
+              <Image
+                source={Images.swellyAvatar}
+                style={styles.consentAvatarImage}
+                resizeMode="cover"
+              />
+            </View>
+
+            {/* Title */}
+            <Text style={styles.consentTitle}>Swellyo uses AI</Text>
+
+            {/* Body */}
+            <Text style={styles.consentBody}>
+              {'We use OpenAI to power your experience - including building your profile and matching you with other surfers.\nYour messages and profile data are processed by OpenAI on our behalf.'}
+            </Text>
+
+            {/* Got it button */}
+            <TouchableOpacity
+              style={styles.consentButton}
+              onPress={() => {
+                setShowConsentModal(false);
+                onComplete();
+              }}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.consentButtonText}>Got it</Text>
+            </TouchableOpacity>
+          </View>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -860,6 +904,75 @@ const styles = StyleSheet.create({
     // backgroundColor: '#FCFCFC',
     zIndex: 10,
     // pointerEvents: 'auto' is implicit, will block all interactions with video
+  },
+  consentBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(33, 33, 33, 0.80)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  consentCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 24,
+    paddingHorizontal: 16,
+    paddingVertical: 36,
+    width: 344,
+    alignItems: 'center',
+    gap: 12,
+  },
+  consentAvatarBubble: {
+    width: 86,
+    height: 86,
+    borderRadius: 43,
+    borderWidth: 1.5,
+    borderColor: '#b72df2',
+    backgroundColor: 'rgba(255,255,255,0.3)',
+    overflow: 'hidden',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#b72df2',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.24,
+    shadowRadius: 7,
+    elevation: 4,
+  },
+  consentAvatarImage: {
+    width: 86,
+    height: 86,
+  },
+  consentTitle: {
+    fontSize: 18,
+    fontWeight: '900',
+    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat',
+    color: '#333333',
+    textAlign: 'center',
+    lineHeight: 24,
+  },
+  consentBody: {
+    fontSize: 14,
+    fontWeight: '200',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    color: '#a0a0a0',
+    textAlign: 'center',
+    lineHeight: 18,
+    width: '90%',
+  },
+  consentButton: {
+    backgroundColor: '#333333',
+    borderRadius: 8,
+    width: '100%',
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 20,
+  },
+  consentButtonText: {
+    fontSize: 16,
+    fontWeight: '400',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    color: '#ffffff',
+    lineHeight: 22,
   },
   videoPlaceholder: {
     width: '100%',
