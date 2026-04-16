@@ -18,7 +18,7 @@ import { colors, spacing } from '../styles/theme';
 import { useIsDesktopWeb, responsiveWidth } from '../utils/responsive';
 import { getSurfLevelMapping } from '../utils/surfLevelMapping';
 import { validateVideoComplete } from '../utils/videoValidation';
-import { uploadProfileVideo } from '../services/storage/storageService';
+import { uploadProfileVideo, uploadProfileVideoS3 } from '../services/storage/storageService';
 import { getSurfLevelVideoFromStorage } from '../services/media/videoService';
 
 const BOARD_VIDEO_DEFINITIONS: { [boardType: number]: Array<{ name: string; videoFileName: string; thumbnailFileName: string }> } = {
@@ -421,8 +421,14 @@ export const OnboardingVideoUploadScreen: React.FC<OnboardingVideoUploadScreenPr
 
   const handleNext = () => {
     if (hasUserVideo && userVideoUri) {
-      uploadProfileVideo(userVideoUri, userId, mimeType)
-        .catch(err => console.error('Background video upload error:', err));
+      const isLocalMode = process.env.EXPO_PUBLIC_LOCAL_MODE === 'true';
+      if (isLocalMode) {
+        uploadProfileVideoS3(userVideoUri, userId, mimeType)
+          .catch(err => console.error('Background S3 video upload error:', err));
+      } else {
+        uploadProfileVideo(userVideoUri, userId, mimeType)
+          .catch(err => console.error('Background video upload error:', err));
+      }
     }
     onNext();
   };

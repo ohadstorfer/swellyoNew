@@ -465,6 +465,157 @@ export const uploadProfileVideo = async (
 };
 
 /**
+ * Get the Supabase Edge Function URL for S3 video processing (LOCAL_MODE)
+ */
+const getS3VideoProcessingFunctionUrl = (): string => {
+  const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
+  return `${supabaseUrl}/functions/v1/process-profile-video-s3`;
+};
+
+/**
+ * Upload a profile video to AWS S3 via presigned URL (LOCAL_MODE only)
+ * Uses the process-profile-video-s3 Edge Function to get presigned URLs
+ */
+export const uploadProfileVideoS3 = async (
+  videoUri: string,
+  userId: string,
+  mimeType?: string
+): Promise<UploadResult> => {
+  try {
+    if (!videoUri || !userId) {
+      return { success: false, error: 'Missing video or user ID' };
+    }
+
+    console.log('[StorageService/S3] Starting S3 upload for user:', userId);
+
+    // Validate video before processing
+    const validation = await validateVideoComplete(videoUri, mimeType);
+    if (!validation.valid) {
+      return { success: false, error: validation.error || 'Video validation failed' };
+    }
+
+    // Step 1: Get presigned upload URL from Edge Function
+    const functionUrl = getS3VideoProcessingFunctionUrl();
+    const headers = await getAuthHeaders();
+
+    const presignResponse = await fetch(functionUrl, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        action: 'get-upload-url',
+        userId,
+      }),
+    });
+
+    if (!presignResponse.ok) {
+      const errorText = await presignResponse.text();
+      console.error('[StorageService/S3] Failed to get presigned URL:', errorText);
+      return { success: false, error: 'Failed to get upload URL' };
+    }
+
+    const { uploadUrl, s3Key, processedKey } = await presignResponse.json();
+    console.log('[StorageService/S3] Got presigned URL for:', s3Key);
+
+    // Step 2: Convert video URI to uploadable body
+    let uploadBody: Blob;
+
+    const isNativeFileUri = Platform.OS !== 'web' &&
+      (videoUri.startsWith('file://') || videoUri.startsWith('content://') || videoUri.startsWith('ph://'));
+
+    if (isNativeFileUri) {
+      // On native, fetch the file URI to get a blob
+      const response = await fetch(videoUri);
+      uploadBody = await response.blob();
+    } else if (videoUri.startsWith('data:')) {
+      uploadBody = dataURLtoBlob(videoUri);
+    } else if (videoUri.startsWith('blob:')) {
+      uploadBody = await uriToBlob(videoUri);
+    } else if (videoUri.startsWith('http://') || videoUri.startsWith('https://')) {
+      uploadBody = await uriToBlob(videoUri);
+    } else {
+      uploadBody = await uriToBlob(videoUri);
+    }
+
+    // Step 3: Upload directly to S3 via presigned PUT URL
+    console.log('[StorageService/S3] Uploading to S3...');
+    const s3Response = await fetch(uploadUrl, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'video/mp4',
+      },
+      body: uploadBody,
+    });
+
+    if (!s3Response.ok) {
+      const errorText = await s3Response.text();
+      console.error('[StorageService/S3] S3 upload failed:', errorText);
+      return { success: false, error: 'S3 upload failed' };
+    }
+
+    console.log('[StorageService/S3] Video uploaded to S3:', s3Key);
+
+    // Step 4: Wait for MediaConvert processing and update DB
+    // Fire-and-forget: poll after a delay to update the DB
+    pollForProcessedVideo(userId, processedKey, headers, functionUrl);
+
+    return {
+      success: true,
+      processing: true,
+      tempPath: s3Key,
+    };
+  } catch (error) {
+    console.error('[StorageService/S3] Upload exception:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
+};
+
+/**
+ * Poll for the processed video and update the DB (runs in background)
+ */
+const pollForProcessedVideo = async (
+  userId: string,
+  processedKey: string,
+  headers: HeadersInit,
+  functionUrl: string,
+) => {
+  const maxAttempts = 10;
+  const delayMs = 15000; // 15 seconds between polls
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    await new Promise(resolve => setTimeout(resolve, delayMs));
+
+    try {
+      console.log(`[StorageService/S3] Polling for processed video (attempt ${attempt}/${maxAttempts})`);
+
+      const response = await fetch(functionUrl, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          action: 'get-processed-url',
+          userId,
+          processedKey,
+        }),
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        if (result.ready) {
+          console.log('[StorageService/S3] Processed video ready:', result.videoUrl);
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn(`[StorageService/S3] Poll attempt ${attempt} failed:`, err);
+    }
+  }
+
+  console.warn('[StorageService/S3] Gave up polling for processed video after max attempts');
+};
+
+/**
  * Delete a profile video from Supabase Storage
  * @param videoPath - The path to the video (e.g., "userId/profile-surf-video-123.mp4")
  */
