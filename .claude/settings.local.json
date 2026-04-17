@@ -104,7 +104,31 @@
       "WebFetch(domain:react-native-google-signin.github.io)",
       "WebFetch(domain:naqeebali-shamsi.medium.com)",
       "WebFetch(domain:blog.stackademic.com)",
-      "Bash(git rebase *)"
+      "Bash(git rebase *)",
+      "Bash(aws --version)",
+      "Bash(brew install *)",
+      "Bash(sudo installer *)",
+      "Bash(export PATH=\"$HOME/bin:$PATH\")",
+      "Bash(aws sts *)",
+      "Bash(aws s3api *)",
+      "Bash(aws mediaconvert *)",
+      "Bash(aws iam *)",
+      "Bash(npm init *)",
+      "Bash(npm install *)",
+      "Bash(zip -r function.zip index.mjs node_modules package.json)",
+      "Bash(aws lambda *)",
+      "Bash(aws s3 *)",
+      "Bash(aws logs *)",
+      "Bash(sips *)",
+      "Bash(cp /Users/ohadstorfer/swellyoNative/assets/icon.png /Users/ohadstorfer/swellyoNative/assets/icon.old.png)",
+      "Bash(cp /Users/ohadstorfer/Downloads/IconLogo-1024.png /Users/ohadstorfer/swellyoNative/assets/icon.png)",
+      "Bash(md5 /Users/ohadstorfer/swellyoNative/assets/icon.png /Users/ohadstorfer/swellyoNative/ios/*/Images.xcassets/AppIcon*.appiconset/App-Icon-1024x1024@1x.png)",
+      "WebFetch(domain:engineering.fb.com)",
+      "WebFetch(domain:discord.com)",
+      "WebFetch(domain:slack.engineering)",
+      "WebFetch(domain:highscalability.com)",
+      "WebFetch(domain:signal.org)",
+      "Bash(xcrun simctl *)"
     ]
   }
 }

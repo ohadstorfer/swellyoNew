@@ -864,18 +864,6 @@ export default function ConversationsScreen({
   };
 
   const renderConversationItem = (conv: Conversation) => {
-    // Development-only logging
-    if (__DEV__) {
-      console.log('[ConversationsScreen] Rendering conversation:', {
-        id: conv.id,
-        hasLastMessage: !!conv.last_message,
-        lastMessageId: conv.last_message?.id,
-        lastMessageBody: conv.last_message?.body?.substring(0, 20),
-        hasOtherUser: !!conv.other_user,
-        otherUserName: conv.other_user?.name,
-      });
-    }
-    
     // Skip rendering welcome conversation here - it's handled separately
     if (conv.metadata?.isWelcome) {
       return renderWelcomeConversation(conv);

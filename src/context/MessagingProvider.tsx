@@ -20,6 +20,7 @@ import {
   clearConversationListCache,
 } from '../services/messaging/conversationListCache';
 import { chatHistoryCache } from '../services/messaging/chatHistoryCache';
+import { messageOutbox } from '../services/messaging/messageOutbox';
 import { supabase } from '../config/supabase';
 import { avatarCacheService } from '../services/media/avatarCacheService';
 import { userPresenceService } from '../services/presence/userPresenceService';
@@ -105,8 +106,9 @@ const conversationReducer = (state: Conversation[], action: ConversationAction):
       // DEDUPLICATION: Only update if this is the last message AND it's actually different
       if (conv.last_message?.id === message.id) {
         // Check if message actually changed (prevent unnecessary updates)
-        if (conv.last_message.body === message.body && 
-            conv.last_message.edited === message.edited) {
+        if (conv.last_message.body === message.body &&
+            conv.last_message.edited === message.edited &&
+            conv.last_message.deleted === message.deleted) {
           return state; // No change - ignore
         }
         
@@ -145,20 +147,19 @@ const conversationReducer = (state: Conversation[], action: ConversationAction):
     case 'CONVERSATION_UPDATED': {
       const { conversationId, updatedAt } = action.payload;
       const index = state.findIndex(c => c.id === conversationId);
-      
+
       if (index === -1) return state;
-      
-      // Move to top if updated_at changed significantly
+
+      // Update updated_at in place — do NOT reorder.
+      // Reordering lives exclusively on NEW_MESSAGE so the list mirrors WhatsApp
+      // behavior: a conversation only bubbles up when its last_message changes.
+      // If conversations.updated_at is bumped server-side (e.g. sendMessage's
+      // trailing conversations update) without a paired messages INSERT reaching
+      // this client, we don't want to move the conv up with a stale preview.
       const conv = state[index];
+      if (conv.updated_at === updatedAt) return state;
       const newList = [...state];
-      
-      if (index > 0 && new Date(updatedAt) > new Date(conv.updated_at)) {
-        newList.splice(index, 1);
-        newList.unshift({ ...conv, updated_at: updatedAt });
-      } else {
-        newList[index] = { ...conv, updated_at: updatedAt };
-      }
-      
+      newList[index] = { ...conv, updated_at: updatedAt };
       return newList;
     }
     
@@ -734,7 +735,13 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
   const lastProcessedMessageIds = useRef<Set<string>>(new Set());
   const subscriptionCleanupRef = useRef<(() => void) | null>(null);
   const conversationsRef = useRef<Conversation[]>([]);
-  
+
+  // Per-conversation list subscriptions (one filtered channel per conv in state).
+  // Complements the unfiltered conversations_list channel by guaranteeing delivery
+  // for peer actions on convs the user isn't actively viewing. Reconciled below
+  // in a useEffect that adds/removes subscriptions as `conversations` changes.
+  const listSubsRef = useRef<Map<string, () => void>>(new Map());
+
   // Track active enrichment operations per conversation to prevent race conditions
   const activeEnrichments = useRef<Map<string, Promise<Conversation | null>>>(new Map());
 
@@ -750,11 +757,20 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
     if (cleanup) {
       cleanup();
     }
+    // Tear down every per-conv list subscription so the next user doesn't inherit them.
+    listSubsRef.current.forEach((unsub) => {
+      try { unsub(); } catch (e) { console.warn('[MessagingProvider] list unsub failed on logout:', e); }
+    });
+    listSubsRef.current.clear();
     dispatch({ type: 'REPLACE_ALL', payload: { conversations: [] } });
     // Clear persistent caches so next user doesn't see old user's data
     clearConversationListCache().catch((err) => console.error('[MessagingProvider] Error clearing conversation list cache on logout:', err));
     chatHistoryCache.clearAll().catch((err) => console.error('[MessagingProvider] Error clearing chat history cache on logout:', err));
     imageUploadResetForLogout().catch((err) => console.error('[MessagingProvider] Error resetting uploads on logout:', err));
+    // Drop any pending outbox entries so the next signed-in user cannot
+    // inadvertently resend them (sendMessage binds the sender to the current
+    // session, not the entry's recorded senderId).
+    messageOutbox.clear().catch((err) => console.error('[MessagingProvider] Error clearing outbox on logout:', err));
   }, [user]);
 
   // Calculate unread total
@@ -1080,7 +1096,7 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
     const avatarUrls = conversations
       .map(conv => conv.other_user?.profile_image_url)
       .filter((url): url is string => !!url);
-    
+
     if (avatarUrls.length > 0) {
       // Prefetch in background (non-blocking)
       avatarCacheService.prefetchAvatars(avatarUrls).catch(err => {
@@ -1088,6 +1104,59 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
       });
     }
   }, [conversations]);
+
+  // Reconcile per-conversation list subscriptions with the current list state.
+  // For every conv in state we run a filtered messages channel that dispatches
+  // NEW_MESSAGE / MESSAGE_UPDATED / MESSAGE_DELETED to the reducer. Handlers are
+  // intentionally thin — they don't retrigger enrichment (the conv is already
+  // enriched by virtue of being in state) and rely on the reducer's existing
+  // dedup via lastProcessedMessageIds + last_message.id comparison.
+  useEffect(() => {
+    if (!user) return;
+
+    const convIdsInState = new Set(conversations.map((c) => c.id));
+
+    // Drop subscriptions for conversations that left state (pagination eviction, logout, etc.).
+    listSubsRef.current.forEach((unsub, convId) => {
+      if (!convIdsInState.has(convId)) {
+        try { unsub(); } catch (e) { console.warn('[MessagingProvider] list unsub failed:', e); }
+        listSubsRef.current.delete(convId);
+      }
+    });
+
+    // Subscribe to any conversation we don't already cover.
+    convIdsInState.forEach((convId) => {
+      if (listSubsRef.current.has(convId)) return;
+
+      const unsub = messagingService.subscribeToConversationListUpdates(convId, {
+        onNewMessage: (conversationId, message) => {
+          const me = currentUserIdRef.current;
+          if (!me) return;
+          if (isMessageProcessed(message.id)) return;
+          markMessageProcessed(message.id);
+
+          // Unread increment only when someone else sent it AND we aren't looking at this conv.
+          const isFromOtherUser = message.sender_id !== me;
+          const isConvOpen = currentConversationIdRef.current === conversationId;
+          if (isFromOtherUser && !isConvOpen) {
+            dispatch({ type: 'INCREMENT_UNREAD', payload: { conversationId } });
+          }
+
+          dispatch({ type: 'NEW_MESSAGE', payload: { conversationId, message } });
+        },
+        onMessageUpdated: (conversationId, message) => {
+          if (!currentUserIdRef.current) return;
+          dispatch({ type: 'MESSAGE_UPDATED', payload: { conversationId, message } });
+        },
+        onMessageDeleted: (conversationId, messageId) => {
+          if (!currentUserIdRef.current) return;
+          dispatch({ type: 'MESSAGE_DELETED', payload: { conversationId, messageId } });
+        },
+      });
+
+      listSubsRef.current.set(convId, unsub);
+    });
+  }, [conversations, user, isMessageProcessed, markMessageProcessed]);
 
   // Set up subscription
   useEffect(() => {
@@ -1412,18 +1481,76 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
     console.log('[MessagingProvider] ✅ Subscription cleanup function received:', typeof cleanup);
     subscriptionCleanupRef.current = cleanup;
 
+    // Drain the outbox on mount (covers the "sent while offline, then app
+    // killed" case) and on every foreground transition (covers "lost network,
+    // came back"). The outbox guards against concurrent flushes internally.
+    const flushOutbox = () => {
+      messageOutbox
+        .flushAll(async (entry) => {
+          await messagingService.sendMessage(
+            entry.conversationId,
+            entry.body,
+            [],
+            entry.type,
+            entry.clientId
+          );
+        })
+        .catch((err) => console.warn('[MessagingProvider] outbox flush failed:', err));
+    };
+    flushOutbox();
+
     // Listen to app state changes (background → foreground)
     // Only sync if needed (subscription-aware)
     const subscription = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
       if (nextAppState === 'active') {
         // App came to foreground - check if sync is needed (subscription-aware)
         handleReconnect();
+        flushOutbox();
       }
     });
+
+    // Network recovery: drain the outbox as soon as connectivity returns, even
+    // without an AppState transition (e.g. user toggles wifi while the app
+    // stays in foreground). Lazy-require so older dev builds (without the
+    // native module compiled in) don't crash at import; they just skip this
+    // listener and rely on AppState + flush-on-conv-open for drain.
+    let netSub: (() => void) | null = null;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const NetInfo = require('@react-native-community/netinfo').default;
+      let lastConnected: boolean | undefined;
+      netSub = NetInfo.addEventListener((state: any) => {
+        const connected = !!state.isConnected && state.isInternetReachable !== false;
+        console.log('[MessagingProvider] NetInfo event', {
+          isConnected: state.isConnected,
+          isInternetReachable: state.isInternetReachable,
+          type: state.type,
+          derivedConnected: connected,
+          lastConnected,
+          willFlush: lastConnected === false && connected,
+        });
+        if (lastConnected === false && connected) {
+          console.log('[MessagingProvider] network recovered, flushing outbox');
+          flushOutbox();
+        }
+        lastConnected = connected;
+      });
+    } catch (err) {
+      console.warn(
+        '[MessagingProvider] NetInfo unavailable (likely a dev build compiled before the package was installed). Falling back to AppState + conv-open flush only. Run `npx expo run:ios` to re-include NetInfo.',
+        err
+      );
+    }
 
     return () => {
       cleanup();
       subscription.remove();
+      if (netSub) netSub();
+      // Tear down every per-conv list subscription on provider unmount.
+      listSubsRef.current.forEach((unsub) => {
+        try { unsub(); } catch (e) { console.warn('[MessagingProvider] list unsub failed on unmount:', e); }
+      });
+      listSubsRef.current.clear();
       // Stop tracking presence when component unmounts (user logs out)
       userPresenceService.stopTrackingCurrentUser().catch(error => {
         console.error('[MessagingProvider] Error stopping presence tracking:', error);

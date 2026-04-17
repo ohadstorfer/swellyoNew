@@ -33,6 +33,8 @@ import { MessageListSkeleton } from '../components/skeletons';
 import { SKELETON_DELAY_MS } from '../constants/loading';
 import { analyticsService } from '../services/analytics/analyticsService';
 import { chatHistoryCache } from '../services/messaging/chatHistoryCache';
+import { messageOutbox } from '../services/messaging/messageOutbox';
+import * as Crypto from 'expo-crypto';
 import { MessageActionsMenu } from '../components/MessageActionsMenu';
 import { useMessaging } from '../context/MessagingProvider';
 import { userPresenceService } from '../services/presence/userPresenceService';
@@ -72,7 +74,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   onViewProfile,
 }) => {
   // Get markAsRead and setCurrentConversationId from MessagingProvider
-  const { markAsRead, setCurrentConversationId: setMessagingCurrentConversationId } = useMessaging();
+  const { markAsRead, setCurrentConversationId: setMessagingCurrentConversationId, dispatch: messagingDispatch } = useMessaging();
   
   const [showBlockOverlay, setShowBlockOverlay] = useState(false);
   const [showDmMenu, setShowDmMenu] = useState(false);
@@ -136,6 +138,10 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const hasTriedReconnectRef = useRef(false);
   const [reconnectAttempt, setReconnectAttempt] = useState(0);
   const [realtimeStatus, setRealtimeStatus] = useState<RealtimeSubscriptionStatus | null>(null);
+  // Reconnect catch-up: detect SUBSCRIBED after a prior disconnect and pull missed messages.
+  const wasDisconnectedRef = useRef(false);
+  const lastRealtimeEventAtRef = useRef<number>(Date.now());
+  const catchUpInFlightRef = useRef(false);
 
   // Keep refs in sync so subscription callbacks always see latest values
   useEffect(() => {
@@ -210,6 +216,41 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         });
       }
 
+      // Reset reconnect catch-up refs for this subscription instance.
+      wasDisconnectedRef.current = false;
+      lastRealtimeEventAtRef.current = Date.now();
+      catchUpInFlightRef.current = false;
+
+      // Fetch messages that arrived while the WebSocket was down. Supabase Realtime does not
+      // replay missed events on reconnect, so cover the gap with a query against Postgres.
+      const runReconnectCatchUp = async () => {
+        const convId = currentConversationIdRef.current;
+        if (!convId) return;
+        if (catchUpInFlightRef.current) return;
+        if (Date.now() - lastRealtimeEventAtRef.current < 10_000) return;
+
+        catchUpInFlightRef.current = true;
+        try {
+          const since = lastRealtimeEventAtRef.current - 2000;
+          const missed = await messagingService.getMessagesUpdatedSince(convId, since, 50);
+          if (missed.length === 0) return;
+          console.log(`[DirectMessageScreen] catch-up found ${missed.length} missed messages (reconnect path)`);
+          if (missed.length === 50) {
+            console.warn('[DirectMessageScreen] catch-up hit 50-message limit — older gap may require scroll-up pagination');
+          }
+          setMessages((prev) => {
+            const merged = chatHistoryCache.mergeMessages(prev, missed);
+            chatHistoryCache.saveMessages(convId, merged).catch(() => {});
+            return merged;
+          });
+          lastRealtimeEventAtRef.current = Date.now();
+        } catch (err) {
+          console.error('[DirectMessageScreen] reconnect catch-up failed:', err);
+        } finally {
+          catchUpInFlightRef.current = false;
+        }
+      };
+
       // Subscribe to messages (callbacks handle currentUserId being null)
       // Note: We need to track subscription health, but messagingService doesn't expose it directly
       // We'll infer health from message activity (messages received recently = healthy)
@@ -221,17 +262,25 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             if (status === 'SUBSCRIBED') {
               setRealtimeHealthy(true);
               hasTriedReconnectRef.current = false;
+              if (wasDisconnectedRef.current) {
+                wasDisconnectedRef.current = false;
+                runReconnectCatchUp();
+              }
             } else if (status === 'CHANNEL_ERROR') {
+              wasDisconnectedRef.current = true;
               if (!hasTriedReconnectRef.current) {
                 hasTriedReconnectRef.current = true;
                 setReconnectAttempt((a) => a + 1);
               } else {
                 setRealtimeHealthy(false);
               }
+            } else if (status === 'TIMED_OUT' || status === 'CLOSED') {
+              wasDisconnectedRef.current = true;
             }
           },
           onNewMessage: (newMessage) => {
             setRealtimeHealthy(true);
+            lastRealtimeEventAtRef.current = Date.now();
             const convId = currentConversationIdRef.current;
             const me = currentUserIdRef.current;
             if (!hasTrackedFirstReply && me && newMessage.sender_id !== me) {
@@ -242,6 +291,27 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
               setHasTrackedFirstReply(true);
             }
             setMessages((prev) => {
+              // Outbox optimistic row lookup: the local row's id is still the
+              // clientId (it becomes the server uuid only after our own send
+              // resolves). If the server row arrives via Realtime first, swap.
+              if (newMessage.client_id) {
+                const optimisticIdx = prev.findIndex(m =>
+                  m.id !== newMessage.id && (
+                    m.id === newMessage.client_id ||
+                    m.client_id === newMessage.client_id
+                  )
+                );
+                if (optimisticIdx !== -1) {
+                  const updated = prev.map((m, i) => i === optimisticIdx ? newMessage : m);
+                  if (convId) {
+                    chatHistoryCache.saveMessages(convId, updated).catch(err => {
+                      console.error('Error updating cache:', err);
+                    });
+                  }
+                  return updated;
+                }
+              }
+
               const existing = prev.find(msg => msg.id === newMessage.id);
               if (existing) {
                 // Keep any local-only upload fields already on the message (we may have injected
@@ -272,13 +342,17 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                 console.error('Error marking message as read:', err);
               });
             }
+            // Piggyback to the provider: the filtered channel is reliable, the unfiltered
+            // conversations_list channel often drops INSERT events due to the RLS quirk
+            // at messagingService.ts:1741-1779. Mirroring the event here keeps the list
+            // preview in sync without depending on that channel. The reducer dedupes.
+            if (convId) {
+              messagingDispatch({ type: 'NEW_MESSAGE', payload: { conversationId: convId, message: newMessage } });
+            }
             scrollToBottom();
           },
           onMessageUpdated: (updatedMessage) => {
-            // #region agent log
-            // Log when message is updated via WebSocket
-            fetch('http://127.0.0.1:7242/ingest/6b4e2d69-2c76-430d-914a-aa3116b97922',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'DirectMessageScreen.tsx:174',message:'Message updated via WebSocket',data:{id:updatedMessage.id,type:updatedMessage.type,hasType:updatedMessage.type!==undefined,hasImageMetadata:!!updatedMessage.image_metadata,imageMetadata:updatedMessage.image_metadata,body:updatedMessage.body?.substring(0,50),allKeys:Object.keys(updatedMessage)},timestamp:Date.now()})}).catch(()=>{});
-            // #endregion
+            lastRealtimeEventAtRef.current = Date.now();
             // Handle message edit
             // Check if message was being edited locally (concurrent edit from another client)
             if (editingMessageId === updatedMessage.id) {
@@ -324,8 +398,18 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
               }
               return updated;
             });
+            // Piggyback to the provider so the list reflects edits and soft-deletes
+            // instantly. See the onNewMessage piggyback above for rationale.
+            const convIdForDispatch = currentConversationIdRef.current;
+            if (convIdForDispatch) {
+              messagingDispatch({
+                type: 'MESSAGE_UPDATED',
+                payload: { conversationId: convIdForDispatch, message: updatedMessage },
+              });
+            }
           },
           onMessageDeleted: (messageId) => {
+            lastRealtimeEventAtRef.current = Date.now();
             const convId = currentConversationIdRef.current;
             console.log('[DirectMessageScreen] onMessageDeleted callback triggered', {
               messageId,
@@ -364,6 +448,14 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
               }
               return updated;
             });
+            // Piggyback to the provider so the list preview clears the deleted
+            // message immediately. See onNewMessage piggyback above for rationale.
+            if (convId) {
+              messagingDispatch({
+                type: 'MESSAGE_DELETED',
+                payload: { conversationId: convId, messageId },
+              });
+            }
           },
           onTyping: (userId, isTyping) => {
             const me = currentUserIdRef.current;
@@ -429,6 +521,74 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       });
     }
   }, [currentConversationId, currentUserId, markAsRead]);
+
+  // Reconcile UI with outbox on conversation open. Covers the zombie case:
+  // an optimistic row with upload_state='failed' persisted in cache, but the
+  // outbox entry is gone (auto-flush succeeded while the user was elsewhere).
+  // - Server row exists with matching client_id → drop the optimistic.
+  // - No server row → clear upload_state so the user isn't told it failed.
+  // Also: if the outbox has pending entries for this conversation, kick a
+  // flushAll so we don't wait for AppState/NetInfo to drain them (covers
+  // Expo Go where NetInfo events may not fire on wifi toggle).
+  useEffect(() => {
+    const convId = currentConversationId;
+    if (!convId) return;
+    let cancelled = false;
+    // Small delay so the initial loadMessages (cache + catch-up) settles first.
+    const t = setTimeout(async () => {
+      try {
+        const pending = await messageOutbox.getByConversation(convId);
+        if (cancelled) return;
+        const pendingIds = new Set(pending.map(e => e.clientId));
+
+        // Self-heal: if anything is pending for this conversation, try to
+        // send it right now. Idempotency on the server (client_id unique
+        // constraint) makes repeated attempts safe.
+        if (pending.length > 0) {
+          console.log(`[DirectMessageScreen] ${pending.length} pending outbox entries for convo, flushing`);
+          messageOutbox
+            .flushAll(async (entry) => {
+              await messagingService.sendMessage(
+                entry.conversationId,
+                entry.body,
+                [],
+                entry.type,
+                entry.clientId
+              );
+            })
+            .catch((err) => console.warn('[DirectMessageScreen] outbox flush failed:', err));
+        }
+        setMessages(prev => {
+          const serverIdsByClientId = new Map<string, string>();
+          prev.forEach(m => {
+            if (m.client_id && m.id !== m.client_id) {
+              serverIdsByClientId.set(m.client_id, m.id);
+            }
+          });
+          let changed = false;
+          const next = prev.flatMap(m => {
+            if (m.upload_state !== 'failed' || !m.client_id) return [m];
+            if (pendingIds.has(m.client_id)) return [m];
+            if (serverIdsByClientId.has(m.client_id)) {
+              changed = true;
+              return [];
+            }
+            changed = true;
+            return [{ ...m, upload_state: undefined, upload_error: undefined }];
+          });
+          if (!changed) return prev;
+          chatHistoryCache.saveMessages(convId, next).catch(() => {});
+          return next;
+        });
+      } catch (err) {
+        console.warn('[DirectMessageScreen] outbox reconcile failed:', err);
+      }
+    }, 500);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [currentConversationId]);
 
   // Subscribe to other user's online status
   useEffect(() => {
@@ -566,9 +726,6 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         });
       } else {
         console.log('[DirectMessageScreen] 📝 No image messages in cache (total messages:', cachedMessages.length, ')');
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/6b4e2d69-2c76-430d-914a-aa3116b97922',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'DirectMessageScreen.tsx:382',message:'Inspecting all cached messages for image fields',data:{totalMessages:cachedMessages.length,allMessages:cachedMessages.map((msg,idx)=>({index:idx,id:msg.id,type:msg.type,typeValue:msg.type,hasType:msg.type!==undefined,hasImageMetadata:!!msg.image_metadata,imageMetadataKeys:msg.image_metadata?Object.keys(msg.image_metadata):null,imageMetadata:msg.image_metadata,body:msg.body?.substring(0,50)})),messageKeys:cachedMessages.length>0?Object.keys(cachedMessages[0]):[]},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
       }
       
       // Memory cache hit - show instantly (no async delay, no loading state)
@@ -655,9 +812,6 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
           });
         } else {
           console.log('[DirectMessageScreen] 📝 No image messages in AsyncStorage cache (total messages:', asyncCachedMessages.length, ')');
-          // #region agent log
-          fetch('http://127.0.0.1:7242/ingest/6b4e2d69-2c76-430d-914a-aa3116b97922',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'DirectMessageScreen.tsx:454',message:'Inspecting all AsyncStorage cached messages for image fields',data:{totalMessages:asyncCachedMessages.length,allMessages:asyncCachedMessages.map((msg,idx)=>({index:idx,id:msg.id,type:msg.type,typeValue:msg.type,hasType:msg.type!==undefined,hasImageMetadata:!!msg.image_metadata,imageMetadataKeys:msg.image_metadata?Object.keys(msg.image_metadata):null,imageMetadata:msg.image_metadata,body:msg.body?.substring(0,50)})),messageKeys:asyncCachedMessages.length>0?Object.keys(asyncCachedMessages[0]):[]},timestamp:Date.now()})}).catch(()=>{});
-          // #endregion
         }
         
         // AsyncStorage cache hit - show messages (after adv_role is loaded)
@@ -706,12 +860,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
           deletedMessages: deletedCount,
           deletedMessageIds: result.messages.filter(m => m.deleted).map(m => m.id),
         });
-        
-        // #region agent log
-        // Log ALL server messages to check for image messages
-        fetch('http://127.0.0.1:7242/ingest/6b4e2d69-2c76-430d-914a-aa3116b97922',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'DirectMessageScreen.tsx:475',message:'Inspecting all server messages for image fields',data:{totalMessages:result.messages.length,allMessages:result.messages.map((msg,idx)=>({index:idx,id:msg.id,type:msg.type,typeValue:msg.type,hasType:msg.type!==undefined,hasImageMetadata:!!msg.image_metadata,imageMetadataKeys:msg.image_metadata?Object.keys(msg.image_metadata):null,imageMetadata:msg.image_metadata,body:msg.body?.substring(0,50)})),messageKeys:result.messages.length>0?Object.keys(result.messages[0]):[]},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
-        
+
         setHasMoreMessages(result.hasMore);
         if (result.messages.length > 0) {
           oldestMessageIdRef.current = result.messages[0].id;
@@ -830,13 +979,6 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         20 // Lightweight limit
       );
       
-      // #region agent log
-      // Log background sync messages to check for image updates
-      if (serverMessages.length > 0) {
-        fetch('http://127.0.0.1:7242/ingest/6b4e2d69-2c76-430d-914a-aa3116b97922',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'DirectMessageScreen.tsx:590',message:'Background sync messages from server',data:{totalMessages:serverMessages.length,allMessages:serverMessages.map((msg,idx)=>({index:idx,id:msg.id,type:msg.type,typeValue:msg.type,hasType:msg.type!==undefined,hasImageMetadata:!!msg.image_metadata,imageMetadataKeys:msg.image_metadata?Object.keys(msg.image_metadata):null,imageMetadata:msg.image_metadata,body:msg.body?.substring(0,50)})),lastSync},timestamp:Date.now()})}).catch(()=>{});
-      }
-      // #endregion
-      
       if (serverMessages.length > 0) {
         // CRITICAL: Use functional setState to avoid stale closure bug
         setMessages((prev) => {
@@ -861,17 +1003,20 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     if (!inputText.trim() || isLoading || !currentUserId) return;
 
     const messageText = inputText.trim();
-    const tempId = `temp-${Date.now()}`;
-    
+    // Client-generated UUID. Acts as both the optimistic row's id (so we can
+    // locate it later) and the server-side idempotency key (client_id column).
+    const clientId = Crypto.randomUUID();
+
     // 1. Show message immediately (optimistic) - BEFORE conversation creation
     const tempConversationId = currentConversationId || `temp-conv-${Date.now()}`;
     const optimisticMessage: Message = {
-      id: tempId,
+      id: clientId,
       conversation_id: tempConversationId,
       sender_id: currentUserId,
       body: messageText,
       rendered_body: null,
       attachments: [],
+      client_id: clientId,
       is_system: false,
       edited: false,
       deleted: false,
@@ -887,52 +1032,65 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
 
     // Scroll to bottom immediately
     scrollToBottom();
-    
+
+    // Optimistically push the message into the conversations list preview right
+    // now — before the network send resolves and before Realtime delivers. The
+    // reducer will overwrite last_message again when the real server row arrives
+    // via the post-send dispatch and/or the Realtime INSERT, but the preview is
+    // already visually correct. Only dispatch when we already have a real
+    // conversation id; new-DM flows dispatch after createDirectConversation.
+    if (currentConversationId) {
+      messagingDispatch({
+        type: 'NEW_MESSAGE',
+        payload: { conversationId: currentConversationId, message: optimisticMessage },
+      });
+    }
+
     // 2. Create conversation if needed (still blocking, but message already visible)
     let targetConversationId = currentConversationId;
-    
+
     if (!targetConversationId) {
       try {
         setIsLoading(true);
         setLoadingMessage('');
-        
+
         // Progressive feedback: Show messages at different intervals
         const feedbackTimeout = setTimeout(() => {
           setLoadingMessage('This is taking longer than usual...');
         }, 5000);
-        
+
         // Final timeout after 30 seconds (generous for DB operations)
         const finalTimeout = setTimeout(() => {
           clearTimeout(feedbackTimeout);
           throw new Error('Connection timeout. Please check your internet connection and try again.');
         }, 30000);
-        
+
         try {
           const conversation = await messagingService.createDirectConversation(otherUserId, fromTripPlanning);
-          
+
           // Clear timeouts if successful
           clearTimeout(feedbackTimeout);
           clearTimeout(finalTimeout);
           setLoadingMessage('');
-          
+
           targetConversationId = conversation.id;
           setCurrentConversationId(targetConversationId);
-          
+
           // Update optimistic message with real conversation ID
           if (targetConversationId) {
-            setMessages((prev) => prev.map(msg => 
-              msg.id === tempId 
+            setMessages((prev) => prev.map(msg =>
+              msg.id === clientId
                 ? { ...msg, conversation_id: targetConversationId! }
                 : msg
             ));
           }
-          
+
           // Set in MessagingProvider
           setMessagingCurrentConversationId(targetConversationId);
-          
+
           // Load other user's adv_role for the new conversation
           await loadOtherUserAdvRole();
-          
+
           // Notify parent component that conversation was created
           if (onConversationCreated) {
             onConversationCreated(targetConversationId);
@@ -946,8 +1104,9 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       } catch (error: any) {
         console.error('Error creating conversation:', error);
         const errorMessage = error?.message || 'Failed to create conversation. Please try again.';
-        // Remove optimistic message on error
-        setMessages((prev) => prev.filter(msg => msg.id !== tempId));
+        // The message never made it off-device — remove it, restore the input,
+        // and surface the error. Do not enqueue to the outbox in this branch.
+        setMessages((prev) => prev.filter(msg => msg.id !== clientId));
         setInputText(messageText); // Restore input text
         chatInputRef.current?.focus?.();
         Alert.alert('Error', errorMessage);
@@ -956,46 +1115,95 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         return;
       }
     }
-    
+
     setIsLoading(true);
+
+    if (!targetConversationId) {
+      setIsLoading(false);
+      return;
+    }
+
+    // Persist the send intent BEFORE attempting the network call. If the app
+    // is killed mid-send or the request fails, the outbox will retry on the
+    // next foreground / reconnect and the partial unique index prevents dupes.
+    try {
+      await messageOutbox.enqueue({
+        clientId,
+        conversationId: targetConversationId,
+        senderId: currentUserId,
+        body: messageText,
+        type: 'text',
+      });
+    } catch (err) {
+      console.warn('[DirectMessageScreen] outbox enqueue failed (proceeding anyway):', err);
+    }
 
     // 3. Send message to server (replace optimistic message with real one)
     try {
-      // At this point, targetConversationId should always be defined
-      if (!targetConversationId) {
-        throw new Error('Conversation ID is required to send message');
-      }
-      
-      // Send message to server
-      const sentMessage = await messagingService.sendMessage(targetConversationId, messageText);
-      
+      const sentMessage = await messagingService.sendMessage(
+        targetConversationId,
+        messageText,
+        [],
+        'text',
+        clientId
+      );
+
+      // Remove from outbox on confirmed delivery.
+      messageOutbox.markSent(clientId).catch(() => {});
+
       // Track first message sent (only if this is a new conversation and we haven't tracked it yet)
       if (!hasTrackedFirstMessage && !conversationId) {
         analyticsService.trackFirstMessageSent(targetConversationId);
         setHasTrackedFirstMessage(true);
         setFirstMessageSentTime(Date.now());
       }
-      
-      // Replace optimistic message with real message from server
+
+      // Swap optimistic row (id=clientId) for the server row (id=server uuid),
+      // or no-op if Realtime already landed it.
       setMessages((prev) => {
-        const filtered = prev.filter(msg => msg.id !== tempId);
-        // Check if message already exists (from subscription)
-        const exists = filtered.some(msg => msg.id === sentMessage.id);
-        const updated = exists ? filtered : [...filtered, sentMessage];
-        // Update cache
-        chatHistoryCache.saveMessages(targetConversationId, updated).catch(err => {
+        if (prev.some(msg => msg.id === sentMessage.id)) {
+          // Realtime beat us — just make sure the optimistic row is gone.
+          const filtered = prev.filter(msg => msg.id !== clientId);
+          if (filtered.length !== prev.length) {
+            chatHistoryCache.saveMessages(targetConversationId!, filtered).catch(err => {
+              console.error('Error updating cache:', err);
+            });
+          }
+          return filtered;
+        }
+        const optimisticIdx = prev.findIndex(m =>
+          m.id === clientId || m.client_id === clientId
+        );
+        const updated = optimisticIdx !== -1
+          ? prev.map((m, i) => i === optimisticIdx ? sentMessage : m)
+          : [...prev, sentMessage];
+        chatHistoryCache.saveMessages(targetConversationId!, updated).catch(err => {
           console.error('Error updating cache:', err);
         });
         return updated;
       });
-      
+
+      // Belt-and-suspenders: push the sent message into the list immediately so
+      // the preview updates the moment the send resolves, without waiting for
+      // the (flaky) unfiltered Realtime INSERT. The reducer dedupes by id, so
+      // if Realtime also delivers, the second dispatch is a no-op.
+      messagingDispatch({
+        type: 'NEW_MESSAGE',
+        payload: { conversationId: targetConversationId, message: sentMessage },
+      });
+
       scrollToBottom();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error sending message:', error);
-      // Remove optimistic message on error
-      setMessages((prev) => prev.filter(msg => msg.id !== tempId));
-      setInputText(messageText); // Restore input text
-      Alert.alert('Error', 'Failed to send message. Please try again.');
+      // Do NOT remove the optimistic row — leave it visible with a failed
+      // indicator so the user knows it's retryable. The outbox entry stays
+      // enqueued and will be retried on the next flush trigger.
+      messageOutbox.markFailed(clientId, error).catch(() => {});
+      setMessages((prev) => prev.map(msg =>
+        msg.id === clientId
+          ? { ...msg, upload_state: 'failed', upload_error: error?.message ?? 'Send failed' }
+          : msg
+      ));
     } finally {
       setIsLoading(false);
     }
@@ -1593,10 +1801,100 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   // Handle retry upload for failed image messages
   const handleRetryUpload = async (message: Message) => {
     if (!message.image_metadata || !currentConversationId) return;
-    
+
     // TODO: Implement retry logic
     // This should re-upload the image and update the message
     Alert.alert('Info', 'Retry upload functionality will be implemented in Phase 3');
+  };
+
+  const handleRetryTextMessage = async (message: Message) => {
+    // The optimistic row's id is the client_id. `message.client_id` is also set
+    // defensively in case this is a re-rendered row.
+    const clientId = message.client_id ?? (typeof message.id === 'string' ? message.id : null);
+    if (!clientId) return;
+
+    // Swap to 'uploading' so the UI shows a spinner instead of the red
+    // "Tap to retry" label while the send is in flight.
+    setMessages((prev) => prev.map(m =>
+      m.id === message.id
+        ? { ...m, upload_state: 'uploading', upload_error: undefined }
+        : m
+    ));
+
+    const result = await messageOutbox.flushOne(clientId, async (entry) => {
+      await messagingService.sendMessage(
+        entry.conversationId,
+        entry.body,
+        [],
+        entry.type,
+        entry.clientId
+      );
+    });
+
+    if (result.ok) {
+      // Realtime INSERT handler will replace the optimistic row with the server
+      // row (see onNewMessage: clientId match branch). Nothing to do here.
+      return;
+    }
+
+    if (result.reason === 'no_entry') {
+      // The outbox entry is gone — auto-flush already sent it, or the user
+      // deleted it. Clear the stale indicator; the mount-sync effect will
+      // reconcile the row against any server copy that arrived.
+      setMessages((prev) => prev.map(m =>
+        m.id === message.id
+          ? { ...m, upload_state: undefined, upload_error: undefined }
+          : m
+      ));
+      return;
+    }
+
+    // result.reason === 'send_failed' — restore the failed indicator and
+    // surface the real error so the user (and us, debugging) can see why.
+    console.error('[DirectMessageScreen] retry failed', result.error);
+    const errorMessage =
+      (result.error instanceof Error && result.error.message) ||
+      (typeof result.error === 'object' && result.error !== null && 'message' in (result.error as any)
+        ? String((result.error as any).message)
+        : String(result.error));
+    setMessages((prev) => prev.map(m =>
+      m.id === message.id
+        ? { ...m, upload_state: 'failed', upload_error: errorMessage }
+        : m
+    ));
+    Alert.alert('No se pudo reenviar', errorMessage);
+  };
+
+  // Remove a failed (never-delivered) message from the UI, outbox, and cache.
+  // Only called from the failed-message long-press menu.
+  const handleDeleteFailedMessage = async (message: Message) => {
+    const clientId = message.client_id ?? (typeof message.id === 'string' ? message.id : null);
+    const convId = message.conversation_id || currentConversationIdRef.current;
+    setMessages((prev) => {
+      const updated = prev.filter(m => m.id !== message.id);
+      if (convId) {
+        chatHistoryCache.saveMessages(convId, updated).catch(() => {});
+      }
+      return updated;
+    });
+    if (clientId) {
+      messageOutbox.remove(clientId).catch((err) =>
+        console.warn('[DirectMessageScreen] outbox remove failed:', err)
+      );
+    }
+  };
+
+  const handleCopyMessageText = async (message: Message) => {
+    if (!message.body) return;
+    try {
+      // Lazy-require so older dev builds without expo-clipboard compiled in
+      // don't crash at module load. Falls back to a warning if unavailable.
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const Clipboard = require('expo-clipboard');
+      await Clipboard.setStringAsync(message.body);
+    } catch (err) {
+      console.warn('[DirectMessageScreen] clipboard copy failed:', err);
+    }
   };
 
   // Handle long press on message
@@ -1608,8 +1906,9 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       isOwnMessage: currentUserId === message.sender_id,
       isDeleted: message.deleted,
       isSystem: message.is_system,
+      uploadState: message.upload_state,
     });
-    
+
     if (!currentUserId || message.sender_id !== currentUserId) {
       return;
     }
@@ -1617,6 +1916,22 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       return;
     }
     if (message.is_system) {
+      return;
+    }
+
+    // Failed messages have no server row yet — edit/delete-via-server would
+    // fail. Offer Retry / Delete (local) / Copy instead.
+    if (message.upload_state === 'failed') {
+      Alert.alert(
+        'Mensaje sin enviar',
+        message.body || '',
+        [
+          { text: 'Reenviar', onPress: () => handleRetryTextMessage(message) },
+          { text: 'Copiar texto', onPress: () => handleCopyMessageText(message) },
+          { text: 'Borrar', style: 'destructive', onPress: () => handleDeleteFailedMessage(message) },
+          { text: 'Cancelar', style: 'cancel' },
+        ]
+      );
       return;
     }
 
@@ -1802,12 +2117,6 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     // This allows messages to appear instantly while currentUserId loads in background
     
   
-    // #region agent log
-    // Log ALL messages to check for potential image messages that aren't being detected
-    if (message.body && (message.body.includes('image') || message.body.includes('photo') || message.body.includes('picture'))) {
-      fetch('http://127.0.0.1:7242/ingest/6b4e2d69-2c76-430d-914a-aa3116b97922',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'DirectMessageScreen.tsx:1018',message:'Message with image-related body text found',data:{id:message.id,type:message.type,hasType:message.type!==undefined,hasImageMetadata:!!message.image_metadata,imageMetadata:message.image_metadata,body:message.body,allKeys:Object.keys(message)},timestamp:Date.now()})}).catch(()=>{});
-    }
-    // #endregion
     const isOwnMessage = currentUserId ? message.sender_id === currentUserId : false;
     const isEditing = editingMessageId === message.id;
     const canEdit = canEditMessage(message);
@@ -2117,8 +2426,24 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                     )}
 
                 </Text>
-                
+
               </View>
+              {message.upload_state === 'uploading' && !message.deleted && !isEditing && isOwnMessage && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2, alignSelf: 'flex-end', gap: 4 }}>
+                  <ActivityIndicator size="small" color="#E53935" />
+                  <Text style={{ fontSize: 12, color: '#E53935' }}>Sending…</Text>
+                </View>
+              )}
+              {message.upload_state === 'failed' && !message.deleted && !isEditing && isOwnMessage && (
+                <TouchableOpacity
+                  onPress={() => handleRetryTextMessage(message)}
+                  style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2, alignSelf: 'flex-end', gap: 4 }}
+                  hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                >
+                  <Ionicons name="alert-circle" size={14} color="#E53935" />
+                  <Text style={{ fontSize: 12, color: '#E53935' }}>Tap to retry</Text>
+                </TouchableOpacity>
+              )}
             </>
           )}
         </View>
