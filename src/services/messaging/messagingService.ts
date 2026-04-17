@@ -90,7 +90,12 @@ export interface Message {
 
   // Legacy attachments array (keep for backward compatibility)
   attachments: any[];
-  
+
+  // Client-generated UUID for idempotent sends. Enforced unique per sender via
+  // partial unique index messages_sender_client_id_idx. Null for legacy rows
+  // predating the outbox. Populated by the send-path / outbox flush.
+  client_id?: string | null;
+
   // Upload state (client-side only, not stored in DB)
   upload_state?: MessageUploadState;
   upload_progress?: number;     // 0-100, only during 'uploading'
@@ -151,6 +156,11 @@ class MessagingService {
   private typingState = new Map<string, Map<string, number>>(); // conversationId -> userId -> timestamp
   // Rate limiting for typing indicators (500ms)
   private lastTypingEvent = new Map<string, number>(); // conversationId -> timestamp
+  // Per-conversation list subscriptions (separate from DM-screen channels above).
+  // Used by MessagingProvider to reliably receive INSERT/UPDATE/DELETE events
+  // for every conv in state, bypassing the RLS quirk of the unfiltered
+  // conversations_list channel. Keyed by conversationId.
+  private listSubscriptions = new Map<string, () => void>();
 
   /**
    * Get or create the Realtime channel for a conversation. Creates and stores the channel only if it
@@ -469,7 +479,7 @@ class MessagingService {
       
       const { data: messages, error } = await supabase
         .from('messages')
-        .select('id, conversation_id, sender_id, body, rendered_body, attachments, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata')
+        .select('id, conversation_id, sender_id, body, rendered_body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata')
         .eq('conversation_id', conversationId)
         // Note: We include deleted messages so they can be displayed with "deleted" placeholder
         .gt('updated_at', lastSyncDate)
@@ -477,13 +487,6 @@ class MessagingService {
         .limit(limit);
 
       if (error) throw error;
-
-      // #region agent log
-      // Log raw database response to check if type and image_metadata are returned
-      if (messages && messages.length > 0) {
-        fetch('http://127.0.0.1:7242/ingest/6b4e2d69-2c76-430d-914a-aa3116b97922',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'messagingService.ts:436',message:'Raw database response from getMessagesUpdatedSince',data:{totalMessages:messages.length,conversationId,lastSyncTimestamp,allMessages:messages.map((msg,idx)=>({index:idx,id:msg.id,type:msg.type,hasType:'type' in msg,imageMetadata:msg.image_metadata,hasImageMetadata:'image_metadata' in msg,rawKeys:Object.keys(msg)})),sampleMessage:messages[0]},timestamp:Date.now()})}).catch(()=>{});
-      }
-      // #endregion
 
       if (!messages || messages.length === 0) {
         return [];
@@ -553,7 +556,7 @@ class MessagingService {
 
       let query = supabase
         .from('messages')
-        .select('id, conversation_id, sender_id, body, rendered_body, attachments, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata')
+        .select('id, conversation_id, sender_id, body, rendered_body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata')
         .eq('conversation_id', conversationId)
         // Note: We include deleted messages so they can be displayed with "deleted" placeholder
         .order('created_at', { ascending: useAscending })
@@ -595,13 +598,6 @@ class MessagingService {
       const { data: messages, error } = await query;
 
       if (error) throw error;
-
-      // #region agent log
-      // Log raw database response to check if type and image_metadata are returned
-      if (messages && messages.length > 0) {
-        fetch('http://127.0.0.1:7242/ingest/6b4e2d69-2c76-430d-914a-aa3116b97922',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'messagingService.ts:541',message:'Raw database response from getMessages',data:{totalMessages:messages.length,conversationId,allMessages:messages.map((msg,idx)=>({index:idx,id:msg.id,type:msg.type,hasType:'type' in msg,imageMetadata:msg.image_metadata,hasImageMetadata:'image_metadata' in msg,rawKeys:Object.keys(msg)})),sampleMessage:messages[0]},timestamp:Date.now()})}).catch(()=>{});
-      }
-      // #endregion
 
       if (!messages || messages.length === 0) {
         return { messages: [], hasMore: false };
@@ -668,33 +664,85 @@ class MessagingService {
   }
 
   /**
-   * Send a message in a conversation
+   * Send a message in a conversation.
+   * When `clientId` is provided the insert is idempotent via the partial unique
+   * index messages_sender_client_id_idx — retries of the same (sender_id,
+   * client_id) are absorbed as no-ops so flaky networks cannot create duplicates.
    */
-  async sendMessage(conversationId: string, body: string, attachments: any[] = [], type: MessageType = 'text'): Promise<Message> {
+  async sendMessage(
+    conversationId: string,
+    body: string,
+    attachments: any[] = [],
+    type: MessageType = 'text',
+    clientId?: string
+  ): Promise<Message> {
     if (!isSupabaseConfigured()) {
       throw new Error('Supabase is not configured');
     }
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        console.log('[messagingService] No user - auth guard will handle redirect');
-        throw new Error('Not authenticated'); // Still throw for type safety, but auth guard will catch
+      // Prefer the cached session (synchronous, no network). getUser() does a
+      // round-trip to /auth/v1/user and can return null on a transient network
+      // blip even though the user is logged in — that caused the outbox retry
+      // to throw "Not authenticated" spuriously. Fall back to getUser only if
+      // the session cache is empty.
+      let senderId: string | undefined;
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user?.id) {
+        senderId = session.user.id;
+      } else {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+          console.log('[messagingService] No user - auth guard will handle redirect');
+          throw new Error('Not authenticated'); // auth guard will catch
+        }
+        senderId = user.id;
       }
 
-      const { data, error } = await supabase
-        .from('messages')
-        .insert({
-          conversation_id: conversationId,
-          sender_id: user.id,
-          body,
-          attachments,
-          type: type || 'text',
-        })
-        .select()
-        .single();
+      const payload: Record<string, unknown> = {
+        conversation_id: conversationId,
+        sender_id: senderId,
+        body,
+        attachments,
+        type: type || 'text',
+      };
+      if (clientId) payload.client_id = clientId;
 
-      if (error) throw error;
+      let data: Message | null = null;
+
+      if (clientId) {
+        // Idempotent path: ON CONFLICT DO NOTHING. If the row already exists
+        // (retry landed twice), maybeSingle returns null and we fetch the
+        // winning row so callers still get a usable Message object.
+        const { data: upserted, error } = await supabase
+          .from('messages')
+          .upsert(payload, { onConflict: 'sender_id,client_id', ignoreDuplicates: true })
+          .select()
+          .maybeSingle();
+
+        if (error) throw error;
+
+        if (upserted) {
+          data = upserted as Message;
+        } else {
+          const { data: existing, error: fetchErr } = await supabase
+            .from('messages')
+            .select()
+            .eq('sender_id', senderId)
+            .eq('client_id', clientId)
+            .single();
+          if (fetchErr) throw fetchErr;
+          data = existing as Message;
+        }
+      } else {
+        const { data: inserted, error } = await supabase
+          .from('messages')
+          .insert(payload)
+          .select()
+          .single();
+        if (error) throw error;
+        data = inserted as Message;
+      }
 
       // Update conversation's updated_at
       await supabase
@@ -1087,18 +1135,27 @@ class MessagingService {
         },
         async (payload) => {
           let newMessage = payload.new as Message;
-          
-          // CRITICAL: Check if payload is missing the type field
-          // Supabase Realtime payloads should include all columns, but we verify to ensure data integrity
-          // Note: image_metadata can be null for image messages (during upload), so we only check for type
-          const needsFullFetch = newMessage.type === undefined;
+
+          if (__DEV__) {
+            console.log('[MessagingService] INSERT payload keys:', Object.keys(payload.new ?? {}));
+          }
+
+          // CRITICAL: Check if payload is missing the type field or client_id key.
+          // Supabase Realtime payloads should include all columns, but we verify to ensure data integrity.
+          // image_metadata can be null for image messages (during upload), so we only check the type field.
+          // client_id is checked with `in` (not `== null`) because legacy rows pre-outbox have
+          // client_id=null — the key is present with null value. We only refetch when the key is
+          // absent entirely (symptom of a publication that pre-dates the column).
+          const needsFullFetch =
+            newMessage.type === undefined ||
+            !('client_id' in newMessage);
           
           if (needsFullFetch) {
             // Fetch full message from database to ensure all fields are present
             try {
               const { data: fullMessage, error } = await supabase
                 .from('messages')
-                .select('id, conversation_id, sender_id, body, rendered_body, attachments, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata')
+                .select('id, conversation_id, sender_id, body, rendered_body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata')
                 .eq('id', newMessage.id)
                 .single();
               
@@ -1155,7 +1212,7 @@ class MessagingService {
           try {
             const { data: fullMessage, error } = await supabase
               .from('messages')
-              .select('id, conversation_id, sender_id, body, rendered_body, attachments, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata')
+              .select('id, conversation_id, sender_id, body, rendered_body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata')
               .eq('id', updatedMessage.id)
               .single();
             
@@ -1336,6 +1393,95 @@ class MessagingService {
   }
 
   /**
+   * Filtered per-conversation subscription for the conversations list.
+   *
+   * Why a second subscription layer exists: the unfiltered `conversations_list`
+   * channel (see subscribeToConversations below) has documented RLS delivery
+   * issues — peer events for conversations the user isn't actively viewing are
+   * sometimes dropped. Filtered channels (conversation_id=eq.{id}) deliver
+   * reliably, so MessagingProvider runs one of these per conv in state to
+   * guarantee list preview / unread count / ordering updates.
+   *
+   * Channel name is intentionally distinct from subscribeToMessages'
+   * `messages:{id}` so a DM screen subscription and a list subscription can
+   * coexist on the same conversation without clobbering each other.
+   */
+  subscribeToConversationListUpdates(
+    conversationId: string,
+    callbacks: {
+      onNewMessage?: (conversationId: string, message: Message) => void;
+      onMessageUpdated?: (conversationId: string, message: Message) => void;
+      onMessageDeleted?: (conversationId: string, messageId: string) => void;
+    }
+  ): () => void {
+    if (!isSupabaseConfigured()) {
+      return () => {};
+    }
+
+    const existing = this.listSubscriptions.get(conversationId);
+    if (existing) {
+      existing();
+    }
+
+    const channel = supabase
+      .channel(`list:messages:${conversationId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+          filter: `conversation_id=eq.${conversationId}`,
+        },
+        (payload) => {
+          const message = payload.new as Message;
+          if (!message?.id || !message.conversation_id || !message.created_at) return;
+          callbacks.onNewMessage?.(conversationId, message);
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'messages',
+          filter: `conversation_id=eq.${conversationId}`,
+        },
+        (payload) => {
+          const message = payload.new as Message;
+          if (!message?.id) return;
+          callbacks.onMessageUpdated?.(conversationId, message);
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'DELETE',
+          schema: 'public',
+          table: 'messages',
+          filter: `conversation_id=eq.${conversationId}`,
+        },
+        (payload) => {
+          const messageId = (payload.old as { id?: string } | undefined)?.id;
+          if (!messageId) return;
+          callbacks.onMessageDeleted?.(conversationId, messageId);
+        }
+      )
+      .subscribe((status) => {
+        if (__DEV__ && status !== 'SUBSCRIBED') {
+          console.log(`[MessagingService] list:messages:${conversationId} status: ${status}`);
+        }
+      });
+
+    const unsubscribe = () => {
+      supabase.removeChannel(channel);
+      this.listSubscriptions.delete(conversationId);
+    };
+    this.listSubscriptions.set(conversationId, unsubscribe);
+    return unsubscribe;
+  }
+
+  /**
    * Reset all in-memory state (called on logout).
    * Unsubscribes from every active channel, then clears all maps.
    */
@@ -1352,6 +1498,14 @@ class MessagingService {
     this.activeChannels.clear();
     this.typingState.clear();
     this.lastTypingEvent.clear();
+    this.listSubscriptions.forEach((unsubscribe) => {
+      try {
+        unsubscribe();
+      } catch (e) {
+        console.warn('[MessagingService] Error during list unsubscribe in resetAll:', e);
+      }
+    });
+    this.listSubscriptions.clear();
     console.log('[MessagingService] All in-memory state reset');
   }
 
@@ -1864,7 +2018,7 @@ class MessagingService {
       const lastMessagesPromises = conversations.map(conv =>
         supabase
           .from('messages')
-          .select('id, conversation_id, sender_id, body, rendered_body, attachments, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata')
+          .select('id, conversation_id, sender_id, body, rendered_body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata')
           .eq('conversation_id', conv.id)
           // Note: We include deleted messages so they can be displayed with "deleted" placeholder
           .order('created_at', { ascending: false })
