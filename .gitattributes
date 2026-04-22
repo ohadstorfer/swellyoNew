@@ -1,0 +1,18 @@
+# Force LF line endings for shell-executed files, regardless of OS.
+# Prevents Windows CRLF from breaking bash-sourced files on EAS/macOS builds.
+*.sh        text eol=lf
+*.bash      text eol=lf
+.xcode.env  text eol=lf
+.env        text eol=lf
+.env.*      text eol=lf
+
+# Mark binaries so git doesn't try to diff/autocrlf them
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.mp4       binary
+*.mov       binary
+*.webp      binary
+*.ico       binary
+*.pdf       binary
