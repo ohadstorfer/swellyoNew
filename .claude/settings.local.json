@@ -128,7 +128,8 @@
       "WebFetch(domain:slack.engineering)",
       "WebFetch(domain:highscalability.com)",
       "WebFetch(domain:signal.org)",
-      "Bash(xcrun simctl *)"
+      "Bash(xcrun simctl *)",
+      "WebFetch(domain:kirillzyusko.github.io)"
     ]
   }
 }

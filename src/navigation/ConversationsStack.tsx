@@ -46,7 +46,6 @@ export default function ConversationsStack(props: ConversationsScreenProps) {
         options={{
           gestureEnabled: true,
           gestureDirection: 'horizontal',
-          gestureActivationArea: { left: 'edge' },
           transitionSpec: {
             open: Transition.Specs.DefaultSpec,
             close: Transition.Specs.DefaultSpec,

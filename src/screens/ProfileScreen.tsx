@@ -10,6 +10,7 @@ import {
   Dimensions,
   Alert,
   Animated,
+  Keyboard,
   Linking,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -43,6 +44,8 @@ import AvatarCropModal from '../components/AvatarCropModal';
 import { BlockUserOverlay } from '../components/BlockUserOverlay';
 import { useMessaging } from '../context/MessagingProvider';
 import { ReportUserScreen } from './ReportUserScreen';
+import Reanimated, { useSharedValue, useAnimatedStyle, withTiming, runOnJS, Easing } from 'react-native-reanimated';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 
 interface ProfileScreenProps {
   onBack?: () => void;
@@ -805,6 +808,11 @@ const PlusIcon: React.FC<{ size?: number }> = ({ size = 40 }) => {
   );
 };
 
+const SWIPE_SCREEN_WIDTH = Dimensions.get('window').width;
+const SWIPE_DISMISS_DISTANCE = SWIPE_SCREEN_WIDTH * 0.3;
+const SWIPE_DISMISS_VELOCITY = 800;
+const SWIPE_ANIMATION_DURATION = 220;
+
 export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, onMessage, onContinueEdit, onEdit, fromOnboardingChat = false, onSaveAndGoToConversations }) => {
   const insets = useSafeAreaInsets();
   // Get onboarding context for logout
@@ -864,7 +872,86 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
   const [retryVideoData, setRetryVideoData] = useState<{ uri: string; mimeType?: string } | null>(null);
   // Track Pexels image URLs for countries that don't have bucket images
   const [pexelsImages, setPexelsImages] = useState<{ [country: string]: string | null }>({});
-  
+
+  // ─── Swipe-to-dismiss setup ─────────────────────────────────────────────
+  // Entry: translateX starts at SWIPE_SCREEN_WIDTH (off-screen right) AND
+  // opacity starts at 0 → mount-time gap (Reanimated worklet timing,
+  // ImageBackground decoding, etc.) is invisible. useEffect animates both
+  // to resting state in parallel.
+  // Exit: swipe right past threshold or flick → calls onBack (handleProfileBack
+  // in AppContent handles per-entry-point logic).
+  const swipeTranslateX = useSharedValue(SWIPE_SCREEN_WIDTH);
+  const swipeOpacity = useSharedValue(0);
+
+  useEffect(() => {
+    swipeTranslateX.value = withTiming(0, {
+      duration: 300,
+      easing: Easing.out(Easing.cubic),
+    });
+    swipeOpacity.value = withTiming(1, { duration: 300 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleSwipeDismiss = useCallback(() => {
+    Keyboard.dismiss();
+    onBack?.();
+  }, [onBack]);
+
+  // Animated back: slide the screen off to the right, then invoke onBack.
+  // Used by tappable back buttons so they match the swipe-to-dismiss feel.
+  const handleBackPress = useCallback(() => {
+    Keyboard.dismiss();
+    swipeTranslateX.value = withTiming(
+      SWIPE_SCREEN_WIDTH,
+      { duration: SWIPE_ANIMATION_DURATION, easing: Easing.in(Easing.cubic) },
+      (finished) => {
+        if (finished) runOnJS(handleSwipeDismiss)();
+      },
+    );
+  }, [swipeTranslateX, handleSwipeDismiss]);
+
+  const isSwipeDisabled =
+    Platform.OS === 'web' ||
+    fromOnboardingChat ||
+    showReportOverlay ||
+    (showVideoUploadModal && isUploadingVideo) ||
+    showBlockOverlay ||
+    cropModalVisible ||
+    showPermissionOverlay;
+
+  const swipeGesture = Gesture.Pan()
+    .enabled(!isSwipeDisabled)
+    .activeOffsetX([15, 1000])
+    .failOffsetY([-15, 15])
+    .onUpdate((e) => {
+      'worklet';
+      if (e.translationX > 0) {
+        swipeTranslateX.value = e.translationX;
+      }
+    })
+    .onEnd((e) => {
+      'worklet';
+      const shouldDismiss =
+        e.translationX > SWIPE_DISMISS_DISTANCE || e.velocityX > SWIPE_DISMISS_VELOCITY;
+      if (shouldDismiss) {
+        swipeTranslateX.value = withTiming(
+          SWIPE_SCREEN_WIDTH,
+          { duration: SWIPE_ANIMATION_DURATION },
+          (finished) => {
+            if (finished) runOnJS(handleSwipeDismiss)();
+          },
+        );
+      } else {
+        swipeTranslateX.value = withTiming(0, { duration: SWIPE_ANIMATION_DURATION });
+      }
+    });
+
+  const animatedSwipeStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: swipeTranslateX.value }],
+    opacity: swipeOpacity.value,
+  }));
+  // ────────────────────────────────────────────────────────────────────────
+
   // Determine if we're viewing our own profile or another user's
   const isViewingOwnProfile = !userId;
 
@@ -1431,39 +1518,47 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
   // Render nothing during load to prevent "No profile data found" flash
   if (loading || authChecking) {
     return (
-      <SafeAreaView style={styles.container}>
-        {fromOnboardingChat && isViewingOwnProfile && onEdit && onBack ? (
-          <>
-            <TouchableOpacity style={styles.onboardingPillButtonLeft} onPress={onEdit}>
-              <View style={styles.onboardingPillButtonContainer}>
-                <OnboardingBackArrowIcon />
-                <Text style={styles.onboardingPillButtonText}>Edit</Text>
-              </View>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.onboardingPillButtonRight} onPress={onBack}>
-              <View style={styles.onboardingPillButtonContainer}>
-                <OnboardingSaveIcon />
-                <Text style={styles.onboardingPillButtonText}>Save</Text>
-              </View>
-            </TouchableOpacity>
-          </>
-        ) : (
-          <>
-            <TouchableOpacity style={styles.backButton} onPress={onBack}>
-              <View style={styles.backButtonContainer}>
-                <BackButtonIcon />
-              </View>
-            </TouchableOpacity>
-            {isViewingOwnProfile && onEdit ? (
-              <TouchableOpacity style={styles.editButton} onPress={onEdit}>
-                <View style={styles.editButtonContainer}>
-                  <EditButtonIcon />
+      <Reanimated.View
+        style={[
+          styles.container,
+          { opacity: 0, transform: [{ translateX: SWIPE_SCREEN_WIDTH }] },
+          animatedSwipeStyle,
+        ]}
+      >
+        <SafeAreaView style={styles.fill}>
+          {fromOnboardingChat && isViewingOwnProfile && onEdit && onBack ? (
+            <>
+              <TouchableOpacity style={styles.onboardingPillButtonLeft} onPress={onEdit}>
+                <View style={styles.onboardingPillButtonContainer}>
+                  <OnboardingBackArrowIcon />
+                  <Text style={styles.onboardingPillButtonText}>Edit</Text>
                 </View>
               </TouchableOpacity>
-            ) : null}
-          </>
-        )}
-      </SafeAreaView>
+              <TouchableOpacity style={styles.onboardingPillButtonRight} onPress={handleBackPress}>
+                <View style={styles.onboardingPillButtonContainer}>
+                  <OnboardingSaveIcon />
+                  <Text style={styles.onboardingPillButtonText}>Save</Text>
+                </View>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <TouchableOpacity style={styles.backButton} onPress={handleBackPress}>
+                <View style={styles.backButtonContainer}>
+                  <BackButtonIcon />
+                </View>
+              </TouchableOpacity>
+              {isViewingOwnProfile && onEdit ? (
+                <TouchableOpacity style={styles.editButton} onPress={onEdit}>
+                  <View style={styles.editButtonContainer}>
+                    <EditButtonIcon />
+                  </View>
+                </TouchableOpacity>
+              ) : null}
+            </>
+          )}
+        </SafeAreaView>
+      </Reanimated.View>
     );
   }
 
@@ -1471,47 +1566,55 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
   // Note: Auth errors are handled by auth guard - no "Authentication Required" screen
   if (!profileData) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.errorContainer}>
-          {profileNotFound ? (
-            <>
-              <Ionicons name="person-outline" size={64} color="#FF6B6B" style={{ marginBottom: 20 }} />
-              <Text style={styles.errorTitle}>Profile Not Found</Text>
-              <Text style={styles.errorMessage}>This user's profile could not be found.</Text>
-              {onBack && (
-                <TouchableOpacity 
-                  style={styles.errorButton}
-                  onPress={onBack}
-                >
-                  <Text style={styles.errorButtonText}>Go Back</Text>
-                </TouchableOpacity>
-              )}
-            </>
-          ) : (
-            <>
-              <Ionicons name="alert-circle-outline" size={64} color="#FF6B6B" style={{ marginBottom: 20 }} />
-              <Text style={styles.errorTitle}>Unable to Load Profile</Text>
-              <Text style={styles.errorMessage}>Please try again later.</Text>
-              {onBack && (
-                <TouchableOpacity 
-                  style={styles.errorButton}
-                  onPress={onBack}
-                >
-                  <Text style={styles.errorButtonText}>Go Back</Text>
-                </TouchableOpacity>
-              )}
-            </>
+      <Reanimated.View
+        style={[
+          styles.container,
+          { opacity: 0, transform: [{ translateX: SWIPE_SCREEN_WIDTH }] },
+          animatedSwipeStyle,
+        ]}
+      >
+        <SafeAreaView style={styles.fill}>
+          <View style={styles.errorContainer}>
+            {profileNotFound ? (
+              <>
+                <Ionicons name="person-outline" size={64} color="#FF6B6B" style={{ marginBottom: 20 }} />
+                <Text style={styles.errorTitle}>Profile Not Found</Text>
+                <Text style={styles.errorMessage}>This user's profile could not be found.</Text>
+                {onBack && (
+                  <TouchableOpacity
+                    style={styles.errorButton}
+                    onPress={handleBackPress}
+                  >
+                    <Text style={styles.errorButtonText}>Go Back</Text>
+                  </TouchableOpacity>
+                )}
+              </>
+            ) : (
+              <>
+                <Ionicons name="alert-circle-outline" size={64} color="#FF6B6B" style={{ marginBottom: 20 }} />
+                <Text style={styles.errorTitle}>Unable to Load Profile</Text>
+                <Text style={styles.errorMessage}>Please try again later.</Text>
+                {onBack && (
+                  <TouchableOpacity
+                    style={styles.errorButton}
+                    onPress={handleBackPress}
+                  >
+                    <Text style={styles.errorButtonText}>Go Back</Text>
+                  </TouchableOpacity>
+                )}
+              </>
+            )}
+          </View>
+          {/* Back button always visible */}
+          {onBack && (
+            <TouchableOpacity style={styles.backButton} onPress={handleBackPress}>
+              <View style={styles.backButtonContainer}>
+                <BackButtonIcon />
+              </View>
+            </TouchableOpacity>
           )}
-        </View>
-        {/* Back button always visible */}
-        {onBack && (
-          <TouchableOpacity style={styles.backButton} onPress={onBack}>
-            <View style={styles.backButtonContainer}>
-              <BackButtonIcon />
-            </View>
-          </TouchableOpacity>
-        )}
-      </SafeAreaView>
+        </SafeAreaView>
+      </Reanimated.View>
     );
   }
 
@@ -1645,7 +1748,19 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
 
   return (
     <>
-    <View style={styles.container}>
+    <GestureDetector gesture={swipeGesture}>
+    <Reanimated.View
+      style={[
+        styles.container,
+        // Static frame-0 fallback: if the Reanimated worklet style hasn't
+        // been applied on the very first native paint, this keeps the view
+        // invisible and off-screen — no white flash from styles.container's
+        // #FAFAFA backgroundColor. The animatedSwipeStyle overrides both
+        // opacity and transform on every subsequent frame.
+        { opacity: 0, transform: [{ translateX: SWIPE_SCREEN_WIDTH }] },
+        animatedSwipeStyle,
+      ]}
+    >
       <ImageBackground
         source={Images.chatBackground}
         style={styles.backgroundImage}
@@ -1904,7 +2019,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
                 <Text style={styles.onboardingPillButtonText}>Edit</Text>
               </View>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.onboardingPillButtonRight} onPress={() => onSaveAndGoToConversations?.() ?? onBack?.()}>
+            <TouchableOpacity style={styles.onboardingPillButtonRight} onPress={() => onSaveAndGoToConversations ? onSaveAndGoToConversations() : handleBackPress()}>
               <View style={styles.onboardingPillButtonContainer}>
                 <OnboardingSaveIcon />
                 <Text style={styles.onboardingPillButtonText}>Save</Text>
@@ -1914,7 +2029,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
         ) : (
           <>
             {/* Back Button - Always visible, goes to ConversationsScreen (home) */}
-            <TouchableOpacity style={styles.backButton} onPress={onBack}>
+            <TouchableOpacity style={styles.backButton} onPress={handleBackPress}>
               <View style={styles.backButtonContainer}>
                 <BackButtonIcon />
               </View>
@@ -2374,7 +2489,8 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
           </TouchableOpacity>
         </>
       )}
-    </View>
+    </Reanimated.View>
+    </GestureDetector>
     {Platform.OS === 'web' && (
       <AvatarCropModal
         visible={cropModalVisible}
@@ -2423,6 +2539,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.backgroundGray,
+  },
+  fill: {
+    flex: 1,
   },
   scrollView: {
     flex: 1,
