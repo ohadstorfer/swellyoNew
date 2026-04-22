@@ -1270,7 +1270,7 @@ export const AppContent: React.FC = () => {
         {/* ConversationsStack is always mounted; hidden when an overlay is active
             so its internal navigation state, scroll position, and subscriptions
             persist across Profile/Settings/DM/etc. visits. */}
-        <View style={[styles.fill, !!activeOverlay && styles.hidden]}>
+        <View style={styles.fill}>
           <ConversationsStack
             onConversationPress={handleConversationPress}
             onSwellyPress={handleSwellyPress}
@@ -1284,7 +1284,7 @@ export const AppContent: React.FC = () => {
             onPendingNotificationHandled={() => setPendingNotificationConversationId(null)}
           />
         </View>
-        {activeOverlay && <View style={styles.fill}>{activeOverlay}</View>}
+        {activeOverlay && <View style={StyleSheet.absoluteFill}>{activeOverlay}</View>}
         {process.env.EXPO_PUBLIC_LOCAL_MODE === 'true' && (
           <TouchableOpacity
             style={{ position: 'absolute', top: 60, right: 10, backgroundColor: '#333', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, zIndex: 999, opacity: 0.7, display: 'none' }}
