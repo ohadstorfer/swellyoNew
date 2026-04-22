@@ -15,7 +15,7 @@
     },
     "ios": {
       "bundleIdentifier": "com.swellyo.app",
-      "buildNumber": "9",
+      "buildNumber": "10",
       "supportsTablet": false,
       "usesNonExemptEncryption": false,
       "usesAppleSignIn": true,
@@ -34,7 +34,7 @@
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#212121"
       },
       "edgeToEdgeEnabled": true,
       "permissions": [

@@ -21,6 +21,9 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 import { colors } from '../styles/theme';
+import { useKeyboardVisible } from '../hooks/useKeyboardVisible';
+
+const KEYBOARD_GAP = 4;
 
 // Height constants (WhatsApp/Instagram pattern): padding + (lineCount × line height)
 // Ensure BASE_HEIGHT + (1 * LINE_HEIGHT) === MIN_INPUT_HEIGHT to avoid twitch between effect and onContentSizeChange
@@ -55,6 +58,13 @@ export interface ChatTextInputProps {
   maxLength?: number;
   leftAccessory?: React.ReactNode;
   primaryColor?: string;
+  /** Optional overrides — used by the image preview modal to render a dark variant. */
+  backgroundColor?: string;
+  textColor?: string;
+  placeholderColor?: string;
+  /** When true, send stays enabled even with an empty value. Image/video
+   * previews use this so users can send a media file without a caption. */
+  allowEmpty?: boolean;
   testID?: string;
 }
 
@@ -73,14 +83,20 @@ export const ChatTextInput = forwardRef<ChatTextInputRef, ChatTextInputProps>(fu
     maxLength = 500,
     leftAccessory,
     primaryColor = '#B72DF2',
+    backgroundColor,
+    textColor,
+    placeholderColor,
+    allowEmpty = false,
     testID,
   },
   ref
 ) {
   const inputRef = useRef<TextInput>(null);
+  const justSentRef = useRef<boolean>(false);
   const lastLineCountRef = useRef<number>(1);
   const [inputHeight, setInputHeight] = useState<number>(MIN_INPUT_HEIGHT);
   const [measureWidth, setMeasureWidth] = useState<number>(0);
+  const keyboardVisible = useKeyboardVisible();
 
   useImperativeHandle(
     ref,
@@ -140,20 +156,38 @@ export const ChatTextInput = forwardRef<ChatTextInputRef, ChatTextInputProps>(fu
   }, []);
 
   const handleSend = () => {
-    if (!value.trim() || disabled) return;
+    if (disabled) return;
+    if (!allowEmpty && !value.trim()) return;
+    // Mark a short window where onBlur should auto-refocus — the re-render
+    // from clearing value + LayoutAnimation can blur the TextInput on iOS.
+    justSentRef.current = true;
+    setTimeout(() => { justSentRef.current = false; }, 400);
     setInputHeight(MIN_INPUT_HEIGHT);
     onSend();
+    // Synchronous refocus — UIKit collapses this with any pending
+    // resignFirstResponder on the same run loop, so no visual dismiss occurs.
+    inputRef.current?.focus();
   };
 
-  const isSendDisabled = !value.trim() || disabled;
+  const isSendDisabled = disabled || (!allowEmpty && !value.trim());
 
   return (
-    <View style={styles.wrapper}>
+    <View
+      style={[
+        styles.wrapper,
+        keyboardVisible && Platform.OS !== 'web' && { paddingBottom: KEYBOARD_GAP },
+      ]}
+    >
       {leftAccessory != null && (
         <View style={styles.attachButtonWrapper}>{leftAccessory}</View>
       )}
 
-      <View style={styles.messageInputContainer}>
+      <View
+        style={[
+          styles.messageInputContainer,
+          backgroundColor ? { backgroundColor } : null,
+        ]}
+      >
         <View style={styles.inputContainer}>
           <View
             style={styles.textWrapper}
@@ -180,27 +214,34 @@ export const ChatTextInput = forwardRef<ChatTextInputRef, ChatTextInputProps>(fu
                   minHeight: MIN_INPUT_HEIGHT,
                   maxHeight: MAX_INPUT_HEIGHT,
                   lineHeight: LINE_HEIGHT,
-                  // Single line: nudge text up so it looks vertically centered (helps when textAlignVertical is ignored, e.g. Web)
+                  // Single line: balance vertical centering on Web (textAlignVertical is ignored there).
                   // Web-only — on iOS the padding flip interacts with onContentSizeChange sub-pixel deltas and produces a visible "shake" (Apple reject 2.1a)
                   ...(Platform.OS === 'web' && inputHeight <= MIN_INPUT_HEIGHT && {
-                    paddingTop: 8,
+                    paddingTop: 12,
                     paddingBottom: 12,
                   }),
+                  ...(textColor ? { color: textColor } : null),
                 },
               ]}
               placeholder={placeholder}
-              placeholderTextColor={colors.textSecondary}
+              placeholderTextColor={placeholderColor ?? colors.textSecondary}
               value={value}
               onChangeText={onChangeText}
-              editable={!disabled}
               multiline
               scrollEnabled={inputHeight >= MAX_INPUT_HEIGHT}
               maxLength={maxLength}
               onContentSizeChange={handleContentSizeChange}
+              onBlur={() => {
+                // Auto-refocus if blur fired during the send re-render window.
+                // Synchronous to preempt the native dismiss (deferring with rAF
+                // lets UIKit/IME commit the dismiss visually before we undo it).
+                if (justSentRef.current) {
+                  inputRef.current?.focus();
+                }
+              }}
               blurOnSubmit={false}
               returnKeyType="default"
               textAlignVertical={inputHeight <= MIN_INPUT_HEIGHT ? 'center' : 'top'}
-              selectionColor={primaryColor}
               testID={testID}
               {...(Platform.OS === 'web' && {
                 outlineStyle: 'none',
@@ -219,8 +260,17 @@ export const ChatTextInput = forwardRef<ChatTextInputRef, ChatTextInputProps>(fu
         <TouchableOpacity
           style={[
             styles.sendButton,
+            { backgroundColor: primaryColor },
             isSendDisabled && styles.sendButtonDisabled,
           ]}
+          onPressIn={() => {
+            // Pre-empt any focus transfer from the touch-down gesture: claim
+            // the send window and re-assert focus synchronously on the same
+            // run loop as the native touch event.
+            if (disabled || (!allowEmpty && !value.trim())) return;
+            justSentRef.current = true;
+            inputRef.current?.focus();
+          }}
           onPress={handleSend}
           activeOpacity={0.7}
           disabled={isSendDisabled}
@@ -247,7 +297,7 @@ const styles = StyleSheet.create({
   attachButtonWrapper: {
     justifyContent: 'flex-end',
     alignItems: 'flex-end',
-    paddingBottom: 16,
+    paddingBottom: 10,
     marginRight: 8,
   },
   messageInputContainer: {
@@ -257,12 +307,12 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingLeft: 10,
     paddingRight: 8,
-    paddingTop: 8,
-    paddingBottom: 8,
-    minHeight: 48,
-    borderBottomLeftRadius: 20,
+    paddingTop: 4,
+    paddingBottom: 4,
+    
+    borderBottomLeftRadius: 32,
     borderBottomRightRadius: 32,
-    borderTopLeftRadius: 20,
+    borderTopLeftRadius: 32,
     borderTopRightRadius: 32,
     backgroundColor: colors.white,
     shadowColor: '#000',
@@ -320,7 +370,8 @@ const styles = StyleSheet.create({
     fontFamily: Platform.OS === 'web' ? undefined : 'Inter',
     padding: 0,
     paddingLeft: 8,
-    paddingVertical: 8,
+    paddingTop: 12,
+    paddingBottom: 8,
     ...(Platform.OS === 'android' && { includeFontPadding: false }),
     margin: 0,
     ...(Platform.OS === 'web' && ({
@@ -331,16 +382,23 @@ const styles = StyleSheet.create({
       border: 'none',
       boxShadow: 'none',
       fontFamily: 'Inter, sans-serif',
+      // Suppress the native <textarea> scroll track / resize handle that
+      // RN-Web renders for multiline inputs. Most visible on dark backgrounds,
+      // where the default gray track reads as a vertical line next to the send button.
+      resize: 'none' as any,
+      scrollbarWidth: 'none' as any,
+      msOverflowStyle: 'none' as any,
     } as any)),
   },
   sendButton: {
-    width: 44,
-    height: 44,
+    width: 32,
+    height: 32,
     borderRadius: 22,
     justifyContent: 'center',
     alignItems: 'center',
+    alignSelf: 'flex-end',
+    marginBottom: 4,
     marginLeft: 8,
-    marginBottom: 2,
     backgroundColor: '#B72DF2',
   },
   sendButtonDisabled: {

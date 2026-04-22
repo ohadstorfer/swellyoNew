@@ -2,6 +2,7 @@ import { supabase } from '../../config/supabase';
 import { Platform } from 'react-native';
 import { validateVideoComplete, getFileExtension, getMimeTypeFromExtension } from '../../utils/videoValidation';
 import { isSupabaseConfigured } from '../../config/supabase';
+import { compressImage } from '../../utils/imageCompression';
 
 /**
  * Storage Service
@@ -117,6 +118,16 @@ export const uploadProfileImage = async (
   try {
     if (!imageUri || !userId) {
       return { success: false, error: 'Missing image or user ID' };
+    }
+
+    // Compress + resize before upload. iPhone originals can be 3-4 MB, which
+    // fails mid-download on spotty networks. Avatars display at 40-200px so a
+    // 1024px source at q=0.75 is plenty and lands around 200-400 KB.
+    try {
+      imageUri = await compressImage(imageUri, { maxDimension: 1024, quality: 0.75 });
+      console.log('[StorageService] Compressed image URI:', imageUri.substring(0, 50));
+    } catch (compressError) {
+      console.warn('[StorageService] Compression failed, uploading raw:', compressError);
     }
 
     // Generate a unique filename

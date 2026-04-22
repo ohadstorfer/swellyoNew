@@ -1277,7 +1277,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             disabled={isLoading}
             placeholder="Type your message.."
             maxLength={500}
-            primaryColor={colors.primary || '#B72DF2'}
+            primaryColor="#B72DF2"
             leftAccessory={
               <TouchableOpacity style={styles.attachButton}>
                 <Ionicons name="add" size={28} color="#222B30" />

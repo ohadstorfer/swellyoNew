@@ -1,17 +1,29 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   StyleSheet,
   Modal,
   TouchableOpacity,
   Image,
-  TextInput,
   ActivityIndicator,
   Platform,
+  KeyboardAvoidingView,
+  Dimensions,
 } from 'react-native';
-import { Text } from './Text';
-import { colors, spacing, borderRadius } from '../styles/theme';
-import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { GestureDetector, Gesture, GestureHandlerRootView } from 'react-native-gesture-handler';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  withSpring,
+  runOnJS,
+  interpolate,
+  Extrapolation,
+} from 'react-native-reanimated';
+import Svg, { Path } from 'react-native-svg';
+import { ChatTextInput } from './ChatTextInput';
+import { colors } from '../styles/theme';
 
 interface ImagePreviewModalProps {
   visible: boolean;
@@ -19,9 +31,27 @@ interface ImagePreviewModalProps {
   onSend: (caption?: string) => void;
   onCancel: () => void;
   isProcessing?: boolean;
+  /** Overrides the default send-button color so the preview matches the host chat's theme. */
+  primaryColor?: string;
 }
 
 const DEBUG_IMAGE_PICKER = typeof __DEV__ !== 'undefined' && __DEV__ && Platform.OS === 'web';
+
+const SCREEN_HEIGHT = Dimensions.get('window').height;
+const DISMISS_DISTANCE = 120; // px — past this, release dismisses
+const DISMISS_VELOCITY = 800; // px/s — past this, release dismisses regardless of distance
+
+const CloseIcon = () => (
+  <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
+    <Path
+      d="M18 6L6 18M6 6l12 12"
+      stroke="#FFFFFF"
+      strokeWidth={2.2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </Svg>
+);
 
 export const ImagePreviewModal: React.FC<ImagePreviewModalProps> = ({
   visible,
@@ -29,162 +59,172 @@ export const ImagePreviewModal: React.FC<ImagePreviewModalProps> = ({
   onSend,
   onCancel,
   isProcessing = false,
+  primaryColor = '#B72DF2',
 }) => {
   if (DEBUG_IMAGE_PICKER && visible) {
     console.log('[ImagePicker] checkpoint 6: ImagePreviewModal render with visible=true', { imageUriLength: imageUri?.length ?? 0 });
   }
+
+  const insets = useSafeAreaInsets();
   const [caption, setCaption] = useState('');
 
+  const translateY = useSharedValue(0);
+
+  // Reset the animated offset every time the modal opens so re-opens start centered.
+  useEffect(() => {
+    if (visible) {
+      translateY.value = 0;
+    }
+  }, [visible, translateY]);
+
   const handleSend = () => {
+    if (isProcessing) return;
     onSend(caption.trim() || undefined);
-    setCaption(''); // Reset caption after send
+    setCaption('');
   };
 
   const handleCancel = () => {
-    setCaption(''); // Reset caption on cancel
+    if (isProcessing) return;
+    setCaption('');
     onCancel();
   };
+
+  // Pan-to-dismiss — vertical swipe (up or down) past the threshold closes the modal.
+  // `activeOffsetY` requires a real vertical motion before activating, so taps on the
+  // caption input still focus normally. `failOffsetX` bails on mostly-horizontal drags.
+  const panGesture = Gesture.Pan()
+    .activeOffsetY([-15, 15])
+    .failOffsetX([-25, 25])
+    .onUpdate((e) => {
+      translateY.value = e.translationY;
+    })
+    .onEnd((e) => {
+      const distance = Math.abs(e.translationY);
+      const velocity = Math.abs(e.velocityY);
+      if (distance > DISMISS_DISTANCE || velocity > DISMISS_VELOCITY) {
+        const destination = e.translationY > 0 ? SCREEN_HEIGHT : -SCREEN_HEIGHT;
+        translateY.value = withTiming(destination, { duration: 220 }, (finished) => {
+          if (finished) {
+            runOnJS(handleCancel)();
+          }
+        });
+      } else {
+        translateY.value = withSpring(0, { damping: 22, stiffness: 180 });
+      }
+    });
+
+  const animatedContentStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: translateY.value }],
+    opacity: interpolate(
+      Math.abs(translateY.value),
+      [0, SCREEN_HEIGHT * 0.4],
+      [1, 0.6],
+      Extrapolation.CLAMP,
+    ),
+  }));
 
   return (
     <Modal
       visible={visible}
-      transparent
       animationType="fade"
       onRequestClose={handleCancel}
       statusBarTranslucent={Platform.OS === 'android'}
     >
-      <View style={styles.overlay}>
+      <GestureHandlerRootView style={styles.flex}>
         <View style={styles.container}>
-          {/* Header */}
-          <View style={styles.header}>
-            {isProcessing ? (
-              <View style={styles.cancelButton} />
-            ) : (
-              <TouchableOpacity
-                style={styles.cancelButton}
-                onPress={handleCancel}
+          <GestureDetector gesture={panGesture}>
+            <Animated.View style={[styles.flex, animatedContentStyle]}>
+              <KeyboardAvoidingView
+                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                style={styles.flex}
               >
-                <Text style={styles.cancelButtonText}>Cancel</Text>
-              </TouchableOpacity>
-            )}
-            <TouchableOpacity
-              style={[styles.sendButton, isProcessing && styles.sendButtonDisabled]}
-              onPress={handleSend}
-              disabled={isProcessing}
-            >
-              {isProcessing ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
-              ) : (
-                <Text style={styles.sendButtonText}>Send</Text>
-              )}
-            </TouchableOpacity>
-          </View>
+                {/* Image fills the available space */}
+                <View style={styles.imageContainer}>
+                  <Image
+                    source={{ uri: imageUri }}
+                    style={styles.image}
+                    resizeMode="contain"
+                  />
 
-          {/* Image Preview */}
-          <View style={styles.imageContainer}>
-            <Image
-              source={{ uri: imageUri }}
-              style={styles.image}
-              resizeMode="contain"
-            />
-          </View>
+                  {isProcessing && (
+                    <View style={styles.processingOverlay} pointerEvents="none">
+                      <ActivityIndicator size="large" color="#FFFFFF" />
+                    </View>
+                  )}
+                </View>
 
-          {/* Caption Input */}
-          <View style={styles.captionContainer}>
-            <TextInput
-              style={styles.captionInput}
-              placeholder="Add a caption (optional)"
-              placeholderTextColor="#7B7B7B"
-              value={caption}
-              onChangeText={setCaption}
-              multiline
-              maxLength={500}
-              editable={!isProcessing}
-            />
-          </View>
+                {/* Close button — circular, top-left, above the status bar */}
+                <TouchableOpacity
+                  style={[styles.closeButton, { top: insets.top + 12 }]}
+                  onPress={handleCancel}
+                  disabled={isProcessing}
+                  activeOpacity={0.7}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <CloseIcon />
+                </TouchableOpacity>
+
+                {/* Caption bar — reuses ChatTextInput so behaviour matches the DM composer exactly */}
+                <View style={[styles.inputWrapper, { paddingBottom: Math.max(insets.bottom, 8) }]}>
+                  <ChatTextInput
+                    value={caption}
+                    onChangeText={setCaption}
+                    onSend={handleSend}
+                    disabled={isProcessing}
+                    placeholder="Add a caption..."
+                    maxLength={500}
+                    primaryColor={primaryColor}
+                    backgroundColor="#2B2B2B"
+                    textColor="#FFFFFF"
+                    placeholderColor="rgba(255, 255, 255, 0.5)"
+                    allowEmpty
+                  />
+                </View>
+              </KeyboardAvoidingView>
+            </Animated.View>
+          </GestureDetector>
         </View>
-      </View>
+      </GestureHandlerRootView>
     </Modal>
   );
 };
 
 const styles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.9)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
+  flex: { flex: 1 },
   container: {
-    width: '90%',
-    maxWidth: 500,
-    backgroundColor: '#FFFFFF',
-    borderRadius: borderRadius.large,
-    overflow: 'hidden',
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E0E0E0',
-  },
-  cancelButton: {
-    paddingVertical: spacing.xs,
-    paddingHorizontal: spacing.sm,
-  },
-  cancelButtonText: {
-    fontSize: 16,
-    color: colors.textSecondary,
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
-  },
-  title: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: colors.textPrimary,
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
-  },
-  sendButton: {
-    paddingVertical: spacing.xs,
-    paddingHorizontal: spacing.md,
-    backgroundColor: colors.primary || '#B72DF2',
-    borderRadius: borderRadius.medium,
-  },
-  sendButtonDisabled: {
-    opacity: 0.5,
-  },
-  sendButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#FFFFFF',
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    flex: 1,
+    backgroundColor: '#000000',
   },
   imageContainer: {
-    width: '100%',
-    height: 400,
-    backgroundColor: '#000000',
+    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    position: 'relative',
   },
   image: {
     width: '100%',
     height: '100%',
   },
-  captionContainer: {
-    padding: spacing.md,
-    borderTopWidth: 1,
-    borderTopColor: '#E0E0E0',
+  processingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.35)',
   },
-  captionInput: {
-    minHeight: 60,
-    maxHeight: 120,
-    fontSize: 16,
-    color: colors.textPrimary,
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
-    textAlignVertical: 'top',
+  closeButton: {
+    position: 'absolute',
+    left: 16,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(40, 40, 40, 0.85)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  inputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    paddingHorizontal: 8,
+    paddingTop: 8,
   },
 });
-

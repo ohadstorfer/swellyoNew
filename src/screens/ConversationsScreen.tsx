@@ -21,6 +21,7 @@ import { usePostHog } from 'posthog-react-native';
 import { messagingService, Conversation } from '../services/messaging/messagingService';
 import { blockingService } from '../services/blocking/blockingService';
 import { useMessaging } from '../context/MessagingProvider';
+import { useUserProfile } from '../context/UserProfileContext';
 import { supabaseAuthService } from '../services/auth/supabaseAuthService';
 import { authService } from '../services/auth/authService';
 import { useOnboarding } from '../context/OnboardingContext';
@@ -32,9 +33,8 @@ import { DirectMessageScreen } from './DirectMessageScreen';
 import { SwellyShaperScreen } from './SwellyShaperScreen';
 import { SwellyoTeamWelcome } from './SwellyoTeamWelcome';
 import { ProfileImage } from '../components/ProfileImage';
-import { ConversationListSkeleton, HeaderSkeleton } from '../components/skeletons';
-import { SKELETON_DELAY_MS } from '../constants/loading';
-import { loadCachedUserProfile, saveCachedUserProfile } from '../utils/userProfileCache';
+import { ConversationListSkeleton } from '../components/skeletons';
+import { useConversationsStack } from '../navigation/ConversationsStack';
 
 interface ConversationsScreenProps {
   onConversationPress?: (conversationId: string) => void;
@@ -170,6 +170,33 @@ export default function ConversationsScreen({
   // Use MessagingProvider for conversations state
   const { conversations: rawConversations, loading, refreshConversations, setCurrentConversationId, hasMoreConversations, isLoadingMoreConversations, loadMoreConversations } = useMessaging();
 
+  // Logged-in user's surfer profile — loaded once at the provider level and
+  // reused across navigations, so the header renders instantly on return.
+  const { profile: myProfile } = useUserProfile();
+
+  // When wrapped by ConversationsStack (native only), push DM via navigation instead of local state.
+  const stackCtx = useConversationsStack();
+  const openConversation = (sel: {
+    id?: string;
+    otherUserId: string;
+    otherUserName: string;
+    otherUserAvatar: string | null;
+    isDirect?: boolean;
+  }) => {
+    if (stackCtx) {
+      stackCtx.navigateToDM({
+        conversationId: sel.id,
+        otherUserId: sel.otherUserId,
+        otherUserName: sel.otherUserName,
+        otherUserAvatar: sel.otherUserAvatar,
+        isDirect: sel.isDirect,
+      });
+    } else {
+      if (sel.id) setCurrentConversationId(sel.id);
+      setSelectedConversation(sel);
+    }
+  };
+
   // Filter out conversations with blocked users (both directions)
   const conversations = useMemo(() => {
     const blocked = blockingService.getAllHiddenIdsSet();
@@ -183,8 +210,6 @@ export default function ConversationsScreen({
   }, [rawConversations]);
 
   const [conversationsLoaded, setConversationsLoaded] = useState(false); // Track if conversations have been loaded
-  const [showSkeletons, setShowSkeletons] = useState(false); // Delayed skeleton display to avoid flicker
-  const [userInfoLoading, setUserInfoLoading] = useState(false); // Track user info loading state
   const [filter, setFilter] = useState<FilterType>('all');
   // Single source of truth for header display name (derived from context)
   const headerDisplayName = contextUser ? (contextUser.nickname?.split(' ')[0] || contextUser.email?.split('@')[0] || 'User') : 'User';
@@ -267,36 +292,18 @@ export default function ConversationsScreen({
 
   useEffect(() => {
     loadConversations();
-
-    if (!contextUser) {
-      setConversationsLoaded(true);
-      return;
-    }
-
-    // Load from cache first, then fetch if needed (only when we have a logged-in user)
-    const initializeUserInfo = async () => {
-      const cachedProfile = await loadCachedUserProfile();
-      if (cachedProfile) {
-        try {
-          const { data: { user: authUser } } = await supabase.auth.getUser();
-          if (authUser && cachedProfile.userId === authUser.id) {
-            setUserAvatar(cachedProfile.photo);
-            if (cachedProfile.userId) setCurrentUserId(cachedProfile.userId);
-            return;
-          }
-        } catch (_) {
-          // Fall through to loadUserInfo on auth error
-        }
-      }
-
-      await loadUserInfo();
-    };
-
-    initializeUserInfo();
-
     // Conversations are now managed by MessagingProvider
     setConversationsLoaded(true);
-  }, [refreshConversations, contextUser]);
+  }, [contextUser?.id]);
+
+  // Sync the header avatar/userId from the shared UserProfileContext.
+  // The context handles caching + refresh, so this effect just mirrors state.
+  useEffect(() => {
+    if (myProfile) {
+      setUserAvatar(myProfile.profile_image_url ?? null);
+      setCurrentUserId(myProfile.user_id);
+    }
+  }, [myProfile]);
 
 
   // Arrow animation effect for welcome instruction
@@ -326,61 +333,15 @@ export default function ConversationsScreen({
   }, [arrowAnim]);
 
 
-  const loadUserInfo = async () => {
-    // Only show skeleton if we don't have cached data
-    const hasCachedData = contextUser?.nickname || contextUser?.email || userAvatar;
-    if (!hasCachedData) {
-      setUserInfoLoading(true);
-    }
-    
-    try {
-      // Fetch from server
-      const user = await supabaseAuthService.getCurrentUser();
-      if (user) {
-        // Extract user data
-        const newName = user.nickname || user.email.split('@')[0];
-        const newPhoto = user.photo || null;
-        const newUserId = user.id || null;
-        
-        // Update state (display name is derived from contextUser; only avatar and id from server)
-        if (newUserId !== currentUserId) {
-          setCurrentUserId(newUserId);
-        }
-        if (newPhoto !== userAvatar) {
-          setUserAvatar(newPhoto);
-        }
-        
-        // Save to cache for future visits
-        if (newUserId) {
-          await saveCachedUserProfile(newName, newPhoto, newUserId);
-        }
-      }
-    } catch (error) {
-      console.error('Error loading user info:', error);
-      // Don't clear the cached data on error - keep showing what we have
-    } finally {
-      setUserInfoLoading(false);
-    }
-  };
-
   // Conversations are now loaded by MessagingProvider
   // This function is kept for backward compatibility but just triggers refresh
   const loadConversations = async () => {
     try {
-      // Delay showing skeletons to avoid flicker for fast loads
-      const skeletonTimeout = setTimeout(() => {
-        setShowSkeletons(true);
-      }, SKELETON_DELAY_MS);
-      
       await refreshConversations();
-      
-      clearTimeout(skeletonTimeout);
-      setShowSkeletons(false);
-      setConversationsLoaded(true); // Mark as loaded after successful fetch
+      setConversationsLoaded(true);
     } catch (error) {
       console.error('Error loading conversations:', error);
-      setShowSkeletons(false);
-      setConversationsLoaded(true); // Mark as loaded even on error
+      setConversationsLoaded(true);
     }
   };
 
@@ -537,12 +498,7 @@ export default function ConversationsScreen({
       });
       
       if (existingConv && existingConv.other_user) {
-        // Conversation exists, use it
-        // Set current conversation in MessagingProvider for unread logic
-        if (existingConv.id) {
-          setCurrentConversationId(existingConv.id);
-        }
-        setSelectedConversation({
+        openConversation({
           id: existingConv.id,
           otherUserId: userId,
           otherUserName: existingConv.other_user.name || 'User',
@@ -550,14 +506,9 @@ export default function ConversationsScreen({
         });
       } else {
         // No conversation exists yet - create pending conversation
-        // Get user details for display
         const { supabaseDatabaseService } = await import('../services/database/supabaseDatabaseService');
         const surferData = await supabaseDatabaseService.getSurferByUserId(userId);
-        
-        // Set current conversation in MessagingProvider for unread logic
-        // Note: No conversation ID yet, will be set after creation
-        setSelectedConversation({
-          // No id - this is a pending conversation
+        openConversation({
           otherUserId: userId,
           otherUserName: surferData?.name || 'User',
           otherUserAvatar: surferData?.profile_image_url || null,
@@ -719,8 +670,7 @@ export default function ConversationsScreen({
   const handleConversationPress = (conv: Conversation) => {
     // Handle both direct messages and group chats
     if (conv.is_direct && conv.other_user) {
-      // Direct message (2 users)
-      setSelectedConversation({
+      openConversation({
         id: conv.id,
         otherUserId: conv.other_user.user_id || '',
         otherUserName: conv.other_user.name || 'User',
@@ -728,12 +678,11 @@ export default function ConversationsScreen({
         isDirect: true,
       });
     } else if (!conv.is_direct) {
-      // Group chat - use title or fallback
-      setSelectedConversation({
+      openConversation({
         id: conv.id,
-        otherUserId: '', // Group chats don't have a single user ID
+        otherUserId: '',
         otherUserName: conv.title || 'Group Chat',
-        otherUserAvatar: null, // Group chats don't have a single avatar
+        otherUserAvatar: null,
         isDirect: false,
       });
     }
@@ -1159,30 +1108,24 @@ export default function ConversationsScreen({
           onPress={onProfilePress}
           activeOpacity={0.7}
         >
-          {userInfoLoading && !contextUser?.nickname && !contextUser?.email ? (
-            <HeaderSkeleton />
-          ) : (
-            <>
-              <LinearGradient
-                colors={['#05BCD3', '#DBCDBC']}
-                locations={[0, 0.7]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                style={styles.headerAvatarBorder}
-              >
-                <ProfileImage
-                  imageUrl={userAvatar}
-                  name={headerDisplayName}
-                  style={styles.headerAvatar}
-                  showLoadingIndicator={false}
-                />
-              </LinearGradient>
-              <View style={styles.headerTitleContainer}>
-                <Text style={styles.headerTitleMain}>The Lineup</Text>
-                <Text style={styles.headerTitleSub}>Yo {headerDisplayName}!</Text>
-              </View>
-            </>
-          )}
+          <LinearGradient
+            colors={['#05BCD3', '#DBCDBC']}
+            locations={[0, 0.7]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={styles.headerAvatarBorder}
+          >
+            <ProfileImage
+              imageUrl={userAvatar}
+              name={headerDisplayName}
+              style={styles.headerAvatar}
+              showLoadingIndicator={false}
+            />
+          </LinearGradient>
+          <View style={styles.headerTitleContainer}>
+            <Text style={styles.headerTitleMain}>The Lineup</Text>
+            <Text style={styles.headerTitleSub}>Yo {headerDisplayName}!</Text>
+          </View>
         </TouchableOpacity>
 
         <TouchableOpacity 
@@ -1247,7 +1190,7 @@ export default function ConversationsScreen({
             }}
             scrollEventThrottle={400}
           >
-            {loading && showSkeletons && conversations.length === 0 ? (
+            {(loading || !conversationsLoaded) && conversations.length === 0 ? (
               <ConversationListSkeleton count={5} />
             ) : (
               <>
@@ -1262,7 +1205,7 @@ export default function ConversationsScreen({
                 )}
                 
                 {/* Welcome message instructional text - only show when welcome conversation is displayed, or in dev mode for testing */}
-                {conversationsLoaded && (conversations.length === 0 || isDevMode) && filter === 'all' && (
+                {!loading && conversationsLoaded && (conversations.length === 0 || isDevMode) && filter === 'all' && (
                   <View style={styles.welcomeInstructionContainer}>
                     <Animated.Text 
                       style={[

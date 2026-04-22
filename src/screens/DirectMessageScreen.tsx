@@ -13,9 +13,12 @@ import {
   Modal,
   Dimensions,
   Linking,
+  Keyboard,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { KeyboardAvoidingView, isExpoGo } from '../utils/keyboardAvoidingView';
+import Reanimated, { useAnimatedStyle } from 'react-native-reanimated';
+import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller';
+import { KeyboardGestureArea, isExpoGo } from '../utils/keyboardAvoidingView';
 import { TextInput as PaperTextInput } from 'react-native-paper';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Path } from 'react-native-svg';
@@ -29,8 +32,6 @@ import { getImageUrl } from '../services/media/imageService';
 import { Images } from '../assets/images';
 import { supabase } from '../config/supabase';
 import { ProfileImage } from '../components/ProfileImage';
-import { MessageListSkeleton } from '../components/skeletons';
-import { SKELETON_DELAY_MS } from '../constants/loading';
 import { analyticsService } from '../services/analytics/analyticsService';
 import { chatHistoryCache } from '../services/messaging/chatHistoryCache';
 import { messageOutbox } from '../services/messaging/messageOutbox';
@@ -46,9 +47,40 @@ import { FullscreenVideoPlayer } from '../components/FullscreenVideoPlayer';
 import { ChatTextInput, ChatTextInputRef } from '../components/ChatTextInput';
 import { WelcomeIntroMessage } from '../components/WelcomeIntroMessage';
 import { useChatKeyboardScroll } from '../hooks/useChatKeyboardScroll';
-import { useKeyboardVisible, useKeyboardHeight } from '../hooks/useKeyboardVisible';
 import { BlockUserOverlay } from '../components/BlockUserOverlay';
 import { ReportUserScreen } from './ReportUserScreen';
+
+// WhatsApp-style read receipts for own messages.
+// - 'pending'   → no tick (upload in flight / failed; existing UI shows "Sending…" / "Tap to retry")
+// - 'delivered' → 2V gris (message in DB, not yet read by other user)
+// - 'read'      → 2V azul (other user's last_read_at >= message.created_at)
+type ReceiptState = 'pending' | 'delivered' | 'read';
+
+function getReceiptState(msg: Message, otherReadAt: string | null): ReceiptState {
+  if (msg.upload_state === 'uploading' || msg.upload_state === 'failed') return 'pending';
+  if (!otherReadAt) return 'delivered';
+  return new Date(msg.created_at).getTime() <= new Date(otherReadAt).getTime()
+    ? 'read'
+    : 'delivered';
+}
+
+function ReadReceipt({ state, onDark }: { state: ReceiptState; onDark?: boolean }) {
+  if (state === 'pending') return null;
+  const color =
+    state === 'read'
+      ? '#53BDEB'
+      : onDark
+        ? 'rgba(255,255,255,0.7)'
+        : 'rgba(255,255,255,0.55)';
+  return (
+    <Ionicons
+      name="checkmark-done"
+      size={16}
+      color={color}
+      style={{ marginLeft: 4 }}
+    />
+  );
+}
 
 interface DirectMessageScreenProps {
   conversationId?: string; // Optional: undefined for pending conversations (will be created on first message)
@@ -93,7 +125,6 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [otherUserAdvRole, setOtherUserAdvRole] = useState<'adv_giver' | 'adv_seeker' | null>(null);
   const [otherUserIsOnline, setOtherUserIsOnline] = useState<boolean | null>(null);
-  const [showSkeletons, setShowSkeletons] = useState(false);
   const [hasTrackedFirstMessage, setHasTrackedFirstMessage] = useState(false);
   const [hasTrackedFirstReply, setHasTrackedFirstReply] = useState(false);
   const [firstMessageSentTime, setFirstMessageSentTime] = useState<number | null>(null);
@@ -123,8 +154,28 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const [videoPreviewVisible, setVideoPreviewVisible] = useState(false);
   const [isProcessingVideo, setIsProcessingVideo] = useState(false);
   const insets = useSafeAreaInsets();
-  const keyboardVisible = useKeyboardVisible();
-  const androidKeyboardHeight = useKeyboardHeight();
+  // Keyboard-aware padding for the chat area. Bypasses the measureLayout-based
+  // KAV which breaks when nested inside react-native-screen-transitions' transformed
+  // ContentLayer. height is negative when keyboard is open on iOS → negate for padding.
+  const { height: kbHeight, progress: kbProgress } = useReanimatedKeyboardAnimation();
+  const animatedKeyboardPadding = useAnimatedStyle(() => ({
+    paddingBottom: -kbHeight.value,
+  }));
+  // Composer's own bottom padding: insets.bottom at rest (home indicator safe area),
+  // shrinks to 0 as keyboard opens (so the input sits flush against keyboard top).
+  const composerRestPadding = Math.max(insets.bottom, 8);
+  const animatedComposerPadding = useAnimatedStyle(() => ({
+    paddingBottom: composerRestPadding * (1 - kbProgress.value),
+  }));
+  // Send-button color themed by the other user's advice role. Used by the
+  // chat composer AND the image/video preview modals so the send button
+  // matches across all three surfaces.
+  const composerPrimaryColor =
+    otherUserAdvRole === 'adv_giver'
+      ? '#DBCDBC'
+      : otherUserAdvRole === 'adv_seeker'
+        ? '#05BCD3'
+        : '#B72DF2';
   const flatListRef = useRef<FlatList<Message>>(null);
   const { handleScroll: handleKeyboardScroll, handleLayout, scrollToBottom } = useChatKeyboardScroll(flatListRef, { inverted: true });
 
@@ -138,6 +189,9 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const hasTriedReconnectRef = useRef(false);
   const [reconnectAttempt, setReconnectAttempt] = useState(0);
   const [realtimeStatus, setRealtimeStatus] = useState<RealtimeSubscriptionStatus | null>(null);
+  // Other user's last_read_at from conversation_members. Used to derive read receipts
+  // (2V gris = delivered, 2V azul = read) for our own messages.
+  const [otherUserLastReadAt, setOtherUserLastReadAt] = useState<string | null>(null);
   // Reconnect catch-up: detect SUBSCRIBED after a prior disconnect and pull missed messages.
   const wasDisconnectedRef = useRef(false);
   const lastRealtimeEventAtRef = useRef<number>(Date.now());
@@ -188,15 +242,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       }
     };
     getCurrentUser();
-
-    // Only show skeletons if fetching AND no messages
-    // This is now redundant since we handle it in render, but keep for safety
-    if (isFetchingMessages && messages.length === 0) {
-      setShowSkeletons(true);
-    } else {
-      setShowSkeletons(false);
-    }
-  }, [isFetchingMessages, messages.length]);
+  }, []);
 
   useEffect(() => {
     if (currentConversationId) {
@@ -214,6 +260,14 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         markAsRead(currentConversationId).catch(err => {
           console.error('Error marking as read:', err);
         });
+      }
+
+      // Fetch the other user's last_read_at to seed receipt state before the first Realtime UPDATE.
+      if (otherUserId) {
+        messagingService
+          .getMemberLastReadAt(currentConversationId, otherUserId)
+          .then((ts) => setOtherUserLastReadAt(ts))
+          .catch(() => { /* non-fatal; defaults to null → delivered */ });
       }
 
       // Reset reconnect catch-up refs for this subscription instance.
@@ -257,6 +311,11 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       const unsubscribe = messagingService.subscribeToMessages(
         currentConversationId,
         {
+          onReadReceiptUpdate: (userId, lastReadAt) => {
+            if (userId === otherUserId) {
+              setOtherUserLastReadAt(lastReadAt);
+            }
+          },
           onSubscriptionStatus: (status) => {
             setRealtimeStatus(status);
             if (status === 'SUBSCRIBED') {
@@ -499,7 +558,6 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       // No conversation yet - clear messages and stop loading
       setMessages([]);
       setIsFetchingMessages(false);
-      setShowSkeletons(false);
       setIsTyping(false);
       // Clear current conversation in MessagingProvider
       setMessagingCurrentConversationId(null);
@@ -511,7 +569,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         setMessagingCurrentConversationId(null);
       }
     };
-  }, [currentConversationId, markAsRead, setMessagingCurrentConversationId, reconnectAttempt]);
+  }, [currentConversationId, markAsRead, setMessagingCurrentConversationId, reconnectAttempt, otherUserId]);
 
   // Separate useEffect to mark as read when currentUserId becomes available
   useEffect(() => {
@@ -657,7 +715,6 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       console.log('[DirectMessageScreen] ⚠️ No conversation ID, clearing messages');
       setMessages([]);
       setIsFetchingMessages(false);
-      setShowSkeletons(false);
       // Reset pagination state
       oldestMessageIdRef.current = null;
       setHasMoreMessages(false);
@@ -738,8 +795,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       });
       setMessages(cachedMessages);
       setIsFetchingMessages(false);
-      setShowSkeletons(false);  // Binary: cache exists = no skeleton
-      
+
       setHasMoreMessages(true);
 
       // Lightweight catch-up: fetch messages newer than the newest cached message
@@ -823,7 +879,6 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         });
         setMessages(asyncCachedMessages);
         setIsFetchingMessages(false);
-        setShowSkeletons(false);  // Binary: cache exists = no skeleton
 
         setHasMoreMessages(true);
 
@@ -845,8 +900,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         }
       } else {
         console.log('[DirectMessageScreen] ⚠️ Both caches MISS - fetching from server');
-        setShowSkeletons(true);  // Binary: no cache = show skeleton
-        
+
         const serverStartTime = Date.now();
         const result = await messagingService.getMessages(currentConversationId, 30);
         const serverTime = Date.now() - serverStartTime;
@@ -873,12 +927,10 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         // Set messages after adv_role is loaded to ensure correct colors
         setMessages(result.messages);
         setIsFetchingMessages(false);
-        setShowSkeletons(false);
       }
     } catch (error) {
       console.error('[DirectMessageScreen] ❌ Error loading messages:', error);
       setIsFetchingMessages(false);
-      setShowSkeletons(false);
     }
   };
   
@@ -1027,8 +1079,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     setMessages((prev) => [...prev, optimisticMessage]);
     setInputText('');
 
-    // Keep keyboard open after sending
-    chatInputRef.current?.focus();
+    // Refocus is handled inside ChatTextInput.handleSend (covers rAF + LayoutAnimation timing).
 
     // Scroll to bottom immediately
     scrollToBottom();
@@ -1698,65 +1749,79 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   };
 
   // Handle video send
-  const handleVideoSend = async (caption?: string) => {
-    const videoUri = selectedVideoUri;
+  const handleVideoSend = async (caption?: string, overrideVideoUri?: string) => {
+    // Prefer a trimmed URI from the preview modal when the user cut the clip;
+    // otherwise fall back to the originally-picked URI.
+    const videoUri = overrideVideoUri ?? selectedVideoUri;
     if (!videoUri || !currentConversationId || !currentUserId) {
       return;
     }
 
     const conversationId = currentConversationId;
     let messageId: string | null = null;
-    // Snapshot picker hints before clearing the ref on modal close.
-    const videoHints = selectedVideoMetadataRef.current ?? undefined;
+    // Picker hints describe the ORIGINAL file. If the user trimmed, the file
+    // changed — let `processVideo` re-read metadata from disk rather than trust
+    // stale hints for duration/size.
+    const videoHints = overrideVideoUri ? undefined : (selectedVideoMetadataRef.current ?? undefined);
 
     try {
-      // Step 1: Create video message record in DB
-      const messageRecord = await messagingService.createVideoMessage(conversationId, caption);
-      messageId = messageRecord.id;
-
       // Close preview immediately — upload continues in background
       setVideoPreviewVisible(false);
       setSelectedVideoUri(null);
       selectedVideoMetadataRef.current = null;
       setIsProcessingVideo(false);
 
-      // Inject message locally with uploading flag + local preview
+      const { processVideo, uploadVideoToS3, uploadThumbnailToStorage, pollForProcessedDmVideo } = await import('../services/messaging/videoUploadService');
+
+      // Generate the thumbnail BEFORE injecting the bubble. <Image> can't render a raw
+      // video URI, so without a real poster the bubble would be a black box during
+      // upload. Paralleled with createVideoMessage to avoid adding latency.
+      const [messageRecord, processed] = await Promise.all([
+        messagingService.createVideoMessage(conversationId, caption),
+        processVideo(videoUri, videoHints),
+      ]);
+      messageId = messageRecord.id;
+
+      // Inject dimensions so the poster renders with the correct aspect ratio
+      // during the upload phase (prevents portrait videos getting stretched to 16/9).
+      const posterMetadata = {
+        video_url: '',
+        thumbnail_url: '',
+        duration: processed.duration,
+        width: processed.width,
+        height: processed.height,
+        file_size: processed.fileSize,
+        mime_type: processed.mimeType,
+        storage_path: '',
+      };
+
+      // Inject message locally with uploading flag + local thumbnail poster
       setMessages((prev) => {
         const existingIdx = prev.findIndex(m => m.id === messageRecord.id);
         if (existingIdx !== -1) {
           return prev.map(m =>
             m.id === messageRecord.id
-              ? { ...m, upload_state: 'uploading', _localPreviewUri: videoUri }
+              ? { ...m, upload_state: 'uploading', _localPreviewUri: processed.thumbnailUri, video_metadata: posterMetadata }
               : m
           );
         }
-        return [...prev, { ...messageRecord, upload_state: 'uploading', _localPreviewUri: videoUri }];
+        return [...prev, { ...messageRecord, upload_state: 'uploading', _localPreviewUri: processed.thumbnailUri, video_metadata: posterMetadata }];
       });
       scrollToBottom();
 
-      const { processVideo, uploadVideoToS3, uploadThumbnailToStorage, pollForProcessedDmVideo } = await import('../services/messaging/videoUploadService');
+      // Step 3: Upload video + thumbnail in parallel
+      const [uploadResult, thumbnailUrl] = await Promise.all([
+        uploadVideoToS3(videoUri, conversationId, messageRecord.id),
+        uploadThumbnailToStorage(processed.thumbnailUri, conversationId, messageRecord.id),
+      ]);
+      const { s3Key, processedKey, originalUrl } = uploadResult;
 
-      // Step 2: Process video (get metadata + thumbnail), feeding picker hints so native
-      // doesn't fall back to zeroed width/height/duration.
-      const processed = await processVideo(videoUri, videoHints);
-
-      // Step 3: Upload video to S3
-      const { s3Key, processedKey } = await uploadVideoToS3(
-        videoUri,
-        conversationId,
-        messageRecord.id,
-      );
-
-      // Step 4: Upload thumbnail to Supabase
-      const thumbnailUrl = await uploadThumbnailToStorage(
-        processed.thumbnailUri,
-        conversationId,
-        messageRecord.id,
-      );
-
-      // Step 5: Update message with initial video metadata (unprocessed URL for now)
+      // Step 5: Update message with initial video metadata.
+      // `original_url` is playable immediately; `video_url` is filled by the
+      // server-side Lambda once MediaConvert writes the compressed output.
       const videoMetadata = {
-        video_url: '', // Will be populated when MediaConvert finishes
+        video_url: '',
+        original_url: originalUrl,
         thumbnail_url: thumbnailUrl,
         duration: processed.duration,
         width: processed.width,
@@ -1768,8 +1833,8 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
 
       await messagingService.updateVideoMessageMetadata(messageRecord.id, videoMetadata);
 
-      // Upload phase done. Clear upload_state so the existing `!videoUrl` "Processing..." overlay
-      // takes over for the MediaConvert polling phase.
+      // Upload phase done. Receiver can already play the original_url; the compressed
+      // video_url will be swapped in via Realtime when the Lambda finishes.
       setMessages((prev) => prev.map(m =>
         m.id === messageRecord.id
           ? { ...m, video_metadata: videoMetadata, upload_state: 'sent', _localPreviewUri: undefined }
@@ -2057,7 +2122,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   // FlatList helpers for inverted list
   const renderItem = useCallback(({ item }: { item: Message }) => {
     return renderMessage(item);
-  }, [currentUserId, editingMessageId, otherUserAdvRole, isDirect, menuVisible, selectedMessage]);
+  }, [currentUserId, editingMessageId, otherUserAdvRole, isDirect, menuVisible, selectedMessage, otherUserLastReadAt]);
 
   const keyExtractor = useCallback((item: Message) => item.id, []);
 
@@ -2076,11 +2141,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
 
   const listEmptyComponent = useMemo(() => {
     if (isFetchingMessages) {
-      return (
-        <View>
-          <MessageListSkeleton count={5} />
-        </View>
-      );
+      return null;
     }
     return (
       <View style={styles.emptyContainerWelcome}>
@@ -2131,6 +2192,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       <TouchableOpacity
         key={message.id}
         activeOpacity={0.7}
+        onPress={() => Keyboard.dismiss()}
         onLongPress={(e) => handleMessageLongPress(message, e)}
         style={[
           styles.messageContainer,
@@ -2182,7 +2244,9 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             // Video message
             (() => {
               const thumbnailUri = message.video_metadata?.thumbnail_url || message._localPreviewUri || '';
-              const videoUrl = message.video_metadata?.video_url || '';
+              // Prefer the compressed URL when ready; otherwise play the original
+              // so the receiver can watch instantly while MediaConvert processes.
+              const playableUrl = message.video_metadata?.video_url || message.video_metadata?.original_url || '';
               const aspectRatio = message.video_metadata?.width && message.video_metadata?.height
                 ? message.video_metadata.width / message.video_metadata.height : 16 / 9;
               const isUploading = message.upload_state === 'uploading';
@@ -2193,11 +2257,11 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                   <TouchableOpacity
                     activeOpacity={0.9}
                     onPress={() => {
-                      if (videoUrl) {
-                        setFullscreenVideoUrl(videoUrl);
+                      if (playableUrl) {
+                        setFullscreenVideoUrl(playableUrl);
                       }
                     }}
-                    disabled={!videoUrl || isUploading || isFailed}
+                    disabled={!playableUrl || isUploading || isFailed}
                     style={styles.imageTouchable}
                   >
                     {thumbnailUri ? (
@@ -2213,7 +2277,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                       <View style={[styles.messageImage, { aspectRatio: 16 / 9, backgroundColor: '#1a1a1a' }]} />
                     )}
                     {/* Play button overlay */}
-                    {videoUrl && !isUploading && !isFailed ? (
+                    {playableUrl && !isUploading && !isFailed ? (
                       <View style={styles.videoPlayOverlay}>
                         <Ionicons name="play-circle" size={48} color="rgba(255,255,255,0.9)" />
                       </View>
@@ -2225,16 +2289,17 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                     ) : (
                       <View style={styles.uploadOverlay}>
                         <ActivityIndicator size="large" color="#FFFFFF" />
-                        <Text style={styles.uploadProgressText}>
-                          {isUploading ? 'Uploading...' : 'Processing...'}
-                        </Text>
+                        <Text style={styles.uploadProgressText}>Uploading...</Text>
                       </View>
                     )}
                     {/* Timestamp overlay */}
-                    <View style={styles.imageTimestampOverlay}>
+                    <View style={[styles.imageTimestampOverlay, { flexDirection: 'row', alignItems: 'center' }]}>
                       <Text style={styles.imageTimestamp}>
                         {formatTime(message.created_at)}
                       </Text>
+                      {isOwnMessage && !message.deleted && (
+                        <ReadReceipt state={getReceiptState(message, otherUserLastReadAt)} onDark />
+                      )}
                     </View>
                   </TouchableOpacity>
                   {message.body && (
@@ -2325,10 +2390,13 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                       </View>
                     )}
                     {/* Timestamp overlay on image */}
-                    <View style={styles.imageTimestampOverlay}>
+                    <View style={[styles.imageTimestampOverlay, { flexDirection: 'row', alignItems: 'center' }]}>
                       <Text style={styles.imageTimestamp}>
                         {formatTime(message.created_at)}
                       </Text>
+                      {isOwnMessage && !message.deleted && (
+                        <ReadReceipt state={getReceiptState(message, otherUserLastReadAt)} onDark />
+                      )}
                     </View>
                   </TouchableOpacity>
                   {message.body && (
@@ -2402,32 +2470,43 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                       isOwnMessage ? styles.userMessageText : styles.botMessageText,
                       !isOwnMessage && otherUserAdvRole === 'adv_giver' && styles.botMessageTextGiveAdv,
                       !isOwnMessage && otherUserAdvRole === 'adv_seeker' && styles.botMessageTextGetAdv,
+                      isOwnMessage && { textAlign: 'right' as const, alignSelf: 'flex-end' as const },
                     ]}>
                       {message.body || ''}
                     </Text>
-                    
+
                   </>
                 )}
               </View>
               
               {/* Timestamp container for text messages */}
-              <View style={[
-                styles.timestampContainer,
-                isOwnMessage ? styles.userTimestampContainer : styles.botTimestampContainer,
-              ]}>
-                <Text style={[
-                  styles.timestamp,
-                  isOwnMessage ? styles.userTimestamp : styles.botTimestamp,
-                ]}>
-                  {formatTime(message.created_at)}
-
-                  {message.edited && !message.deleted && (
+              {isOwnMessage ? (
+                <View style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  alignSelf: 'flex-end',
+                  marginTop: 2,
+                }}>
+                  <Text style={[styles.timestamp, styles.userTimestamp]}>
+                    {formatTime(message.created_at)}
+                    {message.edited && !message.deleted && (
                       <Text style={styles.editedBadge}>  (edited)</Text>
                     )}
-
-                </Text>
-
-              </View>
+                  </Text>
+                  {!message.deleted && !isEditing && (
+                    <ReadReceipt state={getReceiptState(message, otherUserLastReadAt)} />
+                  )}
+                </View>
+              ) : (
+                <View style={[styles.timestampContainer, styles.botTimestampContainer]}>
+                  <Text style={[styles.timestamp, styles.botTimestamp]}>
+                    {formatTime(message.created_at)}
+                    {message.edited && !message.deleted && (
+                      <Text style={styles.editedBadge}>  (edited)</Text>
+                    )}
+                  </Text>
+                </View>
+              )}
               {message.upload_state === 'uploading' && !message.deleted && !isEditing && isOwnMessage && (
                 <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2, alignSelf: 'flex-end', gap: 4 }}>
                   <ActivityIndicator size="small" color="#E53935" />
@@ -2542,19 +2621,19 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       )}
 
       {/* Chat Messages */}
-      <KeyboardAvoidingView
-        style={[styles.chatContainer, isExpoGo && Platform.OS === 'android' && androidKeyboardHeight > 0 && { paddingBottom: androidKeyboardHeight }]}
-        behavior={isExpoGo && Platform.OS === 'android' ? undefined : 'padding'}
-        keyboardVerticalOffset={0}
-      >
-        <ImageBackground
-          source={Images.chatBackground}
-          style={styles.backgroundImage}
-          resizeMode="cover"
-        >
+      {(() => {
+        // The chat area (messages + composer) is wrapped in a Reanimated.View
+        // whose paddingBottom tracks keyboard height (via useReanimatedKeyboardAnimation).
+        // This is a manual behavior='padding' that avoids measureLayout — so it
+        // works correctly even nested inside react-native-screen-transitions'
+        // transformed ContentLayer, where the normal KAV fails.
+        const useGestureArea = !isExpoGo && KeyboardGestureArea != null;
+
+        const messageList = (
           <FlatList
             ref={flatListRef}
             data={invertedMessages}
+            extraData={otherUserLastReadAt}
             renderItem={renderItem}
             keyExtractor={keyExtractor}
             inverted
@@ -2564,9 +2643,10 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
               { flexGrow: 1, justifyContent: 'flex-end' },
             ]}
             showsVerticalScrollIndicator={false}
+            automaticallyAdjustContentInsets={false}
+            contentInsetAdjustmentBehavior="never"
             onScroll={(event) => {
               handleKeyboardScroll(event);
-              // Manual pagination: in inverted list, high offset = scrolled toward older messages
               const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
               const maxOffset = contentSize.height - layoutMeasurement.height;
               const distanceFromTop = maxOffset - contentOffset.y;
@@ -2583,28 +2663,61 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             ListFooterComponent={listFooterComponent}
             ListEmptyComponent={listEmptyComponent}
             keyboardShouldPersistTaps="handled"
-          />
-        </ImageBackground>
-
-        {/* Input Area */}
-        <View style={[styles.inputWrapper, { paddingBottom: keyboardVisible ? 4 : Math.max(insets.bottom, 24) }]}>
-          <ChatTextInput
-            ref={chatInputRef}
-            value={inputText}
-            onChangeText={setInputText}
-            onSend={sendMessage}
-            disabled={isLoading}
-            placeholder="Type your message.."
-            maxLength={500}
-            primaryColor={colors.primary || '#B72DF2'}
-            leftAccessory={
-              <TouchableOpacity style={styles.attachButton} onPress={handleImagePicker}>
-                <Ionicons name="add" size={28} color="#222B30" />
-              </TouchableOpacity>
+            keyboardDismissMode={
+              useGestureArea ? 'none' : Platform.OS === 'ios' ? 'interactive' : 'on-drag'
             }
           />
-        </View>
-      </KeyboardAvoidingView>
+        );
+
+        const composer = (
+          <Reanimated.View style={[styles.inputWrapper, animatedComposerPadding]}>
+            <ChatTextInput
+              ref={chatInputRef}
+              value={inputText}
+              onChangeText={setInputText}
+              onSend={sendMessage}
+              disabled={isLoading}
+              placeholder="Type your message.."
+              maxLength={500}
+              // Send button tracks the other user's advice-role bubble color so
+              // the composer feels "themed" per chat: teal for seekers, beige
+              // for givers, Swelly purple (same as Swelly chat user bubbles) otherwise.
+              primaryColor={composerPrimaryColor}
+              leftAccessory={
+                <TouchableOpacity style={styles.attachButton} onPress={handleImagePicker}>
+                  <Ionicons name="add" size={28} color="#222B30" />
+                </TouchableOpacity>
+              }
+            />
+          </Reanimated.View>
+        );
+
+        const inner = (
+          <View style={{ flex: 1 }}>
+            <ImageBackground
+              source={Images.chatBackground}
+              style={[styles.backgroundImage, { pointerEvents: 'none' }]}
+              resizeMode="cover"
+            />
+            <Reanimated.View style={[{ flex: 1 }, animatedKeyboardPadding]}>
+              {messageList}
+              {composer}
+            </Reanimated.View>
+          </View>
+        );
+
+        return (
+          <View style={styles.chatContainer}>
+            {useGestureArea ? (
+              <KeyboardGestureArea interpolator="ios" style={{ flex: 1 }}>
+                {inner}
+              </KeyboardGestureArea>
+            ) : (
+              inner
+            )}
+          </View>
+        );
+      })()}
 
       {/* Message Actions Menu */}
       <MessageActionsMenu
@@ -2749,6 +2862,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             setIsProcessingImage(false);
           }}
           isProcessing={isProcessingImage}
+          primaryColor={composerPrimaryColor}
         />
       )}
 
@@ -2765,6 +2879,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             setIsProcessingVideo(false);
           }}
           isProcessing={isProcessingVideo}
+          primaryColor={composerPrimaryColor}
         />
       )}
       <BlockUserOverlay
@@ -2804,7 +2919,7 @@ const styles = StyleSheet.create({
   },
   headerContainer: {
     backgroundColor: '#212121',
-    paddingTop: Platform.OS === 'web' ? 35 : 35,
+    paddingTop: Platform.OS === 'web' ? 35 : 10,
     paddingBottom: 24,
     paddingHorizontal: 0,
     alignItems: 'center',
@@ -2942,8 +3057,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#F5F5F5',
   },
   backgroundImage: {
-    flex: 1,
+    ...StyleSheet.absoluteFillObject,
     width: '100%',
+    height: '100%',
   },
   messagesList: {
     flex: 1,
@@ -2999,7 +3115,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end', // Received messages on RIGHT side
     alignItems: 'flex-end',
     paddingLeft: 48,
-    paddingRight: 16, 
+    paddingRight: 0,
     marginBottom: 16,
   },
   botMessageContainer: {
@@ -3045,7 +3161,7 @@ const styles = StyleSheet.create({
     paddingLeft: 16,
     flexDirection: 'column',
     justifyContent: 'flex-end',
-    alignItems: 'flex-start',
+    alignItems: 'flex-end',
     backgroundColor: '#FFFFFF', // White background for outbound messages
     
     borderTopLeftRadius: 16, // 16px 2px 16px 16px

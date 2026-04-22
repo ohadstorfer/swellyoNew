@@ -8,8 +8,10 @@ import {
   Image,
   ImageBackground,
   ScrollView,
+  FlatList,
   PanResponder,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -36,6 +38,52 @@ function logMapPicker(...args: any[]) {
   if (__DEV__ || DEBUG_MAP_PICKER) {
     // eslint-disable-next-line no-console
     console.log('[DestinationMapPickerCard]', ...args);
+  }
+}
+
+const PLACES_AUTOCOMPLETE_URL = 'https://places.googleapis.com/v1/places:autocomplete';
+const PLACES_DETAILS_URL = 'https://places.googleapis.com/v1/places';
+const SUGGESTION_DEBOUNCE_MS = 250;
+const MIN_QUERY_LENGTH = 2;
+const MAX_SUGGESTIONS = 5;
+
+interface PlaceSuggestion {
+  placeId: string;
+  text: string;
+}
+
+function useDebounce<T>(value: T, delay: number): T {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedValue(value), delay);
+    return () => clearTimeout(timer);
+  }, [value, delay]);
+  return debouncedValue;
+}
+
+async function fetchPlaceDetails(placeId: string, apiKey: string): Promise<MapPickerPlace | null> {
+  try {
+    const res = await fetch(`${PLACES_DETAILS_URL}/${encodeURIComponent(placeId)}`, {
+      method: 'GET',
+      headers: {
+        'X-Goog-Api-Key': apiKey,
+        'X-Goog-FieldMask': 'displayName,formattedAddress,location',
+      },
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const lat = data?.location?.latitude;
+    const lng = data?.location?.longitude;
+    if (typeof lat !== 'number' || typeof lng !== 'number') return null;
+    return {
+      name: data?.displayName?.text ?? data?.formattedAddress ?? '',
+      placeId,
+      lat,
+      lng,
+      formatted_address: data?.formattedAddress ?? '',
+    };
+  } catch {
+    return null;
   }
 }
 
@@ -147,6 +195,8 @@ export const DestinationMapPickerCard = forwardRef<
 ) {
   const [places, setPlaces] = useState<SavedPlace[]>(() => parseInitialPlaces(initialAreas));
   const [query, setQuery] = useState('');
+  const [suggestions, setSuggestions] = useState<PlaceSuggestion[]>([]);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
   const [inputRowHeight, setInputRowHeight] = useState(0);
   const [timeValue, setTimeValue] = useState(initialTimeValue || '2');
   const [timeUnit, setTimeUnit] = useState<TimeUnit>(initialTimeUnit || 'weeks');
@@ -155,6 +205,9 @@ export const DestinationMapPickerCard = forwardRef<
   const inputRowRef = useRef<View>(null);
   const unitSelectorWrapperRef = useRef<View>(null);
   const onDataChangeRef = useRef(onDataChange);
+  // Race-guard: discards stale autocomplete responses when the user types fast.
+  const autocompleteSeqRef = useRef(0);
+  const isMountedRef = useRef(true);
 
   const doMeasureAndReport = useCallback(() => {
     if (!onSwipeExcludeZonesLayout || currentIndex == null) return;
@@ -351,52 +404,143 @@ export const DestinationMapPickerCard = forwardRef<
     scrollToUnitIndex(timeUnitIndex, false);
   }, []);
 
-  const handleMapSelect = useCallback((payload: { type: string; place?: MapPickerPlace; error?: string; message?: string }) => {
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => { isMountedRef.current = false; };
+  }, []);
+
+  const addPlace = useCallback((place: MapPickerPlace) => {
+    const normalized = normalizeMapPickerPlace(place);
+    logMapPicker('addPlace', {
+      name: place.name,
+      placeId: place.placeId,
+      lat: place.lat,
+      lng: place.lng,
+      normalized,
+    });
+
+    setPlaces((prev) => {
+      const existingPlaceIds = new Set(prev.filter((p) => p.placeId).map((p) => p.placeId));
+      if (place.placeId && existingPlaceIds.has(place.placeId)) return prev;
+
+      const mainName = (place.name || normalized.area[0] || '').trim();
+      if (!mainName) return prev;
+
+      const existingLabels = new Set(prev.map((p) => p.displayLabel.toLowerCase()));
+      if (existingLabels.has(mainName.toLowerCase())) return prev;
+
+      return [
+        ...prev,
+        {
+          placeId: place.placeId || '',
+          displayLabel: mainName,
+          areaParts: normalized.area,
+        },
+      ];
+    });
+  }, []);
+
+  const handleMapError = useCallback((payload: { type: string; error?: string; message?: string }) => {
     if (payload.type === 'MAP_ERROR') {
       logMapPicker('MAP_ERROR received', { error: payload.error, message: payload.message });
-      return;
-    }
-    if (payload.type === 'PLACE_SELECTED' && payload.place) {
-      const place = payload.place;
-      const normalized = normalizeMapPickerPlace(place);
-
-      logMapPicker('handleMapSelect PLACE_SELECTED', {
-        name: place.name,
-        placeId: place.placeId,
-        lat: place.lat,
-        lng: place.lng,
-        normalized,
-      });
-
-      setPlaces((prev) => {
-        const existingPlaceIds = new Set(prev.filter((p) => p.placeId).map((p) => p.placeId));
-
-        // Skip entirely if we already have this placeId
-        if (place.placeId && existingPlaceIds.has(place.placeId)) return prev;
-
-        // Use the place name as the single display label; keep all area parts for data
-        const mainName = (place.name || normalized.area[0] || '').trim();
-        if (!mainName) return prev;
-
-        // Skip if we already show this name
-        const existingLabels = new Set(prev.map((p) => p.displayLabel.toLowerCase()));
-        if (existingLabels.has(mainName.toLowerCase())) return prev;
-
-        return [
-          ...prev,
-          {
-            placeId: place.placeId || '',
-            displayLabel: mainName,
-            areaParts: normalized.area,
-          },
-        ];
-      });
-
-      setQuery('');
     }
   }, []);
 
-  const showInlineMap = query.trim().length >= 2 && !!apiKey && !isReadOnly;
+  const debouncedQuery = useDebounce(query, SUGGESTION_DEBOUNCE_MS);
+
+  useEffect(() => {
+    const trimmed = debouncedQuery.trim();
+    if (!apiKey || isReadOnly || trimmed.length < MIN_QUERY_LENGTH) {
+      setSuggestions([]);
+      setSuggestionsLoading(false);
+      return;
+    }
+
+    const seq = ++autocompleteSeqRef.current;
+    setSuggestionsLoading(true);
+
+    const body: Record<string, unknown> = {
+      input: trimmed,
+      includeQueryPredictions: false,
+    };
+    if (regionCode && regionCode.length === 2) {
+      body.includedRegionCodes = [regionCode];
+    }
+
+    fetch(PLACES_AUTOCOMPLETE_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': apiKey,
+        'X-Goog-FieldMask': 'suggestions.placePrediction.placeId,suggestions.placePrediction.text',
+      },
+      body: JSON.stringify(body),
+    })
+      .then(async (res) => {
+        if (!isMountedRef.current || seq < autocompleteSeqRef.current) return;
+        if (!res.ok) {
+          logMapPicker('autocomplete http error', { status: res.status });
+          setSuggestions([]);
+          return;
+        }
+        const data = await res.json();
+        if (!isMountedRef.current || seq < autocompleteSeqRef.current) return;
+        const list: PlaceSuggestion[] = [];
+        for (const s of data?.suggestions ?? []) {
+          const pred = s?.placePrediction;
+          if (pred?.text?.text && pred?.placeId) {
+            list.push({ placeId: pred.placeId, text: pred.text.text });
+          }
+          if (list.length >= MAX_SUGGESTIONS) break;
+        }
+        setSuggestions(list);
+      })
+      .catch((err) => {
+        if (!isMountedRef.current || seq < autocompleteSeqRef.current) return;
+        logMapPicker('autocomplete network error', err);
+        setSuggestions([]);
+      })
+      .finally(() => {
+        if (!isMountedRef.current || seq !== autocompleteSeqRef.current) return;
+        setSuggestionsLoading(false);
+      });
+  }, [debouncedQuery, apiKey, regionCode, isReadOnly]);
+
+  const handleSuggestionSelect = useCallback(
+    async (suggestion: PlaceSuggestion) => {
+      if (!apiKey) return;
+      // Invalidate any in-flight autocomplete request so a late response
+      // doesn't re-open the dropdown after we close it.
+      autocompleteSeqRef.current++;
+      setSuggestions([]);
+      setSuggestionsLoading(false);
+      // Clear BOTH the controlled value AND the native input buffer. Setting
+      // state alone can race with the iOS/Android autocorrect commit that
+      // fires on the suggestion tap — ref.clear() wipes the native buffer
+      // so any late onChangeText from autocorrect sees an already-empty field.
+      setQuery('');
+      inputRef.current?.clear?.();
+      const place = await fetchPlaceDetails(suggestion.placeId, apiKey);
+      if (!isMountedRef.current) return;
+      if (place) {
+        addPlace(place);
+      } else {
+        // Fallback: use the suggestion text as display label so the user's tap
+        // isn't silently dropped even when the Details call fails.
+        addPlace({
+          name: suggestion.text,
+          placeId: suggestion.placeId,
+          lat: 0,
+          lng: 0,
+          formatted_address: suggestion.text,
+        });
+      }
+    },
+    [apiKey, addPlace]
+  );
+
+  const dropdownVisible = !isReadOnly && query.trim().length >= MIN_QUERY_LENGTH && (suggestions.length > 0 || suggestionsLoading);
+  const showInlineMap = query.trim().length >= MIN_QUERY_LENGTH && !!apiKey && !isReadOnly;
 
   const screenWidth = Dimensions.get('window').width;
   const cardWidth = Math.min(328, screenWidth - 62);
@@ -436,7 +580,10 @@ export const DestinationMapPickerCard = forwardRef<
                   style={[
                     styles.inputRowWrapper,
                     isReadOnly && styles.inputRowWrapperDisabled,
-                    showInlineMap && styles.inputRowWrapperAboveOverlay,
+                    // Keep input above the map overlay permanently — toggling
+                    // elevation on state change caused Android to recompose the
+                    // view layer, which can blur the focused native TextInput.
+                    styles.inputRowWrapperAboveOverlay,
                   ]}
                 >
                   <Ionicons name="location-outline" size={20} color="#A0A0A0" style={styles.inputRowIcon} />
@@ -460,6 +607,19 @@ export const DestinationMapPickerCard = forwardRef<
                       ref={inputRef}
                       keyboardType="web-search"
                       underlineColorAndroid="transparent"
+                      // Place-search input must treat user input literally.
+                      // iOS/Android autocorrect holds a pending correction in
+                      // a buffer; when the user taps a suggestion, the touch
+                      // commit flushes that buffer and fires onChangeText
+                      // AFTER our setQuery('') → the dropdown re-opens with
+                      // the autocorrect ghost text. Disabling all correction
+                      // on this field prevents that race.
+                      autoCorrect={false}
+                      autoCapitalize="none"
+                      autoComplete="off"
+                      spellCheck={false}
+                      textContentType="none"
+                      importantForAutofill="no"
                       style={[
                         styles.inputRowTextInput,
                         isReadOnly && styles.inputRowTextInputDisabled,
@@ -488,10 +648,46 @@ export const DestinationMapPickerCard = forwardRef<
                     visible
                     inputRowHeight={inputRowHeight}
                     htmlContent={inlineMapHtml}
-                    query={query.trim()}
-                    onMessage={handleMapSelect}
+                    onMessage={handleMapError}
                     onClose={() => setQuery('')}
                   />
+                )}
+                {dropdownVisible && inputRowHeight > 0 && (
+                  <View
+                    style={[styles.suggestionsDropdown, { top: inputRowHeight + 8 }]}
+                    // Claim the touch responder at the RN layer so the gesture
+                    // never falls through to the WebView below (which would
+                    // become first responder and dismiss the IME). Same pattern
+                    // used successfully in MultiPlaceAutocompleteInput.
+                    onStartShouldSetResponder={() => true}
+                  >
+                    {suggestions.length > 0 ? (
+                      <FlatList
+                        data={suggestions}
+                        keyExtractor={(item) => item.placeId}
+                        keyboardShouldPersistTaps="always"
+                        keyboardDismissMode="none"
+                        style={styles.suggestionsList}
+                        renderItem={({ item }) => (
+                          <TouchableOpacity
+                            style={styles.suggestionItem}
+                            onPress={() => handleSuggestionSelect(item)}
+                            activeOpacity={0.7}
+                          >
+                            <Ionicons name="location-outline" size={18} color="#808080" style={styles.suggestionItemIcon} />
+                            <Text style={styles.suggestionItemText} numberOfLines={2}>
+                              {item.text}
+                            </Text>
+                          </TouchableOpacity>
+                        )}
+                      />
+                    ) : suggestionsLoading ? (
+                      <View style={styles.suggestionsLoadingRow}>
+                        <ActivityIndicator size="small" color="#808080" />
+                        <Text style={styles.suggestionsLoadingText}>Searching…</Text>
+                      </View>
+                    ) : null}
+                  </View>
                 )}
 
                 <View
@@ -690,6 +886,49 @@ const styles = StyleSheet.create({
     ...(Platform.OS === 'web' && { outlineStyle: 'none' as any }),
   },
   inputRowTextInputDisabled: { color: '#999' },
+  suggestionsDropdown: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    maxHeight: 240,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.18,
+    shadowRadius: 12,
+    elevation: 24,
+    zIndex: 22,
+  },
+  suggestionsList: { maxHeight: 240 },
+  suggestionItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#EAEAEA',
+  },
+  suggestionItemIcon: { marginRight: 10 },
+  suggestionItemText: {
+    flex: 1,
+    fontSize: 15,
+    color: '#222',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+  },
+  suggestionsLoadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+  },
+  suggestionsLoadingText: {
+    fontSize: 14,
+    color: '#808080',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+  },
   timeInputContainer: { width: '100%' },
   timeInputRow: { flexDirection: 'row', alignItems: 'center', gap: 8, width: '100%' },
   timeInputBox: {

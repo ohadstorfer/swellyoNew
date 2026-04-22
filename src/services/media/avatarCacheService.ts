@@ -1,11 +1,14 @@
-import { Image } from 'react-native';
+import { Image } from 'expo-image';
 
 /**
  * Avatar Cache Service
- * 
+ *
  * Lightweight service to track and prefetch user avatars.
- * Uses React Native's Image.prefetch() which automatically handles disk caching.
- * 
+ * Uses expo-image's Image.prefetch() so the bytes land in the SAME disk+memory
+ * cache that `ProfileImage` reads from at render time. Using react-native's
+ * Image.prefetch here was a silent bug — it populated a separate cache that
+ * our renderer never consulted, causing every avatar to download twice.
+ *
  * Features:
  * - Tracks which avatars have been prefetched (in-memory Set)
  * - Prefetches avatars when conversations are loaded
@@ -36,10 +39,12 @@ class AvatarCacheService {
 
     try {
       this.prefetchingUrls.add(normalizedUrl);
-      
-      // Use React Native's Image.prefetch() which automatically caches to disk
-      await Image.prefetch(normalizedUrl);
-      
+
+      // expo-image.Image.prefetch returns Promise<boolean>. Pass 'memory-disk'
+      // explicitly so the download is persisted to disk (default varies by
+      // platform and version).
+      await Image.prefetch(normalizedUrl, 'memory-disk');
+
       // Mark as prefetched
       this.prefetchedUrls.add(normalizedUrl);
       

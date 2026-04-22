@@ -4,6 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import { PostHogProvider, PostHogSurveyProvider } from 'posthog-react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { OnboardingProvider } from './src/context/OnboardingContext';
+import { UserProfileProvider } from './src/context/UserProfileContext';
 import { MessagingProvider } from './src/context/MessagingProvider';
 import { AppContent } from './src/components/AppContent';
 import { analyticsService } from './src/services/analytics/analyticsService';
@@ -63,27 +64,33 @@ export default function App() {
             {isMVPMode ? (
               <PostHogSurveyProvider>
                 <OnboardingProvider>
-                  <MessagingProvider>
-                    <AppContent />
-                    <StatusBar style="light" />
-                  </MessagingProvider>
+                  <UserProfileProvider>
+                    <MessagingProvider>
+                      <AppContent />
+                      <StatusBar style="light" />
+                    </MessagingProvider>
+                  </UserProfileProvider>
                 </OnboardingProvider>
               </PostHogSurveyProvider>
             ) : (
               <OnboardingProvider>
-                <MessagingProvider>
-                  <AppContent />
-                  <StatusBar style="light" />
-                </MessagingProvider>
+                <UserProfileProvider>
+                  <MessagingProvider>
+                    <AppContent />
+                    <StatusBar style="light" />
+                  </MessagingProvider>
+                </UserProfileProvider>
               </OnboardingProvider>
             )}
           </PostHogProvider>
         ) : (
           <OnboardingProvider>
-            <MessagingProvider>
-              <AppContent />
-              <StatusBar style="light" />
-            </MessagingProvider>
+            <UserProfileProvider>
+              <MessagingProvider>
+                <AppContent />
+                <StatusBar style="light" />
+              </MessagingProvider>
+            </UserProfileProvider>
           </OnboardingProvider>
         )}
       </PostHogErrorBoundary>

@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
-import { View, Image, StyleSheet, Platform, ActivityIndicator } from 'react-native';
+import { View, StyleSheet, Platform, ActivityIndicator } from 'react-native';
+import { Image } from 'expo-image';
 import Svg, { Path } from 'react-native-svg';
 import { Text } from './Text';
 
@@ -42,14 +43,13 @@ export const ProfileImage: React.FC<ProfileImageProps> = React.memo(({
   const [isLoading, setIsLoading] = useState(true);
   const currentImageUrlRef = useRef<string | null | undefined>(imageUrl);
 
-  // Reset loading and error state when imageUrl changes
+  // Reset error state when the URL changes. `isLoading` is driven by expo-image's
+  // onLoadStart/onLoad callbacks — forcing it to true here would flash the
+  // silhouette overlay on memory-cache hits (where onLoadStart never fires).
   useEffect(() => {
-    // Only reset if imageUrl actually changed
     if (currentImageUrlRef.current !== imageUrl) {
       currentImageUrlRef.current = imageUrl;
       setImageError(false);
-      // Set loading to true initially (will show skeleton while loading)
-      setIsLoading(true);
     }
   }, [imageUrl]);
 
@@ -137,30 +137,14 @@ export const ProfileImage: React.FC<ProfileImageProps> = React.memo(({
       ) : hasValidImage ? (
         <Image
           source={{ uri: imageUrl! }}
-          style={[
-            styles.image,
-            {
-              borderRadius,
-              opacity: isLoading ? 0 : 1, // Hide image while loading
-            },
-          ]}
-          resizeMode="cover"
+          style={[styles.image, { borderRadius }]}
+          contentFit="cover"
+          cachePolicy="memory-disk"
+          transition={200}
+          recyclingKey={imageUrl || undefined}
           onError={handleError}
           onLoad={handleLoad}
           onLoadStart={handleLoadStart}
-          {...(Platform.OS === 'web' && {
-            loading: 'lazy' as any,
-            decoding: 'async' as any,
-            objectFit: 'cover' as any,
-            // Use smooth interpolation - prefer smooth/blurry over pixelated/jagged edges
-            imageRendering: 'auto' as any,
-            // Use proper width/height for better browser optimization
-            width: containerSize,
-            height: containerSize,
-            // Add CORS and referrer policy for external images (especially Google profile images)
-            crossOrigin: 'anonymous' as any,
-            referrerPolicy: 'no-referrer' as any,
-          })}
         />
       ) : null}
       

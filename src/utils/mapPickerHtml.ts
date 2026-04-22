@@ -219,8 +219,10 @@ export interface InlineMapOptions {
 }
 
 /**
- * Inline map HTML: no search UI, receives SEARCH_QUERY from parent, shows map zoomed to country.
- * Sends PLACE_SELECTED when user selects a place (marker click or list).
+ * Inline map HTML: static country-zoomed map, no interactive UI.
+ * The prediction list + place selection are owned by RN above this WebView —
+ * keeping the WebView tap-free ensures it can never become first responder
+ * and steal focus from the native TextInput (which would dismiss the IME).
  */
 export function getMapPickerInlineHtml(
   apiKey: string,
@@ -232,7 +234,6 @@ export function getMapPickerInlineHtml(
   const zoom = options?.zoom ?? 5;
   const centerLat = center.lat;
   const centerLng = center.lng;
-  const regionJs = regionCode ? `'${escapeForJsString(regionCode)}'` : 'null';
 
   return `<!DOCTYPE html>
 <html>
@@ -244,18 +245,13 @@ export function getMapPickerInlineHtml(
     * { box-sizing: border-box; }
     html, body { margin: 0; height: 100%; font-family: system-ui, sans-serif; }
     #map { width: 100%; height: 100%; position: absolute; left: 0; top: 0; }
-    #list { position: absolute; left: 0; right: 0; bottom: 0; max-height: 40%; overflow-y: auto; -webkit-overflow-scrolling: touch; background: #fff; box-shadow: 0 -2px 8px rgba(0,0,0,0.15); z-index: 10; }
-    .list-item { padding: 10px 16px; border-bottom: 1px solid #eee; cursor: pointer; font-size: 14px; }
-    .list-item:active { background: #f0f0f0; }
   </style>
 </head>
 <body>
   <div id="map"></div>
-  <div id="list" style="display:none;"></div>
   <script>
     (function() {
       var API_KEY = '${safeKey}';
-      var regionCode = ${regionJs};
       var initialCenter = { lat: ${centerLat}, lng: ${centerLng} };
       var initialZoom = ${zoom};
 
@@ -268,142 +264,16 @@ export function getMapPickerInlineHtml(
         }
       }
 
-      var map, markers = [], placesService, autocompleteService;
-      var currentPredictions = [];
-      var searchTimeoutId = null;
-      var currentSearchSeq = 0;
-      var DEBUG = true;
-      function log(msg, data) {
-        if (DEBUG && typeof console !== 'undefined' && console.log) {
-          console.log('[MapPickerHtml] ' + msg, data !== undefined ? data : '');
-        }
-      }
-
       function initMap() {
-        log('initMap');
-        map = new google.maps.Map(document.getElementById('map'), {
+        new google.maps.Map(document.getElementById('map'), {
           center: initialCenter,
           zoom: initialZoom,
           mapTypeControl: false,
           fullscreenControl: false,
           zoomControl: true,
           streetViewControl: false,
-        });
-
-        var service = new google.maps.places.PlacesService(map);
-        placesService = service;
-        autocompleteService = new google.maps.places.AutocompleteService();
-
-        window.__receiveQuery = function(q) {
-          log('__receiveQuery', { q: q, len: typeof q === 'string' ? q.trim().length : 0 });
-          if (typeof q === 'string' && q.trim().length >= 2) scheduleSearch(q.trim());
-          else {
-            clearResults();
-          }
-        };
-        window.addEventListener('message', onParentMessage);
-      }
-
-      function onParentMessage(ev) {
-        var data = ev.data;
-        if (typeof data === 'string') {
-          try { data = JSON.parse(data); } catch (e) { return; }
-        }
-        if (data && data.type === 'SEARCH_QUERY') {
-          var q = data.query != null ? String(data.query).trim() : '';
-          log('onParentMessage SEARCH_QUERY', { q: q, len: q.length });
-          if (q.length >= 2) scheduleSearch(q);
-          else {
-            clearResults();
-          }
-        }
-      }
-
-      function clearResults() {
-        markers.forEach(function(m) { m.setMap(null); });
-        markers = [];
-        currentPredictions = [];
-        document.getElementById('list').style.display = 'none';
-        document.getElementById('list').innerHTML = '';
-      }
-
-      function scheduleSearch(query) {
-        log('scheduleSearch', { query: query });
-        if (searchTimeoutId !== null) {
-          clearTimeout(searchTimeoutId);
-        }
-        searchTimeoutId = setTimeout(function() {
-          runSearch(query);
-        }, 200);
-      }
-
-      function runSearch(query) {
-        log('runSearch', { query: query, seq: currentSearchSeq + 1 });
-        var req = { input: query };
-        if (regionCode && regionCode.length === 2) {
-          req.componentRestrictions = { country: regionCode };
-        }
-        var seq = ++currentSearchSeq;
-        autocompleteService.getPlacePredictions(req, function(predictions, status) {
-          log('getPlacePredictions callback', { seq: seq, currentSearchSeq: currentSearchSeq, status: status, count: predictions ? predictions.length : 0 });
-          if (seq < currentSearchSeq) {
-            log('getPlacePredictions ignored (stale)', { seq: seq });
-            return;
-          }
-          if (status !== google.maps.places.PlacesServiceStatus.OK || !predictions || predictions.length === 0) {
-            log('getPlacePredictions no results', { status: status });
-            clearResults();
-            return;
-          }
-          currentPredictions = predictions;
-          clearResults();
-          var listEl = document.getElementById('list');
-          listEl.style.display = 'block';
-          listEl.innerHTML = '';
-          predictions.slice(0, 5).forEach(function(p, i) {
-            var div = document.createElement('div');
-            div.className = 'list-item';
-            div.textContent = p.description;
-            div.onclick = function() { selectPrediction(p); };
-            listEl.appendChild(div);
-          });
-          log('getPlacePredictions success, fetching details for first', { placeId: predictions[0].place_id });
-          placesService.getDetails(
-            { placeId: predictions[0].place_id, fields: ['geometry', 'name', 'formatted_address'] },
-            function(place, status) {
-              log('getDetails callback', { status: status, hasPlace: !!place });
-              if (status === google.maps.places.PlacesServiceStatus.OK && place && place.geometry && place.geometry.location) {
-                var loc = place.geometry.location;
-                map.panTo({ lat: loc.lat(), lng: loc.lng() });
-                map.setZoom(12);
-                var m = new google.maps.Marker({ map: map, position: loc, title: place.name || place.formatted_address });
-                m.addListener('click', function() { selectPlaceDetails(place); });
-                markers.push(m);
-              }
-            }
-          );
-        });
-      }
-
-      function selectPrediction(prediction) {
-        placesService.getDetails(
-          { placeId: prediction.place_id, fields: ['geometry', 'name', 'formatted_address'] },
-          function(place, status) {
-            if (status === google.maps.places.PlacesServiceStatus.OK && place) selectPlaceDetails(place);
-          }
-        );
-      }
-
-      function selectPlaceDetails(place) {
-        var name = place.name || place.formatted_address || 'Selected place';
-        var lat = 0, lng = 0;
-        if (place.geometry && place.geometry.location) {
-          lat = place.geometry.location.lat();
-          lng = place.geometry.location.lng();
-        }
-        send({
-          type: 'PLACE_SELECTED',
-          place: { name: name, placeId: place.place_id || '', lat: lat, lng: lng, formatted_address: place.formatted_address || '' }
+          disableDefaultUI: false,
+          gestureHandling: 'greedy',
         });
       }
 
