@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Alert, Platform, View, TouchableOpacity, Text as RNText } from 'react-native';
+import { Alert, Platform, StyleSheet, View, TouchableOpacity, Text as RNText } from 'react-native';
 import { WelcomeScreen } from '../screens/WelcomeScreen';
 import { OnboardingWelcomeScreen } from '../screens/OnboardingWelcomeScreen';
 import { OnboardingStep1Screen, OnboardingData } from '../screens/OnboardingStep1Screen';
@@ -11,7 +11,7 @@ import { LoadingScreen } from '../screens/LoadingScreen';
 import { OnboardingChatScreen } from '../screens/ChatScreen';
 import { TripPlanningChatScreen } from '../screens/TripPlanningChatScreen';
 import { TripPlanningChatScreen as TripPlanningChatScreenCopy } from '../screens/TripPlanningChatScreenCopy';
-import ConversationsScreen from '../screens/ConversationsScreen';
+import ConversationsStack from '../navigation/ConversationsStack';
 import TripsScreen from '../screens/trips/TripsScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
 import { DirectMessageScreen } from '../screens/DirectMessageScreen';
@@ -1151,15 +1151,17 @@ export const AppContent: React.FC = () => {
     console.log('[AppContent] Rendering check - showProfile:', showProfile, 'viewingUserId:', viewingUserId);
     console.log('[AppContent] Rendering check - selectedConversation:', selectedConversation ? 'exists' : 'null');
     console.log('[AppContent] Rendering check - showTripPlanningChat:', showTripPlanningChat);
-    
-    // Show Trips screen if requested
-    if (showTrips) {
-      return <TripsScreen onBack={() => setShowTrips(false)} />;
-    }
+    console.log('[AppContent] Rendering check - showConversationLoading:', showConversationLoading, 'pendingConversation:', !!pendingConversation);
 
-    // Show Settings screen if requested
-    if (showSettings) {
-      return (
+    // Determine which overlay screen (if any) should cover ConversationsStack.
+    // ConversationsStack stays mounted underneath so scroll position and UI state
+    // survive navigation to Profile/Settings/Trips/DM/etc. Priority order matches
+    // the original early-return cascade — first match wins.
+    let activeOverlay: React.ReactNode = null;
+    if (showTrips) {
+      activeOverlay = <TripsScreen onBack={() => setShowTrips(false)} />;
+    } else if (showSettings) {
+      activeOverlay = (
         <SettingsScreen
           onBack={() => setShowSettings(false)}
           userName={currentUserName}
@@ -1167,49 +1169,36 @@ export const AppContent: React.FC = () => {
           userEmail={user?.email}
         />
       );
-    }
-
-    // Show Swelly Shaper screen if requested (check before profile)
-    if (showSwellyShaper) {
+    } else if (showSwellyShaper) {
       console.log('[AppContent] Rendering SwellyShaperScreen');
       console.log('[AppContent] Passing onViewProfile:', typeof handleSwellyShaperViewProfile);
-      return (
-        <SwellyShaperScreen 
+      activeOverlay = (
+        <SwellyShaperScreen
           onBack={handleSwellyShaperBack}
           onViewProfile={handleSwellyShaperViewProfile}
         />
       );
-    }
-
-    // Show profile screen if requested (check before conversation)
-    if (showProfile) {
+    } else if (showProfile) {
       console.log('[AppContent] Rendering ProfileScreen for userId:', viewingUserId);
       console.log('[AppContent] profileFromSwellyShaper flag:', profileFromSwellyShaper);
-      
-      return (
-        <ProfileScreen 
+      activeOverlay = (
+        <ProfileScreen
           onBack={handleProfileBack}
           userId={viewingUserId ?? undefined}
           onMessage={handleStartConversation}
           fromOnboardingChat={profileFromOnboardingChat}
           onSaveAndGoToConversations={handleSaveAndGoToConversations}
           onEdit={() => {
-            // When clicking edit (from onboarding profile), open Swelly Shaper without resetting fromOnboardingChat
             setShowProfile(false);
             setShowSwellyShaper(true);
           }}
         />
       );
-    }
-    
-    // Show conversation loading screen if pending conversation from trip planning
-    // This check MUST come before trip planning chat check to ensure it renders on top
-    console.log('[AppContent] Rendering check - showConversationLoading:', showConversationLoading, 'pendingConversation:', !!pendingConversation);
-    if (showConversationLoading && pendingConversation) {
+    } else if (showConversationLoading && pendingConversation) {
       console.log('[AppContent] ✓ Rendering ConversationLoadingScreen');
       console.log('[AppContent] Loading screen props - currentUserAvatar:', !!currentUserAvatar, 'currentUserName:', currentUserName);
       console.log('[AppContent] Loading screen props - otherUserAvatar:', !!pendingConversation.otherUserAvatar, 'otherUserName:', pendingConversation.otherUserName);
-      return (
+      activeOverlay = (
         <ConversationLoadingScreen
           currentUserAvatar={currentUserAvatar}
           currentUserName={currentUserName}
@@ -1218,19 +1207,12 @@ export const AppContent: React.FC = () => {
           onComplete={handleConversationLoadingComplete}
         />
       );
-    } else {
-      console.log('[AppContent] ✗ NOT rendering ConversationLoadingScreen - showConversationLoading:', showConversationLoading, 'pendingConversation:', !!pendingConversation);
-    }
-    
-    // Show direct message screen if conversation is selected
-    if (selectedConversation) {
+    } else if (selectedConversation) {
       console.log('[AppContent] Rendering DirectMessageScreen');
-      console.log('[AppContent] handleViewUserProfile function exists:', !!handleViewUserProfile);
-      console.log('[AppContent] handleViewUserProfile type:', typeof handleViewUserProfile);
       console.log('[AppContent] Passing onViewProfile prop:', handleViewUserProfile);
-      return (
+      activeOverlay = (
         <DirectMessageScreen
-          conversationId={selectedConversation.id} // May be undefined for pending conversations
+          conversationId={selectedConversation.id}
           otherUserId={selectedConversation.otherUserId}
           otherUserName={selectedConversation.otherUserName}
           otherUserAvatar={selectedConversation.otherUserAvatar}
@@ -1239,8 +1221,6 @@ export const AppContent: React.FC = () => {
           onBack={handleBackFromChat}
           onViewProfile={handleViewUserProfile}
           onConversationCreated={(conversationId) => {
-            // Update selectedConversation with the created conversation ID
-            // Preserve fromTripPlanning flag
             setSelectedConversation({
               ...selectedConversation,
               id: conversationId,
@@ -1249,11 +1229,8 @@ export const AppContent: React.FC = () => {
           }}
         />
       );
-    }
-    
-    // Show trip planning chat copy (dev mode) if requested
-    if (showTripPlanningChatCopy) {
-      return (
+    } else if (showTripPlanningChatCopy) {
+      activeOverlay = (
         <TripPlanningChatScreenCopy
           onChatComplete={() => { setShowTripPlanningChatCopy(false); setShowTripPlanningChat(false); setPendingOnboardingMatches(null); }}
           onViewUserProfile={handleViewUserProfile}
@@ -1270,13 +1247,10 @@ export const AppContent: React.FC = () => {
           onboardingMatches={pendingOnboardingMatches || undefined}
         />
       );
-    }
-    
-    // Show trip planning chat if requested
-    if (showTripPlanningChat) {
-      return (
-        <TripPlanningChatScreen 
-          onChatComplete={handleTripPlanningChatBack} 
+    } else if (showTripPlanningChat) {
+      activeOverlay = (
+        <TripPlanningChatScreen
+          onChatComplete={handleTripPlanningChatBack}
           onViewUserProfile={handleViewUserProfile}
           onStartConversation={handleStartConversation}
           persistedChatId={tripPlanningChatId}
@@ -1290,21 +1264,27 @@ export const AppContent: React.FC = () => {
         />
       );
     }
-    
+
     return (
-      <>
-        <ConversationsScreen
-          onConversationPress={handleConversationPress}
-          onSwellyPress={handleSwellyPress}
-          onSwellyPressCopy={handleSwellyPressCopy}
-          onProfilePress={handleProfilePress}
-          onSettingsPress={() => setShowSettings(true)}
-          onTripsPress={() => setShowTrips(true)}
-          onViewUserProfile={handleViewUserProfile}
-          onSwellyShaperViewProfile={handleSwellyShaperViewProfile}
-          pendingNotificationConversationId={pendingNotificationConversationId}
-          onPendingNotificationHandled={() => setPendingNotificationConversationId(null)}
-        />
+      <View style={styles.fill}>
+        {/* ConversationsStack is always mounted; hidden when an overlay is active
+            so its internal navigation state, scroll position, and subscriptions
+            persist across Profile/Settings/DM/etc. visits. */}
+        <View style={[styles.fill, !!activeOverlay && styles.hidden]}>
+          <ConversationsStack
+            onConversationPress={handleConversationPress}
+            onSwellyPress={handleSwellyPress}
+            onSwellyPressCopy={handleSwellyPressCopy}
+            onProfilePress={handleProfilePress}
+            onSettingsPress={() => setShowSettings(true)}
+            onTripsPress={() => setShowTrips(true)}
+            onViewUserProfile={handleViewUserProfile}
+            onSwellyShaperViewProfile={handleSwellyShaperViewProfile}
+            pendingNotificationConversationId={pendingNotificationConversationId}
+            onPendingNotificationHandled={() => setPendingNotificationConversationId(null)}
+          />
+        </View>
+        {activeOverlay && <View style={styles.fill}>{activeOverlay}</View>}
         {process.env.EXPO_PUBLIC_LOCAL_MODE === 'true' && (
           <TouchableOpacity
             style={{ position: 'absolute', top: 60, right: 10, backgroundColor: '#333', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, zIndex: 999, opacity: 0.7, display: 'none' }}
@@ -1378,7 +1358,7 @@ export const AppContent: React.FC = () => {
             setShowTripPlanningChatCopy(true);
           }}
         />
-      </>
+      </View>
     );
   }
 
@@ -1567,3 +1547,8 @@ export const AppContent: React.FC = () => {
     />
   );
 };
+
+const styles = StyleSheet.create({
+  fill: { flex: 1 },
+  hidden: { display: 'none' },
+});

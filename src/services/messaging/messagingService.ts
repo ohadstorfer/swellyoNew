@@ -61,7 +61,8 @@ export interface ImageMetadata {
 
 // Video metadata interface
 export interface VideoMetadata {
-  video_url: string;           // Video URL (presigned S3 URL)
+  video_url: string;           // Compressed video URL (written by Lambda when MediaConvert finishes). Empty string until ready.
+  original_url?: string;        // Presigned URL for the pre-compression original — lets the receiver play instantly while MediaConvert runs
   thumbnail_url?: string;       // Thumbnail frame URL
   duration: number;            // Duration in seconds
   width: number;               // Video width in pixels
@@ -136,6 +137,7 @@ export interface MessageSubscriptionCallbacks {
   onMessageDeleted?: (messageId: string) => void;
   onTyping?: (userId: string, isTyping: boolean) => void;
   onSubscriptionStatus?: (status: RealtimeSubscriptionStatus) => void;
+  onReadReceiptUpdate?: (userId: string, lastReadAt: string | null) => void;
 }
 
 // Conversation list subscription callbacks
@@ -1091,6 +1093,30 @@ class MessagingService {
   }
 
   /**
+   * Fetch a specific member's last_read_at for a conversation.
+   * Used to derive per-message read receipts (whether the other user has read up to a given message).
+   */
+  async getMemberLastReadAt(conversationId: string, userId: string): Promise<string | null> {
+    if (!isSupabaseConfigured()) return null;
+    try {
+      const { data, error } = await supabase
+        .from('conversation_members')
+        .select('last_read_at')
+        .eq('conversation_id', conversationId)
+        .eq('user_id', userId)
+        .maybeSingle();
+      if (error) {
+        console.warn('[messagingService] getMemberLastReadAt error:', error);
+        return null;
+      }
+      return data?.last_read_at ?? null;
+    } catch (error) {
+      console.error('[messagingService] getMemberLastReadAt failed:', error);
+      return null;
+    }
+  }
+
+  /**
    * Subscribe to messages in a conversation with unified subscription
    * Handles INSERT, UPDATE, DELETE events and typing indicators in a single channel
    */
@@ -1263,6 +1289,23 @@ class MessagingService {
           const deletedMessageId = payload.old.id as string;
           if (normalizedCallbacks.onMessageDeleted) {
             normalizedCallbacks.onMessageDeleted(deletedMessageId);
+          }
+        }
+      )
+      // Handle read-receipt updates (conversation_members.last_read_at changes).
+      // Fires when the other participant opens the conversation and markAsRead updates their row.
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'conversation_members',
+          filter: `conversation_id=eq.${conversationId}`,
+        },
+        (payload) => {
+          const row = payload.new as { user_id: string; last_read_at: string | null };
+          if (normalizedCallbacks.onReadReceiptUpdate && row?.user_id) {
+            normalizedCallbacks.onReadReceiptUpdate(row.user_id, row.last_read_at ?? null);
           }
         }
       )

@@ -242,7 +242,7 @@ export async function uploadVideoToS3(
   videoUri: string,
   conversationId: string,
   messageId: string,
-): Promise<{ s3Key: string; processedKey: string }> {
+): Promise<{ s3Key: string; processedKey: string; originalUrl: string }> {
   console.log('[videoUploadService] Getting presigned URL for S3 upload');
 
   const functionUrl = getEdgeFunctionUrl();
@@ -267,7 +267,7 @@ export async function uploadVideoToS3(
     throw new Error(`Failed to get presigned URL: ${errorText}`);
   }
 
-  const { uploadUrl, s3Key, processedKey } = await presignResponse.json();
+  const { uploadUrl, s3Key, processedKey, originalUrl } = await presignResponse.json();
   console.log('[videoUploadService] Got presigned URL, uploading to S3:', s3Key);
 
   const isNativeFileUri = Platform.OS !== 'web' &&
@@ -307,7 +307,7 @@ export async function uploadVideoToS3(
   }
 
   console.log('[videoUploadService] Video uploaded to S3:', s3Key);
-  return { s3Key, processedKey };
+  return { s3Key, processedKey, originalUrl };
 }
 
 /**

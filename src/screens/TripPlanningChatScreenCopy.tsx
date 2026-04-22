@@ -13,9 +13,12 @@ import {
   Pressable,
   PanResponder,
   Modal,
+  Keyboard,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { KeyboardAvoidingView, isExpoGo } from '../utils/keyboardAvoidingView';
+import Reanimated, { useAnimatedStyle } from 'react-native-reanimated';
+import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller';
+import { isExpoGo } from '../utils/keyboardAvoidingView';
 import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Path, Defs, Stop, LinearGradient as SvgLinearGradient, Rect } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons';
@@ -274,6 +277,15 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   const insets = useSafeAreaInsets();
   const keyboardVisible = useKeyboardVisible();
   const androidKeyboardHeight = useKeyboardHeight();
+  // Keyboard sync via Reanimated worklets — same pattern as DirectMessageScreen.
+  const { height: kbHeight, progress: kbProgress } = useReanimatedKeyboardAnimation();
+  const animatedKeyboardPadding = useAnimatedStyle(() => ({
+    paddingBottom: -kbHeight.value,
+  }));
+  const composerRestPadding = Math.max(insets.bottom, 16);
+  const animatedComposerPadding = useAnimatedStyle(() => ({
+    paddingBottom: composerRestPadding * (1 - kbProgress.value),
+  }));
   const flatListRef = useRef<FlatList<Message>>(null);
   const chatInputRef = useRef<ChatTextInputRef>(null);
   const loadingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -729,6 +741,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             // No actionRow → display-only cards, no action buttons
           };
 
+          Keyboard.dismiss();
           setMessages([matchMessage]);
           setIsInitializing(false);
           setIsLoading(true); // Show typing indicator
@@ -877,6 +890,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         const matchesMessageText = `Found ${matchedUsers.length} awesome match${matchedUsers.length > 1 ? 'es' : ''} for you!`;
         const matchesDestination = tripPlanningData.destination_country || '';
         const newMatchMessageId = (Date.now() + 3).toString();
+        Keyboard.dismiss();
         setMessages(prev => {
           const filtered = prev.filter(msg => msg.text !== 'Finding the perfect surfers for you...');
           const matchesMessage: Message = {
@@ -983,6 +997,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         // User confirmed - show the single criterion matches
         const singleCriterionMessageText = `Found ${pendingSingleCriterionMatches.length} awesome match${pendingSingleCriterionMatches.length > 1 ? 'es' : ''} for you!`;
         const newMatchMessageId = (Date.now() + 1).toString();
+        Keyboard.dismiss();
         setMessages(prev => {
           const withUserMessage = [...prev, userMessage];
           const matchesMessage: Message = {
@@ -1927,11 +1942,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
       </View>
 
       {/* Chat Messages */}
-      <KeyboardAvoidingView
-        style={[styles.chatContainer, isExpoGo && Platform.OS === 'android' && androidKeyboardHeight > 0 && { paddingBottom: androidKeyboardHeight }]}
-        behavior={isExpoGo && Platform.OS === 'android' ? undefined : 'padding'}
-        keyboardVerticalOffset={0}
-      >
+      <Reanimated.View style={[styles.chatContainer, animatedKeyboardPadding]}>
         <ImageBackground
           source={Images.chatBackground}
           style={styles.backgroundImage}
@@ -1976,7 +1987,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         </View>
 
         {/* Input Area */}
-        <View style={[styles.inputWrapper, { paddingBottom: keyboardVisible ? 4 : Math.max(insets.bottom, 16) }]}>
+        <Reanimated.View style={[styles.inputWrapper, animatedComposerPadding]}>
           <ChatTextInput
             ref={chatInputRef}
             value={inputText}
@@ -1985,9 +1996,9 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             disabled={isLoading || hasUnresolvedActionRow || isAwaitingFilterRemovalResponse}
             placeholder={hasUnresolvedActionRow ? 'Choose an option above to continue' : 'Type your message..'}
             maxLength={500}
-            primaryColor={colors.primary || '#B72DF2'}
+            primaryColor="#B72DF2"
           />
-        </View>
+        </Reanimated.View>
 
         {/* Filter dialog: full conversation area, gradient + blur, chips at top */}
         {filtersMenuVisible && (
@@ -2171,7 +2182,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             </View>
           </Animated.View>
         )}
-      </KeyboardAvoidingView>
+      </Reanimated.View>
       {/* New Chat Confirmation Modal */}
       <Modal
         visible={showNewChatModal}

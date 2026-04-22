@@ -22,52 +22,27 @@ if (Platform.OS !== 'web') {
 }
 import { colors } from '../styles/theme';
 
-/** Card-sized inline map: receives query from parent, sends PLACE_SELECTED on select. */
+/**
+ * Card-sized inline map. The WebView renders a static country-zoomed map
+ * only — all autocomplete / selection is owned by native RN above this view.
+ * onMessage only surfaces MAP_ERROR; PLACE_SELECTED no longer originates here.
+ */
 export interface InlineMapViewProps {
   htmlContent: string;
   width: number;
   height: number;
-  query: string;
-  onMessage: (payload: { type: string; place?: MapPickerPlace }) => void;
+  onMessage?: (payload: { type: string; place?: MapPickerPlace }) => void;
 }
 
-export function InlineMapView({ htmlContent, width, height, query, onMessage }: InlineMapViewProps) {
-  const webViewRef = useRef<{ injectJavaScript: (script: string) => void } | null>(null);
+export function InlineMapView({ htmlContent, width, height, onMessage }: InlineMapViewProps) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const sendQuery = useCallback((q: string) => {
-    if (debounceRef.current) {
-      clearTimeout(debounceRef.current);
-    }
-    debounceRef.current = setTimeout(() => {
-      const escaped = JSON.stringify(q);
-      const script = `(function(){ var w = window.__receiveQuery; if(w) w(${escaped}); })();`;
-      if (Platform.OS === 'web' && iframeRef.current?.contentWindow) {
-        iframeRef.current.contentWindow.postMessage(JSON.stringify({ type: 'SEARCH_QUERY', query: q }), '*');
-      } else if (webViewRef.current) {
-        webViewRef.current.injectJavaScript(script);
-      }
-    }, 200);
-  }, []);
-
-  useEffect(() => {
-    sendQuery(query);
-  }, [query, sendQuery]);
-
-  const handleLoad = useCallback(() => {
-    sendQuery(query);
-  }, [query, sendQuery]);
 
   const handleMessage = useCallback(
     (data: string) => {
+      if (!onMessage) return;
       try {
         const payload = JSON.parse(data);
-        if (payload.type === 'PLACE_SELECTED' && payload.place) {
-          onMessage({ type: 'PLACE_SELECTED', place: payload.place as MapPickerPlace });
-        } else {
-          onMessage(payload);
-        }
+        onMessage(payload);
       } catch {
         // ignore
       }
@@ -89,21 +64,24 @@ export function InlineMapView({ htmlContent, width, height, query, onMessage }: 
 
   if (Platform.OS === 'web') {
     return (
-      <View style={[styles.inlineMapContainer, containerStyle]}>
+      // pointerEvents="none": the inline map is purely visual; blocking
+      // touches here prevents the WebView/iframe from ever becoming first
+      // responder (which would dismiss the IME and blur the native TextInput
+      // above). All interactivity — suggestion list, selection — lives in RN.
+      <View style={[styles.inlineMapContainer, containerStyle]} pointerEvents="none">
         <iframe
           ref={(el) => {
             iframeRef.current = el;
           }}
           title="Inline map"
           srcDoc={htmlContent}
-          onLoad={handleLoad}
-          tabIndex={0}
+          tabIndex={-1}
           style={{
             width,
             height,
             border: 'none',
             borderRadius: 8,
-            touchAction: 'pan-y',
+            pointerEvents: 'none',
           } as React.CSSProperties}
           sandbox="allow-scripts allow-same-origin"
         />
@@ -112,20 +90,17 @@ export function InlineMapView({ htmlContent, width, height, query, onMessage }: 
   }
 
   return (
-    <View style={[styles.inlineMapContainer, containerStyle]}>
+    <View style={[styles.inlineMapContainer, containerStyle]} pointerEvents="none">
       {WebView && (
         <WebView
-          ref={(r: { injectJavaScript: (script: string) => void } | null) => {
-            webViewRef.current = r;
-          }}
           source={{ html: htmlContent, baseUrl: 'https://swellyo.com' }}
           style={[styles.inlineWebView, { width, height }]}
           onMessage={(e: { nativeEvent: { data: string } }) => handleMessage(e.nativeEvent.data)}
-          onLoadEnd={handleLoad}
           originWhitelist={['*']}
           javaScriptEnabled
           domStorageEnabled
           nestedScrollEnabled
+          pointerEvents="none"
         />
       )}
     </View>
@@ -144,8 +119,7 @@ export interface MapPopoverProps {
   visible: boolean;
   inputRowHeight: number;
   htmlContent: string;
-  query: string;
-  onMessage: (payload: { type: string; place?: MapPickerPlace }) => void;
+  onMessage?: (payload: { type: string; place?: MapPickerPlace }) => void;
   onClose: () => void;
 }
 
@@ -153,7 +127,6 @@ export function MapPopover({
   visible,
   inputRowHeight,
   htmlContent,
-  query,
   onMessage,
   onClose,
 }: MapPopoverProps) {
@@ -178,13 +151,15 @@ export function MapPopover({
         setOverlaySize((prev) => (prev.width === width && prev.height === height ? prev : { width, height }));
       }}
     >
-      <Pressable style={[StyleSheet.absoluteFill, { pointerEvents: 'none' }]} onPress={onClose} />
+      {/* Pressable forced non-interactive via the prop (not style) so no
+          RN version variant can accidentally let it capture touches and
+          trigger an onClose responder transition while the user is typing. */}
+      <Pressable style={StyleSheet.absoluteFill} pointerEvents="none" onPress={onClose} />
       {overlaySize.width > 0 && overlaySize.height > 0 && (
         <InlineMapView
           htmlContent={htmlContent}
           width={overlaySize.width}
           height={overlaySize.height}
-          query={query}
           onMessage={onMessage}
         />
       )}

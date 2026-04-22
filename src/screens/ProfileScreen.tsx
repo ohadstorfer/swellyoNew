@@ -32,12 +32,12 @@ import { getCountryFlag } from '../utils/countryFlags';
 import { uploadProfileImage, uploadProfileVideoS3 } from '../services/storage/storageService';
 import { validateVideoComplete } from '../utils/videoValidation';
 import { ProfileImage } from '../components/ProfileImage';
-import { ProfileSkeleton } from '../components/skeletons';
 import { analyticsService } from '../services/analytics/analyticsService';
 import { getSurfLevelMappingFromEnum } from '../utils/surfLevelMapping';
 import { useScreenDimensions } from '../utils/responsive';
 import { updateCachedUserProfilePhoto } from '../utils/userProfileCache';
 import { useOnboarding } from '../context/OnboardingContext';
+import { useUserProfile } from '../context/UserProfileContext';
 import { calculateAgeFromDOB } from '../utils/ageCalculation';
 import AvatarCropModal from '../components/AvatarCropModal';
 import { BlockUserOverlay } from '../components/BlockUserOverlay';
@@ -810,6 +810,10 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
   // Get onboarding context for logout
   const { resetOnboarding, setUser, setCurrentStep, setIsDemoUser } = useOnboarding();
 
+  // Shared logged-in user profile — populated once by UserProfileProvider
+  // and reused across navigations so the screen renders instantly on return.
+  const { profile: myProfile, refresh: refreshMyProfile } = useUserProfile();
+
   // Check if already connected to this user
   const { conversations } = useMessaging();
   const isAlreadyConnected = userId ? conversations.some(
@@ -967,71 +971,62 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
   const loadProfileData = async () => {
     try {
       setProfileNotFound(false);
-      let targetUserId: string;
-      
-      if (userId) {
-        // View specific user's profile - no auth check needed
-        targetUserId = userId;
-      } else {
-        // Viewing own profile - auth guard ensures user is authenticated
-        // Just get user ID for API calls
+
+      if (!userId) {
+        // Own profile — delegate to UserProfileContext so the fetch is shared
+        // across screens (conversations header, profile) and deduplicated.
         setAuthChecking(true);
-        
         const { data: { user }, error: userError } = await supabase.auth.getUser();
-        
         if (userError || !user) {
-          // Auth guard will handle redirect, just stop loading
           console.error('[ProfileScreen] Error getting user:', userError);
           setAuthChecking(false);
           setLoading(false);
           return;
         }
-        
-        targetUserId = user.id;
         setCurrentUserId(user.id);
         currentUserIdRef.current = user.id;
         setAuthChecking(false);
-      }
 
-      // Fetch surfer data
-      const surferData = await supabaseDatabaseService.getSurferByUserId(targetUserId);
-      
-      if (!surferData) {
-        if (userId) {
-          // Viewing another user's profile that doesn't exist
-          setProfileNotFound(true);
-        } else {
-          // Own profile not found - this shouldn't happen, but show generic error
+        const fresh = await refreshMyProfile();
+        if (!fresh) {
           console.error('[ProfileScreen] Own profile not found');
         }
+        // myProfile → profileData sync is handled by the effect below.
         setLoading(false);
         return;
       }
-      
+
+      // Viewing another user's profile — fetch directly.
+      const surferData = await supabaseDatabaseService.getSurferByUserId(userId);
+
+      if (!surferData) {
+        setProfileNotFound(true);
+        setLoading(false);
+        return;
+      }
+
       setProfileData(surferData);
       setLoading(false);
       // Reset lifestyle image failure state when profile changes (don't inherit previous user's failures)
       setFailedSavedLifestyles(new Set());
 
       // Preload surf level video for other users (non-blocking)
-      if (userId && surferData) {
-        const defaultVideoUrl = getSurfLevelVideoUrl(
-          surferData.surfboard_type || 'shortboard',
-          surferData.surf_level || 1
-        );
-        
-        if (defaultVideoUrl) {
-          const { preloadVideo } = await import('../services/media/videoPreloadService');
-          preloadVideo(defaultVideoUrl, 'high')
-            .then(result => {
-              if (__DEV__) {
-                console.log(`[ProfileScreen] Surf level video preload completed: ready=${result.ready}`);
-              }
-            })
-            .catch(err => {
-              console.warn('[ProfileScreen] Surf level video preload failed (non-blocking):', err);
-            });
-        }
+      const defaultVideoUrl = getSurfLevelVideoUrl(
+        surferData.surfboard_type || 'shortboard',
+        surferData.surf_level || 1
+      );
+
+      if (defaultVideoUrl) {
+        const { preloadVideo } = await import('../services/media/videoPreloadService');
+        preloadVideo(defaultVideoUrl, 'high')
+          .then(result => {
+            if (__DEV__) {
+              console.log(`[ProfileScreen] Surf level video preload completed: ready=${result.ready}`);
+            }
+          })
+          .catch(err => {
+            console.warn('[ProfileScreen] Surf level video preload failed (non-blocking):', err);
+          });
       }
     } catch (error) {
       console.error('[ProfileScreen] Error loading profile data:', error);
@@ -1039,6 +1034,18 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
       // Don't set authError - auth guard will handle if it's an auth issue
     }
   };
+
+  // Sync own-profile state from the shared context. Renders instantly on return
+  // if the context already has the profile cached.
+  useEffect(() => {
+    if (!isViewingOwnProfile) return;
+    if (myProfile) {
+      setProfileData(myProfile);
+      setCurrentUserId(myProfile.user_id);
+      currentUserIdRef.current = myProfile.user_id;
+      setLoading(false);
+    }
+  }, [isViewingOwnProfile, myProfile]);
 
   const pickImage = async () => {
     if (!currentUserIdRef.current) {
@@ -1421,19 +1428,10 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
     }, intervalMs);
   };
 
-  // Show skeleton while loading - show immediately to prevent "No profile data found" flash
-  // The showSkeleton delay is handled internally by the skeleton components
+  // Render nothing during load to prevent "No profile data found" flash
   if (loading || authChecking) {
     return (
       <SafeAreaView style={styles.container}>
-        <ScrollView 
-          style={styles.scrollView}
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-        >
-          <ProfileSkeleton />
-        </ScrollView>
-        {/* Header Buttons - Always visible even during loading */}
         {fromOnboardingChat && isViewingOwnProfile && onEdit && onBack ? (
           <>
             <TouchableOpacity style={styles.onboardingPillButtonLeft} onPress={onEdit}>

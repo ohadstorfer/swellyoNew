@@ -214,6 +214,9 @@ serve(async (req) => {
       const processedKey = `processed/${prefix}/video-${timestamp}_compressed.mp4`
 
       const uploadUrl = await generatePresignedUrl('PUT', s3Key, 3600, 'video/mp4')
+      // 7-day presigned GET URL for the original, so the client can render playback
+      // immediately after upload while MediaConvert is still producing the compressed version.
+      const originalUrl = await generatePresignedUrl('GET', s3Key, 7 * 24 * 3600)
 
       console.log(`[process-profile-video-s3] Generated upload URL for: ${s3Key}`)
 
@@ -223,6 +226,7 @@ serve(async (req) => {
           uploadUrl,
           s3Key,
           processedKey,
+          originalUrl,
         }),
         { status: 200, headers: corsHeaders }
       )
@@ -253,16 +257,25 @@ serve(async (req) => {
       // Generate a presigned GET URL (7 days)
       const downloadUrl = await generatePresignedUrl('GET', processedKey, 7 * 24 * 3600)
 
-      // Update the database with the processed video URL
-      const { error: updateError } = await supabaseAdmin
-        .from('surfers')
-        .update({ profile_video_url: downloadUrl })
-        .eq('user_id', userId)
+      // Only update `surfers.profile_video_url` for SURF-LEVEL (profile) uploads.
+      // DM video uploads share this Edge Function but store under `processed/dm/...`
+      // — those are linked to a specific message row, not to the user's profile,
+      // so writing them to `surfers` would overwrite the user's real surf video.
+      const isDmVideo = processedKey.startsWith('processed/dm/')
 
-      if (updateError) {
-        console.error('[process-profile-video-s3] DB update failed:', updateError)
+      if (!isDmVideo) {
+        const { error: updateError } = await supabaseAdmin
+          .from('surfers')
+          .update({ profile_video_url: downloadUrl })
+          .eq('user_id', userId)
+
+        if (updateError) {
+          console.error('[process-profile-video-s3] DB update failed:', updateError)
+        } else {
+          console.log(`[process-profile-video-s3] DB updated with processed URL for user ${userId}`)
+        }
       } else {
-        console.log(`[process-profile-video-s3] DB updated with processed URL for user ${userId}`)
+        console.log(`[process-profile-video-s3] DM video processed — skipping surfers update for ${processedKey}`)
       }
 
       return new Response(

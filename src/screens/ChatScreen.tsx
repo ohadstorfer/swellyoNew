@@ -11,9 +11,12 @@ import {
   Animated,
   Dimensions,
   Pressable,
+  Keyboard,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { KeyboardAvoidingView, isExpoGo } from '../utils/keyboardAvoidingView';
+import Reanimated, { useAnimatedStyle } from 'react-native-reanimated';
+import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller';
+import { isExpoGo } from '../utils/keyboardAvoidingView';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../components/Text';
 import { colors, spacing, typography, borderRadius } from '../styles/theme';
@@ -132,6 +135,15 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
   const insets = useSafeAreaInsets();
   const keyboardVisible = useKeyboardVisible();
   const androidKeyboardHeight = useKeyboardHeight();
+  // Keyboard sync via Reanimated worklets — same pattern as DirectMessageScreen.
+  const { height: kbHeight, progress: kbProgress } = useReanimatedKeyboardAnimation();
+  const animatedKeyboardPadding = useAnimatedStyle(() => ({
+    paddingBottom: -kbHeight.value,
+  }));
+  const composerRestPadding = Math.max(insets.bottom, 24);
+  const animatedComposerPadding = useAnimatedStyle(() => ({
+    paddingBottom: composerRestPadding * (1 - kbProgress.value),
+  }));
   const flatListRef = useRef<FlatList<Message>>(null);
   const chatInputRef = useRef<ChatTextInputRef>(null);
   const { handleScroll, handleLayout, scrollToBottom: keyboardScrollToBottom } = useChatKeyboardScroll(flatListRef, { inverted: true });
@@ -550,6 +562,7 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
 
     const timeoutId = setTimeout(() => {
       if (pendingDestinationUiHints) {
+        Keyboard.dismiss();
         setShowDestinationCards(true);
         setDestinationList(pendingDestinationUiHints.destinations);
         setDestinationCardsMessageId(pendingDestinationUiHints.messageId);
@@ -557,6 +570,7 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
       }
 
       if (pendingBudgetUiHints) {
+        Keyboard.dismiss();
         setShowBudgetButtons(true);
         setBudgetButtonsMessageId(pendingBudgetUiHints.messageId);
         setPendingBudgetUiHints(null);
@@ -914,16 +928,13 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
       </View>
 
       {/* Chat Messages */}
-      <KeyboardAvoidingView
-        style={[styles.chatContainer, isExpoGo && Platform.OS === 'android' && androidKeyboardHeight > 0 && { paddingBottom: androidKeyboardHeight }]}
-        behavior={isExpoGo && Platform.OS === 'android' ? undefined : 'padding'}
-        keyboardVerticalOffset={0}
-      >
+      <View style={styles.chatContainer}>
         <ImageBackground
           source={CHAT_BG_IMAGE_URI}
-          style={styles.backgroundImage}
+          style={[styles.backgroundImage, { pointerEvents: 'none' }]}
           resizeMode="cover"
-        >
+        />
+        <Reanimated.View style={[styles.chatContent, animatedKeyboardPadding]}>
           <FlatList
             ref={flatListRef}
             data={invertedMessages}
@@ -945,27 +956,27 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
             maxToRenderPerBatch={50}
             windowSize={21}
           />
-        </ImageBackground>
 
-        {/* Input Area */}
-        <View style={[styles.inputWrapper, { paddingBottom: keyboardVisible ? 4 : Math.max(insets.bottom, 24) }]}>
-          <ChatTextInput
-            ref={chatInputRef}
-            value={inputText}
-            onChangeText={setInputText}
-            onSend={sendMessage}
-            disabled={isLoading || isInitializing || (showDestinationCards && !destinationsSubmitted) || (showBudgetButtons && !budgetSubmitted)}
-            placeholder="Type your message.."
-            maxLength={500}
-            primaryColor={colors.primary || '#B72DF2'}
-            leftAccessory={
-              <TouchableOpacity style={styles.attachButton}>
-                <Ionicons name="add" size={28} color="#222B30" />
-              </TouchableOpacity>
-            }
-          />
-        </View>
-      </KeyboardAvoidingView>
+          {/* Input Area */}
+          <Reanimated.View style={[styles.inputWrapper, animatedComposerPadding]}>
+            <ChatTextInput
+              ref={chatInputRef}
+              value={inputText}
+              onChangeText={setInputText}
+              onSend={sendMessage}
+              disabled={isLoading || isInitializing || (showDestinationCards && !destinationsSubmitted) || (showBudgetButtons && !budgetSubmitted)}
+              placeholder="Type your message.."
+              maxLength={500}
+              primaryColor="#B72DF2"
+              leftAccessory={
+                <TouchableOpacity style={styles.attachButton}>
+                  <Ionicons name="add" size={28} color="#222B30" />
+                </TouchableOpacity>
+              }
+            />
+          </Reanimated.View>
+        </Reanimated.View>
+      </View>
       <ReportAISheet
         visible={reportSheetVisible}
         messageText={reportMessageText}
@@ -1125,9 +1136,13 @@ const styles = StyleSheet.create({
   chatContainer: {
     flex: 1,
   },
-  backgroundImage: {
+  chatContent: {
     flex: 1,
+  },
+  backgroundImage: {
+    ...StyleSheet.absoluteFillObject,
     width: '100%',
+    height: '100%',
   },
   messagesList: {
     flex: 1,

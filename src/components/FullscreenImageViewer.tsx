@@ -123,20 +123,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   imageContainer: {
-    width: SCREEN_WIDTH,
-    height: SCREEN_HEIGHT,
+    ...StyleSheet.absoluteFillObject,
     justifyContent: 'center',
     alignItems: 'center',
   },
   thumbnailImage: {
-    position: 'absolute',
-    width: SCREEN_WIDTH * 0.5,
-    height: SCREEN_HEIGHT * 0.5,
-    opacity: 0.5,
+    // Thumbnail renders at full screen size (same as fullImage) so the image
+    // starts visually full-size and only the pixel density improves when the
+    // real URL loads. Previously it sat at 50% and popped to 100%.
+    ...StyleSheet.absoluteFillObject,
   },
   fullImage: {
-    width: SCREEN_WIDTH,
-    height: SCREEN_HEIGHT,
+    ...StyleSheet.absoluteFillObject,
   },
   loadingContainer: {
     position: 'absolute',
