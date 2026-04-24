@@ -8,6 +8,7 @@ import {
   Easing,
   TouchableOpacity,
   Image,
+  ImageSourcePropType,
   Platform,
   ScrollView,
   useWindowDimensions,
@@ -15,6 +16,11 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { SupabaseSurfer } from '../../services/database/supabaseDatabaseService';
+import { Images } from '../../assets/images';
+import {
+  getCountryImageFromStorage,
+  getCountryImageFallback,
+} from '../../services/media/imageService';
 
 type Props = {
   visible: boolean;
@@ -33,6 +39,30 @@ const FIGMA = {
   textPrimary: '#333333',
   textSecondary: '#7B7B7B',
   brandTeal: '#0788B0',
+};
+
+// Mirrors BOARD_TYPE_MAP from ProfileScreen.tsx:60 — same hosted surfboard illustrations.
+const BOARD_TYPE_MAP: Record<string, { name: string; imageUrl: string }> = {
+  shortboard: {
+    name: 'Shortboard',
+    imageUrl:
+      'https://api.builder.io/api/v1/image/assets/TEMP/9761796f6e2272f3cacf14c4fc9342525bb54ff8?width=371',
+  },
+  mid_length: {
+    name: 'Mid-length',
+    imageUrl:
+      'https://api.builder.io/api/v1/image/assets/TEMP/377f67727b21485479e873ed3d93c57611722f74?width=371',
+  },
+  longboard: {
+    name: 'Longboard',
+    imageUrl:
+      'https://api.builder.io/api/v1/image/assets/TEMP/4692a28e8ac444a82eec1f691f5f008c8a9bbc8e?width=371',
+  },
+  soft_top: {
+    name: 'Soft top',
+    imageUrl:
+      'https://api.builder.io/api/v1/image/assets/TEMP/1d104557a7a5ea05c3b36931c1ee56fd01a6d426?width=371',
+  },
 };
 
 export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) => {
@@ -93,11 +123,15 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
   const avatarUrl = surfer?.profile_image_url;
   const nickname = surfer?.name ?? '';
   const country = surfer?.country_from ?? '';
-  const surfStyleLabel = formatSurfboardType(surfer?.surfboard_type);
-  const tripCount = typeof surfer?.travel_experience === 'number' ? surfer.travel_experience : null;
+
+  const boardTypeInfo = getBoardTypeInfo(surfer?.surfboard_type);
+  const tripCount =
+    typeof surfer?.travel_experience === 'number' ? surfer.travel_experience : null;
   const travelExperienceLabel =
     tripCount == null ? '—' : `${tripCount} surf trip${tripCount === 1 ? '' : 's'}`;
+  const travelLevelImage = getTravelLevelImage(tripCount ?? 0);
   const surfSkillLabel = capitalizeWords(surfer?.surf_level_category) || '—';
+  const surfSkillThumb = getSurfSkillThumb(surfer?.surfboard_type, surfer?.surf_level);
   const destinations = surfer?.destinations_array ?? [];
 
   return (
@@ -130,7 +164,6 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
               ]}
               showsVerticalScrollIndicator={false}
             >
-              {/* Back button (top-left pill) */}
               <View style={styles.backRow}>
                 <TouchableOpacity
                   style={styles.backButton}
@@ -142,7 +175,6 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
                 </TouchableOpacity>
               </View>
 
-              {/* Avatar + change picture link */}
               <View style={styles.avatarWrap}>
                 <View style={styles.avatarRing}>
                   {avatarUrl ? (
@@ -156,9 +188,7 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
                 <Text style={styles.changeProfileLink}>Change profile picture</Text>
               </View>
 
-              {/* White rounded content panel */}
               <View style={styles.contentPanel}>
-                {/* Personal information */}
                 <Section title="Personal information">
                   <View style={styles.fieldsContainer}>
                     <InlineField label="Nickname" value={nickname} />
@@ -166,49 +196,45 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
                   </View>
                 </Section>
 
-                {/* Travel information */}
                 <Section title="Travel information">
                   <View style={styles.cardsContainer}>
                     <EditCard
-                      thumbnailIcon="albums-outline"
-                      thumbnailTint="#0788B0"
+                      thumbnail={{ uri: boardTypeInfo.imageUrl }}
+                      thumbnailResize="contain"
                       label="Surf Style"
-                      value={surfStyleLabel}
+                      value={boardTypeInfo.name}
                     />
                     <EditCard
-                      thumbnailIcon="airplane-outline"
-                      thumbnailTint="#E8A43E"
+                      thumbnail={travelLevelImage}
+                      thumbnailResize="contain"
                       label="Travel Experience"
                       value={travelExperienceLabel}
                     />
                     <EditCard
-                      thumbnailIcon="play-circle-outline"
-                      thumbnailTint="#3B82F6"
+                      thumbnail={surfSkillThumb}
+                      thumbnailResize="cover"
                       label="Surf Skill"
                       value={surfSkillLabel}
                     />
                     <EditCard
-                      thumbnailIcon="location-outline"
-                      thumbnailTint="#10B981"
+                      fallbackIcon="location-outline"
+                      fallbackTint="#10B981"
                       label="Local Break"
                       value="Not set"
                     />
                   </View>
                 </Section>
 
-                {/* Top Destinations */}
                 <Section title="Top Destinations">
                   {destinations.length === 0 ? (
                     <Text style={styles.emptyText}>No destinations added yet.</Text>
                   ) : (
                     <View style={styles.cardsContainer}>
                       {destinations.map((dest, idx) => (
-                        <EditCard
+                        <DestinationCard
                           key={`${dest.country}-${idx}`}
-                          thumbnailIcon="globe-outline"
-                          thumbnailTint="#0788B0"
-                          label={dest.country}
-                          value={`${dest.time_in_days} Day${dest.time_in_days === 1 ? '' : 's'}`}
+                          country={dest.country}
+                          days={dest.time_in_days}
                         />
                       ))}
                     </View>
@@ -239,15 +265,36 @@ const InlineField: React.FC<{ label: string; value: string }> = ({ label, value 
   </View>
 );
 
-const EditCard: React.FC<{
-  thumbnailIcon: React.ComponentProps<typeof Ionicons>['name'];
-  thumbnailTint: string;
+type EditCardProps = {
   label: string;
   value: string;
-}> = ({ thumbnailIcon, thumbnailTint, label, value }) => (
+  thumbnail?: ImageSourcePropType | null;
+  thumbnailResize?: 'cover' | 'contain';
+  fallbackIcon?: React.ComponentProps<typeof Ionicons>['name'];
+  fallbackTint?: string;
+};
+
+const EditCard: React.FC<EditCardProps> = ({
+  label,
+  value,
+  thumbnail,
+  thumbnailResize = 'cover',
+  fallbackIcon,
+  fallbackTint = '#0788B0',
+}) => (
   <View style={styles.editCard}>
-    <View style={[styles.editCardThumb, { backgroundColor: `${thumbnailTint}14` }]}>
-      <Ionicons name={thumbnailIcon} size={28} color={thumbnailTint} />
+    <View style={styles.editCardThumb}>
+      {thumbnail ? (
+        <Image
+          source={thumbnail}
+          style={styles.editCardThumbImage}
+          resizeMode={thumbnailResize}
+        />
+      ) : fallbackIcon ? (
+        <View style={[styles.editCardIconFallback, { backgroundColor: `${fallbackTint}14` }]}>
+          <Ionicons name={fallbackIcon} size={28} color={fallbackTint} />
+        </View>
+      ) : null}
     </View>
     <View style={styles.editCardText}>
       <Text style={styles.editCardLabel}>{label}</Text>
@@ -259,15 +306,79 @@ const EditCard: React.FC<{
   </View>
 );
 
-function formatSurfboardType(input?: string): string {
-  if (!input) return '—';
-  const map: Record<string, string> = {
-    shortboard: 'Shortboard',
-    mid_length: 'Mid-length',
-    longboard: 'Longboard',
-    soft_top: 'Soft top',
-  };
-  return map[input] ?? capitalizeWords(input) ?? '—';
+const DestinationCard: React.FC<{ country: string; days: number }> = ({ country, days }) => {
+  const primaryUrl = getCountryImageFromStorage(country);
+  const [failed, setFailed] = useState(false);
+  const imageUri = !failed && primaryUrl ? primaryUrl : getCountryImageFallback(country);
+
+  return (
+    <View style={styles.editCard}>
+      <View style={styles.editCardThumb}>
+        <Image
+          source={{ uri: imageUri }}
+          style={styles.editCardThumbImage}
+          resizeMode="cover"
+          onError={() => {
+            if (!failed) setFailed(true);
+          }}
+        />
+      </View>
+      <View style={styles.editCardText}>
+        <Text style={styles.editCardLabel}>{country}</Text>
+        <Text style={styles.editCardValue} numberOfLines={1}>
+          {days} Day{days === 1 ? '' : 's'}
+        </Text>
+      </View>
+      <Ionicons name="chevron-forward" size={20} color="#B0B0B0" />
+    </View>
+  );
+};
+
+function getBoardTypeInfo(input?: string): { name: string; imageUrl: string } {
+  if (!input) return BOARD_TYPE_MAP.shortboard;
+  return BOARD_TYPE_MAP[input.toLowerCase()] ?? BOARD_TYPE_MAP.shortboard;
+}
+
+// Mirrors getTravelLevelImage from ProfileScreen.tsx:94.
+function getTravelLevelImage(trips: number): ImageSourcePropType {
+  if (trips <= 3) return Images.travelLevels.level1;
+  if (trips <= 9) return Images.travelLevels.level2;
+  if (trips <= 19) return Images.travelLevels.level3;
+  return Images.travelLevels.level4;
+}
+
+// Per-board thumbnails for the surf-skill row. surf_level (1-4) indexes into
+// the board's thumbnail list, same order used by OnboardingStep2Screen's video list.
+function getSurfSkillThumb(
+  boardType?: string,
+  surfLevel?: number,
+): ImageSourcePropType | null {
+  const level = Math.max(0, Math.min(3, (surfLevel ?? 1) - 1));
+  const board = (boardType || 'shortboard').toLowerCase();
+
+  if (board === 'longboard') {
+    return [
+      Images.surfLevel.longboard.dippingMyToes,
+      Images.surfLevel.longboard.cruisingAround,
+      Images.surfLevel.longboard.crossStepping,
+      Images.surfLevel.longboard.hangingToes,
+    ][level];
+  }
+  if (board === 'mid_length' || board === 'midlength') {
+    return [
+      Images.surfLevel.midlength.dippingMyToes,
+      Images.surfLevel.midlength.cruisingAround,
+      Images.surfLevel.midlength.carvingTurns,
+      Images.surfLevel.midlength.chargingOrCarving,
+    ][level];
+  }
+  // shortboard + soft_top
+  return [
+    Images.surfLevel.shortboard.dippingMyToes,
+    Images.surfLevel.shortboard.cruisingAround,
+    Images.surfLevel.shortboard.snapping,
+    Images.surfLevel.shortboard.charging,
+  ][level];
 }
 
 function capitalizeWords(input?: string | null): string {
@@ -433,8 +544,21 @@ const styles = StyleSheet.create({
     width: 57,
     height: 57,
     borderRadius: 8,
+    overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+  },
+  editCardThumbImage: {
+    width: '100%',
+    height: '100%',
+  },
+  editCardIconFallback: {
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 8,
   },
   editCardText: {
     flex: 1,

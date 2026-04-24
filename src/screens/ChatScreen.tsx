@@ -1166,7 +1166,7 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   messageContainer: {
-    marginBottom: 8,
+    marginBottom: 0,
   },
   userMessageContainer: {
     alignItems: 'flex-end',
