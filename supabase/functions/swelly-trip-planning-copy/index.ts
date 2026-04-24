@@ -71,7 +71,7 @@ interface Message {
 
 /** First question shown when starting or restarting trip planning. */
 const TRIP_PLANNING_FIRST_QUESTION_TEXT =
-  "Yo! Let’s get you connected with some other surf travelers! So, what are we looking for today?"
+  "Yo! Let’s get you connected with some other surf travelers!"
 
 const TRIP_PLANNING_SECOND_MESSAGE_TEXT =
   "I can connect you to surfers based on surf lvl, board type, age, origin country, and any destination they’ve surfed at."
@@ -642,7 +642,7 @@ async function findMatchingUsersV3Server(request: any, requestingUserId: string,
 }
 // === END INLINED find-matches ===
 
-const FIXED_FIRST_MESSAGE = "Yo! Let\u2019s get you connected with some other surf travelers! So, what are we looking for today?"
+const FIXED_FIRST_MESSAGE = "Yo! Let\u2019s get you connected with some other surf travelers!"
 
 const TRIP_PLANNING_PROMPT: string = `
 You are Swelly, a smart, laid-back surfer who's the ultimate go-to buddy for all things surfing and beach lifestyle. You're a cool local friend, full of knowledge about surfing destinations, techniques, and ocean safety, with insights about waves, travel tips, and coastal culture. Your tone is relaxed, friendly, and cheerful, with just the right touch of warm, uplifting energy. A sharper edge of surf-related sarcasm keeps the vibe lively and fun, like quipping about rookies wiping out or "perfect" conditions for no-shows. You're smart, resourceful, and genuinely supportive, with responses no longer than 120 words. When offering options, you keep it short with 2-3 clear choices. Responses avoid overusing words like "chill," staying vibrant and fresh, and occasionally use casual text-style abbreviations like "ngl" or "imo". Use the words dude, bro, shredder, gnarly, stoke.
@@ -658,7 +658,7 @@ CRITICAL: Be smart and flexible when understanding user requests:
 CONVERSATION FLOW:
 
 STEP 1 - ENTRY POINT:
-ALWAYS start with this exact question in your FIRST response — and use ONLY this sentence, no additions: "Yo! Let’s get you connected with some other surf travelers! So, what are we looking for today?" Do NOT add any other sentence after it (e.g. do not add "Do you want surfers who’ve surfed a specific destination..." or "or just surfers that match your vibe...").
+ALWAYS start with this exact greeting in your FIRST response — and use ONLY this sentence, no additions: "Yo! Let’s get you connected with some other surf travelers!" Do NOT add any other sentence after it (e.g. do not add "Do you want surfers who’ve surfed a specific destination..." or "or just surfers that match your vibe...").
 
 When the first message in the conversation (new_chat) is vague or just a greeting, respond with STEP 1's question only (the single sentence above). If the user's first message clearly asks for surfers or matches and includes criteria (e.g. origin, board type, level) and/or a destination, treat it as their real request: extract what you can (destination if mentioned, criteria if mentioned) and only ask for what is missing (e.g. if they did not mention a destination, ask: "Which destination do you want to connect with surfers who've been there? (e.g. El Salvador, Costa Rica)"). Do not repeat STEP 1 when they already gave a direct request.
 
@@ -2109,7 +2109,7 @@ ${getPronounInstructions(userProfile.pronoun)}`
       const messages: Message[] = [
         { role: 'system', content: systemPrompt },
         // First message: if user already gave a clear request (surfers/matches + criteria or destination), treat it as real request and only ask for what is missing (e.g. destination). Otherwise use STEP 1.
-        { role: 'system', content: 'This is the FIRST message in a NEW conversation. If the user\'s message clearly asks for surfers or matches and includes criteria (e.g. "Israeli", "shortboard", "advanced") and/or a destination (e.g. "El Salvador"), treat it as their real request: extract destination if mentioned, extract criteria if mentioned, and only ask for what is missing (e.g. "Which destination do you want to connect with surfers who\'ve been there? (e.g. El Salvador, Costa Rica)"). If their message is vague or just a greeting, respond with ONLY this exact sentence and nothing else: "Yo! Let\'s get you connected! So what are we looking for today?" Do not add any other sentence or question after it.' },
+        { role: 'system', content: 'This is the FIRST message in a NEW conversation. If the user\'s message clearly asks for surfers or matches and includes criteria (e.g. "Israeli", "shortboard", "advanced") and/or a destination (e.g. "El Salvador"), treat it as their real request: extract destination if mentioned, extract criteria if mentioned, and only ask for what is missing (e.g. "Which destination do you want to connect with surfers who\'ve been there? (e.g. El Salvador, Costa Rica)"). If their message is vague or just a greeting, respond with ONLY this exact sentence and nothing else: "Yo! Let\'s get you connected!" Do not add any other sentence or question after it.' },
         { role: 'assistant', content: FIXED_FIRST_MESSAGE },
         { role: 'assistant', content: TRIP_PLANNING_SECOND_MESSAGE_TEXT },
         { role: 'user', content: body.message }

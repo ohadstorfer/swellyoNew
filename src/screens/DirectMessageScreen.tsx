@@ -2039,7 +2039,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       uploadState: message.upload_state,
     });
 
-    if (!currentUserId || message.sender_id !== currentUserId) {
+    if (!currentUserId) {
       return;
     }
     if (message.deleted) {
@@ -2049,9 +2049,17 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       return;
     }
 
+    const isOwnMessage = message.sender_id === currentUserId;
+    const hasCopyableText = !!message.body && message.body.trim().length > 0;
+
+    // For other users' messages, only open the menu if there's text to copy.
+    if (!isOwnMessage && !hasCopyableText) {
+      return;
+    }
+
     // Failed messages have no server row yet — edit/delete-via-server would
     // fail. Offer Retry / Delete (local) / Copy instead.
-    if (message.upload_state === 'failed') {
+    if (isOwnMessage && message.upload_state === 'failed') {
       Alert.alert(
         'Mensaje sin enviar',
         message.body || '',
@@ -2834,6 +2842,12 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             console.error('[DirectMessageScreen] No selected message to delete');
           }
         }}
+        onCopy={() => {
+          if (selectedMessage) {
+            handleCopyMessageText(selectedMessage);
+          }
+        }}
+        canCopy={!!selectedMessage?.body && selectedMessage.body.trim().length > 0}
         canEdit={selectedMessage ? canEditMessage(selectedMessage) : false}
         canDelete={(() => {
           // Only calculate when menu is visible and message is selected
