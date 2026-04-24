@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import type { ReplyToSnapshot } from './messagingService';
 
 // Persistent outbox for outgoing text messages. Each entry is keyed by a
 // client-generated UUID (`client_id`) so retries are idempotent via the DB's
@@ -17,6 +18,7 @@ export interface OutboxEntry {
   attemptCount: number;
   lastError?: string;
   lastAttemptAt?: number;
+  replyTo?: ReplyToSnapshot | null;
 }
 
 export type OutboxSendFn = (entry: OutboxEntry) => Promise<void>;

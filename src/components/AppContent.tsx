@@ -19,6 +19,8 @@ import { SwellyShaperScreen } from '../screens/SwellyShaperScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { ConversationLoadingScreen } from '../components/ConversationLoadingScreen';
 import { WelcomeToLineupOverlay } from '../components/WelcomeToLineupOverlay';
+import { ProfileEditPanel } from './ProfileEditPanel/ProfileEditPanel';
+import { useUserProfile } from '../context/UserProfileContext';
 import { useTutorial } from '../context/TutorialContext';
 import { messagingService } from '../services/messaging/messagingService';
 import { supabaseAuthService } from '../services/auth/supabaseAuthService';
@@ -564,6 +566,8 @@ export const AppContent: React.FC = () => {
   };
 
   const [showProfile, setShowProfile] = useState(false);
+  const [showProfileEditor, setShowProfileEditor] = useState(false);
+  const { profile: currentUserSurfer } = useUserProfile();
   const [showTripPlanningChat, setShowTripPlanningChat] = useState(false);
   const [showTripPlanningChatCopy, setShowTripPlanningChatCopy] = useState(false);
   const [showSwellyShaper, setShowSwellyShaper] = useState(false);
@@ -1191,8 +1195,12 @@ export const AppContent: React.FC = () => {
           fromOnboardingChat={profileFromOnboardingChat}
           onSaveAndGoToConversations={handleSaveAndGoToConversations}
           onEdit={() => {
-            setShowProfile(false);
-            setShowSwellyShaper(true);
+            if (process.env.EXPO_PUBLIC_LOCAL_MODE === 'true') {
+              setShowProfileEditor(true);
+            } else {
+              setShowProfile(false);
+              setShowSwellyShaper(true);
+            }
           }}
         />
       );
@@ -1364,6 +1372,11 @@ export const AppContent: React.FC = () => {
             setTripPlanningChatId(null); // Start fresh chat, not restore
             setShowTripPlanningChatCopy(true);
           }}
+        />
+        <ProfileEditPanel
+          visible={showProfileEditor}
+          onClose={() => setShowProfileEditor(false)}
+          surfer={currentUserSurfer}
         />
       </View>
     );

@@ -10,9 +10,11 @@ interface MessageActionsMenuProps {
   onEdit: () => void;
   onDelete: () => void;
   onCopy?: () => void;
+  onReply?: () => void;
   canEdit: boolean; // Whether message is within edit window
   canDelete: boolean; // Whether message can be deleted
   canCopy?: boolean; // Whether message has text that can be copied
+  canReply?: boolean; // Whether the message can be replied to
   messagePosition: { x: number; y: number }; // Position for menu placement
 }
 
@@ -22,15 +24,23 @@ export const MessageActionsMenu: React.FC<MessageActionsMenuProps> = ({
   onEdit,
   onDelete,
   onCopy,
+  onReply,
   canEdit,
   canDelete,
   canCopy,
+  canReply,
   messagePosition,
 }) => {
   // Only log when visible to reduce noise
   if (visible) {
-    console.log('[MessageActionsMenu] Render (visible)', { visible, canEdit, canDelete, canCopy });
+    console.log('[MessageActionsMenu] Render (visible)', { visible, canEdit, canDelete, canCopy, canReply });
   }
+
+  const handleReply = () => {
+    console.log('[MessageActionsMenu] handleReply called');
+    if (onReply) onReply();
+    onClose();
+  };
 
   const handleEdit = () => {
     console.log('[MessageActionsMenu] handleEdit called');
@@ -88,6 +98,17 @@ export const MessageActionsMenu: React.FC<MessageActionsMenuProps> = ({
             },
           ]}
         >
+          {canReply && (
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={handleReply}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.menuItemText}>Reply</Text>
+              <Ionicons name="arrow-undo-outline" size={20} color={colors.text} />
+            </TouchableOpacity>
+          )}
+
           {canEdit && (
             <TouchableOpacity
               style={styles.menuItem}

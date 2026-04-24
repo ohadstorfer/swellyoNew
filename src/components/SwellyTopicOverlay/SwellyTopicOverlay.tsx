@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -9,10 +9,11 @@ import {
   TouchableOpacity,
   Image,
   Platform,
-  Dimensions,
+  useWindowDimensions,
   ImageSourcePropType,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Images } from '../../assets/images';
 
 export type SwellyTopicId = 'share_wisdom' | 'find_crew' | 'plan_trip' | 'just_waves';
@@ -31,7 +32,7 @@ const TOPICS: Topic[] = [
     id: 'share_wisdom',
     title: 'Share your surf wisdom',
     image: 'https://rfdhtvcmagsbxqntnepv.supabase.co/storage/v1/object/public/onboarding-welcome-images/b0d7956780bd01fbfac42c1db76ed27df34c3fcf.jpg',
-    seed: "Hey Swelly, I wanna share my surf wisdom.",
+    seed: "Hey Swelly, I wanna share my surf knowledge with other travelers.",
   },
   {
     id: 'find_crew',
@@ -49,7 +50,7 @@ const TOPICS: Topic[] = [
     id: 'just_waves',
     title: 'General Surf Guidance',
     image: 'https://rfdhtvcmagsbxqntnepv.supabase.co/storage/v1/object/public/onboarding-welcome-images/082aedec1b3d12fa462436f56cd5af2e3d6ad236.jpg',
-    seed: "Hey Swelly, I'm looking for general surf guidance.",
+    seed: "Hey Swelly, I'm looking for general surf advice.",
   },
 ];
 
@@ -59,73 +60,69 @@ type Props = {
 };
 
 export const SwellyTopicOverlay: React.FC<Props> = ({ visible, onSelect }) => {
-  const screenHeight = Dimensions.get('window').height;
-  const [mounted, setMounted] = useState(visible);
+  const { height: screenHeight } = useWindowDimensions();
+  const [mounted, setMounted] = useState(false);
   const [selectedId, setSelectedId] = useState<SwellyTopicId | null>(null);
-  const translateY = useRef(new Animated.Value(screenHeight)).current;
+  const translateY = useRef(new Animated.Value(0)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
 
-  // Mount/unmount: flip `mounted` true before the slide-up, and flip false only after the
-  // slide-down finishes so the Modal stays in the tree while animating away.
+  // Mount on visible=true; stay mounted through the slide-down and only unmount
+  // once the exit animation finishes. Reset values to the off-screen start state
+  // BEFORE the Modal paints so it never renders in its resting position first.
   useEffect(() => {
     if (visible && !mounted) {
-      setMounted(true);
-      setSelectedId(null);
       translateY.setValue(screenHeight);
       backdropOpacity.setValue(0);
+      setSelectedId(null);
+      setMounted(true);
     }
-  }, [visible, mounted, screenHeight]);
+  }, [visible, mounted, screenHeight, translateY, backdropOpacity]);
 
-  // Drive the animation after the Modal has actually rendered. A DOUBLE requestAnimationFrame
-  // gives the native Modal time to mount + paint its initial state before the slide starts,
-  // which avoids the sheet "teleporting" partway through the animation on iOS.
+  // Exit animation: runs when visible flips to false while still mounted.
   useEffect(() => {
-    if (!mounted) return;
-
-    if (visible) {
-      let raf2: number | null = null;
-      const raf1 = requestAnimationFrame(() => {
-        raf2 = requestAnimationFrame(() => {
-          Animated.parallel([
-            Animated.timing(backdropOpacity, {
-              toValue: 1,
-              duration: 320,
-              useNativeDriver: true,
-            }),
-            Animated.timing(translateY, {
-              toValue: 0,
-              duration: 520,
-              // ease-out-quart — deceleration is smooth and perceivable across the whole
-              // travel, unlike ease-out-cubic which finishes ~85% of the motion in the first
-              // third of the duration.
-              easing: Easing.bezier(0.22, 1, 0.36, 1),
-              useNativeDriver: true,
-            }),
-          ]).start();
-        });
+    if (mounted && !visible) {
+      Animated.parallel([
+        Animated.timing(backdropOpacity, {
+          toValue: 0,
+          duration: 220,
+          useNativeDriver: true,
+        }),
+        Animated.timing(translateY, {
+          toValue: screenHeight,
+          duration: 320,
+          easing: Easing.bezier(0.64, 0, 0.78, 0),
+          useNativeDriver: true,
+        }),
+      ]).start(({ finished }) => {
+        if (finished) setMounted(false);
       });
-      return () => {
-        cancelAnimationFrame(raf1);
-        if (raf2 != null) cancelAnimationFrame(raf2);
-      };
     }
+  }, [mounted, visible, screenHeight, translateY, backdropOpacity]);
 
+  // Entry animation: fires once the Modal has actually been presented on screen.
+  // Using onShow (instead of a double requestAnimationFrame) avoids the race where
+  // the animation kicks off before the native Modal has finished mounting, which
+  // otherwise causes the sheet to appear in place without sliding.
+  const runEnterAnimation = useCallback(() => {
+    translateY.setValue(screenHeight);
+    backdropOpacity.setValue(0);
     Animated.parallel([
       Animated.timing(backdropOpacity, {
-        toValue: 0,
-        duration: 220,
+        toValue: 1,
+        duration: 320,
         useNativeDriver: true,
       }),
       Animated.timing(translateY, {
-        toValue: screenHeight,
-        duration: 320,
-        easing: Easing.bezier(0.64, 0, 0.78, 0),
+        toValue: 0,
+        duration: 520,
+        // ease-out-quart — deceleration is smooth and perceivable across the whole
+        // travel, unlike ease-out-cubic which finishes ~85% of the motion in the
+        // first third of the duration.
+        easing: Easing.bezier(0.22, 1, 0.36, 1),
         useNativeDriver: true,
       }),
-    ]).start(({ finished }) => {
-      if (finished) setMounted(false);
-    });
-  }, [mounted, visible, screenHeight]);
+    ]).start();
+  }, [screenHeight, translateY, backdropOpacity]);
 
   const handleConfirm = () => {
     if (!selectedId) return;
@@ -142,6 +139,7 @@ export const SwellyTopicOverlay: React.FC<Props> = ({ visible, onSelect }) => {
       animationType="none"
       statusBarTranslucent
       hardwareAccelerated
+      onShow={runEnterAnimation}
     >
       <View style={styles.root}>
         <Animated.View
@@ -155,13 +153,20 @@ export const SwellyTopicOverlay: React.FC<Props> = ({ visible, onSelect }) => {
             <View style={styles.handle} />
           </View>
 
-          <View style={styles.avatarBubble}>
-            <Image
-              source={Images.swellyAvatar as ImageSourcePropType}
-              style={styles.avatarImage}
-              resizeMode="cover"
-            />
-          </View>
+          <LinearGradient
+            colors={['#B72DF2', '#FF5367']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={styles.avatarBubble}
+          >
+            <View style={styles.avatarInner}>
+              <Image
+                source={Images.swellyAvatar as ImageSourcePropType}
+                style={styles.avatarImage}
+                resizeMode="contain"
+              />
+            </View>
+          </LinearGradient>
 
           <Text style={styles.title}>{`Yo!  What are we\nfocusing on today?`}</Text>
 
@@ -248,14 +253,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#7B7B7B',
   },
   avatarBubble: {
-    width: 79,
-    height: 86,
+    width: 103,
+    height: 102,
     borderRadius: 40,
-    borderWidth: 1,
-    borderColor: '#B72DF2',
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
-    justifyContent: 'center',
-    alignItems: 'center',
+    padding: 1, // acts as the 1px gradient border
     marginTop: 8,
     marginBottom: 12,
     ...Platform.select({
@@ -272,10 +273,19 @@ const styles = StyleSheet.create({
       },
     }),
   },
+  avatarInner: {
+    flex: 1,
+    borderRadius: 39,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    justifyContent: 'center',
+    alignItems: 'center',
+    overflow: 'hidden',
+  },
   avatarImage: {
-    width: 75,
-    height: 82,
-    borderRadius: 37,
+    
+    height: 95,
   },
   title: {
     fontSize: 18,
@@ -331,7 +341,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-start',
   },
   cardTitle: {
-    fontSize: 16,
+    fontSize: 12,
     lineHeight: 18,
     fontWeight: '700',
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',

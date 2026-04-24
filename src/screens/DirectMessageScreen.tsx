@@ -26,7 +26,7 @@ import { Text } from '../components/Text';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GalleryPermissionOverlay } from '../components/GalleryPermissionOverlay';
 import { colors, spacing, typography, borderRadius } from '../styles/theme';
-import { messagingService, Message, RealtimeSubscriptionStatus } from '../services/messaging/messagingService';
+import { messagingService, Message, RealtimeSubscriptionStatus, ReplyToSnapshot } from '../services/messaging/messagingService';
 import { supabaseAuthService } from '../services/auth/supabaseAuthService';
 import { getImageUrl } from '../services/media/imageService';
 import { Images } from '../assets/images';
@@ -37,6 +37,8 @@ import { chatHistoryCache } from '../services/messaging/chatHistoryCache';
 import { messageOutbox } from '../services/messaging/messageOutbox';
 import * as Crypto from 'expo-crypto';
 import { MessageActionsMenu } from '../components/MessageActionsMenu';
+import { ReplyPreviewBanner } from '../components/ReplyPreviewBanner';
+import { QuotedMessagePreview } from '../components/QuotedMessagePreview';
 import { useMessaging } from '../context/MessagingProvider';
 import { userPresenceService } from '../services/presence/userPresenceService';
 import { avatarCacheService } from '../services/media/avatarCacheService';
@@ -141,6 +143,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const pendingPickerRef = useRef<(() => void) | null>(null);
   const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
   const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
+  const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
   const [pendingDeleteMessageId, setPendingDeleteMessageId] = useState<string | null>(null);
   const [fullscreenImageUrl, setFullscreenImageUrl] = useState<string | null>(null);
@@ -615,7 +618,8 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                 entry.body,
                 [],
                 entry.type,
-                entry.clientId
+                entry.clientId,
+                entry.replyTo ?? undefined
               );
             })
             .catch((err) => console.warn('[DirectMessageScreen] outbox flush failed:', err));
@@ -1063,6 +1067,28 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     // locate it later) and the server-side idempotency key (client_id column).
     const clientId = Crypto.randomUUID();
 
+    // Snapshot the message being replied to (if any), then clear the banner
+    // optimistically. The snapshot is frozen at this moment so edits to the
+    // original don't mutate the quote — matches WhatsApp.
+    const replyToSnapshot: ReplyToSnapshot | undefined = replyingTo
+      ? {
+          message_id: replyingTo.id,
+          sender_id: replyingTo.sender_id,
+          sender_name:
+            replyingTo.sender_id === currentUserId
+              ? 'You'
+              : (replyingTo.sender_name || otherUserName || ''),
+          type: replyingTo.type ?? 'text',
+          body:
+            replyingTo.type === 'image'
+              ? 'Photo'
+              : replyingTo.type === 'video'
+                ? 'Video'
+                : (replyingTo.body ?? ''),
+        }
+      : undefined;
+    if (replyingTo) setReplyingTo(null);
+
     // 1. Show message immediately (optimistic) - BEFORE conversation creation
     const tempConversationId = currentConversationId || `temp-conv-${Date.now()}`;
     const optimisticMessage: Message = {
@@ -1078,6 +1104,8 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       deleted: false,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
+      reply_to_message_id: replyToSnapshot?.message_id ?? null,
+      reply_to_snapshot: replyToSnapshot ?? null,
     };
 
     setMessages((prev) => [...prev, optimisticMessage]);
@@ -1188,6 +1216,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         senderId: currentUserId,
         body: messageText,
         type: 'text',
+        replyTo: replyToSnapshot ?? null,
       });
     } catch (err) {
       console.warn('[DirectMessageScreen] outbox enqueue failed (proceeding anyway):', err);
@@ -1200,7 +1229,8 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         messageText,
         [],
         'text',
-        clientId
+        clientId,
+        replyToSnapshot
       );
 
       // Remove from outbox on confirmed delivery.
@@ -2051,9 +2081,11 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
 
     const isOwnMessage = message.sender_id === currentUserId;
     const hasCopyableText = !!message.body && message.body.trim().length > 0;
+    const isMedia = message.type === 'image' || message.type === 'video';
 
-    // For other users' messages, only open the menu if there's text to copy.
-    if (!isOwnMessage && !hasCopyableText) {
+    // For other users' messages, only open the menu if there's something to
+    // act on: copyable text OR media (which can be replied to).
+    if (!isOwnMessage && !hasCopyableText && !isMedia) {
       return;
     }
 
@@ -2313,6 +2345,21 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             },
           ]}
         >
+          {message.reply_to_snapshot && !message.deleted && (
+            <View
+              style={
+                (message.type === 'image' || message.image_metadata ||
+                 message.type === 'video' || message.video_metadata)
+                  ? styles.quotedPreviewMediaWrap
+                  : undefined
+              }
+            >
+              <QuotedMessagePreview
+                snapshot={message.reply_to_snapshot}
+                isOwnBubble={isOwnMessage}
+              />
+            </View>
+          )}
           {message.type === 'video' || message.video_metadata ? (
             // Video message
             (() => {
@@ -2544,50 +2591,84 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                     </Text>
                   </View>
                 ) : (
-                  <>
+                  // Active text: body + timestamp in a single flex-wrap row.
+                  // Short body → both on the same line. Long body or tight
+                  // width → timestamp wraps to its own row below. Matches
+                  // WhatsApp's inline-when-it-fits behavior.
+                  <Reanimated.View
+                    style={{
+                      flexDirection: 'row',
+                      flexWrap: 'wrap',
+                      alignItems: 'flex-end',
+                      justifyContent: isOwnMessage ? 'flex-end' : 'flex-start',
+                    }}
+                    layout={LinearTransition.duration(240)}
+                  >
                     <Text style={[
                       isOwnMessage ? styles.userMessageText : styles.botMessageText,
                       !isOwnMessage && otherUserAdvRole === 'adv_giver' && styles.botMessageTextGiveAdv,
                       !isOwnMessage && otherUserAdvRole === 'adv_seeker' && styles.botMessageTextGetAdv,
-                      isOwnMessage && { textAlign: 'right' as const, alignSelf: 'flex-end' as const },
                     ]}>
                       {message.body || ''}
                     </Text>
-
-                  </>
+                    <View
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        marginLeft: 6,
+                      }}
+                    >
+                      <Text style={[
+                        styles.timestamp,
+                        isOwnMessage ? styles.userTimestamp : styles.botTimestamp,
+                      ]}>
+                        {formatTime(message.created_at)}
+                        {message.edited && !message.deleted && (
+                          <Text style={styles.editedBadge}>  (edited)</Text>
+                        )}
+                      </Text>
+                      {isOwnMessage && (
+                        <ReadReceipt state={getReceiptState(message, otherUserLastReadAt)} />
+                      )}
+                    </View>
+                  </Reanimated.View>
                 )}
               </View>
-              
-              {/* Timestamp container for text messages */}
-              {isOwnMessage ? (
-                <Reanimated.View
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    alignSelf: 'flex-end',
-                    marginTop: 2,
-                  }}
-                  layout={LinearTransition.duration(240)}
-                >
-                  <Text style={[styles.timestamp, styles.userTimestamp]}>
-                    {formatTime(message.created_at)}
-                    {message.edited && !message.deleted && (
-                      <Text style={styles.editedBadge}>  (edited)</Text>
+
+              {/* Timestamp row for editing / deleted states only — active text
+                  messages render the timestamp inline inside the flex-wrap row
+                  above. */}
+              {(isEditing || message.deleted) && (
+                isOwnMessage ? (
+                  <Reanimated.View
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      alignSelf: 'flex-end',
+                      marginTop: 2,
+                    }}
+                    layout={LinearTransition.duration(240)}
+                  >
+                    <Text style={[styles.timestamp, styles.userTimestamp]}>
+                      {formatTime(message.created_at)}
+                      {message.edited && !message.deleted && (
+                        <Text style={styles.editedBadge}>  (edited)</Text>
+                      )}
+                    </Text>
+                    {!message.deleted && !isEditing && (
+                      <ReadReceipt state={getReceiptState(message, otherUserLastReadAt)} />
                     )}
-                  </Text>
-                  {!message.deleted && !isEditing && (
-                    <ReadReceipt state={getReceiptState(message, otherUserLastReadAt)} />
-                  )}
-                </Reanimated.View>
-              ) : (
-                <View style={[styles.timestampContainer, styles.botTimestampContainer]}>
-                  <Text style={[styles.timestamp, styles.botTimestamp]}>
-                    {formatTime(message.created_at)}
-                    {message.edited && !message.deleted && (
-                      <Text style={styles.editedBadge}>  (edited)</Text>
-                    )}
-                  </Text>
-                </View>
+                  </Reanimated.View>
+                ) : (
+                  <View style={[styles.timestampContainer, styles.botTimestampContainer]}>
+                    <Text style={[styles.timestamp, styles.botTimestamp]}>
+                      {formatTime(message.created_at)}
+                      {message.edited && !message.deleted && (
+                        <Text style={styles.editedBadge}>  (edited)</Text>
+                      )}
+                    </Text>
+                  </View>
+                )
               )}
               {message.upload_state === 'uploading' && !message.deleted && !isEditing && isOwnMessage && (
                 <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2, alignSelf: 'flex-end', gap: 4 }}>
@@ -2764,25 +2845,35 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         );
 
         const composer = (
-          <Reanimated.View style={[styles.inputWrapper, animatedComposerPadding]}>
-            <ChatTextInput
-              ref={chatInputRef}
-              value={inputText}
-              onChangeText={setInputText}
-              onSend={sendMessage}
-              disabled={isLoading}
-              placeholder="Type your message.."
-              maxLength={500}
-              // Send button tracks the other user's advice-role bubble color so
-              // the composer feels "themed" per chat: teal for seekers, beige
-              // for givers, Swelly purple (same as Swelly chat user bubbles) otherwise.
-              primaryColor={composerPrimaryColor}
-              leftAccessory={
-                <TouchableOpacity style={styles.attachButton} onPress={handleImagePicker}>
-                  <Ionicons name="add" size={28} color="#222B30" />
-                </TouchableOpacity>
-              }
-            />
+          <Reanimated.View style={animatedComposerPadding}>
+            {replyingTo && (
+              <ReplyPreviewBanner
+                message={replyingTo}
+                currentUserId={currentUserId}
+                otherUserName={otherUserName}
+                onCancel={() => setReplyingTo(null)}
+              />
+            )}
+            <View style={styles.inputWrapper}>
+              <ChatTextInput
+                ref={chatInputRef}
+                value={inputText}
+                onChangeText={setInputText}
+                onSend={sendMessage}
+                disabled={isLoading}
+                placeholder="Type your message.."
+                maxLength={500}
+                // Send button tracks the other user's advice-role bubble color so
+                // the composer feels "themed" per chat: teal for seekers, beige
+                // for givers, Swelly purple (same as Swelly chat user bubbles) otherwise.
+                primaryColor={composerPrimaryColor}
+                leftAccessory={
+                  <TouchableOpacity style={styles.attachButton} onPress={handleImagePicker}>
+                    <Ionicons name="add" size={28} color="#222B30" />
+                  </TouchableOpacity>
+                }
+              />
+            </View>
           </Reanimated.View>
         );
 
@@ -2847,6 +2938,19 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             handleCopyMessageText(selectedMessage);
           }
         }}
+        onReply={() => {
+          if (selectedMessage) {
+            setReplyingTo(selectedMessage);
+            // Focus the input so the keyboard comes up right away.
+            chatInputRef.current?.focus?.();
+          }
+        }}
+        canReply={(() => {
+          if (!selectedMessage) return false;
+          if (selectedMessage.deleted || selectedMessage.is_system) return false;
+          if (selectedMessage.upload_state === 'failed') return false;
+          return true;
+        })()}
         canCopy={!!selectedMessage?.body && selectedMessage.body.trim().length > 0}
         canEdit={selectedMessage ? canEditMessage(selectedMessage) : false}
         canDelete={(() => {
@@ -3262,10 +3366,10 @@ const styles = StyleSheet.create({
   },
   userMessageBubble: {
     maxWidth: 268,
-    paddingTop: 16,
-    paddingRight: 16,
-    paddingBottom: 8,
-    paddingLeft: 16,
+    paddingTop: 8,
+    paddingRight: 10,
+    paddingBottom: 6,
+    paddingLeft: 10,
     flexDirection: 'column',
     justifyContent: 'flex-end',
     alignItems: 'flex-end',
@@ -3286,9 +3390,9 @@ const styles = StyleSheet.create({
   },
   botMessageBubble: {
     backgroundColor: colors.white, // Default, will be overridden by adv_role styles
-    paddingTop: 16,
-    paddingHorizontal: 16,
-    paddingBottom: 8,
+    paddingTop: 8,
+    paddingHorizontal: 10,
+    paddingBottom: 6,
     flexDirection: 'column',
     justifyContent: 'flex-end',
     alignItems: 'flex-start', // Changed from flex-end to flex-start for proper alignment
@@ -3314,6 +3418,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 0,
     overflow: 'hidden', // Ensure image respects border radius
   },
+  quotedPreviewMediaWrap: {
+    paddingHorizontal: 6,
+    paddingTop: 6,
+  },
   botMessageBubbleGiveAdv: {
     backgroundColor: '#DBCDBC', // adv_giver color
   },
@@ -3321,7 +3429,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#05BCD3', // adv_seeker color
   },
   messageTextContainer: {
-    marginBottom: 10, // Gap between text and timestamp (Figma: gap-[10px])
+    marginBottom: 0, // Gap is now handled by the flex-wrap body+timestamp row.
     width: '100%',
   },
   userMessageText: {
