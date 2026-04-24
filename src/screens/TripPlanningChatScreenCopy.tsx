@@ -1743,15 +1743,28 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
               styles.messageBubble,
               styles.botMessageBubble,
             ]}>
-              <View style={styles.messageTextContainer}>
+              <View
+                style={{
+                  flexDirection: 'row',
+                  flexWrap: 'wrap',
+                  alignItems: 'flex-end',
+                  justifyContent: 'flex-start',
+                }}
+              >
                 <Text style={styles.botMessageText}>
                   {message.text}
                 </Text>
-              </View>
-              <View style={styles.timestampContainer}>
-                <Text style={styles.botTimestamp}>
-                  {message.timestamp}
-                </Text>
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    marginLeft: 6,
+                  }}
+                >
+                  <Text style={[styles.timestamp, styles.botTimestamp]}>
+                    {message.timestamp}
+                  </Text>
+                </View>
               </View>
             </View>
           </View>
@@ -1828,18 +1841,31 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
           message.isUser ? styles.userMessageBubble : styles.botMessageBubble,
         ]}
       >
-        <View style={styles.messageTextContainer}>
+        <View
+          style={{
+            flexDirection: 'row',
+            flexWrap: 'wrap',
+            alignItems: 'flex-end',
+            justifyContent: message.isUser ? 'flex-end' : 'flex-start',
+          }}
+        >
           <Text style={message.isUser ? styles.userMessageText : styles.botMessageText}>
             {message.text}
           </Text>
-        </View>
-        <View style={styles.timestampContainer}>
-          <Text style={[
-            styles.timestamp,
-            message.isUser ? styles.userTimestamp : styles.botTimestamp,
-          ]}>
-            {message.timestamp}
-          </Text>
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              marginLeft: 6,
+            }}
+          >
+            <Text style={[
+              styles.timestamp,
+              message.isUser ? styles.userTimestamp : styles.botTimestamp,
+            ]}>
+              {message.timestamp}
+            </Text>
+          </View>
         </View>
       </View>
     );
@@ -1947,7 +1973,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
 
   return (
     <>
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.white }]} edges={['top']}>
       {/* Header */}
       <View style={styles.headerContainer}>
         <View style={styles.header}>
@@ -2391,7 +2417,7 @@ const styles = StyleSheet.create({
   },
   headerContainer: {
     backgroundColor: colors.white,
-    paddingTop: 40,
+    paddingTop: Platform.OS === 'web' ? 40 : 0,
     paddingBottom: 0,
     paddingHorizontal: 0,
     alignItems: 'center',
@@ -2530,23 +2556,23 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   messageContainer: {
-    marginBottom: 4,
+    marginBottom: 0,
   },
   userMessageContainer: {
     alignItems: 'flex-end',
     paddingLeft: 48,
-    paddingRight: 16,
+    paddingRight: 0,
   },
   botMessageContainer: {
     alignItems: 'flex-start',
-    paddingLeft: 16,
-    paddingRight: 48,
+    paddingLeft: 0,
+    paddingRight: 16,
   },
   messageBubble: {
     maxWidth: 268,
-    paddingTop: 16,
-    paddingBottom: 8,
-    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 6,
+    paddingHorizontal: 10,
     flexDirection: 'column',
   },
   userMessageBubble: {
@@ -2572,7 +2598,7 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   messageTextContainer: {
-    marginBottom: 10,
+    marginBottom: 0,
     gap: 10,
   },
   userMessageText: {
