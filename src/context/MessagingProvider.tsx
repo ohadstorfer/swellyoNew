@@ -1530,7 +1530,8 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
             entry.body,
             [],
             entry.type,
-            entry.clientId
+            entry.clientId,
+            entry.replyTo ?? undefined
           );
         })
         .catch((err) => console.warn('[MessagingProvider] outbox flush failed:', err));
