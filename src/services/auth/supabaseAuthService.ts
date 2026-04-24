@@ -34,6 +34,23 @@ if (Platform.OS !== 'web') {
 // Complete the web browser authentication session
 WebBrowser.maybeCompleteAuthSession();
 
+// Synchronous in-memory cache of the current user's ID. Consumers that need the
+// ID on first render (e.g. chat screens deciding message alignment) can read this
+// without awaiting a promise, avoiding a mount-time layout flicker. The cache is
+// primed on module load from the persisted session and kept in sync via auth state
+// changes, so by the time any screen mounts post-login it is populated.
+let _cachedUserId: string | null = null;
+if (isSupabaseConfigured()) {
+  supabase.auth.getSession()
+    .then(({ data: { session } }) => {
+      _cachedUserId = session?.user?.id ?? null;
+    })
+    .catch(() => {});
+  supabase.auth.onAuthStateChange((_event, session) => {
+    _cachedUserId = session?.user?.id ?? null;
+  });
+}
+
 export interface User {
   id: string; // Supabase uses UUID strings
   email: string;
@@ -458,6 +475,15 @@ class SupabaseAuthService {
   /**
    * Get the current user
    */
+  /**
+   * Synchronous read of the current user ID from an in-memory cache (primed on
+   * module load and on auth state changes). Returns null if auth hasn't settled
+   * yet — callers should still treat the async getCurrentUser() as authoritative.
+   */
+  getCachedUserId(): string | null {
+    return _cachedUserId;
+  }
+
   async getCurrentUser(): Promise<User | null> {
     try {
       const { data: { user }, error } = await supabase.auth.getUser();

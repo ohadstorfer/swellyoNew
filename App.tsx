@@ -6,6 +6,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import { OnboardingProvider } from './src/context/OnboardingContext';
 import { UserProfileProvider } from './src/context/UserProfileContext';
 import { MessagingProvider } from './src/context/MessagingProvider';
+import { TutorialProvider } from './src/context/TutorialContext';
 import { AppContent } from './src/components/AppContent';
 import { analyticsService } from './src/services/analytics/analyticsService';
 import { PostHogErrorBoundary } from './src/components/PostHogErrorBoundary';
@@ -66,8 +67,10 @@ export default function App() {
                 <OnboardingProvider>
                   <UserProfileProvider>
                     <MessagingProvider>
-                      <AppContent />
-                      <StatusBar style="light" />
+                      <TutorialProvider>
+                        <AppContent />
+                        <StatusBar style="light" />
+                      </TutorialProvider>
                     </MessagingProvider>
                   </UserProfileProvider>
                 </OnboardingProvider>
@@ -76,8 +79,10 @@ export default function App() {
               <OnboardingProvider>
                 <UserProfileProvider>
                   <MessagingProvider>
-                    <AppContent />
-                    <StatusBar style="light" />
+                    <TutorialProvider>
+                      <AppContent />
+                      <StatusBar style="light" />
+                    </TutorialProvider>
                   </MessagingProvider>
                 </UserProfileProvider>
               </OnboardingProvider>
@@ -87,8 +92,10 @@ export default function App() {
           <OnboardingProvider>
             <UserProfileProvider>
               <MessagingProvider>
-                <AppContent />
-                <StatusBar style="light" />
+                <TutorialProvider>
+                  <AppContent />
+                  <StatusBar style="light" />
+                </TutorialProvider>
               </MessagingProvider>
             </UserProfileProvider>
           </OnboardingProvider>

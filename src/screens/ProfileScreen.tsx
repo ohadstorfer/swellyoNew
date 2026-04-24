@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   StyleSheet,
-  ScrollView,
   Image,
   ImageBackground,
   TouchableOpacity,
@@ -45,7 +44,7 @@ import { BlockUserOverlay } from '../components/BlockUserOverlay';
 import { useMessaging } from '../context/MessagingProvider';
 import { ReportUserScreen } from './ReportUserScreen';
 import Reanimated, { useSharedValue, useAnimatedStyle, withTiming, runOnJS, Easing } from 'react-native-reanimated';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { Gesture, GestureDetector, ScrollView } from 'react-native-gesture-handler';
 
 interface ProfileScreenProps {
   onBack?: () => void;
@@ -1189,16 +1188,16 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
             }
 
             const result = await ImagePicker.launchImageLibraryAsync({
-              mediaTypes: ImagePicker.MediaTypeOptions.Images,
-              allowsEditing: true,
-            aspect: [1, 1],
-            quality: 0.8,
-          });
+              mediaTypes: ['images'],
+              allowsEditing: false,
+              quality: 1,
+            });
 
-          if (!result.canceled && result.assets[0]) {
-            const imageUri = result.assets[0].uri;
-            await uploadAndUpdateProfile(imageUri);
-          }
+            if (!result.canceled && result.assets[0]) {
+              const imageUri = result.assets[0].uri;
+              setRawImageUri(imageUri);
+              setCropModalVisible(true);
+            }
           } catch (error) {
             console.warn('expo-image-picker not available:', error);
             Alert.alert(
@@ -2491,17 +2490,15 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
       )}
     </Reanimated.View>
     </GestureDetector>
-    {Platform.OS === 'web' && (
-      <AvatarCropModal
-        visible={cropModalVisible}
-        imageUri={rawImageUri}
-        onConfirm={async (croppedUri) => {
-          setCropModalVisible(false);
-          await uploadAndUpdateProfile(croppedUri);
-        }}
-        onCancel={() => setCropModalVisible(false)}
-      />
-    )}
+    <AvatarCropModal
+      visible={cropModalVisible}
+      imageUri={rawImageUri}
+      onConfirm={async (croppedUri) => {
+        setCropModalVisible(false);
+        await uploadAndUpdateProfile(croppedUri);
+      }}
+      onCancel={() => setCropModalVisible(false)}
+    />
     {!isViewingOwnProfile && userId && (
       <>
         <BlockUserOverlay

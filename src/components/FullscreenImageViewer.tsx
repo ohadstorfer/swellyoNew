@@ -67,36 +67,43 @@ export const FullscreenImageViewer: React.FC<FullscreenImageViewerProps> = ({
           <Ionicons name="close" size={28} color="#FFFFFF" />
         </TouchableOpacity>
 
-        {/* Image container */}
+        {/* Image container — only render when there's a URL to show. On close,
+            the parent resets imageUrl to '' while the Modal fades out; rendering
+            an <Image> with an empty uri would fire onError and flicker the
+            "Failed to load image" view during the fade. */}
         <View style={styles.imageContainer}>
-          {!imageLoaded && thumbnailUrl && (
-            <Image
-              source={{ uri: thumbnailUrl }}
-              style={styles.thumbnailImage}
-              resizeMode="contain"
-            />
-          )}
-          
-          {isLoading && (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" color="#FFFFFF" />
-            </View>
-          )}
+          {imageUrl ? (
+            <>
+              {!imageLoaded && thumbnailUrl && (
+                <Image
+                  source={{ uri: thumbnailUrl }}
+                  style={styles.thumbnailImage}
+                  resizeMode="contain"
+                />
+              )}
 
-          {hasError ? (
-            <View style={styles.errorContainer}>
-              <Ionicons name="alert-circle" size={48} color="#FFFFFF" />
-              <Text style={styles.errorText}>Failed to load image</Text>
-            </View>
-          ) : (
-            <Image
-              source={{ uri: imageUrl }}
-              style={styles.fullImage}
-              resizeMode="contain"
-              onLoad={handleImageLoad}
-              onError={handleImageError}
-            />
-          )}
+              {isLoading && (
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator size="large" color="#FFFFFF" />
+                </View>
+              )}
+
+              {hasError ? (
+                <View style={styles.errorContainer}>
+                  <Ionicons name="alert-circle" size={48} color="#FFFFFF" />
+                  <Text style={styles.errorText}>Failed to load image</Text>
+                </View>
+              ) : (
+                <Image
+                  source={{ uri: imageUrl }}
+                  style={styles.fullImage}
+                  resizeMode="contain"
+                  onLoad={handleImageLoad}
+                  onError={handleImageError}
+                />
+              )}
+            </>
+          ) : null}
         </View>
       </View>
     </Modal>

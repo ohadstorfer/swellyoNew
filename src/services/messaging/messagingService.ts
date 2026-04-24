@@ -1076,16 +1076,35 @@ class MessagingService {
       }
 
       // Update last_read for this user in this conversation
+      const lastReadAt = new Date().toISOString();
       const { error } = await supabase
         .from('conversation_members')
         .update({
           last_read_message_id: targetMessageId,
-          last_read_at: new Date().toISOString(),
+          last_read_at: lastReadAt,
         })
         .eq('conversation_id', conversationId)
         .eq('user_id', user.id);
 
       if (error) throw error;
+
+      // Also broadcast the receipt update on the conversation channel. This is a
+      // faster, more reliable path than postgres_changes — the peer sees the blue
+      // tick the moment we mark the conversation as read, without waiting for
+      // replication to fan out. postgres_changes is still wired as a fallback for
+      // clients that subscribe after the broadcast fires.
+      const channel = this.getChannel(conversationId);
+      if (channel) {
+        try {
+          await channel.send({
+            type: 'broadcast',
+            event: 'read_receipt',
+            payload: { userId: user.id, lastReadAt },
+          });
+        } catch (broadcastError) {
+          console.warn('[messagingService] read_receipt broadcast failed:', broadcastError);
+        }
+      }
     } catch (error) {
       console.error('Error marking as read:', error);
       throw error;
@@ -1306,6 +1325,21 @@ class MessagingService {
           const row = payload.new as { user_id: string; last_read_at: string | null };
           if (normalizedCallbacks.onReadReceiptUpdate && row?.user_id) {
             normalizedCallbacks.onReadReceiptUpdate(row.user_id, row.last_read_at ?? null);
+          }
+        }
+      )
+      // Fast realtime path for read receipts — markAsRead broadcasts on the same
+      // channel. This arrives in milliseconds regardless of postgres replication lag.
+      .on(
+        'broadcast',
+        { event: 'read_receipt' },
+        (payload) => {
+          const { userId, lastReadAt } = (payload.payload ?? {}) as {
+            userId?: string;
+            lastReadAt?: string | null;
+          };
+          if (normalizedCallbacks.onReadReceiptUpdate && userId) {
+            normalizedCallbacks.onReadReceiptUpdate(userId, lastReadAt ?? null);
           }
         }
       )
@@ -1788,183 +1822,28 @@ class MessagingService {
     }
 
     // Backward compatibility: if it's a function, convert to callbacks object
-    const normalizedCallbacks: ConversationSubscriptionCallbacks = 
+    const normalizedCallbacks: ConversationSubscriptionCallbacks =
       typeof callbacks === 'function'
         ? { onReconnect: callbacks }
         : callbacks;
-    
-    console.log('[MessagingService] ✅ Callbacks normalized:', {
-      hasOnNewMessage: !!normalizedCallbacks.onNewMessage,
-      hasOnMessageUpdated: !!normalizedCallbacks.onMessageUpdated,
-      hasOnMessageDeleted: !!normalizedCallbacks.onMessageDeleted,
-      hasOnConversationUpdated: !!normalizedCallbacks.onConversationUpdated,
-      hasOnReconnect: !!normalizedCallbacks.onReconnect,
-    });
 
-    // Batch enrichment for sender info (to avoid N+1 queries)
-    const pendingEnrichments = new Map<string, { message: Message; conversationId: string; timestamp: number }>();
-    let enrichmentTimer: ReturnType<typeof setTimeout> | null = null;
-    const ENRICHMENT_BATCH_DELAY = 100; // Batch enrichment every 100ms
-    
-    const processEnrichments = async () => {
-      if (pendingEnrichments.size === 0) return;
-      
-      const enrichments = Array.from(pendingEnrichments.values());
-      pendingEnrichments.clear();
-      
-      console.log('[MessagingService] 🔄 Processing enrichment batch:', {
-        count: enrichments.length,
-        conversationIds: [...new Set(enrichments.map(e => e.conversationId))],
-      });
-      
-      // Get unique sender IDs
-      const senderIds = [...new Set(enrichments.map(e => e.message.sender_id))];
-      
-      if (senderIds.length === 0) {
-        console.log('[MessagingService] ⚠️ No sender IDs to enrich, calling callbacks directly');
-        // No senders to enrich, call callbacks with unenriched messages
-        enrichments.forEach(({ message, conversationId }) => {
-          normalizedCallbacks.onNewMessage?.(conversationId, message);
-        });
-        return;
-      }
-      
-      try {
-        // Batch fetch surfer data for all senders
-        const { data: surfersData } = await supabase
-          .from('surfers')
-          .select('user_id, name, profile_image_url')
-          .in('user_id', senderIds);
-        
-        console.log('[MessagingService] ✅ Fetched surfer data:', {
-          requested: senderIds.length,
-          received: surfersData?.length || 0,
-        });
-        
-        const surferMap = new Map(
-          (surfersData || []).map(s => [s.user_id, s])
-        );
-        
-        // Enrich messages and call callbacks
-        enrichments.forEach(({ message, conversationId }) => {
-          const surferData = surferMap.get(message.sender_id);
-          const enrichedMessage: Message = {
-            ...message,
-            sender_name: surferData?.name,
-            sender_avatar: surferData?.profile_image_url,
-          };
-          
-          console.log('[MessagingService] 📤 Calling onNewMessage callback:', {
-            conversationId,
-            messageId: enrichedMessage.id,
-            hasSenderName: !!enrichedMessage.sender_name,
-            hasSenderAvatar: !!enrichedMessage.sender_avatar,
-          });
-          
-          normalizedCallbacks.onNewMessage?.(conversationId, enrichedMessage);
-        });
-      } catch (error) {
-        console.error('[MessagingService] ❌ Error enriching messages in batch:', error);
-        // Call callbacks with unenriched messages on error
-        enrichments.forEach(({ message, conversationId }) => {
-          console.log('[MessagingService] 📤 Calling onNewMessage callback (fallback, no enrichment):', {
-            conversationId,
-            messageId: message.id,
-          });
-          normalizedCallbacks.onNewMessage?.(conversationId, message);
-        });
-      }
-    };
-
-    console.log('[MessagingService] 📡 Creating channel: conversations_list');
-    
-    // CRITICAL: For unfiltered subscriptions with RLS, Supabase Realtime needs
-    // the RLS policy to be evaluated correctly. The issue is that without a filter,
-    // Supabase might not properly evaluate RLS policies that use functions.
-    // 
-    // Since DirectMessageScreen works (with filter), but ConversationsScreen doesn't
-    // (without filter), we need to ensure RLS evaluation works for unfiltered subscriptions.
+    // NOTE: Previously this channel also subscribed to unfiltered INSERT / UPDATE
+    // on public.messages. That forced Supabase Realtime to evaluate the RLS
+    // policy `is_user_conversation_member()` for every message in the whole DB
+    // on behalf of this client, which destabilized the socket under load —
+    // cascading CHANNEL_ERROR / TIMED_OUT across every channel on the same
+    // connection (presence, per-conv list subs, DM subs).
     //
-    // The RLS policy uses `is_user_conversation_member()` function which should work,
-    // but Supabase Realtime might need a hint. Let's try adding a minimal filter
-    // that doesn't restrict results but helps RLS evaluation.
-    
+    // Those events are fully covered by the per-conversation channels set up
+    // in MessagingProvider via subscribeToConversationListUpdates (see
+    // `list:messages:${conversationId}` above). They use a cheap
+    // `conversation_id=eq.<id>` filter, so the RLS evaluation scope stays
+    // proportional to the user's own conversations instead of the whole table.
+    //
+    // This channel now only listens to `public.conversations` UPDATEs, which
+    // is ~1 row per conversation and harmless at table scope.
     const channel = supabase
       .channel('conversations_list')
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'messages',
-          // Try without filter first - if RLS policy is correct, this should work
-          // If it doesn't work, the issue is RLS policy evaluation, not the subscription
-        },
-        (payload) => {
-          console.log('[MessagingService] 🔔 RECEIVED MESSAGE INSERT EVENT:', {
-            messageId: payload.new?.id,
-            conversationId: payload.new?.conversation_id,
-            senderId: payload.new?.sender_id,
-            hasBody: !!payload.new?.body,
-            timestamp: new Date().toISOString(),
-          });
-          
-          const message = payload.new as Message;
-          
-          // CRITICAL: RLS policy should have already filtered this, but if we're receiving it,
-          // it means the user CAN see it (RLS passed). The difference between this subscription
-          // and DirectMessageScreen is that DirectMessageScreen uses a filter, which might
-          // help Supabase optimize RLS evaluation. Without a filter, Supabase needs to
-          // evaluate RLS for ALL messages, which might not work correctly with function-based policies.
-          
-          console.log('[MessagingService] 🔍 Message received, RLS check passed (user can see this message)');
-          
-          // Validate message has required fields
-          if (!message.id || !message.conversation_id || !message.created_at) {
-            console.warn('[MessagingService] ❌ Invalid message from subscription:', message);
-            return;
-          }
-          
-          console.log('[MessagingService] ✅ Valid message, adding to enrichment batch:', {
-            messageId: message.id,
-            conversationId: message.conversation_id,
-          });
-          
-          // Add to batch for enrichment
-          pendingEnrichments.set(message.id, {
-            message,
-            conversationId: message.conversation_id,
-            timestamp: Date.now(),
-          });
-          
-          // Clear existing timer and set new one
-          if (enrichmentTimer) {
-            clearTimeout(enrichmentTimer);
-          }
-          enrichmentTimer = setTimeout(processEnrichments, ENRICHMENT_BATCH_DELAY);
-          
-          // Legacy support: if only callback function provided, call it
-          if (typeof callbacks === 'function') {
-            callbacks();
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'messages',
-        },
-        (payload) => {
-          const message = payload.new as Message;
-          normalizedCallbacks.onMessageUpdated?.(message.conversation_id, message);
-          // Legacy support
-          if (typeof callbacks === 'function') {
-            callbacks();
-          }
-        }
-      )
       .on(
         'postgres_changes',
         {
@@ -2004,6 +1883,59 @@ class MessagingService {
     // Reconnect detection is handled via:
     // 1. Channel subscription status callback (above) - fires on SUBSCRIBED status
     // 2. AppState listener in MessagingProvider - handles background → foreground transitions
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }
+
+  /**
+   * Subscribe to new-conversation discovery for the current user.
+   *
+   * When another user creates a conversation that includes this user (e.g.
+   * starts a new DM), the server inserts a row into `conversation_members`
+   * with this user's id. Subscribing to that INSERT — filtered on the user
+   * id — lets the client react in real time and load the new conversation
+   * without waiting for reconnect / foreground.
+   *
+   * This replaces the discovery path that used to live inside the old
+   * unfiltered `messages` INSERT handler on `conversations_list`. That
+   * unfiltered subscription destabilized the realtime socket because
+   * Supabase had to evaluate the RLS policy on every message for every
+   * user; scoping discovery to a one-row-per-user filter avoids the RLS
+   * cost entirely.
+   *
+   * Requires `conversation_members` to be in the supabase_realtime
+   * publication (see migration 20260422000000).
+   */
+  subscribeToNewConversations(
+    userId: string,
+    onConversationAdded: (conversationId: string) => void
+  ): () => void {
+    if (!isSupabaseConfigured() || !userId) {
+      return () => {};
+    }
+
+    const channel = supabase
+      .channel(`new_conversations:${userId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'conversation_members',
+          filter: `user_id=eq.${userId}`,
+        },
+        (payload) => {
+          const convId = (payload.new as { conversation_id?: string } | undefined)?.conversation_id;
+          if (convId) onConversationAdded(convId);
+        }
+      )
+      .subscribe((status) => {
+        if (__DEV__ && status !== 'SUBSCRIBED') {
+          console.log(`[MessagingService] new_conversations:${userId} status: ${status}`);
+        }
+      });
 
     return () => {
       supabase.removeChannel(channel);

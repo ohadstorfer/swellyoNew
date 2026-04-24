@@ -35,6 +35,9 @@ import { SwellyoTeamWelcome } from './SwellyoTeamWelcome';
 import { ProfileImage } from '../components/ProfileImage';
 import { ConversationListSkeleton } from '../components/skeletons';
 import { useConversationsStack } from '../navigation/ConversationsStack';
+import { useFocusEffect } from '@react-navigation/native';
+import { useTutorial } from '../context/TutorialContext';
+import { TutorialOverlay, type AnchorRect } from '../components/TutorialOverlay';
 
 interface ConversationsScreenProps {
   onConversationPress?: (conversationId: string) => void;
@@ -50,6 +53,35 @@ interface ConversationsScreenProps {
 }
 
 type FilterType = 'all' | 'advisor' | 'seeker';
+
+// Placeholder row shown during the welcome guide only when the user has zero
+// real conversations. Not tappable — the tutorial backdrop blocks interaction.
+const TUTORIAL_MOCK_CONVERSATION: Conversation = {
+  id: '__tutorial_mock__',
+  is_direct: true,
+  metadata: { __tutorialMock: true },
+  created_by: '',
+  created_at: new Date().toISOString(),
+  updated_at: new Date().toISOString(),
+  other_user: {
+    conversation_id: '__tutorial_mock__',
+    user_id: '__tutorial_mock_user__',
+    role: 'member',
+    joined_at: new Date().toISOString(),
+    preferences: {},
+    name: 'Reef Ryder',
+    profile_image_url: undefined,
+  },
+  last_message: {
+    id: '__tutorial_mock_msg__',
+    conversation_id: '__tutorial_mock__',
+    sender_id: '__tutorial_mock_user__',
+    body: "I'm going to be near the Bean later.",
+    type: 'text',
+    created_at: new Date().toISOString(),
+  } as any,
+  unread_count: 0,
+};
 
 // Cache helper functions are now imported from '../utils/userProfileCache'
 
@@ -209,7 +241,6 @@ export default function ConversationsScreen({
     });
   }, [rawConversations]);
 
-  const [conversationsLoaded, setConversationsLoaded] = useState(false); // Track if conversations have been loaded
   const [filter, setFilter] = useState<FilterType>('all');
   // Single source of truth for header display name (derived from context)
   const headerDisplayName = contextUser ? (contextUser.nickname?.split(' ')[0] || contextUser.email?.split('@')[0] || 'User') : 'User';
@@ -232,6 +263,56 @@ export default function ConversationsScreen({
   const isLoggingOutRef = useRef(false);
   const scrollViewRef = useRef<ScrollView>(null);
   const loadMoreDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ——— Welcome Guide (tutorial overlay) ———
+  const tutorial = useTutorial();
+  const { isDemoUser: onboardingIsDemoUser } = useOnboarding();
+  const firstRowRef = useRef<View>(null);
+  const swellyCardRef = useRef<View>(null);
+  const [firstRowRect, setFirstRowRect] = useState<AnchorRect | null>(null);
+  const [swellyCardRect, setSwellyCardRect] = useState<AnchorRect | null>(null);
+
+  const measureFirstRow = () => {
+    firstRowRef.current?.measureInWindow?.((x, y, width, height) => {
+      setFirstRowRect({ x, y, width, height });
+    });
+  };
+  const measureSwellyCard = () => {
+    swellyCardRef.current?.measureInWindow?.((x, y, width, height) => {
+      setSwellyCardRect({ x, y, width, height });
+    });
+  };
+
+  // Re-measure anchors whenever the active step changes.
+  useEffect(() => {
+    if (tutorial.currentStep === 1) {
+      const t = setTimeout(measureFirstRow, 80);
+      return () => clearTimeout(t);
+    }
+    if (tutorial.currentStep === 2) {
+      const t = setTimeout(measureSwellyCard, 80);
+      return () => clearTimeout(t);
+    }
+  }, [tutorial.currentStep]);
+
+  // Trigger check: fires every time the screen gains focus.
+  useFocusEffect(
+    React.useCallback(() => {
+      if (!tutorial.isHydrated) return;
+      if (tutorial.isCompleted) return;
+      if (tutorial.isActive) return;
+      if (!tutorial.welcomeLineupDismissedAt) return;
+      if (isMVPMode || onboardingIsDemoUser) return;
+      tutorial.start();
+    }, [
+      tutorial.isHydrated,
+      tutorial.isCompleted,
+      tutorial.isActive,
+      tutorial.welcomeLineupDismissedAt,
+      isMVPMode,
+      onboardingIsDemoUser,
+    ])
+  );
 
   // Update user info when context user changes (immediate sync); reset header when logged out
   useEffect(() => {
@@ -292,8 +373,6 @@ export default function ConversationsScreen({
 
   useEffect(() => {
     loadConversations();
-    // Conversations are now managed by MessagingProvider
-    setConversationsLoaded(true);
   }, [contextUser?.id]);
 
   // Sync the header avatar/userId from the shared UserProfileContext.
@@ -338,10 +417,8 @@ export default function ConversationsScreen({
   const loadConversations = async () => {
     try {
       await refreshConversations();
-      setConversationsLoaded(true);
     } catch (error) {
       console.error('Error loading conversations:', error);
-      setConversationsLoaded(true);
     }
   };
 
@@ -415,10 +492,10 @@ export default function ConversationsScreen({
     }
     
     // Add welcome conversation only if:
-    // 1. Conversations have been loaded
+    // 1. MessagingProvider has finished loading (cache + server)
     // 2. No real conversations exist
     // 3. Filter is 'all' (welcome message doesn't apply to filtered views)
-    if (conversationsLoaded && filtered.length === 0 && filter === 'all') {
+    if (!loading && filtered.length === 0 && filter === 'all') {
       return [createWelcomeConversation()];
     }
     
@@ -812,11 +889,15 @@ export default function ConversationsScreen({
     );
   };
 
-  const renderConversationItem = (conv: Conversation) => {
+  const renderConversationItem = (conv: Conversation, index: number = -1) => {
     // Skip rendering welcome conversation here - it's handled separately
     if (conv.metadata?.isWelcome) {
       return renderWelcomeConversation(conv);
     }
+
+    const isTutorialMock = conv.metadata?.__tutorialMock === true;
+    const isFirstTutorialAnchor = index === 0;
+    const isTutorialHighlight = isFirstTutorialAnchor && tutorial.currentStep === 1;
 
     const conversationType = getConversationType(conv);
     const displayName = conv.is_direct
@@ -838,10 +919,20 @@ export default function ConversationsScreen({
     const userAdvRole = currentUserMember?.adv_role;
 
     return (
-      <TouchableOpacity
+      <View
         key={conv.id}
-        style={styles.conversationItem}
-        onPress={() => handleConversationPress(conv)}
+        ref={isFirstTutorialAnchor ? firstRowRef : undefined}
+        onLayout={isFirstTutorialAnchor ? measureFirstRow : undefined}
+        collapsable={false}
+        style={isTutorialHighlight ? styles.tutorialHighlightWrapper : undefined}
+      >
+      <TouchableOpacity
+        style={[styles.conversationItem, isTutorialHighlight && styles.tutorialHighlightItem]}
+        onPress={() => {
+          if (isTutorialMock) return;
+          handleConversationPress(conv);
+        }}
+        activeOpacity={isTutorialMock ? 1 : 0.2}
       >
         <View style={styles.conversationContent}>
           {/* Avatar with adv role icon */}
@@ -969,14 +1060,21 @@ export default function ConversationsScreen({
           ) : null}
         </View>
       </TouchableOpacity>
+      </View>
     );
   };
 
   const renderSwellyConversation = () => {
     return (
+      <View ref={swellyCardRef} onLayout={measureSwellyCard} collapsable={false}>
       <TouchableOpacity
         style={styles.swellyContainer}
-        onPress={onSwellyPress}
+        onPress={() => {
+          if (tutorial.currentStep === 2) {
+            tutorial.advance();
+          }
+          onSwellyPress?.();
+        }}
       >
         <View style={styles.conversationContent}>
           {/* Swelly avatar with ellipse design - matching ChatScreen */}
@@ -1021,10 +1119,14 @@ export default function ConversationsScreen({
           </View>
         </View> */}
       </TouchableOpacity>
+      </View>
     );
   };
 
   const filteredConversations = getFilteredConversations();
+  const conversationsForTutorial = (tutorial.isActive && filteredConversations.length === 0)
+    ? [TUTORIAL_MOCK_CONVERSATION]
+    : filteredConversations;
 
   // Set body and html background color on web to ensure dark background is visible
   // This hook MUST be called before any early returns to follow Rules of Hooks
@@ -1190,11 +1292,11 @@ export default function ConversationsScreen({
             }}
             scrollEventThrottle={400}
           >
-            {(loading || !conversationsLoaded) && conversations.length === 0 ? (
+            {loading ? (
               <ConversationListSkeleton count={5} />
             ) : (
               <>
-                {filteredConversations.map(renderConversationItem)}
+                {conversationsForTutorial.map((conv, idx) => renderConversationItem(conv, idx))}
                 
                 {/* Loading indicator for pagination */}
                 {isLoadingMoreConversations && (
@@ -1205,7 +1307,7 @@ export default function ConversationsScreen({
                 )}
                 
                 {/* Welcome message instructional text - only show when welcome conversation is displayed, or in dev mode for testing */}
-                {!loading && conversationsLoaded && (conversations.length === 0 || isDevMode) && filter === 'all' && (
+                {!loading && (conversations.length === 0 || isDevMode) && filter === 'all' && (
                   <View style={styles.welcomeInstructionContainer}>
                     <Animated.Text 
                       style={[
@@ -1397,6 +1499,22 @@ export default function ConversationsScreen({
                   </TouchableOpacity>
                 )}
 
+                {/* Replay welcome guide — local mode only */}
+                {process.env.EXPO_PUBLIC_LOCAL_MODE === 'true' && (
+                  <TouchableOpacity
+                    style={styles.menuItem}
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      setShowMenu(false);
+                      tutorial.goTo(1);
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="sparkles-outline" size={20} color="#B72DF2" />
+                    <Text style={styles.menuItemText}>Replay welcome guide</Text>
+                  </TouchableOpacity>
+                )}
+
                 <View style={styles.menuDivider} />
 
                 {/* New Chat */}
@@ -1497,6 +1615,39 @@ export default function ConversationsScreen({
           </View>
         </Modal>
       )}
+
+      {/* Welcome Guide — single overlay that swaps content between step 1 & 2 */}
+      <TutorialOverlay
+        visible={tutorial.currentStep === 1 || tutorial.currentStep === 2}
+        step={tutorial.currentStep === 2 ? 2 : 1}
+        total={4}
+        title={tutorial.currentStep === 2 ? 'Click Swelly' : 'Your DM space'}
+        body={
+          tutorial.currentStep === 2
+            ? 'To explore new surfers and connect with them'
+            : 'Chat with surfers and travelers you got connected to'
+        }
+        ctaLabel="Next"
+        onPressCta={() => {
+          if (tutorial.currentStep === 2) {
+            tutorial.advance();
+            onSwellyPress?.();
+          } else {
+            tutorial.advance();
+          }
+        }}
+        onAnchorPress={
+          tutorial.currentStep === 2
+            ? () => {
+                tutorial.advance();
+                onSwellyPress?.();
+              }
+            : undefined
+        }
+        anchorRect={tutorial.currentStep === 2 ? swellyCardRect : firstRowRect}
+        arrowDirection={tutorial.currentStep === 2 ? 'down' : 'up'}
+        arrowAlignment={tutorial.currentStep === 2 ? 'center' : 'right'}
+      />
     </Container>
   );
 
@@ -1726,6 +1877,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     borderBottomWidth: 1,
     borderBottomColor: '#EEEEEE',
+  },
+  tutorialHighlightWrapper: {
+    marginHorizontal: 16,
+    borderRadius: 16,
+    overflow: 'hidden',
+    backgroundColor: '#FFFFFF',
+  },
+  tutorialHighlightItem: {
+    borderBottomWidth: 0,
+    paddingHorizontal: 16,
   },
   conversationContent: {
     flexDirection: 'row',

@@ -1,14 +1,14 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   StyleSheet,
   Modal,
+  Pressable,
   TouchableOpacity,
   ActivityIndicator,
   Platform,
   KeyboardAvoidingView,
   Dimensions,
-  DeviceEventEmitter,
   Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -21,10 +21,17 @@ import Animated, {
   runOnJS,
   interpolate,
   Extrapolation,
+  FadeIn,
+  FadeOut,
 } from 'react-native-reanimated';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import Svg, { Path } from 'react-native-svg';
 import { ChatTextInput } from './ChatTextInput';
+import {
+  getVideoTrim,
+  getVideoTrimNativeModule,
+  isVideoTrimAvailable,
+} from '../utils/videoTrimModule';
 
 interface VideoPreviewModalProps {
   visible: boolean;
@@ -39,7 +46,6 @@ interface VideoPreviewModalProps {
 const SCREEN_HEIGHT = Dimensions.get('window').height;
 const DISMISS_DISTANCE = 120;
 const DISMISS_VELOCITY = 800;
-const TRIM_MAX_DURATION_S = 20; // Matches videoValidation.ts hard cap
 
 const CloseIcon = () => (
   <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
@@ -63,6 +69,13 @@ const TrimIcon = () => (
       strokeLinecap="round"
       strokeLinejoin="round"
     />
+  </Svg>
+);
+
+// Filled play triangle, nudged right so it reads as centered inside the circle.
+const PlayIcon = () => (
+  <Svg width={40} height={40} viewBox="0 0 24 24" fill="none">
+    <Path d="M8 5v14l11-7z" fill="#FFFFFF" />
   </Svg>
 );
 
@@ -94,6 +107,30 @@ export const VideoPreviewModal: React.FC<VideoPreviewModalProps> = ({
     p.muted = false;
   });
 
+  // Track playing/paused so the custom play-button overlay reflects the real
+  // player state (incl. external changes from trim/pause-on-open).
+  const [isPlaying, setIsPlaying] = useState(false);
+
+  useEffect(() => {
+    if (!visible) {
+      setIsPlaying(false);
+      return;
+    }
+    const sub = player.addListener('playingChange', ({ isPlaying: next }) => {
+      setIsPlaying(next);
+    });
+    setIsPlaying(player.playing);
+    return () => sub.remove();
+  }, [visible, player]);
+
+  const togglePlay = useCallback(() => {
+    if (isProcessing) return;
+    try {
+      if (player.playing) player.pause();
+      else player.play();
+    } catch {}
+  }, [player, isProcessing]);
+
   const translateY = useSharedValue(0);
 
   useEffect(() => {
@@ -103,6 +140,14 @@ export const VideoPreviewModal: React.FC<VideoPreviewModalProps> = ({
   }, [visible, translateY]);
 
   const handleSend = () => {
+    if (__DEV__) {
+      console.log('[VideoPreviewModal] handleSend fired', {
+        isProcessing,
+        hasTrimmedUri: currentVideoUri !== videoUri,
+        currentVideoUri,
+        videoUri,
+      });
+    }
     if (isProcessing) return;
     onSend(caption.trim() || undefined, currentVideoUri !== videoUri ? currentVideoUri : undefined);
     setCaption('');
@@ -146,50 +191,87 @@ export const VideoPreviewModal: React.FC<VideoPreviewModalProps> = ({
     ),
   }));
 
-  // Trim editor wiring — native only. `react-native-video-trim` opens its own
-  // native modal with a filmstrip + drag handles. Events arrive via DeviceEventEmitter.
+  // Trim editor wiring. In v7 the TurboModule exposes each event as a codegen
+  // EventEmitter; subscribe via `turbo.onFinishTrimming(cb)`. The JS wrapper
+  // re-exported from 'react-native-video-trim' does NOT expose these — they
+  // live on the TurboModule instance returned by `getVideoTrimNativeModule`.
   useEffect(() => {
     if (Platform.OS === 'web') return;
+    const turbo = getVideoTrimNativeModule() as any;
+    if (!turbo) return;
 
-    const sub = DeviceEventEmitter.addListener('VideoTrim', (event: any) => {
-      if (!event) return;
-      switch (event.name) {
-        case 'onFinishTrimming':
-          if (typeof event.outputPath === 'string' && event.outputPath.length > 0) {
-            // Prepend file:// if the lib returns a bare path.
-            const uri = event.outputPath.startsWith('file://')
-              ? event.outputPath
-              : `file://${event.outputPath}`;
-            setCurrentVideoUri(uri);
-          }
-          break;
-        case 'onError':
-          if (__DEV__) console.warn('[VideoTrim] onError:', event);
-          break;
-        default:
-          break;
-      }
-    });
+    const applyTrimmedUri = (outputPath: string | undefined) => {
+      if (__DEV__) console.log('[VideoTrim] onFinishTrimming outputPath=', outputPath);
+      if (typeof outputPath !== 'string' || outputPath.length === 0) return;
+      const normalized = outputPath.startsWith('file://')
+        ? outputPath
+        : `file://${outputPath}`;
+      setCurrentVideoUri(normalized);
+    };
 
-    return () => sub.remove();
+    const subs: Array<{ remove: () => void }> = [];
+    try {
+      subs.push(
+        turbo.onFinishTrimming(({ outputPath }: { outputPath?: string }) =>
+          applyTrimmedUri(outputPath),
+        ),
+      );
+    } catch (err) {
+      if (__DEV__) console.warn('[VideoTrim] subscribe onFinishTrimming failed:', err);
+    }
+    try {
+      subs.push(
+        turbo.onError(({ message, errorCode }: { message?: string; errorCode?: string }) => {
+          if (__DEV__) console.warn('[VideoTrim] onError:', errorCode, message);
+        }),
+      );
+    } catch {}
+
+    return () => {
+      subs.forEach((s) => {
+        try { s.remove(); } catch {}
+      });
+    };
   }, []);
+
+  // useVideoPlayer creates the player once — it doesn't auto-reload on source
+  // changes. Force an explicit replace whenever currentVideoUri changes so the
+  // trimmed file actually shows in the preview.
+  useEffect(() => {
+    if (!visible || !currentVideoUri) return;
+    try {
+      player.replace(currentVideoUri);
+    } catch (err) {
+      if (__DEV__) console.warn('[VideoPreviewModal] player.replace failed:', err);
+    }
+  }, [currentVideoUri, visible, player]);
 
   const openTrim = async () => {
     if (Platform.OS === 'web' || isProcessing) return;
+    const trim = getVideoTrim();
+    if (!trim) return;
     try {
-      const { showEditor, isValidFile } = require('react-native-video-trim');
-      const valid = await isValidFile(currentVideoUri);
+      const valid = await trim.isValidFile(currentVideoUri);
       if (!valid) {
         Alert.alert('Invalid video', 'This video can\'t be trimmed.');
         return;
       }
       // Pause the preview before opening the trim editor so audio doesn't overlap.
       try { player.pause(); } catch {}
-      showEditor(currentVideoUri, {
-        maxDuration: TRIM_MAX_DURATION_S,
-        enablePreciseTrimming: true,
+      // No `maxDuration` → native editor opens with handles covering the full
+      // video, so the user can trim freely. `videoValidation.ts` enforces the
+      // eventual file-size/duration caps at upload time.
+      // Save/cancel dialogs disabled — tapping Save/Cancel acts immediately.
+      // enablePreciseTrimming:false → keyframe-only cut (no re-encode), turns
+      // the "Save" wait from several seconds into a near-instant copy. Trade-off
+      // is that cut points snap to the nearest keyframe (~1–2 s drift) — fine
+      // for chat previews.
+      trim.showEditor(currentVideoUri, {
+        enablePreciseTrimming: false,
         saveToPhoto: false,
         fullScreenModalIOS: true,
+        enableSaveDialog: false,
+        enableCancelDialog: false,
       });
     } catch (err) {
       if (__DEV__) console.warn('[VideoTrim] failed to open editor:', err);
@@ -211,22 +293,39 @@ export const VideoPreviewModal: React.FC<VideoPreviewModalProps> = ({
                 behavior={Platform.OS === 'ios' ? 'padding' : undefined}
                 style={styles.flex}
               >
-                <View style={styles.videoContainer}>
+                <Pressable
+                  style={styles.videoContainer}
+                  onPress={togglePlay}
+                  disabled={isProcessing}
+                >
                   {visible && currentVideoUri ? (
                     <VideoView
                       player={player}
                       style={styles.video}
                       contentFit="contain"
-                      nativeControls={!isProcessing}
+                      nativeControls={false}
                     />
                   ) : null}
+
+                  {!isPlaying && !isProcessing && visible && currentVideoUri && (
+                    <Animated.View
+                      entering={FadeIn.duration(160)}
+                      exiting={FadeOut.duration(120)}
+                      style={styles.playButtonOverlay}
+                      pointerEvents="none"
+                    >
+                      <View style={styles.playButtonCircle}>
+                        <PlayIcon />
+                      </View>
+                    </Animated.View>
+                  )}
 
                   {isProcessing && (
                     <View style={styles.processingOverlay} pointerEvents="none">
                       <ActivityIndicator size="large" color="#FFFFFF" />
                     </View>
                   )}
-                </View>
+                </Pressable>
 
                 {/* Close — top-left */}
                 <TouchableOpacity
@@ -239,8 +338,9 @@ export const VideoPreviewModal: React.FC<VideoPreviewModalProps> = ({
                   <CloseIcon />
                 </TouchableOpacity>
 
-                {/* Trim — top-right, native only */}
-                {Platform.OS !== 'web' && (
+                {/* Trim — top-right. Hidden when the native trim module isn't
+                    available (web, Expo Go, missing pod install). */}
+                {Platform.OS !== 'web' && isVideoTrimAvailable() && (
                   <TouchableOpacity
                     style={[styles.trimButton, { top: insets.top + 12 }]}
                     onPress={openTrim}
@@ -296,6 +396,20 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: 'rgba(0, 0, 0, 0.35)',
+  },
+  playButtonOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  playButtonCircle: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingLeft: 4,
   },
   closeButton: {
     position: 'absolute',

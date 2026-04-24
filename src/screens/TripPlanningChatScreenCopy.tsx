@@ -41,6 +41,8 @@ import {
   type FilterDisplayItem,
 } from '../utils/tripPlanningFilters';
 import { useChatKeyboardScroll } from '../hooks/useChatKeyboardScroll';
+import { useTutorial } from '../context/TutorialContext';
+import { TutorialOverlay, type AnchorRect } from '../components/TutorialOverlay';
 import { useKeyboardVisible, useKeyboardHeight } from '../hooks/useKeyboardVisible';
 
 /** Split filter label into prefix and value for chip display (e.g. "Origin – Israel" -> prefix "Origin", value "Israel"). */
@@ -263,6 +265,42 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   const [filtersMenuVisible, setFiltersMenuVisible] = useState(false);
   const [isAwaitingFilterRemovalResponse, setAwaitingFilterRemovalResponse] = useState(false);
 
+  // ——— Welcome Guide (tutorial overlay) ———
+  const tutorial = useTutorial();
+  const filtersButtonRef = useRef<View>(null);
+  const filtersChipsRowRef = useRef<View>(null);
+  const [filtersButtonRect, setFiltersButtonRect] = useState<AnchorRect | null>(null);
+  const [filtersChipsRect, setFiltersChipsRect] = useState<AnchorRect | null>(null);
+
+  const measureFiltersButton = () => {
+    filtersButtonRef.current?.measureInWindow?.((x, y, width, height) => {
+      setFiltersButtonRect({ x, y, width, height });
+    });
+  };
+  const measureFiltersChips = () => {
+    filtersChipsRowRef.current?.measureInWindow?.((x, y, width, height) => {
+      setFiltersChipsRect({ x, y, width, height });
+    });
+  };
+
+  // Show step 3 tooltip only after the 2 welcome messages have been sent.
+  const showTutorialStep3 = tutorial.currentStep === 3 && !isInitializing && messages.length >= 2;
+
+  useEffect(() => {
+    if (showTutorialStep3) {
+      Keyboard.dismiss();
+      const t = setTimeout(measureFiltersButton, 120);
+      return () => clearTimeout(t);
+    }
+  }, [showTutorialStep3]);
+
+  useEffect(() => {
+    if (tutorial.currentStep === 4 && filtersMenuVisible) {
+      const t = setTimeout(measureFiltersChips, 120);
+      return () => clearTimeout(t);
+    }
+  }, [tutorial.currentStep, filtersMenuVisible]);
+
   // AI report state
   const [reportSheetVisible, setReportSheetVisible] = useState(false);
   const [reportMessageText, setReportMessageText] = useState('');
@@ -365,6 +403,20 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     [currentRequestData]
   );
   const filterCount = filterDisplayList.length;
+
+  // Mock filter chips shown during the welcome guide's step 4 when there are no real filters.
+  const TUTORIAL_MOCK_CHIPS = useMemo(
+    () => [
+      { id: '__tutorial_chip_1__', label: 'surfed: Hawaii' },
+      { id: '__tutorial_chip_2__', label: 'Origin: United States' },
+      { id: '__tutorial_chip_3__', label: 'Age: 20-40' },
+    ],
+    []
+  );
+
+  // During step 4 (with no real filters) show the mock count + badge to match the Figma.
+  const isTutorialMockVisible = filterCount === 0 && tutorial.currentStep === 4;
+  const displayFilterCount = isTutorialMockVisible ? TUTORIAL_MOCK_CHIPS.length : filterCount;
 
   const hasUnresolvedActionRow = useMemo(
     () =>
@@ -1970,7 +2022,13 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         </ImageBackground>
 
         {/* Floating filters button: 7px from top (below header), 14px from right */}
-        <View style={styles.filtersButtonFloating} pointerEvents="box-none">
+        <View
+          ref={filtersButtonRef}
+          style={styles.filtersButtonFloating}
+          pointerEvents="box-none"
+          onLayout={measureFiltersButton}
+          collapsable={false}
+        >
           <TouchableOpacity
             onPress={() => setFiltersMenuVisible(true)}
             activeOpacity={1}
@@ -2049,8 +2107,34 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
               pointerEvents="box-none"
             >
               <View style={styles.filtersOverlayTop}>
-                <View style={styles.filtersChipsRow}>
-                  {filterDisplayList.length === 0 ? (
+                <View
+                  ref={filtersChipsRowRef}
+                  style={styles.filtersChipsRow}
+                  onLayout={measureFiltersChips}
+                  collapsable={false}
+                >
+                  {filterDisplayList.length === 0 && tutorial.currentStep === 4 ? (
+                    TUTORIAL_MOCK_CHIPS.map(item => {
+                      const parts = getLabelParts(item.label);
+                      return (
+                        <View key={item.id} style={styles.filterChip}>
+                          <View style={styles.filterChipRemove}>
+                            <Ionicons name="close" size={18} color="#7B7B7B" />
+                          </View>
+                          <Text style={styles.filterChipLabel} numberOfLines={1}>
+                            {parts ? (
+                              <>
+                                <Text style={styles.filterChipPrefix}>{parts.prefix}: </Text>
+                                <Text style={styles.filterChipValue}>{parts.value}</Text>
+                              </>
+                            ) : (
+                              item.label
+                            )}
+                          </Text>
+                        </View>
+                      );
+                    })
+                  ) : filterDisplayList.length === 0 ? (
                     <View style={styles.filtersEmptyCard}>
                       <Text style={styles.filtersEmptyCardText}>
                         You can filter and search for other users based on - surf lvl, board type, age, origin country, and any destination they've been to.
@@ -2095,10 +2179,12 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
                   style={[styles.filtersButtonPill, styles.filtersOverlayClose]}
                   hitSlop={12}
                 >
+                  {displayFilterCount > 0 && (
                     <View style={styles.filtersButtonCountWrap}>
-                      
-                      <Text style={styles.filtersButtonCountText}>{filterCount}</Text>
+                      <View style={styles.filtersButtonRedDot} />
+                      <Text style={styles.filtersButtonCountText}>{displayFilterCount}</Text>
                     </View>
+                  )}
                   <Ionicons name="options-outline" size={24} color="#333" />
                 </TouchableOpacity>
               </View>
@@ -2241,6 +2327,32 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         messageY={reportMessageY}
         chatType="matching"
         onClose={() => { setReportSheetVisible(false); setReportMessageId(null); setReportMessageY(null); setReportMessageX(null); }}
+      />
+
+      {/* Welcome Guide — single overlay that swaps content between step 3 & 4 */}
+      <TutorialOverlay
+        visible={showTutorialStep3 || (tutorial.currentStep === 4 && filtersMenuVisible)}
+        step={tutorial.currentStep === 4 ? 4 : 3}
+        total={4}
+        title={tutorial.currentStep === 4 ? 'Filters Review' : "Swelly's Chat"}
+        body={
+          tutorial.currentStep === 4
+            ? 'Review the active filters of your search, and delete the irrelevant ones by Drag-&-Drop'
+            : "Talk to Swelly and filter users based on what you're looking for"
+        }
+        ctaLabel={tutorial.currentStep === 4 ? 'Done' : 'Next'}
+        onPressCta={() => {
+          if (tutorial.currentStep === 4) {
+            tutorial.complete();
+          } else {
+            setFiltersMenuVisible(true);
+            tutorial.advance();
+          }
+        }}
+        anchorRect={tutorial.currentStep === 4 ? filtersChipsRect : filtersButtonRect}
+        arrowDirection="up"
+        arrowGap={tutorial.currentStep === 4 ? 14 : 6}
+        cardGap={tutorial.currentStep === 4 ? 8 : 2}
       />
     </SafeAreaView>
     </>

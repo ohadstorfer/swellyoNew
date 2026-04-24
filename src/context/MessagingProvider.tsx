@@ -995,6 +995,33 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  // Handle real-time new-conversation discovery.
+  //
+  // Fires when `conversation_members` has an INSERT for the current user —
+  // i.e. someone just started a DM with us. Previously this was covered by
+  // the unfiltered `messages` INSERT on `conversations_list`, but that
+  // subscription destabilized the realtime socket by forcing RLS evaluation
+  // on every message in the DB. The new path is a one-row-per-user filter,
+  // so it's cheap and doesn't touch the `messages` table at all.
+  const handleNewConversation = useCallback(async (conversationId: string) => {
+    // Ignore if we already have it in state (e.g. we initiated the DM).
+    if (conversationsRef.current.some((c) => c.id === conversationId)) return;
+
+    try {
+      const lastSync = await getLastSyncTimestamp();
+      // Look back at least 5 minutes so a stale lastSync (or a fresh session
+      // with lastSync === 0) still catches the brand-new conversation row.
+      const syncFrom = Math.max(lastSync, Date.now() - 5 * 60 * 1000);
+      const updated = await messagingService.getConversationsUpdatedSince(syncFrom);
+      if (updated.length > 0) {
+        dispatch({ type: 'SYNC_FROM_SERVER', payload: { conversations: updated } });
+      }
+      await updateLastSyncTimestamp();
+    } catch (error) {
+      console.error('[MessagingProvider] Error syncing on new conversation:', error);
+    }
+  }, []);
+
   // Keep conversationsRef in sync with conversations state
   useEffect(() => {
     conversationsRef.current = conversations;
@@ -1161,6 +1188,7 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
   // Set up subscription
   useEffect(() => {
     // Get current user ID
+    let newConvUnsub: (() => void) | null = null;
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (user) {
         currentUserIdRef.current = user.id;
@@ -1168,6 +1196,16 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
         userPresenceService.trackCurrentUser().catch(error => {
           console.error('[MessagingProvider] Error initializing presence tracking:', error);
         });
+
+        // Subscribe to new-conversation discovery. Fires when another user
+        // starts a DM with us (INSERT on conversation_members filtered by
+        // our user id). Triggers a focused sync so the new conversation
+        // lands in state; the per-conv reconciler then subscribes its
+        // filtered list:messages channel for subsequent message events.
+        newConvUnsub = messagingService.subscribeToNewConversations(
+          user.id,
+          handleNewConversation
+        );
       }
     });
 
@@ -1546,6 +1584,7 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
       cleanup();
       subscription.remove();
       if (netSub) netSub();
+      if (newConvUnsub) newConvUnsub();
       // Tear down every per-conv list subscription on provider unmount.
       listSubsRef.current.forEach((unsub) => {
         try { unsub(); } catch (e) { console.warn('[MessagingProvider] list unsub failed on unmount:', e); }
@@ -1556,7 +1595,7 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
         console.error('[MessagingProvider] Error stopping presence tracking:', error);
       });
     };
-  }, [loadConversations, handleReconnect, isMessageProcessed, markMessageProcessed]);
+  }, [loadConversations, handleReconnect, handleNewConversation, isMessageProcessed, markMessageProcessed]);
 
   const setCurrentConversationId = useCallback((conversationId: string | null) => {
     currentConversationIdRef.current = conversationId;

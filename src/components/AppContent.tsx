@@ -19,6 +19,7 @@ import { SwellyShaperScreen } from '../screens/SwellyShaperScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { ConversationLoadingScreen } from '../components/ConversationLoadingScreen';
 import { WelcomeToLineupOverlay } from '../components/WelcomeToLineupOverlay';
+import { useTutorial } from '../context/TutorialContext';
 import { messagingService } from '../services/messaging/messagingService';
 import { supabaseAuthService } from '../services/auth/supabaseAuthService';
 import { useOnboarding } from '../context/OnboardingContext';
@@ -34,6 +35,7 @@ import { useMessaging } from '../context/MessagingProvider';
 
 export const AppContent: React.FC = () => {
   const { currentStep, formData, setCurrentStep, updateFormData, saveStepToSupabase, isComplete, markOnboardingComplete, isDemoUser, setIsDemoUser, setUser, resetOnboarding, user, isRestoringSession } = useOnboarding();
+  const { markWelcomeLineupDismissed } = useTutorial();
   
   // Initialize auth guard - this will automatically redirect unauthenticated users
   useAuthGuard();
@@ -1317,8 +1319,12 @@ export const AppContent: React.FC = () => {
         <WelcomeToLineupOverlay
           visible={showWelcomeToLineupOverlay && onboardingMatchResult != null && onboardingMatchResult.match_count > 0}
           matches={onboardingMatchResult?.matches || []}
-          onClose={() => setShowWelcomeToLineupOverlay(false)}
+          onClose={() => {
+            markWelcomeLineupDismissed();
+            setShowWelcomeToLineupOverlay(false);
+          }}
           onConnect={(match) => {
+            markWelcomeLineupDismissed();
             setShowWelcomeToLineupOverlay(false);
             // Show loading screen immediately
             setPendingConversation({
@@ -1352,6 +1358,7 @@ export const AppContent: React.FC = () => {
             handleViewUserProfile(userId);
           }}
           onMoreMatches={() => {
+            markWelcomeLineupDismissed();
             setShowWelcomeToLineupOverlay(false);
             setPendingOnboardingMatches(onboardingMatchResult?.matches || null);
             setTripPlanningChatId(null); // Start fresh chat, not restore
@@ -1537,12 +1544,18 @@ export const AppContent: React.FC = () => {
   // Demo buttons always passed; WelcomeScreen controls visibility via showDemoByDefault
   // or a secret long-press gesture on the logo (for testers on production).
   const showDemoByDefault = isDevMode || isLocalMode;
+  // Closes the window between isRestoringSession=false and hasValidatedSession=true:
+  // if we have a restored user but useAuthGuard hasn't validated the session yet,
+  // keep the branded loading UI up so the login buttons don't flash before redirect.
+  const isAuthResolving =
+    isCheckingAuth ||
+    (user !== null && !hasValidatedSession && !isDemoUser && isSupabaseConfigured !== false);
   return (
     <WelcomeScreen
       onGetStarted={handleGetStarted}
       onDemoChat={handleDemoChat}
       onSkipDemo={handleSkipDemo}
-      isCheckingAuth={isCheckingAuth}
+      isCheckingAuth={isAuthResolving}
       showDemoByDefault={showDemoByDefault}
     />
   );

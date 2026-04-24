@@ -59,6 +59,24 @@ if (SUPABASE_URL && SUPABASE_ANON_KEY && validateUrl(SUPABASE_URL)) {
         },
       },
     });
+
+    // Dev-only: log WebSocket lifecycle so channel-level cascades are
+    // distinguishable from socket-level failures. If the next incident
+    // shows [Realtime] socket CLOSED with no foreground/background event,
+    // the cause is socket-level (JWT / network / server kill) rather than
+    // per-channel — fixes need to target the realtime transport.
+    if (__DEV__ && supabaseClient) {
+      const rt: any = (supabaseClient as any).realtime;
+      try {
+        rt?.onOpen?.(() => console.log('[Realtime] socket OPEN'));
+        rt?.onClose?.(() => console.log('[Realtime] socket CLOSED'));
+        rt?.onError?.((err: any) =>
+          console.log('[Realtime] socket ERROR', err?.message ?? err)
+        );
+      } catch (_) {
+        // diagnostic only
+      }
+    }
   } catch (error) {
     console.error('⚠️ Failed to create Supabase client:', error);
     console.error('Please check your EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY in .env');

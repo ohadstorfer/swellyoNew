@@ -18,10 +18,21 @@ const ONLINE_THRESHOLD_MINUTES = 5; // Consider user online if active within 5 m
 const MAX_SUBSCRIPTIONS = 50;
 const METRICS_LOG_INTERVAL = 5 * 60 * 1000; // Log metrics every 5 minutes
 
+// Backoff for re-subscribing the presence channel after CHANNEL_ERROR / TIMED_OUT /
+// CLOSED. Doubles up to 30s and then caps — these are the only states that leave
+// the channel unrecoverable without manual re-subscribe, and on mobile they happen
+// often (network changes, background, JWT refresh mid-connect).
+const PRESENCE_RECOVERY_BACKOFF_MS = [2000, 5000, 10000, 30000] as const;
+// Cap recovery attempts so a persistent WebSocket-level failure (stale JWT,
+// network partition, killed realtime socket) doesn't spam hundreds of warnings.
+// Reset to 0 on AppState 'active' so foregrounding gives presence a fresh shot.
+const MAX_RECOVERY_ATTEMPTS = 10;
+
 class UserPresenceService {
   private static instance: UserPresenceService;
   private presenceChannel: any | null = null;
   private userStatusSubscriptions = new Map<string, Set<(isOnline: boolean) => void>>();
+  private lastNotifiedStatus = new Map<string, boolean>();
   private currentUserId: string | null = null;
   private presenceUpdateInterval: NodeJS.Timeout | null = null;
   private appStateSubscription: any = null;
@@ -29,7 +40,9 @@ class UserPresenceService {
   private lastDbWrite: number = 0;
   private readonly DB_WRITE_COOLDOWN = 60000; // Only write to DB max once per minute
   private presenceChannelHealthy: boolean = false;
-  
+  private recoveryAttempts: number = 0;
+  private recoveryTimeout: ReturnType<typeof setTimeout> | null = null;
+
   // Metrics tracking
   private metrics = {
     presenceUpdates: 0,
@@ -121,10 +134,12 @@ class UserPresenceService {
     }
     this.userStatusSubscriptions.get(userId)!.add(callback);
 
-    // Get initial status
+    // Get initial status (seed lastNotifiedStatus so dedupe works on next sync)
     this.getUserStatus(userId).then(isOnline => {
+      this.lastNotifiedStatus.set(userId, isOnline);
       callback(isOnline);
     }).catch(() => {
+      this.lastNotifiedStatus.set(userId, false);
       callback(false);
     });
 
@@ -143,6 +158,7 @@ class UserPresenceService {
       callbacks.delete(callback);
       if (callbacks.size === 0) {
         this.userStatusSubscriptions.delete(userId);
+        this.lastNotifiedStatus.delete(userId);
       }
     }
   }
@@ -177,13 +193,122 @@ class UserPresenceService {
         })
         .subscribe((status: string) => {
           this.presenceChannelHealthy = status === 'SUBSCRIBED';
+          console.log(`[UserPresenceService] Presence channel status: ${status}`);
           if (status === 'SUBSCRIBED') {
-          } else {
-            console.warn('[UserPresenceService] Presence channel unhealthy:', status);
+            // Healthy again — reset recovery backoff and cancel any pending retry.
+            this.recoveryAttempts = 0;
+            if (this.recoveryTimeout) {
+              clearTimeout(this.recoveryTimeout);
+              this.recoveryTimeout = null;
+            }
+            // Re-track the current user so peers see us online again after a
+            // reconnect. track() is a no-op when we haven't called trackCurrentUser
+            // yet (currentUserId null) — safe to call unconditionally.
+            this.updateCurrentUserPresence().catch(() => {});
+            // Resync subscribers with live presence state — initial getUserStatus()
+            // ran against DB fallback; this picks up anyone already present in the
+            // channel without waiting for the next sync event.
+            this.notifyAllSubscribers().catch(() => {});
+          } else if (
+            status === 'CHANNEL_ERROR' ||
+            status === 'TIMED_OUT' ||
+            status === 'CLOSED'
+          ) {
+            this.scheduleChannelRecovery(status);
           }
         });
     } catch (error) {
       console.error('[UserPresenceService] Error creating presence channel:', error);
+    }
+  }
+
+  /**
+   * Schedule re-creating the presence channel after a non-recoverable status
+   * (CHANNEL_ERROR / TIMED_OUT / CLOSED). Without this, a single transient failure
+   * — common on mobile across backgrounding, network changes, and JWT refresh —
+   * leaves the channel dead forever and the "Available" indicator stuck on the
+   * last-known (often stale) state. Backoff grows from 2s up to 30s.
+   */
+  private scheduleChannelRecovery(reason: string): void {
+    if (this.recoveryTimeout) {
+      return; // already scheduled
+    }
+
+    // Give up after MAX_RECOVERY_ATTEMPTS — at that point it's almost always a
+    // WebSocket-level problem (stale JWT, killed socket, network partition),
+    // not a channel-level one, and retrying every 30s just spams logs.
+    // AppState 'active' will reset the counter and trigger a fresh attempt.
+    if (this.recoveryAttempts >= MAX_RECOVERY_ATTEMPTS) {
+      console.error(
+        `[UserPresenceService] Presence channel ${reason} — giving up after ${this.recoveryAttempts} attempts. ` +
+        `Likely a WebSocket-level issue (stale JWT / network / realtime socket dead). ` +
+        `Will retry when app returns to foreground.`
+      );
+      this.logRealtimeConnectionState();
+      this.presenceChannelHealthy = false;
+      return;
+    }
+
+    // Capture and clear the dead channel reference up front so the scheduled
+    // callback can await its teardown before building a new channel on the
+    // same topic. Without the await, supabase can briefly hold two channels
+    // on 'presence:users' and the new subscribe lands in a racey state.
+    const deadChannel = this.presenceChannel;
+    this.presenceChannel = null;
+    this.presenceChannelHealthy = false;
+
+    const idx = Math.min(
+      this.recoveryAttempts,
+      PRESENCE_RECOVERY_BACKOFF_MS.length - 1
+    );
+    const delay = PRESENCE_RECOVERY_BACKOFF_MS[idx];
+    this.recoveryAttempts += 1;
+
+    console.warn(
+      `[UserPresenceService] Presence channel ${reason}; retry #${this.recoveryAttempts}/${MAX_RECOVERY_ATTEMPTS} in ${delay}ms`
+    );
+    this.logRealtimeConnectionState();
+
+    this.recoveryTimeout = setTimeout(async () => {
+      this.recoveryTimeout = null;
+      // Skip retry if nobody is using presence anymore (logout between schedule
+      // and fire, or all DM screens unmounted before tracking started).
+      if (!this.isTrackingCurrentUser && this.userStatusSubscriptions.size === 0) {
+        this.recoveryAttempts = 0;
+        return;
+      }
+      if (deadChannel) {
+        try {
+          await supabase.removeChannel(deadChannel);
+        } catch (_) {
+          // Ignore — channel may already be torn down server-side.
+        }
+      }
+      try {
+        await this.ensurePresenceChannel();
+      } catch (err) {
+        console.error('[UserPresenceService] Recovery ensurePresenceChannel failed:', err);
+        this.scheduleChannelRecovery('retry failed');
+      }
+    }, delay);
+  }
+
+  /**
+   * Log the Supabase realtime client's socket-level state. On repeated
+   * channel CLOSED events, this tells us whether it's a single-channel issue
+   * or the entire WebSocket is down (which is the common mobile failure mode).
+   */
+  private logRealtimeConnectionState(): void {
+    try {
+      const rt: any = (supabase as any).realtime;
+      if (!rt) return;
+      const info: Record<string, unknown> = {};
+      if (typeof rt.isConnected === 'function') info.isConnected = rt.isConnected();
+      if (typeof rt.connectionState === 'function') info.connectionState = rt.connectionState();
+      if (Array.isArray(rt.channels)) info.channelCount = rt.channels.length;
+      console.warn('[UserPresenceService] Realtime socket state:', info);
+    } catch (_) {
+      // ignore — diagnostic only
     }
   }
 
@@ -361,9 +486,13 @@ class UserPresenceService {
         });
       }
       
-      // Notify all subscribers with combined results
+      // Notify subscribers only when the status actually changed — avoids flicker
+      // caused by presence sync events that re-report the same state.
       userIds.forEach(userId => {
         const isOnline = presenceResults.get(userId) ?? false;
+        const prev = this.lastNotifiedStatus.get(userId);
+        if (prev === isOnline) return;
+        this.lastNotifiedStatus.set(userId, isOnline);
         const callbacks = this.userStatusSubscriptions.get(userId);
         if (callbacks) {
           callbacks.forEach(callback => {
@@ -384,6 +513,9 @@ class UserPresenceService {
    * Notify subscribers for a specific user
    */
   private notifySubscribersForUser(userId: string, isOnline: boolean): void {
+    const prev = this.lastNotifiedStatus.get(userId);
+    if (prev === isOnline) return;
+    this.lastNotifiedStatus.set(userId, isOnline);
     const callbacks = this.userStatusSubscriptions.get(userId);
     if (callbacks) {
       console.log(`[UserPresenceService] Notifying ${callbacks.size} subscriber(s) for user ${userId}: ${isOnline ? 'online' : 'offline'}`);
@@ -394,7 +526,6 @@ class UserPresenceService {
           console.error(`[UserPresenceService] Error in callback for ${userId}:`, error);
         }
       });
-    } else {
     }
   }
 
@@ -540,6 +671,16 @@ class UserPresenceService {
       }
 
       if (nextAppState === 'active') {
+        // If recovery hit the cap while backgrounded, reset and rebuild.
+        // Foregrounding is the natural "try again" signal on mobile — network
+        // changes, JWT refresh, and socket resurrection usually resolve here.
+        if (!this.presenceChannelHealthy && this.recoveryAttempts >= MAX_RECOVERY_ATTEMPTS) {
+          console.log('[UserPresenceService] App active — resetting presence recovery and rebuilding channel');
+          this.recoveryAttempts = 0;
+          this.ensurePresenceChannel().catch((err) => {
+            console.error('[UserPresenceService] App-active rebuild failed:', err);
+          });
+        }
         // App came to foreground - update presence immediately
         await this.updateCurrentUserPresence();
         await this.writeLastSeenToDatabase();
@@ -579,6 +720,14 @@ class UserPresenceService {
         this.metricsLogInterval = null;
       }
 
+      // Cancel any pending presence-channel recovery so logout doesn't
+      // resurrect a dead channel for the signed-out user.
+      if (this.recoveryTimeout) {
+        clearTimeout(this.recoveryTimeout);
+        this.recoveryTimeout = null;
+      }
+      this.recoveryAttempts = 0;
+
       // Remove app state listener
       if (this.appStateSubscription) {
         this.appStateSubscription.remove();
@@ -594,6 +743,7 @@ class UserPresenceService {
 
       // Clear all status subscriptions
       this.userStatusSubscriptions.clear();
+      this.lastNotifiedStatus.clear();
 
       console.log('[UserPresenceService] Stopped tracking and cleaned up');
     } catch (error) {

@@ -185,15 +185,19 @@ export async function processVideo(
   } else {
     // Native: use expo-video-thumbnails for the thumbnail, and expo-file-system/legacy
     // for the file size. Dimensions and duration come from the picker hints.
+    //
+    // Expo Go guard: the native module isn't linked in Expo Go, so require() would
+    // trip the global error handler even inside try/catch (RN surfaces it anyway).
     try {
-      const VideoThumbnails = require('expo-video-thumbnails');
-
-      // Get thumbnail at 1 second
-      const { uri: thumbUri } = await VideoThumbnails.getThumbnailAsync(uri, {
-        time: 1000,
-        quality: 0.8,
-      });
-      thumbnailUri = thumbUri;
+      const { isExpoGo } = require('../../utils/keyboardAvoidingView');
+      if (!isExpoGo) {
+        const VideoThumbnails = require('expo-video-thumbnails');
+        const { uri: thumbUri } = await VideoThumbnails.getThumbnailAsync(uri, {
+          time: 1000,
+          quality: 0.8,
+        });
+        thumbnailUri = thumbUri;
+      }
     } catch (error) {
       console.warn('[videoUploadService] Native thumbnail generation failed:', error);
       thumbnailUri = '';

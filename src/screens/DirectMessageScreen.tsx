@@ -16,7 +16,7 @@ import {
   Keyboard,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import Reanimated, { useAnimatedStyle } from 'react-native-reanimated';
+import Reanimated, { useAnimatedStyle, FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
 import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller';
 import { KeyboardGestureArea, isExpoGo } from '../utils/keyboardAvoidingView';
 import { TextInput as PaperTextInput } from 'react-native-paper';
@@ -43,6 +43,7 @@ import { avatarCacheService } from '../services/media/avatarCacheService';
 import { FullscreenImageViewer } from '../components/FullscreenImageViewer';
 import { ImagePreviewModal } from '../components/ImagePreviewModal';
 import { VideoPreviewModal } from '../components/VideoPreviewModal';
+import { getImageCropPicker, isPickerCancelError } from '../utils/imageCropModule';
 import { FullscreenVideoPlayer } from '../components/FullscreenVideoPlayer';
 import { ChatTextInput, ChatTextInputRef } from '../components/ChatTextInput';
 import { WelcomeIntroMessage } from '../components/WelcomeIntroMessage';
@@ -64,21 +65,19 @@ function getReceiptState(msg: Message, otherReadAt: string | null): ReceiptState
     : 'delivered';
 }
 
-function ReadReceipt({ state, onDark }: { state: ReceiptState; onDark?: boolean }) {
-  if (state === 'pending') return null;
-  const color =
-    state === 'read'
-      ? '#53BDEB'
-      : onDark
-        ? 'rgba(255,255,255,0.7)'
-        : 'rgba(255,255,255,0.55)';
+function ReadReceipt({ state }: { state: ReceiptState; onDark?: boolean }) {
+  // Only render when the other user has read the message. When delivered/pending
+  // we render nothing so the timestamp stays flush to the right with no reserved gap.
+  if (state !== 'read') return null;
   return (
-    <Ionicons
-      name="checkmark-done"
-      size={16}
-      color={color}
-      style={{ marginLeft: 4 }}
-    />
+    <Reanimated.View entering={FadeIn.duration(220)} exiting={FadeOut.duration(140)}>
+      <Ionicons
+        name="checkmark-done"
+        size={16}
+        color="#53BDEB"
+        style={{ marginLeft: 4 }}
+      />
+    </Reanimated.View>
   );
 }
 
@@ -122,7 +121,12 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const [isLoadingOlderMessages, setIsLoadingOlderMessages] = useState(false);
   const oldestMessageIdRef = useRef<string | null>(null);
   const isLoadingOlderRef = useRef<boolean>(false); // Ref-based lock to prevent race conditions
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  // Seed from the synchronous auth cache so own messages render on the right
+  // from the very first paint — otherwise messages briefly appear on the left
+  // and drift right once the async session fetch resolves.
+  const [currentUserId, setCurrentUserId] = useState<string | null>(
+    () => supabaseAuthService.getCachedUserId()
+  );
   const [otherUserAdvRole, setOtherUserAdvRole] = useState<'adv_giver' | 'adv_seeker' | null>(null);
   const [otherUserIsOnline, setOtherUserIsOnline] = useState<boolean | null>(null);
   const [hasTrackedFirstMessage, setHasTrackedFirstMessage] = useState(false);
@@ -1598,16 +1602,25 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
               }
             }
 
+            if (__DEV__) console.log('[DirectMessageScreen] launching native image picker');
             const result = await ImagePicker.launchImageLibraryAsync({
-              mediaTypes: ImagePicker.MediaTypeOptions.All,
+              mediaTypes: ['images', 'videos'],
               quality: 1,
             });
 
             const asset = result.assets?.[0];
             const uri = asset?.uri ?? (result as { uri?: string }).uri;
             const canceled = result.canceled === true || (result as { cancelled?: boolean }).cancelled === true;
+            if (__DEV__) {
+              console.log(
+                '[DirectMessageScreen] picker result — canceled=', canceled,
+                'uri=', typeof uri === 'string' ? uri.slice(0, 80) : uri,
+                'assetType=', asset?.type,
+              );
+            }
             if (uri && !canceled) {
               const isVideo = asset?.type === 'video' || uri.endsWith('.mp4') || uri.endsWith('.mov');
+              if (__DEV__) console.log('[DirectMessageScreen] classified as', isVideo ? 'video' : 'image');
               if (isVideo) {
                 selectedVideoMetadataRef.current = {
                   width: asset?.width,
@@ -1620,9 +1633,59 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                 setSelectedVideoUri(uri);
                 setVideoPreviewVisible(true);
               } else {
-                selectedImageUriForUploadRef.current = uri;
-                setSelectedImageUri(uri);
-                setImagePreviewVisible(true);
+                // Native crop/rotate editor replaces the preview modal on
+                // dev/prod builds where the module is linked. On confirm we
+                // send directly (no caption, no second preview). On cancel
+                // we drop the picked file silently. Web + Expo Go fall back
+                // to the old preview modal.
+                const cropper = getImageCropPicker();
+                if (__DEV__) {
+                  console.log(
+                    '[DirectMessageScreen] photo picked, uri=', uri.slice(0, 60),
+                    'cropperAvailable=', !!cropper,
+                  );
+                }
+                if (cropper) {
+                  try {
+                    // iOS: expo-image-picker's UIViewController is still
+                    // dismissing when we return here. Presenting the cropper's
+                    // VC before that finishes silently fails ("view is not in
+                    // the window hierarchy"). Wait one animation cycle.
+                    if (Platform.OS === 'ios') {
+                      await new Promise((resolve) => setTimeout(resolve, 500));
+                    }
+                    if (__DEV__) console.log('[DirectMessageScreen] opening cropper...');
+                    const edited = await cropper.openCropper({
+                      path: uri,
+                      mediaType: 'photo',
+                      freeStyleCropEnabled: true,
+                      enableRotationGesture: true,
+                      hideBottomControls: false,
+                      showCropGuidelines: true,
+                      showCropFrame: true,
+                      cropperToolbarTitle: 'Edit Photo',
+                      compressImageQuality: 0.9,
+                      includeExif: false,
+                    });
+                    if (__DEV__) console.log('[DirectMessageScreen] cropper done, path=', edited.path.slice(0, 60));
+                    const editedPath = edited.path.startsWith('file://')
+                      ? edited.path
+                      : `file://${edited.path}`;
+                    await handleImageSend(undefined, editedPath);
+                  } catch (err) {
+                    if (isPickerCancelError(err)) {
+                      if (__DEV__) console.log('[DirectMessageScreen] cropper canceled');
+                      return;
+                    }
+                    console.warn('[DirectMessageScreen] openCropper failed:', err);
+                    Alert.alert('Error', 'Could not open the photo editor.');
+                  }
+                } else {
+                  if (__DEV__) console.log('[DirectMessageScreen] fallback → ImagePreviewModal');
+                  selectedImageUriForUploadRef.current = uri;
+                  setSelectedImageUri(uri);
+                  setImagePreviewVisible(true);
+                }
               }
             }
           } catch (error) {
@@ -1653,9 +1716,11 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     }
   };
 
-  // Handle image send
-  const handleImageSend = async (caption?: string) => {
-    const uriToUse = selectedImageUriForUploadRef.current ?? selectedImageUri;
+  // Handle image send. `overrideImageUri` is used by the native crop-picker
+  // flow: after the user confirms in the native cropper, we pass the edited
+  // file URI here directly instead of going through the preview modal.
+  const handleImageSend = async (caption?: string, overrideImageUri?: string) => {
+    const uriToUse = overrideImageUri ?? selectedImageUriForUploadRef.current ?? selectedImageUri;
     if (!uriToUse || !currentConversationId || !currentUserId) {
       return;
     }
@@ -2151,17 +2216,17 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   }, [isFetchingMessages]);
 
   const onlineStatusElement = useMemo(() => {
-    if (otherUserIsOnline === true) {
-      return (
-        <View style={styles.statusContainer}>
-          <View style={styles.onlineDot} />
-          <Text style={styles.profileTagline}>Available</Text>
-        </View>
-      );
-    } else if (otherUserIsOnline === false) {
-      return <Text style={styles.profileTagline}>Offline</Text>;
-    }
-    return null;
+    if (otherUserIsOnline !== true) return null;
+    return (
+      <Reanimated.View
+        entering={FadeIn.duration(220)}
+        exiting={FadeOut.duration(160)}
+        style={styles.statusContainer}
+      >
+        <View style={styles.onlineDot} />
+        <Text style={styles.profileTagline}>Available</Text>
+      </Reanimated.View>
+    );
   }, [otherUserIsOnline]);
 
   const formatTime = (timestamp: string) => {
@@ -2293,14 +2358,17 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                       </View>
                     )}
                     {/* Timestamp overlay */}
-                    <View style={[styles.imageTimestampOverlay, { flexDirection: 'row', alignItems: 'center' }]}>
+                    <Reanimated.View
+                      style={[styles.imageTimestampOverlay, { flexDirection: 'row', alignItems: 'center' }]}
+                      layout={LinearTransition.duration(240)}
+                    >
                       <Text style={styles.imageTimestamp}>
                         {formatTime(message.created_at)}
                       </Text>
                       {isOwnMessage && !message.deleted && (
                         <ReadReceipt state={getReceiptState(message, otherUserLastReadAt)} onDark />
                       )}
-                    </View>
+                    </Reanimated.View>
                   </TouchableOpacity>
                   {message.body && (
                     <Text style={[
@@ -2390,14 +2458,17 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                       </View>
                     )}
                     {/* Timestamp overlay on image */}
-                    <View style={[styles.imageTimestampOverlay, { flexDirection: 'row', alignItems: 'center' }]}>
+                    <Reanimated.View
+                      style={[styles.imageTimestampOverlay, { flexDirection: 'row', alignItems: 'center' }]}
+                      layout={LinearTransition.duration(240)}
+                    >
                       <Text style={styles.imageTimestamp}>
                         {formatTime(message.created_at)}
                       </Text>
                       {isOwnMessage && !message.deleted && (
                         <ReadReceipt state={getReceiptState(message, otherUserLastReadAt)} onDark />
                       )}
-                    </View>
+                    </Reanimated.View>
                   </TouchableOpacity>
                   {message.body && (
                     <Text style={[
@@ -2481,12 +2552,15 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
               
               {/* Timestamp container for text messages */}
               {isOwnMessage ? (
-                <View style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  alignSelf: 'flex-end',
-                  marginTop: 2,
-                }}>
+                <Reanimated.View
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    alignSelf: 'flex-end',
+                    marginTop: 2,
+                  }}
+                  layout={LinearTransition.duration(240)}
+                >
                   <Text style={[styles.timestamp, styles.userTimestamp]}>
                     {formatTime(message.created_at)}
                     {message.edited && !message.deleted && (
@@ -2496,7 +2570,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                   {!message.deleted && !isEditing && (
                     <ReadReceipt state={getReceiptState(message, otherUserLastReadAt)} />
                   )}
-                </View>
+                </Reanimated.View>
               ) : (
                 <View style={[styles.timestampContainer, styles.botTimestampContainer]}>
                   <Text style={[styles.timestamp, styles.botTimestamp]}>
@@ -2556,9 +2630,10 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         <View style={styles.headerGradientBorder} />
         <View style={styles.header}>
           <View style={styles.headerLeft}>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.backButton}
               onPress={onBack}
+              hitSlop={{ top: 30, bottom: 30, left: 30, right: 12 }}
             >
               <Ionicons name="chevron-back" size={24} color="#FFFFFF" />
             </TouchableOpacity>
@@ -2582,7 +2657,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             </TouchableOpacity>
           </View>
           
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.profileInfo}
             onPress={() => {
               if (onViewProfile) {
@@ -2591,8 +2666,19 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             }}
             activeOpacity={0.7}
           >
-            <Text style={styles.profileName}>{otherUserName}</Text>
-            {onlineStatusElement}
+            <Reanimated.View
+              style={styles.profileInfoInner}
+              layout={LinearTransition.duration(240)}
+            >
+              <Reanimated.Text
+                style={styles.profileName}
+                layout={LinearTransition.duration(240)}
+                numberOfLines={1}
+              >
+                {otherUserName}
+              </Reanimated.Text>
+              {onlineStatusElement}
+            </Reanimated.View>
           </TouchableOpacity>
           
           <TouchableOpacity style={styles.menuButton} onPress={() => setShowDmMenu(!showDmMenu)}>
@@ -2866,7 +2952,8 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         />
       )}
 
-      {/* Video Preview Modal */}
+      {/* Video Preview Modal — video + caption + send; trim button in the
+          top-right (only visible when the native video-trim module is available). */}
       {selectedVideoUri && (
         <VideoPreviewModal
           visible={videoPreviewVisible}
@@ -2975,6 +3062,12 @@ const styles = StyleSheet.create({
     flex: 1,
     width: 246,
     marginRight: spacing.sm,
+    justifyContent: 'center',
+  },
+  profileInfoInner: {
+    minHeight: 52,
+    justifyContent: 'center',
+    overflow: 'hidden',
   },
   profileName: {
     fontSize: 20,
@@ -2982,7 +3075,7 @@ const styles = StyleSheet.create({
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter-Bold',
     lineHeight: 28,
     color: '#FFFFFF',
-    marginBottom: 4,
+    marginBottom: 2,
   },
   profileTagline: {
     fontSize: 14,
@@ -3246,9 +3339,10 @@ const styles = StyleSheet.create({
   },
   botTimestampContainer: {
     alignItems: 'flex-end', // Align timestamp to right for received messages (on right side)
+    marginTop: 2, // Match sent-message vertical spacing
   },
   timestamp: {
-    fontSize: 14, // Figma: text-[length:var(--size\/xxs,14px)]
+    fontSize: 13, // Figma: text-[length:var(--size\/xxs,14px)]
     fontWeight: '400', // Figma: font-normal
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     lineHeight: 20, // Figma: leading-[20px]
@@ -3257,7 +3351,7 @@ const styles = StyleSheet.create({
     color: 'rgba(123, 123, 123, 0.5)', // Dark timestamp on white background for outbound messages
   },
   botTimestamp: {
-    color: 'rgba(123, 123, 123, 1)', 
+    color: 'rgba(123, 123, 123, 0.5)', // Match userTimestamp so sent/received times share the same styling
   },
   inputWrapper: {
     flexDirection: 'row',

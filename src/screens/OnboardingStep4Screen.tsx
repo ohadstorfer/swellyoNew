@@ -1093,14 +1093,14 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
 
           const result = await ImagePicker.launchImageLibraryAsync({
             mediaTypes: ['images'],
-            allowsEditing: true,
-            aspect: [1, 1],
+            allowsEditing: false,
             quality: 1,
           });
 
           if (!result.canceled && result.assets[0]) {
             const imageUri = result.assets[0].uri;
-            setProfilePicture(imageUri);
+            setRawImageUri(imageUri);
+            setCropModalVisible(true);
           }
         } catch (error) {
           console.warn('expo-image-picker not available:', error);
@@ -1505,17 +1505,15 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
     )}
 
 
-    {Platform.OS === 'web' && (
-      <AvatarCropModal
-        visible={cropModalVisible}
-        imageUri={rawImageUri}
-        onConfirm={(croppedUri) => {
-          setProfilePicture(croppedUri);
-          setCropModalVisible(false);
-        }}
-        onCancel={() => setCropModalVisible(false)}
-      />
-    )}
+    <AvatarCropModal
+      visible={cropModalVisible}
+      imageUri={rawImageUri}
+      onConfirm={(croppedUri) => {
+        setProfilePicture(croppedUri);
+        setCropModalVisible(false);
+      }}
+      onCancel={() => setCropModalVisible(false)}
+    />
     {Platform.OS !== 'web' && (
       <GalleryPermissionOverlay
         visible={showPermissionOverlay}

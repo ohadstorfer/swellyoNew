@@ -1,7 +1,11 @@
-import Constants from 'expo-constants';
+import Constants, { ExecutionEnvironment } from 'expo-constants';
 import { KeyboardAvoidingView as RNKeyboardAvoidingView } from 'react-native';
 
-export const isExpoGo = Constants.appOwnership === 'expo';
+// `appOwnership` is deprecated in modern Expo SDKs. `executionEnvironment` is
+// the supported API and reliably distinguishes Expo Go (`StoreClient`) from
+// dev/prod builds (`Bare` / `Standalone`).
+export const isExpoGo =
+  Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
 
 // On dev builds, use keyboard-controller's KAV (supports `translate-with-padding`,
 // animates on the UI thread in lockstep with the keyboard). On Expo Go the
