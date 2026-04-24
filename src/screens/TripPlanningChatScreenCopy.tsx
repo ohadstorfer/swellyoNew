@@ -43,6 +43,7 @@ import {
 import { useChatKeyboardScroll } from '../hooks/useChatKeyboardScroll';
 import { useTutorial } from '../context/TutorialContext';
 import { TutorialOverlay, type AnchorRect } from '../components/TutorialOverlay';
+import { SwellyTopicOverlay } from '../components/SwellyTopicOverlay';
 import { useKeyboardVisible, useKeyboardHeight } from '../hooks/useKeyboardVisible';
 
 /** Split filter label into prefix and value for chip display (e.g. "Origin – Israel" -> prefix "Origin", value "Israel"). */
@@ -62,7 +63,7 @@ function getLabelParts(label: string): { prefix: string; value: string } | null 
 
 /** First question shown when starting or restarting trip planning (matches backend prompt). */
 const TRIP_PLANNING_FIRST_QUESTION =
-  "Yo! Let’s get you connected with some other surf travelers! So, what are we looking for today?";
+  "Yo! Let’s get you connected with some other surf travelers!";
 
 /** Second initial message shown after typing animation delay. */
 const TRIP_PLANNING_SECOND_MESSAGE =
@@ -283,20 +284,41 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     });
   };
 
-  // Show step 3 tooltip only after the 2 welcome messages have been sent.
-  const showTutorialStep3 = tutorial.currentStep === 3 && !isInitializing && messages.length >= 2;
+  // Show step 3 tooltip as soon as the chat is ready — don't wait for the
+  // welcome messages to arrive.
+  const showTutorialStep3 = tutorial.currentStep === 3 && !isInitializing;
 
   useEffect(() => {
-    if (showTutorialStep3) {
-      Keyboard.dismiss();
-      const t = setTimeout(measureFiltersButton, 120);
-      return () => clearTimeout(t);
-    }
+    if (!showTutorialStep3) return;
+    Keyboard.dismiss();
+    // `chatContainer` translates vertically while the keyboard animates out
+    // (animatedKeyboardPadding), so measuring too early captures a mid-animation
+    // position for the floating filters button. Wait for `keyboardDidHide`,
+    // then add a small buffer for layout to settle. Fall back to a timed
+    // measurement in case the keyboard was already closed (no event fires).
+    let fallback: ReturnType<typeof setTimeout> | null = null;
+    let settle: ReturnType<typeof setTimeout> | null = null;
+    const runMeasure = () => {
+      if (fallback) { clearTimeout(fallback); fallback = null; }
+      settle = setTimeout(measureFiltersButton, 60);
+    };
+    const sub = Keyboard.addListener('keyboardDidHide', runMeasure);
+    fallback = setTimeout(measureFiltersButton, 500);
+    return () => {
+      sub.remove();
+      if (fallback) clearTimeout(fallback);
+      if (settle) clearTimeout(settle);
+    };
   }, [showTutorialStep3]);
 
   useEffect(() => {
     if (tutorial.currentStep === 4 && filtersMenuVisible) {
-      const t = setTimeout(measureFiltersChips, 120);
+      // The filters menu slides in with translateY 12 → 0 over 350ms
+      // (filterMenuAnim). Measuring mid-animation captures the mid-translate
+      // y-offset, which makes the spotlight sit too low relative to the
+      // chips — not enough space above the first chip, too much below the
+      // last. Wait for the slide-in to finish plus a small buffer.
+      const t = setTimeout(measureFiltersChips, 420);
       return () => clearTimeout(t);
     }
   }, [tutorial.currentStep, filtersMenuVisible]);
@@ -312,6 +334,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   const [messageIdsUnblockedByFilterDeletion, setMessageIdsUnblockedByFilterDeletion] = useState<Record<string, true>>({});
   const [trashHoverProgress, setTrashHoverProgress] = useState(0);
   const [showNewChatModal, setShowNewChatModal] = useState(false);
+  const [showTopicOverlay, setShowTopicOverlay] = useState(false);
   const insets = useSafeAreaInsets();
   const keyboardVisible = useKeyboardVisible();
   const androidKeyboardHeight = useKeyboardHeight();
@@ -820,30 +843,14 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             setTimeout(() => scrollToBottom(), 100);
           }, 2000);
         } else {
-          // Normal new chat: show first message immediately, then second after typing delay
-          setMessages([
-            {
-              id: '1',
-              text: TRIP_PLANNING_FIRST_QUESTION,
-              isUser: false,
-              timestamp: nowTs,
-            }
-          ]);
+          // Normal new chat: start with an empty chat behind the topic-selection overlay. The
+          // greeting + info messages are appended locally after the user picks a topic (see
+          // handleTopicSelected). No backend traffic is triggered by the selection itself —
+          // the backend chat is created in the background below.
+          setMessages([]);
           setIsInitializing(false);
-          setIsLoading(true);
-          setTimeout(() => {
-            setIsLoading(false);
-            setMessages(prev => [
-              ...prev,
-              {
-                id: 'info',
-                text: TRIP_PLANNING_SECOND_MESSAGE,
-                isUser: false,
-                timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
-              },
-            ]);
-            setTimeout(() => scrollToBottom(), 100);
-          }, 2000);
+          setIsLoading(false);
+          setShowTopicOverlay(true);
         }
 
         // Create the backend chat in background
@@ -1023,10 +1030,10 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
       id: Date.now().toString(),
       text: inputText.trim(),
       isUser: true,
-      timestamp: new Date().toLocaleTimeString('en-US', { 
-        hour: '2-digit', 
+      timestamp: new Date().toLocaleTimeString('en-US', {
+        hour: '2-digit',
         minute: '2-digit',
-        hour12: false 
+        hour12: false
       }),
     };
 
@@ -1448,8 +1455,8 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     setShowNewChatModal(false);
     // Reset all conversation state
     setMessages([]);
-    startLoadingWithTimeout();
     setIsInitializing(true);
+    setShowTopicOverlay(true);
     setIsFinished(false);
     setMatchedUsers([]);
     setDestinationCountry('');
@@ -1464,67 +1471,63 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     setAwaitingFilterRemovalResponse(false);
     setMessageIdsUnblockedByFilterDeletion({});
 
-    try {
-      // Build context message same as initial mount
-      const contextMessage = "Hi! I'm looking to connect with surfers.";
+    // Reset chatId — a fresh backend chat will be created in the background below.
+    setChatId(null);
+    if (onChatStateChange) onChatStateChange(null, [], '');
 
-      const response = await svc.startTripPlanningConversation({ message: contextMessage });
-      const newChatId = response.chat_id || null;
-      setChatId(newChatId);
+    setMessages([]);
+    setIsInitializing(false);
+    setIsLoading(false);
 
-      if (onChatStateChange) {
-        onChatStateChange(newChatId, [], '');
-      }
+    // Kick off backend chat creation in the background so the chatId is ready when the user
+    // types their first real message after the topic-overlay flow completes.
+    svc.startTripPlanningConversation({ message: "Hi! I'm looking to connect with surfers." })
+      .then(response => {
+        const newChatId = response.chat_id || null;
+        setChatId(newChatId);
+        if (onChatStateChange) onChatStateChange(newChatId, [], '');
+      })
+      .catch(err => console.error('Failed to recreate backend chat:', err));
+  };
 
-      const backendMessageIndex = typeof response.message_index === 'number' && response.message_index >= 0 ? response.message_index : undefined;
-      setMessages([{
-        id: Date.now().toString(),
-        text: response.return_message,
-        isUser: false,
-        timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
-        ...(backendMessageIndex !== undefined && { backendMessageIndex }),
-      }]);
-      // Show typing indicator then append second message after 2s
-      setIsLoading(true);
-      setTimeout(() => {
-        setIsLoading(false);
-        setMessages(prev => [
-          ...prev,
-          {
-            id: (Date.now() + 2).toString(),
-            text: TRIP_PLANNING_SECOND_MESSAGE,
-            isUser: false,
-            timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
-          },
-        ]);
-        setTimeout(() => scrollToBottom(), 100);
-      }, 2000);
-    } catch (error) {
-      console.error('Failed to start new chat:', error);
-      setMessages([{
-        id: Date.now().toString(),
-        text: TRIP_PLANNING_FIRST_QUESTION,
-        isUser: false,
-        timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
-      }]);
-      // Show typing indicator then append second message after 2s
-      setIsLoading(true);
-      setTimeout(() => {
-        setIsLoading(false);
-        setMessages(prev => [
-          ...prev,
-          {
-            id: (Date.now() + 2).toString(),
-            text: TRIP_PLANNING_SECOND_MESSAGE,
-            isUser: false,
-            timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
-          },
-        ]);
-        setTimeout(() => scrollToBottom(), 100);
-      }, 2000);
-    } finally {
-      setIsInitializing(false);
-    }
+  const handleTopicSelected = (_topicId: string, seedMessage: string) => {
+    // Frontend-only: close overlay, append the fake user seed, then Swelly's two initial
+    // messages with a typing delay between them. No backend round-trip.
+    setShowTopicOverlay(false);
+
+    const tsNow = () => new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+
+    const baseId = Date.now();
+    const seedMsg: Message = {
+      id: String(baseId),
+      text: seedMessage,
+      isUser: true,
+      timestamp: tsNow(),
+    };
+    const firstMsg: Message = {
+      id: String(baseId + 1),
+      text: TRIP_PLANNING_FIRST_QUESTION,
+      isUser: false,
+      timestamp: tsNow(),
+    };
+
+    setMessages(prev => [...prev, seedMsg, firstMsg]);
+    setIsLoading(true);
+    setTimeout(() => scrollToBottom(), 100);
+
+    setTimeout(() => {
+      setIsLoading(false);
+      setMessages(prev => [
+        ...prev,
+        {
+          id: String(baseId + 2),
+          text: TRIP_PLANNING_SECOND_MESSAGE,
+          isUser: false,
+          timestamp: tsNow(),
+        },
+      ]);
+      setTimeout(() => scrollToBottom(), 100);
+    }, 2000);
   };
 
   const handleRemoveFilter = (item: FilterDisplayItem) => {
@@ -2086,9 +2089,9 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             />
             <LinearGradient
               colors={[
-                'rgba(247,247,247,0)',
-                'rgba(247,247,247,0)',
-                `rgba(255,255,255,${0.9 + 0.1 * trashHoverProgress})`,
+                'rgba(247,247,247,0.6)',
+                'rgba(247,247,247,0.78)',
+                `rgba(255,255,255,${0.95 + 0.05 * trashHoverProgress})`,
               ]}
               locations={[0, 0.1596, 0.9553]}
               style={StyleSheet.absoluteFill}
@@ -2107,70 +2110,86 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
               pointerEvents="box-none"
             >
               <View style={styles.filtersOverlayTop}>
-                <View
-                  ref={filtersChipsRowRef}
-                  style={styles.filtersChipsRow}
-                  onLayout={measureFiltersChips}
-                  collapsable={false}
-                >
-                  {filterDisplayList.length === 0 && tutorial.currentStep === 4 ? (
-                    TUTORIAL_MOCK_CHIPS.map(item => {
-                      const parts = getLabelParts(item.label);
-                      return (
-                        <View key={item.id} style={styles.filterChip}>
-                          <View style={styles.filterChipRemove}>
-                            <Ionicons name="close" size={18} color="#7B7B7B" />
-                          </View>
-                          <Text style={styles.filterChipLabel} numberOfLines={1}>
-                            {parts ? (
-                              <>
-                                <Text style={styles.filterChipPrefix}>{parts.prefix}: </Text>
-                                <Text style={styles.filterChipValue}>{parts.value}</Text>
-                              </>
-                            ) : (
-                              item.label
-                            )}
-                          </Text>
-                        </View>
-                      );
-                    })
-                  ) : filterDisplayList.length === 0 ? (
+                <View style={styles.filtersChipsRow}>
+                  {filterDisplayList.length === 0 && tutorial.currentStep !== 4 ? (
+                    // Empty-state card — full-width inside the flex:1 outer.
                     <View style={styles.filtersEmptyCard}>
                       <Text style={styles.filtersEmptyCardText}>
                         You can filter and search for other users based on - surf lvl, board type, age, origin country, and any destination they've been to.
                       </Text>
                     </View>
                   ) : (
-                    filterDisplayList.map(item => {
-                      const parts = getLabelParts(item.label);
-                      const pan = chipPanResponders[item.id];
-                      return (
-                        <View
-                          key={item.id}
-                          ref={r => { chipRefsMap.current[item.id] = r; }}
-                          style={[styles.filterChip, dragState?.item.id === item.id && styles.filterChipDragging]}
-                          {...(pan?.panHandlers ?? {})}
-                        >
-                          <TouchableOpacity
-                            onPress={() => handleRemoveFilter(item)}
-                            style={styles.filterChipRemove}
-                            hitSlop={8}
-                          >
-                            <Ionicons name="close" size={18} color="#7B7B7B" />
-                          </TouchableOpacity>
-                          <Text style={styles.filterChipLabel} numberOfLines={1}>
-                            {parts ? (
-                              <>
-                                <Text style={styles.filterChipPrefix}>{parts.prefix}: </Text>
-                                <Text style={styles.filterChipValue}>{parts.value}</Text>
-                              </>
-                            ) : (
-                              item.label
-                            )}
-                          </Text>
-                        </View>
-                      );
-                    })
+                    // Chips (tutorial mocks OR real filters) wrapped in an
+                    // inner view that hugs its content. The tutorial spotlight
+                    // measures THIS view so the highlighted rect is only as
+                    // wide as the chips themselves (not the empty space that
+                    // flex:1 of the outer would span).
+                    <View
+                      ref={filtersChipsRowRef}
+                      style={[
+                        styles.filtersChipsRowInner,
+                        // During step 4 (tutorial mock chips), stack vertically
+                        // so the inner's width hugs the widest chip instead of
+                        // filling the flex:1 parent. That makes the tutorial
+                        // spotlight rect sit exactly around the chips.
+                        tutorial.currentStep === 4 && filterDisplayList.length === 0 &&
+                          styles.filtersChipsRowInnerTutorial,
+                      ]}
+                      onLayout={measureFiltersChips}
+                      collapsable={false}
+                    >
+                      {filterDisplayList.length === 0 && tutorial.currentStep === 4
+                        ? TUTORIAL_MOCK_CHIPS.map(item => {
+                            const parts = getLabelParts(item.label);
+                            return (
+                              <View key={item.id} style={styles.filterChip}>
+                                <View style={styles.filterChipRemove}>
+                                  <Ionicons name="close" size={18} color="#7B7B7B" />
+                                </View>
+                                <Text style={styles.filterChipLabel} numberOfLines={1}>
+                                  {parts ? (
+                                    <>
+                                      <Text style={styles.filterChipPrefix}>{parts.prefix}: </Text>
+                                      <Text style={styles.filterChipValue}>{parts.value}</Text>
+                                    </>
+                                  ) : (
+                                    item.label
+                                  )}
+                                </Text>
+                              </View>
+                            );
+                          })
+                        : filterDisplayList.map(item => {
+                            const parts = getLabelParts(item.label);
+                            const pan = chipPanResponders[item.id];
+                            return (
+                              <View
+                                key={item.id}
+                                ref={r => { chipRefsMap.current[item.id] = r; }}
+                                style={[styles.filterChip, dragState?.item.id === item.id && styles.filterChipDragging]}
+                                {...(pan?.panHandlers ?? {})}
+                              >
+                                <TouchableOpacity
+                                  onPress={() => handleRemoveFilter(item)}
+                                  style={styles.filterChipRemove}
+                                  hitSlop={8}
+                                >
+                                  <Ionicons name="close" size={18} color="#7B7B7B" />
+                                </TouchableOpacity>
+                                <Text style={styles.filterChipLabel} numberOfLines={1}>
+                                  {parts ? (
+                                    <>
+                                      <Text style={styles.filterChipPrefix}>{parts.prefix}: </Text>
+                                      <Text style={styles.filterChipValue}>{parts.value}</Text>
+                                    </>
+                                  ) : (
+                                    item.label
+                                  )}
+                                </Text>
+                              </View>
+                            );
+                          })}
+                    </View>
                   )}
                 </View>
                 <TouchableOpacity
@@ -2319,6 +2338,10 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
           </Pressable>
         </Pressable>
       </Modal>
+      <SwellyTopicOverlay
+        visible={showTopicOverlay}
+        onSelect={handleTopicSelected}
+      />
       <ReportAISheet
         visible={reportSheetVisible}
         messageText={reportMessageText}
@@ -2344,6 +2367,8 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         onPressCta={() => {
           if (tutorial.currentStep === 4) {
             tutorial.complete();
+            setFiltersMenuVisible(false);
+            onChatComplete?.();
           } else {
             setFiltersMenuVisible(true);
             tutorial.advance();
@@ -2707,10 +2732,25 @@ const styles = StyleSheet.create({
   filtersChipsRow: {
     flex: 1,
     flexDirection: 'row',
+    alignItems: 'center',
+    paddingRight: 8,
+  },
+  // Inner wrapper: hugs the chip content (no flex grow) so the tutorial
+  // spotlight rect is chips-sized, not full-row-sized. Wrap/gap live here so
+  // overflowing chips still wrap against the parent's width.
+  filtersChipsRowInner: {
+    flexDirection: 'row',
     flexWrap: 'wrap',
     alignItems: 'center',
     gap: 8,
-    paddingRight: 8,
+  },
+  // Tutorial-only override — stacks mock chips vertically so the inner's
+  // width hugs the widest chip (row+wrap still takes full parent width as a
+  // flex-row child in RN, which defeats the "hug content" goal).
+  filtersChipsRowInnerTutorial: {
+    flexDirection: 'column',
+    flexWrap: 'nowrap',
+    alignItems: 'flex-start',
   },
   filterChip: {
     flexDirection: 'row',

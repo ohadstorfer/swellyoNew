@@ -19,7 +19,7 @@ const STEP_HEADER_HEIGHT = 60;
 const BUTTON_CONTAINER_HEIGHT = 92;
 const MIN_CONTENT_HEIGHT = 400;
 
-const CARD_IMAGES = {
+export const CARD_IMAGES = {
   share_wisdom:
     'https://rfdhtvcmagsbxqntnepv.supabase.co/storage/v1/object/public/onboarding-welcome-images/b0d7956780bd01fbfac42c1db76ed27df34c3fcf.jpg',
   find_crew:

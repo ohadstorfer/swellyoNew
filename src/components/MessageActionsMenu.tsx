@@ -3,15 +3,16 @@ import { View, StyleSheet, TouchableOpacity, Modal, Platform } from 'react-nativ
 import { Text } from './Text';
 import { colors, spacing } from '../styles/theme';
 import { Ionicons } from '@expo/vector-icons';
-import Svg, { Path } from 'react-native-svg';
 
 interface MessageActionsMenuProps {
   visible: boolean;
   onClose: () => void;
   onEdit: () => void;
   onDelete: () => void;
+  onCopy?: () => void;
   canEdit: boolean; // Whether message is within edit window
   canDelete: boolean; // Whether message can be deleted
+  canCopy?: boolean; // Whether message has text that can be copied
   messagePosition: { x: number; y: number }; // Position for menu placement
 }
 
@@ -20,18 +21,26 @@ export const MessageActionsMenu: React.FC<MessageActionsMenuProps> = ({
   onClose,
   onEdit,
   onDelete,
+  onCopy,
   canEdit,
   canDelete,
+  canCopy,
   messagePosition,
 }) => {
   // Only log when visible to reduce noise
   if (visible) {
-    console.log('[MessageActionsMenu] Render (visible)', { visible, canEdit, canDelete });
+    console.log('[MessageActionsMenu] Render (visible)', { visible, canEdit, canDelete, canCopy });
   }
 
   const handleEdit = () => {
     console.log('[MessageActionsMenu] handleEdit called');
     onEdit();
+    onClose();
+  };
+
+  const handleCopy = () => {
+    console.log('[MessageActionsMenu] handleCopy called');
+    if (onCopy) onCopy();
     onClose();
   };
 
@@ -47,13 +56,6 @@ export const MessageActionsMenu: React.FC<MessageActionsMenuProps> = ({
       console.error('[MessageActionsMenu] Error in onDelete callback:', error);
     }
   };
-
-  // Google Material Design Edit Icon Component
-  const EditIcon = ({ size = 20, color = colors.text }: { size?: number; color?: string }) => (
-    <Svg height={size} viewBox="0 -960 960 960" width={size} fill={color}>
-      <Path d="M200-200h57l391-391-57-57-391 391v57Zm-80 80v-170l528-527q12-11 26.5-17t30.5-6q16 0 31 6t26 18l55 56q12 11 17.5 26t5.5 30q0 16-5.5 30.5T817-647L290-120H120Zm640-584-56-56 56 56Zm-141 85-28-29 57 57-29-28Z" />
-    </Svg>
-  );
 
   if (!visible) return null;
 
@@ -93,10 +95,21 @@ export const MessageActionsMenu: React.FC<MessageActionsMenuProps> = ({
               activeOpacity={0.7}
             >
               <Text style={styles.menuItemText}>Edit</Text>
-              <EditIcon size={20} color={colors.text} />
+              <Ionicons name="create-outline" size={20} color={colors.text} />
             </TouchableOpacity>
           )}
-          
+
+          {canCopy && (
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={handleCopy}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.menuItemText}>Copy</Text>
+              <Ionicons name="copy-outline" size={20} color={colors.text} />
+            </TouchableOpacity>
+          )}
+
           {canDelete && (
             <TouchableOpacity
               style={styles.menuItem}
@@ -109,7 +122,7 @@ export const MessageActionsMenu: React.FC<MessageActionsMenuProps> = ({
               activeOpacity={0.7}
             >
               <Text style={[styles.menuItemText, styles.deleteText]}>Delete</Text>
-              <Ionicons name="trash" size={20} color="#FF3B30" />
+              <Ionicons name="trash-outline" size={20} color="#FF3B30" />
             </TouchableOpacity>
           )}
         </TouchableOpacity>
