@@ -47,7 +47,7 @@ export interface OnboardingData {
   travelExperience: number;
   profilePicture?: string;
   pronouns?: string;
-  /** Selected surf journey option ids from welcome step (e.g. 'share_wisdom', 'find_crew', 'plan_trip', 'just_waves') */
+  /** Selected surf journey option ids from welcome step (e.g. 'travel_advice', 'like_minded_travellers', 'travel_partners', 'guidance') */
   surfJourney?: string[];
 }
 

@@ -20,13 +20,13 @@ const BUTTON_CONTAINER_HEIGHT = 92;
 const MIN_CONTENT_HEIGHT = 400;
 
 export const CARD_IMAGES = {
-  share_wisdom:
+  travel_advice:
     'https://rfdhtvcmagsbxqntnepv.supabase.co/storage/v1/object/public/onboarding-welcome-images/b0d7956780bd01fbfac42c1db76ed27df34c3fcf.jpg',
-  find_crew:
+  like_minded_travellers:
     'https://rfdhtvcmagsbxqntnepv.supabase.co/storage/v1/object/public/onboarding-welcome-images/63ee08f6a46333084911295e23748727ebc90198.jpg',
-  plan_trip:
+  travel_partners:
     'https://rfdhtvcmagsbxqntnepv.supabase.co/storage/v1/object/public/onboarding-welcome-images/6cbafc07268184703dff606b6cb48836431babec.jpg',
-  just_waves:
+  guidance:
     'https://rfdhtvcmagsbxqntnepv.supabase.co/storage/v1/object/public/onboarding-welcome-images/082aedec1b3d12fa462436f56cd5af2e3d6ad236.jpg',
 } as const;
 
@@ -39,24 +39,24 @@ const JOURNEY_OPTIONS: Array<{
   imageUri: string;
 }> = [
   {
-    id: 'share_wisdom',
+    id: 'travel_advice',
     title: 'Give & Get Travel Advice',
-    imageUri: CARD_IMAGES.share_wisdom,
+    imageUri: CARD_IMAGES.travel_advice,
   },
   {
-    id: 'find_crew',
+    id: 'like_minded_travellers',
     title: 'Connect with Like-Minded Travelers',
-    imageUri: CARD_IMAGES.find_crew,
+    imageUri: CARD_IMAGES.like_minded_travellers,
   },
   {
-    id: 'plan_trip',
+    id: 'travel_partners',
     title: 'Meet Potential Travel Partners',
-    imageUri: CARD_IMAGES.plan_trip,
+    imageUri: CARD_IMAGES.travel_partners,
   },
   {
-    id: 'just_waves',
+    id: 'guidance',
     title: 'General Surf Guidance',
-    imageUri: CARD_IMAGES.just_waves,
+    imageUri: CARD_IMAGES.guidance,
   },
 ];
 

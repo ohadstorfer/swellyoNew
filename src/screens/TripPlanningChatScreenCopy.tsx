@@ -43,7 +43,7 @@ import {
 import { useChatKeyboardScroll } from '../hooks/useChatKeyboardScroll';
 import { useTutorial } from '../context/TutorialContext';
 import { TutorialOverlay, type AnchorRect } from '../components/TutorialOverlay';
-import { SwellyTopicOverlay } from '../components/SwellyTopicOverlay';
+import { SwellyTopicOverlay, type SwellyTopicId } from '../components/SwellyTopicOverlay';
 import { useKeyboardVisible, useKeyboardHeight } from '../hooks/useKeyboardVisible';
 
 /** Split filter label into prefix and value for chip display (e.g. "Origin – Israel" -> prefix "Origin", value "Israel"). */
@@ -68,6 +68,19 @@ const TRIP_PLANNING_FIRST_QUESTION =
 /** Second initial message shown after typing animation delay. */
 const TRIP_PLANNING_SECOND_MESSAGE =
   "I can connect you to surfers based on surf lvl, board type, age, origin country, and any destination they’ve surfed at.";
+
+/** First message variants when the user picks a topic from the overlay. Always starts with the
+ *  shared "Yo!" intro, then a topic-specific tail. */
+const TRIP_PLANNING_FIRST_BY_TOPIC: Record<SwellyTopicId, string> = {
+  travel_advice:
+    "Yo! Let’s get you connected with some other surf travellers! So you want to get a travel advice! Which destination are you heading to?",
+  travel_partners:
+    "Yo! Let’s get you connected with some other surf travellers! Right on! What's most important to you when looking for a travel partner?",
+  like_minded_travellers:
+    "Yo! Let’s get you connected with some other surf travellers! I understand you’re on the hunt to meet a like-minded surfer 🤙🏼 wanna tell me some specifics?",
+  guidance:
+    "Yo! Let’s get you connected with some other surf travellers! What kind of surf guidance are you after for today?",
+};
 
 /** True if we have at least one filter required for find-matches (matches backend validation). */
 function hasSearchableFilters(data: any): boolean {
@@ -1490,7 +1503,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
       .catch(err => console.error('Failed to recreate backend chat:', err));
   };
 
-  const handleTopicSelected = (_topicId: string, seedMessage: string) => {
+  const handleTopicSelected = (topicId: SwellyTopicId, seedMessage: string) => {
     // Frontend-only: close overlay, append the fake user seed, then Swelly's two initial
     // messages with a typing delay between them. No backend round-trip.
     setShowTopicOverlay(false);
@@ -1506,7 +1519,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     };
     const firstMsg: Message = {
       id: String(baseId + 1),
-      text: TRIP_PLANNING_FIRST_QUESTION,
+      text: TRIP_PLANNING_FIRST_BY_TOPIC[topicId],
       isUser: false,
       timestamp: tsNow(),
     };

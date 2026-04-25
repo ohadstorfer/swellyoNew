@@ -13,10 +13,10 @@ import {
   ImageSourcePropType,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Images } from '../../assets/images';
 
-export type SwellyTopicId = 'share_wisdom' | 'find_crew' | 'plan_trip' | 'just_waves';
+export type SwellyTopicId = 'travel_advice' | 'like_minded_travellers' | 'travel_partners' | 'guidance';
 
 type Topic = {
   id: SwellyTopicId;
@@ -29,25 +29,25 @@ type Topic = {
 // import dependency.
 const TOPICS: Topic[] = [
   {
-    id: 'share_wisdom',
-    title: 'Share your surf wisdom',
+    id: 'travel_advice',
+    title: 'Get Travel Advice',
     image: 'https://rfdhtvcmagsbxqntnepv.supabase.co/storage/v1/object/public/onboarding-welcome-images/b0d7956780bd01fbfac42c1db76ed27df34c3fcf.jpg',
-    seed: "Hey Swelly, I wanna share my surf knowledge with other travelers.",
+    seed: "Hey Swelly, I wanna get some travel advice.",
   },
   {
-    id: 'find_crew',
+    id: 'like_minded_travellers',
     title: 'Connect with Like-Minded Travelers',
     image: 'https://rfdhtvcmagsbxqntnepv.supabase.co/storage/v1/object/public/onboarding-welcome-images/63ee08f6a46333084911295e23748727ebc90198.jpg',
     seed: "Hey Swelly, I wanna get connected with like-minded travelers.",
   },
   {
-    id: 'plan_trip',
+    id: 'travel_partners',
     title: 'Meet Potential Travel Partners',
     image: 'https://rfdhtvcmagsbxqntnepv.supabase.co/storage/v1/object/public/onboarding-welcome-images/6cbafc07268184703dff606b6cb48836431babec.jpg',
     seed: "Hey Swelly, I wanna meet potential travel partners.",
   },
   {
-    id: 'just_waves',
+    id: 'guidance',
     title: 'General Surf Guidance',
     image: 'https://rfdhtvcmagsbxqntnepv.supabase.co/storage/v1/object/public/onboarding-welcome-images/082aedec1b3d12fa462436f56cd5af2e3d6ad236.jpg',
     seed: "Hey Swelly, I'm looking for general surf advice.",
@@ -61,6 +61,7 @@ type Props = {
 
 export const SwellyTopicOverlay: React.FC<Props> = ({ visible, onSelect }) => {
   const { height: screenHeight } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const [mounted, setMounted] = useState(false);
   const [selectedId, setSelectedId] = useState<SwellyTopicId | null>(null);
   const translateY = useRef(new Animated.Value(0)).current;
@@ -147,26 +148,24 @@ export const SwellyTopicOverlay: React.FC<Props> = ({ visible, onSelect }) => {
           pointerEvents="none"
         />
         <Animated.View
-          style={[styles.sheet, { transform: [{ translateY }] }]}
+          style={[
+            styles.sheet,
+            {
+              height: screenHeight * 0.88,
+              paddingBottom: insets.bottom + 24,
+              transform: [{ translateY }],
+            },
+          ]}
         >
           <View style={styles.handleRow}>
             <View style={styles.handle} />
           </View>
 
-          <LinearGradient
-            colors={['#B72DF2', '#FF5367']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={styles.avatarBubble}
-          >
-            <View style={styles.avatarInner}>
-              <Image
-                source={Images.swellyAvatar as ImageSourcePropType}
-                style={styles.avatarImage}
-                resizeMode="contain"
-              />
-            </View>
-          </LinearGradient>
+          <Image
+            source={Images.swellyWaving as ImageSourcePropType}
+            style={styles.avatarImage}
+            resizeMode="contain"
+          />
 
           <Text style={styles.title}>{`Yo!  What are we\nfocusing on today?`}</Text>
 
@@ -235,7 +234,6 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     paddingTop: 8,
-    paddingBottom: 24,
     paddingHorizontal: 16,
     alignItems: 'center',
     width: '100%',
@@ -252,40 +250,11 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     backgroundColor: '#7B7B7B',
   },
-  avatarBubble: {
-    width: 103,
-    height: 102,
-    borderRadius: 40,
-    padding: 1, // acts as the 1px gradient border
-    marginTop: 8,
-    marginBottom: 12,
-    ...Platform.select({
-      ios: {
-        shadowColor: 'rgba(183, 45, 242, 0.24)',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 1,
-        shadowRadius: 14,
-      },
-      android: { elevation: 4 },
-      web: {
-        // @ts-ignore web-only style
-        boxShadow: '0px 2px 14px rgba(183, 45, 242, 0.24)',
-      },
-    }),
-  },
-  avatarInner: {
-    flex: 1,
-    borderRadius: 39,
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 11,
-    paddingVertical: 7,
-    justifyContent: 'center',
-    alignItems: 'center',
-    overflow: 'hidden',
-  },
   avatarImage: {
-    
-    height: 95,
+    width: 175,
+    height: 175,
+    marginTop: 4,
+    marginBottom: 8,
   },
   title: {
     fontSize: 18,
@@ -294,19 +263,18 @@ const styles = StyleSheet.create({
     fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat',
     color: '#212121',
     textAlign: 'center',
-    marginBottom: 20,
+    marginBottom: 16,
   },
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'center',
-    gap: 10,
+    justifyContent: 'space-between',
+    rowGap: 12,
     width: '100%',
-    maxWidth: 345,
     marginBottom: 20,
   },
   card: {
-    width: 163,
+    width: '48.5%',
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
     padding: 8,
@@ -331,18 +299,18 @@ const styles = StyleSheet.create({
   },
   cardImage: {
     width: '100%',
-    height: 104,
+    height: 130,
     borderTopLeftRadius: 8,
     borderTopRightRadius: 8,
   },
   cardTitleWrap: {
     paddingTop: 12,
-    minHeight: 42,
+    minHeight: 46,
     justifyContent: 'flex-start',
   },
   cardTitle: {
-    fontSize: 12,
-    lineHeight: 18,
+    fontSize: 13,
+    lineHeight: 19,
     fontWeight: '700',
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     color: '#333333',
@@ -373,6 +341,7 @@ const styles = StyleSheet.create({
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     color: '#7B7B7B',
     textAlign: 'center',
+    marginTop: 'auto',
     marginBottom: 16,
   },
   cta: {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View,
   StyleSheet,
@@ -918,10 +918,16 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
     cropModalVisible ||
     showPermissionOverlay;
 
+  // Native gesture handle for the inner ScrollView. Declaring this and using
+  // simultaneousWithExternalGesture below breaks the iOS require-to-fail chain
+  // so vertical scrolling responds at any drag velocity (slow drags included).
+  const nativeGesture = useMemo(() => Gesture.Native(), []);
+
   const swipeGesture = Gesture.Pan()
     .enabled(!isSwipeDisabled)
     .activeOffsetX([15, 1000])
     .failOffsetY([-15, 15])
+    .simultaneousWithExternalGesture(nativeGesture)
     .onUpdate((e) => {
       'worklet';
       if (e.translationX > 0) {
@@ -1987,6 +1993,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
           </TouchableOpacity>
         )}
 
+        <GestureDetector gesture={nativeGesture}>
         <ScrollView
           style={styles.scrollView}
           contentContainerStyle={styles.scrollContent}
@@ -2441,6 +2448,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
           </View>
         </View>
       </ScrollView>
+      </GestureDetector>
       </ImageBackground>
       {/* Connect Button with fading overlay - Floating at bottom when viewing other user's profile */}
       {!isViewingOwnProfile && userId && onMessage && (

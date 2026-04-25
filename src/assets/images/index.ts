@@ -2,6 +2,7 @@ export const Images = {
   chatBackground: require('./chat-background.png'),
   coverImage: require('./cover-image.jpg'),
   swellyAvatar: require('./swelly-avatar-onboarding.png'),
+  swellyWaving: require('./swelly-waving.png'),
   swellyShaper: require('./swelly-shaper.png'),
   swellyWelcomeMessage: require('./swelly-welcome-message.png'),
   welcomeToLineup: require('./swelly-welcome-to-lineup.png'),
