@@ -1120,15 +1120,22 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
               styles.messageBubble,
               styles.botMessageBubble,
             ]}>
-              <View style={styles.messageTextContainer}>
+              <View
+                style={{
+                  flexDirection: 'row',
+                  flexWrap: 'wrap',
+                  alignItems: 'flex-end',
+                  justifyContent: 'flex-start',
+                }}
+              >
                 <Text style={styles.botMessageText}>
                   {message.text}
                 </Text>
-              </View>
-              <View style={styles.timestampContainer}>
-                <Text style={styles.botTimestamp}>
-                  {message.timestamp}
-                </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 6 }}>
+                  <Text style={[styles.timestamp, styles.botTimestamp]}>
+                    {message.timestamp}
+                  </Text>
+                </View>
               </View>
             </View>
           </View>
@@ -1164,18 +1171,25 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             message.isUser ? styles.userMessageBubble : styles.botMessageBubble,
           ]}
         >
-          <View style={styles.messageTextContainer}>
+          <View
+            style={{
+              flexDirection: 'row',
+              flexWrap: 'wrap',
+              alignItems: 'flex-end',
+              justifyContent: message.isUser ? 'flex-end' : 'flex-start',
+            }}
+          >
             <Text style={message.isUser ? styles.userMessageText : styles.botMessageText}>
               {message.text}
             </Text>
-          </View>
-          <View style={styles.timestampContainer}>
-            <Text style={[
-              styles.timestamp,
-              message.isUser ? styles.userTimestamp : styles.botTimestamp,
-            ]}>
-              {message.timestamp}
-            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 6 }}>
+              <Text style={[
+                styles.timestamp,
+                message.isUser ? styles.userTimestamp : styles.botTimestamp,
+              ]}>
+                {message.timestamp}
+              </Text>
+            </View>
           </View>
         </View>
       </View>
@@ -1450,7 +1464,7 @@ const styles = StyleSheet.create({
     paddingRight: 48,
   },
   messageBubble: {
-    maxWidth: 268,
+    maxWidth: '85%',
     paddingTop: 16,
     paddingBottom: 8,
     paddingHorizontal: 16,

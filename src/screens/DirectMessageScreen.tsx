@@ -3470,10 +3470,10 @@ const styles = StyleSheet.create({
     lineHeight: 20, // Figma: leading-[20px]
   },
   userTimestamp: {
-    color: 'rgba(123, 123, 123, 0.5)', // Dark timestamp on white background for outbound messages
+    color: 'rgba(60, 60, 60, 0.75)', // Darker timestamp for better contrast on outbound (brown) bubbles
   },
   botTimestamp: {
-    color: 'rgba(123, 123, 123, 0.5)', // Match userTimestamp so sent/received times share the same styling
+    color: 'rgba(60, 60, 60, 0.75)', // Match userTimestamp so sent/received times share the same styling
   },
   inputWrapper: {
     flexDirection: 'row',

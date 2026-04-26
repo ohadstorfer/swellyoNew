@@ -1179,7 +1179,7 @@ const styles = StyleSheet.create({
     paddingRight: 16,
   },
   messageBubble: {
-    maxWidth: 268,
+    maxWidth: '85%',
     paddingTop: 8,
     paddingBottom: 6,
     paddingHorizontal: 10,

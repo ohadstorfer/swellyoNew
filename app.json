@@ -1,8 +1,8 @@
 {
   "expo": {
-    "name": "swellyo",
+    "name": "Swellyo",
     "slug": "swellyo",
-    "version": "1.0.4",
+    "version": "1.0.5",
     "scheme": "swellyo",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -15,7 +15,7 @@
     },
     "ios": {
       "bundleIdentifier": "com.swellyo.app",
-      "buildNumber": "15",
+      "buildNumber": "16",
       "supportsTablet": false,
       "usesNonExemptEncryption": false,
       "usesAppleSignIn": true,
@@ -30,7 +30,7 @@
     },
     "android": {
       "package": "com.swellyo.app",
-      "versionCode": 15,
+      "versionCode": 16,
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",

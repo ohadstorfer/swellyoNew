@@ -109,7 +109,7 @@ class PushNotificationService {
 
       const { error } = await supabase
         .from('surfers')
-        .update({ expo_push_token: token, is_mobile_user: true })
+        .update({ expo_push_token: token })
         .eq('user_id', authUser.id);
 
       if (error) {

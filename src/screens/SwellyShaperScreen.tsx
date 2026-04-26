@@ -785,7 +785,7 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch',
   },
   messageBubble: {
-    maxWidth: 268,
+    maxWidth: '85%',
     paddingTop: 16,
     paddingBottom: 8,
     paddingHorizontal: 16,

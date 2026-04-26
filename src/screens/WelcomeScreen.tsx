@@ -142,7 +142,7 @@ const CheckboxIcon: React.FC<{ checked: boolean }> = ({ checked }) => {
   return <View style={welcomeStyles.checkboxUnchecked} />;
 };
 
-const TERMS_URL = 'https://www.swellyo.com/terms-of-service';
+const TERMS_URL = 'https://www.swellyo.com/terms-and-conditions';
 const PRIVACY_URL = 'https://www.swellyo.com/privacy-policy';
 const AGE_PICKER_ITEM_HEIGHT = 50;
 

@@ -881,13 +881,19 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
   // in AppContent handles per-entry-point logic).
   const swipeTranslateX = useSharedValue(SWIPE_SCREEN_WIDTH);
   const swipeOpacity = useSharedValue(0);
+  // Direction-gate state for the swipe-to-dismiss Pan. We capture the touch
+  // start, then in onTouchesMove we decide instantly whether the motion is
+  // vertical (→ fail, let ScrollView win) or rightward-horizontal (→ activate).
+  // This is the Telegram pattern: ratio at touch-start, no "undecided wait".
+  const touchStartX = useSharedValue(0);
+  const touchStartY = useSharedValue(0);
 
   useEffect(() => {
     swipeTranslateX.value = withTiming(0, {
-      duration: 300,
+      duration: 450,
       easing: Easing.out(Easing.cubic),
     });
-    swipeOpacity.value = withTiming(1, { duration: 300 });
+    swipeOpacity.value = withTiming(1, { duration: 450 });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -925,9 +931,37 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
 
   const swipeGesture = Gesture.Pan()
     .enabled(!isSwipeDisabled)
-    .activeOffsetX([15, 1000])
-    .failOffsetY([-15, 15])
+    .manualActivation(true)
     .simultaneousWithExternalGesture(nativeGesture)
+    .onTouchesDown((event) => {
+      'worklet';
+      if (event.allTouches.length > 0) {
+        touchStartX.value = event.allTouches[0].absoluteX;
+        touchStartY.value = event.allTouches[0].absoluteY;
+      }
+    })
+    .onTouchesMove((event, manager) => {
+      'worklet';
+      if (event.allTouches.length === 0) return;
+      const touch = event.allTouches[0];
+      const dx = touch.absoluteX - touchStartX.value;
+      const dy = touch.absoluteY - touchStartY.value;
+      const absX = Math.abs(dx);
+      const absY = Math.abs(dy);
+      // Wait until we have enough movement to judge direction
+      if (Math.max(absX, absY) < 5) return;
+      // Vertical dominance → fail immediately so ScrollView gets the touch
+      if (absY > absX) {
+        manager.fail();
+        return;
+      }
+      // Rightward dominance → activate the dismiss gesture
+      if (dx > 0) {
+        manager.activate();
+      } else {
+        manager.fail();
+      }
+    })
     .onUpdate((e) => {
       'worklet';
       if (e.translationX > 0) {
@@ -3131,7 +3165,7 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '700',
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
-    lineHeight: 22,
+    lineHeight: 30,
     color: colors.textPrimary,
   },
   travelExperienceLabel: {
