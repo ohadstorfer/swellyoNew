@@ -54,6 +54,7 @@ interface ProfileScreenProps {
   onEdit?: () => void; // Callback when edit button is clicked
   fromOnboardingChat?: boolean; // When true, show Edit (left) + Save (right) header buttons
   onSaveAndGoToConversations?: () => void; // When Save is pressed from onboarding profile: navigate to conversations and schedule welcome overlay
+  noTransition?: boolean; // When true, skip the slide-in/slide-out animations (e.g. when layered under a modal that handles its own fade)
 }
 
 // Board type mapping
@@ -812,7 +813,7 @@ const SWIPE_DISMISS_DISTANCE = SWIPE_SCREEN_WIDTH * 0.3;
 const SWIPE_DISMISS_VELOCITY = 800;
 const SWIPE_ANIMATION_DURATION = 220;
 
-export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, onMessage, onContinueEdit, onEdit, fromOnboardingChat = false, onSaveAndGoToConversations }) => {
+export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, onMessage, onContinueEdit, onEdit, fromOnboardingChat = false, onSaveAndGoToConversations, noTransition = false }) => {
   const insets = useSafeAreaInsets();
   // Get onboarding context for logout
   const { resetOnboarding, setUser, setCurrentStep, setIsDemoUser } = useOnboarding();
@@ -879,8 +880,8 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
   // to resting state in parallel.
   // Exit: swipe right past threshold or flick → calls onBack (handleProfileBack
   // in AppContent handles per-entry-point logic).
-  const swipeTranslateX = useSharedValue(SWIPE_SCREEN_WIDTH);
-  const swipeOpacity = useSharedValue(0);
+  const swipeTranslateX = useSharedValue(noTransition ? 0 : SWIPE_SCREEN_WIDTH);
+  const swipeOpacity = useSharedValue(noTransition ? 1 : 0);
   // Direction-gate state for the swipe-to-dismiss Pan. We capture the touch
   // start, then in onTouchesMove we decide instantly whether the motion is
   // vertical (→ fail, let ScrollView win) or rightward-horizontal (→ activate).
@@ -889,6 +890,11 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
   const touchStartY = useSharedValue(0);
 
   useEffect(() => {
+    if (noTransition) {
+      swipeTranslateX.value = 0;
+      swipeOpacity.value = 1;
+      return;
+    }
     swipeTranslateX.value = withTiming(0, {
       duration: 450,
       easing: Easing.out(Easing.cubic),
@@ -906,6 +912,10 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
   // Used by tappable back buttons so they match the swipe-to-dismiss feel.
   const handleBackPress = useCallback(() => {
     Keyboard.dismiss();
+    if (noTransition) {
+      handleSwipeDismiss();
+      return;
+    }
     swipeTranslateX.value = withTiming(
       SWIPE_SCREEN_WIDTH,
       { duration: SWIPE_ANIMATION_DURATION, easing: Easing.in(Easing.cubic) },
@@ -913,7 +923,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
         if (finished) runOnJS(handleSwipeDismiss)();
       },
     );
-  }, [swipeTranslateX, handleSwipeDismiss]);
+  }, [swipeTranslateX, handleSwipeDismiss, noTransition]);
 
   const isSwipeDisabled =
     Platform.OS === 'web' ||
@@ -998,24 +1008,33 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
   const uploadSpinnerAnim = useRef(new Animated.Value(0)).current;
   const uploadPulseAnim = useRef(new Animated.Value(1)).current;
 
-  // Shimmer animation for Connect button
+  // Shimmer animation — recursive Animated.timing pattern (more reliable
+  // than Animated.loop for native-driver transforms across RN versions).
+  // Each iteration: snap to -1, slide to 2 over 2.5s, pause 2s, repeat.
   const shimmerAnim = useRef(new Animated.Value(-1)).current;
   useEffect(() => {
-    if (!isAlreadyConnected && !isViewingOwnProfile && userId) {
-      const loop = Animated.loop(
-        Animated.sequence([
-          Animated.timing(shimmerAnim, {
-            toValue: 2,
-            duration: 2500,
-            useNativeDriver: true,
-          }),
-          Animated.delay(2000),
-        ])
-      );
-      loop.start();
-      return () => loop.stop();
-    }
-  }, [isAlreadyConnected, isViewingOwnProfile, userId]);
+    let cancelled = false;
+    let pauseTimer: ReturnType<typeof setTimeout> | null = null;
+    const tick = () => {
+      if (cancelled) return;
+      shimmerAnim.setValue(-1);
+      Animated.timing(shimmerAnim, {
+        toValue: 2,
+        duration: 2500,
+        useNativeDriver: true,
+      }).start(({ finished }) => {
+        if (!finished || cancelled) return;
+        pauseTimer = setTimeout(tick, 2000);
+      });
+    };
+    tick();
+    return () => {
+      cancelled = true;
+      if (pauseTimer) clearTimeout(pauseTimer);
+      shimmerAnim.stopAnimation();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Upload spinner animation
   useEffect(() => {
@@ -1566,20 +1585,9 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
       >
         <SafeAreaView style={styles.fill}>
           {fromOnboardingChat && isViewingOwnProfile && onEdit && onBack ? (
-            <>
-              <TouchableOpacity style={styles.onboardingPillButtonLeft} onPress={onEdit}>
-                <View style={styles.onboardingPillButtonContainer}>
-                  <OnboardingBackArrowIcon />
-                  <Text style={styles.onboardingPillButtonText}>Edit</Text>
-                </View>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.onboardingPillButtonRight} onPress={handleBackPress}>
-                <View style={styles.onboardingPillButtonContainer}>
-                  <OnboardingSaveIcon />
-                  <Text style={styles.onboardingPillButtonText}>Save</Text>
-                </View>
-              </TouchableOpacity>
-            </>
+            // Onboarding profile: no header buttons. The single "Got it!"
+            // button at the bottom replaces both Edit (left) and Save (right).
+            null
           ) : (
             <>
               <TouchableOpacity style={styles.backButton} onPress={handleBackPress}>
@@ -2030,7 +2038,17 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
         <GestureDetector gesture={nativeGesture}>
         <ScrollView
           style={styles.scrollView}
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[
+            styles.scrollContent,
+            // When a floating bottom button is rendered (Connect on other users'
+            // profiles, or "Got it!" on the post-Swelly own-profile), extend
+            // the scrollable area so the last content rows aren't trapped
+            // behind the button.
+            ((!isViewingOwnProfile && !!userId && !!onMessage) ||
+              (fromOnboardingChat && isViewingOwnProfile)) && {
+              paddingBottom: Math.max(insets.bottom, 16) + 24 + 56 + 24,
+            },
+          ]}
           showsVerticalScrollIndicator={false}
         >
         {/* Cover Image */}
@@ -2051,21 +2069,9 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
 
         {/* Header Buttons */}
         {fromOnboardingChat && isViewingOwnProfile && onEdit && onBack ? (
-          // After Swelly onboarding: left = Edit, right = Save (home)
-          <>
-            <TouchableOpacity style={styles.onboardingPillButtonLeft} onPress={onEdit}>
-              <View style={styles.onboardingPillButtonContainer}>
-                <OnboardingBackArrowIcon />
-                <Text style={styles.onboardingPillButtonText}>Edit</Text>
-              </View>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.onboardingPillButtonRight} onPress={() => onSaveAndGoToConversations ? onSaveAndGoToConversations() : handleBackPress()}>
-              <View style={styles.onboardingPillButtonContainer}>
-                <OnboardingSaveIcon />
-                <Text style={styles.onboardingPillButtonText}>Save</Text>
-              </View>
-            </TouchableOpacity>
-          </>
+          // Onboarding profile: no header buttons. The "Got it!" floating
+          // button at the bottom replaces both Edit and Save.
+          null
         ) : (
           <>
             {/* Back Button - Always visible, goes to ConversationsScreen (home) */}
@@ -2526,6 +2532,51 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
               <Text style={styles.connectButtonText}>
                 {isAlreadyConnected ? `Message ${profileData.name?.split(' ')[0] || 'User'}` : `Connect to ${profileData.name?.split(' ')[0] || 'User'}`}
               </Text>
+            </View>
+          </TouchableOpacity>
+        </>
+      )}
+
+      {/* "Got it!" floating button — shown only on the post-Swelly
+          onboarding profile (own profile). Mirrors the Connect button
+          styling, fading overlay, and shimmer animation. */}
+      {fromOnboardingChat && isViewingOwnProfile && (
+        <>
+          <View style={styles.connectOverlay} pointerEvents="none">
+            <LinearGradient
+              colors={['rgba(250, 250, 250, 0)', 'rgba(250, 250, 250, 0.4)', 'rgba(250, 250, 250, 0.75)', '#FAFAFA']}
+              locations={[0, 0.35, 0.6, 0.87]}
+              style={styles.connectOverlayGradient}
+            />
+          </View>
+          <TouchableOpacity
+            style={[styles.connectButton, { bottom: Math.max(insets.bottom, 16) + 24 }]}
+            onPress={() => onSaveAndGoToConversations ? onSaveAndGoToConversations() : handleBackPress()}
+            activeOpacity={0.8}
+          >
+            <View style={styles.connectButtonInner}>
+              <Animated.View
+                pointerEvents="none"
+                style={[
+                  styles.shimmer,
+                  {
+                    transform: [{
+                      translateX: shimmerAnim.interpolate({
+                        inputRange: [-1, 2],
+                        outputRange: [-200, 500],
+                      }),
+                    }],
+                  },
+                ]}
+              >
+                <LinearGradient
+                  colors={['transparent', 'rgba(255,255,255,0.15)', 'transparent']}
+                  start={{ x: 0, y: 0.5 }}
+                  end={{ x: 1, y: 0.5 }}
+                  style={styles.shimmerGradient}
+                />
+              </Animated.View>
+              <Text style={styles.connectButtonText}>Got it!</Text>
             </View>
           </TouchableOpacity>
         </>

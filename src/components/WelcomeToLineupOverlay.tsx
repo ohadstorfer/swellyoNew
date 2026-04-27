@@ -2,7 +2,6 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   StyleSheet,
-  Modal,
   TouchableOpacity,
   Platform,
   Image,
@@ -69,6 +68,17 @@ export const WelcomeToLineupOverlay: React.FC<WelcomeToLineupOverlayProps> = ({
   const swellySlideAnim = useRef(new Animated.Value(-200)).current;
   const slideOutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const carouselContainerRef = useRef<View>(null);
+  // Backdrop fade animation — replaces the old <Modal animationType="fade">.
+  // The component (and all its <Image> elements) stays mounted across visibility
+  // toggles so loaded images aren't torn down and rebuilt on each re-show.
+  const opacityAnim = useRef(new Animated.Value(visible ? 1 : 0)).current;
+  useEffect(() => {
+    Animated.timing(opacityAnim, {
+      toValue: visible ? 1 : 0,
+      duration: 250,
+      useNativeDriver: true,
+    }).start();
+  }, [visible]);
   // Keep ref in sync with state
   useEffect(() => {
     activeIndexRef.current = activeIndex;
@@ -110,6 +120,32 @@ export const WelcomeToLineupOverlay: React.FC<WelcomeToLineupOverlayProps> = ({
   }, [visible]);
 
   // No scroll-to-middle needed — cards are reordered so the best match is already first
+
+  // Prefetch profile images as soon as matches arrive so they're in the
+  // image cache before the modal first renders, and so they paint instantly
+  // when the modal re-shows after a profile view (no reload flash).
+  useEffect(() => {
+    matches.forEach((m) => {
+      if (m.profile_image_url) {
+        Image.prefetch(m.profile_image_url).catch(() => {});
+      }
+    });
+  }, [matches]);
+
+  // Restore carousel scroll position when modal becomes visible again
+  // (e.g. after viewing a profile and coming back). The component instance
+  // persists across visibility toggles, so activeIndex is preserved — but the
+  // ScrollView's native scroll offset resets, so we re-apply it here.
+  useEffect(() => {
+    if (!visible) return;
+    const offset = activeIndexRef.current * (CAROUSEL_CARD_WIDTH + CAROUSEL_CARD_SPACING);
+    if (offset === 0) return;
+    // Defer until the ScrollView has re-laid out after becoming visible
+    const t = setTimeout(() => {
+      scrollViewRef.current?.scrollTo({ x: offset, animated: false });
+    }, 0);
+    return () => clearTimeout(t);
+  }, [visible]);
 
   // Web: attach native DOM touch/mouse listeners for reliable swipe in mobile emulation
   useEffect(() => {
@@ -194,12 +230,9 @@ export const WelcomeToLineupOverlay: React.FC<WelcomeToLineupOverlayProps> = ({
   const activeMatch = reorderedMatches[activeIndex] || reorderedMatches[0];
 
   return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="fade"
-      onRequestClose={onClose}
-      statusBarTranslucent={Platform.OS === 'android'}
+    <Animated.View
+      style={[styles.overlayRoot, { opacity: opacityAnim }]}
+      pointerEvents={visible ? 'auto' : 'none'}
     >
       <View style={styles.backdrop}>
         {/* Swelly character slide-in */}
@@ -243,7 +276,7 @@ export const WelcomeToLineupOverlay: React.FC<WelcomeToLineupOverlayProps> = ({
                         <Image source={coverImageSource} style={styles.coverImage} />
                         <View style={styles.profilePicContainer}>
                           {profileImageUri ? (
-                            <Image source={{ uri: profileImageUri }} style={styles.profilePic} />
+                            <Image source={{ uri: profileImageUri }} style={styles.profilePic} fadeDuration={0} />
                           ) : (
                             <View style={[styles.profilePic, styles.profilePicPlaceholder]}>
                               <Text style={styles.profilePicInitial}>
@@ -309,11 +342,20 @@ export const WelcomeToLineupOverlay: React.FC<WelcomeToLineupOverlayProps> = ({
           </View>
         </View>
       </View>
-    </Modal>
+    </Animated.View>
   );
 };
 
 const styles = StyleSheet.create({
+  overlayRoot: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 100,
+    elevation: 100,
+  },
   backdrop: {
     flex: 1,
     backgroundColor: BACKDROP_COLOR,

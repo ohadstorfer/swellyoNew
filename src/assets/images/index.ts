@@ -8,6 +8,7 @@ export const Images = {
   welcomeToLineup: require('./swelly-welcome-to-lineup.png'),
   deleteAccountSurfer: require('./delete-account-surfer.png'),
   surferPlaceholder: require('./surfer.png'),
+  doubleTick: require('./double-tick.png'),
   userAvatar1: require('./user-avatar-1.png'),
   userAvatar2: require('./user-avatar-2.png'),
   surfLevel: {

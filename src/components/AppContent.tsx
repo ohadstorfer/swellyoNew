@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Alert, Platform, StyleSheet, View, TouchableOpacity, Text as RNText } from 'react-native';
+import { Alert, Keyboard, Platform, StyleSheet, View, TouchableOpacity, Text as RNText } from 'react-native';
 import { WelcomeScreen } from '../screens/WelcomeScreen';
 import { OnboardingWelcomeScreen } from '../screens/OnboardingWelcomeScreen';
 import { OnboardingStep1Screen, OnboardingData } from '../screens/OnboardingStep1Screen';
@@ -59,7 +59,7 @@ export const AppContent: React.FC = () => {
 
   // Push notification: pending conversation to open from notification tap
   const [pendingNotificationConversationId, setPendingNotificationConversationId] = useState<string | null>(null);
-  const { getCurrentConversationId, conversations: messagingConversations } = useMessaging();
+  const { getCurrentConversationId, conversations: messagingConversations, refreshConversations } = useMessaging();
   
   // State to track session validation
   const [hasValidatedSession, setHasValidatedSession] = useState(false);
@@ -570,6 +570,19 @@ export const AppContent: React.FC = () => {
   const { profile: currentUserSurfer } = useUserProfile();
   const [showTripPlanningChat, setShowTripPlanningChat] = useState(false);
   const [showTripPlanningChatCopy, setShowTripPlanningChatCopy] = useState(false);
+  // "Ever shown" flags so we mount TripPlanningChat / -Copy lazily on first
+  // open, then keep them mounted thereafter and toggle visibility via
+  // `display: 'none'`. Lets ProfileScreen slide in over a live, mounted chat
+  // without remounting it (which used to cause a white flash + replay of the
+  // chat's enter animation when transitioning Swelly chat → Profile).
+  const [tripPlanningChatEverShown, setTripPlanningChatEverShown] = useState(false);
+  const [tripPlanningChatCopyEverShown, setTripPlanningChatCopyEverShown] = useState(false);
+  useEffect(() => {
+    if (showTripPlanningChat && !tripPlanningChatEverShown) setTripPlanningChatEverShown(true);
+  }, [showTripPlanningChat, tripPlanningChatEverShown]);
+  useEffect(() => {
+    if (showTripPlanningChatCopy && !tripPlanningChatCopyEverShown) setTripPlanningChatCopyEverShown(true);
+  }, [showTripPlanningChatCopy, tripPlanningChatCopyEverShown]);
   const [showSwellyShaper, setShowSwellyShaper] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showTrips, setShowTrips] = useState(false);
@@ -608,6 +621,7 @@ export const AppContent: React.FC = () => {
   const [currentUserAvatar, setCurrentUserAvatar] = useState<string | null>(null);
   const [currentUserName, setCurrentUserName] = useState<string>('User');
   const [showWelcomeToLineupOverlay, setShowWelcomeToLineupOverlay] = useState(false);
+  const [welcomeOverlayHiddenByProfile, setWelcomeOverlayHiddenByProfile] = useState(false);
   const [onboardingMatchResult, setOnboardingMatchResult] = useState<OnboardingMatchResult | null>(null);
   const [pendingOnboardingMatches, setPendingOnboardingMatches] = useState<OnboardingMatchResult['matches'] | null>(null);
 
@@ -635,13 +649,18 @@ export const AppContent: React.FC = () => {
     // Clear any selected conversation to prevent it from showing when profile closes
     setSelectedConversation(null);
 
-    // If profile was opened from WelcomeToLineupOverlay, return to overlay
+    // If profile was opened from WelcomeToLineupOverlay, return to overlay.
+    // Start the modal fade-in immediately, but keep the profile mounted under it
+    // until the fade completes — otherwise the home screen flashes through the
+    // semi-transparent backdrop during the fade.
     if (profileFromWelcomeOverlay) {
       console.log('[AppContent] Returning to WelcomeToLineupOverlay');
-      setShowProfile(false);
-      setViewingUserId(null);
       setProfileFromWelcomeOverlay(false);
-      // showWelcomeToLineupOverlay is still true, so overlay will re-appear
+      setWelcomeOverlayHiddenByProfile(false); // overlay starts fading back in
+      setTimeout(() => {
+        setShowProfile(false);
+        setViewingUserId(null);
+      }, 350); // matches RN Modal fade duration
       return;
     }
 
@@ -920,17 +939,24 @@ export const AppContent: React.FC = () => {
           fromWelcomeOverlay: profileFromWelcomeOverlay || false,
         });
         console.log('[AppContent] pendingConversation state updated');
-        console.log('[AppContent] Showing loading screen after 500ms...');
-        setTimeout(() => {
-          setShowConversationLoading(true);
-          console.log('[AppContent] ✓ showConversationLoading set to true');
-        }, 500);
+        // Show the loading screen in the same render cycle that closes the
+        // profile — without this, ProfileScreen unmounts first, the render
+        // cascade falls through to ConversationsStack (home flash) and then
+        // TripPlanningChatScreen remounts with its enter animation, all before
+        // the match animation finally appears. Setting both state updates
+        // synchronously batches them so ConversationLoadingScreen wins the
+        // overlay slot the same frame Profile closes.
+        setShowConversationLoading(true);
+        console.log('[AppContent] ✓ showConversationLoading set to true');
 
         // Create conversation immediately in background (same as WelcomeToLineupOverlay connect flow)
         if (profileFromWelcomeOverlay) {
           messagingService.createDirectConversation(userId, false).then((conversation) => {
             console.log('[AppContent] Conversation created/found for welcome overlay profile connect:', conversation.id);
             setPendingConversation(prev => prev ? { ...prev, conversationId: conversation.id } : null);
+            refreshConversations().catch((err) => {
+              console.warn('[AppContent] refreshConversations after profile connect failed:', err);
+            });
           }).catch((error) => {
             console.error('[AppContent] Error creating conversation from profile:', error);
           });
@@ -986,6 +1012,9 @@ export const AppContent: React.FC = () => {
   };
 
   const handleBackFromChat = () => {
+    // Make sure the keyboard goes down with us — otherwise it stays floating
+    // over the home screen until the user taps something else.
+    Keyboard.dismiss();
     // If user came from trip planning, return there
     if (selectedConversation?.fromTripPlanning) {
       const goBackToCopy = selectedConversation?.fromTripPlanningCopy;
@@ -1156,7 +1185,7 @@ export const AppContent: React.FC = () => {
   if (shouldShowConversations) {
     console.log('[AppContent] Rendering check - showProfile:', showProfile, 'viewingUserId:', viewingUserId);
     console.log('[AppContent] Rendering check - selectedConversation:', selectedConversation ? 'exists' : 'null');
-    console.log('[AppContent] Rendering check - showTripPlanningChat:', showTripPlanningChat);
+    console.log('[AppContent] Rendering check - showTripPlanningChat:', showTripPlanningChat, 'showTripPlanningChatCopy:', showTripPlanningChatCopy);
     console.log('[AppContent] Rendering check - showConversationLoading:', showConversationLoading, 'pendingConversation:', !!pendingConversation);
 
     // Determine which overlay screen (if any) should cover ConversationsStack.
@@ -1194,6 +1223,7 @@ export const AppContent: React.FC = () => {
           onMessage={handleStartConversation}
           fromOnboardingChat={profileFromOnboardingChat}
           onSaveAndGoToConversations={handleSaveAndGoToConversations}
+          noTransition={profileFromWelcomeOverlay}
           onEdit={() => {
             if (process.env.EXPO_PUBLIC_LOCAL_MODE === 'true') {
               setShowProfileEditor(true);
@@ -1239,41 +1269,13 @@ export const AppContent: React.FC = () => {
           }}
         />
       );
-    } else if (showTripPlanningChatCopy) {
-      activeOverlay = (
-        <TripPlanningChatScreenCopy
-          onChatComplete={() => { setShowTripPlanningChatCopy(false); setShowTripPlanningChat(false); setPendingOnboardingMatches(null); }}
-          onViewUserProfile={handleViewUserProfile}
-          onStartConversation={handleStartConversation}
-          persistedChatId={tripPlanningChatId}
-          persistedMatchedUsers={tripPlanningMatchedUsers}
-          persistedDestination={tripPlanningDestination}
-          onChatStateChange={(chatId: string | null, matchedUsers: any[], destination: string) => {
-            setTripPlanningChatId(chatId);
-            setTripPlanningMatchedUsers(matchedUsers);
-            setTripPlanningDestination(destination);
-          }}
-          service={activeCopyService === 'copy-copy' ? swellyServiceCopyCopy : swellyServiceCopy}
-          onboardingMatches={pendingOnboardingMatches || undefined}
-        />
-      );
-    } else if (showTripPlanningChat) {
-      activeOverlay = (
-        <TripPlanningChatScreen
-          onChatComplete={handleTripPlanningChatBack}
-          onViewUserProfile={handleViewUserProfile}
-          onStartConversation={handleStartConversation}
-          persistedChatId={tripPlanningChatId}
-          persistedMatchedUsers={tripPlanningMatchedUsers}
-          persistedDestination={tripPlanningDestination}
-          onChatStateChange={(chatId: string | null, matchedUsers: any[], destination: string) => {
-            setTripPlanningChatId(chatId);
-            setTripPlanningMatchedUsers(matchedUsers);
-            setTripPlanningDestination(destination);
-          }}
-        />
-      );
     }
+    // NOTE: TripPlanningChatScreen and TripPlanningChatScreenCopy used to live
+    // here as activeOverlay branches. They've been moved to root-level
+    // persistent layers (see render section below) so ProfileScreen and
+    // ConversationLoadingScreen can slide in over them without remounting the
+    // chat — preserving its messages, scroll position, and websocket
+    // subscriptions across Profile open/close cycles.
 
     return (
       <View style={styles.fill}>
@@ -1294,6 +1296,54 @@ export const AppContent: React.FC = () => {
             onPendingNotificationHandled={() => setPendingNotificationConversationId(null)}
           />
         </View>
+        {/* Persistent Swelly chat layer (regular). Mounted on first open, then
+            kept alive with display:'none' when not the front-most layer. This
+            way ProfileScreen / ConversationLoadingScreen slide in OVER the
+            live chat (no remount, no enter-animation replay, no home flash). */}
+        {tripPlanningChatEverShown && (
+          <View
+            style={[StyleSheet.absoluteFill, { backgroundColor: '#F5F5F5' }, !showTripPlanningChat && { display: 'none' }]}
+            pointerEvents={showTripPlanningChat && !showProfile && !showConversationLoading && !selectedConversation && !showSettings && !showTrips && !showSwellyShaper ? 'auto' : 'none'}
+          >
+            <TripPlanningChatScreen
+              onChatComplete={handleTripPlanningChatBack}
+              onViewUserProfile={handleViewUserProfile}
+              onStartConversation={handleStartConversation}
+              persistedChatId={tripPlanningChatId}
+              persistedMatchedUsers={tripPlanningMatchedUsers}
+              persistedDestination={tripPlanningDestination}
+              onChatStateChange={(chatId: string | null, matchedUsers: any[], destination: string) => {
+                setTripPlanningChatId(chatId);
+                setTripPlanningMatchedUsers(matchedUsers);
+                setTripPlanningDestination(destination);
+              }}
+            />
+          </View>
+        )}
+        {/* Persistent Swelly chat layer (-Copy variant). Same lazy-mount + display
+            toggle pattern as the regular variant above. */}
+        {tripPlanningChatCopyEverShown && (
+          <View
+            style={[StyleSheet.absoluteFill, { backgroundColor: '#F5F5F5' }, !showTripPlanningChatCopy && { display: 'none' }]}
+            pointerEvents={showTripPlanningChatCopy && !showProfile && !showConversationLoading && !selectedConversation && !showSettings && !showTrips && !showSwellyShaper ? 'auto' : 'none'}
+          >
+            <TripPlanningChatScreenCopy
+              onChatComplete={() => { setShowTripPlanningChatCopy(false); setShowTripPlanningChat(false); setPendingOnboardingMatches(null); }}
+              onViewUserProfile={handleViewUserProfile}
+              onStartConversation={handleStartConversation}
+              persistedChatId={tripPlanningChatId}
+              persistedMatchedUsers={tripPlanningMatchedUsers}
+              persistedDestination={tripPlanningDestination}
+              onChatStateChange={(chatId: string | null, matchedUsers: any[], destination: string) => {
+                setTripPlanningChatId(chatId);
+                setTripPlanningMatchedUsers(matchedUsers);
+                setTripPlanningDestination(destination);
+              }}
+              service={activeCopyService === 'copy-copy' ? swellyServiceCopyCopy : swellyServiceCopy}
+              onboardingMatches={pendingOnboardingMatches || undefined}
+            />
+          </View>
+        )}
         {activeOverlay && <View style={StyleSheet.absoluteFill}>{activeOverlay}</View>}
         {process.env.EXPO_PUBLIC_LOCAL_MODE === 'true' && (
           <TouchableOpacity
@@ -1325,11 +1375,12 @@ export const AppContent: React.FC = () => {
           </TouchableOpacity>
         )}
         <WelcomeToLineupOverlay
-          visible={showWelcomeToLineupOverlay && onboardingMatchResult != null && onboardingMatchResult.match_count > 0}
+          visible={showWelcomeToLineupOverlay && !welcomeOverlayHiddenByProfile && onboardingMatchResult != null && onboardingMatchResult.match_count > 0}
           matches={onboardingMatchResult?.matches || []}
           onClose={() => {
             markWelcomeLineupDismissed();
             setShowWelcomeToLineupOverlay(false);
+            setWelcomeOverlayHiddenByProfile(false);
           }}
           onConnect={(match) => {
             markWelcomeLineupDismissed();
@@ -1348,6 +1399,13 @@ export const AppContent: React.FC = () => {
               console.log('[AppContent] Conversation created/found for welcome overlay match:', conversation.id);
               // Update pendingConversation with the real conversation ID
               setPendingConversation(prev => prev ? { ...prev, conversationId: conversation.id } : null);
+              // Pull the new conversation into the messaging list so it shows on
+              // the home screen even if the user backs out before sending a message.
+              // Realtime can miss this one because the row is created before the
+              // current user is added as a member (RLS hides it from the realtime payload).
+              refreshConversations().catch((err) => {
+                console.warn('[AppContent] refreshConversations after connect failed:', err);
+              });
             }).catch((error) => {
               console.error('[AppContent] Error creating conversation:', error);
             });
@@ -1361,8 +1419,9 @@ export const AppContent: React.FC = () => {
             });
           }}
           onViewProfile={(userId) => {
-            // Keep overlay state so it re-appears on back
+            // Keep overlay state so it re-appears on back; hide modal so profile shows in front
             setProfileFromWelcomeOverlay(true);
+            setWelcomeOverlayHiddenByProfile(true);
             handleViewUserProfile(userId);
           }}
           onMoreMatches={() => {

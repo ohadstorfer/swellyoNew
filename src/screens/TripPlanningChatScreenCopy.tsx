@@ -963,6 +963,24 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             ]);
             setTimeout(() => scrollToBottom(), 100);
           }, 2000);
+        } else if (tutorial.isActive) {
+          // During the welcome tutorial the topic-selection overlay would
+          // cover the chat and block step 3's spotlight. Skip the overlay
+          // and append the generic greeting + info directly, so the tutorial
+          // can highlight the filters button immediately.
+          const tsNow = () => new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+          setMessages([]);
+          setIsInitializing(false);
+          setIsLoading(true);
+          setTimeout(() => {
+            setIsLoading(false);
+            setMessages(prev => [
+              ...prev,
+              { id: 'greeting', text: TRIP_PLANNING_FIRST_QUESTION, isUser: false, timestamp: tsNow() },
+              { id: 'info', text: TRIP_PLANNING_SECOND_MESSAGE, isUser: false, timestamp: tsNow() },
+            ]);
+            setTimeout(() => scrollToBottom(), 100);
+          }, 2000);
         } else {
           // Normal new chat: start with an empty chat behind the topic-selection overlay. The
           // greeting + info messages are appended locally after the user picks a topic (see
@@ -1577,7 +1595,9 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     // Reset all conversation state
     setMessages([]);
     setIsInitializing(true);
-    setShowTopicOverlay(true);
+    // Don't show the topic overlay during the welcome tutorial — it would
+    // cover the chat and block the tutorial spotlight.
+    if (!tutorial.isActive) setShowTopicOverlay(true);
     setIsFinished(false);
     setMatchedUsers([]);
     setDestinationCountry('');

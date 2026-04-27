@@ -131,7 +131,10 @@
       "Bash(xcrun simctl *)",
       "WebFetch(domain:kirillzyusko.github.io)",
       "WebFetch(domain:reactiive.io)",
-      "WebFetch(domain:docs.swmansion.com)"
+      "WebFetch(domain:docs.swmansion.com)",
+      "WebFetch(domain:status.supabase.com)",
+      "WebFetch(domain:releasebot.io)",
+      "WebFetch(domain:ishadeed.com)"
     ]
   }
 }

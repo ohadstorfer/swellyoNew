@@ -12,6 +12,7 @@ import {
   NativeScrollEvent,
   Alert,
   Linking,
+  Keyboard,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { TextInput as PaperTextInput } from 'react-native-paper';
@@ -1237,7 +1238,13 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
             />
             
         <View style={styles.header}>
-          <TouchableOpacity onPress={onBack} style={styles.backButton}>
+          <TouchableOpacity
+            onPress={() => {
+              Keyboard.dismiss();
+              onBack?.();
+            }}
+            style={styles.backButton}
+          >
             <Ionicons name="arrow-back" size={24} color="#222B30" />
           </TouchableOpacity>
 
@@ -1266,6 +1273,11 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
             scrollEventThrottle={0}
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}
+            // "handled" = touchables activate on a single tap; we explicitly
+            // call Keyboard.dismiss() in the relevant handlers (profile picker,
+            // country/pronoun fields, Next, back) so a single tap both selects
+            // and closes the keyboard. Plain-area taps also dismiss because
+            // there's no child to handle them.
             keyboardShouldPersistTaps="handled"
           >
 
@@ -1275,7 +1287,10 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
           {/* Profile Picture Container */}
           <View style={styles.profilePictureContainer}>
             <TouchableOpacity
-              onPress={pickImage}
+              onPress={() => {
+                Keyboard.dismiss();
+                pickImage();
+              }}
               style={styles.profilePictureWrapper}
             >
               {profilePicture ? (
@@ -1328,7 +1343,10 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
                 }}
                 placeholder="Where are you from?*"
                 width={Platform.OS === 'web' ? 212 : undefined}
-                onOpen={() => setActiveModal('country')}
+                onOpen={() => {
+                  Keyboard.dismiss();
+                  setActiveModal('country');
+                }}
                 error={locationError}
               />
               </View>
@@ -1369,6 +1387,7 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
                     ]}
                     activeOpacity={0.7}
                     onPress={() => {
+                      Keyboard.dismiss();
                       setPronoun(optionValue);
                       setPronounError(false);
                       updateFormData({ pronouns: optionValue });
@@ -1401,8 +1420,11 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
 
           {/* Next Button - Fixed at bottom, moves up with keyboard */}
         <View style={[styles.buttonContainer, { paddingBottom: Math.max(insets.bottom, 24) }]}>
-          <TouchableOpacity 
-            onPress={handleNext} 
+          <TouchableOpacity
+            onPress={() => {
+              Keyboard.dismiss();
+              handleNext();
+            }}
             activeOpacity={0.8}
             disabled={isLoading || isUploading}
             style={(isLoading || isUploading) && styles.buttonDisabled}
@@ -1465,7 +1487,10 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
               autoFocus
             />
 
-            <ScrollView style={styles.webCountryList}>
+            <ScrollView
+              style={styles.webCountryList}
+              keyboardShouldPersistTaps="handled"
+            >
               {COUNTRIES.filter(country =>
                 country.toLowerCase().includes(countrySearchQuery.toLowerCase())
               ).map((country) => (

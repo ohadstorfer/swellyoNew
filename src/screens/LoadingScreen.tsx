@@ -11,6 +11,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { Ionicons } from '@expo/vector-icons';
+import Svg, { Path } from 'react-native-svg';
 import { Text } from '../components/Text';
 import { colors, spacing, borderRadius } from '../styles/theme';
 import { Images } from '../assets/images';
@@ -705,13 +706,39 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
       >
         <Pressable style={styles.consentBackdrop} onPress={() => {}}>
           <View style={styles.consentCard}>
-            {/* Swelly avatar bubble */}
-            <View style={styles.consentAvatarBubble}>
-              <Image
-                source={Images.swellyAvatar}
-                style={styles.consentAvatarImage}
-                resizeMode="cover"
-              />
+            {/* Swelly avatar — same gray ellipse + purple ring pattern used on
+                the home screen Swelly card, scaled up. Image pokes above the
+                purple top arc; bottom of image sits behind the bottom arc. */}
+            <View style={styles.consentAvatar}>
+              <View style={styles.consentAvatarRing}>
+                <View style={styles.consentEllipseBackground}>
+                  <Svg width={90} height={91} viewBox="0 0 62 63" fill="none">
+                    <Path
+                      d="M30.8242 0.75C47.4452 0.75 60.8984 14.4406 60.8984 31.3027C60.8983 48.1648 47.4451 61.8545 30.8242 61.8545C14.2034 61.8544 0.75014 48.1648 0.75 31.3027C0.75 14.4406 14.2033 0.750059 30.8242 0.75Z"
+                      fill="#D9D9D9"
+                      stroke="#B72DF2"
+                      strokeWidth="1.5"
+                    />
+                  </Svg>
+                </View>
+                <View style={styles.consentAvatarImageContainer}>
+                  <Image
+                    source={Images.swellyAvatar}
+                    style={styles.consentAvatarImage}
+                    resizeMode="cover"
+                  />
+                </View>
+                <View style={styles.consentEllipseForeground} pointerEvents="none">
+                  <Svg width={90} height={91} viewBox="0 0 62 63" fill="none">
+                    <Path
+                      d="M60.8984 31.3027C60.8983 48.1648 47.4451 61.8545 30.8242 61.8545C14.2034 61.8544 0.75014 48.1648 0.75 31.3027"
+                      fill="none"
+                      stroke="#B72DF2"
+                      strokeWidth="1.5"
+                    />
+                  </Svg>
+                </View>
+              </View>
             </View>
 
             {/* Title */}
@@ -919,43 +946,77 @@ const styles = StyleSheet.create({
     paddingVertical: 36,
     width: 344,
     alignItems: 'center',
-    gap: 12,
+    gap: 18,
   },
-  consentAvatarBubble: {
-    width: 86,
-    height: 86,
-    borderRadius: 43,
-    borderWidth: 1.5,
-    borderColor: '#b72df2',
-    backgroundColor: 'rgba(255,255,255,0.3)',
-    overflow: 'hidden',
-    justifyContent: 'center',
+  // Scaled-up version of ConversationsScreen's Swelly card avatar (62×68 → 90×99).
+  consentAvatar: {
+    width: 90,
+    height: 99,
+    aspectRatio: 90 / 99,
+    position: 'relative',
     alignItems: 'center',
-    shadowColor: '#b72df2',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.24,
-    shadowRadius: 7,
-    elevation: 4,
+    justifyContent: 'center',
+    zIndex: 1,
+  },
+  consentAvatarRing: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 45,
+    overflow: 'visible',
+    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1,
+  },
+  consentEllipseBackground: {
+    position: 'absolute',
+    width: '105%',
+    height: '105%',
+    top: '-2.5%',
+    left: '-2.5%',
+    zIndex: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  consentEllipseForeground: {
+    position: 'absolute',
+    width: '105%',
+    height: '105%',
+    top: '-2.5%',
+    left: '-2.5%',
+    zIndex: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  consentAvatarImageContainer: {
+    position: 'absolute',
+    // 75 × 1.45 ≈ 109; offsets scaled the same way (-6.1 → -8.8, -7 → -10.2)
+    width: 109,
+    height: 109,
+    left: -8.8,
+    top: -10.2,
+    overflow: 'hidden',
+    zIndex: 1,
   },
   consentAvatarImage: {
-    width: 86,
-    height: 86,
+    width: 109,
+    height: 109,
   },
   consentTitle: {
-    fontSize: 18,
-    fontWeight: '900',
+    fontSize: 20,
+    fontWeight: '700',
     fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat',
     color: '#333333',
     textAlign: 'center',
-    lineHeight: 24,
+    lineHeight: 26,
   },
   consentBody: {
     fontSize: 14,
     fontWeight: '200',
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
-    color: '#7b7b7b',
+    color: '#5e5e5e',
     textAlign: 'center',
-    lineHeight: 18,
+    lineHeight: 20,
     width: '90%',
   },
   consentButton: {

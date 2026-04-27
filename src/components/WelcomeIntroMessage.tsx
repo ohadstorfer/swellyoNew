@@ -4,7 +4,7 @@ import { Text } from './Text';
 import { Images } from '../assets/images';
 
 const WELCOME_INTRO_TEXT =
-  "Yo shredders! You two align!  I bet if you met out in the water you would have an epic chat, maybe grab some tasty burritos after a session! Wanted to make the intro! Take it from here!";
+  "Yo shredders! I bet if you met out in the water you would have an epic chat :) Wanted to make the intro! Take it from here!";
 
 /**
  * Welcome message shown when a DM conversation is new or has no messages.
@@ -64,15 +64,18 @@ const styles = StyleSheet.create({
   },
   avatarContainer: {
     alignSelf: 'flex-end',
-    width: 86,
-    height: 75,
+    width: 100,
+    height: 87,
     flexShrink: 0,
     overflow: 'hidden',
     borderRadius: 8,
+    // Negative right margin pushes the avatar past the bubble's right edge
+    // so it sits closer to (or beyond) the chat row's right boundary.
+    marginRight: -8,
   },
   avatarImage: {
-    width: 86,
-    height: 75,
+    width: 100,
+    height: 87,
     ...(Platform.OS === 'web' && {
       objectFit: 'cover' as any,
     }),

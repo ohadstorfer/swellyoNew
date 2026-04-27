@@ -69,19 +69,17 @@ function getReceiptState(msg: Message, otherReadAt: string | null): ReceiptState
 }
 
 function ReadReceipt({ state }: { state: ReceiptState; onDark?: boolean }) {
-  // Always render the double-check icon for own messages: GRAY while the
-  // message is pending/delivered (not yet read), turns BLUE the moment the
-  // other user's last_read_at advances past this message's created_at.
-  // FadeIn fires once on first mount; subsequent state→color changes update
-  // in place without re-running the entering animation.
-  const color = state === 'read' ? '#53BDEB' : 'rgba(60, 60, 60, 0.75)';
+  // Custom double-tick image, tinted in a single neutral color regardless of
+  // state or background ("same color for both positions"). #6D6D6D is the
+  // flat equivalent of the bubble timestamp's rgba(60,60,60,0.75) on white,
+  // so the tick now visually matches the timestamp next to it.
+  const color = '#C2C2C2';
   return (
     <Reanimated.View entering={FadeIn.duration(220)} exiting={FadeOut.duration(140)}>
-      <Ionicons
-        name="checkmark-done"
-        size={16}
-        color={color}
-        style={{ marginLeft: 4 }}
+      <Image
+        source={Images.doubleTick}
+        style={{ width: 16, height: 16, marginLeft: 4, tintColor: color }}
+        resizeMode="contain"
       />
     </Reanimated.View>
   );
@@ -2949,30 +2947,13 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                       }
                     </Text>
                   </View>
-                ) : (
-                  // Active text: LTR uses a single flex-wrap row (body +
-                  // timestamp inline when they fit, timestamp wrapping below
-                  // when they don't — WhatsApp-style). RTL stacks them in a
-                  // column so the timestamp is always below the body.
+                ) : isRtl ? (
+                  // RTL bodies stack vertically (timestamp below body).
                   <Reanimated.View
-                    style={
-                      isRtl
-                        ? {
-                            flexDirection: 'column',
-                            alignItems: 'flex-end',
-                          }
-                        : {
-                            flexDirection: 'row',
-                            flexWrap: 'wrap',
-                            alignItems: 'flex-end',
-                            // Timestamp pins to the bottom-right for both own
-                            // and received bubbles. For short bodies the row
-                            // is content-sized so this is invisible; for
-                            // multi-line bodies the timestamp wraps to its own
-                            // row at the right edge.
-                            justifyContent: 'flex-end',
-                          }
-                    }
+                    style={{
+                      flexDirection: 'column',
+                      alignItems: 'flex-end',
+                    }}
                     layout={LinearTransition.duration(240)}
                   >
                     <Text style={[
@@ -2987,9 +2968,78 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                       style={{
                         flexDirection: 'row',
                         alignItems: 'center',
-                        marginLeft: isRtl ? 0 : 16,
-                        marginTop: isRtl ? 2 : 0,
+                        marginTop: 2,
                         marginBottom: -2,
+                      }}
+                    >
+                      <Text style={[
+                        styles.timestamp,
+                        isOwnMessage ? styles.userTimestamp : styles.botTimestamp,
+                      ]}>
+                        {formatTime(message.created_at)}
+                        {message.edited && !message.deleted && (
+                          <Text style={styles.editedBadge}>  (edited)</Text>
+                        )}
+                      </Text>
+                      {isOwnMessage && (
+                        <ReadReceipt state={getReceiptState(message, otherUserLastReadAt)} />
+                      )}
+                    </View>
+                  </Reanimated.View>
+                ) : (
+                  // LTR: WhatsApp-style inline-timestamp layout.
+                  // The body Text contains the message + an invisible inline
+                  // spacer whose width ≈ the timestamp's width. Result:
+                  //  - Short msg: body + spacer fit on one line; bubble
+                  //    shrinks; timestamp (absolutely positioned at bottom-
+                  //    right) sits inline at the right of the body.
+                  //  - Body grows on that line until bubble hits its
+                  //    max-width, then text wraps. Wrapped overflow goes to
+                  //    new lines ABOVE; the bottom line keeps the spacer +
+                  //    visible timestamp anchored at bottom-right.
+                  //  - Subsequent wraps add lines above as needed; the
+                  //    bottom line's wrap point is `bubble width − spacer`,
+                  //    so the visible last line of text never crosses into
+                  //    the timestamp's column.
+                  <Reanimated.View
+                    style={{ position: 'relative' }}
+                    layout={LinearTransition.duration(240)}
+                  >
+                    <Text style={[
+                      isOwnMessage ? styles.userMessageText : styles.botMessageText,
+                      !isOwnMessage && otherUserAdvRole === 'adv_giver' && styles.botMessageTextGiveAdv,
+                      !isOwnMessage && otherUserAdvRole === 'adv_seeker' && styles.botMessageTextGetAdv,
+                      { textAlign: bodyTextAlign },
+                    ]}>
+                      {renderMessageBodyWithLinks(message.body || '')}
+                      {/* Invisible spacer rendered at the timestamp's font
+                          size so its inline width matches the real
+                          timestamp pixel-for-pixel. Mirrors:
+                          - leading "  " gap
+                          - the formatted time text
+                          - "  (edited)" if the badge is shown
+                          - 4 figure-spaces approximating the double-tick
+                          The real timestamp is absolutely overlaid on top
+                          (see <View> below). This is the RN-equivalent of
+                          Telegram's float-right .MessageMeta technique. */}
+                      <Text style={[
+                        styles.timestamp,
+                        isOwnMessage ? styles.userTimestamp : styles.botTimestamp,
+                        { color: 'transparent' },
+                      ]}>
+                        {`  ${formatTime(message.created_at)}${message.edited && !message.deleted ? '  (edited)' : ''}${isOwnMessage ? '    ' : ''}`}
+                      </Text>
+                    </Text>
+                    <View
+                      style={{
+                        position: 'absolute',
+                        // Negative bottom pulls the timestamp + ticks a few
+                        // pixels lower than the spacer's line box, so they
+                        // sit closer to the bubble's bottom edge.
+                        bottom: -3,
+                        right: 0,
+                        flexDirection: 'row',
+                        alignItems: 'center',
                       }}
                     >
                       <Text style={[
@@ -3192,14 +3242,12 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             renderItem={renderItem}
             keyExtractor={keyExtractor}
             inverted
-            // Animate each existing cell's position change when a new message
-            // arrives, with the same duration/easing as the new message's
-            // slide-up. So old messages slide up in sync with the new one
-            // emerging from behind the composer — feels like the new message
-            // is pushing the older messages up.
-            itemLayoutAnimation={LinearTransition.duration(SEND_SLIDE_DURATION_MS).easing(
-              Easing.inOut(Easing.ease)
-            )}
+            // No itemLayoutAnimation: it also fires when the FlatList's parent
+            // shifts due to the keyboard's animated paddingBottom, which causes
+            // cells to overshoot/bounce as Reanimated tries to animate them to
+            // their new absolute position while the keyboard is independently
+            // moving them. New messages still slide up via their `entering`
+            // animation; older messages reposition instantly (WhatsApp behavior).
             style={styles.messagesList}
             contentContainerStyle={[
               styles.messagesContent,

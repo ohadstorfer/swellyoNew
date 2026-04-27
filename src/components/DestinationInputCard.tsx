@@ -60,7 +60,7 @@ const UNIT_LABELS: Record<TimeUnit, string> = { days: 'Days', weeks: 'Weeks', mo
 const UNIT_ITEM_WIDTH = 58;
 const UNIT_CAROUSEL_CONTAINER_WIDTH = 179;
 /** Minimum horizontal drag (px) to advance/retreat one time unit. */
-const SWIPE_THRESHOLD = 20;
+const SWIPE_THRESHOLD = 4;
 
 export const DestinationInputCard = forwardRef<DestinationInputCardRef, DestinationInputCardProps>(function DestinationInputCard(
   {
@@ -250,7 +250,7 @@ export const DestinationInputCard = forwardRef<DestinationInputCardRef, Destinat
         onMoveShouldSetPanResponderCapture: (_, gestureState) => {
           if (isReadOnly) return false;
           const { dx, dy } = gestureState;
-          return Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 4;
+          return Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 2;
         },
         onPanResponderGrant: () => {},
         onPanResponderMove: () => {},
