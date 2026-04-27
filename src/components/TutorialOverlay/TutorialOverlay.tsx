@@ -44,6 +44,8 @@ interface TutorialOverlayProps {
   onAnchorPress?: () => void;
   /** Horizontal position of the arrow within the card. Defaults to 'center'. */
   arrowAlignment?: 'left' | 'center' | 'right';
+  /** Optional extra content rendered above the dark backdrop, fades with the card. */
+  extraContent?: React.ReactNode;
 }
 
 const CARD_WIDTH = 314;
@@ -89,6 +91,7 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
   enterDelay = 800,
   onAnchorPress,
   arrowAlignment = 'center',
+  extraContent,
 }) => {
   const { width: screenW, height: screenH } = Dimensions.get('window');
   const backdropOpacity = useRef(new Animated.Value(0)).current;
@@ -368,6 +371,7 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
           style={[StyleSheet.absoluteFill, { opacity: contentOpacity }]}
           pointerEvents={displayedHeld ? 'none' : 'box-none'}
         >
+          {extraContent}
           <TutorialArrow
             direction={displayed.arrowDirection}
             left={positions.arrowLeft}

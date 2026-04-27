@@ -15,8 +15,9 @@ import {
   Linking,
   Keyboard,
 } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import Reanimated, { useAnimatedStyle, FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
+import Reanimated, { useAnimatedStyle, FadeIn, FadeOut, LinearTransition, withTiming, Easing } from 'react-native-reanimated';
 import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller';
 import { KeyboardGestureArea, isExpoGo } from '../utils/keyboardAvoidingView';
 import { TextInput as PaperTextInput } from 'react-native-paper';
@@ -68,19 +69,194 @@ function getReceiptState(msg: Message, otherReadAt: string | null): ReceiptState
 }
 
 function ReadReceipt({ state }: { state: ReceiptState; onDark?: boolean }) {
-  // Only render when the other user has read the message. When delivered/pending
-  // we render nothing so the timestamp stays flush to the right with no reserved gap.
-  if (state !== 'read') return null;
+  // Always render the double-check icon for own messages: GRAY while the
+  // message is pending/delivered (not yet read), turns BLUE the moment the
+  // other user's last_read_at advances past this message's created_at.
+  // FadeIn fires once on first mount; subsequent state→color changes update
+  // in place without re-running the entering animation.
+  const color = state === 'read' ? '#53BDEB' : 'rgba(60, 60, 60, 0.75)';
   return (
     <Reanimated.View entering={FadeIn.duration(220)} exiting={FadeOut.duration(140)}>
       <Ionicons
         name="checkmark-done"
         size={16}
-        color="#53BDEB"
+        color={color}
         style={{ marginLeft: 4 }}
       />
     </Reanimated.View>
   );
+}
+
+// Drives the bubble slide-up (own + received) AND the existing messages'
+// "push-up" layout animation. Set to 2000 to put everything in slow-mo for
+// visual debugging (see memory: chat_animation_slowmo_knobs.md).
+const SEND_SLIDE_DURATION_MS = 280;
+
+// Send-in animation for OWN messages (current user just hit send). The new
+// bubble starts shifted DOWN so its TOP edge is tucked just under the
+// composer's top, then translates back to 0 — sliding up from behind the bar.
+//
+// Per-bubble offset: in the inverted list every bubble's natural bottom sits
+// at composer.top, so natural_top = composer.top − targetHeight. To make
+// actual_top = composer.top + SEND_SLIDE_TOP_PEEK_DP we need:
+//   translateY = targetHeight + SEND_SLIDE_TOP_PEEK_DP
+// composer.top cancels out — short and tall bubbles both start with their
+// TOP edge at the same visual position relative to the bar, regardless of
+// whether the composer is one line or stretched.
+const SEND_SLIDE_TOP_PEEK_DP = 8;
+
+const messageSlideUpFromComposer = (values: { targetHeight: number }) => {
+  'worklet';
+  return {
+    initialValues: {
+      transform: [{ translateY: values.targetHeight + SEND_SLIDE_TOP_PEEK_DP }],
+    },
+    animations: {
+      transform: [
+        {
+          translateY: withTiming(0, {
+            duration: SEND_SLIDE_DURATION_MS,
+            easing: Easing.inOut(Easing.ease),
+          }),
+        },
+      ],
+    },
+  };
+};
+
+// Send-in animation for RECEIVED messages (from another user). The new bubble
+// starts with its TOP edge at the typing indicator's TOP — so the swap from
+// "typing dots" to "actual message" feels seamless, no vertical jump. We use
+// a fixed reference height (TYPING_INDICATOR_HEIGHT_DP) so the start position
+// is the same whether or not the typing indicator was visible at the moment
+// the message arrives.
+//
+// Same per-bubble math: natural_top = composer.top − targetHeight. To make
+// actual_top = composer.top − TYPING_INDICATOR_HEIGHT_DP:
+//   translateY = targetHeight − TYPING_INDICATOR_HEIGHT_DP
+//
+// CAPPED at 0 (Math.max): for very short bubbles where targetHeight <
+// typing-indicator height, the raw formula goes negative — that would mean
+// starting ABOVE the natural position and sliding DOWN, which reads as wrong
+// ("bubble drops down" instead of rising up). Capping at 0 means short
+// bubbles just appear at their natural spot (which is already very close to
+// where the typing indicator's top sat).
+//
+// Constant matches the typing bubble's actual height: bubble paddingV (16) +
+// typingContainer paddingV (16) + typingDot height (8) = 40.
+const TYPING_INDICATOR_HEIGHT_DP = 40;
+// Extra drop below typing's top — bubble starts ~one chat line lower so the
+// reveal feels like the bubble is rising up from a hair more under the bar.
+const RECEIVED_SLIDE_EXTRA_DROP_DP = 44;
+
+const messageSlideUpFromTypingHeight = (values: { targetHeight: number }) => {
+  'worklet';
+  const initial = Math.max(
+    values.targetHeight - TYPING_INDICATOR_HEIGHT_DP + RECEIVED_SLIDE_EXTRA_DROP_DP,
+    0
+  );
+  return {
+    initialValues: {
+      transform: [{ translateY: initial }],
+    },
+    animations: {
+      transform: [
+        {
+          translateY: withTiming(0, {
+            duration: SEND_SLIDE_DURATION_MS,
+            easing: Easing.inOut(Easing.ease),
+          }),
+        },
+      ],
+    },
+  };
+};
+
+// Detects three URL shapes in message text:
+//   1. https://example.com[/path] — explicit protocol
+//   2. www.example.com[/path]      — www prefix without protocol
+//   3. example.com[/path]          — bare domain (must start with a letter,
+//      end in a 2+ alpha TLD, and stand on a word boundary so "1.2.3" and
+//      "file.exe" within sentences don't match too aggressively)
+const URL_REGEX = /(https?:\/\/[^\s<>]+|www\.[^\s<>]+|\b[a-z][a-z0-9-]*(?:\.[a-z0-9-]+)*\.[a-z]{2,}\b(?:\/[^\s]*)?)/gi;
+
+const LINK_COLOR = '#1976D2'; // Material Blue 700 — readable on white + light bubbles.
+
+// Per-message text alignment: English (and other LTR scripts) sticks to the
+// left of the bubble; Hebrew and Arabic stick to the right. Uses the first
+// strong directional character (Unicode bidi convention) so a sentence that
+// starts in one language but mixes the other still aligns by its dominant
+// direction. Default is 'left' for empty/symbol-only bodies.
+function getBodyTextAlign(body: string | null | undefined): 'left' | 'right' {
+  if (!body) return 'left';
+  for (let i = 0; i < body.length; i++) {
+    const code = body.charCodeAt(i);
+    // Strong RTL: Hebrew + Arabic ranges (incl. supplements/extensions/forms).
+    if (
+      (code >= 0x0590 && code <= 0x05FF) ||
+      (code >= 0x0600 && code <= 0x06FF) ||
+      (code >= 0x0750 && code <= 0x077F) ||
+      (code >= 0x08A0 && code <= 0x08FF) ||
+      (code >= 0xFB50 && code <= 0xFDFF) ||
+      (code >= 0xFE70 && code <= 0xFEFF)
+    ) {
+      return 'right';
+    }
+    // Strong LTR: Basic Latin letters + Latin-1 letters.
+    if (
+      (code >= 0x0041 && code <= 0x005A) ||
+      (code >= 0x0061 && code <= 0x007A) ||
+      (code >= 0x00C0 && code <= 0x00FF)
+    ) {
+      return 'left';
+    }
+  }
+  return 'left';
+}
+
+// Splits a message body into plain-text and tappable-URL segments.
+// Tap → opens the URL in the device's default handler. Returns React nodes
+// that can be dropped directly inside a parent <Text>.
+function renderMessageBodyWithLinks(body: string): React.ReactNode {
+  if (!body) return body;
+  const parts: React.ReactNode[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  // RegExp with /g keeps state across exec calls; reset to be safe.
+  URL_REGEX.lastIndex = 0;
+  while ((match = URL_REGEX.exec(body)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(body.slice(lastIndex, match.index));
+    }
+    const raw = match[0];
+    // Strip a single trailing punctuation char (.,;:!?) that's almost never
+    // part of the URL — a sentence like "check this out https://x.com." should
+    // open https://x.com, not include the period.
+    const trailingPunct = /[.,;:!?]+$/.exec(raw);
+    const url = trailingPunct ? raw.slice(0, -trailingPunct[0].length) : raw;
+    const tail = trailingPunct ? trailingPunct[0] : '';
+    // Bare domain or www prefix → prepend https:// when actually opening.
+    const href = /^https?:\/\//i.test(url) ? url : `https://${url}`;
+    parts.push(
+      <Text
+        key={`lnk-${match.index}-${url.length}`}
+        style={{ color: LINK_COLOR, textDecorationLine: 'underline' }}
+        onPress={() => {
+          Linking.openURL(href).catch((err) => {
+            console.warn('[DirectMessageScreen] failed to open URL:', href, err);
+          });
+        }}
+      >
+        {url}
+      </Text>
+    );
+    if (tail) parts.push(tail);
+    lastIndex = URL_REGEX.lastIndex;
+  }
+  if (lastIndex < body.length) {
+    parts.push(body.slice(lastIndex));
+  }
+  return parts.length > 0 ? parts : body;
 }
 
 interface DirectMessageScreenProps {
@@ -112,6 +288,10 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const [showBlockOverlay, setShowBlockOverlay] = useState(false);
   const [showDmMenu, setShowDmMenu] = useState(false);
   const [showReportUser, setShowReportUser] = useState(false);
+  // Composer (input bar) height — measured via onLayout. Passed to
+  // KeyboardGestureArea's `offset` prop so the interactive-dismiss zone
+  // extends UP to cover the composer, making the gesture feel 1:1.
+  const [composerHeight, setComposerHeight] = useState(0);
   const [currentConversationId, setCurrentConversationId] = useState<string | undefined>(conversationId);
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
@@ -152,6 +332,10 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const [imagePreviewVisible, setImagePreviewVisible] = useState(false);
   const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
   const selectedImageUriForUploadRef = useRef<string | null>(null);
+  // Source dimensions of the picked image — captured at pick time so the
+  // on-demand cropper (Edit button) can pass them to openCropper, avoiding
+  // the lib's 200px default-output trap.
+  const selectedImageDimensionsRef = useRef<{ width: number; height: number }>({ width: 0, height: 0 });
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const isPickerOpenRef = useRef(false);
   const pickerFallbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -185,6 +369,20 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         : '#B72DF2';
   const flatListRef = useRef<FlatList<Message>>(null);
   const { handleScroll: handleKeyboardScroll, handleLayout, scrollToBottom } = useChatKeyboardScroll(flatListRef, { inverted: true });
+
+  // Track which message IDs have already been rendered, so the slide-up
+  // entering animation only fires on genuinely new messages — not on old
+  // ones that re-mount when FlatList virtualization scrolls them back on
+  // screen, and not on the initial batch when the chat first loads.
+  const seenMessageIdsRef = useRef<Set<string>>(new Set());
+  const messageAnimationsInitializedRef = useRef(false);
+
+  useEffect(() => {
+    if (!messageAnimationsInitializedRef.current && messages.length > 0) {
+      seenMessageIdsRef.current = new Set(messages.map((m) => m.id));
+      messageAnimationsInitializedRef.current = true;
+    }
+  }, [messages.length]);
 
   const chatInputRef = useRef<ChatTextInputRef>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -355,6 +553,15 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                 : undefined;
               analyticsService.trackReplyReceived(timeToReplyMinutes, convId ?? '');
               setHasTrackedFirstReply(true);
+            }
+            // Clear the typing indicator immediately when a message arrives
+            // from the other user. Otherwise the indicator can briefly remain
+            // visible while the new bubble mounts, which throws off the
+            // entering animation's natural-position calculation (bubble's
+            // anchor is shifted up by ~40dp, so the slide can read as
+            // sliding DOWN instead of UP).
+            if (me && newMessage.sender_id !== me) {
+              setIsTyping(false);
             }
             setMessages((prev) => {
               // Outbox optimistic row lookup: the local row's id is still the
@@ -1168,6 +1375,31 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             ));
           }
 
+          // Seed the conversation into messaging state with full other_user data
+          // BEFORE the optimistic NEW_MESSAGE dispatch fires for the new chat.
+          // Without this, the NEW_MESSAGE reducer hits its index===-1 branch and
+          // builds a placeholder with sender_id as currentUserId, producing an
+          // other_user with empty user_id and the literal name 'Unknown User'.
+          messagingDispatch({
+            type: 'UPDATE_CONVERSATION',
+            payload: {
+              conversation: {
+                ...conversation,
+                other_user: {
+                  conversation_id: conversation.id,
+                  user_id: otherUserId,
+                  role: 'member',
+                  joined_at: conversation.created_at,
+                  preferences: {},
+                  name: otherUserName,
+                  profile_image_url: otherUserAvatar || undefined,
+                },
+                members: [],
+                unread_count: 0,
+              },
+            },
+          });
+
           // Set in MessagingProvider
           setMessagingCurrentConversationId(targetConversationId);
 
@@ -1663,59 +1895,19 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                 setSelectedVideoUri(uri);
                 setVideoPreviewVisible(true);
               } else {
-                // Native crop/rotate editor replaces the preview modal on
-                // dev/prod builds where the module is linked. On confirm we
-                // send directly (no caption, no second preview). On cancel
-                // we drop the picked file silently. Web + Expo Go fall back
-                // to the old preview modal.
-                const cropper = getImageCropPicker();
+                // Always show the preview modal first — caption + edit + send
+                // live there. The cropper opens on-demand from the modal's
+                // Edit button (handleEditImage), not in this auto-launch path.
                 if (__DEV__) {
-                  console.log(
-                    '[DirectMessageScreen] photo picked, uri=', uri.slice(0, 60),
-                    'cropperAvailable=', !!cropper,
-                  );
+                  console.log('[DirectMessageScreen] photo picked → ImagePreviewModal, uri=', uri.slice(0, 60));
                 }
-                if (cropper) {
-                  try {
-                    // iOS: expo-image-picker's UIViewController is still
-                    // dismissing when we return here. Presenting the cropper's
-                    // VC before that finishes silently fails ("view is not in
-                    // the window hierarchy"). Wait one animation cycle.
-                    if (Platform.OS === 'ios') {
-                      await new Promise((resolve) => setTimeout(resolve, 500));
-                    }
-                    if (__DEV__) console.log('[DirectMessageScreen] opening cropper...');
-                    const edited = await cropper.openCropper({
-                      path: uri,
-                      mediaType: 'photo',
-                      freeStyleCropEnabled: true,
-                      enableRotationGesture: true,
-                      hideBottomControls: false,
-                      showCropGuidelines: true,
-                      showCropFrame: true,
-                      cropperToolbarTitle: 'Edit Photo',
-                      compressImageQuality: 0.9,
-                      includeExif: false,
-                    });
-                    if (__DEV__) console.log('[DirectMessageScreen] cropper done, path=', edited.path.slice(0, 60));
-                    const editedPath = edited.path.startsWith('file://')
-                      ? edited.path
-                      : `file://${edited.path}`;
-                    await handleImageSend(undefined, editedPath);
-                  } catch (err) {
-                    if (isPickerCancelError(err)) {
-                      if (__DEV__) console.log('[DirectMessageScreen] cropper canceled');
-                      return;
-                    }
-                    console.warn('[DirectMessageScreen] openCropper failed:', err);
-                    Alert.alert('Error', 'Could not open the photo editor.');
-                  }
-                } else {
-                  if (__DEV__) console.log('[DirectMessageScreen] fallback → ImagePreviewModal');
-                  selectedImageUriForUploadRef.current = uri;
-                  setSelectedImageUri(uri);
-                  setImagePreviewVisible(true);
-                }
+                selectedImageUriForUploadRef.current = uri;
+                selectedImageDimensionsRef.current = {
+                  width: asset?.width && asset.width > 0 ? asset.width : 0,
+                  height: asset?.height && asset.height > 0 ? asset.height : 0,
+                };
+                setSelectedImageUri(uri);
+                setImagePreviewVisible(true);
               }
             }
           } catch (error) {
@@ -1746,9 +1938,73 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     }
   };
 
-  // Handle image send. `overrideImageUri` is used by the native crop-picker
-  // flow: after the user confirms in the native cropper, we pass the edited
-  // file URI here directly instead of going through the preview modal.
+  // Open the native crop/edit editor on-demand from inside ImagePreviewModal.
+  // Keeps the modal mounted (visible={true}) while the cropper presents on top
+  // — dismissing the RN Modal first triggers the iOS "view not in window
+  // hierarchy" race seen in react-native-image-crop-picker issues #264 / #659.
+  const handleEditImage = async () => {
+    const cropper = getImageCropPicker();
+    if (!cropper) return;
+    const currentUri = selectedImageUriForUploadRef.current ?? selectedImageUri;
+    if (!currentUri) return;
+
+    try {
+      // Use captured source dims; fall back to a generous cap. Without explicit
+      // width/height the lib outputs ~200px regardless of the source.
+      const { width: capturedW, height: capturedH } = selectedImageDimensionsRef.current;
+      const sourceWidth = capturedW > 0 ? capturedW : 4096;
+      const sourceHeight = capturedH > 0 ? capturedH : 4096;
+
+      if (__DEV__) console.log('[DirectMessageScreen] opening cropper from preview, source dims=', sourceWidth, 'x', sourceHeight);
+      const edited = await cropper.openCropper({
+        path: currentUri,
+        mediaType: 'photo',
+        width: sourceWidth,
+        height: sourceHeight,
+        freeStyleCropEnabled: true,
+        // iOS only: stops TOCropViewController from auto-zooming to "fill"
+        // the crop frame whenever the user drags a handle inward. The image
+        // now stays put while only the dark mask moves, which matches how
+        // most chat apps' crop UIs behave.
+        avoidEmptySpaceAroundImage: false,
+        enableRotationGesture: true,
+        hideBottomControls: false,
+        showCropGuidelines: true,
+        showCropFrame: true,
+        cropperToolbarTitle: 'Edit Photo',
+        cropperChooseText: 'Save',
+        compressImageQuality: 0.95,
+        compressImageMaxWidth: 2560,
+        compressImageMaxHeight: 2560,
+        includeExif: false,
+      });
+      if (__DEV__) console.log('[DirectMessageScreen] cropper done, dims=', edited.width, 'x', edited.height);
+
+      const editedPath = edited.path.startsWith('file://')
+        ? edited.path
+        : `file://${edited.path}`;
+
+      // Replace the preview's image in-place. The modal stays open so the user
+      // can keep typing the caption and tap Send when ready.
+      selectedImageUriForUploadRef.current = editedPath;
+      selectedImageDimensionsRef.current = {
+        width: edited.width || sourceWidth,
+        height: edited.height || sourceHeight,
+      };
+      setSelectedImageUri(editedPath);
+    } catch (err) {
+      if (isPickerCancelError(err)) {
+        if (__DEV__) console.log('[DirectMessageScreen] cropper canceled');
+        return;
+      }
+      console.warn('[DirectMessageScreen] openCropper failed:', err);
+      Alert.alert('Error', 'Could not open the photo editor.');
+    }
+  };
+
+  // Handle image send. `overrideImageUri` is no longer used by the picker
+  // (which now always routes through ImagePreviewModal) but is kept for the
+  // recovery path that re-uploads pending messages with the cached local URI.
   const handleImageSend = async (caption?: string, overrideImageUri?: string) => {
     const uriToUse = overrideImageUri ?? selectedImageUriForUploadRef.current ?? selectedImageUri;
     if (!uriToUse || !currentConversationId || !currentUserId) {
@@ -2225,11 +2481,46 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const invertedMessages = useMemo(() => [...messages].reverse(), [messages]);
 
   // FlatList helpers for inverted list
-  const renderItem = useCallback(({ item }: { item: Message }) => {
-    return renderMessage(item);
-  }, [currentUserId, editingMessageId, otherUserAdvRole, isDirect, menuVisible, selectedMessage, otherUserLastReadAt]);
+  const renderItem = useCallback(({ item, index }: { item: Message; index: number }) => {
+    // Track BOTH `id` and `client_id` so the optimistic→server swap (client_id
+    // becomes the row key, server-issued id arrives later) doesn't re-fire the
+    // entering animation mid-flight.
+    const isInitialized = messageAnimationsInitializedRef.current;
+    const idSeen = seenMessageIdsRef.current.has(item.id);
+    const clientIdSeen = item.client_id ? seenMessageIdsRef.current.has(item.client_id) : false;
+    const isNewMessage = isInitialized && !idSeen && !clientIdSeen;
+    if (isInitialized) {
+      seenMessageIdsRef.current.add(item.id);
+      if (item.client_id) seenMessageIdsRef.current.add(item.client_id);
+    }
+    // Inverted list: cell[i].marginBottom creates the visible gap between cell[i]
+    // (older, above visually) and cell[i-1] (newer, below visually). Compare with
+    // the newer neighbor to decide same/different sender. Newest (index 0) sets
+    // marginBottom to 0 — the composer's inputWrapper paddingTop owns that gap.
+    const newerMessage = invertedMessages[index - 1];
+    const sameSender = !!newerMessage && newerMessage.sender_id === item.sender_id;
+    const messageGap = index === 0 ? 0 : (sameSender ? 3 : 9);
+    // Own sends slide up from behind the composer; received messages slide
+    // up from the typing indicator's height so the typing → message swap is
+    // seamless even when the typing indicator wasn't visible.
+    const isOwnSend = !!currentUserId && item.sender_id === currentUserId;
+    const enteringAnim = isNewMessage
+      ? (isOwnSend ? messageSlideUpFromComposer : messageSlideUpFromTypingHeight)
+      : undefined;
+    return (
+      <Reanimated.View
+        entering={enteringAnim}
+        style={{ marginBottom: messageGap }}
+      >
+        {renderMessage(item)}
+      </Reanimated.View>
+    );
+  }, [currentUserId, editingMessageId, otherUserAdvRole, isDirect, menuVisible, selectedMessage, otherUserLastReadAt, invertedMessages]);
 
-  const keyExtractor = useCallback((item: Message) => item.id, []);
+  // Prefer client_id so the React key stays stable across the optimistic →
+  // server-confirmed swap. Without this, FlatList unmounts the old wrapper
+  // and mounts a new one mid-flight, cutting the entering animation in half.
+  const keyExtractor = useCallback((item: Message) => item.client_id || item.id, []);
 
   // In inverted FlatList: ListHeaderComponent renders at bottom, ListFooterComponent renders at top
   const listHeaderComponent = useMemo(() => <TypingIndicator />, [isTyping]);
@@ -2286,6 +2577,13 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     const isOwnMessage = currentUserId ? message.sender_id === currentUserId : false;
     const isEditing = editingMessageId === message.id;
     const canEdit = canEditMessage(message);
+    // English/LTR sticks left, Hebrew/Arabic sticks right. Computed once
+    // per message and applied to every Text that renders the body content.
+    const bodyTextAlign = getBodyTextAlign(message.body);
+    // For RTL bodies the timestamp always sits BELOW the body text — body
+    // and timestamp stack vertically instead of sharing a row. (LTR keeps
+    // the WhatsApp-style inline-when-it-fits, wrap-when-it-doesn't layout.)
+    const isRtl = bodyTextAlign === 'right';
     
     // For group chats, show avatar for received messages
     // For direct messages (2 users), don't show avatar since it's always the same person
@@ -2431,6 +2729,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                       isOwnMessage ? styles.userMessageText : styles.botMessageText,
                       !isOwnMessage && otherUserAdvRole === 'adv_giver' && styles.botMessageTextGiveAdv,
                       !isOwnMessage && otherUserAdvRole === 'adv_seeker' && styles.botMessageTextGetAdv,
+                      { textAlign: bodyTextAlign },
                     ]}>
                       {message.body}
                     </Text>
@@ -2441,24 +2740,24 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
           ) : message.type === 'image' || message.image_metadata ? (
             // Image message - redesigned layout
             (() => {
-              const imageUri = message.image_metadata?.thumbnail_url
-                || message.image_metadata?.image_url
+              const fullImageUri = message.image_metadata?.image_url
                 || message._localPreviewUri
                 || '';
+              const thumbnailUri = message.image_metadata?.thumbnail_url || '';
               const imageWidth = message.image_metadata?.width || 1;
               const imageHeight = message.image_metadata?.height || 1;
               const aspectRatio = imageWidth > 0 && imageHeight > 0 ? imageWidth / imageHeight : 1;
 
-              if (!imageUri) {
+              if (!fullImageUri) {
                 console.warn('[DirectMessageScreen] ⚠️ Image message has no URL:', {
                   id: message.id,
                   type: message.type,
                   imageMetadata: message.image_metadata,
                 });
               }
-              
-              
-              
+
+
+
               return (
                 <View style={styles.imageMessageWrapper}>
                   <TouchableOpacity
@@ -2472,19 +2771,22 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                     disabled={message.upload_state === 'uploading' || message.upload_state === 'failed'}
                     style={styles.imageTouchable}
                   >
-                    <Image
-                      source={{ uri: imageUri }}
+                    <ExpoImage
+                      source={{ uri: fullImageUri }}
+                      placeholder={thumbnailUri ? { uri: thumbnailUri } : undefined}
                       style={[
                         styles.messageImage,
-                        { 
+                        {
                           aspectRatio: aspectRatio && aspectRatio > 0 && isFinite(aspectRatio) ? aspectRatio : 1,
                         }
                       ]}
-                      resizeMode="cover"
+                      contentFit="cover"
+                      cachePolicy="memory-disk"
+                      transition={150}
                       onError={(error) => {
                         console.error('[DirectMessageScreen] ❌ Image load error:', {
                           messageId: message.id,
-                          imageUri,
+                          fullImageUri,
                           error,
                         });
                       }}
@@ -2512,28 +2814,85 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                         </TouchableOpacity>
                       </View>
                     )}
-                    {/* Timestamp overlay on image */}
-                    <Reanimated.View
-                      style={[styles.imageTimestampOverlay, { flexDirection: 'row', alignItems: 'center' }]}
-                      layout={LinearTransition.duration(240)}
-                    >
-                      <Text style={styles.imageTimestamp}>
-                        {formatTime(message.created_at)}
-                      </Text>
-                      {isOwnMessage && !message.deleted && (
-                        <ReadReceipt state={getReceiptState(message, otherUserLastReadAt)} onDark />
-                      )}
-                    </Reanimated.View>
+                    {/* Timestamp overlay — only when there's no caption.
+                        With a caption, the timestamp moves under the image
+                        next to the caption text (text-message style). */}
+                    {!message.body && (
+                      <Reanimated.View
+                        style={[styles.imageTimestampOverlay, { flexDirection: 'row', alignItems: 'center' }]}
+                        layout={LinearTransition.duration(240)}
+                      >
+                        <Text style={styles.imageTimestamp}>
+                          {formatTime(message.created_at)}
+                        </Text>
+                        {isOwnMessage && !message.deleted && (
+                          <ReadReceipt state={getReceiptState(message, otherUserLastReadAt)} onDark />
+                        )}
+                      </Reanimated.View>
+                    )}
                   </TouchableOpacity>
                   {message.body && (
-                    <Text style={[
-                      styles.imageCaption,
-                      isOwnMessage ? styles.userMessageText : styles.botMessageText,
-                      !isOwnMessage && otherUserAdvRole === 'adv_giver' && styles.botMessageTextGiveAdv,
-                      !isOwnMessage && otherUserAdvRole === 'adv_seeker' && styles.botMessageTextGetAdv,
-                    ]}>
-                      {message.body}
-                    </Text>
+                    <Reanimated.View
+                      style={
+                        isRtl
+                          ? {
+                              flexDirection: 'column',
+                              alignItems: 'flex-end',
+                              paddingTop: 8,
+                              paddingHorizontal: 10,
+                              paddingBottom: 8,
+                            }
+                          : {
+                              flexDirection: 'row',
+                              // alignItems: flex-end keeps the timestamp at
+                              // the bottom-right corner even when the caption
+                              // wraps to multiple lines.
+                              alignItems: 'flex-end',
+                              // Restores the vertical/horizontal breathing
+                              // room that imageMessageBubble strips
+                              // (paddings: 0) so the image can hit the bubble
+                              // edges. Without this the caption row hugs the
+                              // bubble and the bubble feels too short.
+                              paddingTop: 8,
+                              paddingHorizontal: 10,
+                              paddingBottom: 8,
+                            }
+                      }
+                      layout={LinearTransition.duration(240)}
+                    >
+                      {/* flex: 1 lets the caption fill the row and wrap on
+                          the left; the timestamp locks to the bottom-right.
+                          For RTL we drop the flex (column stack) so the
+                          caption sizes to its content. */}
+                      <Text style={[
+                        isRtl ? null : { flex: 1 },
+                        isOwnMessage ? styles.userMessageText : styles.botMessageText,
+                        !isOwnMessage && otherUserAdvRole === 'adv_giver' && styles.botMessageTextGiveAdv,
+                        !isOwnMessage && otherUserAdvRole === 'adv_seeker' && styles.botMessageTextGetAdv,
+                        { textAlign: bodyTextAlign },
+                      ]}>
+                        {renderMessageBodyWithLinks(message.body || '')}
+                      </Text>
+                      <View
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          marginLeft: isRtl ? 0 : 18,
+                          marginTop: isRtl ? 2 : 0,
+                          marginBottom: -2,
+                        }}
+                      >
+                        <Text style={[
+                          styles.timestamp,
+                          isOwnMessage ? styles.userTimestamp : styles.botTimestamp,
+                        ]}>
+                          {formatTime(message.created_at)}
+                        </Text>
+                        {isOwnMessage && !message.deleted && (
+                          <ReadReceipt state={getReceiptState(message, otherUserLastReadAt)} />
+                        )}
+                      </View>
+                    </Reanimated.View>
                   )}
                 </View>
               );
@@ -2591,31 +2950,46 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                     </Text>
                   </View>
                 ) : (
-                  // Active text: body + timestamp in a single flex-wrap row.
-                  // Short body → both on the same line. Long body or tight
-                  // width → timestamp wraps to its own row below. Matches
-                  // WhatsApp's inline-when-it-fits behavior.
+                  // Active text: LTR uses a single flex-wrap row (body +
+                  // timestamp inline when they fit, timestamp wrapping below
+                  // when they don't — WhatsApp-style). RTL stacks them in a
+                  // column so the timestamp is always below the body.
                   <Reanimated.View
-                    style={{
-                      flexDirection: 'row',
-                      flexWrap: 'wrap',
-                      alignItems: 'flex-end',
-                      justifyContent: isOwnMessage ? 'flex-end' : 'flex-start',
-                    }}
+                    style={
+                      isRtl
+                        ? {
+                            flexDirection: 'column',
+                            alignItems: 'flex-end',
+                          }
+                        : {
+                            flexDirection: 'row',
+                            flexWrap: 'wrap',
+                            alignItems: 'flex-end',
+                            // Timestamp pins to the bottom-right for both own
+                            // and received bubbles. For short bodies the row
+                            // is content-sized so this is invisible; for
+                            // multi-line bodies the timestamp wraps to its own
+                            // row at the right edge.
+                            justifyContent: 'flex-end',
+                          }
+                    }
                     layout={LinearTransition.duration(240)}
                   >
                     <Text style={[
                       isOwnMessage ? styles.userMessageText : styles.botMessageText,
                       !isOwnMessage && otherUserAdvRole === 'adv_giver' && styles.botMessageTextGiveAdv,
                       !isOwnMessage && otherUserAdvRole === 'adv_seeker' && styles.botMessageTextGetAdv,
+                      { textAlign: bodyTextAlign },
                     ]}>
-                      {message.body || ''}
+                      {renderMessageBodyWithLinks(message.body || '')}
                     </Text>
                     <View
                       style={{
                         flexDirection: 'row',
                         alignItems: 'center',
-                        marginLeft: 6,
+                        marginLeft: isRtl ? 0 : 16,
+                        marginTop: isRtl ? 2 : 0,
+                        marginBottom: -2,
                       }}
                     >
                       <Text style={[
@@ -2771,7 +3145,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
           </TouchableOpacity>
           
           <TouchableOpacity style={styles.menuButton} onPress={() => setShowDmMenu(!showDmMenu)}>
-            <Ionicons name="ellipsis-vertical" size={24} color="#FFFFFF" />
+            <Ionicons name="ellipsis-vertical" size={20} color="#7B7B7B" />
           </TouchableOpacity>
         </View>
       </View>
@@ -2803,15 +3177,29 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         // works correctly even nested inside react-native-screen-transitions'
         // transformed ContentLayer, where the normal KAV fails.
         const useGestureArea = !isExpoGo && KeyboardGestureArea != null;
+        // Pairing nativeID + textInputNativeID extends the gesture-sensitive
+        // zone up to include the composer, so a drag starting inside the
+        // composer area moves the keyboard 1:1 with the finger (WhatsApp
+        // feel). Without this the gesture only fires when the touch is
+        // already over the keyboard, which makes it feel under-traveled.
+        const composerNativeID = 'dm-composer-input';
 
         const messageList = (
-          <FlatList
-            ref={flatListRef}
+          <Reanimated.FlatList
+            ref={flatListRef as any}
             data={invertedMessages}
             extraData={otherUserLastReadAt}
             renderItem={renderItem}
             keyExtractor={keyExtractor}
             inverted
+            // Animate each existing cell's position change when a new message
+            // arrives, with the same duration/easing as the new message's
+            // slide-up. So old messages slide up in sync with the new one
+            // emerging from behind the composer — feels like the new message
+            // is pushing the older messages up.
+            itemLayoutAnimation={LinearTransition.duration(SEND_SLIDE_DURATION_MS).easing(
+              Easing.inOut(Easing.ease)
+            )}
             style={styles.messagesList}
             contentContainerStyle={[
               styles.messagesContent,
@@ -2839,13 +3227,28 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             ListEmptyComponent={listEmptyComponent}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode={
-              useGestureArea ? 'none' : Platform.OS === 'ios' ? 'interactive' : 'on-drag'
+              // iOS handles interactive dismiss natively. On Android, KeyboardGestureArea
+              // tracks the drag and the FlatList's "interactive" dismissMode reports it
+              // to the keyboard — both are needed for the WhatsApp/Instagram feel where
+              // the keyboard follows the finger down. Fallback to "on-drag" on Android <
+              // 11 / Expo Go, where KeyboardGestureArea is a no-op fragment.
+              useGestureArea ? 'interactive' : Platform.OS === 'ios' ? 'interactive' : 'on-drag'
             }
           />
         );
 
         const composer = (
           <Reanimated.View style={animatedComposerPadding}>
+            {/* Measure just the inner composer (reply banner + input bar),
+                NOT the animated keyboard padding above. Otherwise the offset
+                changes while the keyboard is sliding, which creates a feedback
+                loop and the jumping-up-and-down feel. */}
+            <View
+              onLayout={(e) => {
+                const h = Math.round(e.nativeEvent.layout.height);
+                if (h !== composerHeight) setComposerHeight(h);
+              }}
+            >
             {replyingTo && (
               <ReplyPreviewBanner
                 message={replyingTo}
@@ -2857,6 +3260,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             <View style={styles.inputWrapper}>
               <ChatTextInput
                 ref={chatInputRef}
+                nativeID={composerNativeID}
                 value={inputText}
                 onChangeText={setInputText}
                 onSend={sendMessage}
@@ -2868,11 +3272,16 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                 // for givers, Swelly purple (same as Swelly chat user bubbles) otherwise.
                 primaryColor={composerPrimaryColor}
                 leftAccessory={
-                  <TouchableOpacity style={styles.attachButton} onPress={handleImagePicker}>
+                  <TouchableOpacity
+                    style={styles.attachButton}
+                    onPress={handleImagePicker}
+                    hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
+                  >
                     <Ionicons name="add" size={28} color="#222B30" />
                   </TouchableOpacity>
                 }
               />
+            </View>
             </View>
           </Reanimated.View>
         );
@@ -2894,7 +3303,12 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         return (
           <View style={styles.chatContainer}>
             {useGestureArea ? (
-              <KeyboardGestureArea interpolator="ios" style={{ flex: 1 }}>
+              <KeyboardGestureArea
+                interpolator="linear"
+                textInputNativeID={composerNativeID}
+                offset={composerHeight}
+                style={{ flex: 1 }}
+              >
                 {inner}
               </KeyboardGestureArea>
             ) : (
@@ -3061,10 +3475,14 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
           onSend={handleImageSend}
           onCancel={() => {
             selectedImageUriForUploadRef.current = null;
+            selectedImageDimensionsRef.current = { width: 0, height: 0 };
             setImagePreviewVisible(false);
             setSelectedImageUri(null);
             setIsProcessingImage(false);
           }}
+          // The cropper module is native-only. On web / Expo Go we leave
+          // onEdit undefined so the modal hides the Edit button.
+          onEdit={Platform.OS !== 'web' && getImageCropPicker() ? handleEditImage : undefined}
           isProcessing={isProcessingImage}
           primaryColor={composerPrimaryColor}
         />
@@ -3117,6 +3535,20 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   );
 };
 
+// Match the bubble max-width to the composer's text-wrapping width so a
+// paragraph typed in the input bar wraps at exactly the same line breaks
+// when rendered as a message. Math: screenWidth
+//   − 16 (inputWrapper paddingHorizontal × 2)
+//   − 36 (attach button: 28 icon + 8 marginRight)
+//   − 18 (messageInputContainer paddingLeft 10 + paddingRight 8)
+//   − 40 (send button 32 + marginLeft 8)
+//   − 8  (inputContainer paddingRight)
+//   − 8  (TextInput paddingLeft)
+//   = screenWidth − 126 → composer text-wrap width.
+// Bubble has paddingHorizontal 10 × 2 = 20, so bubble max-width
+//   = (screenWidth − 126) + 20 = screenWidth − 106.
+const MESSAGE_BUBBLE_MAX_WIDTH = Dimensions.get('window').width - 106;
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -3124,8 +3556,8 @@ const styles = StyleSheet.create({
   },
   headerContainer: {
     backgroundColor: '#212121',
-    paddingTop: Platform.OS === 'web' ? 35 : 10,
-    paddingBottom: 24,
+    paddingTop: Platform.OS === 'web' ? 24 : 12,
+    paddingBottom: 14,
     paddingHorizontal: 0,
     alignItems: 'center',
     position: 'relative',
@@ -3222,8 +3654,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#05BCD3', // Teal/cyan color from Figma
   },
   menuButton: {
-    width: 24,
-    height: 24,
+    width: 36,
+    height: 36,
+    borderRadius: 40,
+    backgroundColor: '#333333',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -3277,7 +3711,8 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   messagesContent: {
-    padding: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingTop: 0,
     paddingBottom: spacing.lg,
   },
   loadOlderContainer: {
@@ -3327,15 +3762,15 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     paddingLeft: 48,
     paddingRight: 0,
-    marginBottom: 16,
+    marginBottom: 0,
   },
   botMessageContainer: {
     flexDirection: 'row',
-    justifyContent: 'flex-start', 
+    justifyContent: 'flex-start',
     alignItems: 'flex-end',
     paddingLeft: 0,
     paddingRight: 60,
-    marginBottom: 16,
+    marginBottom: 0,
   },
   botMessageContainerDirect: {
     // For direct messages (no avatar), reduce right padding
@@ -3361,14 +3796,14 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   messageBubble: {
-    maxWidth: 268,
+    maxWidth: MESSAGE_BUBBLE_MAX_WIDTH,
     flexDirection: 'column',
   },
   userMessageBubble: {
-    maxWidth: 268,
+    maxWidth: MESSAGE_BUBBLE_MAX_WIDTH,
     paddingTop: 8,
     paddingRight: 10,
-    paddingBottom: 6,
+    paddingBottom: 8,
     paddingLeft: 10,
     flexDirection: 'column',
     justifyContent: 'flex-end',
@@ -3392,7 +3827,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.white, // Default, will be overridden by adv_role styles
     paddingTop: 8,
     paddingHorizontal: 10,
-    paddingBottom: 6,
+    paddingBottom: 8,
     flexDirection: 'column',
     justifyContent: 'flex-end',
     alignItems: 'flex-start', // Changed from flex-end to flex-start for proper alignment
@@ -3434,17 +3869,17 @@ const styles = StyleSheet.create({
   },
   userMessageText: {
     color: '#333333', // Dark text on white background for outbound messages
-    fontSize: 16,
-    fontWeight: '500',
+    fontSize: 17,
+    fontWeight: '400',
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
-    lineHeight: 21,
+    lineHeight: 22,
   },
   botMessageText: {
-    color: '#333333', // Figma: text-[color:var(--text\/primary,#333333)]
-    fontSize: 16, // Figma: text-[length:var(--size\/xs,16px)]
-    fontWeight: '500', // Figma: font-medium
+    color: '#333333',
+    fontSize: 17,
+    fontWeight: '400',
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
-    lineHeight: 21, // Figma: leading-[normal]
+    lineHeight: 22,
   },
   botMessageTextGiveAdv: {
     color: '#333333', // Dark text on #DBCDBC (beige) background for adv_giver
@@ -3464,10 +3899,12 @@ const styles = StyleSheet.create({
     marginTop: 2, // Match sent-message vertical spacing
   },
   timestamp: {
-    fontSize: 13, // Figma: text-[length:var(--size\/xxs,14px)]
-    fontWeight: '400', // Figma: font-normal
+    fontSize: 13,
+    fontWeight: '300',
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
-    lineHeight: 20, // Figma: leading-[20px]
+    // Tighter lineHeight pulls the timestamp visually closer to the bubble's
+    // bottom edge — at 20 the line box reserved extra space above/below.
+    lineHeight: 15,
   },
   userTimestamp: {
     color: 'rgba(60, 60, 60, 0.75)', // Darker timestamp for better contrast on outbound (brown) bubbles
@@ -3480,7 +3917,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     paddingHorizontal: 8,
    // paddingBottom: Platform.OS === 'android' ? 50 : 35,
-    paddingTop: 0,
+    paddingTop: 10,
   },
   attachButtonWrapper: {
     paddingBottom: 15,
@@ -3576,7 +4013,7 @@ const styles = StyleSheet.create({
   },
   imageTimestampOverlay: {
     position: 'absolute',
-    bottom: 6,
+    bottom: 4,
     right: 8,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     borderRadius: 8,
@@ -3584,8 +4021,8 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   imageTimestamp: {
-    fontSize: 11,
-    fontWeight: '400',
+    fontSize: 13,
+    fontWeight: '300',
     color: '#FFFFFF',
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
   },

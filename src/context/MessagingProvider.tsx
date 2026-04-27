@@ -323,7 +323,12 @@ const conversationReducer = (state: Conversation[], action: ConversationAction):
       const serverMap = new Map(serverConversations.map(c => [c.id, c]));
       return state.map(local => {
         const server = serverMap.get(local.id);
-        return server || local;
+        if (!server) return local;
+        return {
+          ...server,
+          other_user: server.other_user ?? local.other_user,
+          members: server.members ?? local.members,
+        };
       }).concat(
         serverConversations.filter(s => !state.some(l => l.id === s.id))
       ).sort((a, b) => 

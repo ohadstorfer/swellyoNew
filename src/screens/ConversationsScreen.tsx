@@ -88,7 +88,7 @@ const TUTORIAL_MOCK_CONVERSATION: Conversation = {
 // Three Dots Menu Icon Component
 const ThreeDotsIcon: React.FC = () => {
   return (
-    <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
+    <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
       <Path
         d="M12 13C12.5523 13 13 12.5523 13 12C13 11.4477 12.5523 11 12 11C11.4477 11 11 11.4477 11 12C11 12.5523 11.4477 13 12 13Z"
         stroke="#7B7B7B"
@@ -165,6 +165,23 @@ const SwellyEllipse: React.FC = () => {
       <Path
         d="M30.8242 0.75C47.4452 0.75 60.8984 14.4406 60.8984 31.3027C60.8983 48.1648 47.4451 61.8545 30.8242 61.8545C14.2034 61.8544 0.75014 48.1648 0.75 31.3027C0.75 14.4406 14.2033 0.750059 30.8242 0.75Z"
         fill="#D9D9D9"
+        stroke="#B72DF2"
+        strokeWidth="1.5"
+      />
+    </Svg>
+  );
+};
+
+// Swelly Ellipse BOTTOM arc only — rendered ON TOP of the avatar image so the
+// purple line at the bottom of the ring sits in front of the image (image
+// bottom appears behind the line). The top arc stays behind the image
+// (rendered by SwellyEllipse), so the head/hair pops above the purple line.
+const SwellyEllipseStroke: React.FC = () => {
+  return (
+    <Svg width={62} height={63} viewBox="0 0 62 63" fill="none">
+      <Path
+        d="M60.8984 31.3027C60.8983 48.1648 47.4451 61.8545 30.8242 61.8545C14.2034 61.8544 0.75014 48.1648 0.75 31.3027"
+        fill="none"
         stroke="#B72DF2"
         strokeWidth="1.5"
       />
@@ -1090,6 +1107,9 @@ export default function ConversationsScreen({
                   resizeMode="cover"
                 />
               </View>
+              <View style={styles.swellyEllipseForeground} pointerEvents="none">
+                <SwellyEllipseStroke />
+              </View>
             </View>
           </View>
 
@@ -1100,7 +1120,7 @@ export default function ConversationsScreen({
               styles.swellyLastMessage,
               Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
             ]} numberOfLines={1}>
-              Yo! Let's get you connected with some other surf travelers!
+              Let's explore new surfers!
             </Text>
           </View>
         </View>
@@ -1408,6 +1428,9 @@ export default function ConversationsScreen({
                       resizeMode="cover"
                     />
                   </View>
+                  <View style={styles.swellyEllipseForeground} pointerEvents="none">
+                    <SwellyEllipseStroke />
+                  </View>
                 </View>
               </View>
               <View style={styles.swellyTextContainer}>
@@ -1688,7 +1711,7 @@ const styles = StyleSheet.create({
   },
   contentInner: {
     flex: 1,
-    paddingTop: 24,
+    paddingTop: 0,
     paddingBottom: 32,
   },
   searchBarContainer: {
@@ -1717,8 +1740,8 @@ const styles = StyleSheet.create({
   },
   header: {
     backgroundColor: '#212121',
-    paddingTop: Platform.OS === 'web' ? 35 : 35,
-    paddingBottom: 24,
+    paddingTop: Platform.OS === 'web' ? 24 : 12,
+    paddingBottom: 20,
     paddingHorizontal: 16,
     flexDirection: 'row',
     alignItems: 'center',
@@ -1738,16 +1761,16 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   headerAvatarBorder: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 46,
+    height: 46,
+    borderRadius: 23,
     alignItems: 'center',
     justifyContent: 'center',
   },
   headerAvatar: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     marginRight: 0,
   },
   headerTitleContainer: {
@@ -1769,9 +1792,9 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   headerButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 48,
+    width: 36,
+    height: 36,
+    borderRadius: 40,
     backgroundColor: '#333333',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1779,7 +1802,7 @@ const styles = StyleSheet.create({
   filterContainer: {
     flexDirection: 'row',
     paddingHorizontal: 16,
-    paddingTop: 18,
+    paddingTop: 20,
     paddingBottom: 4,
     gap: 8,
   },
@@ -1787,12 +1810,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 5,
     borderRadius: 32,
-    height: 46,
+    height: 41,
     borderWidth: 1,
-    gap: 10,
+    gap: 9,
   },
   filterButtonActive: {
     ...(Platform.OS === 'web' ? {
@@ -1846,7 +1869,7 @@ const styles = StyleSheet.create({
   },
   conversationsListContent: {
     paddingHorizontal: 16,
-    paddingTop: 16,
+    paddingTop: 8,
     paddingBottom: 120, // Space for Swelly card at bottom
     gap: 0,
   },
@@ -2004,7 +2027,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '400',
     lineHeight: 15,
-    color: '#212121',
+    color: 'rgba(60, 60, 60, 0.5)',
     textAlign: 'right',
     // CSS variable applied via inline style on web
   },
@@ -2109,6 +2132,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  swellyEllipseForeground: {
+    position: 'absolute',
+    // Same geometry as swellyEllipseBackground so the stroke aligns perfectly
+    // with the gray ellipse behind. Rendered on top (zIndex 2) so the purple
+    // ring sits in front of the avatar image — bottom of image goes behind
+    // the line, while the top still pokes above it.
+    width: '105%',
+    height: '105%',
+    top: '-2.5%',
+    left: '-2.5%',
+    zIndex: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   swellyAvatarImageContainer: {
     position: 'absolute',
     // Container for the avatar image, centered horizontally
@@ -2116,10 +2153,10 @@ const styles = StyleSheet.create({
     // Ellipse is 62px wide, so center 75px: (62 - 75) / 2 = -6.5px
     width: 75,
     height: 75,
-    left: -6.1, 
-    top: -5.1, 
+    left: -6.1,
+    top: -7,
     overflow: 'hidden',
-    zIndex: 1, 
+    zIndex: 1,
   },
   swellyAvatarImage: {
     // Image dimensions: 75px width and height

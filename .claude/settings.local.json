@@ -129,7 +129,9 @@
       "WebFetch(domain:highscalability.com)",
       "WebFetch(domain:signal.org)",
       "Bash(xcrun simctl *)",
-      "WebFetch(domain:kirillzyusko.github.io)"
+      "WebFetch(domain:kirillzyusko.github.io)",
+      "WebFetch(domain:reactiive.io)",
+      "WebFetch(domain:docs.swmansion.com)"
     ]
   }
 }

@@ -46,11 +46,11 @@ export interface UploadProgress {
 
 const PENDING_UPLOAD_KEY_PREFIX = '@pending_upload_';
 const MAX_RETRIES = 3;
-const MAX_IMAGE_SIZE_MB = 10;
-const MAX_IMAGE_DIMENSIONS = 2048;
-const THUMBNAIL_WIDTH = 300;
-const ORIGINAL_JPEG_QUALITY = 0.85;
-const THUMBNAIL_JPEG_QUALITY = 0.8;
+const MAX_IMAGE_SIZE_MB = 15;
+const MAX_IMAGE_DIMENSIONS = 2560;
+const THUMBNAIL_WIDTH = 600;
+const ORIGINAL_JPEG_QUALITY = 0.95;
+const THUMBNAIL_JPEG_QUALITY = 0.85;
 
 /**
  * Convert a base64 data URL to a Blob
@@ -344,13 +344,24 @@ export async function processImage(uri: string): Promise<ImageProcessingResult> 
 
     // Compress original
     const compressedUri = await compressImage(uri);
-    
+
     // Generate thumbnail
     const thumbnailUri = await generateThumbnail(compressedUri);
-    
+
     // Get final dimensions and size
     const dimensions = await getImageDimensions(compressedUri);
     const finalSize = await getFileSize(compressedUri);
+
+    console.log('[imageUploadService] 📸 processed image', {
+      sourceFileSize: fileSize,
+      sourceFileSizeKB: Math.round(fileSize / 1024),
+      finalFileSize: finalSize,
+      finalFileSizeKB: Math.round(finalSize / 1024),
+      finalWidth: dimensions.width,
+      finalHeight: dimensions.height,
+      qualityUsed: ORIGINAL_JPEG_QUALITY,
+      maxDimUsed: MAX_IMAGE_DIMENSIONS,
+    });
 
     return {
       originalUri: compressedUri,

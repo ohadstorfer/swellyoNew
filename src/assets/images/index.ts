@@ -7,6 +7,7 @@ export const Images = {
   swellyWelcomeMessage: require('./swelly-welcome-message.png'),
   welcomeToLineup: require('./swelly-welcome-to-lineup.png'),
   deleteAccountSurfer: require('./delete-account-surfer.png'),
+  surferPlaceholder: require('./surfer.png'),
   userAvatar1: require('./user-avatar-1.png'),
   userAvatar2: require('./user-avatar-2.png'),
   surfLevel: {

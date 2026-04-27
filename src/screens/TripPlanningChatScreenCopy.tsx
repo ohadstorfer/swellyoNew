@@ -14,9 +14,17 @@ import {
   PanResponder,
   Modal,
   Keyboard,
+  Dimensions,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import Reanimated, { useAnimatedStyle } from 'react-native-reanimated';
+import Reanimated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+  runOnJS,
+  Easing as RnEasing,
+} from 'react-native-reanimated';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller';
 import { isExpoGo } from '../utils/keyboardAvoidingView';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -232,6 +240,13 @@ function getSingleCriterionType(request: TripPlanningRequest): string | null {
   return null;
 }
 
+// Swipe-to-dismiss tuning — matches ProfileScreen so the gesture feels the same
+// across screens.
+const SWIPE_SCREEN_WIDTH = Dimensions.get('window').width;
+const SWIPE_DISMISS_DISTANCE = SWIPE_SCREEN_WIDTH * 0.3;
+const SWIPE_DISMISS_VELOCITY = 800;
+const SWIPE_ANIMATION_DURATION = 220;
+
 interface TripPlanningChatScreenProps {
   onChatComplete?: () => void;
   onViewUserProfile?: (userId: string, fromTripPlanningChat?: boolean) => void;
@@ -279,12 +294,99 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   const [filtersMenuVisible, setFiltersMenuVisible] = useState(false);
   const [isAwaitingFilterRemovalResponse, setAwaitingFilterRemovalResponse] = useState(false);
 
+  // ─── Swipe-to-dismiss (matches ProfileScreen pattern) ─────────────────────
+  // Entry: starts off-screen right + opacity 0, animates in. Exit: rightward
+  // pan past threshold OR a flick velocity → calls onChatComplete (which is
+  // wired to setShowTripPlanningChatCopy(false) in AppContent).
+  const swipeTranslateX = useSharedValue(SWIPE_SCREEN_WIDTH);
+  const swipeOpacity = useSharedValue(0);
+  const touchStartX = useSharedValue(0);
+  const touchStartY = useSharedValue(0);
+
+  useEffect(() => {
+    swipeTranslateX.value = withTiming(0, {
+      duration: 450,
+      easing: RnEasing.out(RnEasing.cubic),
+    });
+    swipeOpacity.value = withTiming(1, { duration: 450 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleSwipeDismiss = useCallback(() => {
+    Keyboard.dismiss();
+    onChatComplete?.();
+  }, [onChatComplete]);
+
+  const swipeGesture = useMemo(
+    () =>
+      Gesture.Pan()
+        .enabled(Platform.OS !== 'web')
+        .manualActivation(true)
+        .onTouchesDown((event) => {
+          'worklet';
+          if (event.allTouches.length > 0) {
+            touchStartX.value = event.allTouches[0].absoluteX;
+            touchStartY.value = event.allTouches[0].absoluteY;
+          }
+        })
+        .onTouchesMove((event, manager) => {
+          'worklet';
+          if (event.allTouches.length === 0) return;
+          const touch = event.allTouches[0];
+          const dx = touch.absoluteX - touchStartX.value;
+          const dy = touch.absoluteY - touchStartY.value;
+          const absX = Math.abs(dx);
+          const absY = Math.abs(dy);
+          if (Math.max(absX, absY) < 5) return;
+          if (absY > absX) {
+            manager.fail();
+            return;
+          }
+          if (dx > 0) {
+            manager.activate();
+          } else {
+            manager.fail();
+          }
+        })
+        .onUpdate((e) => {
+          'worklet';
+          if (e.translationX > 0) {
+            swipeTranslateX.value = e.translationX;
+          }
+        })
+        .onEnd((e) => {
+          'worklet';
+          const shouldDismiss =
+            e.translationX > SWIPE_DISMISS_DISTANCE || e.velocityX > SWIPE_DISMISS_VELOCITY;
+          if (shouldDismiss) {
+            swipeTranslateX.value = withTiming(
+              SWIPE_SCREEN_WIDTH,
+              { duration: SWIPE_ANIMATION_DURATION },
+              (finished) => {
+                if (finished) runOnJS(handleSwipeDismiss)();
+              },
+            );
+          } else {
+            swipeTranslateX.value = withTiming(0, { duration: SWIPE_ANIMATION_DURATION });
+          }
+        }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [handleSwipeDismiss],
+  );
+
+  const animatedSwipeStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: swipeTranslateX.value }],
+    opacity: swipeOpacity.value,
+  }));
+  // ──────────────────────────────────────────────────────────────────────────
+
   // ——— Welcome Guide (tutorial overlay) ———
   const tutorial = useTutorial();
   const filtersButtonRef = useRef<View>(null);
   const filtersChipsRowRef = useRef<View>(null);
   const [filtersButtonRect, setFiltersButtonRect] = useState<AnchorRect | null>(null);
   const [filtersChipsRect, setFiltersChipsRect] = useState<AnchorRect | null>(null);
+  const [trashZoneRect, setTrashZoneRect] = useState<AnchorRect | null>(null);
 
   const measureFiltersButton = () => {
     filtersButtonRef.current?.measureInWindow?.((x, y, width, height) => {
@@ -331,7 +433,13 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
       // y-offset, which makes the spotlight sit too low relative to the
       // chips — not enough space above the first chip, too much below the
       // last. Wait for the slide-in to finish plus a small buffer.
-      const t = setTimeout(measureFiltersChips, 420);
+      const t = setTimeout(() => {
+        measureFiltersChips();
+        trashZoneRef.current?.measureInWindow?.((x: number, y: number, width: number, height: number) => {
+          trashZoneBounds.current = { x, y, width, height };
+          setTrashZoneRect({ x, y, width, height });
+        });
+      }, 420);
       return () => clearTimeout(t);
     }
   }, [tutorial.currentStep, filtersMenuVisible]);
@@ -1967,9 +2075,20 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
 
   const invertedMessages = useMemo(() => [...messages].reverse(), [messages]);
 
-  const renderItem = useCallback(({ item }: { item: Message }) => {
-    return renderMessage(item);
-  }, [messages, matchedUsers, filtersMenuVisible, pendingSearch, chatId, searchBtnSize, filterDisplayList, reportSheetVisible, reportMessageId]);
+  const renderItem = useCallback(({ item, index }: { item: Message; index: number }) => {
+    // Inverted list: cell[i].marginBottom creates the visible gap between cell[i]
+    // (older, above visually) and cell[i-1] (newer, below visually). Compare with
+    // the newer neighbor to decide same/different sender. Newest (index 0) sets
+    // marginBottom to 0 — the composer's inputWrapper paddingTop owns that gap.
+    const newerMessage = invertedMessages[index - 1];
+    const sameSender = !!newerMessage && newerMessage.isUser === item.isUser;
+    const messageGap = index === 0 ? 0 : (sameSender ? 3 : 9);
+    return (
+      <View style={{ marginBottom: messageGap }}>
+        {renderMessage(item)}
+      </View>
+    );
+  }, [messages, matchedUsers, filtersMenuVisible, pendingSearch, chatId, searchBtnSize, filterDisplayList, reportSheetVisible, reportMessageId, invertedMessages]);
 
   const listHeaderComponent = useMemo(() => {
     if (!isLoading && !isInitializing && !isAwaitingFilterRemovalResponse) return null;
@@ -1985,10 +2104,21 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   }, [isLoading, isInitializing, isAwaitingFilterRemovalResponse]);
 
   return (
-    <>
+    <GestureDetector gesture={swipeGesture}>
+    <Reanimated.View
+      style={[
+        { flex: 1 },
+        // Frame-0 fallback before the worklet kicks in: keeps the screen
+        // off-screen and invisible so there's no flash of the un-animated
+        // background while mounting.
+        { opacity: 0, transform: [{ translateX: SWIPE_SCREEN_WIDTH }] },
+        animatedSwipeStyle,
+      ]}
+    >
     <SafeAreaView style={[styles.container, { backgroundColor: colors.white }]} edges={['top']}>
       {/* Header */}
       <View style={styles.headerContainer}>
+        <View style={styles.headerBottomLine} pointerEvents="none" />
         <View style={styles.header}>
           <View style={styles.headerLeft}>
             <TouchableOpacity 
@@ -2002,15 +2132,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             
             <View style={styles.avatar}>
               <View style={styles.avatarRing}>
-                {Platform.OS === 'web' ? (
-                  <Image
-                    source={{ uri: getImageUrl('/Ellipse 11.svg') }}
-                    style={styles.ellipseBackground}
-                    resizeMode="contain"
-                  />
-                ) : (
-                  <View style={styles.ellipseBackgroundNative} />
-                )}
+                <View style={styles.ellipseBackgroundNative} />
                 <View style={styles.avatarImageContainer}>
                   <Image
                     source={Images.swellyAvatar}
@@ -2072,7 +2194,12 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
           collapsable={false}
         >
           <TouchableOpacity
-            onPress={() => setFiltersMenuVisible(true)}
+            onPress={() => {
+              setFiltersMenuVisible(true);
+              if (tutorial.currentStep === 3) {
+                tutorial.advance();
+              }
+            }}
             activeOpacity={1}
             style={styles.filtersButtonPill}
           >
@@ -2253,17 +2380,18 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
                 onLayout={() => {
                   trashZoneRef.current?.measureInWindow?.((x: number, y: number, width: number, height: number) => {
                     trashZoneBounds.current = { x, y, width, height };
+                    setTrashZoneRect({ x, y, width, height });
                   });
                 }}
               >
-                <Text style={styles.filtersDragZoneText}>Drag to Delete</Text>
+                <Text style={styles.filtersDragZoneText}>Drag to Recycle</Text>
                 <Animated.View
                   style={[
                     styles.filtersDragZoneTrash,
                     {
                       backgroundColor: trashProgressAnim.interpolate({
                         inputRange: [0, 1],
-                        outputRange: ['rgba(255,255,255,0.10)', 'rgba(0,0,0,0.60)'],
+                        outputRange: ['rgba(255,255,255,1)', 'rgba(0,0,0,0.60)'],
                       }),
                       transform: [
                         {
@@ -2417,9 +2545,46 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         arrowDirection="up"
         arrowGap={tutorial.currentStep === 4 ? 14 : 6}
         cardGap={tutorial.currentStep === 4 ? 8 : 2}
+        extraContent={
+          tutorial.currentStep === 4 && trashZoneRect ? (
+            <View
+              pointerEvents="none"
+              style={{
+                position: 'absolute',
+                left: trashZoneRect.x,
+                top: trashZoneRect.y,
+                width: trashZoneRect.width,
+                height: trashZoneRect.height,
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <Text style={styles.tutorialRecycleLabel}>Drag to Recycle</Text>
+              <View style={styles.tutorialRecycleBin}>
+                <Svg width={48} height={48} viewBox="0 0 48 48" fill="none">
+                  <Path
+                    d="M8 9H41M38.5 9L37.0974 30.0386C36.887 33.1951 36.7818 34.7733 36.1 35.97C35.4998 37.0236 34.5945 37.8706 33.5033 38.3994C32.2639 39 30.6822 39 27.5187 39H21.4813C18.3178 39 16.7361 39 15.4967 38.3994C14.4055 37.8706 13.5002 37.0236 12.9 35.97C12.2182 34.7733 12.113 33.1951 11.9026 30.0386L10.5 9"
+                    stroke="#212121"
+                    strokeWidth={2}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  <Path
+                    d="M25.3594 28.965H28.2324C29.4803 28.965 30.1043 28.965 30.4586 28.6999C30.7674 28.4688 30.9635 28.1143 30.997 27.7265C31.0353 27.2818 30.71 26.742 30.0593 25.6624L29.3923 24.5558M20.7632 23.2705L19.3215 25.6624C18.6708 26.742 18.3455 27.2818 18.3838 27.7265C18.4173 28.1143 18.6134 28.4688 18.9222 28.6999C19.2765 28.965 19.9005 28.965 21.1484 28.965H22.3488M27.9613 22.1816L26.5172 19.7858C25.9132 18.7837 25.6112 18.2827 25.2224 18.1118C24.883 17.9627 24.4978 17.9627 24.1584 18.1118C23.7696 18.2827 23.4676 18.7837 22.8636 19.7858L22.1813 20.9178M28.7046 19.4683L27.97 22.2482L25.2282 21.5033M18 23.944L20.7418 23.1991L21.4764 25.979M27.032 31L25.0249 28.965L27.032 26.93"
+                    stroke="#212121"
+                    strokeWidth={1.5}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </Svg>
+              </View>
+            </View>
+          ) : null
+        }
       />
     </SafeAreaView>
-    </>
+    </Reanimated.View>
+    </GestureDetector>
   );
 };
 
@@ -2430,17 +2595,28 @@ const styles = StyleSheet.create({
   },
   headerContainer: {
     backgroundColor: colors.white,
-    paddingTop: Platform.OS === 'web' ? 40 : 0,
-    paddingBottom: 0,
+    // Tight padding so total header height (paddingTop + 68px avatar + paddingBottom)
+    // matches DM's 78px (native) / 90px (web). The Swelly avatar is taller than
+    // DM's, so the padding has to give back the difference.
+    paddingTop: Platform.OS === 'web' ? 10 : 0,
+    paddingBottom: Platform.OS === 'web' ? 12 : 10,
     paddingHorizontal: 0,
     alignItems: 'center',
+    position: 'relative',
+  },
+  headerBottomLine: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 4,
+    backgroundColor: 'rgba(183, 45, 242, 0.75)',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     width: '100%',
     paddingHorizontal: spacing.md,
-    marginBottom: 12,
   },
   headerLeft: {
     flexDirection: 'row',
@@ -2494,17 +2670,17 @@ const styles = StyleSheet.create({
     zIndex: 0,
     borderRadius: 45,
     borderWidth: 2,
-    borderColor: '#B72DF2',
+    borderColor: 'rgba(34, 43, 48, 0.5)',
     backgroundColor: '#E0E0E0',
   },
   avatarImageContainer: {
     position: 'absolute',
     width: 75,
     height: 75,
-    left: -6.1, 
-    top: -5.1, 
+    left: -6.1,
+    top: -5.1,
     overflow: 'hidden',
-    zIndex: 1, 
+    zIndex: 1,
   },
   avatarImage: {
     width: 75,
@@ -2519,10 +2695,10 @@ const styles = StyleSheet.create({
     marginRight: spacing.sm,
   },
   profileName: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: '700',
-    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat',
-    lineHeight: 24,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter-Bold',
+    lineHeight: 28,
     color: '#333333',
     marginBottom: 2,
   },
@@ -2553,9 +2729,9 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   messagesContent: {
-    padding: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingTop: 0,
     paddingBottom: spacing.lg,
-    gap: 16,
   },
   matchedUsersContainer: {
     marginBottom: 16,
@@ -2648,7 +2824,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     paddingHorizontal: 8,
     paddingBottom: Platform.OS === 'android' ? 0 : 0,
-    paddingTop: 0,
+    paddingTop: 10,
   },
   attachButtonWrapper: {
     paddingBottom: 15,
@@ -2845,12 +3021,29 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   filtersDragZoneTrash: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
+    width: 68,
+    height: 68,
+    borderRadius: 34,
     borderWidth: 2,
     borderColor: '#333',
-    backgroundColor: 'rgba(255, 255, 255, 0.10)',
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tutorialRecycleLabel: {
+    fontFamily: Platform.OS === 'web' ? 'var(--Family-Body, Inter), sans-serif' : 'Inter',
+    fontSize: 14,
+    lineHeight: 18,
+    color: '#FFFFFF',
+    marginBottom: 8,
+  },
+  tutorialRecycleBin: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    borderWidth: 2,
+    borderColor: '#333',
+    backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
   },

@@ -12,14 +12,15 @@ import {
   TouchableOpacity,
   StyleSheet,
   Platform,
-  LayoutAnimation,
-  UIManager,
 } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
 import { colors } from '../styles/theme';
 import { useKeyboardVisible } from '../hooks/useKeyboardVisible';
 
@@ -28,7 +29,9 @@ const KEYBOARD_GAP = 4;
 // Height constants (WhatsApp/Instagram pattern): padding + (lineCount × line height)
 // Ensure BASE_HEIGHT + (1 * LINE_HEIGHT) === MIN_INPUT_HEIGHT to avoid twitch between effect and onContentSizeChange
 const INPUT_PADDING_VERTICAL = 10;
-const LINE_HEIGHT = 20;
+// 22 matches the message bubble text lineHeight so a paragraph wraps the
+// same number of lines in the composer and in the sent bubble.
+const LINE_HEIGHT = 22;
 const BASE_HEIGHT = INPUT_PADDING_VERTICAL * 2;
 const MIN_LINES = 1;
 const MAX_LINES = 5;
@@ -36,6 +39,13 @@ const MIN_INPUT_HEIGHT = BASE_HEIGHT + LINE_HEIGHT; // 40, same as BASE_HEIGHT +
 const MAX_INPUT_HEIGHT = BASE_HEIGHT + MAX_LINES * LINE_HEIGHT; // 120
 
 const SEND_ICON_SIZE = 20;
+
+// Composer shrink duration on send. Set to 2000 to put it in slow-mo for
+// visual debugging (see memory: chat_animation_slowmo_knobs.md).
+const SEND_SHRINK_DURATION_MS = 180;
+// Vertical padding on messageInputContainer (paddingTop + paddingBottom).
+// Used to translate input content height ↔ container outer height.
+const MESSAGE_CONTAINER_VPADDING = 8;
 
 const SendIcon = ({ color = '#FFFFFF' }: { color?: string }) => (
   <Svg width={SEND_ICON_SIZE} height={SEND_ICON_SIZE} viewBox="0 0 24 24" fill="none">
@@ -66,6 +76,10 @@ export interface ChatTextInputProps {
    * previews use this so users can send a media file without a caption. */
   allowEmpty?: boolean;
   testID?: string;
+  /** Native view id — required when pairing with KeyboardGestureArea's
+   * `textInputNativeID` to extend the interactive-dismiss zone up to the
+   * composer (so dragging from inside the composer also moves the keyboard). */
+  nativeID?: string;
 }
 
 export interface ChatTextInputRef {
@@ -88,6 +102,7 @@ export const ChatTextInput = forwardRef<ChatTextInputRef, ChatTextInputProps>(fu
     placeholderColor,
     allowEmpty = false,
     testID,
+    nativeID,
   },
   ref
 ) {
@@ -97,6 +112,28 @@ export const ChatTextInput = forwardRef<ChatTextInputRef, ChatTextInputProps>(fu
   const [inputHeight, setInputHeight] = useState<number>(MIN_INPUT_HEIGHT);
   const [measureWidth, setMeasureWidth] = useState<number>(0);
   const keyboardVisible = useKeyboardVisible();
+
+  // While typing, Yoga drives the container height naturally from TextInput's
+  // multiline auto-grow. For the post-send shrink we need explicit control:
+  // iOS's UITextView collapses its frame immediately when value clears,
+  // before Reanimated's layout-transition system can snapshot a size change.
+  //
+  // We use minHeight (not height) for the override. Reasons:
+  //  - Reanimated doesn't reliably "release" a height prop when the animated
+  //    style returns undefined — the last value sticks, and Yoga can't
+  //    reclaim. With minHeight we always return a real number (0 when not
+  //    shrinking), so the constraint is removed cleanly.
+  //  - During shrink the TextInput is empty (40px intrinsic), so
+  //    max(content, minHeight) === minHeight — the container follows the
+  //    animation. When minHeight goes back to 0, Yoga drives freely.
+  const isShrinkingFromSendSv = useSharedValue<boolean>(false);
+  const shrinkHeightSv = useSharedValue<number>(
+    MIN_INPUT_HEIGHT + MESSAGE_CONTAINER_VPADDING
+  );
+
+  const shrinkAnimatedStyle = useAnimatedStyle(() => ({
+    minHeight: isShrinkingFromSendSv.value ? shrinkHeightSv.value : 0,
+  }));
 
   useImperativeHandle(
     ref,
@@ -136,9 +173,6 @@ export const ChatTextInput = forwardRef<ChatTextInputRef, ChatTextInputProps>(fu
       );
       // Tolerance: ignore sub-pixel/1px deltas to avoid flicker loops on iOS
       if (Math.abs(cappedHeight - inputHeight) >= 2) {
-        if (Platform.OS !== 'web') {
-          LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-        }
         setInputHeight(cappedHeight);
       }
     },
@@ -162,6 +196,28 @@ export const ChatTextInput = forwardRef<ChatTextInputRef, ChatTextInputProps>(fu
     // from clearing value + LayoutAnimation can blur the TextInput on iOS.
     justSentRef.current = true;
     setTimeout(() => { justSentRef.current = false; }, 400);
+
+    // Slow shrink animation when collapsing the composer back from multi-line
+    // to one line. We seed the SV with the CURRENT natural height (so the
+    // animation starts from where the bar actually is, not from whatever the
+    // SV last held), flip on the override flag, and start the slow timing.
+    // After the animation completes we drop the override; the bar's empty-
+    // content natural height matches the SV's end value, so the handoff is
+    // visually seamless.
+    const wasMultiline = inputHeight > MIN_INPUT_HEIGHT;
+    if (wasMultiline) {
+      const startHeight = inputHeight + MESSAGE_CONTAINER_VPADDING;
+      const targetHeight = MIN_INPUT_HEIGHT + MESSAGE_CONTAINER_VPADDING;
+      shrinkHeightSv.value = startHeight;
+      isShrinkingFromSendSv.value = true;
+      shrinkHeightSv.value = withTiming(targetHeight, {
+        duration: SEND_SHRINK_DURATION_MS,
+        easing: Easing.inOut(Easing.ease),
+      });
+      setTimeout(() => {
+        isShrinkingFromSendSv.value = false;
+      }, SEND_SHRINK_DURATION_MS + 50);
+    }
     setInputHeight(MIN_INPUT_HEIGHT);
     onSend();
     // Synchronous refocus — UIKit collapses this with any pending
@@ -182,10 +238,11 @@ export const ChatTextInput = forwardRef<ChatTextInputRef, ChatTextInputProps>(fu
         <View style={styles.attachButtonWrapper}>{leftAccessory}</View>
       )}
 
-      <View
+      <Animated.View
         style={[
           styles.messageInputContainer,
           backgroundColor ? { backgroundColor } : null,
+          shrinkAnimatedStyle,
         ]}
       >
         <View style={styles.inputContainer}>
@@ -206,10 +263,12 @@ export const ChatTextInput = forwardRef<ChatTextInputRef, ChatTextInputProps>(fu
             )}
             <TextInput
               ref={inputRef}
+              nativeID={nativeID}
               style={[
                 styles.inputText,
                 {
-                  // On web, drive height from mirror measurement; on native, let multiline auto-size
+                  // On web, drive height from mirror measurement; on native, let multiline auto-size.
+                  // The container's animated height owns the visible shrink animation.
                   ...(Platform.OS === 'web' ? { height: inputHeight } : {}),
                   minHeight: MIN_INPUT_HEIGHT,
                   maxHeight: MAX_INPUT_HEIGHT,
@@ -278,7 +337,7 @@ export const ChatTextInput = forwardRef<ChatTextInputRef, ChatTextInputProps>(fu
         >
           <SendIcon color="#FFFFFF" />
         </TouchableOpacity>
-      </View>
+      </Animated.View>
     </View>
   );
 });
@@ -352,7 +411,7 @@ const styles = StyleSheet.create({
   },
   // Mirror uses whiteSpace: pre-wrap on Web so newlines (Enter) are respected and handleWebMeasureLayout sees correct height
   webMeasureText: {
-    fontSize: 16,
+    fontSize: 17,
     lineHeight: LINE_HEIGHT,
     color: colors.textPrimary,
     width: '100%',
@@ -364,7 +423,7 @@ const styles = StyleSheet.create({
   },
   inputText: {
     width: '100%',
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: '400',
     color: colors.textPrimary,
     fontFamily: Platform.OS === 'web' ? undefined : 'Inter',

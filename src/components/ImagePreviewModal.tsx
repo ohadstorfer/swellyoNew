@@ -30,6 +30,8 @@ interface ImagePreviewModalProps {
   imageUri: string;
   onSend: (caption?: string) => void;
   onCancel: () => void;
+  /** When provided, shows an Edit button that opens a native crop/edit flow. */
+  onEdit?: () => void;
   isProcessing?: boolean;
   /** Overrides the default send-button color so the preview matches the host chat's theme. */
   primaryColor?: string;
@@ -53,11 +55,25 @@ const CloseIcon = () => (
   </Svg>
 );
 
+// Pencil — universal "edit" affordance.
+const EditIcon = () => (
+  <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
+    <Path
+      d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"
+      stroke="#FFFFFF"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </Svg>
+);
+
 export const ImagePreviewModal: React.FC<ImagePreviewModalProps> = ({
   visible,
   imageUri,
   onSend,
   onCancel,
+  onEdit,
   isProcessing = false,
   primaryColor = '#B72DF2',
 }) => {
@@ -138,8 +154,10 @@ export const ImagePreviewModal: React.FC<ImagePreviewModalProps> = ({
                 behavior={Platform.OS === 'ios' ? 'padding' : undefined}
                 style={styles.flex}
               >
-                {/* Image fills the available space */}
-                <View style={styles.imageContainer}>
+                {/* Image fills the available space below the notch / status bar.
+                    Without paddingTop, tall portrait shots extend under the
+                    dynamic island; landscape media is unaffected. */}
+                <View style={[styles.imageContainer, { paddingTop: insets.top }]}>
                   <Image
                     source={{ uri: imageUri }}
                     style={styles.image}
@@ -163,6 +181,20 @@ export const ImagePreviewModal: React.FC<ImagePreviewModalProps> = ({
                 >
                   <CloseIcon />
                 </TouchableOpacity>
+
+                {/* Edit button — top-right. Hidden when the host doesn't supply
+                    onEdit (web / Expo Go / cropper module missing). */}
+                {onEdit && (
+                  <TouchableOpacity
+                    style={[styles.editButton, { top: insets.top + 12 }]}
+                    onPress={onEdit}
+                    disabled={isProcessing}
+                    activeOpacity={0.7}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <EditIcon />
+                  </TouchableOpacity>
+                )}
 
                 {/* Caption bar — reuses ChatTextInput so behaviour matches the DM composer exactly */}
                 <View style={[styles.inputWrapper, { paddingBottom: Math.max(insets.bottom, 8) }]}>
@@ -213,6 +245,17 @@ const styles = StyleSheet.create({
   closeButton: {
     position: 'absolute',
     left: 16,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(40, 40, 40, 0.85)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  editButton: {
+    position: 'absolute',
+    right: 16,
     width: 36,
     height: 36,
     borderRadius: 18,
