@@ -7,7 +7,7 @@ import { supabase, isSupabaseConfigured } from '../../config/supabase';
 import { Platform } from 'react-native';
 import { VideoMetadata } from './messagingService';
 
-const MAX_VIDEO_SIZE_MB = 50;
+const MAX_VIDEO_SIZE_MB = 250;
 const MAX_VIDEO_DURATION_SECONDS = 120; // 2 minutes for DMs
 
 export interface VideoProcessingResult {
@@ -375,8 +375,8 @@ export async function pollForProcessedDmVideo(
   videoMetadata: Omit<VideoMetadata, 'video_url'>,
 ): Promise<void> {
   const functionUrl = getEdgeFunctionUrl();
-  const maxAttempts = 12;
-  const delayMs = 15000; // 15 seconds
+  const maxAttempts = 28;
+  const delayMs = 15000; // 15 seconds (28 × 15s ≈ 7 min, sized for 250 MB videos)
 
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return;

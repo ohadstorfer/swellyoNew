@@ -4,7 +4,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 /**
  * Video Validation Constants
  */
-export const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
+export const MAX_FILE_SIZE = 250 * 1024 * 1024; // 250MB
 export const MAX_DURATION_SECONDS = 20; // 20 seconds (UI limit)
 export const ALLOWED_MIME_TYPES = ['video/mp4', 'video/quicktime', 'video/webm', 'video/x-msvideo'];
 export const ALLOWED_EXTENSIONS = ['.mp4', '.mov', '.webm', '.avi'];

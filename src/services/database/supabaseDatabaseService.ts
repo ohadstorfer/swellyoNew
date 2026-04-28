@@ -35,6 +35,7 @@ export interface SupabaseSurfer {
   travel_experience?: number; // number of trips (0-20+), nullable
   bio?: string; // text, nullable
   profile_image_url?: string; // varchar(2048), nullable
+  cover_image_url?: string; // varchar(2048), nullable - per-user profile cover photo
   profile_video_url?: string; // varchar(2048), nullable - URL to user-uploaded custom surf level video
   // Swelly conversation results
   onboarding_summary_text?: string; // text, nullable
@@ -214,6 +215,7 @@ class SupabaseDatabaseService {
     travelExperience?: number; // number of trips (0-20+)
     bio?: string;
     profileImageUrl?: string;
+    coverImageUrl?: string;
     profileVideoUrl?: string; // URL to user-uploaded custom surf level video
     boardType?: number; // Legacy support - will be converted to surfboardType enum
     // Swelly conversation results
@@ -334,6 +336,13 @@ class SupabaseDatabaseService {
         profileImageUrl = profileImageUrl.substring(0, 2048);
       }
 
+      // Truncate cover_image_url if it's too long (max 2048 characters)
+      let coverImageUrl = surferData.coverImageUrl;
+      if (coverImageUrl && coverImageUrl.length > 2048) {
+        console.warn(`Cover image URL is too long (${coverImageUrl.length} chars), truncating to 2048 characters`);
+        coverImageUrl = coverImageUrl.substring(0, 2048);
+      }
+
       // Truncate profile_video_url if it's too long (max 2048 characters)
       let profileVideoUrl = surferData.profileVideoUrl;
       if (profileVideoUrl && profileVideoUrl.length > 2048) {
@@ -373,6 +382,7 @@ class SupabaseDatabaseService {
         travel_experience: surferData.travelExperience,
         bio: surferData.bio,
         profile_image_url: profileImageUrl,
+        ...(coverImageUrl !== undefined && { cover_image_url: coverImageUrl }),
         profile_video_url: profileVideoUrl,
         // Swelly conversation results
         onboarding_summary_text: surferData.onboardingSummaryText,
@@ -578,7 +588,7 @@ class SupabaseDatabaseService {
       // destinations_map does NOT exist - only destinations_array exists
       const { data, error } = await supabase
         .from('surfers')
-        .select('user_id, name, age, pronoun, country_from, surfboard_type, surf_level, surf_level_description, surf_level_category, travel_experience, bio, profile_image_url, profile_video_url, destinations_array, lifestyle_keywords, lifestyle_image_urls, wave_type_keywords, travel_buddies, created_at, updated_at, finished_onboarding')
+        .select('user_id, name, age, pronoun, country_from, surfboard_type, surf_level, surf_level_description, surf_level_category, travel_experience, bio, profile_image_url, cover_image_url, profile_video_url, destinations_array, lifestyle_keywords, lifestyle_image_urls, wave_type_keywords, travel_buddies, created_at, updated_at, finished_onboarding')
         .eq('user_id', userId)
         .single();
 
