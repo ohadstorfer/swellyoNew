@@ -32,12 +32,13 @@ import {
   getCountryImageFromStorage,
   getCountryImageFallback,
 } from '../../services/media/imageService';
-import { uploadCoverImage } from '../../services/storage/storageService';
+import { uploadCoverImage, uploadProfileImage } from '../../services/storage/storageService';
 import { ProfileEditSurfStyleScreen } from './ProfileEditSurfStyleScreen';
 import { ProfileEditTravelExperienceScreen } from './ProfileEditTravelExperienceScreen';
 import { ProfileEditSurfSkillScreen } from './ProfileEditSurfSkillScreen';
 import { ProfileEditDestinationScreen } from './ProfileEditDestinationScreen';
 import { CountrySearchModal } from '../CountrySearchModal';
+import AvatarCropModal from '../AvatarCropModal';
 
 type Props = {
   visible: boolean;
@@ -89,6 +90,7 @@ type SaveTarget =
   | 'destination'
   | 'destinationDelete'
   | 'cover'
+  | 'avatar'
   | 'nickname'
   | 'countryFrom';
 
@@ -115,6 +117,8 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
   const [showNicknameModal, setShowNicknameModal] = useState(false);
   const [nicknameDraft, setNicknameDraft] = useState('');
   const [showOriginModal, setShowOriginModal] = useState(false);
+  // Raw URI awaiting crop. `target` decides which upload path runs after crop.
+  const [pendingCrop, setPendingCrop] = useState<{ uri: string; target: 'avatar' | 'cover' } | null>(null);
   const translateX = useRef(new Animated.Value(screenWidth)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
 
@@ -242,7 +246,7 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
         const reader = new FileReader();
         reader.onload = (ev) => {
           const dataUrl = ev.target?.result as string | undefined;
-          if (dataUrl) uploadCover(dataUrl);
+          if (dataUrl) setPendingCrop({ uri: dataUrl, target: 'cover' });
         };
         reader.onerror = () => {
           Alert.alert('Error', 'Could not read the selected file. Please try another.');
@@ -278,12 +282,11 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
         }
       }
 
+      // Pick raw — cropping happens in our in-app modal so users see the exact
+      // 16:9 frame that will appear on the profile.
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
-        // Cover photos are wide; let the user crop to a 16:9 frame so the
-        // result fills the cover container without obvious letterboxing.
-        allowsEditing: true,
-        aspect: [16, 9],
+        allowsEditing: false,
         quality: 1,
       });
 
@@ -292,12 +295,132 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
       const canceled = result.canceled === true || (result as { cancelled?: boolean }).cancelled === true;
       if (canceled || !uri) return;
 
-      uploadCover(uri);
+      setPendingCrop({ uri, target: 'cover' });
     } catch (error: any) {
       console.warn('[ProfileEditPanel] expo-image-picker not available:', error);
       Alert.alert('Image Picker Not Available', 'Could not open the photo picker.');
     }
-  }, [savingTarget, surfer?.user_id, uploadCover]);
+  }, [savingTarget, surfer?.user_id]);
+
+  // Avatar picker mirrors the cover picker above, but with a 1:1 crop and the
+  // profile-image upload path. Kept as a parallel handler (instead of a shared
+  // helper) so that future cover-only or avatar-only tweaks stay isolated.
+  const isAvatarPickerOpenRef = useRef(false);
+  const webAvatarInputRef = useRef<HTMLInputElement | null>(null);
+
+  const uploadAvatar = useCallback(
+    async (uri: string) => {
+      const userId = surfer?.user_id;
+      if (!userId) return;
+      setSavingTarget('avatar');
+      try {
+        const result = await uploadProfileImage(uri, userId);
+        if (!result.success || !result.url) {
+          throw new Error(result.error || 'Upload failed');
+        }
+        const updated = await supabaseDatabaseService.saveSurfer({ profileImageUrl: result.url });
+        updateProfile(updated);
+      } catch (err: any) {
+        console.error('[ProfileEditPanel] Avatar upload failed:', err);
+        Alert.alert('Could not update profile picture', err?.message || 'Please try again.');
+      } finally {
+        setSavingTarget(null);
+      }
+    },
+    [surfer?.user_id, updateProfile],
+  );
+
+  const handlePickAvatar = useCallback(async () => {
+    if (savingTarget === 'avatar') return;
+    if (!surfer?.user_id) return;
+
+    if (Platform.OS === 'web') {
+      if (typeof document === 'undefined' || !document.body) return;
+      if (isAvatarPickerOpenRef.current) return;
+      isAvatarPickerOpenRef.current = true;
+
+      const input = document.createElement('input') as HTMLInputElement;
+      input.type = 'file';
+      input.accept = 'image/*';
+      Object.assign(input.style, {
+        position: 'fixed',
+        left: '-9999px',
+        opacity: '0',
+        pointerEvents: 'none',
+      });
+      webAvatarInputRef.current = input;
+
+      const cleanup = () => {
+        if (webAvatarInputRef.current?.parentNode) {
+          webAvatarInputRef.current.parentNode.removeChild(webAvatarInputRef.current);
+        }
+        webAvatarInputRef.current = null;
+        isAvatarPickerOpenRef.current = false;
+      };
+
+      input.addEventListener('change', (e: Event) => {
+        const target = e.target as HTMLInputElement | null;
+        const file = target?.files?.[0];
+        cleanup();
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          const dataUrl = ev.target?.result as string | undefined;
+          if (dataUrl) setPendingCrop({ uri: dataUrl, target: 'avatar' });
+        };
+        reader.onerror = () => {
+          Alert.alert('Error', 'Could not read the selected file. Please try another.');
+        };
+        reader.readAsDataURL(file);
+      });
+
+      document.body.appendChild(input);
+      input.click();
+      return;
+    }
+
+    try {
+      const ImagePicker = require('expo-image-picker');
+      const usePhotoPicker = Platform.OS === 'android' && (Platform.Version as number) >= 33;
+
+      if (!usePhotoPicker) {
+        const { status, canAskAgain } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (status !== 'granted') {
+          if (!canAskAgain) {
+            Alert.alert(
+              'Permission Required',
+              'Swellyo needs access to your photos. Please enable it in your device settings.',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Open Settings', onPress: () => Linking.openSettings() },
+              ],
+            );
+          } else {
+            Alert.alert('Permission Required', 'Sorry, we need camera roll permissions to update your photo.');
+          }
+          return;
+        }
+      }
+
+      // Pick raw; circular crop UI is rendered in the app, matching how avatar
+      // crop works in onboarding and the main profile screen.
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: false,
+        quality: 1,
+      });
+
+      const asset = result.assets?.[0];
+      const uri = asset?.uri ?? (result as { uri?: string }).uri;
+      const canceled = result.canceled === true || (result as { cancelled?: boolean }).cancelled === true;
+      if (canceled || !uri) return;
+
+      setPendingCrop({ uri, target: 'avatar' });
+    } catch (error: any) {
+      console.warn('[ProfileEditPanel] expo-image-picker not available:', error);
+      Alert.alert('Image Picker Not Available', 'Could not open the photo picker.');
+    }
+  }, [savingTarget, surfer?.user_id]);
 
   const handleDestinationSave = useCallback(
     async (next: { country: string; time_in_days: number; time_in_text: string }) => {
@@ -364,6 +487,7 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
       setShowTravelExperienceEditor(false);
       setShowSurfSkillEditor(false);
       setEditingDestinationIndex(null);
+      setPendingCrop(null);
     }
   }, [visible]);
 
@@ -422,6 +546,7 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
     ? { uri: surfer.cover_image_url }
     : Images.coverImage;
   const isUploadingCover = savingTarget === 'cover';
+  const isUploadingAvatar = savingTarget === 'avatar';
 
   const boardTypeInfo = getBoardTypeInfo(surfer?.surfboard_type);
   const tripCount =
@@ -503,16 +628,35 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
               </View>
 
               <View style={styles.avatarWrap}>
-                <View style={styles.avatarRing}>
-                  {avatarUrl ? (
-                    <Image source={{ uri: avatarUrl }} style={styles.avatarImage} />
-                  ) : (
-                    <View style={[styles.avatarImage, styles.avatarPlaceholder]}>
-                      <Ionicons name="person" size={48} color="#C5C5C5" />
-                    </View>
-                  )}
-                </View>
-                <Text style={styles.changeProfileLink}>Change profile picture</Text>
+                <TouchableOpacity
+                  onPress={handlePickAvatar}
+                  activeOpacity={0.8}
+                  disabled={isUploadingAvatar}
+                  accessibilityLabel="Change profile picture"
+                >
+                  <View style={styles.avatarRing}>
+                    {avatarUrl ? (
+                      <Image source={{ uri: avatarUrl }} style={styles.avatarImage} />
+                    ) : (
+                      <View style={[styles.avatarImage, styles.avatarPlaceholder]}>
+                        <Ionicons name="person" size={48} color="#C5C5C5" />
+                      </View>
+                    )}
+                    {isUploadingAvatar ? (
+                      <View style={styles.avatarUploadingOverlay}>
+                        <ActivityIndicator size="small" color="#FFFFFF" />
+                      </View>
+                    ) : null}
+                  </View>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={handlePickAvatar}
+                  activeOpacity={0.7}
+                  disabled={isUploadingAvatar}
+                  hitSlop={{ top: 8, bottom: 8, left: 16, right: 16 }}
+                >
+                  <Text style={styles.changeProfileLink}>Change profile picture</Text>
+                </TouchableOpacity>
               </View>
 
               <View style={styles.contentPanel}>
@@ -636,6 +780,22 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
           saving={savingTarget === 'destination'}
           onDelete={handleDestinationDelete}
           deleting={savingTarget === 'destinationDelete'}
+        />
+
+        <AvatarCropModal
+          visible={pendingCrop !== null}
+          imageUri={pendingCrop?.uri ?? ''}
+          aspect={pendingCrop?.target === 'cover' ? 16 / 9 : 1}
+          cropShape={pendingCrop?.target === 'cover' ? 'rect' : 'round'}
+          title={pendingCrop?.target === 'cover' ? 'Crop cover photo' : 'Move and scale'}
+          onCancel={() => setPendingCrop(null)}
+          onConfirm={(croppedUri) => {
+            const target = pendingCrop?.target;
+            setPendingCrop(null);
+            if (!target || !croppedUri) return;
+            if (target === 'cover') uploadCover(croppedUri);
+            else uploadAvatar(croppedUri);
+          }}
         />
 
         <CountrySearchModal
@@ -1006,6 +1166,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  avatarUploadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 80,
+  },
   changeProfileLink: {
     fontSize: 16,
     lineHeight: 24,
@@ -1073,7 +1240,7 @@ const styles = StyleSheet.create({
   destAddButtonWrap: {
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 8,
+    marginTop: 24,
     paddingBottom: 8,
   },
   destAddButton: {

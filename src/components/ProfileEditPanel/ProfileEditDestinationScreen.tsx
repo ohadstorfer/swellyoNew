@@ -9,6 +9,8 @@ import {
   Platform,
   useWindowDimensions,
   Alert,
+  Keyboard,
+  KeyboardEvent,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -67,8 +69,46 @@ export const ProfileEditDestinationScreen: React.FC<Props> = ({
   const { height: screenHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const [mounted, setMounted] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const translateY = useRef(new Animated.Value(screenHeight)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
+
+  // Lift the sheet above the on-screen keyboard. Native uses `Keyboard` events;
+  // web (mobile browsers) uses visualViewport, which shrinks when the OS
+  // keyboard opens — neither RN-Web's Keyboard module nor the iOS Safari
+  // window resize fires reliably for that case.
+  useEffect(() => {
+    if (!visible) return;
+    if (Platform.OS === 'web') {
+      if (typeof window === 'undefined') return;
+      const vv = (window as any).visualViewport as VisualViewport | undefined;
+      if (!vv) return;
+      const onResize = () => {
+        // Difference between layout viewport and visible viewport ≈ keyboard height.
+        const diff = window.innerHeight - vv.height;
+        setKeyboardHeight(Math.max(0, Math.round(diff)));
+      };
+      vv.addEventListener('resize', onResize);
+      vv.addEventListener('scroll', onResize);
+      onResize();
+      return () => {
+        vv.removeEventListener('resize', onResize);
+        vv.removeEventListener('scroll', onResize);
+        setKeyboardHeight(0);
+      };
+    }
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, (e: KeyboardEvent) => {
+      setKeyboardHeight(e.endCoordinates?.height ?? 0);
+    });
+    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardHeight(0));
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+      setKeyboardHeight(0);
+    };
+  }, [visible]);
 
   const initial = useMemo(
     () => decomposeDaysForDurationInput(destination?.time_in_days ?? 0),
@@ -211,6 +251,9 @@ export const ProfileEditDestinationScreen: React.FC<Props> = ({
           {
             transform: [{ translateY }],
             paddingBottom: Math.max(insets.bottom, 16) + 24,
+            // Lifts the sheet above the on-screen keyboard. When the keyboard
+            // is hidden this is 0 and has no effect.
+            marginBottom: keyboardHeight,
           },
         ]}
       >

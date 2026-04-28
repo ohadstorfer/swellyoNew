@@ -21,6 +21,9 @@ interface AvatarCropModalProps {
   imageUri: string;
   onConfirm: (croppedUri: string) => void;
   onCancel: () => void;
+  aspect?: number; // width / height. Defaults to 1 (square).
+  cropShape?: 'round' | 'rect'; // Defaults to 'round'.
+  title?: string;
 }
 
 const CROP_PADDING = 16;
@@ -30,16 +33,29 @@ const AvatarCropModal: React.FC<AvatarCropModalProps> = ({
   imageUri,
   onConfirm,
   onCancel,
+  aspect = 1,
+  cropShape = 'round',
+  title = 'Move and scale',
 }) => {
   const [containerWidth, setContainerWidth] = useState(0);
   const [containerHeight, setContainerHeight] = useState(0);
   const [imageSize, setImageSize] = useState<{ width: number; height: number } | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const cropDiameter = Math.max(
-    0,
-    Math.min(containerWidth, containerHeight) - CROP_PADDING * 2,
-  );
+  // Fit a `aspect`-shaped frame inside the available container.
+  const availW = Math.max(0, containerWidth - CROP_PADDING * 2);
+  const availH = Math.max(0, containerHeight - CROP_PADDING * 2);
+  let cropWidth = 0;
+  let cropHeight = 0;
+  if (availW > 0 && availH > 0) {
+    if (availW / aspect <= availH) {
+      cropWidth = availW;
+      cropHeight = availW / aspect;
+    } else {
+      cropHeight = availH;
+      cropWidth = availH * aspect;
+    }
+  }
 
   // Shared values mirror the React state above so worklets on the UI thread
   // can read them without stale-closure issues.
@@ -53,7 +69,8 @@ const AvatarCropModal: React.FC<AvatarCropModalProps> = ({
   const maxScaleSv = useSharedValue(3);
   const imageWSv = useSharedValue(0);
   const imageHSv = useSharedValue(0);
-  const cropDSv = useSharedValue(0);
+  const cropWSv = useSharedValue(0);
+  const cropHSv = useSharedValue(0);
 
   useEffect(() => {
     if (!visible || !imageUri) {
@@ -77,8 +94,12 @@ const AvatarCropModal: React.FC<AvatarCropModalProps> = ({
 
   // Initialize transform state once image + crop area are both known.
   useEffect(() => {
-    if (!imageSize || cropDiameter <= 0) return;
-    const minS = cropDiameter / Math.min(imageSize.width, imageSize.height);
+    if (!imageSize || cropWidth <= 0 || cropHeight <= 0) return;
+    // minScale must cover both axes of the (possibly non-square) crop frame.
+    const minS = Math.max(
+      cropWidth / imageSize.width,
+      cropHeight / imageSize.height,
+    );
     minScaleSv.value = minS;
     maxScaleSv.value = minS * 3;
     scale.value = minS;
@@ -89,8 +110,9 @@ const AvatarCropModal: React.FC<AvatarCropModalProps> = ({
     savedTranslateY.value = 0;
     imageWSv.value = imageSize.width;
     imageHSv.value = imageSize.height;
-    cropDSv.value = cropDiameter;
-  }, [imageSize, cropDiameter]);
+    cropWSv.value = cropWidth;
+    cropHSv.value = cropHeight;
+  }, [imageSize, cropWidth, cropHeight]);
 
   const panGesture = useMemo(
     () =>
@@ -105,8 +127,8 @@ const AvatarCropModal: React.FC<AvatarCropModalProps> = ({
         })
         .onEnd(() => {
           const s = scale.value;
-          const maxTx = (imageWSv.value * s - cropDSv.value) / 2;
-          const maxTy = (imageHSv.value * s - cropDSv.value) / 2;
+          const maxTx = (imageWSv.value * s - cropWSv.value) / 2;
+          const maxTy = (imageHSv.value * s - cropHSv.value) / 2;
           if (translateX.value > maxTx) translateX.value = withTiming(maxTx);
           else if (translateX.value < -maxTx) translateX.value = withTiming(-maxTx);
           if (translateY.value > maxTy) translateY.value = withTiming(maxTy);
@@ -130,8 +152,8 @@ const AvatarCropModal: React.FC<AvatarCropModalProps> = ({
         })
         .onEnd(() => {
           const s = scale.value;
-          const maxTx = (imageWSv.value * s - cropDSv.value) / 2;
-          const maxTy = (imageHSv.value * s - cropDSv.value) / 2;
+          const maxTx = (imageWSv.value * s - cropWSv.value) / 2;
+          const maxTy = (imageHSv.value * s - cropHSv.value) / 2;
           if (translateX.value > maxTx) translateX.value = withTiming(maxTx);
           else if (translateX.value < -maxTx) translateX.value = withTiming(-maxTx);
           if (translateY.value > maxTy) translateY.value = withTiming(maxTy);
@@ -154,26 +176,28 @@ const AvatarCropModal: React.FC<AvatarCropModalProps> = ({
   }));
 
   const handleConfirm = useCallback(async () => {
-    if (!imageSize || cropDiameter <= 0 || busy) return;
+    if (!imageSize || cropWidth <= 0 || cropHeight <= 0 || busy) return;
     setBusy(true);
     try {
       const s = scale.value;
       const tx = translateX.value;
       const ty = translateY.value;
 
-      const cropSizePx = cropDiameter / s;
+      const cropWPx = cropWidth / s;
+      const cropHPx = cropHeight / s;
       const centerX = imageSize.width / 2 - tx / s;
       const centerY = imageSize.height / 2 - ty / s;
 
-      const size = Math.round(cropSizePx);
-      let originX = Math.round(centerX - cropSizePx / 2);
-      let originY = Math.round(centerY - cropSizePx / 2);
-      originX = Math.max(0, Math.min(originX, imageSize.width - size));
-      originY = Math.max(0, Math.min(originY, imageSize.height - size));
+      const w = Math.round(cropWPx);
+      const h = Math.round(cropHPx);
+      let originX = Math.round(centerX - cropWPx / 2);
+      let originY = Math.round(centerY - cropHPx / 2);
+      originX = Math.max(0, Math.min(originX, imageSize.width - w));
+      originY = Math.max(0, Math.min(originY, imageSize.height - h));
 
       const result = await ImageManipulator.manipulateAsync(
         imageUri,
-        [{ crop: { originX, originY, width: size, height: size } }],
+        [{ crop: { originX, originY, width: w, height: h } }],
         { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG },
       );
       onConfirm(result.uri);
@@ -182,14 +206,14 @@ const AvatarCropModal: React.FC<AvatarCropModalProps> = ({
     } finally {
       setBusy(false);
     }
-  }, [imageSize, cropDiameter, imageUri, onConfirm, busy]);
+  }, [imageSize, cropWidth, cropHeight, imageUri, onConfirm, busy]);
 
   if (!visible) return null;
 
   return (
     <Modal visible={visible} transparent={false} animationType="fade" statusBarTranslucent>
       <View style={styles.overlay}>
-        <Text style={styles.title}>Move and scale</Text>
+        <Text style={styles.title}>{title}</Text>
 
         <View
           style={styles.cropperWrapper}
@@ -198,18 +222,18 @@ const AvatarCropModal: React.FC<AvatarCropModalProps> = ({
             setContainerHeight(e.nativeEvent.layout.height);
           }}
         >
-          {cropDiameter > 0 && imageSize && (
+          {cropWidth > 0 && cropHeight > 0 && imageSize && (
             <GestureDetector gesture={composedGesture}>
               <View style={StyleSheet.absoluteFill}>
                 <View
                   style={[
                     styles.cropSquare,
                     {
-                      width: cropDiameter,
-                      height: cropDiameter,
-                      borderRadius: cropDiameter / 2,
-                      left: (containerWidth - cropDiameter) / 2,
-                      top: (containerHeight - cropDiameter) / 2,
+                      width: cropWidth,
+                      height: cropHeight,
+                      borderRadius: cropShape === 'round' ? Math.min(cropWidth, cropHeight) / 2 : 0,
+                      left: (containerWidth - cropWidth) / 2,
+                      top: (containerHeight - cropHeight) / 2,
                     },
                   ]}
                 >
@@ -220,8 +244,8 @@ const AvatarCropModal: React.FC<AvatarCropModalProps> = ({
                         position: 'absolute',
                         width: imageSize.width,
                         height: imageSize.height,
-                        left: (cropDiameter - imageSize.width) / 2,
-                        top: (cropDiameter - imageSize.height) / 2,
+                        left: (cropWidth - imageSize.width) / 2,
+                        top: (cropHeight - imageSize.height) / 2,
                       },
                       animatedImageStyle,
                     ]}

@@ -15,6 +15,9 @@ interface AvatarCropModalProps {
   imageUri: string;
   onConfirm: (croppedUri: string) => void;
   onCancel: () => void;
+  aspect?: number; // width / height. Defaults to 1 (square).
+  cropShape?: 'round' | 'rect'; // Defaults to 'round'.
+  title?: string;
 }
 
 async function getCroppedImg(imageSrc: string, pixelCrop: Area): Promise<string> {
@@ -51,6 +54,9 @@ const AvatarCropModal: React.FC<AvatarCropModalProps> = ({
   imageUri,
   onConfirm,
   onCancel,
+  aspect = 1,
+  cropShape = 'round',
+  title = 'Move and scale',
 }) => {
   const [crop, setCrop] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
@@ -58,22 +64,38 @@ const AvatarCropModal: React.FC<AvatarCropModalProps> = ({
   const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null);
   const [containerWidth, setContainerWidth] = useState<number>(0);
   const [containerHeight, setContainerHeight] = useState<number>(0);
-  const cropDiameter = containerWidth > 0 ? containerWidth - 16 : 0;
+  // Fit the crop frame inside the container with 16px padding on the limiting side.
+  const maxCropWidth = containerWidth > 0 ? containerWidth - 16 : 0;
+  const maxCropHeight = containerHeight > 0 ? containerHeight - 16 : 0;
+  let cropWidth = 0;
+  let cropHeight = 0;
+  if (maxCropWidth > 0 && maxCropHeight > 0) {
+    if (maxCropWidth / aspect <= maxCropHeight) {
+      cropWidth = maxCropWidth;
+      cropHeight = maxCropWidth / aspect;
+    } else {
+      cropHeight = maxCropHeight;
+      cropWidth = maxCropHeight * aspect;
+    }
+  }
 
   const onCropComplete = useCallback((_croppedArea: Area, croppedPixels: Area) => {
     setCroppedAreaPixels(croppedPixels);
   }, []);
 
   const onMediaLoaded = useCallback((mediaSize: { naturalWidth: number; naturalHeight: number; width: number; height: number }) => {
-    if (cropDiameter > 0) {
-      // Scale so the image width fills the crop circle diameter.
-      const requiredZoom = cropDiameter / mediaSize.width;
+    if (cropWidth > 0 && cropHeight > 0) {
+      // Scale so the image fully covers the crop frame on both axes.
+      const requiredZoom = Math.max(
+        cropWidth / mediaSize.width,
+        cropHeight / mediaSize.height,
+      );
       const newMinZoom = Math.max(1, requiredZoom);
       setMinZoom(newMinZoom);
       setZoom(newMinZoom);
       setCrop({ x: 0, y: 0 });
     }
-  }, [cropDiameter]);
+  }, [cropWidth, cropHeight]);
 
   const handleConfirm = async () => {
     if (!croppedAreaPixels) return;
@@ -100,7 +122,7 @@ const AvatarCropModal: React.FC<AvatarCropModalProps> = ({
   return (
     <Modal visible={visible} transparent animationType="fade">
       <View style={styles.overlay}>
-        <Text style={styles.title}>Move and scale</Text>
+        <Text style={styles.title}>{title}</Text>
 
         <View
           style={styles.cropperWrapper}
@@ -110,18 +132,18 @@ const AvatarCropModal: React.FC<AvatarCropModalProps> = ({
             setContainerHeight(height);
           }}
         >
-          {cropDiameter > 0 && (
+          {cropWidth > 0 && cropHeight > 0 && (
             <Cropper
               image={imageUri}
               crop={crop}
               zoom={zoom}
               minZoom={minZoom}
               maxZoom={minZoom * 3}
-              aspect={1}
-              cropShape="round"
+              aspect={aspect}
+              cropShape={cropShape}
               showGrid={false}
               restrictPosition={false}
-              cropSize={{ width: cropDiameter, height: cropDiameter }}
+              cropSize={{ width: cropWidth, height: cropHeight }}
               onMediaLoaded={onMediaLoaded}
               onCropChange={setCrop}
               onZoomChange={setZoom}

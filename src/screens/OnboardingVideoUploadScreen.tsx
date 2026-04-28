@@ -643,6 +643,13 @@ const styles = StyleSheet.create({
   videoThumbnail: {
     width: '100%',
     height: '100%',
+    ...(Platform.OS === 'web' && {
+      // Force the underlying <video> element to fill the box on web. The
+      // VideoView contentFit prop alone isn't always honored by expo-video
+      // on web, so we set object-fit explicitly to guarantee fill (no bars).
+      objectFit: 'cover' as any,
+      objectPosition: 'center center' as any,
+    }),
   },
   surfSkillVideoWrapper: {
     width: '100%',
