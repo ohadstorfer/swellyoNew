@@ -12,10 +12,9 @@ import { Text } from '../components/Text';
 import { VideoCarousel, VideoLevel } from '../components/VideoCarousel';
 import { colors, spacing } from '../styles/theme';
 import { OnboardingData } from './OnboardingStep1Screen';
-import { getSurfLevelVideoFromStorage } from '../services/media/videoService';
-import { Images } from '../assets/images';
 import { useIsDesktopWeb, useScreenDimensions, responsiveWidth, getScreenWidth } from '../utils/responsive';
-import { getVideoPreloadStatus, waitForVideoReady, getPlaybackUrl } from '../services/media/videoPreloadService';
+import { getVideoPreloadStatus, waitForVideoReady } from '../services/media/videoPreloadService';
+import { getSurfLevelVideos } from '../services/media/surfLevelVideos';
 
 interface OnboardingStep2ScreenProps {
   onNext: (data: OnboardingData) => void;
@@ -24,120 +23,6 @@ interface OnboardingStep2ScreenProps {
   updateFormData: (data: Partial<OnboardingData>) => void;
   isLoading?: boolean;
 }
-
-// Board-specific video definitions
-// Each board type has its own set of videos in the specified order
-const BOARD_VIDEO_DEFINITIONS: { [boardType: number]: Array<{ name: string; videoFileName: string; thumbnailFileName: string }> } = {
-  // Shortboard (id: 0): Dipping My Toes, Cruising Around, Snapping, Charging
-  0: [
-    { name: 'Dipping My Toes', videoFileName: 'Dipping My Toes.mp4', thumbnailFileName: 'Dipping My Toes thumbnail.PNG' },
-    { name: 'Cruising Around', videoFileName: 'Cruising Around.mp4', thumbnailFileName: 'Cruising Around thumbnail.PNG' },
-    { name: 'Snapping', videoFileName: 'Snapping.mp4', thumbnailFileName: 'Snapping thumbnail.PNG' },
-    { name: 'Charging', videoFileName: 'Charging.mp4', thumbnailFileName: 'Charging thumbnail.PNG' },
-  ],
-  // Midlength (id: 1): Dipping My Toes (beginner), Cruising Around (intermediate), Carving Turns (advanced), Charging (pro)
-  1: [
-    { name: 'Dipping My Toes', videoFileName: 'Dipping My Toes.mp4', thumbnailFileName: 'Dipping My Toes thumbnail.PNG' },
-    { name: 'Cruising Around', videoFileName: 'Cruising Around.mp4', thumbnailFileName: 'Cruising Around thumbnail.PNG' },
-    { name: 'Carving Turns', videoFileName: 'Carving Turns.mp4', thumbnailFileName: 'Carving Turns thumbnail.PNG' },
-    { name: 'Charging', videoFileName: 'Charging.mp4', thumbnailFileName: 'Charging thumbnail.PNG' },
-  ],
-  // Longboard (id: 2): Dipping My Toes, Cruising Around, Cross Stepping, Hanging Toes
-  2: [
-    { name: 'Dipping My Toes', videoFileName: 'Dipping My Toes.mp4', thumbnailFileName: 'Dipping My Toes thumbnail.PNG' },
-    { name: 'Cruising Around', videoFileName: 'Cruising Around.mp4', thumbnailFileName: 'Cruising Around thumbnail.PNG' },
-    { name: 'Cross Stepping', videoFileName: 'CrossStepping.mp4', thumbnailFileName: 'CrossStepping thumbnail.PNG' },
-    { name: 'Hanging Toes', videoFileName: 'Hanging Toes.mp4', thumbnailFileName: 'Hanging Toes thumbnail.PNG' },
-  ],
-  // Softtop (id: 3): Skip step 2 - no videos
-};
-
-// Helper function to get board folder name from board type
-const getBoardFolder = (boardType: number): string => {
-  const folderMap: { [key: number]: string } = {
-    0: 'shortboard',
-    1: 'midlength',
-    2: 'longboard',
-    3: 'softtop', // Not used, but for completeness
-  };
-  return folderMap[boardType] || 'shortboard';
-};
-
-// Thumbnail lookup by board folder and filename
-const THUMBNAIL_MAP: Record<string, Record<string, any>> = {
-  shortboard: {
-    'Dipping My Toes thumbnail.PNG': Images.surfLevel.shortboard.dippingMyToes,
-    'Cruising Around thumbnail.PNG': Images.surfLevel.shortboard.cruisingAround,
-    'Snapping thumbnail.PNG': Images.surfLevel.shortboard.snapping,
-    'Charging thumbnail.PNG': Images.surfLevel.shortboard.charging,
-  },
-  midlength: {
-    'Dipping My Toes thumbnail.PNG': Images.surfLevel.midlength.dippingMyToes,
-    'Cruising Around thumbnail.PNG': Images.surfLevel.midlength.cruisingAround,
-    'Carving Turns thumbnail.PNG': Images.surfLevel.midlength.carvingTurns,
-    'Charging thumbnail.PNG': Images.surfLevel.midlength.chargingOrCarving,
-    'Charging thumbnail.png': Images.surfLevel.midlength.chargingOrCarving,
-  },
-  longboard: {
-    'Dipping My Toes thumbnail.PNG': Images.surfLevel.longboard.dippingMyToes,
-    'Cruising Around thumbnail.PNG': Images.surfLevel.longboard.cruisingAround,
-    'CrossStepping thumbnail.PNG': Images.surfLevel.longboard.crossStepping,
-    'Hanging Toes thumbnail.PNG': Images.surfLevel.longboard.hangingToes,
-  },
-};
-
-// Cache video URLs to avoid re-computation
-const videoUrlCache = new Map<string, string>();
-
-// Function to get videos with resolved URLs for a specific board type
-const getSurfLevelVideos = (boardType: number): VideoLevel[] => {
-  const boardVideos = BOARD_VIDEO_DEFINITIONS[boardType];
-  if (!boardVideos) {
-    console.warn(`No videos defined for board type ${boardType}, using shortboard as fallback`);
-    return getSurfLevelVideos(0); // Fallback to shortboard
-  }
-
-  const boardFolder = getBoardFolder(boardType);
-  
-  return boardVideos
-    .filter(video => {
-      // Filter out videos that don't exist (e.g., Snapping if file doesn't exist)
-      // We'll include all videos and let the component handle missing files gracefully
-      return true;
-    })
-    .map((video, index) => {
-      // Videos are served from Supabase storage bucket
-      const storagePath = `${boardFolder}/${video.videoFileName}`;
-      const thumbnailSource = THUMBNAIL_MAP[boardFolder]?.[video.thumbnailFileName];
-      
-      // Use cached URL if available; on Safari use blob URL when preloaded for instant playback
-      let videoUrl: string;
-      if (videoUrlCache.has(storagePath)) {
-        videoUrl = videoUrlCache.get(storagePath)!;
-      } else {
-        const originalUrl = getSurfLevelVideoFromStorage(storagePath);
-        videoUrl = getPlaybackUrl(originalUrl);
-        videoUrlCache.set(storagePath, videoUrl);
-      }
-      
-      if (__DEV__) {
-        console.log(`[OnboardingStep2] Video ${index} (${video.name}):`, {
-          storagePath,
-          videoUrl,
-          boardFolder,
-          videoFileName: video.videoFileName,
-          cached: videoUrlCache.has(storagePath),
-        });
-      }
-      
-      return {
-        id: index, // Use index as ID to maintain order
-        name: video.name,
-        thumbnailSource,
-        videoUrl,
-      };
-    });
-};
 
 export const OnboardingStep2Screen: React.FC<OnboardingStep2ScreenProps> = ({
   onNext,

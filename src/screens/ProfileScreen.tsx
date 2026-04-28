@@ -1530,7 +1530,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
     }
   };
 
-  const pollForVideoUpdate = async (userId: string, maxAttempts = 60, intervalMs = 2000) => {
+  const pollForVideoUpdate = async (userId: string, maxAttempts = 210, intervalMs = 2000) => {
     // Poll the database to check if video URL has been updated
     let attempts = 0;
     
@@ -2054,7 +2054,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
         {/* Cover Image */}
         <View style={styles.coverContainer}>
           <ImageBackground
-            source={Images.coverImage}
+            source={profileData.cover_image_url ? { uri: profileData.cover_image_url } : Images.coverImage}
             style={styles.coverImage}
             resizeMode="cover"
           >

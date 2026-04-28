@@ -8,19 +8,36 @@ import {
   Easing,
   TouchableOpacity,
   Image,
+  ImageBackground,
   ImageSourcePropType,
+  Linking,
   Platform,
   ScrollView,
+  ActivityIndicator,
+  Alert,
   useWindowDimensions,
+  TextInput,
+  Keyboard,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { SupabaseSurfer } from '../../services/database/supabaseDatabaseService';
+import { LinearGradient } from 'expo-linear-gradient';
+import {
+  SupabaseSurfer,
+  supabaseDatabaseService,
+} from '../../services/database/supabaseDatabaseService';
+import { useUserProfile } from '../../context/UserProfileContext';
 import { Images } from '../../assets/images';
 import {
   getCountryImageFromStorage,
   getCountryImageFallback,
 } from '../../services/media/imageService';
+import { uploadCoverImage } from '../../services/storage/storageService';
+import { ProfileEditSurfStyleScreen } from './ProfileEditSurfStyleScreen';
+import { ProfileEditTravelExperienceScreen } from './ProfileEditTravelExperienceScreen';
+import { ProfileEditSurfSkillScreen } from './ProfileEditSurfSkillScreen';
+import { ProfileEditDestinationScreen } from './ProfileEditDestinationScreen';
+import { CountrySearchModal } from '../CountrySearchModal';
 
 type Props = {
   visible: boolean;
@@ -65,12 +82,290 @@ const BOARD_TYPE_MAP: Record<string, { name: string; imageUrl: string }> = {
   },
 };
 
+type SaveTarget =
+  | 'surfStyle'
+  | 'travel'
+  | 'skill'
+  | 'destination'
+  | 'destinationDelete'
+  | 'cover'
+  | 'nickname'
+  | 'countryFrom';
+
+type DestinationEditorIndex = number | 'new' | null;
+
+const BOARD_ID_TO_DB: Record<number, string> = {
+  0: 'shortboard',
+  1: 'mid_length',
+  2: 'longboard',
+  3: 'soft_top',
+};
+
 export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) => {
   const { width: screenWidth } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  const { updateProfile } = useUserProfile();
   const [mounted, setMounted] = useState(false);
+  const [showSurfStyleEditor, setShowSurfStyleEditor] = useState(false);
+  const [showTravelExperienceEditor, setShowTravelExperienceEditor] = useState(false);
+  const [showSurfSkillEditor, setShowSurfSkillEditor] = useState(false);
+  const [editingDestinationIndex, setEditingDestinationIndex] =
+    useState<DestinationEditorIndex>(null);
+  const [savingTarget, setSavingTarget] = useState<SaveTarget | null>(null);
+  const [showNicknameModal, setShowNicknameModal] = useState(false);
+  const [nicknameDraft, setNicknameDraft] = useState('');
+  const [showOriginModal, setShowOriginModal] = useState(false);
   const translateX = useRef(new Animated.Value(screenWidth)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
+
+  const persist = useCallback(
+    async (
+      target: SaveTarget,
+      patch: Parameters<typeof supabaseDatabaseService.saveSurfer>[0],
+    ) => {
+      setSavingTarget(target);
+      try {
+        const updated = await supabaseDatabaseService.saveSurfer(patch);
+        // PostgREST `.select()` after update sometimes omits or lags `destinations_array`;
+        // merge the payload we sent so ProfileScreen (via context) always matches DB.
+        const next: SupabaseSurfer =
+          patch.destinationsArray !== undefined
+            ? { ...updated, destinations_array: patch.destinationsArray }
+            : { ...updated };
+        updateProfile(next);
+      } catch (err) {
+        console.error('[ProfileEditPanel] Save failed:', err);
+        Alert.alert('Could not save', 'Please try again.');
+        throw err;
+      } finally {
+        setSavingTarget(null);
+      }
+    },
+    [updateProfile],
+  );
+
+  const handleSurfStyleSave = useCallback(
+    async (boardId: number) => {
+      const surfboardType = BOARD_ID_TO_DB[boardId];
+      if (!surfboardType) return;
+      await persist('surfStyle', { surfboardType });
+    },
+    [persist],
+  );
+
+  const handleTravelExperienceSave = useCallback(
+    async (value: number) => {
+      await persist('travel', { travelExperience: value });
+    },
+    [persist],
+  );
+
+  const handleSurfSkillSave = useCallback(
+    async (selectedVideoId: number, userVideoUri: string | null) => {
+      const idx = Math.max(0, Math.min(3, selectedVideoId));
+      await persist('skill', {
+        // saveSurfer maps 0-4 app-level → 1-5 DB-level and auto-derives
+        // surf_level_category + surf_level_description from (surfboardType, surfLevel).
+        // Passing the current surfboardType keeps the derivation correct when the
+        // user only changes their level.
+        surfLevel: idx,
+        surfboardType: surfer?.surfboard_type ?? undefined,
+        profileVideoUrl: userVideoUri ?? '',
+      });
+    },
+    [persist, surfer?.surfboard_type],
+  );
+
+  // Mirrors DirectMessageScreen's image-picker pattern: web uses a transient
+  // <input type="file"> + FileReader; native uses expo-image-picker with a
+  // permission request (and a "Open Settings" prompt when the user has
+  // permanently declined). The picked image is uploaded immediately — no
+  // preview/caption step, since covers don't need one.
+  const webFileInputRef = useRef<HTMLInputElement | null>(null);
+  const isPickerOpenRef = useRef(false);
+
+  const uploadCover = useCallback(
+    async (uri: string) => {
+      const userId = surfer?.user_id;
+      if (!userId) return;
+      setSavingTarget('cover');
+      try {
+        const result = await uploadCoverImage(uri, userId);
+        if (!result.success || !result.url) {
+          throw new Error(result.error || 'Upload failed');
+        }
+        const updated = await supabaseDatabaseService.saveSurfer({ coverImageUrl: result.url });
+        updateProfile(updated);
+      } catch (err: any) {
+        console.error('[ProfileEditPanel] Cover upload failed:', err);
+        Alert.alert('Could not update cover photo', err?.message || 'Please try again.');
+      } finally {
+        setSavingTarget(null);
+      }
+    },
+    [surfer?.user_id, updateProfile],
+  );
+
+  const handlePickCover = useCallback(async () => {
+    if (savingTarget === 'cover') return;
+    if (!surfer?.user_id) return;
+
+    if (Platform.OS === 'web') {
+      if (typeof document === 'undefined' || !document.body) return;
+      if (isPickerOpenRef.current) return;
+      isPickerOpenRef.current = true;
+
+      const input = document.createElement('input') as HTMLInputElement;
+      input.type = 'file';
+      input.accept = 'image/*';
+      Object.assign(input.style, {
+        position: 'fixed',
+        left: '-9999px',
+        opacity: '0',
+        pointerEvents: 'none',
+      });
+      webFileInputRef.current = input;
+
+      const cleanup = () => {
+        if (webFileInputRef.current?.parentNode) {
+          webFileInputRef.current.parentNode.removeChild(webFileInputRef.current);
+        }
+        webFileInputRef.current = null;
+        isPickerOpenRef.current = false;
+      };
+
+      input.addEventListener('change', (e: Event) => {
+        const target = e.target as HTMLInputElement | null;
+        const file = target?.files?.[0];
+        cleanup();
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          const dataUrl = ev.target?.result as string | undefined;
+          if (dataUrl) uploadCover(dataUrl);
+        };
+        reader.onerror = () => {
+          Alert.alert('Error', 'Could not read the selected file. Please try another.');
+        };
+        reader.readAsDataURL(file);
+      });
+
+      document.body.appendChild(input);
+      input.click();
+      return;
+    }
+
+    try {
+      const ImagePicker = require('expo-image-picker');
+      const usePhotoPicker = Platform.OS === 'android' && (Platform.Version as number) >= 33;
+
+      if (!usePhotoPicker) {
+        const { status, canAskAgain } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (status !== 'granted') {
+          if (!canAskAgain) {
+            Alert.alert(
+              'Permission Required',
+              'Swellyo needs access to your photos. Please enable it in your device settings.',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Open Settings', onPress: () => Linking.openSettings() },
+              ],
+            );
+          } else {
+            Alert.alert('Permission Required', 'Sorry, we need camera roll permissions to update your cover.');
+          }
+          return;
+        }
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        // Cover photos are wide; let the user crop to a 16:9 frame so the
+        // result fills the cover container without obvious letterboxing.
+        allowsEditing: true,
+        aspect: [16, 9],
+        quality: 1,
+      });
+
+      const asset = result.assets?.[0];
+      const uri = asset?.uri ?? (result as { uri?: string }).uri;
+      const canceled = result.canceled === true || (result as { cancelled?: boolean }).cancelled === true;
+      if (canceled || !uri) return;
+
+      uploadCover(uri);
+    } catch (error: any) {
+      console.warn('[ProfileEditPanel] expo-image-picker not available:', error);
+      Alert.alert('Image Picker Not Available', 'Could not open the photo picker.');
+    }
+  }, [savingTarget, surfer?.user_id, uploadCover]);
+
+  const handleDestinationSave = useCallback(
+    async (next: { country: string; time_in_days: number; time_in_text: string }) => {
+      if (editingDestinationIndex == null) return;
+      const base = [...(surfer?.destinations_array ?? [])];
+      if (editingDestinationIndex === 'new') {
+        const arr = [
+          ...base,
+          {
+            country: next.country,
+            area: [] as string[],
+            time_in_days: next.time_in_days,
+            time_in_text: next.time_in_text,
+          },
+        ];
+        await persist('destination', { destinationsArray: arr });
+        return;
+      }
+      const existing = base[editingDestinationIndex];
+      if (!existing) return;
+      base[editingDestinationIndex] = {
+        ...existing,
+        country: next.country,
+        time_in_days: next.time_in_days,
+        time_in_text: next.time_in_text,
+      };
+      await persist('destination', { destinationsArray: base });
+    },
+    [persist, editingDestinationIndex, surfer?.destinations_array],
+  );
+
+  const handleDestinationDelete = useCallback(async () => {
+    if (typeof editingDestinationIndex !== 'number') return;
+    const base = [...(surfer?.destinations_array ?? [])];
+    if (editingDestinationIndex < 0 || editingDestinationIndex >= base.length) return;
+    base.splice(editingDestinationIndex, 1);
+    await persist('destinationDelete', { destinationsArray: base });
+  }, [persist, editingDestinationIndex, surfer?.destinations_array]);
+
+  const handleNicknameSave = useCallback(async () => {
+    const trimmed = nicknameDraft.trim();
+    if (!trimmed) {
+      Alert.alert('Nickname', 'Please enter a nickname.');
+      return;
+    }
+    try {
+      await persist('nickname', { name: trimmed });
+      setShowNicknameModal(false);
+    } catch {
+      // persist already alerted
+    }
+  }, [nicknameDraft, persist]);
+
+  const openNicknameEditor = useCallback(() => {
+    setNicknameDraft(surfer?.name ?? '');
+    setShowNicknameModal(true);
+  }, [surfer?.name]);
+
+  // Close any open sub-editor whenever the parent panel itself closes,
+  // so that re-opening the panel always lands on the main view.
+  useEffect(() => {
+    if (!visible) {
+      setShowSurfStyleEditor(false);
+      setShowTravelExperienceEditor(false);
+      setShowSurfSkillEditor(false);
+      setEditingDestinationIndex(null);
+    }
+  }, [visible]);
 
   useEffect(() => {
     if (visible && !mounted) {
@@ -123,6 +418,10 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
   const avatarUrl = surfer?.profile_image_url;
   const nickname = surfer?.name ?? '';
   const country = surfer?.country_from ?? '';
+  const coverSource: ImageSourcePropType = surfer?.cover_image_url
+    ? { uri: surfer.cover_image_url }
+    : Images.coverImage;
+  const isUploadingCover = savingTarget === 'cover';
 
   const boardTypeInfo = getBoardTypeInfo(surfer?.surfboard_type);
   const tripCount =
@@ -155,7 +454,7 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
             { width: screenWidth, transform: [{ translateX }] },
           ]}
         >
-          <SafeAreaContainer style={styles.safeArea} edges={['top', 'bottom']}>
+          <SafeAreaContainer style={styles.safeArea} edges={[ 'bottom']}>
             <ScrollView
               style={styles.scroll}
               contentContainerStyle={[
@@ -164,15 +463,43 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
               ]}
               showsVerticalScrollIndicator={false}
             >
-              <View style={styles.backRow}>
-                <TouchableOpacity
-                  style={styles.backButton}
-                  onPress={onClose}
-                  activeOpacity={0.7}
+              <View style={styles.coverContainer}>
+                <ImageBackground
+                  source={coverSource}
+                  style={styles.coverImage}
+                  resizeMode="cover"
                 >
-                  <Ionicons name="chevron-back" size={16} color={FIGMA.textPrimary} />
-                  <Text style={styles.backButtonText}>Back</Text>
-                </TouchableOpacity>
+                  <LinearGradient
+                    colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.4)']}
+                    locations={[0.29059, 0.99702]}
+                    style={styles.coverGradient}
+                  />
+                </ImageBackground>
+
+                <View style={[styles.coverTopRow, { paddingTop: insets.top + 12 }]}>
+                  <TouchableOpacity
+                    style={styles.backButton}
+                    onPress={onClose}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="chevron-back" size={16} color={FIGMA.textPrimary} />
+                    <Text style={styles.backButtonText}>Back</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.coverEditButton}
+                    onPress={handlePickCover}
+                    activeOpacity={0.7}
+                    disabled={isUploadingCover}
+                    accessibilityLabel="Change cover photo"
+                  >
+                    {isUploadingCover ? (
+                      <ActivityIndicator size="small" color={FIGMA.textPrimary} />
+                    ) : (
+                      <Ionicons name="camera" size={18} color={FIGMA.textPrimary} />
+                    )}
+                  </TouchableOpacity>
+                </View>
               </View>
 
               <View style={styles.avatarWrap}>
@@ -191,8 +518,16 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
               <View style={styles.contentPanel}>
                 <Section title="Personal information">
                   <View style={styles.fieldsContainer}>
-                    <InlineField label="Nickname" value={nickname} />
-                    <InlineField label="where do you live?" value={country} />
+                    <InlineField
+                      label="Nickname"
+                      value={nickname}
+                      onPress={openNicknameEditor}
+                    />
+                    <InlineField
+                      label="Where are you from?"
+                      value={country}
+                      onPress={() => setShowOriginModal(true)}
+                    />
                   </View>
                 </Section>
 
@@ -203,47 +538,177 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
                       thumbnailResize="contain"
                       label="Surf Style"
                       value={boardTypeInfo.name}
+                      onPress={() => setShowSurfStyleEditor(true)}
                     />
                     <EditCard
                       thumbnail={travelLevelImage}
                       thumbnailResize="contain"
                       label="Travel Experience"
                       value={travelExperienceLabel}
+                      onPress={() => setShowTravelExperienceEditor(true)}
                     />
                     <EditCard
                       thumbnail={surfSkillThumb}
                       thumbnailResize="cover"
                       label="Surf Skill"
                       value={surfSkillLabel}
+                      onPress={() => setShowSurfSkillEditor(true)}
                     />
-                    <EditCard
+                    {/* <EditCard
                       fallbackIcon="location-outline"
                       fallbackTint="#10B981"
                       label="Local Break"
                       value="Not set"
-                    />
+                    /> */}
                   </View>
                 </Section>
 
                 <Section title="Top Destinations">
-                  {destinations.length === 0 ? (
-                    <Text style={styles.emptyText}>No destinations added yet.</Text>
-                  ) : (
-                    <View style={styles.cardsContainer}>
-                      {destinations.map((dest, idx) => (
-                        <DestinationCard
-                          key={`${dest.country}-${idx}`}
-                          country={dest.country}
-                          days={dest.time_in_days}
-                        />
-                      ))}
+                  <View style={styles.destinationsBlock}>
+                    {destinations.length === 0 ? (
+                      <Text style={styles.emptyText}>No destinations added yet.</Text>
+                    ) : (
+                      <View style={styles.cardsContainer}>
+                        {destinations.map((dest, idx) => (
+                          <DestinationCard
+                            key={`${dest.country}-${idx}`}
+                            country={dest.country}
+                            days={dest.time_in_days}
+                            onPress={() => setEditingDestinationIndex(idx)}
+                          />
+                        ))}
+                      </View>
+                    )}
+                    <View style={styles.destAddButtonWrap}>
+                      <TouchableOpacity
+                        style={styles.destAddButton}
+                        onPress={() => setEditingDestinationIndex('new')}
+                        activeOpacity={0.75}
+                        accessibilityLabel="Add destination"
+                      >
+                        <Ionicons name="add" size={36} color="#4A4A4A" />
+                      </TouchableOpacity>
                     </View>
-                  )}
+                  </View>
                 </Section>
               </View>
             </ScrollView>
           </SafeAreaContainer>
         </Animated.View>
+
+        <ProfileEditSurfStyleScreen
+          visible={showSurfStyleEditor}
+          onClose={() => setShowSurfStyleEditor(false)}
+          initialBoardType={surfer?.surfboard_type ?? null}
+          onSave={handleSurfStyleSave}
+          saving={savingTarget === 'surfStyle'}
+        />
+
+        <ProfileEditTravelExperienceScreen
+          visible={showTravelExperienceEditor}
+          onClose={() => setShowTravelExperienceEditor(false)}
+          initialValue={surfer?.travel_experience ?? 0}
+          onSave={handleTravelExperienceSave}
+          saving={savingTarget === 'travel'}
+        />
+
+        <ProfileEditSurfSkillScreen
+          visible={showSurfSkillEditor}
+          onClose={() => setShowSurfSkillEditor(false)}
+          initialBoardType={surfer?.surfboard_type ?? null}
+          initialSurfLevel={surfer?.surf_level ?? 1}
+          initialUserVideoUri={surfer?.profile_video_url ?? null}
+          userId={surfer?.user_id ?? null}
+          onSave={handleSurfSkillSave}
+          saving={savingTarget === 'skill'}
+        />
+
+        <ProfileEditDestinationScreen
+          visible={editingDestinationIndex !== null}
+          mode={editingDestinationIndex === 'new' ? 'add' : 'edit'}
+          onClose={() => setEditingDestinationIndex(null)}
+          destination={
+            editingDestinationIndex !== null && editingDestinationIndex !== 'new'
+              ? surfer?.destinations_array?.[editingDestinationIndex] ?? null
+              : null
+          }
+          onSave={handleDestinationSave}
+          saving={savingTarget === 'destination'}
+          onDelete={handleDestinationDelete}
+          deleting={savingTarget === 'destinationDelete'}
+        />
+
+        <CountrySearchModal
+          visible={showOriginModal}
+          selectedCountry={country}
+          onSelect={async c => {
+            setShowOriginModal(false);
+            try {
+              await persist('countryFrom', { countryFrom: c });
+            } catch {
+              // persist surfaced alert
+            }
+          }}
+          onClose={() => setShowOriginModal(false)}
+        />
+
+        <Modal
+          visible={showNicknameModal}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setShowNicknameModal(false)}
+        >
+          <TouchableOpacity
+            style={styles.nicknameOverlay}
+            activeOpacity={1}
+            onPress={() => {
+              Keyboard.dismiss();
+              setShowNicknameModal(false);
+            }}
+          >
+            <TouchableOpacity
+              style={styles.nicknameCard}
+              activeOpacity={1}
+              onPress={e => e.stopPropagation()}
+            >
+              <Text style={styles.nicknameTitle}>Nickname</Text>
+              <TextInput
+                style={styles.nicknameInput}
+                value={nicknameDraft}
+                onChangeText={setNicknameDraft}
+                placeholder="Your nickname"
+                placeholderTextColor={FIGMA.textSecondary}
+                autoCapitalize="words"
+                autoCorrect={false}
+                maxLength={80}
+                editable={savingTarget !== 'nickname'}
+              />
+              <View style={styles.nicknameActions}>
+                <TouchableOpacity
+                  style={styles.nicknameCancelBtn}
+                  onPress={() => setShowNicknameModal(false)}
+                  disabled={savingTarget === 'nickname'}
+                >
+                  <Text style={styles.nicknameCancelText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.nicknameSaveBtn,
+                    savingTarget === 'nickname' && styles.nicknameSaveBtnDisabled,
+                  ]}
+                  onPress={handleNicknameSave}
+                  disabled={savingTarget === 'nickname'}
+                >
+                  {savingTarget === 'nickname' ? (
+                    <ActivityIndicator color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.nicknameSaveText}>Save</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </Modal>
       </View>
     </Modal>
   );
@@ -256,14 +721,38 @@ const Section: React.FC<{ title: string; children: React.ReactNode }> = ({ title
   </View>
 );
 
-const InlineField: React.FC<{ label: string; value: string }> = ({ label, value }) => (
-  <View style={styles.inlineField}>
-    <Text style={styles.inlineFieldLabel}>{label}</Text>
-    <Text style={styles.inlineFieldValue} numberOfLines={1}>
-      {value || '—'}
-    </Text>
-  </View>
-);
+const InlineField: React.FC<{ label: string; value: string; onPress?: () => void }> = ({
+  label,
+  value,
+  onPress,
+}) => {
+  const valueRow = (
+    <View style={styles.inlineFieldValueRow}>
+      <Text style={styles.inlineFieldValue} numberOfLines={1}>
+        {value || '—'}
+      </Text>
+      {onPress ? (
+        <Ionicons name="chevron-forward" size={18} color="#B0B0B0" />
+      ) : null}
+    </View>
+  );
+
+  if (onPress) {
+    return (
+      <TouchableOpacity style={styles.inlineField} onPress={onPress} activeOpacity={0.7}>
+        <Text style={styles.inlineFieldLabel}>{label}</Text>
+        {valueRow}
+      </TouchableOpacity>
+    );
+  }
+
+  return (
+    <View style={styles.inlineField}>
+      <Text style={styles.inlineFieldLabel}>{label}</Text>
+      {valueRow}
+    </View>
+  );
+};
 
 type EditCardProps = {
   label: string;
@@ -272,6 +761,7 @@ type EditCardProps = {
   thumbnailResize?: 'cover' | 'contain';
   fallbackIcon?: React.ComponentProps<typeof Ionicons>['name'];
   fallbackTint?: string;
+  onPress?: () => void;
 };
 
 const EditCard: React.FC<EditCardProps> = ({
@@ -281,38 +771,55 @@ const EditCard: React.FC<EditCardProps> = ({
   thumbnailResize = 'cover',
   fallbackIcon,
   fallbackTint = '#0788B0',
-}) => (
-  <View style={styles.editCard}>
-    <View style={styles.editCardThumb}>
-      {thumbnail ? (
-        <Image
-          source={thumbnail}
-          style={styles.editCardThumbImage}
-          resizeMode={thumbnailResize}
-        />
-      ) : fallbackIcon ? (
-        <View style={[styles.editCardIconFallback, { backgroundColor: `${fallbackTint}14` }]}>
-          <Ionicons name={fallbackIcon} size={28} color={fallbackTint} />
-        </View>
-      ) : null}
-    </View>
-    <View style={styles.editCardText}>
-      <Text style={styles.editCardLabel}>{label}</Text>
-      <Text style={styles.editCardValue} numberOfLines={1}>
-        {value}
-      </Text>
-    </View>
-    <Ionicons name="chevron-forward" size={20} color="#B0B0B0" />
-  </View>
-);
+  onPress,
+}) => {
+  const inner = (
+    <>
+      <View style={styles.editCardThumb}>
+        {thumbnail ? (
+          <Image
+            source={thumbnail}
+            style={styles.editCardThumbImage}
+            resizeMode={thumbnailResize}
+          />
+        ) : fallbackIcon ? (
+          <View style={[styles.editCardIconFallback, { backgroundColor: `${fallbackTint}14` }]}>
+            <Ionicons name={fallbackIcon} size={28} color={fallbackTint} />
+          </View>
+        ) : null}
+      </View>
+      <View style={styles.editCardText}>
+        <Text style={styles.editCardLabel}>{label}</Text>
+        <Text style={styles.editCardValue} numberOfLines={1}>
+          {value}
+        </Text>
+      </View>
+      <Ionicons name="chevron-forward" size={20} color="#B0B0B0" />
+    </>
+  );
 
-const DestinationCard: React.FC<{ country: string; days: number }> = ({ country, days }) => {
+  if (onPress) {
+    return (
+      <TouchableOpacity style={styles.editCard} onPress={onPress} activeOpacity={0.7}>
+        {inner}
+      </TouchableOpacity>
+    );
+  }
+
+  return <View style={styles.editCard}>{inner}</View>;
+};
+
+const DestinationCard: React.FC<{
+  country: string;
+  days: number;
+  onPress?: () => void;
+}> = ({ country, days, onPress }) => {
   const primaryUrl = getCountryImageFromStorage(country);
   const [failed, setFailed] = useState(false);
   const imageUri = !failed && primaryUrl ? primaryUrl : getCountryImageFallback(country);
 
-  return (
-    <View style={styles.editCard}>
+  const inner = (
+    <>
       <View style={styles.editCardThumb}>
         <Image
           source={{ uri: imageUri }}
@@ -330,8 +837,18 @@ const DestinationCard: React.FC<{ country: string; days: number }> = ({ country,
         </Text>
       </View>
       <Ionicons name="chevron-forward" size={20} color="#B0B0B0" />
-    </View>
+    </>
   );
+
+  if (onPress) {
+    return (
+      <TouchableOpacity style={styles.editCard} onPress={onPress} activeOpacity={0.7}>
+        {inner}
+      </TouchableOpacity>
+    );
+  }
+
+  return <View style={styles.editCard}>{inner}</View>;
 };
 
 function getBoardTypeInfo(input?: string): { name: string; imageUrl: string } {
@@ -403,7 +920,7 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
     right: 0,
-    backgroundColor: FIGMA.bg,
+    backgroundColor: '#FFFFFF',
   },
   safeArea: {
     flex: 1,
@@ -414,14 +931,31 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
   },
-  backRow: {
+  coverContainer: {
+    height: 180,
+    width: '100%',
+    position: 'relative',
+  },
+  coverImage: {
+    width: '100%',
+    height: '100%',
+  },
+  coverGradient: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  coverTopRow: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
     paddingHorizontal: 16,
-    paddingTop: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   backButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    alignSelf: 'flex-start',
     gap: 4,
     height: 40,
     minWidth: 70,
@@ -437,9 +971,19 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     color: FIGMA.textPrimary,
   },
+  coverEditButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: FIGMA.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   avatarWrap: {
     alignItems: 'center',
-    marginTop: 24,
+    marginTop: -50,
     gap: 8,
     zIndex: 2,
   },
@@ -511,11 +1055,107 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
     color: FIGMA.textSecondary,
   },
+  inlineFieldValueRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 2,
+  },
   inlineFieldValue: {
+    flex: 1,
     fontSize: 16,
     lineHeight: 24,
     color: FIGMA.textPrimary,
-    marginTop: 2,
+  },
+  destinationsBlock: {
+    width: '100%',
+  },
+  destAddButtonWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 8,
+    paddingBottom: 8,
+  },
+  destAddButton: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 2,
+    borderColor: '#B8B8B8',
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#596E7C',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.12,
+        shadowRadius: 8,
+      },
+      android: { elevation: 2 },
+    }),
+  },
+  nicknameOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  nicknameCard: {
+    width: '100%',
+    maxWidth: 400,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 20,
+  },
+  nicknameTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: FIGMA.textPrimary,
+    marginBottom: 12,
+  },
+  nicknameInput: {
+    borderWidth: 1,
+    borderColor: FIGMA.border,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 16,
+    color: FIGMA.textPrimary,
+    marginBottom: 20,
+  },
+  nicknameActions: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  nicknameCancelBtn: {
+    flex: 1,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: '#EEEEEE',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  nicknameCancelText: {
+    fontSize: 16,
+    color: FIGMA.textPrimary,
+  },
+  nicknameSaveBtn: {
+    flex: 1,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: '#212121',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  nicknameSaveBtnDisabled: {
+    opacity: 0.7,
+  },
+  nicknameSaveText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFFFFF',
   },
   editCard: {
     flexDirection: 'row',

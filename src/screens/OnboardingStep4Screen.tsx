@@ -32,6 +32,7 @@ import { uploadProfileImage } from '../services/storage/storageService';
 import { supabase } from '../config/supabase';
 import { formatDateOfBirth, isValidDateOfBirth, dateToISOString, calculateAgeFromDOB } from '../utils/ageCalculation';
 import AvatarCropModal from '../components/AvatarCropModal';
+import { CountrySearchModal } from '../components/CountrySearchModal';
 
 interface OnboardingStep4ScreenProps {
   onNext: (data: OnboardingData) => void;
@@ -197,253 +198,6 @@ const Field: React.FC<FieldProps> = ({
     </TouchableOpacity>
   );
 };
-
-// Comprehensive country list for web (UN member states, Iran excluded)
-const COUNTRIES = [
-  'Afghanistan',
-  'Albania',
-  'Algeria',
-  'Andorra',
-  'Angola',
-  'Antigua and Barbuda',
-  'Argentina',
-  'Armenia',
-  'Australia',
-  'Austria',
-  'Azerbaijan',
-  'Bahamas',
-  'Bahrain',
-  'Bangladesh',
-  'Barbados',
-  'Belarus',
-  'Belgium',
-  'Belize',
-  'Benin',
-  'Bhutan',
-  'Bolivia',
-  'Bosnia and Herzegovina',
-  'Botswana',
-  'Brazil',
-  'Brunei',
-  'Bulgaria',
-  'Burkina Faso',
-  'Burundi',
-  'Cambodia',
-  'Cameroon',
-  'Canada',
-  'Cape Verde',
-  'Central African Republic',
-  'Chad',
-  'Chile',
-  'China',
-  'Colombia',
-  'Comoros',
-  'Costa Rica',
-  'Croatia',
-  'Cuba',
-  'Cyprus',
-  'Czech Republic',
-  'Democratic Republic of the Congo',
-  'Denmark',
-  'Djibouti',
-  'Dominica',
-  'Dominican Republic',
-  'Ecuador',
-  'Egypt',
-  'El Salvador',
-  'Equatorial Guinea',
-  'Eritrea',
-  'Estonia',
-  'Eswatini',
-  'Ethiopia',
-  'Fiji',
-  'Finland',
-  'France',
-  'Gabon',
-  'Gambia',
-  'Georgia',
-  'Germany',
-  'Ghana',
-  'Greece',
-  'Grenada',
-  'Guatemala',
-  'Guinea',
-  'Guinea-Bissau',
-  'Guyana',
-  'Haiti',
-  'Honduras',
-  'Hong Kong',
-  'Hungary',
-  'Iceland',
-  'India',
-  'Indonesia',
-  'Ireland',
-  'Israel',
-  'Italy',
-  'Ivory Coast',
-  'Jamaica',
-  'Japan',
-  'Jordan',
-  'Kazakhstan',
-  'Kenya',
-  'Kiribati',
-  'Kuwait',
-  'Kyrgyzstan',
-  'Laos',
-  'Latvia',
-  'Lebanon',
-  'Lesotho',
-  'Liberia',
-  'Libya',
-  'Liechtenstein',
-  'Lithuania',
-  'Luxembourg',
-  'Madagascar',
-  'Malawi',
-  'Malaysia',
-  'Maldives',
-  'Mali',
-  'Malta',
-  'Marshall Islands',
-  'Mauritania',
-  'Mauritius',
-  'Mexico',
-  'Micronesia',
-  'Moldova',
-  'Monaco',
-  'Mongolia',
-  'Montenegro',
-  'Morocco',
-  'Mozambique',
-  'Myanmar',
-  'Namibia',
-  'Nauru',
-  'Nepal',
-  'Netherlands',
-  'New Zealand',
-  'Nicaragua',
-  'Niger',
-  'Nigeria',
-  'North Korea',
-  'North Macedonia',
-  'Norway',
-  'Oman',
-  'Pakistan',
-  'Palau',
-  'Panama',
-  'Papua New Guinea',
-  'Paraguay',
-  'Peru',
-  'Philippines',
-  'Poland',
-  'Portugal',
-  'Qatar',
-  'Romania',
-  'Russia',
-  'Rwanda',
-  'Saint Kitts and Nevis',
-  'Saint Lucia',
-  'Saint Vincent and the Grenadines',
-  'Samoa',
-  'San Marino',
-  'Sao Tome and Principe',
-  'Saudi Arabia',
-  'Senegal',
-  'Serbia',
-  'Seychelles',
-  'Sierra Leone',
-  'Singapore',
-  'Slovakia',
-  'Slovenia',
-  'Solomon Islands',
-  'Somalia',
-  'South Africa',
-  'South Korea',
-  'South Sudan',
-  'Spain',
-  'Sri Lanka',
-  'Sudan',
-  'Suriname',
-  'Sweden',
-  'Switzerland',
-  'Syria',
-  'Taiwan',
-  'Tajikistan',
-  'Tanzania',
-  'Thailand',
-  'Timor-Leste',
-  'Togo',
-  'Tonga',
-  'Trinidad and Tobago',
-  'Tunisia',
-  'Turkey',
-  'Turkmenistan',
-  'Tuvalu',
-  'Uganda',
-  'Ukraine',
-  'United Arab Emirates',
-  'United Kingdom',
-  'United States',
-  'United States - Alabama',
-  'United States - Alaska',
-  'United States - Arizona',
-  'United States - Arkansas',
-  'United States - California',
-  'United States - Colorado',
-  'United States - Connecticut',
-  'United States - Delaware',
-  'United States - Florida',
-  'United States - Georgia',
-  'United States - Hawaii',
-  'United States - Idaho',
-  'United States - Illinois',
-  'United States - Indiana',
-  'United States - Iowa',
-  'United States - Kansas',
-  'United States - Kentucky',
-  'United States - Louisiana',
-  'United States - Maine',
-  'United States - Maryland',
-  'United States - Massachusetts',
-  'United States - Michigan',
-  'United States - Minnesota',
-  'United States - Mississippi',
-  'United States - Missouri',
-  'United States - Montana',
-  'United States - Nebraska',
-  'United States - Nevada',
-  'United States - New Hampshire',
-  'United States - New Jersey',
-  'United States - New Mexico',
-  'United States - New York',
-  'United States - North Carolina',
-  'United States - North Dakota',
-  'United States - Ohio',
-  'United States - Oklahoma',
-  'United States - Oregon',
-  'United States - Pennsylvania',
-  'United States - Rhode Island',
-  'United States - South Carolina',
-  'United States - South Dakota',
-  'United States - Tennessee',
-  'United States - Texas',
-  'United States - Utah',
-  'United States - Vermont',
-  'United States - Virginia',
-  'United States - Washington',
-  'United States - West Virginia',
-  'United States - Wisconsin',
-  'United States - Wyoming',
-  'Uruguay',
-  'Uzbekistan',
-  'Vanuatu',
-  'Vatican City',
-  'Venezuela',
-  'Vietnam',
-  'Yemen',
-  'Zambia',
-  'Zimbabwe',
-].sort();
 
 // Country Field Component - matches Field styling with custom searchable dropdown
 const CountryField: React.FC<CountryFieldProps> = ({
@@ -1011,7 +765,6 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
   
   // Modal state management - lifted to screen level for proper stacking
   const [activeModal, setActiveModal] = useState<'country' | 'pronoun' | null>(null);
-  const [countrySearchQuery, setCountrySearchQuery] = useState('');
   const [cropModalVisible, setCropModalVisible] = useState(false);
   const [rawImageUri, setRawImageUri] = useState<string>('');
 
@@ -1440,94 +1193,17 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
     </SafeAreaView>
 
     {/* Modals rendered at screen level for proper stacking */}
-    {activeModal === 'country' && (
-      <Modal
-        visible={activeModal === 'country'}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => {
-          setActiveModal(null);
-          setCountrySearchQuery('');
-        }}
-      >
-        <TouchableOpacity
-          style={styles.countryPickerOverlayModal}
-          activeOpacity={1}
-          onPress={() => {
-            setActiveModal(null);
-            setCountrySearchQuery('');
-          }}
-        >
-          <TouchableOpacity
-            style={styles.countryPickerContent}
-            activeOpacity={1}
-            onPress={(e) => {
-              // Prevent closing when clicking inside the modal
-              e.stopPropagation();
-            }}
-          >
-            <View style={styles.webModalHeader}>
-              <Text style={styles.webModalTitle}>Select Country</Text>
-              <TouchableOpacity
-                onPress={() => {
-                  setActiveModal(null);
-                  setCountrySearchQuery('');
-                }}
-                style={styles.webModalCloseButton}
-              >
-                <Ionicons name="close" size={24} color="#333" />
-              </TouchableOpacity>
-            </View>
-
-            <TextInput
-              style={styles.webSearchInput}
-              placeholder="Search countries..."
-              value={countrySearchQuery}
-              onChangeText={setCountrySearchQuery}
-              autoFocus
-            />
-
-            <ScrollView
-              style={styles.webCountryList}
-              keyboardShouldPersistTaps="handled"
-            >
-              {COUNTRIES.filter(country =>
-                country.toLowerCase().includes(countrySearchQuery.toLowerCase())
-              ).map((country) => (
-                <TouchableOpacity
-                  key={country}
-                  style={[
-                    styles.webCountryItem,
-                    location === country && styles.webCountryItemSelected,
-                  ]}
-                  onPress={() => {
-                    setLocation(country);
-                    setLocationError(false);
-                    updateFormData({ location: country });
-                    setActiveModal(null);
-                    setCountrySearchQuery('');
-                  }}
-                >
-                  <Text
-                    style={[
-                      styles.webCountryText,
-                      location === country && styles.webCountryTextSelected,
-                    ]}
-                  >
-                    {country}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-              {COUNTRIES.filter(country =>
-                country.toLowerCase().includes(countrySearchQuery.toLowerCase())
-              ).length === 0 && (
-                <Text style={styles.webNoResults}>No countries found</Text>
-              )}
-            </ScrollView>
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
-    )}
+    <CountrySearchModal
+      visible={activeModal === 'country'}
+      selectedCountry={location}
+      onSelect={country => {
+        setLocation(country);
+        setLocationError(false);
+        updateFormData({ location: country });
+        setActiveModal(null);
+      }}
+      onClose={() => setActiveModal(null)}
+    />
 
 
     <AvatarCropModal

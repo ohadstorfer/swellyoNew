@@ -97,6 +97,7 @@ interface TravelExperienceSliderProps {
   onValueChange: (value: number) => void;
   error?: string;
   availableHeight?: number; // Available space for content to dynamically size
+  hideTitle?: boolean; // Hide the internal "What is your Travel Experience?" header (parent provides one)
 }
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
@@ -112,13 +113,23 @@ const NativeSlider: React.FC<{ currentTrips: number; updateTrips: (trips: number
   updateTrips,
 }) => {
   const thumbX = useSharedValue((currentTrips / MAX_TRIPS) * BAR_WIDTH);
-  const trackLeftX = useSharedValue(0);
 
+  // Keep the thumb in sync when the value changes from outside the gesture
+  // (e.g. opening the edit panel with an existing initialValue).
+  useEffect(() => {
+    thumbX.value = (currentTrips / MAX_TRIPS) * BAR_WIDTH;
+  }, [currentTrips, thumbX]);
+
+  // Use `e.x` — the pointer position relative to the GestureDetector's view —
+  // instead of `absoluteX` minus a measured offset. measureInWindow includes
+  // transforms, so when the parent slides in via Animated.translateX, the
+  // measurement is captured at the off-screen position and every drag clamps
+  // to 0. `e.x` is computed by RNGH on the UI thread relative to the attached
+  // view, so it's correct regardless of parent animations.
   const panGesture = Gesture.Pan()
-    .onUpdate((e) => {
+    .onUpdate((e: any) => {
       'worklet';
-      const localX = e.absoluteX - trackLeftX.value;
-      const clamped = Math.min(Math.max(localX, 0), BAR_WIDTH);
+      const clamped = Math.min(Math.max(e.x, 0), BAR_WIDTH);
       thumbX.value = clamped;
       const trips = Math.round((clamped / BAR_WIDTH) * MAX_TRIPS);
       runOnJS(updateTrips)(trips);
@@ -138,15 +149,9 @@ const NativeSlider: React.FC<{ currentTrips: number; updateTrips: (trips: number
     width: thumbX.value,
   }));
 
-  const handleLayout = (e: any) => {
-    e.target.measureInWindow((x: number) => {
-      trackLeftX.value = x;
-    });
-  };
-
   return (
     <GestureDetector gesture={panGesture}>
-      <View style={styles.sliderWrapper} onLayout={handleLayout}>
+      <View style={styles.sliderWrapper}>
         {/* Track background */}
         <View style={styles.trackBackground} />
 
@@ -176,35 +181,30 @@ const FallbackNativeSlider: React.FC<{ currentTrips: number; updateTrips: (trips
 }) => {
   const updateTripsRef = useRef(updateTrips);
   updateTripsRef.current = updateTrips;
-  const trackLeftRef = useRef(0);
 
+  // locationX is the pointer position relative to the touched view, so it's
+  // correct even when the parent is mid-animation (translateX). Avoid pageX
+  // minus a cached offset — that breaks if the wrapper measured itself while
+  // the panel was still off-screen.
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
       onPanResponderGrant: (evt) => {
-        const x = evt.nativeEvent.pageX - trackLeftRef.current;
-        const clamped = Math.max(0, Math.min(BAR_WIDTH, x));
+        const clamped = Math.max(0, Math.min(BAR_WIDTH, evt.nativeEvent.locationX));
         const trips = Math.round((clamped / BAR_WIDTH) * MAX_TRIPS);
         updateTripsRef.current(trips);
       },
       onPanResponderMove: (evt) => {
-        const x = evt.nativeEvent.pageX - trackLeftRef.current;
-        const clamped = Math.max(0, Math.min(BAR_WIDTH, x));
+        const clamped = Math.max(0, Math.min(BAR_WIDTH, evt.nativeEvent.locationX));
         const trips = Math.round((clamped / BAR_WIDTH) * MAX_TRIPS);
         updateTripsRef.current(trips);
       },
     })
   ).current;
 
-  const handleLayout = (e: any) => {
-    e.target.measureInWindow((x: number) => {
-      trackLeftRef.current = x;
-    });
-  };
-
   return (
-    <View style={styles.sliderWrapper} {...panResponder.panHandlers} onLayout={handleLayout}>
+    <View style={styles.sliderWrapper} {...panResponder.panHandlers}>
       {/* Track background */}
       <View style={styles.trackBackground} />
 
@@ -241,6 +241,7 @@ export const TravelExperienceSlider: React.FC<TravelExperienceSliderProps> = ({
   onValueChange,
   error,
   availableHeight,
+  hideTitle = false,
 }) => {
   // Ensure initial value is valid (number of trips, 0-20+)
   const safeInitialValue = isNaN(value) || value < 0 ? 0 : Math.min(value, MAX_TRIPS);
@@ -379,12 +380,14 @@ export const TravelExperienceSlider: React.FC<TravelExperienceSliderProps> = ({
 
   return (
     <View style={styles.container}>
-      <Text style={[styles.title, {
-        fontSize: dynamicSizes.titleFontSize,
-        lineHeight: dynamicSizes.titleFontSize * 1.2,
-        marginBottom: 8,
-        zIndex: 20,
-      }]}>What is your Travel Experience?</Text>
+      {!hideTitle && (
+        <Text style={[styles.title, {
+          fontSize: dynamicSizes.titleFontSize,
+          lineHeight: dynamicSizes.titleFontSize * 1.2,
+          marginBottom: 8,
+          zIndex: 20,
+        }]}>What is your Travel Experience?</Text>
+      )}
 
       {/* <Text style={[styles.subtitle, {
         marginBottom: dynamicSizes.titleMarginBottom 

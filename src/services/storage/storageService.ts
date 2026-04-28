@@ -229,6 +229,80 @@ export const uploadProfileImage = async (
 };
 
 /**
+ * Upload a profile cover image to the `profile-images` bucket.
+ * Mirrors `uploadProfileImage`; uses a `cover-` filename prefix so the same
+ * bucket can host both avatars and covers per user.
+ */
+export const uploadCoverImage = async (
+  imageUri: string,
+  userId: string
+): Promise<UploadResult> => {
+  try {
+    if (!imageUri || !userId) {
+      return { success: false, error: 'Missing image or user ID' };
+    }
+
+    // Cover photos are wide and prominent — allow more pixels than avatars
+    // (which use 1024px max). 2048 keeps the file small enough for spotty
+    // networks while still looking sharp on tablet-width displays.
+    try {
+      imageUri = await compressImage(imageUri, { maxDimension: 2048, quality: 0.85 });
+    } catch (compressError) {
+      console.warn('[StorageService] Cover compression failed, uploading raw:', compressError);
+    }
+
+    const fileName = `${userId}/cover-${Date.now()}.jpg`;
+    const contentType = 'image/jpeg';
+
+    let uploadBody: Blob | FormData;
+
+    const isNativeFileUri = Platform.OS !== 'web' &&
+      (imageUri.startsWith('file://') || imageUri.startsWith('content://') || imageUri.startsWith('ph://'));
+
+    if (isNativeFileUri) {
+      uploadBody = nativeFileFormData(imageUri, contentType);
+    } else if (imageUri.startsWith('data:')) {
+      uploadBody = dataURLtoBlob(imageUri);
+    } else if (imageUri.startsWith('blob:') || imageUri.startsWith('http://') || imageUri.startsWith('https://')) {
+      uploadBody = await uriToBlob(imageUri);
+    } else {
+      try {
+        uploadBody = await uriToBlob(imageUri);
+      } catch (fetchError) {
+        return {
+          success: false,
+          error: `Unsupported image format. URI starts with: ${imageUri.substring(0, 20)}...`,
+        };
+      }
+    }
+
+    const { data, error } = await supabase.storage
+      .from('profile-images')
+      .upload(fileName, uploadBody, {
+        contentType,
+        upsert: true,
+      });
+
+    if (error) {
+      console.error('[StorageService] Cover upload error:', error);
+      return { success: false, error: error.message || 'Upload failed' };
+    }
+
+    const { data: urlData } = supabase.storage
+      .from('profile-images')
+      .getPublicUrl(data.path);
+
+    return { success: true, url: urlData.publicUrl };
+  } catch (error) {
+    console.error('[StorageService] Cover upload exception:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
+};
+
+/**
  * Upload a trip image (hero or accommodation) to the `trip-images` bucket.
  * Mirrors `uploadProfileImage` — same URI handling, different bucket and path.
  */
@@ -596,8 +670,8 @@ const pollForProcessedVideo = async (
   headers: HeadersInit,
   functionUrl: string,
 ) => {
-  const maxAttempts = 10;
-  const delayMs = 15000; // 15 seconds between polls
+  const maxAttempts = 28;
+  const delayMs = 15000; // 15 seconds between polls (28 × 15s ≈ 7 min, sized for 250 MB videos)
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     await new Promise(resolve => setTimeout(resolve, delayMs));

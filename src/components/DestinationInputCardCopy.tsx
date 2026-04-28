@@ -2,17 +2,13 @@ import React, { useState, useEffect, useRef, useMemo, useCallback, forwardRef, u
 import {
   View,
   StyleSheet,
-  TextInput,
   TouchableOpacity,
   Dimensions,
   Image,
   ImageBackground,
-  ScrollView,
-  PanResponder,
   Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Text } from './Text';
 import { colors, spacing } from '../styles/theme';
 import { getCountryFlag } from '../utils/countryFlags';
@@ -24,6 +20,9 @@ import {
 } from '../services/media/imageService';
 import { MultiPlaceAutocompleteInput, type MultiPlaceAutocompleteInputRef } from './MultiPlaceAutocompleteInput';
 import type { SwipeExcludeZoneRect } from './DestinationInputCard';
+import { DestinationDurationInput } from './DestinationDurationInput';
+import type { DurationTimeUnit } from '../utils/destinationDuration';
+import { computeDurationParts } from '../utils/destinationDuration';
 
 /** Country name (as shown in UI) to CLDR 2-letter region code for Places API bias. */
 const COUNTRY_TO_REGION: Record<string, string> = {
@@ -67,7 +66,7 @@ interface DestinationInputCardCopyProps {
   isReadOnly?: boolean;
   initialAreas?: string;
   initialTimeValue?: string;
-  initialTimeUnit?: TimeUnit;
+  initialTimeUnit?: DurationTimeUnit;
   onSwipeExcludeZonesLayout?: (
     index: number,
     zones: { timeUnit: SwipeExcludeZoneRect; areaInput: SwipeExcludeZoneRect }
@@ -81,15 +80,6 @@ interface DestinationInputCardCopyProps {
 export interface DestinationInputCardCopyRef {
   focusAreaInput: () => void;
 }
-
-type TimeUnit = 'days' | 'weeks' | 'months' | 'years';
-
-const TIME_UNITS: TimeUnit[] = ['days', 'weeks', 'months', 'years'];
-const UNIT_LABELS: Record<TimeUnit, string> = { days: 'Days', weeks: 'Weeks', months: 'Months', years: 'Years' };
-const UNIT_ITEM_WIDTH = 58;
-const UNIT_CAROUSEL_CONTAINER_WIDTH = 179;
-/** Minimum horizontal drag (px) to advance/retreat one time unit. */
-const SWIPE_THRESHOLD = 12;
 
 export const DestinationInputCardCopy = forwardRef<
   DestinationInputCardCopyRef,
@@ -118,8 +108,7 @@ export const DestinationInputCardCopy = forwardRef<
     : [];
   const [places, setPlaces] = useState<string[]>(initialPlaces);
   const [timeValue, setTimeValue] = useState(initialTimeValue || '2');
-  const [timeUnit, setTimeUnit] = useState<TimeUnit>(initialTimeUnit || 'weeks');
-  const unitScrollRef = useRef<ScrollView>(null);
+  const [timeUnit, setTimeUnit] = useState<DurationTimeUnit>(initialTimeUnit || 'weeks');
   const placesInputRef = useRef<MultiPlaceAutocompleteInputRef>(null);
   const unitSelectorWrapperRef = useRef<View>(null);
   const areaInputZoneRef = useRef<View>(null);
@@ -156,23 +145,6 @@ export const DestinationInputCardCopy = forwardRef<
     }
   }, [isCurrentCard, doMeasureAndReport]);
 
-  const timeUnitIndex = TIME_UNITS.indexOf(timeUnit);
-  const scrollToUnitIndex = useCallback((index: number, animated = true) => {
-    const x = index * UNIT_ITEM_WIDTH;
-    unitScrollRef.current?.scrollTo({ x, animated });
-  }, []);
-
-  /** Move selection at most one step in the given direction (-1 or 1). */
-  const stepTimeUnit = useCallback((direction: number) => {
-    if (direction === 0) return;
-    const currentIndex = TIME_UNITS.indexOf(timeUnit);
-    const nextIndex = Math.max(0, Math.min(TIME_UNITS.length - 1, currentIndex + direction));
-    if (nextIndex === currentIndex) return;
-    const newUnit = TIME_UNITS[nextIndex];
-    setTimeUnit(newUnit);
-    scrollToUnitIndex(nextIndex);
-  }, [timeUnit]);
-
   const { displayLabel, flagKey } = useMemo(
     () => getDisplayLabelAndFlagKey(destination),
     [destination]
@@ -195,38 +167,13 @@ export const DestinationInputCardCopy = forwardRef<
   }, [onDataChange]);
 
   useEffect(() => {
-    const numericValue = parseFloat(timeValue);
-    if (isNaN(numericValue) || numericValue <= 0) return;
-
-    let timeInDays = 0;
-    let timeInText = '';
-
-    switch (timeUnit) {
-      case 'days':
-        timeInDays = Math.round(numericValue);
-        timeInText = numericValue === 1 ? '1 day' : `${numericValue} days`;
-        break;
-      case 'weeks':
-        timeInDays = Math.round(numericValue * 7);
-        timeInText = numericValue === 1 ? '1 week' : `${numericValue} weeks`;
-        break;
-      case 'months':
-        timeInDays = Math.round(numericValue * 30);
-        timeInText = numericValue % 1 === 0.5 ? `${Math.floor(numericValue)}.5 months` : (numericValue === 1 ? '1 month' : `${numericValue} months`);
-        break;
-      case 'years':
-        timeInDays = Math.round(numericValue * 365);
-        timeInText = numericValue % 1 === 0.5 ? `${Math.floor(numericValue)}.5 years` : (numericValue === 1 ? '1 year' : `${numericValue} years`);
-        break;
-    }
-
-    if (!isReadOnly) {
-      onDataChangeRef.current({
-        areas: places,
-        timeInDays,
-        timeInText,
-      });
-    }
+    const parts = computeDurationParts(timeValue, timeUnit);
+    if (!parts || isReadOnly) return;
+    onDataChangeRef.current({
+      areas: places,
+      timeInDays: parts.timeInDays,
+      timeInText: parts.timeInText,
+    });
   }, [places, timeValue, timeUnit, isReadOnly]);
 
   const [countryImageFailed, setCountryImageFailed] = useState(false);
@@ -250,66 +197,6 @@ export const DestinationInputCardCopy = forwardRef<
     setPexelsImageUrl(null);
     bucketImageErrorHandledRef.current = false;
   }, [destination]);
-
-  const handleTimeValueChange = (text: string) => {
-    // Allow only numbers and a single decimal point
-    let cleanedText = text.replace(/[^0-9.]/g, '');
-    const parts = cleanedText.split('.');
-
-    if (parts.length > 2) {
-      // More than one decimal point, keep only the first part and first decimal
-      cleanedText = `${parts[0]}.${parts[1]}`;
-    }
-
-    // If there's a decimal point with digits after it, only allow ".5"
-    if (cleanedText.includes('.')) {
-      const [integerPart, decimalPart] = cleanedText.split('.');
-      if (decimalPart && decimalPart.length > 0) {
-        // If user types anything after decimal, replace with "5"
-        // Examples: "2.8" -> "2.5", "2.832" -> "2.5", "2.55" -> "2.5"
-        cleanedText = `${integerPart}.5`;
-      }
-      // If decimalPart is empty (user just typed "."), allow it temporarily
-    }
-
-    setTimeValue(cleanedText);
-  };
-
-  const onSetParentScrollEnabledRef = useRef(onSetParentScrollEnabled);
-  onSetParentScrollEnabledRef.current = onSetParentScrollEnabled;
-
-  const unitPanResponder = useMemo(
-    () =>
-      PanResponder.create({
-        // On native, claim the responder immediately on touch-start so the
-        // parent FlatList's native scroll recognizer doesn't grab the gesture.
-        // On web the FlatList is CSS overflow-scroll, so capture-on-move works.
-        onStartShouldSetPanResponder: () => Platform.OS !== 'web' && !isReadOnly,
-        onMoveShouldSetPanResponderCapture: (_, gestureState) => {
-          if (isReadOnly) return false;
-          const { dx, dy } = gestureState;
-          return Math.abs(dx) > Math.abs(dy) * 0.5 && Math.abs(dx) > 4;
-        },
-        onPanResponderGrant: () => {
-          onSetParentScrollEnabledRef.current?.(false);
-        },
-        onPanResponderMove: () => {},
-        onPanResponderRelease: (_, gestureState) => {
-          const { dx } = gestureState;
-          const direction = dx > SWIPE_THRESHOLD ? -1 : dx < -SWIPE_THRESHOLD ? 1 : 0;
-          stepTimeUnit(direction);
-          onSetParentScrollEnabledRef.current?.(true);
-        },
-        onPanResponderTerminate: () => {
-          onSetParentScrollEnabledRef.current?.(true);
-        },
-      }),
-    [isReadOnly, stepTimeUnit]
-  );
-
-  useEffect(() => {
-    scrollToUnitIndex(timeUnitIndex, false);
-  }, []);
 
   const screenWidth = Dimensions.get('window').width;
   const cardWidth = Math.min(328, screenWidth - 62);
@@ -350,67 +237,16 @@ export const DestinationInputCardCopy = forwardRef<
                 />
               </View>
 
-              <View
-                style={styles.timeInputContainer}
-                {...(Platform.OS === 'web' && { dataSet: { swipeExclude: 'true' } } as any)}
-              >
-                <View style={styles.timeInputRow}>
-                  <View style={styles.timeInputBox}>
-                    <TextInput
-                      style={[styles.timeInput, isReadOnly && styles.inputReadOnly]}
-                      value={timeValue}
-                      onChangeText={handleTimeValueChange}
-                      placeholder="🕝 Time spent"
-                      placeholderTextColor="#A0A0A0"
-                      keyboardType="decimal-pad"
-                      editable={!isReadOnly}
-                    />
-                  </View>
-                  <View
-                    ref={unitSelectorWrapperRef}
-                    onLayout={reportExcludeZones}
-                    style={[styles.unitCarouselContainer, isReadOnly && styles.unitCarouselReadOnly]}
-                    {...unitPanResponder.panHandlers}
-                  >
-                    <ScrollView
-                      ref={unitScrollRef}
-                      horizontal
-                      showsHorizontalScrollIndicator={false}
-                      scrollEnabled={false}
-                      contentContainerStyle={[
-                        styles.unitCarouselContent,
-                        { paddingHorizontal: (UNIT_CAROUSEL_CONTAINER_WIDTH - UNIT_ITEM_WIDTH) / 2 },
-                      ]}
-                    >
-                      {TIME_UNITS.map((unit, i) => {
-                        const isSelected = i === timeUnitIndex;
-                        return (
-                          <View key={unit} style={[styles.unitCarouselItem, { width: UNIT_ITEM_WIDTH }]}>
-                            <Text
-                              style={[
-                                styles.unitCarouselItemText,
-                                isSelected ? styles.unitCarouselItemTextSelected : styles.unitCarouselItemTextFaded,
-                                isReadOnly && styles.unitCarouselItemTextReadOnly,
-                              ]}
-                            >
-                              {UNIT_LABELS[unit]}
-                            </Text>
-                          </View>
-                        );
-                      })}
-                    </ScrollView>
-                    <View style={styles.unitCarouselGradientOverlay} pointerEvents="none">
-                      <LinearGradient
-                        colors={['#FFFFFF', 'rgba(255, 255, 255, 0)', '#FFFFFF']}
-                        locations={[0, 0.5, 1]}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 0 }}
-                        style={StyleSheet.absoluteFill}
-                      />
-                    </View>
-                  </View>
-                </View>
-              </View>
+              <DestinationDurationInput
+                timeValue={timeValue}
+                timeUnit={timeUnit}
+                onTimeValueChange={setTimeValue}
+                onTimeUnitChange={setTimeUnit}
+                readOnly={isReadOnly}
+                onSetParentScrollEnabled={onSetParentScrollEnabled}
+                unitSelectorWrapperRef={unitSelectorWrapperRef}
+                onUnitSelectorLayout={reportExcludeZones}
+              />
             </View>
 
             {!isReadOnly && (onNext || onSave) && (
@@ -489,52 +325,6 @@ const styles = StyleSheet.create({
     zIndex: 10000,
     elevation: 24,
   },
-  timeInputContainer: { width: '100%' },
-  timeInputRow: { flexDirection: 'row', alignItems: 'center', gap: 8, width: '100%' },
-  timeInputBox: {
-    flex: 1,
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    borderRadius: 12,
-    height: 56,
-    justifyContent: 'center',
-    paddingHorizontal: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  timeInput: {
-    flex: 1,
-    fontSize: 16,
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
-    fontWeight: '400',
-    color: colors.textPrimary,
-    lineHeight: 22,
-  },
-  inputReadOnly: { opacity: 0.6, backgroundColor: '#F5F5F5' },
-  unitCarouselContainer: {
-    width: UNIT_CAROUSEL_CONTAINER_WIDTH,
-    height: 56,
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    borderRadius: 12,
-    overflow: 'hidden',
-    justifyContent: 'center',
-    position: 'relative',
-  },
-  unitCarouselReadOnly: { opacity: 0.6, backgroundColor: '#F5F5F5' },
-  unitCarouselContent: { alignItems: 'center', justifyContent: 'center' },
-  unitCarouselItem: { height: 56, alignItems: 'center', justifyContent: 'center' },
-  unitCarouselItemText: {
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
-    fontSize: 16,
-    fontWeight: '400',
-    lineHeight: 22,
-  },
-  unitCarouselItemTextSelected: { color: '#333333', fontWeight: '400' },
-  unitCarouselItemTextFaded: { color: '#B0B0B0' },
-  unitCarouselItemTextReadOnly: { color: '#999999' },
-  unitCarouselGradientOverlay: { ...StyleSheet.absoluteFillObject, borderRadius: 12 },
   nextButton: {
     backgroundColor: '#2C2C2C',
     borderRadius: 14,
