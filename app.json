@@ -2,7 +2,7 @@
   "expo": {
     "name": "Swellyo",
     "slug": "swellyo",
-    "version": "1.0.6",
+    "version": "1.0.7",
     "scheme": "swellyo",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -15,7 +15,7 @@
     },
     "ios": {
       "bundleIdentifier": "com.swellyo.app",
-      "buildNumber": "17",
+      "buildNumber": "18",
       "supportsTablet": false,
       "usesNonExemptEncryption": false,
       "usesAppleSignIn": true,

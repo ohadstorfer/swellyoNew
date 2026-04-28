@@ -1225,12 +1225,7 @@ export const AppContent: React.FC = () => {
           onSaveAndGoToConversations={handleSaveAndGoToConversations}
           noTransition={profileFromWelcomeOverlay}
           onEdit={() => {
-            if (process.env.EXPO_PUBLIC_LOCAL_MODE === 'true') {
-              setShowProfileEditor(true);
-            } else {
-              setShowProfile(false);
-              setShowSwellyShaper(true);
-            }
+            setShowProfileEditor(true);
           }}
         />
       );
