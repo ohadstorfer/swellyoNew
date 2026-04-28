@@ -241,6 +241,7 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
         player.staysActiveInBackground = true;
         player.loop = true;
         player.muted = true; // Critical for Safari autoplay
+        player.audioMixingMode = 'mixWithOthers'; // Don't interrupt Spotify/other audio
         
         if (__DEV__) {
           console.log('[SurfSkillCard] Video player initialized with URL:', videoUrl, 'Preloaded:', isVideoPreloaded);

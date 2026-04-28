@@ -260,6 +260,10 @@ interface TripPlanningChatScreenProps {
   service?: SwellyServiceType;
   /** Optional: onboarding matches to display before starting a new conversation. */
   onboardingMatches?: import('../services/matching/onboardingMatchingService').OnboardingMatch[];
+  /** True when this layer is the foreground screen. The component is kept
+   *  mounted across visibility toggles (display:'none' in AppContent), so
+   *  this prop drives the entry-animation re-trigger on each show. */
+  visible?: boolean;
 }
 
 export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
@@ -272,6 +276,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   onChatStateChange,
   service,
   onboardingMatches,
+  visible,
 }) => {
   const svc = service ?? swellyServiceCopy;
   const { formData } = useOnboarding();
@@ -294,23 +299,32 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   const [filtersMenuVisible, setFiltersMenuVisible] = useState(false);
   const [isAwaitingFilterRemovalResponse, setAwaitingFilterRemovalResponse] = useState(false);
 
-  // ─── Swipe-to-dismiss (matches ProfileScreen pattern) ─────────────────────
-  // Entry: starts off-screen right + opacity 0, animates in. Exit: rightward
-  // pan past threshold OR a flick velocity → calls onChatComplete (which is
-  // wired to setShowTripPlanningChatCopy(false) in AppContent).
+  // ─── Swipe-to-dismiss (persistence-aware) ────────────────────────────────
+  // The screen lives in a persistent layer in AppContent (toggled via
+  // display:'none'). Component never unmounts, so the entry animation is
+  // driven off the `visible` prop transitioning false → true, not off mount.
+  // After a swipe-to-dismiss, swipeTranslateX is left at SWIPE_SCREEN_WIDTH
+  // (off-screen). When the screen becomes visible again, this effect resets
+  // it to off-screen-right + opacity 0 and runs the slide-in.
   const swipeTranslateX = useSharedValue(SWIPE_SCREEN_WIDTH);
   const swipeOpacity = useSharedValue(0);
   const touchStartX = useSharedValue(0);
   const touchStartY = useSharedValue(0);
 
   useEffect(() => {
+    if (!visible) return;
+    // Snap to off-screen-right + invisible, then animate in. setValue is
+    // synchronous on the UI thread so the worklet style picks it up before
+    // the next paint — no flash of the previous (off-screen) position.
+    swipeTranslateX.value = SWIPE_SCREEN_WIDTH;
+    swipeOpacity.value = 0;
     swipeTranslateX.value = withTiming(0, {
       duration: 450,
       easing: RnEasing.out(RnEasing.cubic),
     });
     swipeOpacity.value = withTiming(1, { duration: 450 });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [visible]);
 
   const handleSwipeDismiss = useCallback(() => {
     Keyboard.dismiss();
@@ -2098,11 +2112,13 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   const renderItem = useCallback(({ item, index }: { item: Message; index: number }) => {
     // Inverted list: cell[i].marginBottom creates the visible gap between cell[i]
     // (older, above visually) and cell[i-1] (newer, below visually). Compare with
-    // the newer neighbor to decide same/different sender. Newest (index 0) sets
-    // marginBottom to 0 — the composer's inputWrapper paddingTop owns that gap.
+    // the newer neighbor to decide same/different sender. For the newest message
+    // (index 0), the marginBottom lands between it and the composer — keep this
+    // gap inside the FlatList (rather than on inputWrapper) so the chat background
+    // image shows through instead of plain gray.
     const newerMessage = invertedMessages[index - 1];
     const sameSender = !!newerMessage && newerMessage.isUser === item.isUser;
-    const messageGap = index === 0 ? 0 : (sameSender ? 3 : 9);
+    const messageGap = index === 0 ? 18 : (sameSender ? 3 : 9);
     return (
       <View style={{ marginBottom: messageGap }}>
         {renderMessage(item)}
@@ -2135,9 +2151,16 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         animatedSwipeStyle,
       ]}
     >
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.white }]} edges={['top']}>
-      {/* Header */}
-      <View style={styles.headerContainer}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.white }]} edges={[]}>
+      {/* Header — paddingTop includes the OS top inset so the dark header
+          extends up into the status-bar area without staining the rest of
+          the screen via the SafeAreaView's background. */}
+      <View
+        style={[
+          styles.headerContainer,
+          { paddingTop: (Platform.OS === 'web' ? 10 : 0) + insets.top },
+        ]}
+      >
         <View style={styles.headerBottomLine} pointerEvents="none" />
         <View style={styles.header}>
           <View style={styles.headerLeft}>
@@ -2147,12 +2170,19 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
                 onChatComplete?.();
               }}
             >
-              <Ionicons name="chevron-back" size={24} color="#222B30" />
+              <Ionicons name="chevron-back" size={24} color="#FFFFFF" />
             </TouchableOpacity>
             
             <View style={styles.avatar}>
               <View style={styles.avatarRing}>
-                <View style={styles.ellipseBackgroundNative} />
+                <LinearGradient
+                  colors={['#B72DF2', '#D3D3D3']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.ellipseBackgroundNative}
+                >
+                  <View style={styles.ellipseInnerFill} />
+                </LinearGradient>
                 <View style={styles.avatarImageContainer}>
                   <Image
                     source={Images.swellyAvatar}
@@ -2171,7 +2201,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
           
           <TouchableOpacity style={styles.editButton} onPress={() => setShowNewChatModal(true)}>
             <Svg width={18} height={18} viewBox="0 0 18 18" fill="none">
-              <Path d="M8 2.26777H4.5C3.09987 2.26777 2.3998 2.26777 1.86502 2.54025C1.39462 2.77994 1.01217 3.16239 0.772484 3.63279C0.5 4.16757 0.5 4.86764 0.5 6.26777V13.2678C0.5 14.6679 0.5 15.368 0.772484 15.9027C1.01217 16.3731 1.39462 16.7556 1.86502 16.9953C2.3998 17.2678 3.09987 17.2678 4.5 17.2678H11.5C12.9001 17.2678 13.6002 17.2678 14.135 16.9953C14.6054 16.7556 14.9878 16.3731 15.2275 15.9027C15.5 15.368 15.5 14.6679 15.5 13.2678V9.76777M5.49998 12.2678H6.89543C7.30308 12.2678 7.50691 12.2678 7.69872 12.2217C7.86878 12.1809 8.03135 12.1135 8.18047 12.0222C8.34867 11.9191 8.4928 11.775 8.78105 11.4867L16.75 3.51777C17.4404 2.82741 17.4404 1.70812 16.75 1.01777C16.0596 0.327412 14.9404 0.327411 14.25 1.01777L6.28103 8.98672C5.99277 9.27497 5.84865 9.4191 5.74558 9.58729C5.6542 9.73641 5.58686 9.89899 5.54603 10.069C5.49998 10.2609 5.49998 10.4647 5.49998 10.8723V12.2678Z" stroke="#7B7B7B" strokeLinecap="round" strokeLinejoin="round" />
+              <Path d="M8 2.26777H4.5C3.09987 2.26777 2.3998 2.26777 1.86502 2.54025C1.39462 2.77994 1.01217 3.16239 0.772484 3.63279C0.5 4.16757 0.5 4.86764 0.5 6.26777V13.2678C0.5 14.6679 0.5 15.368 0.772484 15.9027C1.01217 16.3731 1.39462 16.7556 1.86502 16.9953C2.3998 17.2678 3.09987 17.2678 4.5 17.2678H11.5C12.9001 17.2678 13.6002 17.2678 14.135 16.9953C14.6054 16.7556 14.9878 16.3731 15.2275 15.9027C15.5 15.368 15.5 14.6679 15.5 13.2678V9.76777M5.49998 12.2678H6.89543C7.30308 12.2678 7.50691 12.2678 7.69872 12.2217C7.86878 12.1809 8.03135 12.1135 8.18047 12.0222C8.34867 11.9191 8.4928 11.775 8.78105 11.4867L16.75 3.51777C17.4404 2.82741 17.4404 1.70812 16.75 1.01777C16.0596 0.327412 14.9404 0.327411 14.25 1.01777L6.28103 8.98672C5.99277 9.27497 5.84865 9.4191 5.74558 9.58729C5.6542 9.73641 5.58686 9.89899 5.54603 10.069C5.49998 10.2609 5.49998 10.4647 5.49998 10.8723V12.2678Z" stroke="#FFFFFF" strokeLinecap="round" strokeLinejoin="round" />
             </Svg>
           </TouchableOpacity>
         </View>
@@ -2614,7 +2644,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#F5F5F5',
   },
   headerContainer: {
-    backgroundColor: colors.white,
+    backgroundColor: '#212121',
     // Tight padding so total header height (paddingTop + 68px avatar + paddingBottom)
     // matches DM's 78px (native) / 90px (web). The Swelly avatar is taller than
     // DM's, so the padding has to give back the difference.
@@ -2683,15 +2713,21 @@ const styles = StyleSheet.create({
     }),
   },
   ellipseBackgroundNative: {
+    // LinearGradient acts as a 2px purple→light-gray "border ring":
+    // padding gives the visible gradient strip; the inner View paints the
+    // gray fill on top, leaving only the strip visible.
     position: 'absolute',
     width: '105%',
     height: '98%',
     left: '-2.5%',
     zIndex: 0,
     borderRadius: 45,
-    borderWidth: 2,
-    borderColor: 'rgba(34, 43, 48, 0.5)',
+    padding: 1.5,
+  },
+  ellipseInnerFill: {
+    flex: 1,
     backgroundColor: '#E0E0E0',
+    borderRadius: 43.5,
   },
   avatarImageContainer: {
     position: 'absolute',
@@ -2719,7 +2755,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter-Bold',
     lineHeight: 28,
-    color: '#333333',
+    color: '#FFFFFF',
     marginBottom: 2,
   },
   profileTagline: {
@@ -2727,13 +2763,12 @@ const styles = StyleSheet.create({
     fontWeight: '400',
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     lineHeight: 15,
-    color: '#868686',
+    color: 'rgba(255, 255, 255, 0.65)',
   },
   editButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 102,
-    backgroundColor: colors.white,
+    // Removed the white circle background — icon now sits naked on the dark
+    // header. Padding gives a comfortable hit-target.
+    padding: 12,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -2844,7 +2879,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     paddingHorizontal: 8,
     paddingBottom: Platform.OS === 'android' ? 0 : 0,
-    paddingTop: 10,
+    paddingTop: 0,
   },
   attachButtonWrapper: {
     paddingBottom: 15,
@@ -3085,6 +3120,7 @@ const styles = StyleSheet.create({
     gap: 16,
     paddingHorizontal: 16,
     marginTop: 12,
+    marginBottom: 12,
   },
   reviewFiltersButton: {
     flex: 1,
@@ -3173,6 +3209,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginTop: 12,
+    marginBottom: 12,
     paddingHorizontal: 0,
     gap: 6,
   },

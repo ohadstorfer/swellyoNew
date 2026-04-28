@@ -69,11 +69,9 @@ function getReceiptState(msg: Message, otherReadAt: string | null): ReceiptState
 }
 
 function ReadReceipt({ state }: { state: ReceiptState; onDark?: boolean }) {
-  // Custom double-tick image, tinted in a single neutral color regardless of
-  // state or background ("same color for both positions"). #6D6D6D is the
-  // flat equivalent of the bubble timestamp's rgba(60,60,60,0.75) on white,
-  // so the tick now visually matches the timestamp next to it.
-  const color = '#C2C2C2';
+  // Gray when delivered (or pending — UI shows "Sending…" alongside it anyway),
+  // Swellyo teal when the other user has read up to this message.
+  const color = state === 'read' ? '#05BCD3' : '#C2C2C2';
   return (
     <Reanimated.View entering={FadeIn.duration(220)} exiting={FadeOut.duration(140)}>
       <Image
@@ -345,17 +343,21 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const insets = useSafeAreaInsets();
   // Keyboard-aware padding for the chat area. Bypasses the measureLayout-based
   // KAV which breaks when nested inside react-native-screen-transitions' transformed
-  // ContentLayer. height is negative when keyboard is open on iOS → negate for padding.
+  // ContentLayer. height is negative when keyboard is open on iOS → use abs for
+  // padding (defensive: ignore brief sign flips during interactive dismiss).
   const { height: kbHeight, progress: kbProgress } = useReanimatedKeyboardAnimation();
   const animatedKeyboardPadding = useAnimatedStyle(() => ({
-    paddingBottom: -kbHeight.value,
+    paddingBottom: Math.round(Math.abs(kbHeight.value)),
   }));
   // Composer's own bottom padding: insets.bottom at rest (home indicator safe area),
   // shrinks to 0 as keyboard opens (so the input sits flush against keyboard top).
+  // Clamp progress to [0,1] — the lib has occasionally reported a hair past either
+  // end during fast focus/dismiss, which leaked a stray pixel of paddingBottom.
   const composerRestPadding = Math.max(insets.bottom, 8);
-  const animatedComposerPadding = useAnimatedStyle(() => ({
-    paddingBottom: composerRestPadding * (1 - kbProgress.value),
-  }));
+  const animatedComposerPadding = useAnimatedStyle(() => {
+    const p = Math.min(1, Math.max(0, kbProgress.value));
+    return { paddingBottom: Math.round(composerRestPadding * (1 - p)) };
+  });
   // Send-button color themed by the other user's advice role. Used by the
   // chat composer AND the image/video preview modals so the send button
   // matches across all three surfaces.
@@ -1137,8 +1139,19 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         // CRITICAL: Load adv_role BEFORE setting messages to ensure correct color on first render
         await loadOtherUserAdvRole();
         
-        // Set messages after adv_role is loaded to ensure correct colors
-        setMessages(result.messages);
+        // Set messages after adv_role is loaded to ensure correct colors.
+        // Preserve any local-only messages already present for THIS conversation
+        // (e.g. the optimistic first message after createDirectConversation
+        // flipped currentConversationId from null → real). At this moment the
+        // server has the conversation row but messagingService.sendMessage
+        // hasn't run yet, so result.messages is []. A blind replace would wipe
+        // the optimistic bubble for a frame and the WelcomeIntroMessage would
+        // flash back until the send resolves.
+        setMessages((prev) => {
+          const localForThisConvo = prev.filter(m => m.conversation_id === currentConversationId);
+          if (localForThisConvo.length === 0) return result.messages;
+          return chatHistoryCache.mergeMessages(localForThisConvo, result.messages);
+        });
         setIsFetchingMessages(false);
       }
     } catch (error) {
@@ -3293,8 +3306,11 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                 loop and the jumping-up-and-down feel. */}
             <View
               onLayout={(e) => {
+                // 2px tolerance — sub-pixel layout deltas were causing stray
+                // re-renders that propagated into KeyboardGestureArea's offset
+                // and could nudge the composer mid-keyboard-animation.
                 const h = Math.round(e.nativeEvent.layout.height);
-                if (h !== composerHeight) setComposerHeight(h);
+                if (Math.abs(h - composerHeight) >= 2) setComposerHeight(h);
               }}
             >
             {replyingTo && (

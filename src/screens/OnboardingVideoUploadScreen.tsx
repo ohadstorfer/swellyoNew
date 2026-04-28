@@ -115,6 +115,7 @@ export const OnboardingVideoUploadScreen: React.FC<OnboardingVideoUploadScreenPr
       player.staysActiveInBackground = true;
       player.loop = true;
       player.muted = true;
+      player.audioMixingMode = 'mixWithOthers';
     }
   });
 

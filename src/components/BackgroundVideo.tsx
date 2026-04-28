@@ -464,6 +464,7 @@ export const BackgroundVideo: React.FC<BackgroundVideoProps> = ({
       console.log('[BackgroundVideo] Player created:', player);
       player.loop = true;
       player.muted = true;
+      player.audioMixingMode = 'mixWithOthers';
       try {
         player.play();
       } catch (error) {
@@ -482,6 +483,7 @@ export const BackgroundVideo: React.FC<BackgroundVideoProps> = ({
       // Set properties again to ensure they're applied
       player.loop = true;
       player.muted = true;
+      player.audioMixingMode = 'mixWithOthers';
       
       // Play the video
       const playVideo = async () => {

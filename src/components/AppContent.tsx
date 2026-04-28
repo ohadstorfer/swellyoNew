@@ -1324,7 +1324,11 @@ export const AppContent: React.FC = () => {
             toggle pattern as the regular variant above. */}
         {tripPlanningChatCopyEverShown && (
           <View
-            style={[StyleSheet.absoluteFill, { backgroundColor: '#F5F5F5' }, !showTripPlanningChatCopy && { display: 'none' }]}
+            // No backgroundColor — the swelly screen has its own (white
+            // SafeAreaView + chatBackground image), and a transparent parent
+            // lets the home screen behind show through during the
+            // slide/fade entry & swipe-back exit animations.
+            style={[StyleSheet.absoluteFill, !showTripPlanningChatCopy && { display: 'none' }]}
             pointerEvents={showTripPlanningChatCopy && !showProfile && !showConversationLoading && !selectedConversation && !showSettings && !showTrips && !showSwellyShaper ? 'auto' : 'none'}
           >
             <TripPlanningChatScreenCopy
@@ -1341,6 +1345,7 @@ export const AppContent: React.FC = () => {
               }}
               service={activeCopyService === 'copy-copy' ? swellyServiceCopyCopy : swellyServiceCopy}
               onboardingMatches={pendingOnboardingMatches || undefined}
+              visible={showTripPlanningChatCopy}
             />
           </View>
         )}

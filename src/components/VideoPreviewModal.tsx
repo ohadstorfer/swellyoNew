@@ -105,6 +105,7 @@ export const VideoPreviewModal: React.FC<VideoPreviewModalProps> = ({
   const player = useVideoPlayer(visible ? currentVideoUri : null, (p) => {
     p.loop = true;
     p.muted = false;
+    p.audioMixingMode = 'mixWithOthers';
   });
 
   // Track playing/paused so the custom play-button overlay reflects the real

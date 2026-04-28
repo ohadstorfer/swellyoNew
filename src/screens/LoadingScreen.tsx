@@ -56,6 +56,7 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
         // Set properties required for autoplay (muted is required for iOS Safari)
         player.loop = false; // Don't loop - play once
         player.muted = true; // Must be muted for autoplay on iOS Safari
+        player.audioMixingMode = 'mixWithOthers'; // Don't interrupt Spotify/other audio
         
         if (__DEV__) {
           console.log('[LoadingScreen] Video player initialized with URL:', videoUrl, 'Preloaded:', isVideoPreloaded);

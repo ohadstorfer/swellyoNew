@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,13 @@ import {
 import Svg, { Path } from 'react-native-svg';
 import { ProfileImage } from './ProfileImage';
 import { colors } from '../styles/theme';
+
+// Animatable Path so we can drive strokeDashoffset from an Animated.Value.
+const AnimatedPath = Animated.createAnimatedComponent(Path);
+
+// Fallback length (pre-measured estimate). Overridden at runtime by the
+// real value via Path.getTotalLength() once the SVG mounts.
+const PATH_LENGTH_FALLBACK = 900;
 
 interface ConversationLoadingScreenProps {
   currentUserAvatar: string | null;
@@ -40,8 +47,15 @@ export const ConversationLoadingScreen: React.FC<ConversationLoadingScreenProps>
     console.log('  - otherUserName:', otherUserName);
   }, [currentUserAvatar, currentUserName, otherUserAvatar, otherUserName]);
   
-  // Animation for cover sliding away to reveal the line
-  const coverTranslateX = useRef(new Animated.Value(0)).current; // Start covering the line
+  // Cover-stroke animation: a Path of the same shape as the dashed line is
+  // drawn ON TOP in the background color, fully covering it, then "retracts"
+  // along the curve via strokeDashoffset. This reveals the dashed line at a
+  // steady arc-length pace — every ms uncovers the same amount of line,
+  // regardless of how curvy the path is. Negative offset retreats from the
+  // START of the path so the reveal goes left-to-right.
+  const linePathRef = useRef<any>(null);
+  const [pathLength, setPathLength] = useState(PATH_LENGTH_FALLBACK);
+  const coverDashOffset = useRef(new Animated.Value(0)).current;
   
   // Text slider animation
   const textSlideX = useRef(new Animated.Value(0)).current; // For sliding text horizontally
@@ -100,12 +114,17 @@ export const ConversationLoadingScreen: React.FC<ConversationLoadingScreenProps>
       useNativeDriver: true,
     });
     
-    // Step 2: Cover slides away to reveal line (3 seconds, starts after profiles slide in)
-    const coverAnimation = Animated.timing(coverTranslateX, {
-      toValue: 434.5, // Slide completely off-screen to the right
+    // Step 2: Cover stroke retracts along the path (3 seconds, starts after
+    // profiles slide in). Linear easing on dashoffset gives constant reveal
+    // speed in arc length, independent of the path's curvature.
+    // useNativeDriver: false because strokeDashoffset is an SVG attribute,
+    // not a transform/opacity — native driver doesn't support it.
+    const coverAnimation = Animated.timing(coverDashOffset, {
+      toValue: -pathLength,
       duration: 3000,
-      delay: 800, // Start after profiles slide in (800ms)
-      useNativeDriver: true,
+      delay: 800,
+      easing: Easing.linear,
+      useNativeDriver: false,
     });
 
     // Step 3: After line animation completes, profiles move closer together horizontally and grow
@@ -283,29 +302,43 @@ export const ConversationLoadingScreen: React.FC<ConversationLoadingScreenProps>
 
         {/* Animated SVG Line Container - positioned between profiles */}
         <View style={styles.lineWrapper}>
-          {/* Static SVG Line - no animation */}
+          {/* SVG holds two paths: the visible dashed line (bottom) and the
+              cover stroke (top) that retracts along the curve to reveal it.
+              Both share the same `d` so the cover sits exactly over the line. */}
           <View style={styles.svgContainer}>
             <Svg width={434.5} height={413.988} viewBox="0 0 424 415">
               <Path
+                ref={linePathRef}
                 d={animatedLinePath}
                 stroke="#333333"
                 strokeWidth="1"
                 fill="none"
                 strokeDasharray="6 6"
                 strokeLinecap="round"
+                onLayout={() => {
+                  // Measure the real path length once it's mounted; replaces
+                  // the fallback estimate so the animation matches the actual
+                  // arc length of this specific curve.
+                  const node: any = linePathRef.current;
+                  if (node && typeof node.getTotalLength === 'function') {
+                    try {
+                      const len = node.getTotalLength();
+                      if (len && len > 0) setPathLength(len);
+                    } catch {}
+                  }
+                }}
+              />
+              <AnimatedPath
+                d={animatedLinePath}
+                stroke="#F5F5F5"
+                strokeWidth="3"
+                fill="none"
+                strokeLinecap="round"
+                strokeDasharray={`${pathLength} ${pathLength}`}
+                strokeDashoffset={coverDashOffset as any}
               />
             </Svg>
           </View>
-
-          {/* Cover that slides away to reveal the line */}
-          <Animated.View
-            style={[
-              styles.lineCover,
-              {
-                transform: [{ translateX: coverTranslateX }],
-              },
-            ]}
-          />
 
           {/* Icons positioned along the line - 4 icons at different positions */}
           <View style={styles.iconsWrapper}>

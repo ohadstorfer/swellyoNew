@@ -76,6 +76,7 @@ const VideoSlot: React.FC<VideoSlotProps> = React.memo(({ videoUrl, isActive, st
     if (p) {
       p.loop = true;
       p.muted = true;
+      p.audioMixingMode = 'mixWithOthers';
     }
   });
 
