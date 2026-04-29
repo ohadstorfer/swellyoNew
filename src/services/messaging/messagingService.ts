@@ -1066,6 +1066,122 @@ class MessagingService {
   }
 
   /**
+   * Create a new group conversation. Creator becomes owner; other userIds are added as members.
+   * Optional metadata is stored on the row (used to link a conversation to a group_trip via { trip_id }).
+   */
+  async createGroupConversation(
+    title: string,
+    memberIds: string[],
+    metadata?: Record<string, any>
+  ): Promise<Conversation> {
+    if (!isSupabaseConfigured()) {
+      throw new Error('Supabase is not configured');
+    }
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      throw new Error('Not authenticated');
+    }
+
+    const { data: conversation, error: convError } = await supabase
+      .from('conversations')
+      .insert({
+        is_direct: false,
+        title: title.trim(),
+        created_by: user.id,
+        metadata: metadata ?? {},
+      })
+      .select()
+      .single();
+
+    if (convError) throw convError;
+
+    const uniqueMemberIds = Array.from(new Set(memberIds.filter(id => id && id !== user.id)));
+    const memberRows = [
+      { conversation_id: conversation.id, user_id: user.id, role: 'owner' as const },
+      ...uniqueMemberIds.map(id => ({
+        conversation_id: conversation.id,
+        user_id: id,
+        role: 'member' as const,
+      })),
+    ];
+
+    const { error: membersError } = await supabase
+      .from('conversation_members')
+      .insert(memberRows);
+
+    if (membersError) throw membersError;
+
+    return conversation;
+  }
+
+  /**
+   * Idempotently add a user to a conversation. Safe to call repeatedly: if the user is already
+   * a member, the upsert is a no-op (composite primary key on conversation_id+user_id absorbs duplicates).
+   */
+  async addConversationMember(
+    conversationId: string,
+    userId: string,
+    role: 'member' | 'admin' = 'member'
+  ): Promise<void> {
+    if (!isSupabaseConfigured()) {
+      throw new Error('Supabase is not configured');
+    }
+
+    const { error } = await supabase
+      .from('conversation_members')
+      .upsert(
+        { conversation_id: conversationId, user_id: userId, role },
+        { onConflict: 'conversation_id,user_id', ignoreDuplicates: true }
+      );
+
+    if (error) throw error;
+  }
+
+  /**
+   * Idempotently remove a user from a conversation. No-op if they aren't a member.
+   */
+  async removeConversationMember(
+    conversationId: string,
+    userId: string
+  ): Promise<void> {
+    if (!isSupabaseConfigured()) {
+      throw new Error('Supabase is not configured');
+    }
+
+    const { error } = await supabase
+      .from('conversation_members')
+      .delete()
+      .eq('conversation_id', conversationId)
+      .eq('user_id', userId);
+
+    if (error) throw error;
+  }
+
+  /**
+   * Find the group conversation linked to a surftrip via metadata.trip_id. Returns null if none exists.
+   */
+  async getConversationByTripId(tripId: string): Promise<Conversation | null> {
+    if (!isSupabaseConfigured()) {
+      return null;
+    }
+
+    const { data, error } = await supabase
+      .from('conversations')
+      .select('*')
+      .eq('is_direct', false)
+      .eq('metadata->>trip_id', tripId)
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      console.error('Error fetching conversation by trip id:', error);
+      return null;
+    }
+    return data;
+  }
+
+  /**
    * Mark messages as read
    */
   async markAsRead(conversationId: string, messageId?: string): Promise<void> {

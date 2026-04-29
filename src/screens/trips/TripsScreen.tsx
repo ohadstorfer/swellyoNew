@@ -18,11 +18,16 @@ import {
   listMyTrips,
 } from '../../services/trips/groupTripsService';
 import CreateTripWizard from './CreateTripWizard';
+import TripDetailScreen from './TripDetailScreen';
 
 export type TripsTab = 'explore' | 'my' | 'create';
 
 interface TripsScreenProps {
   onBack: () => void;
+  /** When provided (e.g. from a push tap), open the detail screen for this trip on mount. */
+  initialTripId?: string | null;
+  /** Open the group chat linked to a trip. Lifted to AppContent so it can swap to the DM overlay. */
+  onOpenGroupChat?: (params: { conversationId: string; title: string; heroImageUrl?: string | null; tripId?: string }) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -86,8 +91,13 @@ const formatDestination = (trip: GroupTrip): string => {
   return parts.join(', ');
 };
 
-const TripCard: React.FC<{ trip: GroupTrip }> = ({ trip }) => (
-  <View style={styles.card}>
+const TripCard: React.FC<{ trip: GroupTrip; onPress?: () => void }> = ({ trip, onPress }) => (
+  <TouchableOpacity
+    style={styles.card}
+    activeOpacity={onPress ? 0.85 : 1}
+    onPress={onPress}
+    disabled={!onPress}
+  >
     {trip.hero_image_url ? (
       <Image source={{ uri: trip.hero_image_url }} style={styles.cardImage} />
     ) : (
@@ -112,13 +122,13 @@ const TripCard: React.FC<{ trip: GroupTrip }> = ({ trip }) => (
         ))}
       </View>
     </View>
-  </View>
+  </TouchableOpacity>
 );
 
 // ---------------------------------------------------------------------------
 // Explore view
 // ---------------------------------------------------------------------------
-const ExploreTripsView: React.FC = () => {
+const ExploreTripsView: React.FC<{ onOpenTrip: (tripId: string) => void }> = ({ onOpenTrip }) => {
   const [trips, setTrips] = useState<GroupTrip[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -146,7 +156,7 @@ const ExploreTripsView: React.FC = () => {
     <FlatList
       data={trips}
       keyExtractor={t => t.id}
-      renderItem={({ item }) => <TripCard trip={item} />}
+      renderItem={({ item }) => <TripCard trip={item} onPress={() => onOpenTrip(item.id)} />}
       contentContainerStyle={styles.listContent}
       refreshControl={
         <RefreshControl
@@ -170,10 +180,11 @@ const ExploreTripsView: React.FC = () => {
 // ---------------------------------------------------------------------------
 // My Trips view
 // ---------------------------------------------------------------------------
-const MyTripsView: React.FC<{ userId: string | null; onGoCreate: () => void }> = ({
-  userId,
-  onGoCreate,
-}) => {
+const MyTripsView: React.FC<{
+  userId: string | null;
+  onGoCreate: () => void;
+  onOpenTrip: (tripId: string) => void;
+}> = ({ userId, onGoCreate, onOpenTrip }) => {
   const [trips, setTrips] = useState<GroupTrip[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -205,7 +216,7 @@ const MyTripsView: React.FC<{ userId: string | null; onGoCreate: () => void }> =
     <FlatList
       data={trips}
       keyExtractor={t => t.id}
-      renderItem={({ item }) => <TripCard trip={item} />}
+      renderItem={({ item }) => <TripCard trip={item} onPress={() => onOpenTrip(item.id)} />}
       contentContainerStyle={styles.listContent}
       refreshControl={
         <RefreshControl
@@ -232,18 +243,66 @@ const MyTripsView: React.FC<{ userId: string | null; onGoCreate: () => void }> =
 // ---------------------------------------------------------------------------
 // Wrapper screen
 // ---------------------------------------------------------------------------
-export default function TripsScreen({ onBack }: TripsScreenProps) {
+export default function TripsScreen({ onBack, initialTripId, onOpenGroupChat }: TripsScreenProps) {
   const insets = useSafeAreaInsets();
   const { user: contextUser } = useOnboarding();
   const currentUserId = contextUser?.id?.toString() ?? null;
 
   const [activeTab, setActiveTab] = useState<TripsTab>('explore');
   const [myTripsVersion, setMyTripsVersion] = useState(0); // bump to refresh after create
+  const [selectedTripId, setSelectedTripId] = useState<string | null>(initialTripId ?? null);
+  const [editingTrip, setEditingTrip] = useState<GroupTrip | null>(null);
+
+  // Deep-link into a trip from a push tap: when initialTripId changes, open it.
+  useEffect(() => {
+    if (initialTripId) setSelectedTripId(initialTripId);
+  }, [initialTripId]);
 
   const handleCreated = () => {
     setMyTripsVersion(v => v + 1);
     setActiveTab('my');
   };
+
+  const handleSavedEdit = () => {
+    setMyTripsVersion(v => v + 1);
+    setEditingTrip(null);
+    // Stay on detail screen so the host sees the updated trip immediately.
+  };
+
+  if (editingTrip) {
+    return (
+      <SafeAreaView style={styles.root} edges={['top']}>
+        <View style={[styles.header, { paddingTop: 8 }]}>
+          <TouchableOpacity
+            onPress={() => setEditingTrip(null)}
+            style={styles.backBtn}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Ionicons name="chevron-back" size={28} color="#222B30" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Edit trip</Text>
+          <View style={{ width: 28 }} />
+        </View>
+        <CreateTripWizard
+          hostId={currentUserId}
+          initialTrip={editingTrip}
+          onCreated={handleSavedEdit}
+          onCancel={() => setEditingTrip(null)}
+        />
+      </SafeAreaView>
+    );
+  }
+
+  if (selectedTripId) {
+    return (
+      <TripDetailScreen
+        tripId={selectedTripId}
+        onBack={() => setSelectedTripId(null)}
+        onOpenGroupChat={onOpenGroupChat}
+        onEditTrip={setEditingTrip}
+      />
+    );
+  }
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
@@ -258,12 +317,13 @@ export default function TripsScreen({ onBack }: TripsScreenProps) {
       <TripsSegmentBar active={activeTab} onChange={setActiveTab} />
 
       <View style={styles.body}>
-        {activeTab === 'explore' && <ExploreTripsView />}
+        {activeTab === 'explore' && <ExploreTripsView onOpenTrip={setSelectedTripId} />}
         {activeTab === 'my' && (
           <MyTripsView
             key={myTripsVersion}
             userId={currentUserId}
             onGoCreate={() => setActiveTab('create')}
+            onOpenTrip={setSelectedTripId}
           />
         )}
         {activeTab === 'create' && (

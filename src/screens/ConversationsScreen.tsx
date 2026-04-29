@@ -28,8 +28,10 @@ import { useOnboarding } from '../context/OnboardingContext';
 import { getImageUrl } from '../services/media/imageService';
 import { Images } from '../assets/images';
 import { UserSearchModal } from '../components/UserSearchModal';
+import { CreateGroupChatModal } from '../components/CreateGroupChatModal';
 import { analyticsService } from '../services/analytics/analyticsService';
 import { DirectMessageScreen } from './DirectMessageScreen';
+import { DirectGroupChat } from './DirectGroupChat';
 import { SwellyShaperScreen } from './SwellyShaperScreen';
 import { SwellyoTeamWelcome } from './SwellyoTeamWelcome';
 import { ProfileImage } from '../components/ProfileImage';
@@ -49,6 +51,7 @@ interface ConversationsScreenProps {
   onSwellyShaperViewProfile?: () => void; // Callback for viewing profile from Swelly Shaper
   onSettingsPress?: () => void;
   onTripsPress?: () => void;
+  onOpenTripDetail?: (tripId: string) => void;
   pendingNotificationConversationId?: string | null;
   onPendingNotificationHandled?: () => void;
   // True when the conversations list is the topmost visible layer (no DM,
@@ -204,6 +207,7 @@ export default function ConversationsScreen({
   onSwellyShaperViewProfile,
   onSettingsPress,
   onTripsPress,
+  onOpenTripDetail,
   pendingNotificationConversationId,
   onPendingNotificationHandled,
   isListFrontmost = true,
@@ -238,6 +242,7 @@ export default function ConversationsScreen({
     otherUserName: string;
     otherUserAvatar: string | null;
     isDirect?: boolean;
+    tripId?: string;
   }) => {
     if (stackCtx) {
       stackCtx.navigateToDM({
@@ -246,6 +251,7 @@ export default function ConversationsScreen({
         otherUserName: sel.otherUserName,
         otherUserAvatar: sel.otherUserAvatar,
         isDirect: sel.isDirect,
+        tripId: sel.tripId,
       });
     } else {
       if (sel.id) setCurrentConversationId(sel.id);
@@ -274,12 +280,14 @@ export default function ConversationsScreen({
   });
   const [showMenu, setShowMenu] = useState(false);
   const [showSearchModal, setShowSearchModal] = useState(false);
+  const [showCreateGroupModal, setShowCreateGroupModal] = useState(false);
   const [selectedConversation, setSelectedConversation] = useState<{
     id?: string; // Optional: undefined for pending conversations
     otherUserId: string; // Required: the user ID we're messaging
     otherUserName: string;
     otherUserAvatar: string | null;
     isDirect?: boolean;
+    tripId?: string; // For trip-linked group chats; tapping the header opens the trip
   } | null>(null);
   const [showSwellyShaper, setShowSwellyShaper] = useState(false);
   const [showSwellyoTeamWelcome, setShowSwellyoTeamWelcome] = useState(false);
@@ -495,7 +503,13 @@ export default function ConversationsScreen({
   };
 
   const getFilteredConversations = () => {
-    let filtered = conversations.filter(conv => conv.other_user?.name);
+    const isLocalMode = process.env.EXPO_PUBLIC_LOCAL_MODE === 'true';
+    let filtered = conversations.filter(conv => {
+      // Group chats: only show in local mode (feature is gated until promoted to prod).
+      if (conv.is_direct === false) return isLocalMode && !!conv.title;
+      // Direct chats: keep existing requirement that the other user is enriched.
+      return !!conv.other_user?.name;
+    });
 
     if (filter !== 'all' && currentUserId) {
       filtered = conversations.filter(conv => {
@@ -785,12 +799,14 @@ export default function ConversationsScreen({
         isDirect: true,
       });
     } else if (!conv.is_direct) {
+      const linkedTripId = typeof conv.metadata?.trip_id === 'string' ? conv.metadata.trip_id : undefined;
       openConversation({
         id: conv.id,
         otherUserId: '',
         otherUserName: conv.title || 'Group Chat',
         otherUserAvatar: null,
         isDirect: false,
+        tripId: linkedTripId,
       });
     }
     // Also call the callback if provided
@@ -967,13 +983,19 @@ export default function ConversationsScreen({
         <View style={styles.conversationContent}>
           {/* Avatar with adv role icon */}
           <View style={styles.avatarContainer}>
-            <ProfileImage
-              imageUrl={avatarUrl}
-              name={displayName}
-              style={styles.avatar}
-              showLoadingIndicator={false}
-            />
-            
+            {conv.is_direct ? (
+              <ProfileImage
+                imageUrl={avatarUrl}
+                name={displayName}
+                style={styles.avatar}
+                showLoadingIndicator={false}
+              />
+            ) : (
+              <View style={[styles.avatar, styles.groupAvatar]}>
+                <Ionicons name="people" size={22} color="#FFFFFF" />
+              </View>
+            )}
+
             {/* Adv role icon badge */}
             {userAdvRole === 'adv_seeker' && (
               <View style={styles.advRoleBadgeGetAdv}>
@@ -1208,15 +1230,18 @@ export default function ConversationsScreen({
 
   // Early return for DirectMessageScreen - must come AFTER all hooks
   if (selectedConversation) {
+    const ChatScreen = selectedConversation.isDirect === false ? DirectGroupChat : DirectMessageScreen;
     return (
-      <DirectMessageScreen
+      <ChatScreen
         conversationId={selectedConversation.id} // May be undefined for pending conversations
         otherUserId={selectedConversation.otherUserId}
         otherUserName={selectedConversation.otherUserName}
         otherUserAvatar={selectedConversation.otherUserAvatar}
         isDirect={selectedConversation.isDirect ?? true}
+        tripId={selectedConversation.tripId}
         onBack={handleBackFromChat}
         onViewProfile={onViewUserProfile}
+        onOpenTripDetail={onOpenTripDetail}
         onConversationCreated={(conversationId) => {
           // Update selectedConversation with the created conversation ID
           // Set current conversation in MessagingProvider for unread logic
@@ -1535,6 +1560,22 @@ export default function ConversationsScreen({
                   </TouchableOpacity>
                 )}
 
+                {/* New group chat — local mode only */}
+                {process.env.EXPO_PUBLIC_LOCAL_MODE === 'true' && (
+                  <TouchableOpacity
+                    style={styles.menuItem}
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      setShowMenu(false);
+                      setShowCreateGroupModal(true);
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="people-outline" size={20} color="#222B30" />
+                    <Text style={styles.menuItemText}>New group</Text>
+                  </TouchableOpacity>
+                )}
+
                 {/* Replay welcome guide — local mode only */}
                 {process.env.EXPO_PUBLIC_LOCAL_MODE === 'true' && (
                   <TouchableOpacity
@@ -1633,6 +1674,24 @@ export default function ConversationsScreen({
         visible={showSearchModal}
         onClose={() => setShowSearchModal(false)}
         onUserSelect={handleUserSelect}
+      />
+
+      {/* Create Group Chat Modal — local mode only */}
+      <CreateGroupChatModal
+        visible={showCreateGroupModal}
+        currentUserId={currentUserId}
+        directConversations={conversations.filter(c => c.is_direct && !!c.other_user?.user_id)}
+        onClose={() => setShowCreateGroupModal(false)}
+        onCreated={(conv) => {
+          setShowCreateGroupModal(false);
+          openConversation({
+            id: conv.id,
+            otherUserId: '',
+            otherUserName: conv.title || 'Group',
+            otherUserAvatar: null,
+            isDirect: false,
+          });
+        }}
       />
 
       {/* Logout Loading Overlay */}
@@ -1941,6 +2000,11 @@ const styles = StyleSheet.create({
     width: 52,
     height: 52,
     borderRadius: 40,
+  },
+  groupAvatar: {
+    backgroundColor: '#5E6B73',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   avatarPlaceholder: {
     backgroundColor: '#E4E4E4',
