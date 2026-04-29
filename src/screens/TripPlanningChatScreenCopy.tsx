@@ -51,6 +51,7 @@ import {
 import { useChatKeyboardScroll } from '../hooks/useChatKeyboardScroll';
 import { useTutorial } from '../context/TutorialContext';
 import { TutorialOverlay, type AnchorRect } from '../components/TutorialOverlay';
+import { TUTORIAL_ANCHOR_Y_OFFSET } from '../utils/tutorialAnchorOffset';
 import { SwellyTopicOverlay, type SwellyTopicId } from '../components/SwellyTopicOverlay';
 import { useKeyboardVisible, useKeyboardHeight } from '../hooks/useKeyboardVisible';
 
@@ -404,12 +405,12 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
 
   const measureFiltersButton = () => {
     filtersButtonRef.current?.measureInWindow?.((x, y, width, height) => {
-      setFiltersButtonRect({ x, y, width, height });
+      setFiltersButtonRect({ x, y: y + TUTORIAL_ANCHOR_Y_OFFSET, width, height });
     });
   };
   const measureFiltersChips = () => {
     filtersChipsRowRef.current?.measureInWindow?.((x, y, width, height) => {
-      setFiltersChipsRect({ x, y, width, height });
+      setFiltersChipsRect({ x, y: y + TUTORIAL_ANCHOR_Y_OFFSET, width, height });
     });
   };
 
@@ -450,8 +451,11 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
       const t = setTimeout(() => {
         measureFiltersChips();
         trashZoneRef.current?.measureInWindow?.((x: number, y: number, width: number, height: number) => {
+          // bounds is for drag-and-drop hit testing in the regular app
+          // coordinate system — keep raw. rect is for the tutorial's modal
+          // extraContent — apply Android translucent-modal offset.
           trashZoneBounds.current = { x, y, width, height };
-          setTrashZoneRect({ x, y, width, height });
+          setTrashZoneRect({ x, y: y + TUTORIAL_ANCHOR_Y_OFFSET, width, height });
         });
       }, 420);
       return () => clearTimeout(t);
@@ -2430,7 +2434,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
                 onLayout={() => {
                   trashZoneRef.current?.measureInWindow?.((x: number, y: number, width: number, height: number) => {
                     trashZoneBounds.current = { x, y, width, height };
-                    setTrashZoneRect({ x, y, width, height });
+                    setTrashZoneRect({ x, y: y + TUTORIAL_ANCHOR_Y_OFFSET, width, height });
                   });
                 }}
               >

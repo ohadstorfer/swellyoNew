@@ -38,6 +38,7 @@ import { useConversationsStack } from '../navigation/ConversationsStack';
 import { useFocusEffect } from '@react-navigation/native';
 import { useTutorial } from '../context/TutorialContext';
 import { TutorialOverlay, type AnchorRect } from '../components/TutorialOverlay';
+import { TUTORIAL_ANCHOR_Y_OFFSET } from '../utils/tutorialAnchorOffset';
 
 interface ConversationsScreenProps {
   onConversationPress?: (conversationId: string) => void;
@@ -50,6 +51,11 @@ interface ConversationsScreenProps {
   onTripsPress?: () => void;
   pendingNotificationConversationId?: string | null;
   onPendingNotificationHandled?: () => void;
+  // True when the conversations list is the topmost visible layer (no DM,
+  // overlay, or full-screen panel covering it). Gates the welcome-guide tutorial
+  // trigger so it doesn't fire while the user is inside a DM rendered as an
+  // overlay above this still-focused screen.
+  isListFrontmost?: boolean;
 }
 
 type FilterType = 'all' | 'advisor' | 'seeker';
@@ -200,6 +206,7 @@ export default function ConversationsScreen({
   onTripsPress,
   pendingNotificationConversationId,
   onPendingNotificationHandled,
+  isListFrontmost = true,
 }: ConversationsScreenProps) {
   const insets = useSafeAreaInsets();
   const { resetOnboarding, setCurrentStep, setUser, setIsDemoUser, user: contextUser } = useOnboarding();
@@ -291,12 +298,12 @@ export default function ConversationsScreen({
 
   const measureFirstRow = () => {
     firstRowRef.current?.measureInWindow?.((x, y, width, height) => {
-      setFirstRowRect({ x, y, width, height });
+      setFirstRowRect({ x, y: y + TUTORIAL_ANCHOR_Y_OFFSET, width, height });
     });
   };
   const measureSwellyCard = () => {
     swellyCardRef.current?.measureInWindow?.((x, y, width, height) => {
-      setSwellyCardRect({ x, y, width, height });
+      setSwellyCardRect({ x, y: y + TUTORIAL_ANCHOR_Y_OFFSET, width, height });
     });
   };
 
@@ -315,6 +322,11 @@ export default function ConversationsScreen({
   // Trigger check: fires every time the screen gains focus.
   useFocusEffect(
     React.useCallback(() => {
+      // The DM and other full-screen layers are rendered as overlays on top of
+      // this screen (not via navigation push), so this screen never blurs.
+      // Without this gate, dependency changes would re-run the callback and
+      // start the tutorial while the user is inside a DM/overlay.
+      if (!isListFrontmost) return;
       if (!tutorial.isHydrated) return;
       if (tutorial.isCompleted) return;
       if (tutorial.isActive) return;
@@ -322,6 +334,7 @@ export default function ConversationsScreen({
       if (isMVPMode || onboardingIsDemoUser) return;
       tutorial.start();
     }, [
+      isListFrontmost,
       tutorial.isHydrated,
       tutorial.isCompleted,
       tutorial.isActive,
