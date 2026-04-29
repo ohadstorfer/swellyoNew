@@ -30,7 +30,7 @@
     },
     "android": {
       "package": "com.swellyo.app",
-      "versionCode": 16,
+      "versionCode": 17,
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",

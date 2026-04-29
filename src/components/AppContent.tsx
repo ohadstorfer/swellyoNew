@@ -1188,6 +1188,23 @@ export const AppContent: React.FC = () => {
     console.log('[AppContent] Rendering check - showTripPlanningChat:', showTripPlanningChat, 'showTripPlanningChatCopy:', showTripPlanningChatCopy);
     console.log('[AppContent] Rendering check - showConversationLoading:', showConversationLoading, 'pendingConversation:', !!pendingConversation);
 
+    // True only when the conversations list is the topmost visible layer.
+    // Used to gate the welcome-guide tutorial trigger inside ConversationsScreen
+    // — the screen never blurs (overlays render on top, no navigation push), so
+    // its useFocusEffect would otherwise fire while the user is inside a DM or
+    // Swelly chat.
+    const isListFrontmost =
+      !selectedConversation &&
+      !showConversationLoading &&
+      !showTripPlanningChat &&
+      !showTripPlanningChatCopy &&
+      !showProfile &&
+      !showSettings &&
+      !showTrips &&
+      !showSwellyShaper &&
+      !showWelcomeToLineupOverlay &&
+      !showProfileEditor;
+
     // Determine which overlay screen (if any) should cover ConversationsStack.
     // ConversationsStack stays mounted underneath so scroll position and UI state
     // survive navigation to Profile/Settings/Trips/DM/etc. Priority order matches
@@ -1284,6 +1301,7 @@ export const AppContent: React.FC = () => {
             persist across Profile/Settings/DM/etc. visits. */}
         <View style={styles.fill}>
           <ConversationsStack
+            isListFrontmost={isListFrontmost}
             onConversationPress={handleConversationPress}
             onSwellyPress={handleSwellyPress}
             onSwellyPressCopy={handleSwellyPressCopy}

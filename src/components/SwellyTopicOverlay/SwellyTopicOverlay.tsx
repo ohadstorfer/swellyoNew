@@ -161,50 +161,56 @@ export const SwellyTopicOverlay: React.FC<Props> = ({ visible, onSelect }) => {
             <View style={styles.handle} />
           </View>
 
-          <Image
-            source={Images.swellyWaving as ImageSourcePropType}
-            style={styles.avatarImage}
-            resizeMode="contain"
-          />
+          <View style={styles.content}>
+            <Image
+              source={Images.swellyWaving as ImageSourcePropType}
+              style={styles.avatarImage}
+              resizeMode="contain"
+            />
 
-          <Text style={styles.title}>{`Yo!  What are we\nfocusing on today?`}</Text>
+            <Text style={styles.title}>{`Yo!  What are we\nfocusing on today?`}</Text>
 
-          <View style={styles.grid}>
-            {TOPICS.map((topic) => {
-              const selected = selectedId === topic.id;
-              return (
-                <TouchableOpacity
-                  key={topic.id}
-                  activeOpacity={0.85}
-                  onPress={() => setSelectedId(topic.id)}
-                  style={[styles.card, selected && styles.cardSelected]}
-                >
-                  <Image
-                    source={{ uri: topic.image }}
-                    style={styles.cardImage}
-                    resizeMode="cover"
-                  />
-                  <View style={styles.cardTitleWrap}>
-                    <Text style={styles.cardTitle} numberOfLines={2}>
-                      {topic.title}
-                    </Text>
-                  </View>
-                  <View
-                    style={[
-                      styles.checkbox,
-                      selected ? styles.checkboxSelected : styles.checkboxUnselected,
-                    ]}
-                  >
-                    {selected && (
-                      <Ionicons name="checkmark" size={14} color="#FFFFFF" />
-                    )}
-                  </View>
-                </TouchableOpacity>
-              );
-            })}
+            <View style={styles.grid}>
+              {[0, 2].map((rowStart) => (
+                <View key={rowStart} style={styles.gridRow}>
+                  {TOPICS.slice(rowStart, rowStart + 2).map((topic) => {
+                    const selected = selectedId === topic.id;
+                    return (
+                      <TouchableOpacity
+                        key={topic.id}
+                        activeOpacity={0.85}
+                        onPress={() => setSelectedId(topic.id)}
+                        style={[styles.card, selected && styles.cardSelected]}
+                      >
+                        <Image
+                          source={{ uri: topic.image }}
+                          style={styles.cardImage}
+                          resizeMode="cover"
+                        />
+                        <View style={styles.cardTitleWrap}>
+                          <Text style={styles.cardTitle} numberOfLines={2}>
+                            {topic.title}
+                          </Text>
+                        </View>
+                        <View
+                          style={[
+                            styles.checkbox,
+                            selected ? styles.checkboxSelected : styles.checkboxUnselected,
+                          ]}
+                        >
+                          {selected && (
+                            <Ionicons name="checkmark" size={14} color="#FFFFFF" />
+                          )}
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              ))}
+            </View>
+
+            <Text style={styles.subtext}>Select only 1 option</Text>
           </View>
-
-          <Text style={styles.subtext}>Select only 1 option</Text>
 
           <TouchableOpacity
             activeOpacity={0.85}
@@ -265,16 +271,26 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 16,
   },
+  content: {
+    flex: 1,
+    width: '100%',
+    alignItems: 'center',
+  },
   grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
+    flex: 1,
+    flexDirection: 'column',
     rowGap: 12,
     width: '100%',
     marginBottom: 20,
   },
+  gridRow: {
+    flex: 1,
+    flexDirection: 'row',
+    columnGap: 12,
+    width: '100%',
+  },
   card: {
-    width: '48.5%',
+    flex: 1,
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
     padding: 8,
@@ -299,7 +315,7 @@ const styles = StyleSheet.create({
   },
   cardImage: {
     width: '100%',
-    height: 130,
+    flex: 1,
     borderTopLeftRadius: 8,
     borderTopRightRadius: 8,
   },
@@ -341,7 +357,6 @@ const styles = StyleSheet.create({
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     color: '#7B7B7B',
     textAlign: 'center',
-    marginTop: 'auto',
     marginBottom: 16,
   },
   cta: {
