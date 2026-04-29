@@ -4,6 +4,13 @@ import * as Device from 'expo-device';
 import Constants from 'expo-constants';
 import { supabase, isSupabaseConfigured } from '../../config/supabase';
 
+export interface NotificationTapPayload {
+  type?: string;
+  conversationId?: string;
+  tripId?: string;
+  requestId?: string;
+}
+
 class PushNotificationService {
   private static instance: PushNotificationService;
   private currentToken: string | null = null;
@@ -12,7 +19,7 @@ class PushNotificationService {
   private notificationListener: Notifications.Subscription | null = null;
   private responseListener: Notifications.Subscription | null = null;
   private getCurrentConversationId: (() => string | null) | null = null;
-  private onNotificationTap: ((conversationId: string) => void) | null = null;
+  private onNotificationTap: ((payload: NotificationTapPayload) => void) | null = null;
 
   private constructor() {}
 
@@ -128,7 +135,7 @@ class PushNotificationService {
    */
   setupNotificationHandlers(
     getCurrentConversationId: () => string | null,
-    onNotificationTap: (conversationId: string) => void
+    onNotificationTap: (payload: NotificationTapPayload) => void
   ): void {
     if (Platform.OS === 'web') return;
 
@@ -150,14 +157,19 @@ class PushNotificationService {
       },
     });
 
-    // Tap: user tapped a notification — navigate to conversation
+    // Tap: user tapped a notification — pass the full data payload so the app can route by type
     if (this.responseListener) {
       this.responseListener.remove();
     }
     this.responseListener = Notifications.addNotificationResponseReceivedListener((response) => {
-      const conversationId = response.notification.request.content.data?.conversationId as string | undefined;
-      if (conversationId && this.onNotificationTap) {
-        this.onNotificationTap(conversationId);
+      const data = (response.notification.request.content.data || {}) as Record<string, unknown>;
+      if (this.onNotificationTap) {
+        this.onNotificationTap({
+          type: typeof data.type === 'string' ? (data.type as string) : undefined,
+          conversationId: typeof data.conversationId === 'string' ? (data.conversationId as string) : undefined,
+          tripId: typeof data.tripId === 'string' ? (data.tripId as string) : undefined,
+          requestId: typeof data.requestId === 'string' ? (data.requestId as string) : undefined,
+        });
       }
     });
   }
