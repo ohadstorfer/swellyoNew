@@ -453,6 +453,26 @@ class SupabaseDatabaseService {
   }
 
   /**
+   * Update only the `age` column for the current user. Used to keep age fresh
+   * relative to date_of_birth on app open — the trigger only recalculates on
+   * date_of_birth writes, so age would otherwise go stale across birthdays.
+   */
+  async updateSurferAge(age: number): Promise<boolean> {
+    if (!isSupabaseConfigured()) return false;
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) return false;
+    const { error } = await supabase
+      .from('surfers')
+      .update({ age })
+      .eq('user_id', user.id);
+    if (error) {
+      console.warn('updateSurferAge failed:', error);
+      return false;
+    }
+    return true;
+  }
+
+  /**
    * Update only lifestyle_image_urls for the current user's surfer row.
    * Used after background enrichment so we don't send a full payload that could clear other columns.
    */
@@ -588,7 +608,7 @@ class SupabaseDatabaseService {
       // destinations_map does NOT exist - only destinations_array exists
       const { data, error } = await supabase
         .from('surfers')
-        .select('user_id, name, age, pronoun, country_from, surfboard_type, surf_level, surf_level_description, surf_level_category, travel_experience, bio, profile_image_url, cover_image_url, profile_video_url, destinations_array, lifestyle_keywords, lifestyle_image_urls, wave_type_keywords, travel_buddies, created_at, updated_at, finished_onboarding')
+        .select('user_id, name, age, date_of_birth, pronoun, country_from, surfboard_type, surf_level, surf_level_description, surf_level_category, travel_experience, bio, profile_image_url, cover_image_url, profile_video_url, destinations_array, lifestyle_keywords, lifestyle_image_urls, wave_type_keywords, travel_buddies, created_at, updated_at, finished_onboarding')
         .eq('user_id', userId)
         .single();
 

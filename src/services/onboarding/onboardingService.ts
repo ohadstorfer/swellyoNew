@@ -16,6 +16,7 @@ export interface OnboardingStepData {
   userEmail?: string;
   location?: string;
   age?: number;
+  dateOfBirth?: string; // ISO YYYY-MM-DD; preferred over `age` (DB trigger derives age from this)
   profilePicture?: string;
   pronouns?: string;
   boardType?: number;
@@ -50,8 +51,11 @@ class OnboardingService {
    * Save Step 2 data (Surf Level)
    * @param boardType - Board type ID
    * @param surfLevel - Surf level (0-4, will be converted to 1-5 in database)
+   * @param dateOfBirth - Optional ISO date string. Promoted from device-local
+   *   AsyncStorage (welcome-screen age gate) into the surfers row at this step
+   *   so the value lives in the DB before step 4. Trigger derives age from it.
    */
-  async saveStep2(boardType: number, surfLevel: number): Promise<void> {
+  async saveStep2(boardType: number, surfLevel: number, dateOfBirth?: string): Promise<void> {
     if (!isSupabaseConfigured()) {
       console.log('Supabase not configured, skipping Step 2 save');
       return;
@@ -61,6 +65,7 @@ class OnboardingService {
       await supabaseDatabaseService.saveOnboardingData({
         boardType,
         surfLevel,
+        dateOfBirth,
       });
       console.log('Step 2 (surf level) saved to Supabase successfully');
     } catch (error: any) {
@@ -116,6 +121,7 @@ class OnboardingService {
         userEmail: data.userEmail,
         location: data.location,
         age: data.age,
+        dateOfBirth: data.dateOfBirth,
         profilePicture: data.profilePicture,
         pronouns: data.pronouns,
         boardType: data.boardType,
@@ -148,6 +154,7 @@ class OnboardingService {
         userEmail: data.userEmail,
         location: data.location,
         age: data.age,
+        dateOfBirth: data.dateOfBirth,
         profilePicture: data.profilePicture,
         pronouns: data.pronouns,
         boardType: data.boardType,

@@ -28,7 +28,7 @@ import { useOnboarding } from '../context/OnboardingContext';
 import { analyticsService } from '../services/analytics/analyticsService';
 import { useAuthGuard } from '../hooks/useAuthGuard';
 import { isFirstVideoReadyForBoardType, getVideoPreloadStatus, waitForVideoReady, preloadLoadingVideo, getLoadingVideoUrl } from '../services/media/videoPreloadService';
-import { STEP_WELCOME } from '../constants/onboardingSteps';
+import { STEP_WELCOME, STEP_ONBOARDING_WELCOME } from '../constants/onboardingSteps';
 import { ageGateService } from '../services/ageGate/ageGateService';
 import { swellyServiceCopy, swellyServiceCopyCopy } from '../services/swelly/swellyServiceCopy';
 import { findAndConnectMatches, OnboardingMatchResult } from '../services/matching/onboardingMatchingService';
@@ -36,7 +36,8 @@ import { pushNotificationService } from '../services/notifications/pushNotificat
 import { useMessaging } from '../context/MessagingProvider';
 
 export const AppContent: React.FC = () => {
-  const { currentStep, formData, setCurrentStep, updateFormData, saveStepToSupabase, isComplete, markOnboardingComplete, isDemoUser, setIsDemoUser, setUser, resetOnboarding, user, isRestoringSession } = useOnboarding();
+  const { currentStep, formData, setCurrentStep, updateFormData, saveStepToSupabase, isComplete, markOnboardingComplete, isDemoUser, setIsDemoUser, setUser, resetOnboarding, user, isRestoringSession, isLoaded: isOnboardingLoaded, completionCheckedForUserId } = useOnboarding();
+  const onboardingCheckedForCurrentUser = user !== null && completionCheckedForUserId === user.id;
   const { markWelcomeLineupDismissed } = useTutorial();
   
   // Initialize auth guard - this will automatically redirect unauthenticated users
@@ -87,21 +88,21 @@ export const AppContent: React.FC = () => {
     });
   }, []);
 
-  // Validate session before showing ConversationsScreen
+  // Validate session whenever a user is signed in (regardless of onboarding
+  // completion). This unblocks mid-onboarding users who would otherwise be
+  // stuck on the spinning welcome screen because hasValidatedSession was
+  // gated on isComplete.
   useEffect(() => {
-    // Only validate if onboarding is complete, user exists, not demo user, not already validating, and Supabase is configured
-    if (isComplete && user !== null && !isDemoUser && !isRestoringSession && 
+    if (user !== null && !isDemoUser && !isRestoringSession &&
         !sessionValidationRef.current && isSupabaseConfigured === true) {
       sessionValidationRef.current = true;
-      
-      // Check if there's actually a valid Supabase session
+
       const validateSession = async () => {
         try {
           const { supabase } = await import('../config/supabase');
           const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-          
+
           if (sessionError || !session) {
-            // User exists in context but no valid session - trigger logout
             console.log('[AppContent] User in context but no valid session - triggering logout');
             const { performLogout } = await import('../utils/logout');
             await performLogout({
@@ -112,28 +113,43 @@ export const AppContent: React.FC = () => {
             });
             return;
           }
-          
-          // Session is valid
+
           setHasValidatedSession(true);
         } catch (error) {
           console.error('[AppContent] Error validating session:', error);
-          // On error, allow rendering (auth guard will handle it)
           setHasValidatedSession(true);
         } finally {
           sessionValidationRef.current = false;
         }
       };
-      
+
       validateSession();
-    } else if (user === null || !isComplete) {
-      // Reset validation state when user logs out or onboarding not complete
+    } else if (user === null) {
       setHasValidatedSession(false);
       sessionValidationRef.current = false;
     } else if (isSupabaseConfigured === false) {
-      // Supabase not configured - no need to validate, allow rendering
       setHasValidatedSession(true);
     }
-  }, [isComplete, user, isDemoUser, isRestoringSession, isSupabaseConfigured, resetOnboarding, setUser, setCurrentStep, setIsDemoUser]);
+  }, [user, isDemoUser, isRestoringSession, isSupabaseConfigured, resetOnboarding, setUser, setCurrentStep, setIsDemoUser]);
+
+  // Recover from inconsistent state: signed-in user with currentStep stuck at
+  // STEP_WELCOME (-1) and onboarding not complete. Gated on isOnboardingLoaded
+  // so we wait for the DB-backed isComplete check to finish — otherwise
+  // already-onboarded users briefly flash OnboardingWelcomeScreen on cold
+  // start before isComplete flips to true.
+  useEffect(() => {
+    if (
+      !isRestoringSession &&
+      onboardingCheckedForCurrentUser &&
+      user !== null &&
+      !isDemoUser &&
+      !isComplete &&
+      currentStep === STEP_WELCOME
+    ) {
+      console.log('[AppContent] Signed-in user at STEP_WELCOME, resuming onboarding');
+      setCurrentStep(STEP_ONBOARDING_WELCOME);
+    }
+  }, [user, isDemoUser, isComplete, currentStep, isRestoringSession, onboardingCheckedForCurrentUser, setCurrentStep]);
   
   // Set up push notification handlers (foreground suppression + tap navigation)
   useEffect(() => {
@@ -442,11 +458,16 @@ export const AppContent: React.FC = () => {
     
     try {
       updateFormData(data);
-      
+
+      // Promote the device-local DOB (set on welcome screen) into the DB now,
+      // so by step 4 the surfers row is the source of truth.
+      const { ageGateService } = await import('../services/ageGate/ageGateService');
+      const dobFromDevice = await ageGateService.getDOB();
+
       // Save Step 2 data to Supabase (surf level) using onboarding service
       const { onboardingService } = await import('../services/onboarding/onboardingService');
-      await onboardingService.saveStep2(data.boardType!, data.surfLevel!);
-      
+      await onboardingService.saveStep2(data.boardType!, data.surfLevel!, dobFromDevice ?? undefined);
+
       setShowVideoUploadStep(true); // Show video upload mid-step
     } catch (error) {
       console.error('Error in Step 2 Next:', error);
@@ -496,6 +517,7 @@ export const AppContent: React.FC = () => {
         userEmail: data.userEmail,
         location: data.location,
         age: data.age,
+        dateOfBirth: data.dateOfBirth,
         profilePicture: data.profilePicture,
         pronouns: data.pronouns,
         boardType: data.boardType,
@@ -1639,7 +1661,11 @@ export const AppContent: React.FC = () => {
   // keep the branded loading UI up so the login buttons don't flash before redirect.
   const isAuthResolving =
     isCheckingAuth ||
-    (user !== null && !hasValidatedSession && !isDemoUser && isSupabaseConfigured !== false);
+    (user !== null && !hasValidatedSession && !isDemoUser && isSupabaseConfigured !== false) ||
+    // Keep spinner up until we've checked finished_onboarding from the DB for
+    // THIS specific user. Without this gate, a fresh sign-in flashes
+    // OnboardingWelcomeScreen before the DB check resolves.
+    (user !== null && !isDemoUser && !onboardingCheckedForCurrentUser);
   return (
     <WelcomeScreen
       onGetStarted={handleGetStarted}

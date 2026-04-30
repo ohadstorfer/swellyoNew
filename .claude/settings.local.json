@@ -134,7 +134,10 @@
       "WebFetch(domain:docs.swmansion.com)",
       "WebFetch(domain:status.supabase.com)",
       "WebFetch(domain:releasebot.io)",
-      "WebFetch(domain:ishadeed.com)"
+      "WebFetch(domain:ishadeed.com)",
+      "Read(//c/Users/User/Downloads/**)",
+      "Read(//c/Users/User/Desktop/**)",
+      "Read(//c/Users/User/Documents/**)"
     ]
   }
 }

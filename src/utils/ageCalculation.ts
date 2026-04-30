@@ -13,33 +13,37 @@
  * @returns Age in years (integer) or null if invalid
  */
 export function calculateAgeFromDOB(dateOfBirth: string | Date): number | null {
-  let dob: Date;
-  
+  // Extract DOB year/month/day directly from the string when possible to
+  // avoid Date timezone shifts (parsing "YYYY-MM-DD" as UTC then reading
+  // local components can roll the day backward in negative UTC offsets).
+  let dobYear: number;
+  let dobMonth: number; // 1-12
+  let dobDay: number;   // 1-31
+
   if (typeof dateOfBirth === 'string') {
-    dob = new Date(dateOfBirth + 'T00:00:00Z'); // Use UTC to avoid timezone issues
-    if (isNaN(dob.getTime())) {
-      return null;
-    }
+    const m = dateOfBirth.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!m) return null;
+    dobYear = parseInt(m[1], 10);
+    dobMonth = parseInt(m[2], 10);
+    dobDay = parseInt(m[3], 10);
   } else {
-    dob = dateOfBirth;
-    if (isNaN(dob.getTime())) {
-      return null;
-    }
+    if (isNaN(dateOfBirth.getTime())) return null;
+    dobYear = dateOfBirth.getUTCFullYear();
+    dobMonth = dateOfBirth.getUTCMonth() + 1;
+    dobDay = dateOfBirth.getUTCDate();
   }
-  
-  const today = new Date();
-  const todayUTC = new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()));
-  const dobUTC = new Date(Date.UTC(dob.getFullYear(), dob.getMonth(), dob.getDate()));
-  
-  let age = todayUTC.getFullYear() - dobUTC.getFullYear();
-  const monthDiff = todayUTC.getMonth() - dobUTC.getMonth();
-  const dayDiff = todayUTC.getDate() - dobUTC.getDate();
-  
-  // Subtract 1 if birthday hasn't occurred this year
-  if (monthDiff < 0 || (monthDiff === 0 && dayDiff < 0)) {
+
+  // "Today" uses the device's local calendar — that's the right notion of
+  // "today" from the user's perspective.
+  const now = new Date();
+  const todayYear = now.getFullYear();
+  const todayMonth = now.getMonth() + 1;
+  const todayDay = now.getDate();
+
+  let age = todayYear - dobYear;
+  if (todayMonth < dobMonth || (todayMonth === dobMonth && todayDay < dobDay)) {
     age--;
   }
-  
   return age >= 0 ? age : null;
 }
 

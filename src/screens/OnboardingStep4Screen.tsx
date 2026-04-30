@@ -30,6 +30,7 @@ import { colors, spacing, typography } from '../styles/theme';
 import { OnboardingData } from './OnboardingStep1Screen';
 import { uploadProfileImage } from '../services/storage/storageService';
 import { supabase } from '../config/supabase';
+import { useUserProfile } from '../context/UserProfileContext';
 import { formatDateOfBirth, isValidDateOfBirth, dateToISOString, calculateAgeFromDOB } from '../utils/ageCalculation';
 import AvatarCropModal from '../components/AvatarCropModal';
 import { CountrySearchModal } from '../components/CountrySearchModal';
@@ -745,6 +746,7 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
   onAgeBlocked,
 }) => {
   const insets = useSafeAreaInsets();
+  const { profile, isLoading: isProfileLoading, refresh: refreshProfile } = useUserProfile();
   const [showPermissionOverlay, setShowPermissionOverlay] = useState(false);
   const pendingPickerRef = useRef<(() => void) | null>(null);
   const [profilePicture, setProfilePicture] = useState<string | null>(
@@ -752,15 +754,22 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
   );
   const [name, setName] = useState<string>(initialData.nickname || '');
   const [location, setLocation] = useState<string>(initialData.location || '');
-  const [dateOfBirth, setDateOfBirth] = useState<string>(
-    initialData.dateOfBirth || ''
-  );
+  // DOB starts empty — only the DB is the source of truth here. If the row's
+  // date_of_birth is set we'll mirror it in (and hide the field). Otherwise we
+  // leave it empty so the field renders as a hard gate. AsyncStorage is no
+  // longer consulted here — the step-2 promotion ensures it's already in DB.
+  const [dateOfBirth, setDateOfBirth] = useState<string>('');
   const [dobReadOnly, setDobReadOnly] = useState(false);
+  // True until we've confirmed (via a fresh DB fetch) whether the user has a
+  // DOB row. Prevents the hard-gate field from flashing when the cached
+  // profile predates the step-2 DOB write.
+  const [isCheckingDob, setIsCheckingDob] = useState(true);
   const [dateOfBirthError, setDateOfBirthError] = useState<string>('');
   const [nameError, setNameError] = useState(false);
   const [locationError, setLocationError] = useState(false);
   const [pronounError, setPronounError] = useState(false);
   const [pronoun, setPronoun] = useState<string>(initialData.pronouns || 'name only');
+  const [homeBreak, setHomeBreak] = useState<string>('');
   const [isUploading, setIsUploading] = useState(false);
   
   // Modal state management - lifted to screen level for proper stacking
@@ -780,21 +789,26 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
     };
   }, []);
 
-  // Pre-populate DOB from age gate (set on welcome screen)
+  // Resolve DOB from a fresh DB fetch on mount, then commit the answer
+  // atomically so the field's render decision is made only once.
   useEffect(() => {
-    if (dateOfBirth) return; // Already has a value
+    let cancelled = false;
     (async () => {
-      const { ageGateService } = await import('../services/ageGate/ageGateService');
-      const storedDob = await ageGateService.getDOB();
-      if (storedDob) {
-        setDateOfBirth(storedDob);
+      const fresh = await refreshProfile().catch(() => null);
+      if (cancelled) return;
+      if (fresh?.date_of_birth) {
+        setDateOfBirth(fresh.date_of_birth);
         setDobReadOnly(true);
-        const age = calculateAgeFromDOB(storedDob);
+        const age = calculateAgeFromDOB(fresh.date_of_birth);
         if (age !== null) {
-          updateFormData({ dateOfBirth: storedDob, age });
+          updateFormData({ dateOfBirth: fresh.date_of_birth, age });
         }
       }
+      setIsCheckingDob(false);
     })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const pickImage = async () => {
@@ -1084,43 +1098,33 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
             />
 
             <View style={styles.rowContainer}>
-              <View style={Platform.OS !== 'web' ? { flex: 3, minWidth: 0 } : undefined}>
-              <CountryField
-                label="Location"
-                value={location}
-                onSelect={(countryName) => {
-                  setLocation(countryName);
-                  setLocationError(false);
-                  updateFormData({ location: countryName });
-                  setActiveModal(null);
-                }}
-                placeholder="Where are you from?*"
-                width={Platform.OS === 'web' ? 212 : undefined}
-                onOpen={() => {
-                  Keyboard.dismiss();
-                  setActiveModal('country');
-                }}
-                error={locationError}
-              />
+              <View style={Platform.OS !== 'web' ? { flex: 9, minWidth: 0 } : undefined}>
+                <CountryField
+                  label="Location"
+                  value={location}
+                  onSelect={(countryName) => {
+                    setLocation(countryName);
+                    setLocationError(false);
+                    updateFormData({ location: countryName });
+                    setActiveModal(null);
+                  }}
+                  placeholder="Country / State*"
+                  width={Platform.OS === 'web' ? 175 : undefined}
+                  onOpen={() => {
+                    Keyboard.dismiss();
+                    setActiveModal('country');
+                  }}
+                  error={locationError}
+                />
               </View>
-              <View style={Platform.OS !== 'web' ? { flex: 2, minWidth: 0 } : undefined}>
-              <DateOfBirthField
-                label="Age"
-                value={dateOfBirth}
-                onChange={(dob) => {
-                  setDateOfBirth(dob);
-                  setDateOfBirthError('');
-                  const calculatedAge = calculateAgeFromDOB(dob);
-                  if (calculatedAge !== null) {
-                    updateFormData({ dateOfBirth: dob, age: calculatedAge });
-                  }
-                }}
-                placeholder="Age*"
-                    width={Platform.OS === 'web' ? 118 : undefined}
-                style={styles.ageField}
-                error={dateOfBirthError}
-                disabled={dobReadOnly}
-              />
+              <View style={Platform.OS !== 'web' ? { flex: 8, minWidth: 0 } : undefined}>
+                <Field
+                  label="Home Break"
+                  value={homeBreak}
+                  onChangeText={setHomeBreak}
+                  placeholder="Home Break"
+                  width={Platform.OS === 'web' ? 175 : undefined}
+                />
               </View>
             </View>
 
@@ -1166,6 +1170,25 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
                 );
               })}
             </View>
+
+            {!dateOfBirth && !isCheckingDob && (
+              <DateOfBirthField
+                label="Age"
+                value={dateOfBirth}
+                onChange={(dob) => {
+                  setDateOfBirth(dob);
+                  setDateOfBirthError('');
+                  const calculatedAge = calculateAgeFromDOB(dob);
+                  if (calculatedAge !== null) {
+                    updateFormData({ dateOfBirth: dob, age: calculatedAge });
+                  }
+                }}
+                placeholder="Age*"
+                width={140}
+                style={styles.ageField}
+                error={dateOfBirthError}
+              />
+            )}
             </View>
           </View>
         </View>
@@ -1474,7 +1497,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   ageField: {
-    // Age field specific styles if needed
+    alignSelf: 'flex-start',
   },
   fieldError: {
     borderColor: '#FF0000',
