@@ -15,6 +15,7 @@ import ConversationsStack from '../navigation/ConversationsStack';
 import TripsScreen from '../screens/trips/TripsScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
 import { DirectMessageScreen } from '../screens/DirectMessageScreen';
+import { DirectGroupChat } from '../screens/DirectGroupChat';
 import { SwellyShaperScreen } from '../screens/SwellyShaperScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { ConversationLoadingScreen } from '../components/ConversationLoadingScreen';
@@ -60,6 +61,8 @@ export const AppContent: React.FC = () => {
 
   // Push notification: pending conversation to open from notification tap
   const [pendingNotificationConversationId, setPendingNotificationConversationId] = useState<string | null>(null);
+  // Push notification: pending trip detail to open (from a trip_join_request notification)
+  const [pendingTripDetailId, setPendingTripDetailId] = useState<string | null>(null);
   const { getCurrentConversationId, conversations: messagingConversations, refreshConversations } = useMessaging();
   
   // State to track session validation
@@ -156,7 +159,16 @@ export const AppContent: React.FC = () => {
     if (Platform.OS === 'web') return;
     pushNotificationService.setupNotificationHandlers(
       getCurrentConversationId,
-      (conversationId) => setPendingNotificationConversationId(conversationId)
+      (payload) => {
+        if (payload.type === 'trip_join_request' && payload.tripId) {
+          setPendingTripDetailId(payload.tripId);
+          setShowTrips(true);
+          return;
+        }
+        if (payload.conversationId) {
+          setPendingNotificationConversationId(payload.conversationId);
+        }
+      }
     );
   }, [getCurrentConversationId]);
 
@@ -621,9 +633,11 @@ export const AppContent: React.FC = () => {
   
   const [selectedConversation, setSelectedConversation] = useState<{
     id?: string; // Optional: undefined for pending conversations
-    otherUserId: string; // Required: the user ID we're messaging
+    otherUserId: string; // Required: the user ID we're messaging (empty string for groups)
     otherUserName: string;
     otherUserAvatar: string | null;
+    isDirect?: boolean; // false for group chats; defaults to true (1-on-1)
+    tripId?: string; // For trip-linked group chats: tapping header opens the trip
     fromTripPlanning?: boolean; // If true, conversation was created from trip planning recommendations
     fromTripPlanningCopy?: boolean; // If true, conversation was created from the Copy variant of trip planning
     fromWelcomeOverlay?: boolean; // If true, conversation was created from WelcomeToLineupOverlay
@@ -910,6 +924,30 @@ export const AppContent: React.FC = () => {
     setShowProfile(true);
     console.log('[AppContent] handleViewUserProfile completed');
   };
+
+  const handleOpenGroupChat = useCallback((params: {
+    conversationId: string;
+    title: string;
+    heroImageUrl?: string | null;
+    tripId?: string;
+  }) => {
+    setShowTrips(false);
+    setPendingTripDetailId(null);
+    setSelectedConversation({
+      id: params.conversationId,
+      otherUserId: '',
+      otherUserName: params.title,
+      otherUserAvatar: params.heroImageUrl ?? null,
+      isDirect: false,
+      tripId: params.tripId,
+    });
+  }, []);
+
+  const handleOpenTripDetailFromChat = useCallback((tripId: string) => {
+    setSelectedConversation(null);
+    setPendingTripDetailId(tripId);
+    setShowTrips(true);
+  }, []);
 
   const handleStartConversation = async (userId: string, otherUserName?: string, otherUserAvatar?: string | null) => {
     console.log('[AppContent] ========== handleStartConversation START ==========');
@@ -1233,7 +1271,16 @@ export const AppContent: React.FC = () => {
     // the original early-return cascade — first match wins.
     let activeOverlay: React.ReactNode = null;
     if (showTrips) {
-      activeOverlay = <TripsScreen onBack={() => setShowTrips(false)} />;
+      activeOverlay = (
+        <TripsScreen
+          onBack={() => {
+            setShowTrips(false);
+            setPendingTripDetailId(null);
+          }}
+          initialTripId={pendingTripDetailId}
+          onOpenGroupChat={handleOpenGroupChat}
+        />
+      );
     } else if (showSettings) {
       activeOverlay = (
         <SettingsScreen
@@ -1284,16 +1331,19 @@ export const AppContent: React.FC = () => {
     } else if (selectedConversation) {
       console.log('[AppContent] Rendering DirectMessageScreen');
       console.log('[AppContent] Passing onViewProfile prop:', handleViewUserProfile);
+      const ChatScreen = selectedConversation.isDirect === false ? DirectGroupChat : DirectMessageScreen;
       activeOverlay = (
-        <DirectMessageScreen
+        <ChatScreen
           conversationId={selectedConversation.id}
           otherUserId={selectedConversation.otherUserId}
           otherUserName={selectedConversation.otherUserName}
           otherUserAvatar={selectedConversation.otherUserAvatar}
-          isDirect={true}
+          isDirect={selectedConversation.isDirect !== false}
           fromTripPlanning={selectedConversation.fromTripPlanning || false}
+          tripId={selectedConversation.tripId}
           onBack={handleBackFromChat}
           onViewProfile={handleViewUserProfile}
+          onOpenTripDetail={handleOpenTripDetailFromChat}
           onConversationCreated={(conversationId) => {
             setSelectedConversation({
               ...selectedConversation,
@@ -1325,6 +1375,7 @@ export const AppContent: React.FC = () => {
             onProfilePress={handleProfilePress}
             onSettingsPress={() => setShowSettings(true)}
             onTripsPress={() => setShowTrips(true)}
+            onOpenTripDetail={handleOpenTripDetailFromChat}
             onViewUserProfile={handleViewUserProfile}
             onSwellyShaperViewProfile={handleSwellyShaperViewProfile}
             pendingNotificationConversationId={pendingNotificationConversationId}

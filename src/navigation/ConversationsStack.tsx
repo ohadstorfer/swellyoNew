@@ -6,6 +6,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { interpolate } from 'react-native-reanimated';
 import ConversationsScreen from '../screens/ConversationsScreen';
 import { DirectMessageScreen } from '../screens/DirectMessageScreen';
+import { DirectGroupChat } from '../screens/DirectGroupChat';
 import { useMessaging } from '../context/MessagingProvider';
 
 export type DMNavParams = {
@@ -14,6 +15,7 @@ export type DMNavParams = {
   otherUserName: string;
   otherUserAvatar: string | null;
   isDirect?: boolean;
+  tripId?: string;
 };
 
 type ConversationsStackContextValue = {
@@ -73,7 +75,7 @@ export default function ConversationsStack(props: ConversationsScreenProps) {
           },
         }}
       >
-        {() => <DirectMessageRoute onViewUserProfile={props.onViewUserProfile} />}
+        {() => <DirectMessageRoute onViewUserProfile={props.onViewUserProfile} onOpenTripDetail={props.onOpenTripDetail} />}
       </Stack.Screen>
     </Stack.Navigator>
   );
@@ -109,8 +111,10 @@ function ConversationsListRoute(props: ConversationsScreenProps) {
 
 function DirectMessageRoute({
   onViewUserProfile,
+  onOpenTripDetail,
 }: {
   onViewUserProfile?: (userId: string) => void;
+  onOpenTripDetail?: (tripId: string) => void;
 }) {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
@@ -130,15 +134,18 @@ function DirectMessageRoute({
     if (navigation.canGoBack()) navigation.goBack();
   }, [navigation]);
 
+  const ChatScreen = params.isDirect === false ? DirectGroupChat : DirectMessageScreen;
   return (
-    <DirectMessageScreen
+    <ChatScreen
       conversationId={params.conversationId}
       otherUserId={params.otherUserId}
       otherUserName={params.otherUserName}
       otherUserAvatar={params.otherUserAvatar}
       isDirect={params.isDirect ?? true}
+      tripId={params.tripId}
       onBack={handleBack}
       onViewProfile={onViewUserProfile}
+      onOpenTripDetail={onOpenTripDetail}
       onConversationCreated={(conversationId) => {
         if (conversationId) setCurrentConversationId(conversationId);
         navigation.setParams({ conversationId });

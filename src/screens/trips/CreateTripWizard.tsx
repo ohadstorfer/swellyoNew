@@ -18,7 +18,10 @@ import {
   SurfLevel,
   SurfStyle,
   CreateGroupTripInput,
+  UpdateGroupTripInput,
+  GroupTrip,
   createGroupTrip,
+  updateGroupTrip,
   TripVibe,
 } from '../../services/trips/groupTripsService';
 import { uploadTripImage } from '../../services/storage/storageService';
@@ -36,6 +39,12 @@ interface CreateTripWizardProps {
   hostId: string | null;
   onCreated: () => void;
   onCancel: () => void;
+  /**
+   * When provided, the wizard runs in edit mode: state is pre-filled from this
+   * trip, the destination step is read-only (product decision: destination is
+   * locked once the trip exists), and submitting calls updateGroupTrip.
+   */
+  initialTrip?: GroupTrip;
 }
 
 interface WizardState {
@@ -79,7 +88,58 @@ interface WizardState {
   waveFatToBarreling: string;
   waveSizeMin: string;
   waveSizeMax: string;
+  // 1.5b — host has been to this destination before
+  hostBeenThere: boolean | null;
+  // 1.6b — approximate per-person budget
+  budgetMin: string;
+  budgetMax: string;
+  budgetCurrency: string;
+  // For B-class: toggle between specific dates and abstract months. A is always
+  // 'months', C is always 'specific'; this only matters when hostingStyle === 'B'.
+  datesMode: 'specific' | 'months';
 }
+
+const stateFromTrip = (trip: GroupTrip): WizardState => ({
+  hostingStyle: trip.hosting_style,
+  title: trip.title ?? '',
+  heroImageUri: trip.hero_image_url ?? null,
+  description: trip.description ?? '',
+  startDate: trip.start_date ?? '',
+  endDate: trip.end_date ?? '',
+  datesSetInStone: trip.dates_set_in_stone ?? true,
+  dateMonths: trip.date_months ?? [],
+  destinationCountry: trip.destination_country ?? '',
+  destinationArea: trip.destination_area ?? '',
+  destinationSpot: Array.isArray(trip.destination_spot)
+    ? trip.destination_spot.join(', ')
+    : (trip.destination_spot as unknown as string) ?? '',
+  accommodationType: Array.isArray(trip.accommodation_type)
+    ? trip.accommodation_type
+    : trip.accommodation_type
+    ? [trip.accommodation_type as unknown as string]
+    : [],
+  accommodationName: trip.accommodation_name ?? '',
+  accommodationUrl: trip.accommodation_url ?? '',
+  accommodationImageUri: trip.accommodation_image_url ?? null,
+  vibeMorning: trip.vibe?.morning?.join(', ') ?? '',
+  vibeAfternoon: trip.vibe?.afternoon?.join(', ') ?? '',
+  vibeEvening: trip.vibe?.evening?.join(', ') ?? '',
+  vibeNight: trip.vibe?.night?.join(', ') ?? '',
+  surfSpotsText: (trip.surf_spots ?? []).map(s => s.name).join(', '),
+  ageMin: trip.age_min != null ? String(trip.age_min) : '',
+  ageMax: trip.age_max != null ? String(trip.age_max) : '',
+  targetSurfLevels: trip.target_surf_levels ?? [],
+  targetSurfStyles: trip.target_surf_styles ?? [],
+  waveFatToBarreling:
+    trip.wave_fat_to_barreling != null ? String(trip.wave_fat_to_barreling) : '',
+  waveSizeMin: trip.wave_size_min != null ? String(trip.wave_size_min) : '',
+  waveSizeMax: trip.wave_size_max != null ? String(trip.wave_size_max) : '',
+  hostBeenThere: trip.host_been_there ?? null,
+  budgetMin: trip.budget_min != null ? String(trip.budget_min) : '',
+  budgetMax: trip.budget_max != null ? String(trip.budget_max) : '',
+  budgetCurrency: trip.budget_currency ?? 'USD',
+  datesMode: trip.date_months && trip.date_months.length > 0 ? 'months' : 'specific',
+});
 
 const INITIAL_STATE: WizardState = {
   hostingStyle: null,
@@ -109,6 +169,11 @@ const INITIAL_STATE: WizardState = {
   waveFatToBarreling: '',
   waveSizeMin: '',
   waveSizeMax: '',
+  hostBeenThere: null,
+  budgetMin: '',
+  budgetMax: '',
+  budgetCurrency: 'USD',
+  datesMode: 'specific',
 };
 
 // Totalsteps: 0 hosting + 1-14 as per plan. Index into step list.
@@ -119,7 +184,9 @@ const STEPS = [
   'description',
   'dates',
   'destination',
+  'beenThere',
   'accommodation',
+  'budget',
   'vibe',
   'surfSpots',
   'ageRange',
@@ -162,8 +229,16 @@ const pickImage = async (): Promise<string | null> => {
 // ---------------------------------------------------------------------------
 // Main wizard
 // ---------------------------------------------------------------------------
-export default function CreateTripWizard({ hostId, onCreated, onCancel }: CreateTripWizardProps) {
-  const [state, setState] = useState<WizardState>(INITIAL_STATE);
+export default function CreateTripWizard({
+  hostId,
+  onCreated,
+  onCancel,
+  initialTrip,
+}: CreateTripWizardProps) {
+  const editMode = !!initialTrip;
+  const [state, setState] = useState<WizardState>(
+    initialTrip ? stateFromTrip(initialTrip) : INITIAL_STATE
+  );
   const [stepIdx, setStepIdx] = useState(0);
   const [submitting, setSubmitting] = useState(false);
 
@@ -189,15 +264,17 @@ export default function CreateTripWizard({ hostId, onCreated, onCancel }: Create
         return s.heroImageUri ? null : 'Hero image is required.';
       case 'description':
         return s.description.trim() ? null : 'Description is required.';
-      case 'dates':
-        if (hostingStyle === 'A') {
+      case 'dates': {
+        const mode = hostingStyle === 'A' ? 'months' : hostingStyle === 'C' ? 'specific' : s.datesMode;
+        if (mode === 'months') {
           if (s.dateMonths.length === 0) return 'Pick at least 1 month.';
-          if (s.dateMonths.length > 3) return 'Max 3 months for style A.';
+          if (s.dateMonths.length > 3) return 'Pick up to 3 months.';
           return null;
         }
         if (!s.startDate || !s.endDate) return 'Start and end dates are required.';
         if (new Date(s.startDate) > new Date(s.endDate)) return 'End date must be after start date.';
         return null;
+      }
       case 'destination':
         if (hostingStyle === 'B' && !s.destinationCountry.trim())
           return 'Destination country is required for style B.';
@@ -206,6 +283,18 @@ export default function CreateTripWizard({ hostId, onCreated, onCancel }: Create
           if (!s.destinationSpot.trim()) return 'Spot is required for style C.';
         }
         return null;
+      case 'beenThere':
+        return s.hostBeenThere === null ? 'Pick yes or no.' : null;
+      case 'budget': {
+        const required = hostingStyle !== 'A';
+        if (!s.budgetMin && !s.budgetMax) return required ? 'Enter an approximate budget.' : null;
+        const min = parseInt(s.budgetMin, 10);
+        const max = parseInt(s.budgetMax, 10);
+        if (isNaN(min) || isNaN(max)) return 'Enter valid numbers for min and max.';
+        if (min < 0 || max < 0) return 'Budget must be ≥ 0.';
+        if (max < min) return 'Max must be ≥ min.';
+        return null;
+      }
       case 'accommodation':
         if (hostingStyle === 'A' && s.accommodationType.length === 0)
           return 'Pick an accommodation type.';
@@ -266,17 +355,34 @@ export default function CreateTripWizard({ hostId, onCreated, onCancel }: Create
     if (!hostingStyle) return;
     setSubmitting(true);
     try {
-      // Upload hero image (required)
-      const heroRes = await uploadTripImage(state.heroImageUri!, hostId, 'hero');
-      if (!heroRes.success || !heroRes.url) {
-        throw new Error(heroRes.error || 'Failed to upload hero image');
+      const isRemoteUrl = (uri: string | null): boolean =>
+        !!uri && /^https?:\/\//.test(uri);
+
+      // Upload hero image only if user picked a new local one. In edit mode the URI may already be the remote URL.
+      let heroUrl: string;
+      if (isRemoteUrl(state.heroImageUri)) {
+        heroUrl = state.heroImageUri!;
+      } else {
+        const heroRes = await uploadTripImage(state.heroImageUri!, hostId, 'hero');
+        if (!heroRes.success || !heroRes.url) {
+          throw new Error(heroRes.error || 'Failed to upload hero image');
+        }
+        heroUrl = heroRes.url;
       }
 
-      // Upload accommodation image if provided
+      // Upload accommodation image if provided and local
       let accommodationImageUrl: string | null = null;
       if (state.accommodationImageUri) {
-        const accRes = await uploadTripImage(state.accommodationImageUri, hostId, 'accommodation');
-        if (accRes.success && accRes.url) accommodationImageUrl = accRes.url;
+        if (isRemoteUrl(state.accommodationImageUri)) {
+          accommodationImageUrl = state.accommodationImageUri;
+        } else {
+          const accRes = await uploadTripImage(
+            state.accommodationImageUri,
+            hostId,
+            'accommodation'
+          );
+          if (accRes.success && accRes.url) accommodationImageUrl = accRes.url;
+        }
       }
 
       const vibe: TripVibe | null =
@@ -293,16 +399,22 @@ export default function CreateTripWizard({ hostId, onCreated, onCancel }: Create
         ? state.surfSpotsText.split(',').map(s => ({ name: s.trim() })).filter(s => s.name)
         : null;
 
+      const effectiveDatesMode: 'specific' | 'months' =
+        hostingStyle === 'A' ? 'months'
+          : hostingStyle === 'C' ? 'specific'
+          : state.datesMode;
+
       const input: CreateGroupTripInput = {
         hosting_style: hostingStyle,
+        status: 'active',
         title: state.title.trim() || null,
         description: state.description.trim(),
-        hero_image_url: heroRes.url,
+        hero_image_url: heroUrl,
 
-        start_date: hostingStyle === 'A' ? null : state.startDate || null,
-        end_date: hostingStyle === 'A' ? null : state.endDate || null,
-        dates_set_in_stone: hostingStyle === 'A' ? null : state.datesSetInStone,
-        date_months: hostingStyle === 'A' ? state.dateMonths : null,
+        start_date: effectiveDatesMode === 'months' ? null : state.startDate || null,
+        end_date: effectiveDatesMode === 'months' ? null : state.endDate || null,
+        dates_set_in_stone: effectiveDatesMode === 'months' ? null : state.datesSetInStone,
+        date_months: effectiveDatesMode === 'months' ? state.dateMonths : null,
 
         destination_country: state.destinationCountry.trim() || null,
         destination_area: state.destinationArea.trim() || null,
@@ -325,15 +437,27 @@ export default function CreateTripWizard({ hostId, onCreated, onCancel }: Create
         wave_fat_to_barreling: state.waveFatToBarreling ? parseInt(state.waveFatToBarreling, 10) : null,
         wave_size_min: state.waveSizeMin ? parseFloat(state.waveSizeMin) : null,
         wave_size_max: state.waveSizeMax ? parseFloat(state.waveSizeMax) : null,
+
+        host_been_there: state.hostBeenThere,
+        budget_min: state.budgetMin ? parseInt(state.budgetMin, 10) : null,
+        budget_max: state.budgetMax ? parseInt(state.budgetMax, 10) : null,
+        budget_currency: state.budgetMin || state.budgetMax ? state.budgetCurrency : null,
       };
 
-      await createGroupTrip(hostId, input);
-      setState(INITIAL_STATE);
-      setStepIdx(0);
+      if (editMode && initialTrip) {
+        // Strip destination + status (immutable per product) and host_id (server-managed).
+        const { destination_country, destination_area, destination_spot, status, ...editable } =
+          input;
+        await updateGroupTrip(initialTrip.id, editable as UpdateGroupTripInput);
+      } else {
+        await createGroupTrip(hostId, input);
+        setState(INITIAL_STATE);
+        setStepIdx(0);
+      }
       onCreated();
     } catch (e: any) {
       console.error('[CreateTripWizard] submit error:', e);
-      Alert.alert('Could not create trip', e?.message || 'Unknown error');
+      Alert.alert(editMode ? 'Could not save trip' : 'Could not create trip', e?.message || 'Unknown error');
     } finally {
       setSubmitting(false);
     }
@@ -348,7 +472,9 @@ export default function CreateTripWizard({ hostId, onCreated, onCancel }: Create
       description: 'Description',
       dates: 'Dates',
       destination: 'Destination',
+      beenThere: 'Been there before?',
       accommodation: 'Accommodation',
+      budget: 'Budget',
       vibe: 'Trip vibe (optional)',
       surfSpots: 'Surf spots (optional)',
       ageRange: 'Age range',
@@ -367,11 +493,18 @@ export default function CreateTripWizard({ hostId, onCreated, onCancel }: Create
         return (
           <View>
             <Text style={styles.question}>Do you want to…</Text>
+            {editMode && (
+              <Text style={styles.helper}>Hosting style is locked once a trip is created.</Text>
+            )}
             {(['A', 'B', 'C'] as HostingStyle[]).map(v => (
               <TouchableOpacity
                 key={v}
                 style={[styles.optionCard, state.hostingStyle === v && styles.optionCardActive]}
-                onPress={() => update('hostingStyle', v)}
+                onPress={() => {
+                  if (editMode) return;
+                  update('hostingStyle', v);
+                }}
+                activeOpacity={editMode ? 1 : 0.7}
               >
                 <Text style={styles.optionTitle}>
                   {v === 'A' && 'A. Create a group with a general idea'}
@@ -444,95 +577,140 @@ export default function CreateTripWizard({ hostId, onCreated, onCancel }: Create
           </View>
         );
 
-      case 'dates':
-        if (hostingStyle === 'A') {
-          return (
-            <View>
-              <Text style={styles.label}>Target month(s) — up to 3</Text>
-              <Text style={styles.helper}>
-                Enter as YYYY-MM, comma-separated. e.g. 2026-05, 2026-06
-              </Text>
-              <TextInput
-                style={styles.input}
-                value={state.dateMonths.join(', ')}
-                onChangeText={t =>
-                  update(
-                    'dateMonths',
-                    t.split(',').map(x => x.trim()).filter(Boolean)
-                  )
-                }
-                placeholder="2026-05, 2026-06"
-                placeholderTextColor="#B0B0B0"
-                autoCapitalize="none"
-              />
-            </View>
-          );
-        }
+      case 'dates': {
+        const mode = hostingStyle === 'A' ? 'months' : hostingStyle === 'C' ? 'specific' : state.datesMode;
         return (
           <View>
-            <Text style={styles.label}>Start date (YYYY-MM-DD)</Text>
-            <TextInput
-              style={styles.input}
-              value={state.startDate}
-              onChangeText={t => update('startDate', t)}
-              placeholder="2026-06-01"
-              placeholderTextColor="#B0B0B0"
-              autoCapitalize="none"
-            />
-            <Text style={styles.label}>End date (YYYY-MM-DD)</Text>
-            <TextInput
-              style={styles.input}
-              value={state.endDate}
-              onChangeText={t => update('endDate', t)}
-              placeholder="2026-06-10"
-              placeholderTextColor="#B0B0B0"
-              autoCapitalize="none"
-            />
-            <TouchableOpacity
-              style={styles.toggleRow}
-              onPress={() => update('datesSetInStone', !state.datesSetInStone)}
-            >
-              <Ionicons
-                name={state.datesSetInStone ? 'checkbox' : 'square-outline'}
-                size={22}
-                color="#B72DF2"
-              />
-              <Text style={styles.toggleLabel}>Dates are set in stone</Text>
-            </TouchableOpacity>
+            {hostingStyle === 'B' && (
+              <View style={styles.chipRow}>
+                {(['specific', 'months'] as const).map(m => {
+                  const active = state.datesMode === m;
+                  return (
+                    <TouchableOpacity
+                      key={m}
+                      style={[styles.chip, active && styles.chipActive]}
+                      onPress={() => update('datesMode', m)}
+                    >
+                      <Text style={[styles.chipText, active && styles.chipTextActive]}>
+                        {m === 'specific' ? 'Specific dates' : 'Months only'}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            )}
+            {mode === 'months' ? (
+              <>
+                <Text style={styles.label}>Target month(s) — up to 3</Text>
+                <Text style={styles.helper}>
+                  Enter as YYYY-MM, comma-separated. e.g. 2026-05, 2026-06
+                </Text>
+                <TextInput
+                  style={styles.input}
+                  value={state.dateMonths.join(', ')}
+                  onChangeText={t =>
+                    update(
+                      'dateMonths',
+                      t.split(',').map(x => x.trim()).filter(Boolean)
+                    )
+                  }
+                  placeholder="2026-05, 2026-06"
+                  placeholderTextColor="#B0B0B0"
+                  autoCapitalize="none"
+                />
+              </>
+            ) : (
+              <>
+                <Text style={styles.label}>Start date (YYYY-MM-DD)</Text>
+                <TextInput
+                  style={styles.input}
+                  value={state.startDate}
+                  onChangeText={t => update('startDate', t)}
+                  placeholder="2026-06-01"
+                  placeholderTextColor="#B0B0B0"
+                  autoCapitalize="none"
+                />
+                <Text style={styles.label}>End date (YYYY-MM-DD)</Text>
+                <TextInput
+                  style={styles.input}
+                  value={state.endDate}
+                  onChangeText={t => update('endDate', t)}
+                  placeholder="2026-06-10"
+                  placeholderTextColor="#B0B0B0"
+                  autoCapitalize="none"
+                />
+                <TouchableOpacity
+                  style={styles.toggleRow}
+                  onPress={() => update('datesSetInStone', !state.datesSetInStone)}
+                >
+                  <Ionicons
+                    name={state.datesSetInStone ? 'checkbox' : 'square-outline'}
+                    size={22}
+                    color="#B72DF2"
+                  />
+                  <Text style={styles.toggleLabel}>Dates are set in stone</Text>
+                </TouchableOpacity>
+              </>
+            )}
           </View>
         );
+      }
 
       case 'destination':
         return (
           <View>
+            {editMode && (
+              <Text style={styles.helper}>
+                Destination is locked once a trip is created.
+              </Text>
+            )}
             <Text style={styles.label}>
               Country {hostingStyle === 'A' ? '(optional)' : '(required)'}
             </Text>
             <TextInput
-              style={styles.input}
+              style={[styles.input, editMode && styles.inputDisabled]}
               value={state.destinationCountry}
               onChangeText={t => update('destinationCountry', t)}
               placeholder="Morocco"
               placeholderTextColor="#B0B0B0"
+              editable={!editMode}
             />
             <Text style={styles.label}>Area (optional)</Text>
             <TextInput
-              style={styles.input}
+              style={[styles.input, editMode && styles.inputDisabled]}
               value={state.destinationArea}
               onChangeText={t => update('destinationArea', t)}
               placeholder="Taghazout"
               placeholderTextColor="#B0B0B0"
+              editable={!editMode}
             />
             <Text style={styles.label}>
               Spot {hostingStyle === 'C' ? '(required)' : '(optional)'}
             </Text>
             <TextInput
-              style={styles.input}
+              style={[styles.input, editMode && styles.inputDisabled]}
               value={state.destinationSpot}
               onChangeText={t => update('destinationSpot', t)}
               placeholder="Anchor Point"
               placeholderTextColor="#B0B0B0"
+              editable={!editMode}
             />
+          </View>
+        );
+
+      case 'beenThere':
+        return (
+          <View>
+            <Text style={styles.question}>Have you been to this destination before?</Text>
+            {([true, false] as const).map(v => (
+              <TouchableOpacity
+                key={String(v)}
+                style={[styles.optionCard, state.hostBeenThere === v && styles.optionCardActive]}
+                onPress={() => update('hostBeenThere', v)}
+              >
+                <Text style={styles.optionTitle}>{v ? 'Yes' : 'No'}</Text>
+              </TouchableOpacity>
+            ))}
           </View>
         );
 
@@ -599,6 +777,49 @@ export default function CreateTripWizard({ hostId, onCreated, onCancel }: Create
                 </TouchableOpacity>
               </>
             )}
+          </View>
+        );
+
+      case 'budget':
+        return (
+          <View>
+            <Text style={styles.label}>
+              Approximate budget per person {hostingStyle === 'A' ? '(optional)' : ''}
+            </Text>
+            <Text style={styles.helper}>Round numbers are fine — guests just want a ballpark.</Text>
+            <View style={styles.row}>
+              <TextInput
+                style={[styles.input, { flex: 1, marginRight: 8 }]}
+                value={state.budgetMin}
+                onChangeText={t => update('budgetMin', t.replace(/[^0-9]/g, ''))}
+                placeholder="Min"
+                placeholderTextColor="#B0B0B0"
+                keyboardType="number-pad"
+              />
+              <TextInput
+                style={[styles.input, { flex: 1 }]}
+                value={state.budgetMax}
+                onChangeText={t => update('budgetMax', t.replace(/[^0-9]/g, ''))}
+                placeholder="Max"
+                placeholderTextColor="#B0B0B0"
+                keyboardType="number-pad"
+              />
+            </View>
+            <Text style={styles.label}>Currency</Text>
+            <View style={styles.chipRow}>
+              {(['USD', 'EUR'] as const).map(c => {
+                const active = state.budgetCurrency === c;
+                return (
+                  <TouchableOpacity
+                    key={c}
+                    style={[styles.chip, active && styles.chipActive]}
+                    onPress={() => update('budgetCurrency', c)}
+                  >
+                    <Text style={[styles.chipText, active && styles.chipTextActive]}>{c}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
           </View>
         );
 
@@ -765,10 +986,18 @@ export default function CreateTripWizard({ hostId, onCreated, onCancel }: Create
             </Text>
             <Text style={styles.reviewLine}>
               Dates:{' '}
-              {hostingStyle === 'A'
+              {(hostingStyle === 'A' || (hostingStyle === 'B' && state.datesMode === 'months'))
                 ? state.dateMonths.join(', ')
                 : `${state.startDate} → ${state.endDate}`}
             </Text>
+            <Text style={styles.reviewLine}>
+              Been there before: {state.hostBeenThere === null ? '—' : state.hostBeenThere ? 'Yes' : 'No'}
+            </Text>
+            {(state.budgetMin || state.budgetMax) && (
+              <Text style={styles.reviewLine}>
+                Budget: {state.budgetMin || '?'}–{state.budgetMax || '?'} {state.budgetCurrency}
+              </Text>
+            )}
             <Text style={styles.reviewLine}>
               Age: {state.ageMin}–{state.ageMax}
             </Text>
@@ -814,7 +1043,7 @@ export default function CreateTripWizard({ hostId, onCreated, onCancel }: Create
             {submitting ? (
               <ActivityIndicator color="#FFF" />
             ) : (
-              <Text style={styles.primaryBtnText}>Create trip</Text>
+              <Text style={styles.primaryBtnText}>{editMode ? 'Save changes' : 'Create trip'}</Text>
             )}
           </TouchableOpacity>
         ) : (
@@ -854,6 +1083,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFF',
   },
   textarea: { minHeight: 100, textAlignVertical: 'top' },
+  inputDisabled: { backgroundColor: '#F4F4F4', color: '#7B7B7B' },
 
   row: { flexDirection: 'row' },
   toggleRow: { flexDirection: 'row', alignItems: 'center', marginTop: 12 },

@@ -259,7 +259,7 @@ function renderMessageBodyWithLinks(body: string): React.ReactNode {
   return parts.length > 0 ? parts : body;
 }
 
-interface DirectMessageScreenProps {
+interface DirectGroupChatProps {
   conversationId?: string; // Optional: undefined for pending conversations (will be created on first message)
   otherUserId: string; // Required: the user ID we're messaging
   otherUserName: string;
@@ -275,7 +275,7 @@ interface DirectMessageScreenProps {
   onOpenTripDetail?: (tripId: string) => void;
 }
 
-export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
+export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
   conversationId,
   otherUserId,
   otherUserName,
@@ -2645,7 +2645,11 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         {/* Group chat: show avatar only on the last/newest message of a run.
             Mid-run messages render an empty spacer to keep bubble alignment. */}
         {showAvatar && (
-          <View style={styles.messageAvatarContainer}>
+          <TouchableOpacity
+            style={styles.messageAvatarContainer}
+            onPress={() => message.sender_id && onViewProfile?.(message.sender_id)}
+            activeOpacity={0.7}
+          >
             {senderAvatar ? (
               <Image
                 source={{ uri: senderAvatar }}
@@ -2659,7 +2663,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                 </Text>
               </View>
             )}
-          </View>
+          </TouchableOpacity>
         )}
         {showAvatarSpacer && (
           <View style={styles.messageAvatarSpacer} />
@@ -2685,12 +2689,18 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
           ]}
         >
           {showSenderName && (
-            <Text
-              style={[styles.groupSenderName, { color: senderNameColor }]}
-              numberOfLines={1}
+            <TouchableOpacity
+              onPress={() => message.sender_id && onViewProfile?.(message.sender_id)}
+              activeOpacity={0.7}
+              style={styles.groupSenderNameTouchable}
             >
-              {senderName}
-            </Text>
+              <Text
+                style={[styles.groupSenderName, { color: senderNameColor }]}
+                numberOfLines={1}
+              >
+                {senderName}
+              </Text>
+            </TouchableOpacity>
           )}
           {message.reply_to_snapshot && !message.deleted && (
             <View
@@ -3910,6 +3920,9 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginBottom: 2,
     textAlign: 'left',
+    alignSelf: 'flex-start',
+  },
+  groupSenderNameTouchable: {
     alignSelf: 'flex-start',
   },
   messageAvatar: {
