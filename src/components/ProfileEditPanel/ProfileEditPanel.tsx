@@ -36,9 +36,13 @@ import { uploadCoverImage, uploadProfileImage } from '../../services/storage/sto
 import { ProfileEditSurfStyleScreen } from './ProfileEditSurfStyleScreen';
 import { ProfileEditTravelExperienceScreen } from './ProfileEditTravelExperienceScreen';
 import { ProfileEditSurfSkillScreen } from './ProfileEditSurfSkillScreen';
+import { ProfileEditSurfVideoScreen } from './ProfileEditSurfVideoScreen';
 import { ProfileEditDestinationScreen } from './ProfileEditDestinationScreen';
 import { CountrySearchModal } from '../CountrySearchModal';
+import { HomeBreakSearchSheet, HomeBreakSelection } from '../HomeBreakSearchSheet';
 import AvatarCropModal from '../AvatarCropModal';
+import { DateOfBirthSheet } from '../DateOfBirthSheet';
+import { calculateAgeFromDOB } from '../../utils/ageCalculation';
 
 type Props = {
   visible: boolean;
@@ -92,7 +96,9 @@ type SaveTarget =
   | 'cover'
   | 'avatar'
   | 'nickname'
-  | 'countryFrom';
+  | 'countryFrom'
+  | 'dateOfBirth'
+  | 'homeBreak';
 
 type DestinationEditorIndex = number | 'new' | null;
 
@@ -111,11 +117,14 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
   const [showSurfStyleEditor, setShowSurfStyleEditor] = useState(false);
   const [showTravelExperienceEditor, setShowTravelExperienceEditor] = useState(false);
   const [showSurfSkillEditor, setShowSurfSkillEditor] = useState(false);
+  const [showSurfVideoEditor, setShowSurfVideoEditor] = useState(false);
   const [editingDestinationIndex, setEditingDestinationIndex] =
     useState<DestinationEditorIndex>(null);
   const [savingTarget, setSavingTarget] = useState<SaveTarget | null>(null);
   const [showNicknameModal, setShowNicknameModal] = useState(false);
   const [nicknameDraft, setNicknameDraft] = useState('');
+  const [showDobModal, setShowDobModal] = useState(false);
+  const [showHomeBreakSheet, setShowHomeBreakSheet] = useState(false);
   const [showOriginModal, setShowOriginModal] = useState(false);
   // Raw URI awaiting crop. `target` decides which upload path runs after crop.
   const [pendingCrop, setPendingCrop] = useState<{ uri: string; target: 'avatar' | 'cover' } | null>(null);
@@ -165,14 +174,27 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
   );
 
   const handleSurfSkillSave = useCallback(
-    async (selectedVideoId: number, userVideoUri: string | null) => {
+    async (selectedVideoId: number) => {
       const idx = Math.max(0, Math.min(3, selectedVideoId));
+      // saveSurfer maps 0-4 app-level → 1-5 DB-level and auto-derives
+      // surf_level_category + surf_level_description from (surfboardType, surfLevel).
+      // Passing the current surfboardType keeps the derivation correct when the
+      // user only changes their level. profileVideoUrl is intentionally not
+      // touched here — it's owned by the dedicated Surf Video editor.
       await persist('skill', {
-        // saveSurfer maps 0-4 app-level → 1-5 DB-level and auto-derives
-        // surf_level_category + surf_level_description from (surfboardType, surfLevel).
-        // Passing the current surfboardType keeps the derivation correct when the
-        // user only changes their level.
         surfLevel: idx,
+        surfboardType: surfer?.surfboard_type ?? undefined,
+      });
+    },
+    [persist, surfer?.surfboard_type],
+  );
+
+  const handleSurfVideoSave = useCallback(
+    async (userVideoUri: string | null) => {
+      // Persist the new video URL (or empty string to clear it). The S3
+      // upload itself was kicked off inside the editor — this only writes
+      // the DB pointer.
+      await persist('skill', {
         surfboardType: surfer?.surfboard_type ?? undefined,
         profileVideoUrl: userVideoUri ?? '',
       });
@@ -460,6 +482,31 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
     await persist('destinationDelete', { destinationsArray: base });
   }, [persist, editingDestinationIndex, surfer?.destinations_array]);
 
+  // Keep the inline nickname draft in sync with the current surfer name so
+  // we don't show a stale value after saving (or after another save path
+  // updates the profile).
+  useEffect(() => {
+    setNicknameDraft(surfer?.name ?? '');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [surfer?.name]);
+
+  // Save on blur — revert to the previous value if the user clears the field
+  // or if the save fails. No-op when the value hasn't changed.
+  const handleNicknameBlur = useCallback(async () => {
+    const trimmed = nicknameDraft.trim();
+    const original = surfer?.name ?? '';
+    if (!trimmed) {
+      setNicknameDraft(original);
+      return;
+    }
+    if (trimmed === original) return;
+    try {
+      await persist('nickname', { name: trimmed });
+    } catch {
+      setNicknameDraft(original);
+    }
+  }, [nicknameDraft, persist, surfer?.name]);
+
   const handleNicknameSave = useCallback(async () => {
     const trimmed = nicknameDraft.trim();
     if (!trimmed) {
@@ -478,6 +525,43 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
     setNicknameDraft(surfer?.name ?? '');
     setShowNicknameModal(true);
   }, [surfer?.name]);
+
+  const handleDobSave = useCallback(
+    async (iso: string) => {
+      const calculatedAge = calculateAgeFromDOB(iso);
+      if (calculatedAge === null || calculatedAge < 18) {
+        Alert.alert('Invalid date', 'You must be at least 18 years old to use Swellyo.');
+        return;
+      }
+      try {
+        await persist('dateOfBirth', { dateOfBirth: iso });
+        setShowDobModal(false);
+      } catch {
+        // persist already shows an alert
+      }
+    },
+    [persist],
+  );
+
+  const handleHomeBreakSave = useCallback(
+    async (selection: HomeBreakSelection) => {
+      try {
+        await persist('homeBreak', {
+          homeBreakPlaceId: selection.placeId,
+          homeBreakFull: selection.full,
+          homeBreakShort: selection.short,
+          homeBreakLocality: selection.locality ?? undefined,
+          homeBreakCountry: selection.country ?? undefined,
+          homeBreakLat: selection.lat ?? undefined,
+          homeBreakLng: selection.lng ?? undefined,
+        });
+        setShowHomeBreakSheet(false);
+      } catch {
+        // persist already shows an alert
+      }
+    },
+    [persist],
+  );
 
   // Close any open sub-editor whenever the parent panel itself closes,
   // so that re-opening the panel always lands on the main view.
@@ -552,8 +636,8 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
   const tripCount =
     typeof surfer?.travel_experience === 'number' ? surfer.travel_experience : null;
   const travelExperienceLabel =
-    tripCount == null ? '—' : `${tripCount} surf trip${tripCount === 1 ? '' : 's'}`;
-  const travelLevelImage = getTravelLevelImage(tripCount ?? 0);
+    tripCount == null ? '—' : `surf trip${tripCount === 1 ? '' : 's'}`;
+  const tripCountText = tripCount == null ? '—' : String(tripCount);
   const surfSkillLabel = capitalizeWords(surfer?.surf_level_category) || '—';
   const surfSkillThumb = getSurfSkillThumb(surfer?.surfboard_type, surfer?.surf_level);
   const destinations = surfer?.destinations_array ?? [];
@@ -662,15 +746,48 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
               <View style={styles.contentPanel}>
                 <Section title="Personal information">
                   <View style={styles.fieldsContainer}>
+                    {/* Inline-editable nickname — tap to type, blur to save */}
+                    <View style={styles.inlineField}>
+                      <Text style={styles.inlineFieldLabel}>Nickname</Text>
+                      <TextInput
+                        style={styles.inlineFieldInput}
+                        value={nicknameDraft}
+                        onChangeText={setNicknameDraft}
+                        onBlur={handleNicknameBlur}
+                        onSubmitEditing={() => Keyboard.dismiss()}
+                        placeholder="Add nickname"
+                        placeholderTextColor="#A0A0A0"
+                        returnKeyType="done"
+                        autoCapitalize="words"
+                        editable={savingTarget !== 'nickname'}
+                      />
+                    </View>
                     <InlineField
-                      label="Nickname"
-                      value={nickname}
-                      onPress={openNicknameEditor}
-                    />
-                    <InlineField
-                      label="Where are you from?"
+                      label="Country / State"
                       value={country}
                       onPress={() => setShowOriginModal(true)}
+                    />
+                    <InlineField
+                      label="Date of birth"
+                      value={(() => {
+                        if (!surfer?.date_of_birth) return '';
+                        const m = surfer.date_of_birth.match(/^(\d{4})-(\d{2})-(\d{2})/);
+                        if (!m) return surfer.date_of_birth;
+                        const monthsShort = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                        const monthIndex = parseInt(m[2], 10) - 1;
+                        const monthName = monthsShort[monthIndex] ?? m[2];
+                        const day = parseInt(m[3], 10);
+                        const year = m[1];
+                        const formatted = `${monthName} ${day}, ${year}`;
+                        const age = calculateAgeFromDOB(surfer.date_of_birth);
+                        return age !== null ? `${formatted}  ·  ${age} years old` : formatted;
+                      })()}
+                      onPress={() => setShowDobModal(true)}
+                    />
+                    <InlineField
+                      label="Home break"
+                      value={surfer?.home_break_short ?? ''}
+                      onPress={() => setShowHomeBreakSheet(true)}
                     />
                   </View>
                 </Section>
@@ -685,8 +802,7 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
                       onPress={() => setShowSurfStyleEditor(true)}
                     />
                     <EditCard
-                      thumbnail={travelLevelImage}
-                      thumbnailResize="contain"
+                      thumbnailText={tripCountText}
                       label="Travel Experience"
                       value={travelExperienceLabel}
                       onPress={() => setShowTravelExperienceEditor(true)}
@@ -705,9 +821,27 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
                       value="Not set"
                     /> */}
                   </View>
+                  {/* Direct video entry — opens the dedicated Surf Video editor
+                      (separate from Surf Skill so editing one doesn't touch the
+                      other). */}
+                  <TouchableOpacity
+                    style={styles.surfVideoLinkRow}
+                    onPress={() => setShowSurfVideoEditor(true)}
+                    activeOpacity={0.7}
+                    hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                  >
+                    <Ionicons
+                      name={surfer?.profile_video_url ? 'videocam' : 'videocam-outline'}
+                      size={18}
+                      color={FIGMA.brandTeal}
+                    />
+                    <Text style={styles.surfVideoLinkText}>
+                      {surfer?.profile_video_url ? 'Change surf video' : 'Add surf video'}
+                    </Text>
+                  </TouchableOpacity>
                 </Section>
 
-                <Section title="Top Destinations">
+                <Section title="Where you surfed at">
                   <View style={styles.destinationsBlock}>
                     {destinations.length === 0 ? (
                       <Text style={styles.emptyText}>No destinations added yet.</Text>
@@ -761,9 +895,18 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
           onClose={() => setShowSurfSkillEditor(false)}
           initialBoardType={surfer?.surfboard_type ?? null}
           initialSurfLevel={surfer?.surf_level ?? 1}
+          onSave={handleSurfSkillSave}
+          saving={savingTarget === 'skill'}
+        />
+
+        <ProfileEditSurfVideoScreen
+          visible={showSurfVideoEditor}
+          onClose={() => setShowSurfVideoEditor(false)}
+          initialBoardType={surfer?.surfboard_type ?? null}
+          initialSurfLevel={surfer?.surf_level ?? 1}
           initialUserVideoUri={surfer?.profile_video_url ?? null}
           userId={surfer?.user_id ?? null}
-          onSave={handleSurfSkillSave}
+          onSave={handleSurfVideoSave}
           saving={savingTarget === 'skill'}
         />
 
@@ -785,7 +928,9 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
         <AvatarCropModal
           visible={pendingCrop !== null}
           imageUri={pendingCrop?.uri ?? ''}
-          aspect={pendingCrop?.target === 'cover' ? 16 / 9 : 1}
+          // Cover aspect must match the actual rendered cover (full width × 180px
+          // tall) so the crop frame shows exactly what'll appear in the profile.
+          aspect={pendingCrop?.target === 'cover' ? screenWidth / 180 : 1}
           cropShape={pendingCrop?.target === 'cover' ? 'rect' : 'round'}
           title={pendingCrop?.target === 'cover' ? 'Crop cover photo' : 'Move and scale'}
           onCancel={() => setPendingCrop(null)}
@@ -796,6 +941,25 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
             if (target === 'cover') uploadCover(croppedUri);
             else uploadAvatar(croppedUri);
           }}
+        />
+
+        {/* DOB sheet — same bottom-sheet picker used during signup age verification */}
+        <DateOfBirthSheet
+          visible={showDobModal}
+          initialDOB={surfer?.date_of_birth ?? null}
+          onClose={() => setShowDobModal(false)}
+          onSave={handleDobSave}
+          saving={savingTarget === 'dateOfBirth'}
+          title="Date of birth"
+          subtitle="Update your date of birth."
+          saveLabel="Save"
+        />
+
+        {/* Home Break picker — same bottom sheet used in onboarding step 4 */}
+        <HomeBreakSearchSheet
+          visible={showHomeBreakSheet}
+          onClose={() => setShowHomeBreakSheet(false)}
+          onSelect={handleHomeBreakSave}
         />
 
         <CountrySearchModal
@@ -919,6 +1083,9 @@ type EditCardProps = {
   value: string;
   thumbnail?: ImageSourcePropType | null;
   thumbnailResize?: 'cover' | 'contain';
+  /** Renders a centered number/text instead of a thumbnail image. Used for
+   *  Travel Experience where we want the trip count to be the visual. */
+  thumbnailText?: string;
   fallbackIcon?: React.ComponentProps<typeof Ionicons>['name'];
   fallbackTint?: string;
   onPress?: () => void;
@@ -929,6 +1096,7 @@ const EditCard: React.FC<EditCardProps> = ({
   value,
   thumbnail,
   thumbnailResize = 'cover',
+  thumbnailText,
   fallbackIcon,
   fallbackTint = '#0788B0',
   onPress,
@@ -936,7 +1104,13 @@ const EditCard: React.FC<EditCardProps> = ({
   const inner = (
     <>
       <View style={styles.editCardThumb}>
-        {thumbnail ? (
+        {thumbnailText !== undefined ? (
+          <View style={styles.editCardThumbTextWrap}>
+            <Text style={styles.editCardThumbText} numberOfLines={1} adjustsFontSizeToFit>
+              {thumbnailText}
+            </Text>
+          </View>
+        ) : thumbnail ? (
           <Image
             source={thumbnail}
             style={styles.editCardThumbImage}
@@ -1178,6 +1352,23 @@ const styles = StyleSheet.create({
     lineHeight: 24,
     color: FIGMA.brandTeal,
   },
+  // "Change/Add surf video" link rendered just below the Surf Skill card so
+  // users have a one-tap entry to update only their surf video. The 16px
+  // horizontal padding matches `cardsContainer` so the link aligns with the
+  // edges of the cards above it.
+  surfVideoLinkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 12,
+    paddingHorizontal: 16,
+    alignSelf: 'flex-start',
+  },
+  surfVideoLinkText: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: FIGMA.brandTeal,
+  },
   contentPanel: {
     marginTop: -38,
     paddingTop: 84,
@@ -1213,7 +1404,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 12,
-    minHeight: 64,
+    minHeight: 80,
     justifyContent: 'center',
   },
   inlineFieldLabel: {
@@ -1233,6 +1424,25 @@ const styles = StyleSheet.create({
     fontSize: 16,
     lineHeight: 24,
     color: FIGMA.textPrimary,
+  },
+  // TextInput inside an inline field row (e.g. inline-editable nickname).
+  // Matches inlineFieldValue's typography but with input-friendly defaults.
+  // No lineHeight — RN's TextInput renders tighter than <Text>, and an
+  // explicit lineHeight smaller than the actual font metrics clips
+  // descenders. Letting the font handle line metrics + a generous minHeight
+  // gives the visible glyph (incl. y/g/p) room to breathe.
+  inlineFieldInput: {
+    fontSize: 16,
+    color: FIGMA.textPrimary,
+    paddingVertical: 6,
+    paddingHorizontal: 0,
+    marginTop: 2,
+    minHeight: 40,
+    ...(Platform.OS === 'android' && { includeFontPadding: false, textAlignVertical: 'center' as const }),
+    ...(Platform.OS === 'web' && {
+      // @ts-ignore web-only outline removal
+      outlineStyle: 'none' as any,
+    }),
   },
   destinationsBlock: {
     width: '100%',
@@ -1281,6 +1491,54 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: FIGMA.textPrimary,
     marginBottom: 12,
+  },
+  dobOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  dobSheet: {
+    width: '100%',
+    maxWidth: 400,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 20,
+  },
+  dobTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: FIGMA.textPrimary,
+    marginBottom: 8,
+  },
+  dobButtonsRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+    marginTop: 12,
+  },
+  dobButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    borderRadius: 10,
+    minWidth: 96,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dobButtonCancel: {
+    backgroundColor: '#F0F0F0',
+  },
+  dobButtonCancelText: {
+    color: '#333',
+    fontWeight: '600',
+  },
+  dobButtonSave: {
+    backgroundColor: '#212121',
+  },
+  dobButtonSaveText: {
+    color: '#fff',
+    fontWeight: '600',
   },
   nicknameInput: {
     borderWidth: 1,
@@ -1366,6 +1624,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 8,
+  },
+  editCardThumbTextWrap: {
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 8,
+    backgroundColor: '#FFFFFF',
+  },
+  editCardThumbText: {
+    fontSize: 28,
+    fontWeight: '700',
+    color: FIGMA.textPrimary,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
   },
   editCardText: {
     flex: 1,

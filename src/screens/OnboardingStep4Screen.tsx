@@ -31,6 +31,7 @@ import { OnboardingData } from './OnboardingStep1Screen';
 import { uploadProfileImage } from '../services/storage/storageService';
 import { supabase } from '../config/supabase';
 import { useUserProfile } from '../context/UserProfileContext';
+import { HomeBreakSearchSheet, HomeBreakSelection } from '../components/HomeBreakSearchSheet';
 import { formatDateOfBirth, isValidDateOfBirth, dateToISOString, calculateAgeFromDOB } from '../utils/ageCalculation';
 import AvatarCropModal from '../components/AvatarCropModal';
 import { CountrySearchModal } from '../components/CountrySearchModal';
@@ -769,7 +770,8 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
   const [locationError, setLocationError] = useState(false);
   const [pronounError, setPronounError] = useState(false);
   const [pronoun, setPronoun] = useState<string>(initialData.pronouns || 'name only');
-  const [homeBreak, setHomeBreak] = useState<string>('');
+  const [homeBreak, setHomeBreak] = useState<HomeBreakSelection | null>(null);
+  const [showHomeBreakSheet, setShowHomeBreakSheet] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   
   // Modal state management - lifted to screen level for proper stacking
@@ -789,8 +791,8 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
     };
   }, []);
 
-  // Resolve DOB from a fresh DB fetch on mount, then commit the answer
-  // atomically so the field's render decision is made only once.
+  // Resolve DOB and home break from a fresh DB fetch on mount, then commit
+  // the answer atomically so render decisions are made only once.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -803,6 +805,18 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
         if (age !== null) {
           updateFormData({ dateOfBirth: fresh.date_of_birth, age });
         }
+      }
+      if (fresh?.home_break_place_id) {
+        setHomeBreak({
+          placeId: fresh.home_break_place_id,
+          full: fresh.home_break_full || '',
+          short: fresh.home_break_short || fresh.home_break_full || '',
+          name: fresh.home_break_short?.split(',')[0]?.trim() || '',
+          locality: fresh.home_break_locality ?? null,
+          country: fresh.home_break_country ?? null,
+          lat: fresh.home_break_lat ?? null,
+          lng: fresh.home_break_lng ?? null,
+        });
       }
       setIsCheckingDob(false);
     })();
@@ -984,6 +998,15 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
       travelExperience: initialData.travelExperience ?? 0,
       profilePicture: finalProfilePicture || undefined,
       pronouns: pronoun || undefined,
+      ...(homeBreak && {
+        homeBreakPlaceId: homeBreak.placeId,
+        homeBreakFull: homeBreak.full,
+        homeBreakShort: homeBreak.short,
+        homeBreakLocality: homeBreak.locality ?? undefined,
+        homeBreakCountry: homeBreak.country ?? undefined,
+        homeBreakLat: homeBreak.lat ?? undefined,
+        homeBreakLng: homeBreak.lng ?? undefined,
+      }),
     };
     onNext(formData);
   };
@@ -1108,7 +1131,7 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
                     updateFormData({ location: countryName });
                     setActiveModal(null);
                   }}
-                  placeholder="Country / State*"
+                  placeholder="Country*"
                   width={Platform.OS === 'web' ? 175 : undefined}
                   onOpen={() => {
                     Keyboard.dismiss();
@@ -1118,13 +1141,35 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
                 />
               </View>
               <View style={Platform.OS !== 'web' ? { flex: 8, minWidth: 0 } : undefined}>
-                <Field
-                  label="Home Break"
-                  value={homeBreak}
-                  onChangeText={setHomeBreak}
-                  placeholder="Home Break"
-                  width={Platform.OS === 'web' ? 175 : undefined}
-                />
+                <TouchableOpacity
+                  style={[
+                    styles.fieldContainer,
+                    Platform.OS === 'web' ? { width: 175 } : undefined,
+                  ]}
+                  activeOpacity={0.7}
+                  onPress={() => {
+                    Keyboard.dismiss();
+                    setShowHomeBreakSheet(true);
+                  }}
+                >
+                  <PencilIcon size={24} />
+                  <View style={styles.inputContainer}>
+                    <Text
+                      style={[
+                        homeBreak ? styles.fieldInputFilled : styles.fieldInput,
+                        styles.fieldInputWeb,
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {homeBreak ? homeBreak.short : 'Home Break'}
+                    </Text>
+                  </View>
+                  {homeBreak && (
+                    <View style={styles.checkIconContainer}>
+                      <CheckIcon size={16} />
+                    </View>
+                  )}
+                </TouchableOpacity>
               </View>
             </View>
 
@@ -1226,6 +1271,15 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
         setActiveModal(null);
       }}
       onClose={() => setActiveModal(null)}
+    />
+
+    <HomeBreakSearchSheet
+      visible={showHomeBreakSheet}
+      onClose={() => setShowHomeBreakSheet(false)}
+      onSelect={selection => {
+        setHomeBreak(selection);
+        setShowHomeBreakSheet(false);
+      }}
     />
 
 

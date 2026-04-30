@@ -23,6 +23,14 @@ export interface OnboardingStepData {
   surfLevel?: number;
   travelExperience?: number;
   isDemoUser?: boolean; // Whether this is a demo user
+  // Home break (Google Places) — pass all together when set.
+  homeBreakPlaceId?: string;
+  homeBreakFull?: string;
+  homeBreakShort?: string;
+  homeBreakLocality?: string;
+  homeBreakCountry?: string;
+  homeBreakLat?: number;
+  homeBreakLng?: number;
 }
 
 class OnboardingService {
@@ -128,6 +136,13 @@ class OnboardingService {
         surfLevel: data.surfLevel,
         travelExperience: data.travelExperience,
         isDemoUser: data.isDemoUser ?? false, // Pass demo user flag
+        homeBreakPlaceId: data.homeBreakPlaceId,
+        homeBreakFull: data.homeBreakFull,
+        homeBreakShort: data.homeBreakShort,
+        homeBreakLocality: data.homeBreakLocality,
+        homeBreakCountry: data.homeBreakCountry,
+        homeBreakLat: data.homeBreakLat,
+        homeBreakLng: data.homeBreakLng,
       });
       console.log('Step 4 (complete profile) saved to Supabase successfully');
     } catch (error: any) {

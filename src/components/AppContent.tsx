@@ -536,8 +536,15 @@ export const AppContent: React.FC = () => {
         surfLevel: data.surfLevel,
         travelExperience: data.travelExperience,
         isDemoUser: isDemoUser, // Pass demo user flag
+        homeBreakPlaceId: data.homeBreakPlaceId,
+        homeBreakFull: data.homeBreakFull,
+        homeBreakShort: data.homeBreakShort,
+        homeBreakLocality: data.homeBreakLocality,
+        homeBreakCountry: data.homeBreakCountry,
+        homeBreakLat: data.homeBreakLat,
+        homeBreakLng: data.homeBreakLng,
       });
-      
+
       // Update PostHog with the new name if user exists
       if (user && user.id) {
         const userId = user.id.toString();

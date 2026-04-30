@@ -117,10 +117,11 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           setUser(appUser);
           console.log('[OnboardingContext] User restored from session:', appUser.id);
 
-          // Also update form data with user info
+          // Carry only the email through; the user picks their own nickname
+          // in step 4. Auto-filling from Google's display name was confusing
+          // ("why is my full name in there?") and easy to miss editing.
           setFormData(prev => ({
             ...prev,
-            nickname: appUser.nickname,
             userEmail: appUser.email,
           }));
 
