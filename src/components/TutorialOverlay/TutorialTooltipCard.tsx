@@ -17,6 +17,11 @@ const CARD_WIDTH = 314;
 const BORDER_WIDTH = 2;
 const RADIUS = 24;
 
+// Web-only inline style. On web, an ancestor View with `box-none` compiles a
+// `* { pointer-events: auto }` rule that overrides inheritance, so we have to
+// set `pointer-events: none` directly on the element itself.
+const webPointerEventsNone = Platform.OS === 'web' ? ({ pointerEvents: 'none' } as any) : null;
+
 export const TutorialTooltipCard: React.FC<TutorialTooltipCardProps> = ({
   step,
   total,
@@ -57,11 +62,18 @@ export const TutorialTooltipCard: React.FC<TutorialTooltipCardProps> = ({
       </View>
 
       {/* SVG gradient border — wrapped in a pointer-events-none View so the
-          SVG doesn't swallow taps on the Pressable below (react-native-svg
-          doesn't always forward `pointerEvents` to the rendered element). */}
+          SVG doesn't swallow taps on the Pressable below. On web the SVG
+          itself also needs pointerEvents="none" because RN-web's `box-none`
+          ancestor compiles a `* { pointer-events: auto }` rule that overrides
+          inheritance from the wrap, making the SVG interactive again. */}
       {height > 0 && (
-        <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-          <Svg width={CARD_WIDTH} height={height}>
+        <View pointerEvents="none" style={[StyleSheet.absoluteFill, webPointerEventsNone]}>
+          <Svg
+            width={CARD_WIDTH}
+            height={height}
+            pointerEvents="none"
+            style={webPointerEventsNone as any}
+          >
             <Defs>
               <SvgLinearGradient id="tutorial-border-grad" x1="0" y1="0" x2="1" y2="0">
                 <Stop offset="0" stopColor="#B72DF2" stopOpacity="1" />

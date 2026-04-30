@@ -549,6 +549,28 @@ const fetchAndEnrichConversation = async (
 };
 
 /**
+ * Best-effort prefetch of message threads for the top conversations, so opening
+ * any of them is instant from cache. Runs sequentially after first paint to
+ * avoid bandwidth spikes and competing with the inbox render.
+ */
+const TOP_CONVERSATIONS_TO_PREFETCH = 10;
+const schedulePrefetchTopConversations = (conversations: Conversation[]): void => {
+  const ids = conversations
+    .slice(0, TOP_CONVERSATIONS_TO_PREFETCH)
+    .map(c => c.id)
+    .filter(Boolean);
+  if (ids.length === 0) return;
+
+  setTimeout(() => {
+    (async () => {
+      for (const id of ids) {
+        await chatHistoryCache.prefetchConversationMessages(id);
+      }
+    })().catch(() => {});
+  }, 0);
+};
+
+/**
  * Creates a minimal conversation with fallback data when enrichment fails
  * SACRED: Ensures message is never dropped, even if enrichment fails
  */
@@ -830,7 +852,11 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
               console.error('[MessagingProvider] Error prefetching avatars from cache:', err);
             });
           }
-          
+
+          // Warm message cache for the top conversations so opening any of them
+          // is instant (Instagram-style). Deferred so it doesn't compete with paint.
+          schedulePrefetchTopConversations(cached);
+
         } else {
           console.log('[MessagingProvider] 📦 No cached conversations found');
           // Keep loading true if no cache (will show skeletons)
@@ -882,6 +908,13 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
           avatarCacheService.prefetchAvatars(serverAvatarUrls).catch(err => {
             console.error('[MessagingProvider] Error prefetching avatars from server:', err);
           });
+        }
+
+        // Warm message cache for the top conversations on the initial load
+        // (offset 0). chatHistoryCache.prefetchConversationMessages no-ops if
+        // memory cache is already populated from the cached-path call above.
+        if (offset === 0) {
+          schedulePrefetchTopConversations(result.conversations);
         }
 
         // No cache case — set loading false after server fetch
