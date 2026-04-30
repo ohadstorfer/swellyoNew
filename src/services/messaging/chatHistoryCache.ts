@@ -44,6 +44,10 @@ class ChatHistoryCache {
   // Per-conversation locks to prevent concurrent saveMessages calls
   private conversationSaveLocks = new Map<string, Promise<void>>();
 
+  // In-flight prefetches — prevents duplicate network calls when prefetch is
+  // triggered from both the cached and server-fetch paths of loadConversations.
+  private prefetchInFlight = new Set<string>();
+
   /**
    * Get cache key for a conversation
    */
@@ -718,6 +722,31 @@ class ChatHistoryCache {
     AsyncStorage.removeItem(key).catch(err =>
       console.warn('[chatHistoryCache] Error clearing conversation cache:', err)
     );
+  }
+
+  /**
+   * Best-effort background prefetch: fetch latest messages for a conversation
+   * and seed the cache so the next entry to that chat is instant.
+   * Skips if memory cache already has messages (avoids redundant network work).
+   */
+  async prefetchConversationMessages(conversationId: string, limit: number = 30): Promise<void> {
+    if (!conversationId) return;
+    if (this.memoryCache.has(conversationId)) return;
+    if (this.prefetchInFlight.has(conversationId)) return;
+
+    this.prefetchInFlight.add(conversationId);
+    try {
+      // Dynamic import to avoid a circular module load with messagingService.
+      const { messagingService } = await import('./messagingService');
+      const result = await messagingService.getMessages(conversationId, limit);
+      if (result.messages.length > 0) {
+        await this.saveMessages(conversationId, result.messages);
+      }
+    } catch {
+      // Best-effort — silent.
+    } finally {
+      this.prefetchInFlight.delete(conversationId);
+    }
   }
 
   /**

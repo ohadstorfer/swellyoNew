@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, StyleSheet, Platform } from 'react-native';
+import { View, StyleSheet, Platform, Pressable, ActivityIndicator } from 'react-native';
 import { Text } from './Text';
 import { Ionicons } from '@expo/vector-icons';
 import type { ReplyToSnapshot } from '../services/messaging/messagingService';
@@ -9,11 +9,15 @@ const REPLY_PURPLE = '#A58DED';
 interface QuotedMessagePreviewProps {
   snapshot: ReplyToSnapshot;
   isOwnBubble: boolean;
+  onPress?: () => void;
+  isLoading?: boolean;
 }
 
 export const QuotedMessagePreview: React.FC<QuotedMessagePreviewProps> = ({
   snapshot,
   isOwnBubble,
+  onPress,
+  isLoading,
 }) => {
   let preview: string;
   if (snapshot.type === 'image') {
@@ -34,8 +38,8 @@ export const QuotedMessagePreview: React.FC<QuotedMessagePreviewProps> = ({
   // bubbles. The sender name stays purple which reads fine on all bubble colors.
   const bodyColor = 'rgba(0,0,0,0.7)';
 
-  return (
-    <View style={styles.container}>
+  const inner = (
+    <>
       <View style={styles.bar} />
       <View style={styles.content}>
         <Text style={styles.name} numberOfLines={1}>{snapshot.sender_name || 'User'}</Text>
@@ -53,8 +57,29 @@ export const QuotedMessagePreview: React.FC<QuotedMessagePreviewProps> = ({
           </Text>
         </View>
       </View>
-    </View>
+      {isLoading && (
+        <ActivityIndicator
+          size="small"
+          color={REPLY_PURPLE}
+          style={styles.loader}
+        />
+      )}
+    </>
   );
+
+  if (onPress) {
+    return (
+      <Pressable
+        onPress={onPress}
+        hitSlop={6}
+        style={({ pressed }) => [styles.container, pressed && styles.containerPressed]}
+      >
+        {inner}
+      </Pressable>
+    );
+  }
+
+  return <View style={styles.container}>{inner}</View>;
 };
 
 const styles = StyleSheet.create({
@@ -71,6 +96,13 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     paddingVertical: 5,
     paddingRight: 8,
+  },
+  containerPressed: {
+    opacity: 0.7,
+  },
+  loader: {
+    marginRight: 4,
+    alignSelf: 'center',
   },
   bar: {
     width: 3,

@@ -19,6 +19,23 @@ export interface SurfSpot {
 
 export type TripStatus = 'active' | 'cancelled';
 
+export interface PackingItem {
+  name: string;
+  done: boolean;
+}
+
+export interface GroupPackingItem {
+  name: string;
+  single: boolean;
+}
+
+export interface GroupPackingClaim {
+  item_name: string;
+  user_id: string;
+  user_name: string | null;
+  user_profile_image_url: string | null;
+}
+
 export interface GroupTrip {
   id: string;
   host_id: string;
@@ -59,6 +76,9 @@ export interface GroupTrip {
   budget_max: number | null;
   budget_currency: string | null;
 
+  packing_list: string[];
+  group_packing_list: GroupPackingItem[];
+
   created_at: string;
   updated_at: string;
 }
@@ -69,6 +89,8 @@ export interface GroupTripParticipant {
   user_id: string;
   role: 'host' | 'member';
   joined_at: string;
+  committed: boolean;
+  packing_list: PackingItem[];
 }
 
 export type JoinRequestStatus = 'pending' | 'approved' | 'declined' | 'withdrawn';
@@ -98,6 +120,8 @@ export interface ParticipantProfile {
 export interface EnrichedParticipant extends ParticipantProfile {
   role: 'host' | 'member';
   joined_at: string;
+  committed: boolean;
+  packing_list: PackingItem[];
 }
 
 export interface EnrichedJoinRequest extends GroupTripJoinRequest {
@@ -236,6 +260,176 @@ export async function updateGroupTrip(
 }
 
 /**
+ * Host updates the trip's master packing list (item names, ordered).
+ * A DB trigger then syncs each participant's per-user list, preserving done state
+ * for items that still exist in the new list and removing items that don't.
+ */
+export async function setTripPackingList(
+  tripId: string,
+  names: string[]
+): Promise<void> {
+  const cleaned = names.map(n => n.trim()).filter(Boolean);
+  const { error } = await supabase
+    .from('group_trips')
+    .update({ packing_list: cleaned })
+    .eq('id', tripId);
+
+  if (error) {
+    console.error('[groupTripsService] setTripPackingList error:', error);
+    throw new Error(error.message);
+  }
+}
+
+/**
+ * Host updates the trip's group packing list (the shared, claim-able items).
+ * Each item has a `single` flag controlling whether only one user can claim it.
+ * A DB trigger prunes claims for items removed from the master list.
+ */
+export async function setTripGroupPackingList(
+  tripId: string,
+  items: GroupPackingItem[]
+): Promise<void> {
+  const cleaned = items
+    .map(i => ({ name: i.name.trim(), single: !!i.single }))
+    .filter(i => i.name.length > 0);
+  const { error } = await supabase
+    .from('group_trips')
+    .update({ group_packing_list: cleaned })
+    .eq('id', tripId);
+
+  if (error) {
+    console.error('[groupTripsService] setTripGroupPackingList error:', error);
+    throw new Error(error.message);
+  }
+}
+
+/**
+ * Lists all claims on a trip's group packing items, joined to surfers for the
+ * claimer's name + profile_image_url. Two queries (no FK between
+ * group_trip_group_packing_claims and surfers — both reference auth.users).
+ */
+export async function listTripGroupPackingClaims(
+  tripId: string
+): Promise<GroupPackingClaim[]> {
+  const { data: rows, error } = await supabase
+    .from('group_trip_group_packing_claims')
+    .select('item_name, user_id, created_at')
+    .eq('trip_id', tripId)
+    .order('created_at', { ascending: true });
+
+  if (error) {
+    console.error('[groupTripsService] listTripGroupPackingClaims error:', error);
+    return [];
+  }
+  if (!rows || rows.length === 0) return [];
+
+  const userIds = Array.from(new Set(rows.map((r: any) => r.user_id)));
+  const { data: surfers } = await supabase
+    .from('surfers')
+    .select('user_id, name, profile_image_url')
+    .in('user_id', userIds);
+
+  const byId = new Map<string, { name: string | null; profile_image_url: string | null }>();
+  (surfers || []).forEach((s: any) => {
+    byId.set(s.user_id, {
+      name: s.name ?? null,
+      profile_image_url: s.profile_image_url ?? null,
+    });
+  });
+
+  return rows.map((r: any) => ({
+    item_name: r.item_name,
+    user_id: r.user_id,
+    user_name: byId.get(r.user_id)?.name ?? null,
+    user_profile_image_url: byId.get(r.user_id)?.profile_image_url ?? null,
+  }));
+}
+
+/**
+ * Current user claims an item from the group packing list. The DB trigger
+ * `enforce_group_packing_single_claim` rejects the insert if the item is
+ * marked single and another claim already exists.
+ */
+export async function claimGroupPackingItem(
+  tripId: string,
+  userId: string,
+  itemName: string
+): Promise<void> {
+  const { error } = await supabase
+    .from('group_trip_group_packing_claims')
+    .insert({ trip_id: tripId, user_id: userId, item_name: itemName });
+
+  if (error) {
+    console.error('[groupTripsService] claimGroupPackingItem error:', error);
+    throw new Error(error.message);
+  }
+}
+
+/**
+ * Current user releases their claim on a group packing item.
+ */
+export async function unclaimGroupPackingItem(
+  tripId: string,
+  userId: string,
+  itemName: string
+): Promise<void> {
+  const { error } = await supabase
+    .from('group_trip_group_packing_claims')
+    .delete()
+    .eq('trip_id', tripId)
+    .eq('user_id', userId)
+    .eq('item_name', itemName);
+
+  if (error) {
+    console.error('[groupTripsService] unclaimGroupPackingItem error:', error);
+    throw new Error(error.message);
+  }
+}
+
+/**
+ * Participant replaces their own packing_list jsonb. Used to toggle a single
+ * item's done state — the caller passes the full list with the toggled item.
+ * RLS allows update only when auth.uid() === user_id.
+ */
+export async function setMyPackingList(
+  tripId: string,
+  userId: string,
+  list: PackingItem[]
+): Promise<void> {
+  const { error } = await supabase
+    .from('group_trip_participants')
+    .update({ packing_list: list })
+    .eq('trip_id', tripId)
+    .eq('user_id', userId);
+
+  if (error) {
+    console.error('[groupTripsService] setMyPackingList error:', error);
+    throw new Error(error.message);
+  }
+}
+
+/**
+ * A participant (host or member) marks their own commitment to a trip.
+ * RLS enforces that auth.uid() === user_id, so users can only toggle their own row.
+ */
+export async function setTripCommitment(
+  tripId: string,
+  userId: string,
+  committed: boolean
+): Promise<void> {
+  const { error } = await supabase
+    .from('group_trip_participants')
+    .update({ committed })
+    .eq('trip_id', tripId)
+    .eq('user_id', userId);
+
+  if (error) {
+    console.error('[groupTripsService] setTripCommitment error:', error);
+    throw new Error(error.message);
+  }
+}
+
+/**
  * Member self-leaves a trip. Removes from group_trip_participants and from the
  * linked group conversation. Their original join request stays approved (history).
  */
@@ -332,7 +526,7 @@ export async function getTripParticipants(
 ): Promise<EnrichedParticipant[]> {
   const { data: rows, error } = await supabase
     .from('group_trip_participants')
-    .select('role, joined_at, user_id')
+    .select('role, joined_at, user_id, committed, packing_list')
     .eq('trip_id', tripId)
     .order('joined_at', { ascending: true });
 
@@ -367,6 +561,8 @@ export async function getTripParticipants(
       user_id: row.user_id,
       role: row.role,
       joined_at: row.joined_at,
+      committed: !!row.committed,
+      packing_list: Array.isArray(row.packing_list) ? row.packing_list as PackingItem[] : [],
       name: profile?.name ?? null,
       age: profile?.age ?? null,
       surfboard_type: profile?.surfboard_type ?? null,

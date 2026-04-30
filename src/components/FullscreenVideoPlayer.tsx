@@ -7,7 +7,7 @@ import {
   Pressable,
   Platform,
   StatusBar,
-  Dimensions,
+  useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GestureDetector, Gesture, GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -41,7 +41,6 @@ interface FullscreenVideoPlayerProps {
   onClose: () => void;
 }
 
-const SCREEN_HEIGHT = Dimensions.get('window').height;
 const DISMISS_DISTANCE = 120;
 const DISMISS_VELOCITY = 800;
 
@@ -104,6 +103,7 @@ const NativeVideoPlayer: React.FC<{ videoUrl: string; visible: boolean; onClose:
   onClose,
 }) => {
   const insets = useSafeAreaInsets();
+  const { height: screenHeight } = useWindowDimensions();
   const translateY = useSharedValue(0);
   const [isPlaying, setIsPlaying] = useState(false);
 
@@ -145,7 +145,7 @@ const NativeVideoPlayer: React.FC<{ videoUrl: string; visible: boolean; onClose:
       const distance = Math.abs(e.translationY);
       const velocity = Math.abs(e.velocityY);
       if (distance > DISMISS_DISTANCE || velocity > DISMISS_VELOCITY) {
-        const destination = e.translationY > 0 ? SCREEN_HEIGHT : -SCREEN_HEIGHT;
+        const destination = e.translationY > 0 ? screenHeight : -screenHeight;
         translateY.value = withTiming(destination, { duration: 220 }, (finished) => {
           if (finished) runOnJS(onClose)();
         });
@@ -158,7 +158,7 @@ const NativeVideoPlayer: React.FC<{ videoUrl: string; visible: boolean; onClose:
     transform: [{ translateY: translateY.value }],
     opacity: interpolate(
       Math.abs(translateY.value),
-      [0, SCREEN_HEIGHT * 0.4],
+      [0, screenHeight * 0.4],
       [1, 0.6],
       Extrapolation.CLAMP,
     ),
@@ -218,6 +218,7 @@ export const FullscreenVideoPlayer: React.FC<FullscreenVideoPlayerProps> = ({
       animationType="fade"
       onRequestClose={onClose}
       statusBarTranslucent={Platform.OS === 'android'}
+      supportedOrientations={['portrait', 'landscape', 'landscape-left', 'landscape-right']}
     >
       <StatusBar barStyle="light-content" backgroundColor="#000000" />
       <View style={styles.container}>

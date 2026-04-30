@@ -53,6 +53,12 @@ const ARROW_SIZE = 16;
 const SCREEN_MARGIN = 16;
 const BACKDROP_COLOR = 'rgba(1, 0, 0, 0.7)';
 
+// Web-only inline style. RN-web compiles `pointer-events: auto` onto every
+// descendant of a `box-none` ancestor, which can override inheritance from a
+// `pointer-events: none` wrapper. Setting `pointer-events: none` directly on
+// the element via inline style wins.
+const webPointerEventsNone = Platform.OS === 'web' ? ({ pointerEvents: 'none' } as any) : null;
+
 // Step-transition timings (ms). Every "open" and "close" of a step runs these
 // three phases in order:
 //   A  tooltip fades out AND a dark rect fills the spotlight hole (simultaneously)
@@ -327,23 +333,29 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
     >
       <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
         {/* Backdrop: SVG with cutout + a dark rect that fills the hole during
-            Phase A. The whole wrapper fades via backdropOpacity in Phase B/C. */}
+            Phase A. The whole wrapper fades via backdropOpacity in Phase B/C.
+            The wrapper View (pointerEvents="auto") absorbs taps on the dark
+            area; the SVG itself is non-interactive. On web the SVG bounding
+            box can swallow taps meant for the tooltip's Next button — same
+            issue called out in TutorialTooltipCard's gradient border. */}
         <Animated.View
           style={[StyleSheet.absoluteFill, { opacity: backdropOpacity }]}
-          pointerEvents="box-none"
+          pointerEvents="auto"
         >
-          <Svg
-            width={screenW}
-            height={screenH}
-            style={StyleSheet.absoluteFill as any}
-            pointerEvents="auto"
-          >
-            <Path
-              d={buildCutoutPath(screenW, screenH, cutout.hole, cutoutRadius)}
-              fill={BACKDROP_COLOR}
-              fillRule="evenodd"
-            />
-          </Svg>
+          <View pointerEvents="none" style={[StyleSheet.absoluteFill, webPointerEventsNone]}>
+            <Svg
+              width={screenW}
+              height={screenH}
+              style={[StyleSheet.absoluteFill, webPointerEventsNone] as any}
+              pointerEvents="none"
+            >
+              <Path
+                d={buildCutoutPath(screenW, screenH, cutout.hole, cutoutRadius)}
+                fill={BACKDROP_COLOR}
+                fillRule="evenodd"
+              />
+            </Svg>
+          </View>
           <Animated.View
             pointerEvents="none"
             style={{
@@ -366,9 +378,11 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
           onPress={displayedHeld ? undefined : onAnchorPress}
         />
 
-        {/* Tooltip card + arrow — opacity only, no slide. */}
+        {/* Tooltip card + arrow — opacity only, no slide. Explicit zIndex so
+            the Next button is above the backdrop on web (where opacity-based
+            stacking contexts in sibling DOM order can be flaky). */}
         <Animated.View
-          style={[StyleSheet.absoluteFill, { opacity: contentOpacity }]}
+          style={[StyleSheet.absoluteFill, { opacity: contentOpacity, zIndex: 2 }]}
           pointerEvents={displayedHeld ? 'none' : 'box-none'}
         >
           {extraContent}

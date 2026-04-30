@@ -40,6 +40,7 @@ import * as Crypto from 'expo-crypto';
 import { MessageActionsMenu } from '../components/MessageActionsMenu';
 import { ReplyPreviewBanner } from '../components/ReplyPreviewBanner';
 import { QuotedMessagePreview } from '../components/QuotedMessagePreview';
+import { MessageBubbleHighlight } from '../components/MessageBubbleHighlight';
 import { useMessaging } from '../context/MessagingProvider';
 import { userPresenceService } from '../services/presence/userPresenceService';
 import { avatarCacheService } from '../services/media/avatarCacheService';
@@ -329,6 +330,9 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const pendingPickerRef = useRef<(() => void) | null>(null);
   const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
   const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
+  const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
+  const [resolvingReplyJumpId, setResolvingReplyJumpId] = useState<string | null>(null);
+  const messagesRef = useRef<Message[]>([]);
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
   const [pendingDeleteMessageId, setPendingDeleteMessageId] = useState<string | null>(null);
@@ -971,20 +975,15 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     if (cachedMessages && cachedMessages.length > 0) {
       const totalTime = Date.now() - loadStartTime;
       console.log(`[DirectMessageScreen] ✅ MEMORY CACHE HIT - Showing ${cachedMessages.length} messages instantly (${totalTime}ms total)`);
-      
-      // CRITICAL: Load adv_role BEFORE setting messages to ensure correct color on first render
-      // Load in parallel but await it before rendering messages
-      const advRolePromise = loadOtherUserAdvRole();
-      
-      // Set pagination cursor from cache (will be corrected by background sync)
+
+      // Fire-and-forget adv_role load — must not block render. setOtherUserAdvRole
+      // triggers a re-render when it resolves; bubble color may briefly use the
+      // default before then, which is the trade for instant message visibility.
+      loadOtherUserAdvRole().catch(() => {});
+
       if (cachedMessages.length > 0) {
         oldestMessageIdRef.current = cachedMessages[0].id;
-        // Don't enable pagination yet — wait for background sync to set the correct
-        // cursor and hasMore from the server, avoiding race conditions with stale cache data
       }
-      
-      // Wait for adv_role to load, then set messages
-      await advRolePromise;
       
       // Log image messages for debugging
       const imageMessages = cachedMessages.filter(msg => msg.type === 'image' || msg.image_metadata);
@@ -1067,9 +1066,9 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         if (asyncCachedMessages.length > 0) {
           oldestMessageIdRef.current = asyncCachedMessages[0].id;
         }
-        
-        // CRITICAL: Load adv_role BEFORE setting messages to ensure correct color on first render
-        await loadOtherUserAdvRole();
+
+        // Fire-and-forget — see memory-cache path for rationale.
+        loadOtherUserAdvRole().catch(() => {});
         
         // Log image messages for debugging
         const imageMessages = asyncCachedMessages.filter(msg => msg.type === 'image' || msg.image_metadata);
@@ -1145,11 +1144,10 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
           oldestMessageIdRef.current = result.messages[0].id;
         }
         await chatHistoryCache.saveMessages(currentConversationId, result.messages);
-        
-        // CRITICAL: Load adv_role BEFORE setting messages to ensure correct color on first render
-        await loadOtherUserAdvRole();
-        
-        // Set messages after adv_role is loaded to ensure correct colors.
+
+        // Fire-and-forget — see memory-cache path for rationale.
+        loadOtherUserAdvRole().catch(() => {});
+
         // Preserve any local-only messages already present for THIS conversation
         // (e.g. the optimistic first message after createDirectConversation
         // flipped currentConversationId from null → real). At this moment the
@@ -2334,6 +2332,52 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     }
   };
 
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  // Tap on a reply preview → scroll the original message to vertical center,
+  // then briefly flash it. If the parent is older than what's loaded, page in
+  // older messages until found (capped to avoid infinite loops).
+  const handleReplyPreviewPress = useCallback(async (parentMessageId: string) => {
+    if (resolvingReplyJumpId) return;
+
+    const findInvertedIndex = (id: string): number => {
+      const arr = messagesRef.current;
+      const chronoIdx = arr.findIndex((m) => m.id === id);
+      return chronoIdx === -1 ? -1 : arr.length - 1 - chronoIdx;
+    };
+
+    let invertedIndex = findInvertedIndex(parentMessageId);
+    if (invertedIndex === -1) {
+      setResolvingReplyJumpId(parentMessageId);
+      let attempts = 0;
+      while (
+        invertedIndex === -1 &&
+        attempts < 5 &&
+        hasMoreMessagesRef.current &&
+        !isLoadingOlderRef.current
+      ) {
+        await loadOlderMessages();
+        invertedIndex = findInvertedIndex(parentMessageId);
+        attempts++;
+      }
+      setResolvingReplyJumpId(null);
+    }
+
+    if (invertedIndex === -1) {
+      Alert.alert('Mensaje no disponible', 'No pudimos encontrar el mensaje original.');
+      return;
+    }
+
+    flatListRef.current?.scrollToIndex({
+      index: invertedIndex,
+      viewPosition: 0.5,
+      animated: true,
+    });
+    setTimeout(() => setHighlightedMessageId(parentMessageId), 350);
+  }, [resolvingReplyJumpId]);
+
   // Handle long press on message
   const handleMessageLongPress = (message: Message, event: any) => {
     console.log('[DirectMessageScreen] handleMessageLongPress called', {
@@ -2665,11 +2709,13 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
           <View style={styles.messageAvatarSpacer} />
         )}
 
-        <View
+        <MessageBubbleHighlight
+          isHighlighted={highlightedMessageId === message.id}
+          onAnimationEnd={() => setHighlightedMessageId(null)}
           style={[
             styles.messageBubble,
-            isOwnMessage 
-              ? styles.userMessageBubble 
+            isOwnMessage
+              ? styles.userMessageBubble
               : [
                   styles.botMessageBubble,
                   otherUserAdvRole === 'adv_giver' && styles.botMessageBubbleGiveAdv,
@@ -2704,6 +2750,8 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
               <QuotedMessagePreview
                 snapshot={message.reply_to_snapshot}
                 isOwnBubble={isOwnMessage}
+                onPress={() => handleReplyPreviewPress(message.reply_to_snapshot!.message_id)}
+                isLoading={resolvingReplyJumpId === message.reply_to_snapshot.message_id}
               />
             </View>
           )}
@@ -2714,8 +2762,11 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
               // Prefer the compressed URL when ready; otherwise play the original
               // so the receiver can watch instantly while MediaConvert processes.
               const playableUrl = message.video_metadata?.video_url || message.video_metadata?.original_url || '';
-              const aspectRatio = message.video_metadata?.width && message.video_metadata?.height
+              const rawAspectRatio = message.video_metadata?.width && message.video_metadata?.height
                 ? message.video_metadata.width / message.video_metadata.height : 16 / 9;
+              // Clamp portrait videos at 3:4 so the bubble doesn't dominate the screen.
+              // Thumbnail uses resizeMode="cover" so the visible frame just crops cleanly.
+              const aspectRatio = Math.max(rawAspectRatio, 1);
               const isUploading = message.upload_state === 'uploading';
               const isFailed = message.upload_state === 'failed';
 
@@ -3163,7 +3214,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
               )}
             </>
           )}
-        </View>
+        </MessageBubbleHighlight>
       </TouchableOpacity>
     );
   };
@@ -3339,6 +3390,15 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             ListFooterComponent={listFooterComponent}
             ListEmptyComponent={listEmptyComponent}
             keyboardShouldPersistTaps="handled"
+            onScrollToIndexFailed={(info) => {
+              setTimeout(() => {
+                flatListRef.current?.scrollToIndex({
+                  index: info.index,
+                  viewPosition: 0.5,
+                  animated: true,
+                });
+              }, 200);
+            }}
             keyboardDismissMode={
               // iOS handles interactive dismiss natively. On Android, KeyboardGestureArea
               // tracks the drag and the FlatList's "interactive" dismissMode reports it

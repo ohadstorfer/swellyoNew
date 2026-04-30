@@ -10,6 +10,7 @@ export interface Conversation {
   id: string;
   title?: string;
   is_direct: boolean;
+  direct_pair_key?: string | null;
   metadata: any;
   created_by: string;
   created_at: string;
@@ -978,64 +979,53 @@ class MessagingService {
       console.log('Creating conversation with user:', otherUserId, 'Current user:', user.id);
       console.log('Session exists:', !!session, 'Access token present:', !!session.access_token);
 
-      // Check if a direct conversation already exists
-      // Use maybeSingle() to handle cases where no conversations exist
-      const { data: existingConversations, error: existingError } = await supabase
-        .from('conversation_members')
-        .select('conversation_id')
-        .eq('user_id', user.id);
+      // Canonical sorted pair key — matches the partial unique index on conversations.
+      const [uidA, uidB] = [user.id, otherUserId].sort();
+      const directPairKey = `${uidA}:${uidB}`;
 
-      if (existingError) {
-        console.error('Error checking existing conversations:', existingError);
-        // Continue to create new conversation even if check fails
-      } else if (existingConversations && existingConversations.length > 0) {
-        for (const { conversation_id } of existingConversations) {
-          const { data: members, error: membersError } = await supabase
-            .from('conversation_members')
-            .select('user_id')
-            .eq('conversation_id', conversation_id);
-
-          if (membersError) {
-            console.error('Error fetching members for conversation:', conversation_id, membersError);
-            continue;
-          }
-
-          if (members && members.length === 2) {
-            const userIds = members.map(m => m.user_id).sort();
-            const targetUserIds = [user.id, otherUserId].sort();
-            if (JSON.stringify(userIds) === JSON.stringify(targetUserIds)) {
-              // Found existing conversation
-              const { data: conv, error: convError } = await supabase
-                .from('conversations')
-                .select('*')
-                .eq('id', conversation_id)
-                .maybeSingle();
-              
-              if (convError) {
-                console.error('Error fetching existing conversation:', convError);
-                break;
-              }
-              
-              if (conv) {
-                console.log('Found existing conversation:', conv.id);
-                return conv;
-              }
-            }
-          }
+      const fetchByPairKey = async () => {
+        const { data, error } = await supabase
+          .from('conversations')
+          .select('*')
+          .eq('is_direct', true)
+          .eq('direct_pair_key', directPairKey)
+          .maybeSingle();
+        if (error) {
+          console.error('Error fetching existing direct conversation:', error);
+          return null;
         }
+        return data;
+      };
+
+      const existing = await fetchByPairKey();
+      if (existing) {
+        console.log('Found existing conversation:', existing.id);
+        return existing;
       }
 
-      // Create new conversation
+      // Create new conversation. The partial unique index makes this race-safe:
+      // a concurrent caller that wins the insert will cause us to hit 23505,
+      // and we'll fetch their row instead.
       const { data: conversation, error: convError } = await supabase
         .from('conversations')
         .insert({
           is_direct: true,
           created_by: user.id,
+          direct_pair_key: directPairKey,
         })
         .select()
         .single();
 
-      if (convError) throw convError;
+      if (convError) {
+        if ((convError as { code?: string }).code === '23505') {
+          const winner = await fetchByPairKey();
+          if (winner) {
+            console.log('Lost direct-conversation insert race; using existing:', winner.id);
+            return winner;
+          }
+        }
+        throw convError;
+      }
 
       // Add both users as members
       // If from trip planning: current user is adv_seeker, other user is adv_giver

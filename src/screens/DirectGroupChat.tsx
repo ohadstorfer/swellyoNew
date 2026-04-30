@@ -40,6 +40,7 @@ import * as Crypto from 'expo-crypto';
 import { MessageActionsMenu } from '../components/MessageActionsMenu';
 import { ReplyPreviewBanner } from '../components/ReplyPreviewBanner';
 import { QuotedMessagePreview } from '../components/QuotedMessagePreview';
+import { MessageBubbleHighlight } from '../components/MessageBubbleHighlight';
 import { useMessaging } from '../context/MessagingProvider';
 import { userPresenceService } from '../services/presence/userPresenceService';
 import { avatarCacheService } from '../services/media/avatarCacheService';
@@ -329,6 +330,9 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
   const pendingPickerRef = useRef<(() => void) | null>(null);
   const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
   const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
+  const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
+  const [resolvingReplyJumpId, setResolvingReplyJumpId] = useState<string | null>(null);
+  const messagesRef = useRef<Message[]>([]);
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
   const [pendingDeleteMessageId, setPendingDeleteMessageId] = useState<string | null>(null);
@@ -2334,6 +2338,52 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
     }
   };
 
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  // Tap on a reply preview → scroll the original message to vertical center,
+  // then briefly flash it. If the parent is older than what's loaded, page in
+  // older messages until found (capped to avoid infinite loops).
+  const handleReplyPreviewPress = useCallback(async (parentMessageId: string) => {
+    if (resolvingReplyJumpId) return;
+
+    const findInvertedIndex = (id: string): number => {
+      const arr = messagesRef.current;
+      const chronoIdx = arr.findIndex((m) => m.id === id);
+      return chronoIdx === -1 ? -1 : arr.length - 1 - chronoIdx;
+    };
+
+    let invertedIndex = findInvertedIndex(parentMessageId);
+    if (invertedIndex === -1) {
+      setResolvingReplyJumpId(parentMessageId);
+      let attempts = 0;
+      while (
+        invertedIndex === -1 &&
+        attempts < 5 &&
+        hasMoreMessagesRef.current &&
+        !isLoadingOlderRef.current
+      ) {
+        await loadOlderMessages();
+        invertedIndex = findInvertedIndex(parentMessageId);
+        attempts++;
+      }
+      setResolvingReplyJumpId(null);
+    }
+
+    if (invertedIndex === -1) {
+      Alert.alert('Mensaje no disponible', 'No pudimos encontrar el mensaje original.');
+      return;
+    }
+
+    flatListRef.current?.scrollToIndex({
+      index: invertedIndex,
+      viewPosition: 0.5,
+      animated: true,
+    });
+    setTimeout(() => setHighlightedMessageId(parentMessageId), 350);
+  }, [resolvingReplyJumpId]);
+
   // Handle long press on message
   const handleMessageLongPress = (message: Message, event: any) => {
     console.log('[DirectMessageScreen] handleMessageLongPress called', {
@@ -2669,11 +2719,13 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
           <View style={styles.messageAvatarSpacer} />
         )}
 
-        <View
+        <MessageBubbleHighlight
+          isHighlighted={highlightedMessageId === message.id}
+          onAnimationEnd={() => setHighlightedMessageId(null)}
           style={[
             styles.messageBubble,
-            isOwnMessage 
-              ? styles.userMessageBubble 
+            isOwnMessage
+              ? styles.userMessageBubble
               : [
                   styles.botMessageBubble,
                   otherUserAdvRole === 'adv_giver' && styles.botMessageBubbleGiveAdv,
@@ -2714,6 +2766,8 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
               <QuotedMessagePreview
                 snapshot={message.reply_to_snapshot}
                 isOwnBubble={isOwnMessage}
+                onPress={() => handleReplyPreviewPress(message.reply_to_snapshot!.message_id)}
+                isLoading={resolvingReplyJumpId === message.reply_to_snapshot.message_id}
               />
             </View>
           )}
@@ -2724,8 +2778,11 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
               // Prefer the compressed URL when ready; otherwise play the original
               // so the receiver can watch instantly while MediaConvert processes.
               const playableUrl = message.video_metadata?.video_url || message.video_metadata?.original_url || '';
-              const aspectRatio = message.video_metadata?.width && message.video_metadata?.height
+              const rawAspectRatio = message.video_metadata?.width && message.video_metadata?.height
                 ? message.video_metadata.width / message.video_metadata.height : 16 / 9;
+              // Clamp portrait videos at 3:4 so the bubble doesn't dominate the screen.
+              // Thumbnail uses resizeMode="cover" so the visible frame just crops cleanly.
+              const aspectRatio = Math.max(rawAspectRatio, 1);
               const isUploading = message.upload_state === 'uploading';
               const isFailed = message.upload_state === 'failed';
 
@@ -3173,7 +3230,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
               )}
             </>
           )}
-        </View>
+        </MessageBubbleHighlight>
       </TouchableOpacity>
     );
   };
@@ -3265,13 +3322,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
             </Reanimated.View>
           </TouchableOpacity>
           
-          {isDirect ? (
-            <TouchableOpacity style={styles.menuButton} onPress={() => setShowDmMenu(!showDmMenu)}>
-              <Ionicons name="ellipsis-vertical" size={20} color="#7B7B7B" />
-            </TouchableOpacity>
-          ) : (
-            <View style={styles.menuButton} />
-          )}
+          
         </View>
       </View>
 
@@ -3349,6 +3400,15 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
             ListFooterComponent={listFooterComponent}
             ListEmptyComponent={listEmptyComponent}
             keyboardShouldPersistTaps="handled"
+            onScrollToIndexFailed={(info) => {
+              setTimeout(() => {
+                flatListRef.current?.scrollToIndex({
+                  index: info.index,
+                  viewPosition: 0.5,
+                  animated: true,
+                });
+              }, 200);
+            }}
             keyboardDismissMode={
               // iOS handles interactive dismiss natively. On Android, KeyboardGestureArea
               // tracks the drag and the FlatList's "interactive" dismissMode reports it

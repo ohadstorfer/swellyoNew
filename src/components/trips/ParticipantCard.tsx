@@ -4,7 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { ParticipantProfile } from '../../services/trips/groupTripsService';
 
 interface ParticipantCardProps {
-  participant: ParticipantProfile & { role?: 'host' | 'member' };
+  participant: ParticipantProfile & { role?: 'host' | 'member'; committed?: boolean };
   rightSlot?: React.ReactNode;
   /**
    * When provided, renders a kebab/remove button. Used by hosts to expel a member.
@@ -28,7 +28,7 @@ export const ParticipantCard: React.FC<ParticipantCardProps> = ({
   rightSlot,
   onRemove,
 }) => {
-  const { user_id, name, age, profile_image_url, surfboard_type, surf_level_category, role } =
+  const { user_id, name, age, profile_image_url, surfboard_type, surf_level_category, role, committed } =
     participant;
 
   const board = formatBoard(surfboard_type);
@@ -47,6 +47,14 @@ export const ParticipantCard: React.FC<ParticipantCardProps> = ({
         {role === 'host' && (
           <View style={styles.hostBadge}>
             <Ionicons name="star" size={10} color="#FFFFFF" />
+          </View>
+        )}
+        {committed && (
+          <View
+            style={styles.committedBadge}
+            accessibilityLabel={`${name || 'Participant'} is committed to this trip`}
+          >
+            <Ionicons name="checkmark" size={11} color="#FFFFFF" />
           </View>
         )}
       </View>
@@ -103,6 +111,19 @@ const styles = StyleSheet.create({
     bottom: -2,
     right: -2,
     backgroundColor: '#B72DF2',
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: '#FFFFFF',
+  },
+  committedBadge: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    backgroundColor: '#34C759',
     width: 16,
     height: 16,
     borderRadius: 8,
