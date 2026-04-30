@@ -49,6 +49,14 @@ export interface OnboardingData {
   pronouns?: string;
   /** Selected surf journey option ids from welcome step (e.g. 'travel_advice', 'like_minded_travellers', 'travel_partners', 'guidance') */
   surfJourney?: string[];
+  // Home break (Google Places) — set in step 4.
+  homeBreakPlaceId?: string;
+  homeBreakFull?: string;
+  homeBreakShort?: string;
+  homeBreakLocality?: string;
+  homeBreakCountry?: string;
+  homeBreakLat?: number;
+  homeBreakLng?: number;
 }
 
 const BOARD_TYPES: BoardType[] = [

@@ -11,6 +11,7 @@ import {
   Alert,
   Keyboard,
   KeyboardEvent,
+  PanResponder,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -72,6 +73,31 @@ export const ProfileEditDestinationScreen: React.FC<Props> = ({
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const translateY = useRef(new Animated.Value(screenHeight)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
+
+  // Swipe-down to dismiss — drag the handle/header area, sheet follows finger.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
+  const pan = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, gs) => gs.dy > 4,
+      onPanResponderMove: (_, gs) => {
+        if (gs.dy > 0) translateY.setValue(gs.dy);
+      },
+      onPanResponderRelease: (_, gs) => {
+        if (gs.dy > 100 || gs.vy > 0.5) {
+          onCloseRef.current();
+        } else {
+          Animated.spring(translateY, {
+            toValue: 0,
+            tension: 65,
+            friction: 11,
+            useNativeDriver: true,
+          }).start();
+        }
+      },
+    }),
+  ).current;
 
   // Lift the sheet above the on-screen keyboard. Native uses `Keyboard` events;
   // web (mobile browsers) uses visualViewport, which shrinks when the OS
@@ -257,21 +283,24 @@ export const ProfileEditDestinationScreen: React.FC<Props> = ({
           },
         ]}
       >
-        <View style={styles.handleRow}>
-          <View style={styles.handle} />
-        </View>
+        {/* Drag area — swipe down on the handle/title to dismiss */}
+        <View {...pan.panHandlers}>
+          <View style={styles.handleRow}>
+            <View style={styles.handle} />
+          </View>
 
-        <View style={styles.header}>
-          <Text style={styles.title}>
-            {mode === 'add' ? 'Add destination' : 'Top Destination'}
-          </Text>
-          <TouchableOpacity
-            style={styles.closeButton}
-            onPress={onClose}
-            activeOpacity={0.7}
-          >
-            <Ionicons name="close" size={24} color={FIGMA.textPrimary} />
-          </TouchableOpacity>
+          <View style={styles.header}>
+            <Text style={styles.title}>
+              {mode === 'add' ? 'Add destination' : 'Top Destination'}
+            </Text>
+            <TouchableOpacity
+              style={styles.closeButton}
+              onPress={onClose}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="close" size={24} color={FIGMA.textPrimary} />
+            </TouchableOpacity>
+          </View>
         </View>
 
         {mode === 'add' ? (

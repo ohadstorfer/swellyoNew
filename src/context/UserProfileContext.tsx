@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { AppState, AppStateStatus } from 'react-native';
 import {
   supabaseDatabaseService,
   SupabaseSurfer,
@@ -9,6 +10,8 @@ import {
 } from '../utils/userProfileCache';
 import { avatarCacheService } from '../services/media/avatarCacheService';
 import { useOnboarding } from './OnboardingContext';
+import { calculateAgeFromDOB } from '../utils/ageCalculation';
+import { ageGateService } from '../services/ageGate/ageGateService';
 
 type UserProfileContextValue = {
   profile: SupabaseSurfer | null;
@@ -29,6 +32,42 @@ export const UserProfileProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const inflightRef = useRef<Promise<SupabaseSurfer | null> | null>(null);
   const loadedForUserIdRef = useRef<string | null>(null);
 
+  const ageSyncedForUserIdRef = useRef<string | null>(null);
+
+  const syncAgeFromDOBIfNeeded = useCallback(async (surfer: SupabaseSurfer) => {
+    if (ageSyncedForUserIdRef.current === surfer.user_id) return;
+
+    let dob: string | null | undefined = surfer.date_of_birth;
+    let dobSource: 'db' | 'asyncstorage' = 'db';
+    if (!dob) {
+      try {
+        dob = await ageGateService.getDOB();
+        dobSource = 'asyncstorage';
+      } catch {
+        dob = null;
+      }
+    }
+    console.log('[ageSync] dob:', dob, 'source:', dobSource, 'storedAge:', surfer.age);
+    if (!dob) {
+      console.log('[ageSync] skip — no dob anywhere');
+      return;
+    }
+
+    const calculatedAge = calculateAgeFromDOB(dob);
+    console.log('[ageSync] calculatedAge:', calculatedAge);
+    if (calculatedAge === null || calculatedAge === surfer.age) {
+      console.log('[ageSync] skip — age matches or invalid');
+      ageSyncedForUserIdRef.current = surfer.user_id;
+      return;
+    }
+    ageSyncedForUserIdRef.current = surfer.user_id;
+    console.log('[ageSync] WRITING age to DB:', calculatedAge);
+    const ok = await supabaseDatabaseService.updateSurferAge(calculatedAge);
+    console.log('[ageSync] write result:', ok);
+    if (!ok) return;
+    setProfile(prev => (prev && prev.user_id === surfer.user_id ? { ...prev, age: calculatedAge } : prev));
+  }, []);
+
   const fetchFromServer = useCallback(
     async (targetUserId: string): Promise<SupabaseSurfer | null> => {
       if (inflightRef.current) return inflightRef.current;
@@ -38,6 +77,9 @@ export const UserProfileProvider: React.FC<{ children: React.ReactNode }> = ({ c
           if (surfer) {
             setProfile(surfer);
             await saveCachedFullProfile(surfer);
+            syncAgeFromDOBIfNeeded(surfer).catch(err =>
+              console.warn('[UserProfileContext] age sync failed:', err),
+            );
           }
           return surfer;
         } catch (error) {
@@ -50,7 +92,7 @@ export const UserProfileProvider: React.FC<{ children: React.ReactNode }> = ({ c
       inflightRef.current = promise;
       return promise;
     },
-    [],
+    [syncAgeFromDOBIfNeeded],
   );
 
   useEffect(() => {
@@ -95,6 +137,21 @@ export const UserProfileProvider: React.FC<{ children: React.ReactNode }> = ({ c
       });
     }
   }, [profile?.profile_image_url]);
+
+  // Re-check age when the app returns to foreground — covers the case where
+  // the JS bundle stays alive across the user's birthday (no cold start).
+  useEffect(() => {
+    if (!profile) return;
+    const handleAppStateChange = (next: AppStateStatus) => {
+      if (next !== 'active') return;
+      ageSyncedForUserIdRef.current = null;
+      syncAgeFromDOBIfNeeded(profile).catch(err =>
+        console.warn('[UserProfileContext] age sync failed:', err),
+      );
+    };
+    const sub = AppState.addEventListener('change', handleAppStateChange);
+    return () => sub.remove();
+  }, [profile, syncAgeFromDOBIfNeeded]);
 
   const refresh = useCallback(async () => {
     if (!userId) return null;

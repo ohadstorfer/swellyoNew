@@ -49,6 +49,14 @@ export interface SupabaseSurfer {
   finished_onboarding?: boolean; // boolean, default false
   analytics_opt_out?: boolean; // boolean, default false - user opted out of PostHog analytics
   expo_push_token?: string; // text, nullable - Expo push notification token
+  // Home break (Google Places). One spot per user, identity-level.
+  home_break_place_id?: string; // text
+  home_break_full?: string; // text - "Ocean Beach, San Diego, CA, USA"
+  home_break_short?: string; // text - "Ocean Beach, San Diego"
+  home_break_locality?: string; // text - city/town
+  home_break_country?: string; // text - ISO 2-letter code
+  home_break_lat?: number; // float8
+  home_break_lng?: number; // float8
   created_at: string; // timestamptz
   updated_at: string; // timestamptz
 }
@@ -212,6 +220,8 @@ class SupabaseDatabaseService {
     countryFrom?: string;
     surfboardType?: string; // surfboard_type enum
     surfLevel?: number; // 1-5
+    surfLevelDescription?: string; // text - "Snapping", "Cross Stepping", etc.
+    surfLevelCategory?: string; // 'beginner' | 'intermediate' | 'advanced' | 'pro'
     travelExperience?: number; // number of trips (0-20+)
     bio?: string;
     profileImageUrl?: string;
@@ -229,6 +239,14 @@ class SupabaseDatabaseService {
     waveTypeKeywords?: string[];
     isDemoUser?: boolean; // Whether this is a demo user
     analyticsOptOut?: boolean; // Whether user opted out of analytics
+    // Home break fields (Google Places)
+    homeBreakPlaceId?: string;
+    homeBreakFull?: string;
+    homeBreakShort?: string;
+    homeBreakLocality?: string;
+    homeBreakCountry?: string;
+    homeBreakLat?: number;
+    homeBreakLng?: number;
   }): Promise<SupabaseSurfer> {
     if (!isSupabaseConfigured()) {
       throw new Error('Supabase is not configured. Please set up your Supabase credentials.');
@@ -395,6 +413,15 @@ class SupabaseDatabaseService {
         wave_type_keywords: surferData.waveTypeKeywords,
         is_demo_user: surferData.isDemoUser ?? false, // Set is_demo_user flag
         analytics_opt_out: surferData.analyticsOptOut,
+        // Home break — only include if a value was provided so partial saves
+        // (e.g. step 2) don't clobber a previously-set break with undefined.
+        ...(surferData.homeBreakPlaceId !== undefined && { home_break_place_id: surferData.homeBreakPlaceId }),
+        ...(surferData.homeBreakFull !== undefined && { home_break_full: surferData.homeBreakFull }),
+        ...(surferData.homeBreakShort !== undefined && { home_break_short: surferData.homeBreakShort }),
+        ...(surferData.homeBreakLocality !== undefined && { home_break_locality: surferData.homeBreakLocality }),
+        ...(surferData.homeBreakCountry !== undefined && { home_break_country: surferData.homeBreakCountry }),
+        ...(surferData.homeBreakLat !== undefined && { home_break_lat: surferData.homeBreakLat }),
+        ...(surferData.homeBreakLng !== undefined && { home_break_lng: surferData.homeBreakLng }),
       };
 
       let savedSurfer: SupabaseSurfer;
@@ -453,6 +480,26 @@ class SupabaseDatabaseService {
   }
 
   /**
+   * Update only the `age` column for the current user. Used to keep age fresh
+   * relative to date_of_birth on app open — the trigger only recalculates on
+   * date_of_birth writes, so age would otherwise go stale across birthdays.
+   */
+  async updateSurferAge(age: number): Promise<boolean> {
+    if (!isSupabaseConfigured()) return false;
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) return false;
+    const { error } = await supabase
+      .from('surfers')
+      .update({ age })
+      .eq('user_id', user.id);
+    if (error) {
+      console.warn('updateSurferAge failed:', error);
+      return false;
+    }
+    return true;
+  }
+
+  /**
    * Update only lifestyle_image_urls for the current user's surfer row.
    * Used after background enrichment so we don't send a full payload that could clear other columns.
    */
@@ -483,6 +530,14 @@ class SupabaseDatabaseService {
     surfLevel?: number;
     travelExperience?: number;
     isDemoUser?: boolean; // Whether this is a demo user
+    // Home break (Google Places). All fields together — pass all or none.
+    homeBreakPlaceId?: string;
+    homeBreakFull?: string;
+    homeBreakShort?: string;
+    homeBreakLocality?: string;
+    homeBreakCountry?: string;
+    homeBreakLat?: number;
+    homeBreakLng?: number;
   }): Promise<{ user: User; surfer: SupabaseSurfer }> {
     try {
       // Save user data (only email goes to users table)
@@ -525,6 +580,13 @@ class SupabaseDatabaseService {
         travelExperience: onboardingData.travelExperience, // Save as integer (number of trips)
         profileImageUrl: onboardingData.profilePicture,
         isDemoUser: onboardingData.isDemoUser ?? false, // Pass is_demo_user flag
+        homeBreakPlaceId: onboardingData.homeBreakPlaceId,
+        homeBreakFull: onboardingData.homeBreakFull,
+        homeBreakShort: onboardingData.homeBreakShort,
+        homeBreakLocality: onboardingData.homeBreakLocality,
+        homeBreakCountry: onboardingData.homeBreakCountry,
+        homeBreakLat: onboardingData.homeBreakLat,
+        homeBreakLng: onboardingData.homeBreakLng,
       });
 
       return { user, surfer };
@@ -588,7 +650,7 @@ class SupabaseDatabaseService {
       // destinations_map does NOT exist - only destinations_array exists
       const { data, error } = await supabase
         .from('surfers')
-        .select('user_id, name, age, pronoun, country_from, surfboard_type, surf_level, surf_level_description, surf_level_category, travel_experience, bio, profile_image_url, cover_image_url, profile_video_url, destinations_array, lifestyle_keywords, lifestyle_image_urls, wave_type_keywords, travel_buddies, created_at, updated_at, finished_onboarding')
+        .select('user_id, name, age, date_of_birth, pronoun, country_from, surfboard_type, surf_level, surf_level_description, surf_level_category, travel_experience, bio, profile_image_url, cover_image_url, profile_video_url, destinations_array, lifestyle_keywords, lifestyle_image_urls, wave_type_keywords, travel_buddies, home_break_place_id, home_break_full, home_break_short, home_break_locality, home_break_country, home_break_lat, home_break_lng, created_at, updated_at, finished_onboarding')
         .eq('user_id', userId)
         .single();
 

@@ -8,26 +8,21 @@ import {
   TouchableOpacity,
   Platform,
   useWindowDimensions,
-  Alert,
-  Linking,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { VideoCarousel, VideoLevel } from '../VideoCarousel';
-import { GalleryPermissionOverlay } from '../GalleryPermissionOverlay';
 import { getSurfLevelVideos } from '../../services/media/surfLevelVideos';
-import { validateVideoComplete } from '../../utils/videoValidation';
-import { uploadProfileVideoS3 } from '../../services/storage/storageService';
 
 type Props = {
   visible: boolean;
   onClose: () => void;
   initialBoardType?: string | null;
   initialSurfLevel?: number | null;
-  initialUserVideoUri?: string | null;
-  userId?: string | null;
-  onSave?: (selectedVideoId: number, userVideoUri: string | null) => void | Promise<void>;
+  // Surf-skill editing now ONLY changes the level (and the board-paired demo
+  // video the user is being shown). It does NOT touch the user's uploaded
+  // video — that lives in the dedicated Surf Video editor.
+  onSave?: (selectedVideoId: number) => void | Promise<void>;
   saving?: boolean;
 };
 
@@ -60,8 +55,6 @@ export const ProfileEditSurfSkillScreen: React.FC<Props> = ({
   onClose,
   initialBoardType,
   initialSurfLevel,
-  initialUserVideoUri,
-  userId,
   onSave,
   saving = false,
 }) => {
@@ -75,36 +68,20 @@ export const ProfileEditSurfSkillScreen: React.FC<Props> = ({
   const initialId = Math.max(0, Math.min(3, (initialSurfLevel ?? 1) - 1));
 
   const [selectedVideoId, setSelectedVideoId] = useState<number>(initialId);
-  const [userVideoUri, setUserVideoUri] = useState<string | null>(initialUserVideoUri ?? null);
-  const [mimeType, setMimeType] = useState<string | undefined>(undefined);
-  const [error, setError] = useState<string | null>(null);
-  const [showPermissionOverlay, setShowPermissionOverlay] = useState(false);
   const [carouselHeight, setCarouselHeight] = useState<number>(0);
 
-  // Sync only on closed→open transition. A re-run mid-interaction (e.g. the
-  // parent context emitting after another save) would yank the user's
-  // selection back to the upstream value while they're still picking.
+  // Sync on closed→open transition only — see SurfVideo screen for rationale.
   const prevVisibleRef = useRef(visible);
   useEffect(() => {
     if (visible && !prevVisibleRef.current) {
       setSelectedVideoId(Math.max(0, Math.min(3, (initialSurfLevel ?? 1) - 1)));
-      setUserVideoUri(initialUserVideoUri ?? null);
-      setMimeType(undefined);
-      setError(null);
     }
     prevVisibleRef.current = visible;
-  }, [visible, initialSurfLevel, initialUserVideoUri]);
+  }, [visible, initialSurfLevel]);
 
-  // Build the videos list. When a user video exists, swap the videoUrl on the
-  // currently-selected level so the main player shows their clip while the
-  // thumbnails remain the static level images.
-  const videos: VideoLevel[] = useMemo(() => {
-    const base = getSurfLevelVideos(boardId);
-    if (!userVideoUri) return base;
-    return base.map(v =>
-      v.id === selectedVideoId ? { ...v, videoUrl: userVideoUri } : v,
-    );
-  }, [boardId, userVideoUri, selectedVideoId]);
+  // Always show Swellyo's reference videos for the user's board type. The
+  // user's uploaded clip is ignored here; that lives in the Surf Video editor.
+  const videos: VideoLevel[] = useMemo(() => getSurfLevelVideos(boardId), [boardId]);
 
   useEffect(() => {
     if (visible && !mounted) {
@@ -151,149 +128,14 @@ export const ProfileEditSurfSkillScreen: React.FC<Props> = ({
     setSelectedVideoId(video.id);
   }, []);
 
-  const launchVideoPicker = useCallback(async () => {
-    try {
-      const ImagePicker = require('expo-image-picker');
-      const usePhotoPicker = Platform.OS === 'android' && Platform.Version >= 33;
-
-      if (!usePhotoPicker) {
-        const { status, canAskAgain } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (status !== 'granted') {
-          if (!canAskAgain) {
-            Alert.alert(
-              'Permission Required',
-              'Swellyo needs access to your photos. Please enable it in your device settings.',
-              [
-                { text: 'Cancel', style: 'cancel' },
-                { text: 'Open Settings', onPress: () => Linking.openSettings() },
-              ],
-            );
-          } else {
-            Alert.alert(
-              'Permission Required',
-              'Sorry, we need media library permissions to upload your video!',
-            );
-          }
-          return;
-        }
-      }
-
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['videos'],
-        allowsEditing: false,
-        quality: 1.0,
-      });
-
-      if (!result.canceled && result.assets[0]) {
-        const videoAsset = result.assets[0];
-        const assetMimeType = videoAsset.mimeType || undefined;
-
-        const validation = await validateVideoComplete(videoAsset.uri, assetMimeType);
-        if (!validation.valid) {
-          setError(validation.error || 'Please select a valid video file.');
-          return;
-        }
-        setUserVideoUri(videoAsset.uri);
-        setMimeType(assetMimeType);
-        setError(null);
-      }
-    } catch (err) {
-      console.warn('expo-image-picker not available:', err);
-      Alert.alert(
-        'Video Picker Not Available',
-        'Please install expo-image-picker for native platforms.',
-      );
-    }
-  }, []);
-
-  const pickVideo = useCallback(async () => {
-    setError(null);
-
-    if (Platform.OS === 'web') {
-      const input = document.createElement('input');
-      input.type = 'file';
-      input.accept = 'video/mp4,video/quicktime,video/webm,video/x-msvideo';
-      input.style.display = 'none';
-
-      input.onchange = async (event: any) => {
-        const file = event.target.files?.[0];
-        if (!file) return;
-
-        const uri = URL.createObjectURL(file);
-        const fileMimeType = file.type || undefined;
-
-        try {
-          const validation = await validateVideoComplete(uri, fileMimeType);
-          if (!validation.valid) {
-            setError(validation.error || 'Please select a valid video file.');
-            URL.revokeObjectURL(uri);
-            return;
-          }
-          setUserVideoUri(uri);
-          setMimeType(fileMimeType);
-        } catch (err) {
-          console.error('Error validating video:', err);
-          setError('Failed to validate video. Please try again.');
-          URL.revokeObjectURL(uri);
-        }
-
-        document.body.removeChild(input);
-      };
-
-      document.body.appendChild(input);
-      input.click();
-    } else {
-      const usePhotoPicker = Platform.OS === 'android' && Platform.Version >= 33;
-      if (usePhotoPicker) {
-        await launchVideoPicker();
-      } else {
-        const primerShown = await AsyncStorage.getItem('@swellyo_gallery_primer_shown');
-        if (primerShown) {
-          await launchVideoPicker();
-        } else {
-          setShowPermissionOverlay(true);
-        }
-      }
-    }
-  }, [launchVideoPicker]);
-
-  const isLocalUri = (uri: string): boolean =>
-    uri.startsWith('file://') ||
-    uri.startsWith('content://') ||
-    uri.startsWith('blob:') ||
-    uri.startsWith('data:');
-
   const handleSave = useCallback(async () => {
     try {
-      const isFreshLocalUri =
-        userVideoUri !== null &&
-        userVideoUri !== initialUserVideoUri &&
-        isLocalUri(userVideoUri);
-
-      if (isFreshLocalUri && userId && userVideoUri) {
-        // Fire-and-forget: the Edge Function (process-profile-video-s3) writes
-        // surfers.profile_video_url after MediaConvert finishes processing.
-        // Persist the OLD url here so the DB never holds a local URI.
-        uploadProfileVideoS3(userVideoUri, userId, mimeType).catch(err =>
-          console.error('[SurfSkillEdit] background upload failed:', err),
-        );
-        if (onSave) await onSave(selectedVideoId, initialUserVideoUri ?? null);
-      } else {
-        if (onSave) await onSave(selectedVideoId, userVideoUri);
-      }
+      if (onSave) await onSave(selectedVideoId);
       onClose();
     } catch {
       // Error already surfaced by parent — keep editor open for retry.
     }
-  }, [
-    selectedVideoId,
-    userVideoUri,
-    initialUserVideoUri,
-    mimeType,
-    userId,
-    onSave,
-    onClose,
-  ]);
+  }, [selectedVideoId, onSave, onClose]);
 
   if (!mounted) return null;
 
@@ -331,8 +173,7 @@ export const ProfileEditSurfSkillScreen: React.FC<Props> = ({
           <View style={styles.titleBlock}>
             <Text style={styles.title}>Surf Skill</Text>
             <Text style={styles.subtitle}>
-              Select the video that best represents how you surf or Drop a clip of you
-              surfing so others can see how you ride
+              Select the video that best represents how you surf.
             </Text>
           </View>
 
@@ -359,30 +200,7 @@ export const ProfileEditSurfSkillScreen: React.FC<Props> = ({
               );
             })()}
 
-            {/* Upload + trash overlay buttons */}
-            <View style={styles.overlayButtons} pointerEvents="box-none">
-              <TouchableOpacity
-                style={styles.overlayButton}
-                activeOpacity={0.7}
-                onPress={pickVideo}
-              >
-                <Ionicons name="cloud-upload-outline" size={20} color="#FFFFFF" />
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.overlayButton}
-                activeOpacity={0.7}
-                onPress={() => {
-                  setUserVideoUri(null);
-                  setMimeType(undefined);
-                  setError(null);
-                }}
-              >
-                <Ionicons name="trash-outline" size={20} color="#FFFFFF" />
-              </TouchableOpacity>
-            </View>
           </View>
-
-          {error && <Text style={styles.errorText}>{error}</Text>}
 
           <View
             style={[
@@ -401,17 +219,6 @@ export const ProfileEditSurfSkillScreen: React.FC<Props> = ({
           </View>
         </SafeAreaContainer>
       </Animated.View>
-      {Platform.OS !== 'web' && (
-        <GalleryPermissionOverlay
-          visible={showPermissionOverlay}
-          onAllow={async () => {
-            await AsyncStorage.setItem('@swellyo_gallery_primer_shown', 'true');
-            setShowPermissionOverlay(false);
-            launchVideoPicker();
-          }}
-          onDismiss={() => setShowPermissionOverlay(false)}
-        />
-      )}
     </View>
   );
 };

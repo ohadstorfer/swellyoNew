@@ -24,6 +24,11 @@ interface OnboardingContextType {
   isDemoUser: boolean;
   setIsDemoUser: (isDemo: boolean) => void;
   isRestoringSession: boolean;
+  isLoaded: boolean;
+  // user_id (or null for anonymous) for whom finished_onboarding has been
+  // resolved. Lets consumers wait for THIS user's completeness to be known
+  // before making routing decisions, instead of trusting a stale isLoaded.
+  completionCheckedForUserId: string | null;
 }
 
 const OnboardingContext = createContext<OnboardingContextType | undefined>(undefined);
@@ -59,6 +64,7 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const [formData, setFormData] = useState<Partial<OnboardingData>>({});
   const [user, setUser] = useState<User | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
+  const [completionCheckedForUserId, setCompletionCheckedForUserId] = useState<string | null>(null);
   const [isComplete, setIsComplete] = useState(false);
   const [isDemoUser, setIsDemoUser] = useState(false);
   const [isRestoringSession, setIsRestoringSession] = useState(true);
@@ -111,10 +117,11 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           setUser(appUser);
           console.log('[OnboardingContext] User restored from session:', appUser.id);
 
-          // Also update form data with user info
+          // Carry only the email through; the user picks their own nickname
+          // in step 4. Auto-filling from Google's display name was confusing
+          // ("why is my full name in there?") and easy to miss editing.
           setFormData(prev => ({
             ...prev,
-            nickname: appUser.nickname,
             userEmail: appUser.email,
           }));
 
@@ -188,13 +195,15 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     restoreSession();
   }, [restoreSession]);
 
-  // Load saved data on mount - runs after session restoration
+  // Load saved data on mount - runs after session restoration AND whenever
+  // the user identity changes (sign-in / sign-out). Without the user dep, a
+  // fresh sign-in wouldn't re-check finished_onboarding from the DB.
   useEffect(() => {
     if (!isRestoringSession) {
       loadOnboardingData();
       initializeDatabase();
     }
-  }, [isRestoringSession]);
+  }, [isRestoringSession, user?.id]);
 
   // Save to local storage whenever step, formData, or isComplete changes (for step tracking and recovery)
   // Note: Supabase saving happens only when user presses "Next" button
@@ -234,6 +243,9 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const loadOnboardingData = async () => {
+    // Mark "not loaded yet" so consumers gating on isLoaded (e.g. AppContent's
+    // auto-advance effect) wait until we've checked the DB for this user.
+    setIsLoaded(false);
     try {
       // First, check database for finished_onboarding status if user is authenticated
       let dbOnboardingComplete = false;
@@ -252,6 +264,13 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           console.log('Error checking database for onboarding status:', error);
           // Continue with local storage check if database check fails
         }
+      }
+
+      // Apply the DB completion status immediately so a fresh sign-in (no
+      // local saved data) doesn't briefly flash the onboarding flow before
+      // the routing settles.
+      if (dbOnboardingComplete) {
+        setIsComplete(true);
       }
 
       const savedData = await AsyncStorage.getItem(STORAGE_KEY);
@@ -343,6 +362,7 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       console.log('Error loading onboarding data:', error);
     } finally {
       setIsLoaded(true);
+      setCompletionCheckedForUserId(user?.id ?? null);
     }
   };
 
@@ -469,6 +489,8 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     isDemoUser,
     setIsDemoUser,
     isRestoringSession,
+    isLoaded,
+    completionCheckedForUserId,
   };
 
   return (

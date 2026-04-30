@@ -11,6 +11,9 @@ import {
   Animated,
   Keyboard,
   Linking,
+  Modal,
+  TouchableWithoutFeedback,
+  PanResponder,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -43,6 +46,7 @@ import AvatarCropModal from '../components/AvatarCropModal';
 import { BlockUserOverlay } from '../components/BlockUserOverlay';
 import { useMessaging } from '../context/MessagingProvider';
 import { ReportUserScreen } from './ReportUserScreen';
+import { HomeBreakViewSheet } from '../components/HomeBreakViewSheet';
 import Reanimated, { useSharedValue, useAnimatedStyle, withTiming, runOnJS, Easing } from 'react-native-reanimated';
 import { Gesture, GestureDetector, ScrollView } from 'react-native-gesture-handler';
 
@@ -855,6 +859,39 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showBlockOverlay, setShowBlockOverlay] = useState(false);
   const [showReportOverlay, setShowReportOverlay] = useState(false);
+  const [showDestinationsSheet, setShowDestinationsSheet] = useState(false);
+  const [showHomeBreakViewSheet, setShowHomeBreakViewSheet] = useState(false);
+  const destinationsSheetOverlayAnim = useRef(new Animated.Value(0)).current;
+  const destinationsSheetAnim = useRef(new Animated.Value(0)).current;
+  const [destinationsSheetMounted, setDestinationsSheetMounted] = useState(false);
+  // Drag-to-dismiss for the destinations bottom sheet. Tracks finger drag,
+  // moves the sheet with it, and closes if released past a velocity/distance
+  // threshold — otherwise snaps back open.
+  const destinationsSheetPan = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, gs) => gs.dy > 4,
+      onPanResponderMove: (_, gs) => {
+        if (gs.dy > 0) {
+          const sheetH = Math.round(Dimensions.get('window').height * 0.8);
+          destinationsSheetAnim.setValue(Math.max(0, 1 - gs.dy / sheetH));
+        }
+      },
+      onPanResponderRelease: (_, gs) => {
+        const shouldClose = gs.dy > 100 || gs.vy > 0.5;
+        if (shouldClose) {
+          setShowDestinationsSheet(false);
+        } else {
+          Animated.spring(destinationsSheetAnim, {
+            toValue: 1,
+            tension: 65,
+            friction: 11,
+            useNativeDriver: true,
+          }).start();
+        }
+      },
+    })
+  ).current;
   const [profileData, setProfileData] = useState<SupabaseSurfer | null>(null);
   const [loading, setLoading] = useState(true);
   const [authChecking, setAuthChecking] = useState(false);
@@ -1105,6 +1142,23 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
   useEffect(() => {
     loadProfileData();
   }, [userId]);
+
+  // Slide the destinations bottom sheet in/out when the visibility flag flips.
+  useEffect(() => {
+    if (showDestinationsSheet) {
+      setDestinationsSheetMounted(true);
+      Animated.parallel([
+        Animated.timing(destinationsSheetOverlayAnim, { toValue: 1, duration: 250, useNativeDriver: true }),
+        Animated.spring(destinationsSheetAnim, { toValue: 1, tension: 65, friction: 11, useNativeDriver: true }),
+      ]).start();
+    } else if (destinationsSheetMounted) {
+      Animated.parallel([
+        Animated.timing(destinationsSheetOverlayAnim, { toValue: 0, duration: 200, useNativeDriver: true }),
+        Animated.timing(destinationsSheetAnim, { toValue: 0, duration: 200, useNativeDriver: true }),
+      ]).start(() => setDestinationsSheetMounted(false));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showDestinationsSheet]);
 
   // Track which countries have failed bucket loads (so we know to use Pexels)
   const [failedBucketCountries, setFailedBucketCountries] = useState<Set<string>>(new Set());
@@ -1698,12 +1752,13 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
     travelExpInfo = getTravelExperienceInfo(0);
   }
 
-  // Get destinations array (top 3 by longest stay - sorted by time_in_days descending)
-  const topDestinations = profileData.destinations_array 
-    ? [...profileData.destinations_array]
-        .sort((a, b) => (b.time_in_days || 0) - (a.time_in_days || 0)) // Sort by time_in_days descending
-        .slice(0, 3) // Take top 3
+  // Sorted destinations by longest stay (descending). topDestinations shows
+  // only the top 3 in the inline section; allDestinations is used by the
+  // bottom sheet so users with more spots see the full list.
+  const allDestinations = profileData.destinations_array
+    ? [...profileData.destinations_array].sort((a, b) => (b.time_in_days || 0) - (a.time_in_days || 0))
     : [];
+  const topDestinations = allDestinations.slice(0, 3);
 
   // Get lifestyle keywords
   const lifestyleKeywords = profileData.lifestyle_keywords || [];
@@ -1742,38 +1797,20 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
     return (travelExpInfo.progress / 100) * containerWidth;
   };
 
-  const getDestinationProgressWidth = (days: number): number => {
-    // Destination progress bar is 243px wide
-    const progressBarWidth = 243;
-    
-    // Three-tier progress system:
-    // 1st third (0-33.33%): 0 days to 1 month (30 days)
-    // 2nd third (33.33%-66.66%): 1 month to 5 months (30-150 days)
-    // 3rd third (66.66%-100%): 5 to 18 months (150-540 days)
-    
-    let progressPercentage: number;
-    
+  const getDestinationProgressPercent = (days: number): number => {
+    // Three-tier progress mapping (returns percent 0-100, used as flex value
+    // so the bar scales with the card width instead of being fixed-width):
+    // 1st third (0-33.33%): 0 to 30 days
+    // 2nd third (33.33%-66.66%): 30 to 150 days
+    // 3rd third (66.66%-100%): 150 to 540 days
     if (days <= 30) {
-      // First third: 0-30 days maps to 0-33.33%
-      progressPercentage = (days / 30) * 33.33;
+      return (days / 30) * 33.33;
     } else if (days <= 150) {
-      // Second third: 30-150 days maps to 33.33%-66.66%
-      const daysInSecondThird = days - 30;
-      const maxDaysInSecondThird = 150 - 30; // 120 days
-      const progressInSecondThird = (daysInSecondThird / maxDaysInSecondThird) * 33.33;
-      progressPercentage = 33.33 + progressInSecondThird;
+      return 33.33 + ((days - 30) / (150 - 30)) * 33.33;
     } else if (days <= 540) {
-      // Third third: 150-540 days maps to 66.66%-100%
-      const daysInThirdThird = days - 150;
-      const maxDaysInThirdThird = 540 - 150; // 390 days
-      const progressInThirdThird = (daysInThirdThird / maxDaysInThirdThird) * 33.34;
-      progressPercentage = 66.66 + progressInThirdThird;
-    } else {
-      // Cap at 100% for anything over 18 months
-      progressPercentage = 100;
+      return 66.66 + ((days - 150) / (540 - 150)) * 33.34;
     }
-    
-    return (progressPercentage / 100) * progressBarWidth;
+    return 100;
   };
 
   if (showReportOverlay && userId) {
@@ -1793,6 +1830,111 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
       />
     );
   }
+
+  // Reusable destination-card renderer — used by both the inline Top
+  // Destinations section and the Travel Experience bottom sheet so the
+  // bucket / Pexels / flag fallback chain is implemented in one place.
+  const renderDestinationCard = (destination: any, index: number) => {
+    const progressPercent = getDestinationProgressPercent(destination.time_in_days);
+    const country = destination.country || (destination as any).destination_name?.split(',')[0]?.trim() || '';
+    const state = (destination as any).state || '';
+    const areas = destination.area || [];
+    const isUSA = ['USA', 'United States', 'US', 'U.S.', 'U.S.A.'].includes(country);
+    const primaryLocation = isUSA && state ? state : country;
+    const stateLower = primaryLocation.trim().toLowerCase();
+    const areaToShow = isUSA && areas.length > 0
+      ? (areas.find((a: any) => (a != null && String(a).trim().toLowerCase() !== stateLower)) ?? '')
+      : '';
+    const displayName = areaToShow ? `${primaryLocation}, ${areaToShow}` : primaryLocation;
+    const locationForAssets = isUSA && state ? state : country;
+    const countryImageUrl = getCountryImageFromStorage(locationForAssets);
+    const pexelsImageUrl = pexelsImages[locationForAssets] || null;
+    const countryFlagUrl = getCountryFlag(locationForAssets);
+    const hasFailedBucket = failedBucketCountries.has(locationForAssets);
+
+    const handleBucketImageError = async () => {
+      if (__DEV__) {
+        console.warn(`[ProfileScreen] Bucket image failed to load: ${countryImageUrl}, trying Pexels`);
+      }
+      setFailedBucketCountries(prev => new Set(prev).add(locationForAssets));
+      if (!pexelsImageUrl) {
+        const pexelsUrl = await getCountryImageFromPexels(locationForAssets);
+        if (pexelsUrl) {
+          setPexelsImages(prev => ({ ...prev, [locationForAssets]: pexelsUrl }));
+          uploadCountryImageToStorage(locationForAssets, pexelsUrl)
+            .then(storageUrl => {
+              if (storageUrl && __DEV__) {
+                console.log(`[ProfileScreen] Country image uploaded to storage: ${locationForAssets} -> ${storageUrl}`);
+              }
+            })
+            .catch(err => console.warn('[ProfileScreen] Failed to upload country image to storage:', err));
+        }
+      }
+    };
+
+    return (
+      <View key={index} style={styles.destinationCard}>
+        {!hasFailedBucket && countryImageUrl ? (
+          <Image
+            key={`bucket-${country}`}
+            source={{ uri: countryImageUrl }}
+            style={styles.destinationImage}
+            resizeMode="cover"
+            onError={handleBucketImageError}
+          />
+        ) : pexelsImageUrl ? (
+          <Image
+            key={`pexels-${country}`}
+            source={{ uri: pexelsImageUrl }}
+            style={styles.destinationImage}
+            resizeMode="cover"
+          />
+        ) : countryFlagUrl ? (
+          <Image
+            source={{ uri: countryFlagUrl }}
+            style={styles.destinationImage}
+            resizeMode="cover"
+          />
+        ) : (
+          <Image
+            source={{ uri: getCountryImageFallback(country) }}
+            style={styles.destinationImage}
+            resizeMode="cover"
+          />
+        )}
+        <View style={styles.destinationContent}>
+          <View style={styles.destinationTitleRow}>
+            <Text style={styles.destinationName}>{displayName}</Text>
+            <View style={styles.destinationDaysContainer}>
+              <Text style={styles.destinationDays}>
+                {destination.time_in_text || `${destination.time_in_days} days`}
+              </Text>
+            </View>
+          </View>
+          <View style={styles.destinationProgressContainer}>
+            <View style={styles.destinationProgressBar}>
+              <LinearGradient
+                colors={['#05BCD3', '#00A2B6']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={[styles.destinationProgressFill, { flex: progressPercent }]}
+              />
+              <View
+                style={[
+                  styles.destinationProgressEmpty,
+                  { flex: Math.max(0, 100 - progressPercent) },
+                ]}
+              />
+            </View>
+            <View style={styles.destinationProgressLabels}>
+              <Text style={styles.destinationProgressLabel}>Short visit</Text>
+              <Text style={styles.destinationProgressLabel}>Local</Text>
+            </View>
+          </View>
+        </View>
+      </View>
+    );
+  };
 
   return (
     <>
@@ -2127,24 +2269,8 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
               showLoadingIndicator={false}
             />
           </View>
-          {/* Plus Icon Overlay - Only show when viewing own profile */}
-          {isViewingOwnProfile && (
-            <TouchableOpacity
-              style={styles.plusIconContainer}
-              onPress={pickImage}
-              disabled={isUploadingImage}
-              activeOpacity={0.7}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            >
-              {isUploadingImage ? (
-                <View style={styles.uploadingContainer}>
-                  <Ionicons name="hourglass-outline" size={20} color="#FFFFFF" />
-                </View>
-              ) : (
-                <PlusIcon size={40} />
-              )}
-            </TouchableOpacity>
-          )}
+          {/* Photo upload moved to the Edit Profile screen — no inline plus
+              icon on the profile view anymore. */}
         </View>
 
         {/* Profile Info Section - Board and Name Row */}
@@ -2192,62 +2318,9 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
             </View>
           </View>
 
-          {/* Content Container - Surf Style, Travel Experience, Destinations */}
+          {/* Content Container - Surf Skill video, Cards grid, Lifestyle, Destinations */}
           <View style={[styles.contentContainer, { width: contentWidth }]}>
-          {/* Cards Row - Surf Style and Travel Experience */}
-          <View style={styles.cardsRow}>
-            {/* Surf Style Section - New Figma Design */}
-            <View style={styles.surfStyleCard}>
-              {/* Title */}
-              <View style={styles.surfStyleTitleContainer}>
-                <Text style={styles.surfStyleTitle}>Surf Style</Text>
-              </View>
-              
-              {/* Board Type Name and Label - Aligned to Bottom */}
-              <View style={styles.surfStyleContent}>
-                <View style={styles.surfStyleNameContainer}>
-                  <Text style={styles.surfStyleName}>{boardTypeInfo.name}</Text>
-                </View>
-                <Text style={styles.surfStyleLabel}>Board</Text>
-              </View>
-              
-              {/* Board Illustration */}
-              <View style={styles.surfStyleIllustration}>
-                <Image
-                  source={{ uri: boardTypeInfo.imageUrl }}
-                  style={styles.surfStyleImage}
-                  resizeMode="contain"
-                />
-              </View>
-            </View>
-
-            {/* Travel Experience Section - New Figma Design */}
-            <View style={styles.travelExperienceCard}>
-              {/* Title */}
-              <View style={styles.travelExperienceTitleContainer}>
-                <Text style={styles.travelExperienceTitle}>Travel Experience</Text>
-              </View>
-              
-              {/* Trip Count and Label - Aligned to Bottom */}
-              <View style={styles.travelExperienceContent}>
-                <View style={styles.travelExperienceNumberContainer}>
-                  <Text style={styles.travelExperienceNumber}>{travelExpInfo.trips}</Text>
-                </View>
-                <Text style={styles.travelExperienceLabel}>Trips</Text>
-              </View>
-              
-              {/* Travel Illustration */}
-              <View style={styles.travelExperienceIllustration}>
-                <Image
-                  source={getTravelLevelImage(travelExpInfo.trips)}
-                  style={styles.travelExperienceImage}
-                  resizeMode="contain"
-                />
-              </View>
-            </View>
-          </View>
-
-          {/* Surf Skill Card with Video */}
+          {/* Surf Skill Card with Video — moved ABOVE the cards grid per Figma */}
           <SurfSkillCard
             key={`surf-skill-${profileData.user_id || 'default'}`}
             boardType={profileData.surfboard_type || 'shortboard'}
@@ -2256,9 +2329,180 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
             surfLevelCategory={profileData.surf_level_category || 'beginner'}
             surfLevelProgress={surfLevelInfo.progress}
             customVideoUrl={profileData.profile_video_url}
-            onUploadVideo={handleVideoUpload}
+            // Video upload moved to the Edit Profile screen — omit the
+            // onUploadVideo prop so the inline upload button is hidden.
             isViewingOwnProfile={isViewingOwnProfile}
           />
+
+          {/* Cards Grid — left column stacks Travel Experience (top) + Home
+              Break (bottom); right column is a tall Surf Style card with a
+              bigger surfboard. Matches the Figma "double box" layout. */}
+          <View style={styles.cardsGrid}>
+            {/* LEFT COLUMN — stacked */}
+            <View style={styles.cardsLeftColumn}>
+              {/* Travel Experience — TOP LEFT (speedometer-style 80% arc, 1-20 trips).
+                  Tapping opens a bottom sheet with the user's full destinations list. */}
+              <TouchableOpacity
+                style={styles.travelExperienceCard}
+                activeOpacity={0.85}
+                onPress={() => topDestinations.length > 0 && setShowDestinationsSheet(true)}
+              >
+                <Text style={styles.travelExperienceTitle}>Travel Experience</Text>
+                {/* Map icon — top-right pill (TODO: swap for Figma SVG) */}
+                <View style={styles.travelExperienceIconBadge}>
+                  <Ionicons name="map-outline" size={20} color="#B0B0B0" />
+                </View>
+                {/* Spacer pushes the gauge toward the bottom of the card */}
+                <View style={{ flex: 1 }} />
+                {/* Circular gauge: 80% arc with gap at bottom (speedometer) */}
+                <View style={styles.travelExperienceGaugeWrap}>
+                  {(() => {
+                    const trips = travelExpInfo.trips || 0;
+                    const RING_SIZE = 116;
+                    const STROKE = 13;
+                    const radius = (RING_SIZE - STROKE) / 2;
+                    const circumference = 2 * Math.PI * radius;
+                    const TRACK_FRACTION = 0.8; // 80% arc, gap in the lower-right
+                    const trackLen = circumference * TRACK_FRACTION;
+                    const progress = Math.max(0, Math.min(1, trips / 20));
+                    const progressLen = trackLen * progress;
+                    // Rotating 90° CW puts the start at 6 o'clock, so the arc's
+                    // left endpoint sits at the very bottom and sweeps clockwise
+                    // through the left, top and right.
+                    const ROTATION = 90;
+                    const c = RING_SIZE / 2;
+                    return (
+                      <Svg width={RING_SIZE} height={RING_SIZE} viewBox={`0 0 ${RING_SIZE} ${RING_SIZE}`}>
+                        {/* Track (gray, 80%) */}
+                        <Circle
+                          cx={c} cy={c} r={radius}
+                          stroke="#EEEEEE"
+                          strokeWidth={STROKE}
+                          strokeLinecap="round"
+                          fill="none"
+                          strokeDasharray={`${trackLen} ${circumference}`}
+                          transform={`rotate(${ROTATION} ${c} ${c})`}
+                        />
+                        {/* Progress arc (teal) — fills track based on trips/20 */}
+                        {progressLen > 0 && (
+                          <Circle
+                            cx={c} cy={c} r={radius}
+                            stroke="#00BCD4"
+                            strokeWidth={STROKE}
+                            strokeLinecap="round"
+                            fill="none"
+                            strokeDasharray={`${progressLen} ${circumference}`}
+                            transform={`rotate(${ROTATION} ${c} ${c})`}
+                          />
+                        )}
+                      </Svg>
+                    );
+                  })()}
+                  <View style={styles.travelExperienceGaugeCenter} pointerEvents="none">
+                    <Text style={styles.travelExperienceGaugeNumber}>{travelExpInfo.trips}</Text>
+                    <Text style={styles.travelExperienceGaugeLabel}>Trips</Text>
+                  </View>
+                </View>
+              </TouchableOpacity>
+
+              {/* Home Break — BOTTOM LEFT, matches Figma 10818:79366.
+                  Tappable when a home break is set: opens a small bottom
+                  sheet with the Google Maps preview of the spot. */}
+              <TouchableOpacity
+                style={styles.homeBreakCard}
+                activeOpacity={profileData.home_break_short ? 0.85 : 1}
+                onPress={() => {
+                  if (profileData.home_break_short) setShowHomeBreakViewSheet(true);
+                }}
+                disabled={!profileData.home_break_short}
+              >
+                {/* Title — top-left. Grays out in the unset state. */}
+                <Text
+                  style={[
+                    styles.homeBreakTitle,
+                    !profileData.home_break_short && styles.homeBreakUnsetText,
+                  ]}
+                >
+                  Home Break
+                </Text>
+                {/* Location pin — icon already includes the gray circle background */}
+                <Image
+                  source={require('../assets/icons/home-break-location-pin-icon.png')}
+                  style={styles.homeBreakIconImage}
+                  resizeMode="contain"
+                />
+                {/* Wave icon — centered in the middle of the card. Gets tinted
+                    gray when no home break is set. */}
+                <View style={styles.homeBreakWaveAnchor} pointerEvents="none">
+                  <Image
+                    source={require('../assets/icons/home-break-icon.png')}
+                    style={[
+                      styles.homeBreakWaveImage,
+                      !profileData.home_break_short && styles.homeBreakWaveImageUnset,
+                    ]}
+                    resizeMode="contain"
+                  />
+                </View>
+                {/* Address — bottom-left. Falls back to country_from (set in
+                    step 4) when no specific home break has been picked. */}
+                <View style={styles.homeBreakBottomMeta}>
+                  {profileData.home_break_short ? (
+                    <Text style={styles.homeBreakValue} numberOfLines={2}>
+                      {profileData.home_break_short}
+                    </Text>
+                  ) : profileData.country_from ? (
+                    <Text
+                      style={[styles.homeBreakValue, styles.homeBreakUnsetText]}
+                      numberOfLines={2}
+                    >
+                      {profileData.country_from}
+                    </Text>
+                  ) : (
+                    <Text style={styles.homeBreakEmpty}>No home break set</Text>
+                  )}
+                </View>
+                {/* Unset state — dim the whole card with a translucent dark
+                    overlay so users notice they haven't set their actual
+                    break. The overlay sits on top of all content but lets
+                    underlying text/icons still show through. */}
+                {!profileData.home_break_short && (
+                  <View style={styles.homeBreakUnsetOverlay} pointerEvents="none" />
+                )}
+              </TouchableOpacity>
+            </View>
+
+            {/* RIGHT COLUMN — "My Quiver" tall card per Figma 10983:14708 */}
+            <View style={styles.surfStyleCardTall}>
+              {/* Title — top-left */}
+              <Text style={styles.surfStyleQuiverTitle}>My Quiver</Text>
+              {/* Board image — absolutely centered. The shortboard source has
+                  ~22% empty space above the actual board, so for shortboards
+                  only we wrap it in a clip box (overflow: hidden + bottom
+                  anchor) to trim that top space. Other boards render natural. */}
+              <View style={styles.surfStyleBoardAnchor} pointerEvents="none">
+                {profileData.surfboard_type?.toLowerCase() === 'shortboard' ? (
+                  <View style={styles.surfStyleImageClip}>
+                    <Image
+                      source={{ uri: boardTypeInfo.imageUrl }}
+                      style={styles.surfStyleImageTall}
+                      resizeMode="contain"
+                    />
+                  </View>
+                ) : (
+                  <Image
+                    source={{ uri: boardTypeInfo.imageUrl }}
+                    style={styles.surfStyleImageNatural}
+                    resizeMode="contain"
+                  />
+                )}
+              </View>
+              {/* Bottom-left meta — board name + "Board" label */}
+              <View style={styles.surfStyleBottomMeta}>
+                <Text style={styles.surfStyleBoardName}>{boardTypeInfo.name}</Text>
+                <Text style={styles.surfStyleLabel}>Board</Text>
+              </View>
+            </View>
+          </View>
 
           {/* Lifestyle Section - Inside profileInfoSection, before destinations */}
           {lifestyleKeywords.length > 0 && (
@@ -2325,7 +2569,11 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
                           </View>
                         )}
                       </View>
-                      <Text style={styles.lifestyleLabel}>{keyword}</Text>
+                      {/* Label vertically centered in the gap between the
+                          image and the card bottom. */}
+                      <View style={styles.lifestyleLabelWrap}>
+                        <Text style={styles.lifestyleLabel}>{keyword}</Text>
+                      </View>
                     </View>
                   );
                 })}
@@ -2341,146 +2589,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
                 <Text style={styles.sectionTitle}>Top Destinations</Text>
                 <View style={styles.destinationsTitleSpacer} />
               </View>
-              {topDestinations.map((destination, index) => {
-                const progressWidth = getDestinationProgressWidth(destination.time_in_days);
-                // Support both new structure (country, area) and legacy (destination_name)
-                const country = destination.country || (destination as any).destination_name?.split(',')[0]?.trim() || '';
-                const state = (destination as any).state || '';
-                const areas = destination.area || [];
-                
-                // For USA destinations: show state if exists, otherwise show country
-                const isUSA = ['USA', 'United States', 'US', 'U.S.', 'U.S.A.'].includes(country);
-                const primaryLocation = isUSA && state ? state : country;
-                
-                // Add first area to display name ONLY for USA destinations;
-                // skip area if it equals state (case-insensitive); if so, use next area; if none, show no area
-                const stateLower = primaryLocation.trim().toLowerCase();
-                const areaToShow = isUSA && areas.length > 0
-                  ? (areas.find((a) => (a != null && String(a).trim().toLowerCase() !== stateLower)) ?? '')
-                  : '';
-                const displayName = areaToShow ? `${primaryLocation}, ${areaToShow}` : primaryLocation;
-                
-                // Use state for image/flag lookup if USA, otherwise use country
-                const locationForAssets = isUSA && state ? state : country;
-                
-                // Always try bucket first (getCountryImageFromStorage now always returns a URL)
-                const countryImageUrl = getCountryImageFromStorage(locationForAssets);
-                const pexelsImageUrl = pexelsImages[locationForAssets] || null;
-                const countryFlagUrl = getCountryFlag(locationForAssets);
-                const hasFailedBucket = failedBucketCountries.has(locationForAssets);
-                
-                // Handler for when bucket image fails to load (404)
-                const handleBucketImageError = async () => {
-                  if (__DEV__) {
-                    console.warn(`[ProfileScreen] Bucket image failed to load: ${countryImageUrl}, trying Pexels`);
-                  }
-                  
-                  // Mark this location as having failed bucket load
-                  setFailedBucketCountries((prev) => new Set(prev).add(locationForAssets));
-                  
-                  // If we don't have Pexels image yet, fetch it
-                  if (!pexelsImageUrl) {
-                    const pexelsUrl = await getCountryImageFromPexels(locationForAssets);
-                    if (pexelsUrl) {
-                      setPexelsImages((prev) => ({
-                        ...prev,
-                        [locationForAssets]: pexelsUrl,
-                      }));
-                      
-                      // Upload to storage for next time (non-blocking)
-                      uploadCountryImageToStorage(locationForAssets, pexelsUrl)
-                        .then((storageUrl) => {
-                          if (storageUrl && __DEV__) {
-                            console.log(`[ProfileScreen] Country image uploaded to storage: ${locationForAssets} -> ${storageUrl}`);
-                          }
-                        })
-                        .catch((err) => {
-                          console.warn(`[ProfileScreen] Failed to upload country image to storage:`, err);
-                        });
-                    }
-                  }
-                };
-                
-                // Determine which image URL to use
-                // If bucket failed, use Pexels; otherwise try bucket first
-                const imageUrlToUse = hasFailedBucket && pexelsImageUrl
-                  ? pexelsImageUrl
-                  : countryImageUrl || pexelsImageUrl || countryFlagUrl || getCountryImageFallback(country);
-                
-                return (
-                  <View key={index} style={styles.destinationCard}>
-                    {!hasFailedBucket && countryImageUrl ? (
-                      // Try bucket first (fastest if image exists)
-                      <Image
-                        key={`bucket-${country}`} // Key forces re-render when switching
-                        source={{ uri: countryImageUrl }}
-                        style={styles.destinationImage}
-                        resizeMode="cover"
-                        onError={handleBucketImageError}
-                      />
-                    ) : pexelsImageUrl ? (
-                      // Use Pexels image if bucket failed or bucket URL couldn't be generated
-                      <Image
-                        key={`pexels-${country}`} // Key forces re-render when switching
-                        source={{ uri: pexelsImageUrl }}
-                        style={styles.destinationImage}
-                        resizeMode="cover"
-                        onError={() => {
-                          if (__DEV__) {
-                            console.warn(`[ProfileScreen] Pexels image failed to load: ${pexelsImageUrl}, falling back`);
-                          }
-                        }}
-                      />
-                    ) : countryFlagUrl ? (
-                      // Fallback to country flag if bucket and Pexels images not available
-                      <Image
-                        source={{ uri: countryFlagUrl }}
-                        style={styles.destinationImage}
-                        resizeMode="cover"
-                      />
-                    ) : (
-                      // Final fallback to placeholder service
-                      <Image
-                        source={{ 
-                          uri: getCountryImageFallback(country)
-                        }}
-                        style={styles.destinationImage}
-                        resizeMode="cover"
-                        onError={() => {
-                          if (__DEV__) {
-                            console.warn(`[ProfileScreen] Fallback image failed to load for: ${country}`);
-                          }
-                        }}
-                      />
-                    )}
-                    <View style={styles.destinationContent}>
-                      <View style={styles.destinationTitleRow}>
-                        <Text style={styles.destinationName}>{displayName}</Text>
-                        <View style={styles.destinationDaysContainer}>
-                          <Text style={styles.destinationDays}>
-                            {destination.time_in_text || `${destination.time_in_days} days`}
-                          </Text>
-                        </View>
-                      </View>
-                      <View style={styles.destinationProgressContainer}>
-                        <View style={styles.destinationProgressBar}>
-                          <LinearGradient
-                            colors={['#05BCD3', '#00A2B6']}
-                            start={{ x: 0, y: 0 }}
-                            end={{ x: 1, y: 0 }}
-                            style={[styles.destinationProgressFill, { width: progressWidth }]}
-                          />
-                          <View style={[styles.destinationProgressEmpty, { flex: 1 }]} />
-                        </View>
-                        <View style={styles.destinationProgressLabels}>
-                          <Text style={styles.destinationProgressLabel}>Short visit</Text>
-                          <Text style={styles.destinationProgressLabel}>Local</Text>
-                        </View>
-                      </View>
-                    </View>
-                  </View>
-                );
-              })}
+              {topDestinations.map((destination, index) => renderDestinationCard(destination, index))}
             </View>
           )}
           {!isViewingOwnProfile && userId && onMessage && (
@@ -2584,6 +2693,66 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
       )}
     </Reanimated.View>
     </GestureDetector>
+    {/* Destinations bottom sheet — opens when the user taps the Travel
+        Experience card. Renders the same destination cards as the inline
+        Top Destinations section, just inside a slide-up sheet. */}
+    {/* Home Break preview — opened by tapping the home break card */}
+    <HomeBreakViewSheet
+      visible={showHomeBreakViewSheet}
+      onClose={() => setShowHomeBreakViewSheet(false)}
+      name={profileData?.home_break_short ?? ''}
+      full={profileData?.home_break_full ?? null}
+      lat={profileData?.home_break_lat ?? null}
+      lng={profileData?.home_break_lng ?? null}
+    />
+    {destinationsSheetMounted && (
+      <Modal visible transparent animationType="none" onRequestClose={() => setShowDestinationsSheet(false)}>
+        <View style={styles.destinationsSheetContainer}>
+          <TouchableWithoutFeedback onPress={() => setShowDestinationsSheet(false)}>
+            <Animated.View style={[styles.destinationsSheetOverlay, { opacity: destinationsSheetOverlayAnim }]} />
+          </TouchableWithoutFeedback>
+          <Animated.View
+            style={[
+              styles.destinationsSheet,
+              {
+                transform: [
+                  {
+                    translateY: destinationsSheetAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [600, 0],
+                    }),
+                  },
+                ],
+              },
+            ]}
+          >
+            {/* Drag area — handle + header. Pan-down to dismiss the sheet. */}
+            <View {...destinationsSheetPan.panHandlers}>
+              <View style={styles.destinationsSheetHandle} />
+              <View style={styles.destinationsSheetHeader}>
+                <Text style={styles.destinationsSheetTitle}>
+                  {(() => {
+                    const firstName = (profileData?.name || '').split(' ')[0].trim();
+                    if (isViewingOwnProfile || !firstName) return 'Where you surfed at';
+                    return `Where ${firstName} surfed at`;
+                  })()}
+                </Text>
+                <TouchableOpacity onPress={() => setShowDestinationsSheet(false)} style={styles.destinationsSheetClose}>
+                  <Ionicons name="close" size={24} color="#333" />
+                </TouchableOpacity>
+              </View>
+            </View>
+            <ScrollView
+              style={styles.destinationsSheetList}
+              contentContainerStyle={styles.destinationsSheetListContent}
+              showsVerticalScrollIndicator={false}
+            >
+              {allDestinations.map((destination, index) => renderDestinationCard(destination, index))}
+            </ScrollView>
+          </Animated.View>
+        </View>
+      </Modal>
+    )}
     <AvatarCropModal
       visible={cropModalVisible}
       imageUri={rawImageUri}
@@ -2967,19 +3136,19 @@ const styles = StyleSheet.create({
   },
   profilePictureContainer: {
     position: 'absolute',
-    top: 78,
+    top: 65,
     left: '50%',
-    transform: [{ translateX: -60 }], // Half of 120px (profile picture width)
+    transform: [{ translateX: -75 }], // Half of 150px (profile picture width)
     zIndex: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    width: 120,
-    height: 120,
+    width: 150,
+    height: 150,
   },
   profilePictureWrapper: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
+    width: 150,
+    height: 150,
+    borderRadius: 75,
     borderWidth: 6,
     borderColor: colors.white,
     overflow: 'hidden',
@@ -3038,7 +3207,7 @@ const styles = StyleSheet.create({
     ...Platform.select({
       web: {
         position: 'absolute' as any,
-        top: 145,
+        top: 162, // tracks profile pic position (offset 97 below pic top 65)
         left: '50%',
         transform: [{ translateX: -180.5 }],
       },
@@ -3046,7 +3215,7 @@ const styles = StyleSheet.create({
         // On native, use flow layout so content contributes to ScrollView scroll area.
         // Absolute elements don't contribute to ScrollView content size on native,
         // making content below the fold unreachable.
-        marginTop: -35, // 145 - 180 (cover height) to match web's top: 145
+        marginTop: -18, // 162 - 180 (cover height) to match web's top: 162
       },
     }),
   },
@@ -3181,9 +3350,8 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 16,
     flex: 1,
-    height: 140,
+    height: 175,
     position: 'relative',
-    justifyContent: 'space-between',
     shadowColor: '#596E7C',
     shadowOffset: {
       width: 0,
@@ -3196,14 +3364,52 @@ const styles = StyleSheet.create({
       boxShadow: '0px 2px 16px 0px rgba(89, 110, 124, 0.15)',
     }),
   },
+  travelExperienceIconBadge: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#E4E4E4',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  travelExperienceGaugeWrap: {
+    width: 116,
+    height: 116,
+    alignSelf: 'center',
+    marginBottom: 0,
+    position: 'relative',
+  },
+  travelExperienceGaugeCenter: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  travelExperienceGaugeNumber: {
+    fontSize: 34,
+    fontWeight: '700',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    lineHeight: 36,
+    color: '#333333',
+  },
+  travelExperienceGaugeLabel: {
+    fontSize: 12,
+    fontWeight: '400',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    lineHeight: 14,
+    color: '#A0A0A0',
+    marginTop: 2,
+  },
   travelExperienceTitleContainer: {
     // Title at top - no margin needed with space-between
   },
   travelExperienceTitle: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '400',
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
-    lineHeight: 15,
+    lineHeight: 16,
     color: colors.textPrimary, // #333
   },
   travelExperienceContent: {
@@ -3246,6 +3452,228 @@ const styles = StyleSheet.create({
     gap: 16,
     width: '100%',
     // marginBottom: 16,
+  },
+  // 2-column grid: stacked left (Travel Exp + Home Break) + tall right (Surf Style)
+  cardsGrid: {
+    flexDirection: 'row',
+    gap: 12,
+    width: '100%',
+    marginTop: 16,
+  },
+  cardsLeftColumn: {
+    flex: 1,
+    flexDirection: 'column',
+    gap: 12,
+  },
+  homeBreakCard: {
+    backgroundColor: colors.white,
+    borderRadius: 16,
+    padding: 16,
+    height: 175,
+    position: 'relative',
+    justifyContent: 'space-between',
+    shadowColor: '#596E7C',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 16,
+    elevation: 4,
+    ...(Platform.OS === 'web' && {
+      boxShadow: '0px 2px 16px 0px rgba(89, 110, 124, 0.15)',
+    }),
+  },
+  homeBreakTitle: {
+    fontSize: 13,
+    fontWeight: '400',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    lineHeight: 16,
+    color: colors.textPrimary,
+  },
+  homeBreakBottomMeta: {
+    marginTop: 'auto', // push to bottom of the card
+  },
+  homeBreakValue: {
+    fontSize: 14,
+    fontWeight: '700',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    lineHeight: 18,
+    color: colors.textPrimary,
+  },
+  homeBreakEmpty: {
+    fontSize: 13,
+    fontWeight: '400',
+    fontStyle: 'italic',
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    lineHeight: 16,
+    color: '#A0A0A0',
+  },
+  // Top-right location pin — icon includes the gray circle background, so we
+  // size it to the badge size (36×36) and position it directly.
+  homeBreakIconImage: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 36,
+    height: 36,
+  },
+  // Big centered wave icon
+  homeBreakWaveAnchor: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  homeBreakWaveImage: {
+    width: 78,
+    height: 55,
+    transform: [{ translateY: -8 }],
+  },
+  // Destinations bottom sheet (opened from the Travel Experience card)
+  destinationsSheetContainer: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  destinationsSheetOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  destinationsSheet: {
+    backgroundColor: colors.white,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    height: Math.round(Dimensions.get('window').height * 0.8),
+    paddingBottom: 24,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  destinationsSheetHandle: {
+    width: 40,
+    height: 4,
+    backgroundColor: '#D0D0D0',
+    borderRadius: 2,
+    alignSelf: 'center',
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  destinationsSheetHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E0E0E0',
+  },
+  destinationsSheetTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat',
+    color: colors.textPrimary,
+  },
+  destinationsSheetClose: {
+    padding: 4,
+  },
+  destinationsSheetList: {
+    flex: 1,
+  },
+  destinationsSheetListContent: {
+    padding: 16,
+    gap: 0,
+  },
+  // Translucent dark overlay shown only when no home break has been picked.
+  // Matches the card's borderRadius so the dimming respects the rounded corners.
+  homeBreakUnsetOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.18)',
+    borderRadius: 16,
+  },
+  // Gray color applied to title + country fallback text in the unset state.
+  homeBreakUnsetText: {
+    color: '#A0A0A0',
+  },
+  // Tints the wave PNG to gray in the unset state.
+  homeBreakWaveImageUnset: {
+    tintColor: '#A0A0A0',
+  },
+  // Tall Surf Style card (right column) — full grid height with a bigger board
+  surfStyleCardTall: {
+    backgroundColor: colors.white,
+    borderRadius: 16,
+    padding: 16,
+    flex: 1,
+    // Match left column total (175 + 12 + 175) for clean alignment
+    height: 362,
+    position: 'relative',
+    shadowColor: '#596E7C',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 16,
+    elevation: 4,
+    ...(Platform.OS === 'web' && {
+      boxShadow: '0px 2px 16px 0px rgba(89, 110, 124, 0.15)',
+    }),
+  },
+  // "My Quiver" title — matches Travel Experience title size (13/16)
+  surfStyleQuiverTitle: {
+    fontSize: 13,
+    fontWeight: '400',
+    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat',
+    lineHeight: 16,
+    color: colors.textPrimary,
+  },
+  // Anchor that fills the card so the board image can be perfectly centered
+  surfStyleBoardAnchor: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // Visible "window" — 70% card height, but proportionally wider so cropping
+  // the top ~22% of the source image still leaves a natural-looking aspect.
+  // overflow: hidden clips whatever overflows above (the empty space).
+  surfStyleImageClip: {
+    height: '60%',
+    aspectRatio: 113 / 135.72, // 113 × (174 × 0.78) — visible portion after 22% top crop
+    overflow: 'hidden',
+    alignItems: 'center',
+  },
+  surfStyleImageTall: {
+    // Anchored to the bottom of the clip box. The image renders at its natural
+    // 113:174 aspect, which is taller than the clip — the overflow above gets
+    // hidden, trimming the empty space at the top of the source image.
+    width: '100%',
+    aspectRatio: 113 / 174,
+    position: 'absolute',
+    bottom: 0,
+    ...(Platform.OS === 'web' && {
+      objectFit: 'contain' as any,
+    }),
+  },
+  // Natural (un-trimmed) board image — used by mid-length, longboard, soft top.
+  surfStyleImageNatural: {
+    height: '70%',
+    aspectRatio: 113 / 174,
+    ...(Platform.OS === 'web' && {
+      objectFit: 'contain' as any,
+    }),
+  },
+  // Bottom-left "Mid-length / Board" meta block
+  surfStyleBottomMeta: {
+    marginTop: 'auto', // push to bottom of the flex column
+    gap: 4,
+    alignItems: 'flex-start',
+  },
+  // Board name — Montserrat Bold 16/20 per Figma (Headings/H-7)
+  surfStyleBoardName: {
+    fontSize: 16,
+    fontWeight: '700',
+    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat',
+    lineHeight: 20,
+    color: colors.textPrimary,
   },
   surfStyleCard: {
     backgroundColor: colors.white,
@@ -3332,7 +3760,7 @@ const styles = StyleSheet.create({
   },
   surfSkillVideoContainer: {
     width: '100%',
-    height: 229,
+    height: 275,
     borderRadius: 12,
     overflow: 'hidden',
     backgroundColor: '#000',
@@ -3465,8 +3893,8 @@ const styles = StyleSheet.create({
     paddingRight: 16,
   },
   destinationImage: {
-    width: 86,
-    height: 74,
+    width: 100,
+    height: 84,
     borderRadius: 0,
   },
   destinationContent: {
@@ -3475,7 +3903,7 @@ const styles = StyleSheet.create({
     paddingVertical: 0,
     gap: 8,
     justifyContent: 'center',
-    minHeight: 74,
+    minHeight: 84,
   },
   destinationTitleRow: {
     flexDirection: 'row',
@@ -3528,7 +3956,7 @@ const styles = StyleSheet.create({
   },
   destinationProgressBar: {
     height: 6,
-    width: 243,
+    width: '100%', // grows with the destination card width
     backgroundColor: colors.white,
     borderRadius: 2,
     flexDirection: 'row',
@@ -3547,7 +3975,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.white,
     borderRadius: 16,
     paddingLeft: 16,
-    paddingVertical: 8,
+    paddingTop: 8,
+    paddingBottom: 0, // collapse so label area extends to the visible card bottom
     gap: 8,
     width: '100%',
     marginTop: 0,
@@ -3570,6 +3999,7 @@ const styles = StyleSheet.create({
   },
   lifestyleTitleContainer: {
     marginBottom: 0,
+    marginTop: 8,
   },
   lifestyleTitle: {
     fontSize: 20,
@@ -3579,12 +4009,13 @@ const styles = StyleSheet.create({
     color: colors.black,
   },
   lifestyleContainerWrapper: {
-    height: 91,
+    height: 140, // image (107) + label area (33) — label area now reaches the
+    // visible bottom of the white card (paddingBottom on section is 0).
     overflow: 'hidden',
     width: '100%',
   },
   lifestyleScrollView: {
-    marginTop: 2,
+    marginTop: 0,
   },
   lifestyleContainer: {
     flexDirection: 'row',
@@ -3595,10 +4026,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 0,
     marginBottom: 0,
+    width: 140, // match image container so the label wraps cleanly under it
+    height: '100%', // fill the container so the label can center vertically
+  },
+  // Vertically centers the label in the space between image and card bottom.
+  lifestyleLabelWrap: {
+    flex: 1,
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   lifestyleImageContainer: {
-    width: 92,
-    height: 70,
+    width: 140,
+    height: 107,
     borderRadius: 4,
     overflow: 'hidden',
     backgroundColor: colors.white,
@@ -3620,10 +4060,14 @@ const styles = StyleSheet.create({
     fontSize: 12.61,
     fontWeight: '400',
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
-    lineHeight: 18.018,
     color: '#333333',
     textAlign: 'center',
-    marginTop: 0,
+    textTransform: 'capitalize',
+    width: '100%',
+    // Removed manual lineHeight/marginTop — let the parent flex container do
+    // the centering with the font's natural line metrics.
+    ...(Platform.OS === 'android' && { includeFontPadding: false }),
+    ...(Platform.OS === 'android' && { textAlignVertical: 'center' }),
   },
   uploadLoadingOverlay: {
     position: 'absolute',
