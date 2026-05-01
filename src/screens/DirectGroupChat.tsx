@@ -2376,12 +2376,12 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
       return;
     }
 
+    setHighlightedMessageId(parentMessageId);
     flatListRef.current?.scrollToIndex({
       index: invertedIndex,
       viewPosition: 0.5,
       animated: true,
     });
-    setTimeout(() => setHighlightedMessageId(parentMessageId), 350);
   }, [resolvingReplyJumpId]);
 
   // Handle long press on message
@@ -2591,7 +2591,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
         {renderMessage(item, isLastInRun)}
       </Reanimated.View>
     );
-  }, [currentUserId, editingMessageId, otherUserAdvRole, isDirect, menuVisible, selectedMessage, otherUserLastReadAt, invertedMessages]);
+  }, [currentUserId, editingMessageId, otherUserAdvRole, isDirect, menuVisible, selectedMessage, otherUserLastReadAt, invertedMessages, highlightedMessageId, resolvingReplyJumpId]);
 
   // Prefer client_id so the React key stays stable across the optimistic →
   // server-confirmed swap. Without this, FlatList unmounts the old wrapper

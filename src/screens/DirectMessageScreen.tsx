@@ -2340,6 +2340,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   // then briefly flash it. If the parent is older than what's loaded, page in
   // older messages until found (capped to avoid infinite loops).
   const handleReplyPreviewPress = useCallback(async (parentMessageId: string) => {
+    console.log('[reply-jump] tap', { parentMessageId, resolvingReplyJumpId });
     if (resolvingReplyJumpId) return;
 
     const findInvertedIndex = (id: string): number => {
@@ -2349,6 +2350,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     };
 
     let invertedIndex = findInvertedIndex(parentMessageId);
+    console.log('[reply-jump] initial lookup', { invertedIndex, total: messagesRef.current.length });
     if (invertedIndex === -1) {
       setResolvingReplyJumpId(parentMessageId);
       let attempts = 0;
@@ -2361,21 +2363,24 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         await loadOlderMessages();
         invertedIndex = findInvertedIndex(parentMessageId);
         attempts++;
+        console.log('[reply-jump] paginated', { attempts, invertedIndex });
       }
       setResolvingReplyJumpId(null);
     }
 
     if (invertedIndex === -1) {
+      console.log('[reply-jump] not found after pagination');
       Alert.alert('Mensaje no disponible', 'No pudimos encontrar el mensaje original.');
       return;
     }
 
+    console.log('[reply-jump] scrolling to', invertedIndex);
+    setHighlightedMessageId(parentMessageId);
     flatListRef.current?.scrollToIndex({
       index: invertedIndex,
       viewPosition: 0.5,
       animated: true,
     });
-    setTimeout(() => setHighlightedMessageId(parentMessageId), 350);
   }, [resolvingReplyJumpId]);
 
   // Handle long press on message
@@ -2585,7 +2590,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         {renderMessage(item, isLastInRun)}
       </Reanimated.View>
     );
-  }, [currentUserId, editingMessageId, otherUserAdvRole, isDirect, menuVisible, selectedMessage, otherUserLastReadAt, invertedMessages]);
+  }, [currentUserId, editingMessageId, otherUserAdvRole, isDirect, menuVisible, selectedMessage, otherUserLastReadAt, invertedMessages, highlightedMessageId, resolvingReplyJumpId]);
 
   // Prefer client_id so the React key stays stable across the optimistic →
   // server-confirmed swap. Without this, FlatList unmounts the old wrapper
