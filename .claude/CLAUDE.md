@@ -4,6 +4,12 @@ Cross-platform social app for surfers. React Native + Expo (web, iOS, Android) w
 
 **Web is live and used by real users.** Mobile is being prepared for App Store / Google Play.
 
+## ⚠️ Before any build / ship / OTA / deploy: read PRE_BUILD_CHECKLIST.md
+
+If the user mentions ANY of these — **build, ship, release, OTA, update, submit, deploy, publish, push to stores, TestFlight, eas build, eas update, eas submit** — STOP and walk through `PRE_BUILD_CHECKLIST.md` at the project root before agreeing to or running anything.
+
+The checklist enforces version sync across the 5 spots EAS reads from, env-var hygiene, migration application, and the native-vs-JS-only decision tree. Skipping it has historically caused production-visible drift (mismatched runtime versions silently rejecting OTAs, dev mode flags shipping to users, etc.). Even if the user is confident, run the automated checks in the "Claude's checklist" section — they take 5 seconds and have caught real problems.
+
 ## Tech Stack
 
 - **Frontend:** React Native 0.81, Expo 54, React 19, React Navigation
