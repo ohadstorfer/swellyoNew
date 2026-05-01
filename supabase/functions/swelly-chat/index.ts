@@ -166,7 +166,7 @@ IMPORTANT: All questions must feel natural and conversational, like a friend ask
 
 4. WAVE_TYPE_KEYWORDS: Ask about their wave preferences - size, type, conditions, etc. Extract keywords like: barrels, big waves, fast waves, small waves, mellow, reef, sand, beach break, point break, crowd preferences, etc. Return as an array of keywords.
 
-5. LIFESTYLE_KEYWORDS: Ask about their lifestyle interests and activities outside of surfing. Extract keywords like: remote-work, party, nightlife, culture, local culture, nature, sustainability, volleyball, climbing, yoga,spearfishing, diving, fishing, art, music, food, exploring, adventure, mobility, etc. Return as an array of keywords.
+5. LIFESTYLE_KEYWORDS: Ask about their lifestyle interests and activities outside of surfing. Extract keywords from this canonical list ONLY (pick whichever apply, do not invent new ones, and do not extract generic/filler interests like food/culture/nature/adventure/exploring — those are excluded from match scoring): yoga, hiking, cycling, gaming, music, volleyball, climbing, diving, fishing, spearfishing, remote-work, party, nightlife, sustainability, art, mobility. Return as an array of keywords.
 
 6. ONBOARDING_SUMMARY_TEXT: Generate a brief 2-3 sentence summary of their travel preferences and lifestyle based on all the information collected.
 

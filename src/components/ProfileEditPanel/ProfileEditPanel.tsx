@@ -31,6 +31,7 @@ import { Images } from '../../assets/images';
 import {
   getCountryImageFromStorage,
   getCountryImageFallback,
+  resolveLifestyleKeywordToImageUrl,
 } from '../../services/media/imageService';
 import { uploadCoverImage, uploadProfileImage } from '../../services/storage/storageService';
 import { ProfileEditSurfStyleScreen } from './ProfileEditSurfStyleScreen';
@@ -38,6 +39,8 @@ import { ProfileEditTravelExperienceScreen } from './ProfileEditTravelExperience
 import { ProfileEditSurfSkillScreen } from './ProfileEditSurfSkillScreen';
 import { ProfileEditSurfVideoScreen } from './ProfileEditSurfVideoScreen';
 import { ProfileEditDestinationScreen } from './ProfileEditDestinationScreen';
+import { ProfileEditLifestyleScreen } from './ProfileEditLifestyleScreen';
+import { LIFESTYLE_ICON_MAP } from '../../utils/lifestyleIconMap';
 import { CountrySearchModal } from '../CountrySearchModal';
 import { HomeBreakSearchSheet, HomeBreakSelection } from '../HomeBreakSearchSheet';
 import AvatarCropModal from '../AvatarCropModal';
@@ -93,6 +96,8 @@ type SaveTarget =
   | 'skill'
   | 'destination'
   | 'destinationDelete'
+  | 'lifestyle'
+  | 'lifestyleDelete'
   | 'cover'
   | 'avatar'
   | 'nickname'
@@ -101,6 +106,7 @@ type SaveTarget =
   | 'homeBreak';
 
 type DestinationEditorIndex = number | 'new' | null;
+type LifestyleEditorIndex = number | 'new' | null;
 
 const BOARD_ID_TO_DB: Record<number, string> = {
   0: 'shortboard',
@@ -120,6 +126,8 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
   const [showSurfVideoEditor, setShowSurfVideoEditor] = useState(false);
   const [editingDestinationIndex, setEditingDestinationIndex] =
     useState<DestinationEditorIndex>(null);
+  const [editingLifestyleIndex, setEditingLifestyleIndex] =
+    useState<LifestyleEditorIndex>(null);
   const [savingTarget, setSavingTarget] = useState<SaveTarget | null>(null);
   const [showNicknameModal, setShowNicknameModal] = useState(false);
   const [nicknameDraft, setNicknameDraft] = useState('');
@@ -139,12 +147,18 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
       setSavingTarget(target);
       try {
         const updated = await supabaseDatabaseService.saveSurfer(patch);
-        // PostgREST `.select()` after update sometimes omits or lags `destinations_array`;
-        // merge the payload we sent so ProfileScreen (via context) always matches DB.
-        const next: SupabaseSurfer =
-          patch.destinationsArray !== undefined
-            ? { ...updated, destinations_array: patch.destinationsArray }
-            : { ...updated };
+        // PostgREST `.select()` after update sometimes omits or lags JSONB / array
+        // columns; merge the payload we sent so ProfileScreen (via context) matches DB.
+        const next: SupabaseSurfer = { ...updated };
+        if (patch.destinationsArray !== undefined) {
+          next.destinations_array = patch.destinationsArray;
+        }
+        if (patch.lifestyleKeywords !== undefined) {
+          next.lifestyle_keywords = patch.lifestyleKeywords;
+        }
+        if (patch.lifestyleImageUrls !== undefined) {
+          next.lifestyle_image_urls = patch.lifestyleImageUrls;
+        }
         updateProfile(next);
       } catch (err) {
         console.error('[ProfileEditPanel] Save failed:', err);
@@ -482,6 +496,73 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
     await persist('destinationDelete', { destinationsArray: base });
   }, [persist, editingDestinationIndex, surfer?.destinations_array]);
 
+  // Mirrors destination handlers but for lifestyle keywords. The keyword text
+  // is the source of truth in `lifestyle_keywords`; `lifestyle_image_urls` maps
+  // each keyword to a Pexels image URL and stays in sync (entries are added on
+  // save and removed on delete/edit-rename).
+  const handleLifestyleSave = useCallback(
+    async (keyword: string) => {
+      if (editingLifestyleIndex == null) return;
+      const baseKeywords = [...(surfer?.lifestyle_keywords ?? [])];
+      const baseImages: Record<string, string> = {
+        ...((surfer?.lifestyle_image_urls as Record<string, string> | null | undefined) ?? {}),
+      };
+
+      let nextKeywords: string[];
+      if (editingLifestyleIndex === 'new') {
+        if (baseKeywords.length >= 6) return;
+        if (!baseImages[keyword]) {
+          try {
+            const url = await resolveLifestyleKeywordToImageUrl(keyword);
+            if (url) baseImages[keyword] = url;
+          } catch {
+            // Pexels failures fall through to the icon fallback in LifestyleCard.
+          }
+        }
+        nextKeywords = [...baseKeywords, keyword];
+      } else {
+        const previous = baseKeywords[editingLifestyleIndex];
+        if (!previous) return;
+        if (previous === keyword) return;
+        baseKeywords[editingLifestyleIndex] = keyword;
+        if (previous && previous !== keyword) {
+          delete baseImages[previous];
+        }
+        if (!baseImages[keyword]) {
+          try {
+            const url = await resolveLifestyleKeywordToImageUrl(keyword);
+            if (url) baseImages[keyword] = url;
+          } catch {
+            // see above
+          }
+        }
+        nextKeywords = baseKeywords;
+      }
+
+      await persist('lifestyle', {
+        lifestyleKeywords: nextKeywords,
+        lifestyleImageUrls: Object.keys(baseImages).length ? baseImages : null,
+      });
+    },
+    [persist, editingLifestyleIndex, surfer?.lifestyle_keywords, surfer?.lifestyle_image_urls],
+  );
+
+  const handleLifestyleDelete = useCallback(async () => {
+    if (typeof editingLifestyleIndex !== 'number') return;
+    const baseKeywords = [...(surfer?.lifestyle_keywords ?? [])];
+    if (editingLifestyleIndex < 0 || editingLifestyleIndex >= baseKeywords.length) return;
+    const baseImages: Record<string, string> = {
+      ...((surfer?.lifestyle_image_urls as Record<string, string> | null | undefined) ?? {}),
+    };
+    const removed = baseKeywords[editingLifestyleIndex];
+    baseKeywords.splice(editingLifestyleIndex, 1);
+    if (removed) delete baseImages[removed];
+    await persist('lifestyleDelete', {
+      lifestyleKeywords: baseKeywords,
+      lifestyleImageUrls: Object.keys(baseImages).length ? baseImages : null,
+    });
+  }, [persist, editingLifestyleIndex, surfer?.lifestyle_keywords, surfer?.lifestyle_image_urls]);
+
   // Keep the inline nickname draft in sync with the current surfer name so
   // we don't show a stale value after saving (or after another save path
   // updates the profile).
@@ -571,6 +652,7 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
       setShowTravelExperienceEditor(false);
       setShowSurfSkillEditor(false);
       setEditingDestinationIndex(null);
+      setEditingLifestyleIndex(null);
       setPendingCrop(null);
     }
   }, [visible]);
@@ -641,6 +723,9 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
   const surfSkillLabel = capitalizeWords(surfer?.surf_level_category) || '—';
   const surfSkillThumb = getSurfSkillThumb(surfer?.surfboard_type, surfer?.surf_level);
   const destinations = surfer?.destinations_array ?? [];
+  const lifestyleKeywords = surfer?.lifestyle_keywords ?? [];
+  const lifestyleImageUrls =
+    (surfer?.lifestyle_image_urls as Record<string, string> | null | undefined) ?? null;
 
   return (
     <Modal
@@ -869,6 +954,37 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
                     </View>
                   </View>
                 </Section>
+
+                <Section title="Lifestyle">
+                  <View style={styles.destinationsBlock}>
+                    {lifestyleKeywords.length === 0 ? (
+                      <Text style={styles.emptyText}>No lifestyle interests added yet.</Text>
+                    ) : (
+                      <View style={styles.cardsContainer}>
+                        {lifestyleKeywords.slice(0, 6).map((kw, idx) => (
+                          <LifestyleCard
+                            key={`${kw}-${idx}`}
+                            keyword={kw}
+                            imageUrl={lifestyleImageUrls?.[kw] ?? null}
+                            onPress={() => setEditingLifestyleIndex(idx)}
+                          />
+                        ))}
+                      </View>
+                    )}
+                    {lifestyleKeywords.length < 6 ? (
+                      <View style={styles.destAddButtonWrap}>
+                        <TouchableOpacity
+                          style={styles.destAddButton}
+                          onPress={() => setEditingLifestyleIndex('new')}
+                          activeOpacity={0.75}
+                          accessibilityLabel="Add lifestyle interest"
+                        >
+                          <Ionicons name="add" size={36} color="#4A4A4A" />
+                        </TouchableOpacity>
+                      </View>
+                    ) : null}
+                  </View>
+                </Section>
               </View>
             </ScrollView>
           </SafeAreaContainer>
@@ -923,6 +1039,22 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
           saving={savingTarget === 'destination'}
           onDelete={handleDestinationDelete}
           deleting={savingTarget === 'destinationDelete'}
+        />
+
+        <ProfileEditLifestyleScreen
+          visible={editingLifestyleIndex !== null}
+          mode={editingLifestyleIndex === 'new' ? 'add' : 'edit'}
+          onClose={() => setEditingLifestyleIndex(null)}
+          keyword={
+            editingLifestyleIndex !== null && editingLifestyleIndex !== 'new'
+              ? surfer?.lifestyle_keywords?.[editingLifestyleIndex] ?? null
+              : null
+          }
+          existingKeywords={surfer?.lifestyle_keywords ?? []}
+          onSave={handleLifestyleSave}
+          saving={savingTarget === 'lifestyle'}
+          onDelete={handleLifestyleDelete}
+          deleting={savingTarget === 'lifestyleDelete'}
         />
 
         <AvatarCropModal
@@ -1169,6 +1301,49 @@ const DestinationCard: React.FC<{
         <Text style={styles.editCardValue} numberOfLines={1}>
           {days} Day{days === 1 ? '' : 's'}
         </Text>
+      </View>
+      <Ionicons name="chevron-forward" size={20} color="#B0B0B0" />
+    </>
+  );
+
+  if (onPress) {
+    return (
+      <TouchableOpacity style={styles.editCard} onPress={onPress} activeOpacity={0.7}>
+        {inner}
+      </TouchableOpacity>
+    );
+  }
+
+  return <View style={styles.editCard}>{inner}</View>;
+};
+
+const LifestyleCard: React.FC<{
+  keyword: string;
+  imageUrl: string | null;
+  onPress?: () => void;
+}> = ({ keyword, imageUrl, onPress }) => {
+  const [failed, setFailed] = useState(false);
+  const showImage = !!imageUrl && !failed;
+  const iconName = (LIFESTYLE_ICON_MAP[keyword.toLowerCase()] ?? 'ellipse-outline') as React.ComponentProps<typeof Ionicons>['name'];
+
+  const inner = (
+    <>
+      <View style={styles.editCardThumb}>
+        {showImage ? (
+          <Image
+            source={{ uri: imageUrl as string }}
+            style={styles.editCardThumbImage}
+            resizeMode="cover"
+            onError={() => setFailed(true)}
+          />
+        ) : (
+          <View style={[styles.editCardIconFallback, { backgroundColor: '#0788B014' }]}>
+            <Ionicons name={iconName} size={24} color="#0788B0" />
+          </View>
+        )}
+      </View>
+      <View style={styles.editCardText}>
+        <Text style={styles.editCardLabel}>{capitalizeWords(keyword)}</Text>
       </View>
       <Ionicons name="chevron-forward" size={20} color="#B0B0B0" />
     </>
