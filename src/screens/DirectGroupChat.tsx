@@ -53,6 +53,7 @@ import { FullscreenVideoPlayer } from '../components/FullscreenVideoPlayer';
 import { ChatTextInput, ChatTextInputRef } from '../components/ChatTextInput';
 import { WelcomeIntroMessage } from '../components/WelcomeIntroMessage';
 import { useChatKeyboardScroll } from '../hooks/useChatKeyboardScroll';
+import { useDismissKeyboardOnBlur } from '../hooks/useDismissKeyboardOnBlur';
 import { BlockUserOverlay } from '../components/BlockUserOverlay';
 import { ReportUserScreen } from './ReportUserScreen';
 
@@ -383,6 +384,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
         : '#B72DF2';
   const flatListRef = useRef<FlatList<Message>>(null);
   const { handleScroll: handleKeyboardScroll, handleLayout, scrollToBottom } = useChatKeyboardScroll(flatListRef, { inverted: true });
+  useDismissKeyboardOnBlur();
 
   // Track which message IDs have already been rendered, so the slide-up
   // entering animation only fires on genuinely new messages — not on old

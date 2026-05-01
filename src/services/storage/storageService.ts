@@ -3,6 +3,7 @@ import { Platform } from 'react-native';
 import { validateVideoComplete, getFileExtension, getMimeTypeFromExtension } from '../../utils/videoValidation';
 import { isSupabaseConfigured } from '../../config/supabase';
 import { compressImage } from '../../utils/imageCompression';
+import { profileVideoUploadTracker } from './profileVideoUploadTracker';
 
 /**
  * Storage Service
@@ -567,17 +568,21 @@ export const uploadProfileVideoS3 = async (
   userId: string,
   mimeType?: string
 ): Promise<UploadResult> => {
-  try {
-    if (!videoUri || !userId) {
-      return { success: false, error: 'Missing video or user ID' };
-    }
+  if (!videoUri || !userId) {
+    return { success: false, error: 'Missing video or user ID' };
+  }
 
+  profileVideoUploadTracker.start(userId);
+
+  try {
     console.log('[StorageService/S3] Starting S3 upload for user:', userId);
 
     // Validate video before processing
     const validation = await validateVideoComplete(videoUri, mimeType);
     if (!validation.valid) {
-      return { success: false, error: validation.error || 'Video validation failed' };
+      const msg = validation.error || 'Video validation failed';
+      profileVideoUploadTracker.fail(userId, msg);
+      return { success: false, error: msg };
     }
 
     // Step 1: Get presigned upload URL from Edge Function
@@ -596,6 +601,7 @@ export const uploadProfileVideoS3 = async (
     if (!presignResponse.ok) {
       const errorText = await presignResponse.text();
       console.error('[StorageService/S3] Failed to get presigned URL:', errorText);
+      profileVideoUploadTracker.fail(userId, 'Failed to get upload URL');
       return { success: false, error: 'Failed to get upload URL' };
     }
 
@@ -617,7 +623,9 @@ export const uploadProfileVideoS3 = async (
       });
       if (result.status < 200 || result.status >= 300) {
         console.error('[StorageService/S3] S3 upload failed:', result.status, result.body);
-        return { success: false, error: `S3 upload failed (${result.status})` };
+        const msg = `S3 upload failed (${result.status})`;
+        profileVideoUploadTracker.fail(userId, msg);
+        return { success: false, error: msg };
       }
     } else {
       let uploadBody: Blob;
@@ -637,14 +645,16 @@ export const uploadProfileVideoS3 = async (
       if (!s3Response.ok) {
         const errorText = await s3Response.text();
         console.error('[StorageService/S3] S3 upload failed:', errorText);
+        profileVideoUploadTracker.fail(userId, 'S3 upload failed');
         return { success: false, error: 'S3 upload failed' };
       }
     }
 
     console.log('[StorageService/S3] Video uploaded to S3:', s3Key);
 
-    // Step 4: Wait for MediaConvert processing and update DB
-    // Fire-and-forget: poll after a delay to update the DB
+    // Step 4: Wait for MediaConvert processing and update DB.
+    // Polling drives the tracker to 'success' or 'failed' itself.
+    profileVideoUploadTracker.markProcessing(userId);
     pollForProcessedVideo(userId, processedKey, headers, functionUrl);
 
     return {
@@ -654,10 +664,9 @@ export const uploadProfileVideoS3 = async (
     };
   } catch (error) {
     console.error('[StorageService/S3] Upload exception:', error);
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Unknown error',
-    };
+    const msg = error instanceof Error ? error.message : 'Unknown error';
+    profileVideoUploadTracker.fail(userId, msg);
+    return { success: false, error: msg };
   }
 };
 
@@ -693,6 +702,7 @@ const pollForProcessedVideo = async (
         const result = await response.json();
         if (result.ready) {
           console.log('[StorageService/S3] Processed video ready:', result.videoUrl);
+          profileVideoUploadTracker.succeed(userId);
           return;
         }
       }
@@ -702,6 +712,7 @@ const pollForProcessedVideo = async (
   }
 
   console.warn('[StorageService/S3] Gave up polling for processed video after max attempts');
+  profileVideoUploadTracker.fail(userId, 'Processing timed out. Please try again.');
 };
 
 /**

@@ -49,6 +49,7 @@ import {
   type FilterDisplayItem,
 } from '../utils/tripPlanningFilters';
 import { useChatKeyboardScroll } from '../hooks/useChatKeyboardScroll';
+import { useDismissKeyboardOnBlur } from '../hooks/useDismissKeyboardOnBlur';
 import { useTutorial } from '../context/TutorialContext';
 import { TutorialOverlay, type AnchorRect } from '../components/TutorialOverlay';
 import { TUTORIAL_ANCHOR_Y_OFFSET } from '../utils/tutorialAnchorOffset';
@@ -490,6 +491,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   const chatInputRef = useRef<ChatTextInputRef>(null);
   const loadingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { handleScroll, handleLayout, scrollToBottom } = useChatKeyboardScroll(flatListRef, { inverted: true });
+  useDismissKeyboardOnBlur();
 
   // Drag-to-delete: ghost chip position and dragged item
   const [dragState, setDragState] = useState<{
