@@ -49,6 +49,7 @@ import { ReportUserScreen } from './ReportUserScreen';
 import { HomeBreakViewSheet } from '../components/HomeBreakViewSheet';
 import Reanimated, { useSharedValue, useAnimatedStyle, withTiming, runOnJS, Easing } from 'react-native-reanimated';
 import { Gesture, GestureDetector, ScrollView } from 'react-native-gesture-handler';
+import { LIFESTYLE_ICON_MAP } from '../utils/lifestyleIconMap';
 
 interface ProfileScreenProps {
   onBack?: () => void;
@@ -172,30 +173,6 @@ const getSurfLevelVideoUrl = (boardType: string, surfLevel: number): string | nu
   // Use Supabase storage URL instead of local path
   const storagePath = `${boardFolder}/${video.videoFileName}`;
   return getSurfLevelVideoFromStorage(storagePath);
-};
-// Lifestyle keyword to icon mapping (simplified - using Ionicons for now)
-const LIFESTYLE_ICON_MAP: { [key: string]: string } = {
-  'yoga': 'fitness-outline',
-  'hiking': 'walk-outline',
-  'cycling': 'bicycle-outline',
-  'gaming': 'game-controller-outline',
-  'music': 'musical-notes-outline',
-  'volleyball': 'football-outline',
-  'climbing': 'trail-sign-outline',
-  'diving': 'water-outline',
-  'fishing': 'fish-outline',
-  'remote-work': 'laptop-outline',
-  'party': 'wine-outline',
-  'nightlife': 'moon-outline',
-  'culture': 'library-outline',
-  'local culture': 'people-outline',
-  'nature': 'leaf-outline',
-  'sustainability': 'reload-outline',
-  'art': 'color-palette-outline',
-  'food': 'restaurant-outline',
-  'exploring': 'map-outline',
-  'adventure': 'compass-outline',
-  'mobility': 'barbell-outline',
 };
 
 // Surf Skill Card Component
