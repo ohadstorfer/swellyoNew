@@ -33,6 +33,7 @@ import { ChatTextInput, ChatTextInputRef } from '../components/ChatTextInput';
 import { ReportAISheet } from '../components/ReportAISheet';
 import { useChatKeyboardScroll } from '../hooks/useChatKeyboardScroll';
 import { useKeyboardVisible, useKeyboardHeight } from '../hooks/useKeyboardVisible';
+import { useDismissKeyboardOnBlur } from '../hooks/useDismissKeyboardOnBlur';
 
 // Resolve image URLs once at module level to avoid heavy manifest inspection +
 // console.log spam on every render (getImageUrl does extensive Constants lookups).
@@ -147,6 +148,7 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
   const flatListRef = useRef<FlatList<Message>>(null);
   const chatInputRef = useRef<ChatTextInputRef>(null);
   const { handleScroll, handleLayout, scrollToBottom: keyboardScrollToBottom } = useChatKeyboardScroll(flatListRef, { inverted: true });
+  useDismissKeyboardOnBlur();
 
   const chatInitializedRef = useRef(false);
   

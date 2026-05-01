@@ -34,6 +34,10 @@ import {
   resolveLifestyleKeywordToImageUrl,
 } from '../../services/media/imageService';
 import { uploadCoverImage, uploadProfileImage } from '../../services/storage/storageService';
+import {
+  profileVideoUploadTracker,
+  useProfileVideoUploadStatus,
+} from '../../services/storage/profileVideoUploadTracker';
 import { ProfileEditSurfStyleScreen } from './ProfileEditSurfStyleScreen';
 import { ProfileEditTravelExperienceScreen } from './ProfileEditTravelExperienceScreen';
 import { ProfileEditSurfSkillScreen } from './ProfileEditSurfSkillScreen';
@@ -138,6 +142,36 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
   const [pendingCrop, setPendingCrop] = useState<{ uri: string; target: 'avatar' | 'cover' } | null>(null);
   const translateX = useRef(new Animated.Value(screenWidth)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
+
+  // Surf video upload status — driven by uploadProfileVideoS3 / pollForProcessedVideo.
+  // Survives unmounting the SurfVideo editor (state lives in a module-level singleton).
+  const surfVideoUpload = useProfileVideoUploadStatus(surfer?.user_id ?? null);
+  const isSurfVideoUploading =
+    surfVideoUpload.status === 'uploading' || surfVideoUpload.status === 'processing';
+
+  useEffect(() => {
+    const userId = surfer?.user_id;
+    if (!userId) return;
+    if (surfVideoUpload.status === 'success') {
+      // MediaConvert finished and the Edge Function wrote the new URL — refetch.
+      (async () => {
+        try {
+          const fresh = await supabaseDatabaseService.getSurferByUserId(userId);
+          if (fresh) updateProfile(fresh);
+        } catch (err) {
+          console.warn('[ProfileEditPanel] surf video refetch failed:', err);
+        } finally {
+          profileVideoUploadTracker.reset(userId);
+        }
+      })();
+    } else if (surfVideoUpload.status === 'failed') {
+      Alert.alert(
+        'Surf video upload failed',
+        surfVideoUpload.error || 'Please try again.',
+      );
+      profileVideoUploadTracker.reset(userId);
+    }
+  }, [surfVideoUpload.status, surfVideoUpload.error, surfer?.user_id, updateProfile]);
 
   const persist = useCallback(
     async (
@@ -897,6 +931,7 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
                       thumbnailResize="cover"
                       label="Surf Skill"
                       value={surfSkillLabel}
+                      loading={isSurfVideoUploading}
                       onPress={() => setShowSurfSkillEditor(true)}
                     />
                     {/* <EditCard
@@ -914,14 +949,24 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
                     onPress={() => setShowSurfVideoEditor(true)}
                     activeOpacity={0.7}
                     hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                    disabled={isSurfVideoUploading}
                   >
                     <Ionicons
                       name={surfer?.profile_video_url ? 'videocam' : 'videocam-outline'}
                       size={18}
-                      color={FIGMA.brandTeal}
+                      color={isSurfVideoUploading ? '#B0B0B0' : FIGMA.brandTeal}
                     />
-                    <Text style={styles.surfVideoLinkText}>
-                      {surfer?.profile_video_url ? 'Change surf video' : 'Add surf video'}
+                    <Text
+                      style={[
+                        styles.surfVideoLinkText,
+                        isSurfVideoUploading && { color: '#B0B0B0' },
+                      ]}
+                    >
+                      {isSurfVideoUploading
+                        ? 'Uploading surf video…'
+                        : surfer?.profile_video_url
+                          ? 'Change surf video'
+                          : 'Add surf video'}
                     </Text>
                   </TouchableOpacity>
                 </Section>
@@ -1220,6 +1265,8 @@ type EditCardProps = {
   thumbnailText?: string;
   fallbackIcon?: React.ComponentProps<typeof Ionicons>['name'];
   fallbackTint?: string;
+  /** Renders a spinner overlay on top of the thumbnail. */
+  loading?: boolean;
   onPress?: () => void;
 };
 
@@ -1231,6 +1278,7 @@ const EditCard: React.FC<EditCardProps> = ({
   thumbnailText,
   fallbackIcon,
   fallbackTint = '#0788B0',
+  loading = false,
   onPress,
 }) => {
   const inner = (
@@ -1253,6 +1301,11 @@ const EditCard: React.FC<EditCardProps> = ({
             <Ionicons name={fallbackIcon} size={28} color={fallbackTint} />
           </View>
         ) : null}
+        {loading && (
+          <View style={styles.editCardThumbSpinnerOverlay} pointerEvents="none">
+            <ActivityIndicator size="small" color="#FFFFFF" />
+          </View>
+        )}
       </View>
       <View style={styles.editCardText}>
         <Text style={styles.editCardLabel}>{label}</Text>
@@ -1792,6 +1845,17 @@ const styles = StyleSheet.create({
   editCardThumbImage: {
     width: '100%',
     height: '100%',
+  },
+  editCardThumbSpinnerOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    borderRadius: 8,
   },
   editCardIconFallback: {
     width: '100%',
