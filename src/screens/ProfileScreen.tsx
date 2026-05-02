@@ -2324,10 +2324,9 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
                 activeOpacity={0.85}
                 onPress={() => topDestinations.length > 0 && setShowDestinationsSheet(true)}
               >
-                <Text style={styles.travelExperienceTitle}>Travel Experience</Text>
-                {/* Map icon — top-right pill (TODO: swap for Figma SVG) */}
-                <View style={styles.travelExperienceIconBadge}>
-                  <Ionicons name="map-outline" size={20} color="#B0B0B0" />
+                <View style={styles.cardTitleRow}>
+                  <Text style={styles.travelExperienceTitle}>Travel Experience</Text>
+                  <Ionicons name="chevron-forward" size={16} color="#B0B0B0" />
                 </View>
                 {/* Spacer pushes the gauge toward the bottom of the card */}
                 <View style={{ flex: 1 }} />
@@ -2394,20 +2393,17 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
                 disabled={!profileData.home_break_short}
               >
                 {/* Title — top-left. Grays out in the unset state. */}
-                <Text
-                  style={[
-                    styles.homeBreakTitle,
-                    !profileData.home_break_short && styles.homeBreakUnsetText,
-                  ]}
-                >
-                  Home Break
-                </Text>
-                {/* Location pin — icon already includes the gray circle background */}
-                <Image
-                  source={require('../assets/icons/home-break-location-pin-icon.png')}
-                  style={styles.homeBreakIconImage}
-                  resizeMode="contain"
-                />
+                <View style={styles.cardTitleRow}>
+                  <Text
+                    style={[
+                      styles.homeBreakTitle,
+                      !profileData.home_break_short && styles.homeBreakUnsetText,
+                    ]}
+                  >
+                    Home Break
+                  </Text>
+                  <Ionicons name="chevron-forward" size={16} color="#B0B0B0" />
+                </View>
                 {/* Wave icon — centered in the middle of the card. Gets tinted
                     gray when no home break is set. */}
                 <View style={styles.homeBreakWaveAnchor} pointerEvents="none">
@@ -3341,16 +3337,11 @@ const styles = StyleSheet.create({
       boxShadow: '0px 2px 16px 0px rgba(89, 110, 124, 0.15)',
     }),
   },
-  travelExperienceIconBadge: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#E4E4E4',
+  cardTitleRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    gap: 4,
+    alignSelf: 'flex-start',
   },
   travelExperienceGaugeWrap: {
     width: 116,
@@ -3482,15 +3473,6 @@ const styles = StyleSheet.create({
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
     lineHeight: 16,
     color: '#A0A0A0',
-  },
-  // Top-right location pin — icon includes the gray circle background, so we
-  // size it to the badge size (36×36) and position it directly.
-  homeBreakIconImage: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    width: 36,
-    height: 36,
   },
   // Big centered wave icon
   homeBreakWaveAnchor: {
