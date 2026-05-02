@@ -26,7 +26,8 @@
         "NSPhotoLibraryUsageDescription": "This app needs access to your photo library to select profile pictures.",
         "NSCameraUsageDescription": "This app needs access to your camera to take profile pictures.",
         "NSMicrophoneUsageDescription": "This app needs access to your microphone to record video with audio."
-      }
+      },
+      "runtimeVersion": "1.0.0"
     },
     "android": {
       "package": "com.swellyo.app",
@@ -75,6 +76,9 @@
       "eas": {
         "projectId": "c14ee9e6-bad8-43e2-b37a-d196b49f638f"
       }
+    },
+    "updates": {
+      "url": "https://u.expo.dev/c14ee9e6-bad8-43e2-b37a-d196b49f638f"
     }
   }
 }

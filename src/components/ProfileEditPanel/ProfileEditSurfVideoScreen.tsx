@@ -19,7 +19,13 @@ import { useVideoPlayer, VideoView } from 'expo-video';
 import { GalleryPermissionOverlay } from '../GalleryPermissionOverlay';
 import { getSurfLevelVideos } from '../../services/media/surfLevelVideos';
 import { validateVideoComplete } from '../../utils/videoValidation';
-import { uploadProfileVideoS3 } from '../../services/storage/storageService';
+import {
+  uploadProfileVideoS3,
+  uploadProfileVideoThumbnail,
+} from '../../services/storage/storageService';
+import { profileVideoUploadTracker } from '../../services/storage/profileVideoUploadTracker';
+import { supabaseDatabaseService } from '../../services/database/supabaseDatabaseService';
+import { captureVideoThumbnail } from '../../utils/videoThumbnail';
 
 type Props = {
   visible: boolean;
@@ -109,6 +115,32 @@ export const ProfileEditSurfVideoScreen: React.FC<Props> = ({
     p.muted = true;
     if (videoUrl) p.play();
   });
+
+  // The init callback above only runs once. When the user picks a new clip
+  // (videoUrl changes), expo-video swaps the source internally but does NOT
+  // re-trigger play() — on iOS Simulator that surfaces as "stuck on the first
+  // frame". This effect kicks play() after a short delay so the new source has
+  // time to load. Mirrors the workaround timeout in OnboardingVideoUploadScreen.
+  useEffect(() => {
+    if (!player || !videoUrl) return;
+    const timeoutId = setTimeout(() => {
+      try {
+        player.muted = true;
+        player.loop = true;
+        const result = player.play() as unknown as Promise<void> | void;
+        if (result && typeof (result as Promise<void>).catch === 'function') {
+          (result as Promise<void>).catch((err: any) => {
+            if (__DEV__ && err?.name !== 'NotAllowedError') {
+              console.warn('[SurfVideoEdit] play() rejected:', err);
+            }
+          });
+        }
+      } catch (err) {
+        if (__DEV__) console.warn('[SurfVideoEdit] play() threw:', err);
+      }
+    }, Platform.OS === 'web' ? 200 : 100);
+    return () => clearTimeout(timeoutId);
+  }, [player, videoUrl]);
 
   useEffect(() => {
     if (visible && !mounted) {
@@ -247,12 +279,33 @@ export const ProfileEditSurfVideoScreen: React.FC<Props> = ({
         isLocalUri(userVideoUri);
 
       if (isFreshLocalUri && userId && userVideoUri) {
-        // Fire-and-forget: Edge Function writes profile_video_url after
-        // MediaConvert finishes. Persist the OLD url here so the DB never
-        // holds a local URI.
+        // Kick off the S3 video upload immediately (fire-and-forget) — this
+        // is what the user is actually waiting on.
         uploadProfileVideoS3(userVideoUri, userId, mimeType).catch(err =>
           console.error('[SurfVideoEdit] background upload failed:', err),
         );
+
+        // In parallel, capture a thumbnail. When it resolves it serves two
+        // purposes:
+        //   1. setLocalThumbnail → ProfileEditPanel flips the surf-skill card
+        //      to the user's clip for this session, even before the video
+        //      finishes uploading.
+        //   2. uploadProfileVideoThumbnail + saveSurfer → persists the poster
+        //      across reloads via profile_video_thumbnail_url.
+        captureVideoThumbnail(userVideoUri)
+          .then(thumb => {
+            if (!thumb) return;
+            profileVideoUploadTracker.setLocalThumbnail(userId, thumb);
+            return uploadProfileVideoThumbnail(thumb, userId).then(url => {
+              if (url) {
+                return supabaseDatabaseService.saveSurfer({ profileVideoThumbnailUrl: url });
+              }
+            });
+          })
+          .catch(err => {
+            console.warn('[SurfVideoEdit] thumbnail persist failed:', err);
+          });
+
         if (onSave) await onSave(initialUserVideoUri ?? null);
       } else {
         if (onSave) await onSave(userVideoUri);
