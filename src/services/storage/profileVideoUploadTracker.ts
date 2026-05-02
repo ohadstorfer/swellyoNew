@@ -10,6 +10,11 @@ export type ProfileVideoUploadStatus =
 export interface ProfileVideoUploadEntry {
   status: ProfileVideoUploadStatus;
   error?: string;
+  /** Local URI / data URL of a thumbnail captured client-side at Save time.
+   *  Persists across status transitions so the surf-skill card can flip to
+   *  the user's clip the instant they pick + Save, without waiting for
+   *  MediaConvert to finish. */
+  localThumbnail?: string;
 }
 
 const IDLE: ProfileVideoUploadEntry = { status: 'idle' };
@@ -21,8 +26,12 @@ const notify = () => {
   listeners.forEach((l) => l());
 };
 
-const set = (userId: string, entry: ProfileVideoUploadEntry) => {
-  state.set(userId, entry);
+const update = (
+  userId: string,
+  patch: Partial<ProfileVideoUploadEntry> & Pick<ProfileVideoUploadEntry, 'status'>,
+) => {
+  const prev = state.get(userId) ?? IDLE;
+  state.set(userId, { ...prev, ...patch });
   notify();
 };
 
@@ -32,19 +41,32 @@ export const profileVideoUploadTracker = {
     return state.get(userId) ?? IDLE;
   },
   start(userId: string) {
-    set(userId, { status: 'uploading' });
+    // Preserve any thumbnail already set by setLocalThumbnail before start().
+    update(userId, { status: 'uploading', error: undefined });
+  },
+  setLocalThumbnail(userId: string, uri: string) {
+    const prev = state.get(userId) ?? IDLE;
+    state.set(userId, { ...prev, localThumbnail: uri });
+    notify();
   },
   markProcessing(userId: string) {
-    set(userId, { status: 'processing' });
+    update(userId, { status: 'processing' });
   },
   succeed(userId: string) {
-    set(userId, { status: 'success' });
+    // Keep localThumbnail — the user's clip is now live, the card should keep showing it.
+    update(userId, { status: 'success' });
   },
   fail(userId: string, error: string) {
-    set(userId, { status: 'failed', error });
+    // Drop the local thumbnail too: the clip never made it, so showing it is misleading.
+    state.set(userId, { status: 'failed', error });
+    notify();
   },
   reset(userId: string) {
-    set(userId, IDLE);
+    // Reset to idle but keep localThumbnail so the card stays on the user's clip
+    // for the rest of the session.
+    const prev = state.get(userId) ?? IDLE;
+    state.set(userId, { status: 'idle', localThumbnail: prev.localThumbnail });
+    notify();
   },
   subscribe(listener: () => void) {
     listeners.add(listener);

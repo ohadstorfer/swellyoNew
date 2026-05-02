@@ -304,6 +304,64 @@ export const uploadCoverImage = async (
 };
 
 /**
+ * Upload a poster image for the user's surf video to the `profile-images`
+ * bucket. Mirrors `uploadProfileImage` URI handling, but skips compression —
+ * the input is already a small JPEG produced by `captureVideoThumbnail`
+ * (~240px, q=0.7).
+ *
+ * Returns the public URL on success, null on any failure. Failures here are
+ * non-critical: the live `profile_video_url` will keep working with the demo
+ * card thumbnail; only the across-reload poster is missing.
+ */
+export const uploadProfileVideoThumbnail = async (
+  thumbnailUri: string,
+  userId: string,
+): Promise<string | null> => {
+  try {
+    if (!thumbnailUri || !userId) return null;
+
+    const fileName = `${userId}/video-thumbnail-${Date.now()}.jpg`;
+    const contentType = 'image/jpeg';
+
+    let uploadBody: Blob | FormData;
+
+    const isNativeFileUri = Platform.OS !== 'web' &&
+      (thumbnailUri.startsWith('file://') ||
+        thumbnailUri.startsWith('content://') ||
+        thumbnailUri.startsWith('ph://'));
+
+    if (isNativeFileUri) {
+      uploadBody = nativeFileFormData(thumbnailUri, contentType);
+    } else if (thumbnailUri.startsWith('data:')) {
+      uploadBody = dataURLtoBlob(thumbnailUri);
+    } else {
+      uploadBody = await uriToBlob(thumbnailUri);
+    }
+
+    const { data, error } = await supabase.storage
+      .from('profile-images')
+      .upload(fileName, uploadBody, {
+        contentType,
+        upsert: true,
+      });
+
+    if (error) {
+      console.warn('[StorageService] Video thumbnail upload error:', error.message);
+      return null;
+    }
+
+    const { data: urlData } = supabase.storage
+      .from('profile-images')
+      .getPublicUrl(data.path);
+
+    return urlData.publicUrl ?? null;
+  } catch (err) {
+    console.warn('[StorageService] Video thumbnail upload exception:', err);
+    return null;
+  }
+};
+
+/**
  * Upload a trip image (hero or accommodation) to the `trip-images` bucket.
  * Mirrors `uploadProfileImage` — same URI handling, different bucket and path.
  */
@@ -566,7 +624,7 @@ const getS3VideoProcessingFunctionUrl = (): string => {
 export const uploadProfileVideoS3 = async (
   videoUri: string,
   userId: string,
-  mimeType?: string
+  mimeType?: string,
 ): Promise<UploadResult> => {
   if (!videoUri || !userId) {
     return { success: false, error: 'Missing video or user ID' };
@@ -577,13 +635,9 @@ export const uploadProfileVideoS3 = async (
   try {
     console.log('[StorageService/S3] Starting S3 upload for user:', userId);
 
-    // Validate video before processing
-    const validation = await validateVideoComplete(videoUri, mimeType);
-    if (!validation.valid) {
-      const msg = validation.error || 'Video validation failed';
-      profileVideoUploadTracker.fail(userId, msg);
-      return { success: false, error: msg };
-    }
+    // Validation already runs in the picker; skipping here to cut ~2-300ms
+    // off the Save → upload-start latency on web (the validator probes
+    // duration/codec via a hidden <video> element, which dominates that path).
 
     // Step 1: Get presigned upload URL from Edge Function
     const functionUrl = getS3VideoProcessingFunctionUrl();
@@ -652,9 +706,12 @@ export const uploadProfileVideoS3 = async (
 
     console.log('[StorageService/S3] Video uploaded to S3:', s3Key);
 
-    // Step 4: Wait for MediaConvert processing and update DB.
-    // Polling drives the tracker to 'success' or 'failed' itself.
-    profileVideoUploadTracker.markProcessing(userId);
+    // The bytes are in S3 — that's the part the user is waiting on. Flip the
+    // tracker to 'success' now so the spinner clears immediately. The processing
+    // (MediaConvert + Edge Function DB write) keeps running in the background;
+    // when it finishes, the polling loop fires another succeed() so the client
+    // refetches and picks up the final processed-video URL.
+    profileVideoUploadTracker.succeed(userId);
     pollForProcessedVideo(userId, processedKey, headers, functionUrl);
 
     return {
@@ -711,8 +768,11 @@ const pollForProcessedVideo = async (
     }
   }
 
+  // The S3 PUT already succeeded and we already flipped the tracker to 'success'.
+  // The local thumbnail is showing on the card. If MediaConvert never delivers,
+  // that's a server-side problem — don't surface an alert that contradicts the
+  // earlier success. Just log and move on.
   console.warn('[StorageService/S3] Gave up polling for processed video after max attempts');
-  profileVideoUploadTracker.fail(userId, 'Processing timed out. Please try again.');
 };
 
 /**

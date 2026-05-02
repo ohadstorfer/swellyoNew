@@ -37,6 +37,7 @@ export interface SupabaseSurfer {
   profile_image_url?: string; // varchar(2048), nullable
   cover_image_url?: string; // varchar(2048), nullable - per-user profile cover photo
   profile_video_url?: string; // varchar(2048), nullable - URL to user-uploaded custom surf level video
+  profile_video_thumbnail_url?: string; // varchar, nullable - public URL of a poster image for the surf video (profile-images bucket)
   // Swelly conversation results
   onboarding_summary_text?: string; // text, nullable
   destinations_array?: Array<{ country: string; state?: string; area: string[]; time_in_days: number; time_in_text?: string }>; // jsonb, nullable
@@ -227,6 +228,7 @@ class SupabaseDatabaseService {
     profileImageUrl?: string;
     coverImageUrl?: string;
     profileVideoUrl?: string; // URL to user-uploaded custom surf level video
+    profileVideoThumbnailUrl?: string; // public URL of a poster image for the surf video
     boardType?: number; // Legacy support - will be converted to surfboardType enum
     // Swelly conversation results
     onboardingSummaryText?: string;
@@ -368,6 +370,13 @@ class SupabaseDatabaseService {
         profileVideoUrl = profileVideoUrl.substring(0, 2048);
       }
 
+      // Truncate profile_video_thumbnail_url if it's too long (max 2048 characters)
+      let profileVideoThumbnailUrl = surferData.profileVideoThumbnailUrl;
+      if (profileVideoThumbnailUrl && profileVideoThumbnailUrl.length > 2048) {
+        console.warn(`Profile video thumbnail URL is too long (${profileVideoThumbnailUrl.length} chars), truncating to 2048 characters`);
+        profileVideoThumbnailUrl = profileVideoThumbnailUrl.substring(0, 2048);
+      }
+
       // Validate dateOfBirth if provided
       let dateOfBirth: string | undefined = surferData.dateOfBirth;
       if (dateOfBirth) {
@@ -402,6 +411,7 @@ class SupabaseDatabaseService {
         profile_image_url: profileImageUrl,
         ...(coverImageUrl !== undefined && { cover_image_url: coverImageUrl }),
         profile_video_url: profileVideoUrl,
+        ...(profileVideoThumbnailUrl !== undefined && { profile_video_thumbnail_url: profileVideoThumbnailUrl }),
         // Swelly conversation results
         onboarding_summary_text: surferData.onboardingSummaryText,
         finished_onboarding: surferData.finishedOnboarding,
@@ -650,7 +660,7 @@ class SupabaseDatabaseService {
       // destinations_map does NOT exist - only destinations_array exists
       const { data, error } = await supabase
         .from('surfers')
-        .select('user_id, name, age, date_of_birth, pronoun, country_from, surfboard_type, surf_level, surf_level_description, surf_level_category, travel_experience, bio, profile_image_url, cover_image_url, profile_video_url, destinations_array, lifestyle_keywords, lifestyle_image_urls, wave_type_keywords, travel_buddies, home_break_place_id, home_break_full, home_break_short, home_break_locality, home_break_country, home_break_lat, home_break_lng, created_at, updated_at, finished_onboarding')
+        .select('user_id, name, age, date_of_birth, pronoun, country_from, surfboard_type, surf_level, surf_level_description, surf_level_category, travel_experience, bio, profile_image_url, cover_image_url, profile_video_url, profile_video_thumbnail_url, destinations_array, lifestyle_keywords, lifestyle_image_urls, wave_type_keywords, travel_buddies, home_break_place_id, home_break_full, home_break_short, home_break_locality, home_break_country, home_break_lat, home_break_lng, created_at, updated_at, finished_onboarding')
         .eq('user_id', userId)
         .single();
 

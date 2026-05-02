@@ -927,7 +927,13 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
                       onPress={() => setShowTravelExperienceEditor(true)}
                     />
                     <EditCard
-                      thumbnail={surfSkillThumb}
+                      thumbnail={
+                        surfVideoUpload.localThumbnail
+                          ? { uri: surfVideoUpload.localThumbnail }
+                          : surfer?.profile_video_thumbnail_url
+                            ? { uri: surfer.profile_video_thumbnail_url }
+                            : surfSkillThumb
+                      }
                       thumbnailResize="cover"
                       label="Surf Skill"
                       value={surfSkillLabel}
