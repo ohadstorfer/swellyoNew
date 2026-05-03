@@ -36,13 +36,22 @@ When bumping the app version (e.g. `1.1.0 → 1.2.0`), update **all** of these:
 ```bash
 node -e "
 const fs = require('fs');
-const app = JSON.parse(fs.readFileSync('app.json','utf8')).expo.version;
+const appJson = JSON.parse(fs.readFileSync('app.json','utf8')).expo;
+const app = appJson.version;
+const rt = appJson.runtimeVersion;
+const rtIos = appJson.ios && appJson.ios.runtimeVersion;
+const rtAndroid = appJson.android && appJson.android.runtimeVersion;
 const plist = (fs.readFileSync('ios/swellyo/Supporting/Expo.plist','utf8').match(/EXUpdatesRuntimeVersion[^]*?<string>([^<]+)<\/string>/) || [])[1];
 const manifest = (fs.readFileSync('android/app/src/main/AndroidManifest.xml','utf8').match(/EXPO_RUNTIME_VERSION\" android:value=\"([^\"]+)\"/) || [])[1];
 const gradle = (fs.readFileSync('android/app/build.gradle','utf8').match(/versionName \"([^\"]+)\"/) || [])[1];
 const pbxAll = [...fs.readFileSync('ios/swellyo.xcodeproj/project.pbxproj','utf8').matchAll(/MARKETING_VERSION = ([\d.]+);/g)].map(m=>m[1]);
-const all = [app, plist, manifest, gradle, ...pbxAll];
-console.log('app.json:', app);
+const all = [app, rt, plist, manifest, gradle, ...pbxAll];
+if (rtIos !== undefined) all.push(rtIos);
+if (rtAndroid !== undefined) all.push(rtAndroid);
+console.log('app.json version:', app);
+console.log('app.json runtimeVersion (top):', rt);
+console.log('app.json ios.runtimeVersion:', rtIos === undefined ? '(unset — falls back to top)' : rtIos);
+console.log('app.json android.runtimeVersion:', rtAndroid === undefined ? '(unset — falls back to top)' : rtAndroid);
 console.log('Expo.plist:', plist);
 console.log('AndroidManifest:', manifest);
 console.log('build.gradle:', gradle);
@@ -50,6 +59,8 @@ console.log('project.pbxproj:', pbxAll.join(', '));
 console.log(new Set(all).size === 1 ? '✅ All match' : '❌ DRIFT — values differ');
 "
 ```
+
+**Why `expo.ios.runtimeVersion` and `expo.android.runtimeVersion` matter**: if either nested override is set, EAS uses the override for that platform's update tag instead of the top-level `expo.runtimeVersion`. A drifted nested value publishes OTAs to a runtime that no installed binary listens for — the update silently goes nowhere. This bit us once when iOS was bumped 1.0.8 → 1.1.0 and `ios.runtimeVersion` stayed at "1.0.0".
 
 `buildNumber` (iOS) and `versionCode` (Android) auto-increment on the EAS build server (per `eas.json` `production.ios.autoIncrement` / `android.autoIncrement`). Don't bump those manually unless you have a reason.
 
@@ -185,17 +196,22 @@ When the user says any of: "build", "ship", "release", "OTA", "update", "submit"
 ### Run automatically
 
 1. **Read this file** if not already in context
-2. **Check version drift**:
+2. **Check version drift** (includes nested ios/android `runtimeVersion` overrides — these are the silent OTA-killer):
    ```bash
    node -e "
    const fs=require('fs');
-   const app=JSON.parse(fs.readFileSync('app.json','utf8')).expo.version;
-   const plist=(fs.readFileSync('ios/swellyo/Supporting/Expo.plist','utf8').match(/EXUpdatesRuntimeVersion[^]*?<string>([^<]+)<\/string>/)||[])[1];
+   const e=JSON.parse(fs.readFileSync('app.json','utf8')).expo;
+   const rtIos=e.ios&&e.ios.runtimeVersion;
+   const rtAndroid=e.android&&e.android.runtimeVersion;
+   const plist=(fs.readFileSync('ios/swellyo/Supporting/Expo.plist','utf8').match(/EXUpdatesRuntimeVersion[^]*?<string>([^<]+)<\\/string>/)||[])[1];
    const manifest=(fs.readFileSync('android/app/src/main/AndroidManifest.xml','utf8').match(/EXPO_RUNTIME_VERSION\" android:value=\"([^\"]+)\"/)||[])[1];
    const gradle=(fs.readFileSync('android/app/build.gradle','utf8').match(/versionName \"([^\"]+)\"/)||[])[1];
    const pbx=[...fs.readFileSync('ios/swellyo.xcodeproj/project.pbxproj','utf8').matchAll(/MARKETING_VERSION = ([\\d.]+);/g)].map(m=>m[1]);
-   console.log({app,plist,manifest,gradle,pbx});
-   console.log(new Set([app,plist,manifest,gradle,...pbx]).size===1?'OK':'DRIFT');
+   const all=[e.version,e.runtimeVersion,plist,manifest,gradle,...pbx];
+   if(rtIos!==undefined)all.push(rtIos);
+   if(rtAndroid!==undefined)all.push(rtAndroid);
+   console.log({version:e.version,runtimeVersion:e.runtimeVersion,'ios.runtimeVersion':rtIos,'android.runtimeVersion':rtAndroid,plist,manifest,gradle,pbx});
+   console.log(new Set(all).size===1?'OK':'DRIFT');
    "
    ```
 3. **Inspect `.env`** for `LOCAL_MODE=true` / `DEV_MODE=true` / `MVP_MODE=true` and warn if any are set

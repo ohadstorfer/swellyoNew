@@ -34,7 +34,7 @@
         "NSCameraUsageDescription": "This app needs access to your camera to take profile pictures.",
         "NSMicrophoneUsageDescription": "This app needs access to your microphone to record video with audio."
       },
-      "runtimeVersion": "1.0.0"
+      "runtimeVersion": "1.1.0"
     },
     "android": {
       "package": "com.swellyo.app",
