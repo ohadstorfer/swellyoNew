@@ -120,12 +120,21 @@ Conditions:
 - No `ios/` or `android/` file changes
 - No new permissions
 
-Command:
+**Default for Swellyo: target iOS only.** iOS 1.1.0 is the binary live in the App Store; Android's `1.1.0` binary may not be live in Play Store yet. Pushing to both platforms when only iOS is in stores is harmless (Android 1.0.x doesn't poll for OTAs), but explicit is safer and avoids a future surprise the day an Android 1.1.0 build ships.
+
+Command (iOS only — default):
 ```
-eas update --branch production --environment production --message "concise summary"
+eas update --branch production --environment production --platform ios --message "concise summary"
 ```
 
-What happens: bundle uploads to Expo's servers. Devices on the matching `runtimeVersion` (currently `1.1.0`) pull it in background on next launch and apply on the launch after.
+Command (both platforms — only when Android 1.1.0 is also live):
+```
+eas update --branch production --environment production --platform all --message "concise summary"
+```
+
+`--platform` accepts `ios`, `android`, or `all`. Omitting it defaults to `all`. **Always pass it explicitly** so the target is never ambiguous.
+
+What happens: bundle uploads to Expo's servers, tagged with the platform. Devices on the matching platform AND `runtimeVersion` (currently `1.1.0`) pull it in background on next launch and apply on the launch after.
 
 ### B. Native change → `eas build` (App Store / Play Store review required)
 
@@ -152,6 +161,7 @@ Steps:
 ## 7. OTA-specific gotchas
 
 - **The 1.0.8 binaries already in the wild will never receive OTAs.** The first OTA-capable build is `1.1.0`. Don't expect anyone on older binaries to get JS updates.
+- **Always pass `--platform ios|android|all` explicitly.** Default for Swellyo is `--platform ios` because iOS is the only 1.1.0 binary live in the stores. Pushing to `all` while Android is still on 1.0.x is technically harmless but obscures intent and breaks the moment Android 1.1.0 ships. See §5A.
 - **Don't `eas update` until the new native binary is approved and live.** Updates accumulate but go nowhere. Harmless but confusing in the dashboard.
 - **First launch always runs the embedded bundle.** OTA download happens in background; new bundle applies on the *second* cold launch after publish.
 - **Test on `preview` channel first.** Build a preview binary, push to preview channel (`eas update --branch preview --environment preview ...`), verify, then `eas update:republish --destination-channel production` to promote.
@@ -237,12 +247,15 @@ eas build --platform all --profile production
 # Submit to stores after build completes
 eas submit --platform all --profile production
 
-# Push OTA after stores have the new binary live
-eas update --branch production --environment production --message "..."
+# Push OTA — iOS only (Swellyo default — only 1.1.0 binary in stores is iOS)
+eas update --branch production --environment production --platform ios --message "..."
+
+# Push OTA — both platforms (only when Android 1.1.0 is live too)
+eas update --branch production --environment production --platform all --message "..."
 
 # Promote a tested preview update to production
 eas update:republish --destination-channel production --message "..."
 
-# Roll back a bad update
-eas update:rollback --branch production
+# Roll back a bad update (also takes --platform)
+eas update:rollback --branch production --platform ios
 ```
