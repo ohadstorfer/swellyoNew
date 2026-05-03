@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -34,6 +34,7 @@ import {
   getCountryImageFallback,
   resolveLifestyleKeywordToImageUrl,
 } from '../../services/media/imageService';
+import { getDisplayLabelAndFlagKey } from '../../utils/destinationDisplay';
 import { uploadCoverImage, uploadProfileImage } from '../../services/storage/storageService';
 import {
   profileVideoUploadTracker,
@@ -45,6 +46,15 @@ import { ProfileEditSurfSkillScreen } from './ProfileEditSurfSkillScreen';
 import { ProfileEditSurfVideoScreen } from './ProfileEditSurfVideoScreen';
 import { ProfileEditDestinationScreen } from './ProfileEditDestinationScreen';
 import { ProfileEditLifestyleScreen } from './ProfileEditLifestyleScreen';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import Reanimated, {
+  useSharedValue,
+  useAnimatedStyle,
+  runOnJS,
+  withSpring,
+  withTiming,
+  type SharedValue,
+} from 'react-native-reanimated';
 import { LIFESTYLE_ICON_MAP } from '../../utils/lifestyleIconMap';
 import { CountrySearchModal } from '../CountrySearchModal';
 import { HomeBreakSearchSheet, HomeBreakSelection } from '../HomeBreakSearchSheet';
@@ -610,6 +620,28 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
     [persist, editingLifestyleIndex, surfer?.lifestyle_keywords, surfer?.lifestyle_image_urls],
   );
 
+  // Reorder lifestyle keywords. lifestyle_image_urls is a keyword→URL map, so
+  // it stays in sync automatically — only the keyword array order changes.
+  const handleLifestyleReorder = useCallback(
+    async (newKeywords: string[]) => {
+      const baseKeywords = surfer?.lifestyle_keywords ?? [];
+      if (
+        baseKeywords.length === newKeywords.length &&
+        baseKeywords.every((kw, i) => kw === newKeywords[i])
+      ) {
+        return;
+      }
+      const baseImages: Record<string, string> = {
+        ...((surfer?.lifestyle_image_urls as Record<string, string> | null | undefined) ?? {}),
+      };
+      await persist('lifestyle', {
+        lifestyleKeywords: newKeywords,
+        lifestyleImageUrls: Object.keys(baseImages).length ? baseImages : null,
+      });
+    },
+    [persist, surfer?.lifestyle_keywords, surfer?.lifestyle_image_urls],
+  );
+
   const handleLifestyleDelete = useCallback(async () => {
     if (typeof editingLifestyleIndex !== 'number') return;
     const baseKeywords = [...(surfer?.lifestyle_keywords ?? [])];
@@ -1017,6 +1049,7 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
                             key={`${dest.country}-${idx}`}
                             country={dest.country}
                             days={dest.time_in_days}
+                            timeText={dest.time_in_text}
                             onPress={() => setEditingDestinationIndex(idx)}
                           />
                         ))}
@@ -1039,7 +1072,8 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
                   <View style={styles.destinationsBlock}>
                     {lifestyleKeywords.length === 0 ? (
                       <Text style={styles.emptyText}>No lifestyle interests added yet.</Text>
-                    ) : (
+                    ) : Platform.OS === 'web' ? (
+                      // Web: static grid, no drag (per spec — drag is native-only).
                       <View style={styles.cardsContainer}>
                         {lifestyleKeywords.slice(0, 6).map((kw, idx) => (
                           <LifestyleCard
@@ -1050,6 +1084,20 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
                           />
                         ))}
                       </View>
+                    ) : (
+                      // Native: drag-to-reorder. Custom impl over gesture-handler v2 +
+                      // Reanimated. The pan gesture is attached only to the drag handle
+                      // (so finger-on-card scrolling still bubbles to the parent
+                      // ScrollView) and uses `activateAfterLongPress` so the row never
+                      // moves until the user starts sliding their finger. Drag state is
+                      // shared across all rows so non-dragged rows shift live to make
+                      // space.
+                      <LifestyleReorderableList
+                        items={lifestyleKeywords.slice(0, 6)}
+                        imageUrls={lifestyleImageUrls}
+                        onReorder={handleLifestyleReorder}
+                        onItemPress={(idx) => setEditingLifestyleIndex(idx)}
+                      />
                     )}
                     {lifestyleKeywords.length < 6 ? (
                       <View style={styles.destAddButtonWrap}>
@@ -1366,11 +1414,20 @@ const EditCard: React.FC<EditCardProps> = ({
 const DestinationCard: React.FC<{
   country: string;
   days: number;
+  timeText?: string;
   onPress?: () => void;
-}> = ({ country, days, onPress }) => {
-  const primaryUrl = getCountryImageFromStorage(country);
+}> = ({ country, days, timeText, onPress }) => {
+  // Friendly label: "United States - California" → "California"; image
+  // lookup uses flagKey so US-state buckets / fallbacks still resolve.
+  const { displayLabel, flagKey } = getDisplayLabelAndFlagKey(country);
+  const primaryUrl = getCountryImageFromStorage(flagKey);
   const [failed, setFailed] = useState(false);
-  const imageUri = !failed && primaryUrl ? primaryUrl : getCountryImageFallback(country);
+  const imageUri = !failed && primaryUrl ? primaryUrl : getCountryImageFallback(flagKey);
+
+  // Prefer the human-readable time_in_text the user picked when they added the
+  // destination (e.g. "10 months") — same string ProfileScreen renders. Fall
+  // back to days if that field isn't populated for legacy rows.
+  const displayTime = (timeText && timeText.trim()) || `${days} day${days === 1 ? '' : 's'}`;
 
   const inner = (
     <>
@@ -1385,9 +1442,9 @@ const DestinationCard: React.FC<{
         />
       </View>
       <View style={styles.editCardText}>
-        <Text style={styles.editCardLabel}>{country}</Text>
+        <Text style={styles.editCardLabel}>{displayLabel}</Text>
         <Text style={styles.editCardValue} numberOfLines={1}>
-          {days} Day{days === 1 ? '' : 's'}
+          {displayTime}
         </Text>
       </View>
       <Ionicons name="chevron-forward" size={20} color="#B0B0B0" />
@@ -1431,7 +1488,7 @@ const LifestyleCard: React.FC<{
         )}
       </View>
       <View style={styles.editCardText}>
-        <Text style={styles.editCardLabel}>{capitalizeWords(keyword)}</Text>
+        <Text style={styles.lifestyleCardLabel}>{capitalizeWords(keyword)}</Text>
       </View>
       <Ionicons name="chevron-forward" size={20} color="#B0B0B0" />
     </>
@@ -1446,6 +1503,273 @@ const LifestyleCard: React.FC<{
   }
 
   return <View style={styles.editCard}>{inner}</View>;
+};
+
+// Approximate height of a lifestyle row including its bottom margin. Used to
+// translate finger-Y delta into an integer index delta on drag end. Slight
+// per-device drift is absorbed by Math.round.
+const LIFESTYLE_ROW_HEIGHT = 73 + 16;
+
+const LIFESTYLE_SPRING = { damping: 22, stiffness: 240, mass: 0.6 };
+
+// Architecture (modeled after react-native-draggable-flatlist v4):
+// - Rows are absolutely positioned inside a fixed-height container. Their
+//   visual order is a `positions` shared-value map (keyword → slot index).
+//   This decouples visual order from React's array order, which is what
+//   makes the post-release transition smooth — we update positions live on
+//   the UI thread, then commit the new array order to React only AFTER the
+//   spring lands.
+// - The dragged row tracks finger position via its own `activeTranslateY`
+//   shared value. Other rows derive their `top` from the positions map,
+//   springed via `withSpring` in useAnimatedStyle.
+// - On release: spring `activeTranslateY` to `positions[key] * H` (already
+//   correct because we updated the map live during drag); only inside the
+//   spring's completion callback do we call `runOnJS(commit)` to flush the
+//   new order into React state.
+// - `onFinalize` is intentionally NOT used to reset shared values — that
+//   would race with and cancel the in-flight release spring.
+
+const LifestyleReorderableList: React.FC<{
+  items: string[];
+  imageUrls: Record<string, string> | null;
+  onReorder: (next: string[]) => void;
+  onItemPress: (idx: number) => void;
+}> = ({ items, imageUrls, onReorder, onItemPress }) => {
+  const positions = useSharedValue<Record<string, number>>({});
+  const activeKey = useSharedValue<string | null>(null);
+  const activeTranslateY = useSharedValue(0);
+
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+  const onReorderRef = useRef(onReorder);
+  onReorderRef.current = onReorder;
+
+  // Sync the positions map only when items truly diverges from positions —
+  // a NEW keyword appears, a keyword DISAPPEARS, or it's the first mount.
+  // We DO NOT resync purely on items reference change or order change. After
+  // a drag commit, `onReorder` is async (Supabase round-trip); the parent
+  // can re-render with the OLD items order while `positions` already holds
+  // the new order. Naïvely resyncing in that window snaps every row back to
+  // its pre-drag slot until the state update lands — exactly the bug we're
+  // fixing.
+  const initializedRef = useRef(false);
+  useEffect(() => {
+    if (activeKey.value !== null) return;
+    const itemSet = new Set(items);
+    const positionKeys = Object.keys(positions.value);
+    const hasStale = positionKeys.some((k) => !itemSet.has(k));
+    const hasMissing = items.some((kw) => !(kw in positions.value));
+    const shouldSync = !initializedRef.current || hasStale || hasMissing;
+    if (!shouldSync) return;
+    const map: Record<string, number> = {};
+    for (let i = 0; i < items.length; i++) map[items[i]] = i;
+    positions.value = map;
+    initializedRef.current = true;
+  }, [items, positions, activeKey]);
+
+  const commit = useCallback(() => {
+    // Build the new items array from the (UI-thread-mutated) positions map.
+    const map = positions.value;
+    const next = [...itemsRef.current].sort((a, b) => (map[a] ?? 0) - (map[b] ?? 0));
+    const same =
+      next.length === itemsRef.current.length &&
+      next.every((kw, i) => kw === itemsRef.current[i]);
+    if (!same) onReorderRef.current(next);
+    // Drop active state. We deliberately DO NOT reset activeTranslateY — its
+    // current value (the spring's landed position) matches what each row's
+    // non-active branch will compute (`positions[kw] * H`), so flipping
+    // `activeKey` to null is a visual no-op. Resetting activeTranslateY to 0
+    // here would race with the worklet and cause a one-frame jump to slot 0.
+    activeKey.value = null;
+  }, [positions, activeKey]);
+
+  const itemCount = items.length;
+
+  return (
+    <View
+      style={[
+        styles.lifestyleAbsoluteContainer,
+        { height: itemCount * LIFESTYLE_ROW_HEIGHT },
+      ]}
+    >
+      {items.map((kw, idx) => (
+        // key=kw so each row's component instance (and its shared-value reads)
+        // survives a reorder. React reconciles the move; no remount.
+        <LifestyleReorderableRow
+          key={kw}
+          keyword={kw}
+          imageUrl={imageUrls?.[kw] ?? null}
+          fallbackIndex={idx}
+          totalItems={itemCount}
+          positions={positions}
+          activeKey={activeKey}
+          activeTranslateY={activeTranslateY}
+          onPress={() => onItemPress(idx)}
+          onCommit={commit}
+        />
+      ))}
+    </View>
+  );
+};
+
+const LifestyleReorderableRow: React.FC<{
+  keyword: string;
+  imageUrl: string | null;
+  fallbackIndex: number;
+  totalItems: number;
+  positions: SharedValue<Record<string, number>>;
+  activeKey: SharedValue<string | null>;
+  activeTranslateY: SharedValue<number>;
+  onPress: () => void;
+  onCommit: () => void;
+}> = ({
+  keyword,
+  imageUrl,
+  fallbackIndex,
+  totalItems,
+  positions,
+  activeKey,
+  activeTranslateY,
+  onPress,
+  onCommit,
+}) => {
+  // Captures the dragged row's slot at drag-start so onUpdate can derive an
+  // absolute Y from the finger's translation delta.
+  const dragStartSlot = useSharedValue(0);
+
+  const pan = useMemo(
+    () =>
+      Gesture.Pan()
+        .activateAfterLongPress(220)
+        .onStart(() => {
+          // Use the positions map as the source of truth for "where am I now".
+          // Falls back to fallbackIndex if the map hasn't been hydrated yet.
+          const slot = positions.value[keyword] ?? fallbackIndex;
+          dragStartSlot.value = slot;
+          activeTranslateY.value = slot * LIFESTYLE_ROW_HEIGHT;
+          activeKey.value = keyword;
+        })
+        .onUpdate((e) => {
+          const newY = dragStartSlot.value * LIFESTYLE_ROW_HEIGHT + e.translationY;
+          activeTranslateY.value = newY;
+
+          // Compute the slot the finger currently hovers over and rebuild the
+          // map if it differs from this row's current slot. The non-dragged
+          // rows' useAnimatedStyle re-evaluates because positions.value points
+          // at a new object reference.
+          const targetSlot = Math.max(
+            0,
+            Math.min(
+              totalItems - 1,
+              Math.round(newY / LIFESTYLE_ROW_HEIGHT),
+            ),
+          );
+          const map = positions.value;
+          const currentSlot = map[keyword] ?? fallbackIndex;
+          if (targetSlot !== currentSlot) {
+            const next: Record<string, number> = { ...map };
+            // Shift every other row that sits between currentSlot and targetSlot.
+            const keys = Object.keys(next);
+            for (let i = 0; i < keys.length; i++) {
+              const k = keys[i];
+              if (k === keyword) continue;
+              const s = next[k];
+              if (currentSlot < targetSlot) {
+                if (s > currentSlot && s <= targetSlot) next[k] = s - 1;
+              } else {
+                if (s >= targetSlot && s < currentSlot) next[k] = s + 1;
+              }
+            }
+            next[keyword] = targetSlot;
+            positions.value = next;
+          }
+        })
+        .onEnd(() => {
+          // The positions map is already correct (live updates during drag).
+          // Spring activeTranslateY to the dragged row's final slot Y, and
+          // commit ONLY in the spring's completion callback so React's
+          // reorder doesn't fight the in-flight animation.
+          const finalSlot = positions.value[keyword] ?? fallbackIndex;
+          const targetY = finalSlot * LIFESTYLE_ROW_HEIGHT;
+          activeTranslateY.value = withSpring(
+            targetY,
+            LIFESTYLE_SPRING,
+            (finished) => {
+              if (finished) {
+                runOnJS(onCommit)();
+              }
+            },
+          );
+        }),
+      // Deliberately no .onFinalize() that touches activeTranslateY — that
+      // would cancel the release spring (its `finished` callback fires
+      // `false`) and the commit would never run. This is the
+      // most-cited footgun in the docs and in DraggableFlatList issue #532.
+    [
+      keyword,
+      fallbackIndex,
+      totalItems,
+      positions,
+      activeKey,
+      activeTranslateY,
+      dragStartSlot,
+      onCommit,
+    ],
+  );
+
+  const animatedStyle = useAnimatedStyle(() => {
+    const slot = positions.value[keyword] ?? fallbackIndex;
+    const isActive = activeKey.value === keyword;
+
+    // Pick-up / put-down feel: scale and opacity are timed (180ms) so the row
+    // doesn't pop instantly between resting and floating. withTiming inside
+    // useAnimatedStyle smoothly animates whenever the conditional flips.
+    const SCALE_DURATION = 180;
+    const targetScale = isActive ? 1.04 : 1;
+    const targetOpacity = isActive ? 0.96 : 1;
+
+    if (isActive) {
+      // Free-floating: tracks the finger via activeTranslateY (and on
+      // release, springs to the final slot's Y). Lifted above siblings.
+      // No withSpring on translateY here — the dragged row must follow the
+      // finger 1:1 with no perceptible lag.
+      return {
+        transform: [
+          { translateY: activeTranslateY.value },
+          { scale: withTiming(targetScale, { duration: SCALE_DURATION }) },
+        ],
+        zIndex: 999,
+        elevation: 12,
+        opacity: withTiming(targetOpacity, { duration: SCALE_DURATION }),
+      };
+    }
+
+    // Slot-aligned: animate to the slot the positions map says I belong in.
+    // withSpring picks up smoothly from the active branch's last value
+    // because translateY is the same transform position in both branches.
+    return {
+      transform: [
+        { translateY: withSpring(slot * LIFESTYLE_ROW_HEIGHT, LIFESTYLE_SPRING) },
+        { scale: withTiming(targetScale, { duration: SCALE_DURATION }) },
+      ],
+      zIndex: 0,
+      elevation: 0,
+      opacity: withTiming(targetOpacity, { duration: SCALE_DURATION }),
+    };
+  });
+
+  return (
+    <Reanimated.View style={[styles.lifestyleAbsoluteRow, animatedStyle]}>
+      <GestureDetector gesture={pan}>
+        <View style={styles.lifestyleDragHandle}>
+          <Ionicons name="reorder-three" size={22} color="#9A9A9A" />
+        </View>
+      </GestureDetector>
+      <View style={styles.lifestyleCardWrap}>
+        <LifestyleCard keyword={keyword} imageUrl={imageUrl} onPress={onPress} />
+      </View>
+    </Reanimated.View>
+  );
 };
 
 function getBoardTypeInfo(input?: string): { name: string; imageUrl: string } {
@@ -1661,6 +1985,37 @@ const styles = StyleSheet.create({
   cardsContainer: {
     paddingHorizontal: 16,
     gap: 16,
+  },
+  // The reorderable list uses absolute positioning so the dragged row can
+  // float free of the flex flow and the rest of the rows can slide via
+  // shared-value-driven `top` updates (no React re-renders during drag).
+  // Height is set inline (itemCount * LIFESTYLE_ROW_HEIGHT) so the parent
+  // ScrollView reserves the right space.
+  lifestyleAbsoluteContainer: {
+    position: 'relative',
+    width: '100%',
+  },
+  // Each row's left/right respect the section's 16px horizontal padding.
+  // height matches the card's thumb height; the 16px gap between rows is
+  // baked into LIFESTYLE_ROW_HEIGHT (73 + 16) and produced by translateY.
+  lifestyleAbsoluteRow: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    height: 73,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  // Width here is the "shorter from the left" the card loses to the handle.
+  lifestyleDragHandle: {
+    width: 32,
+    alignSelf: 'stretch',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingRight: 4,
+  },
+  lifestyleCardWrap: {
+    flex: 1,
   },
   inlineField: {
     backgroundColor: FIGMA.fieldBg,
@@ -1918,15 +2273,25 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   editCardLabel: {
-    fontSize: 12,
-    lineHeight: 14,
-    color: FIGMA.textPrimary,
-  },
-  editCardValue: {
+    // Country (destinations): prominent, bold.
     fontSize: 18,
     lineHeight: 22,
     fontWeight: '700',
     color: FIGMA.textPrimary,
+  },
+  lifestyleCardLabel: {
+    // Lifestyle keyword: same family but a tiny notch lighter than the
+    // destination-card title so the lifestyle row reads as secondary.
+    fontSize: 16,
+    lineHeight: 20,
+    fontWeight: '600',
+    color: FIGMA.textPrimary,
+  },
+  editCardValue: {
+    // Time-spent line under the country: small + secondary gray.
+    fontSize: 12,
+    lineHeight: 14,
+    color: FIGMA.textSecondary,
   },
   emptyText: {
     paddingHorizontal: 16,

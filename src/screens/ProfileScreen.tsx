@@ -32,6 +32,7 @@ import { Images } from '../assets/images';
 import { getSurfLevelVideoFromStorage } from '../services/media/videoService';
 import { getVideoPreloadStatus } from '../services/media/videoPreloadService';
 import { getCountryFlag } from '../utils/countryFlags';
+import { getDisplayLabelAndFlagKey } from '../utils/destinationDisplay';
 import { uploadProfileImage, uploadProfileVideoS3 } from '../services/storage/storageService';
 import { validateVideoComplete } from '../utils/videoValidation';
 import { ProfileImage } from '../components/ProfileImage';
@@ -1816,14 +1817,18 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
     const country = destination.country || (destination as any).destination_name?.split(',')[0]?.trim() || '';
     const state = (destination as any).state || '';
     const areas = destination.area || [];
+    // getDisplayLabelAndFlagKey turns "United States - California" / "United States - Hawaii"
+    // into a clean "California" / "Hawaii" — the canonical "United States - X" form is what
+    // the DB and matching expect, so we keep storage as-is and only friendly-label here.
+    const { displayLabel, flagKey } = getDisplayLabelAndFlagKey(country);
     const isUSA = ['USA', 'United States', 'US', 'U.S.', 'U.S.A.'].includes(country);
-    const primaryLocation = isUSA && state ? state : country;
+    const primaryLocation = isUSA && state ? state : displayLabel;
     const stateLower = primaryLocation.trim().toLowerCase();
     const areaToShow = isUSA && areas.length > 0
       ? (areas.find((a: any) => (a != null && String(a).trim().toLowerCase() !== stateLower)) ?? '')
       : '';
     const displayName = areaToShow ? `${primaryLocation}, ${areaToShow}` : primaryLocation;
-    const locationForAssets = isUSA && state ? state : country;
+    const locationForAssets = isUSA && state ? state : flagKey;
     const countryImageUrl = getCountryImageFromStorage(locationForAssets);
     const pexelsImageUrl = pexelsImages[locationForAssets] || null;
     const countryFlagUrl = getCountryFlag(locationForAssets);
@@ -1874,7 +1879,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
           />
         ) : (
           <Image
-            source={{ uri: getCountryImageFallback(country) }}
+            source={{ uri: getCountryImageFallback(flagKey) }}
             style={styles.destinationImage}
             resizeMode="cover"
           />

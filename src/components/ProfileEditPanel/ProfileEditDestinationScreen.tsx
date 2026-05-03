@@ -23,6 +23,7 @@ import { CountrySearchModal } from '../CountrySearchModal';
 import { DestinationDurationInput } from '../DestinationDurationInput';
 import { PlaceChip } from '../PlaceChip';
 import { normalizeMapPickerPlace } from '../../utils/googlePlaceNormalizer';
+import { getDisplayLabelAndFlagKey } from '../../utils/destinationDisplay';
 import type { MapPickerPlace } from '../MapPickerModal';
 import type { DurationTimeUnit } from '../../utils/destinationDuration';
 import {
@@ -323,6 +324,11 @@ export const ProfileEditDestinationScreen: React.FC<Props> = ({
   const apiKey = process.env.EXPO_PUBLIC_GOOGLE_PLACES_API_KEY;
   const regionCode = useMemo(() => {
     const country = selectedCountry || destination?.country || '';
+    // California / Hawaii are stored as "United States - California" / etc.
+    // and aren't in COUNTRY_TO_REGION directly — fall back to "us" for those.
+    // Same handling as DestinationMapPickerCard in onboarding.
+    const { flagKey } = getDisplayLabelAndFlagKey(country);
+    if (flagKey === 'California' || flagKey === 'Hawaii') return 'us';
     return COUNTRY_TO_REGION[country];
   }, [selectedCountry, destination?.country]);
 
@@ -493,7 +499,11 @@ export const ProfileEditDestinationScreen: React.FC<Props> = ({
 
   if (!mounted) return null;
 
-  const displayCountry = selectedCountry;
+  // Show the friendly label ("California" / "Hawaii") even though we keep
+  // storing the canonical "United States - California" form for matching/DB.
+  const displayCountry = selectedCountry
+    ? getDisplayLabelAndFlagKey(selectedCountry).displayLabel
+    : '';
   const placesInputDisabled = !selectedCountry || !apiKey;
   const placesPlaceholder = !selectedCountry
     ? 'Pick a country first'

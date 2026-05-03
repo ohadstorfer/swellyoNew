@@ -142,7 +142,9 @@
       "Bash(cp \"C:/Users/User/Downloads/home-break-icon.png\" \"src/assets/icons/home-break-icon.png\")",
       "Bash(cp \"C:/Users/User/Downloads/home-break-location-pin-icon.png\" \"src/assets/icons/home-break-location-pin-icon.png\")",
       "Bash(node -e \"console.log\\('app.json ✓', !!JSON.parse\\(require\\('fs'\\).readFileSync\\('app.json','utf8'\\)\\)\\)\")",
-      "Bash(node -e \"console.log\\('eas.json ✓', !!JSON.parse\\(require\\('fs'\\).readFileSync\\('eas.json','utf8'\\)\\)\\)\")"
+      "Bash(node -e \"console.log\\('eas.json ✓', !!JSON.parse\\(require\\('fs'\\).readFileSync\\('eas.json','utf8'\\)\\)\\)\")",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:api.github.com)"
     ]
   }
 }
