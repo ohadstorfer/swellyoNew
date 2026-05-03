@@ -25,4 +25,5 @@ Populates the `user_destinations` table by geocoding place names from a user's `
 - Geocodes each (place name + country, and state for USA) with the Google Geocoding API.
 - Normalizes the response to `place_id`, `lat`, `lng`, `country`, `admin_level_1`, `admin_level_2`, `locality`, `types`, `display_name`, and `formatted_address`. `display_name` is the place name used in the geocode request; `formatted_address` is from the Geocoding API result.
 - Inserts only rows that don’t already exist for that user and `place_id` (no duplicates).
+- **Reconciles**: after upserting, deletes any rows for this user whose `place_id` is no longer in the new geocoded set, so `user_destinations` mirrors the latest `destinations_array`. Reconcile only runs when geocoding fully succeeds (every expected place resolved) or when the input array is empty — partial Google API failures skip the delete so a transient outage can't lose data. Response includes `deleted` count and `reconciled: boolean`.
 - Uses a short delay between API calls to respect rate limits.

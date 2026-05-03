@@ -263,6 +263,7 @@ serve(async (req) => {
     }
   }
 
+  const expectedPlaces = placeNamesByCountry.length
   const rows: GeocodedRow[] = []
   for (let i = 0; i < placeNamesByCountry.length; i++) {
     if (i > 0) await new Promise((r) => setTimeout(r, GEOCODE_DELAY_MS))
@@ -274,54 +275,83 @@ serve(async (req) => {
     }
   }
 
-  if (rows.length === 0) {
-    return new Response(
-      JSON.stringify({
-        success: true,
-        user_id,
-        inserted: 0,
-        skipped: 0,
-        message: 'No geocoded results to insert',
-      }),
-      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
+  // Reconcile = "user_destinations should mirror the new destinations_array".
+  // Only safe when we either expected nothing (empty array → delete all rows)
+  // or every expected place geocoded successfully. A partial failure (some
+  // places resolved, some didn't) means we can't tell missing-from-new apart
+  // from failed-to-geocode, so we skip the delete and just upsert what we got.
+  const safeToReconcile = expectedPlaces === 0 || rows.length === expectedPlaces
+
+  let upserted = 0
+  let skippedExisting = 0
+  if (rows.length > 0) {
+    const { data: existing } = await supabaseAdmin
+      .from('user_destinations')
+      .select('place_id')
+      .eq('user_id', user_id)
+      .in('place_id', rows.map((r) => r.place_id))
+
+    const existingPlaceIds = new Set((existing || []).map((r: { place_id: string }) => r.place_id))
+    const toInsert = rows.filter((r) => !existingPlaceIds.has(r.place_id))
+    skippedExisting = rows.length - toInsert.length
+
+    if (toInsert.length > 0) {
+      const insertPayload = toInsert.map((r) => ({
+        user_id: r.user_id,
+        place_id: r.place_id,
+        lat: r.lat,
+        lng: r.lng,
+        country: r.country,
+        admin_level_1: r.admin_level_1,
+        admin_level_2: r.admin_level_2,
+        locality: r.locality,
+        types: r.types,
+        display_name: r.display_name,
+        formatted_address: r.formatted_address,
+        geo_bucket_4: r.geo_bucket_4,
+        geo_bucket_5: r.geo_bucket_5,
+        geo_bucket_6: r.geo_bucket_6,
+      }))
+      const { error: insertError } = await supabaseAdmin
+        .from('user_destinations')
+        .upsert(insertPayload, { onConflict: 'user_id,place_id', ignoreDuplicates: true })
+      if (insertError) {
+        console.error('Insert user_destinations error:', insertError)
+        return new Response(
+          JSON.stringify({ success: false, error: insertError.message }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      upserted = toInsert.length
+    }
   }
 
-  const { data: existing } = await supabaseAdmin
-    .from('user_destinations')
-    .select('place_id')
-    .eq('user_id', user_id)
-    .in('place_id', rows.map((r) => r.place_id))
-
-  const existingPlaceIds = new Set((existing || []).map((r: { place_id: string }) => r.place_id))
-  const toInsert = rows.filter((r) => !existingPlaceIds.has(r.place_id))
-
-  if (toInsert.length > 0) {
-    const insertPayload = toInsert.map((r) => ({
-      user_id: r.user_id,
-      place_id: r.place_id,
-      lat: r.lat,
-      lng: r.lng,
-      country: r.country,
-      admin_level_1: r.admin_level_1,
-      admin_level_2: r.admin_level_2,
-      locality: r.locality,
-      types: r.types,
-      display_name: r.display_name,
-      formatted_address: r.formatted_address,
-      geo_bucket_4: r.geo_bucket_4,
-      geo_bucket_5: r.geo_bucket_5,
-      geo_bucket_6: r.geo_bucket_6,
-    }))
-    const { error: insertError } = await supabaseAdmin
+  let deleted = 0
+  if (safeToReconcile) {
+    const newPlaceIds = new Set(rows.map((r) => r.place_id))
+    const { data: allExisting, error: existingError } = await supabaseAdmin
       .from('user_destinations')
-      .upsert(insertPayload, { onConflict: 'user_id,place_id', ignoreDuplicates: true })
-    if (insertError) {
-      console.error('Insert user_destinations error:', insertError)
-      return new Response(
-        JSON.stringify({ success: false, error: insertError.message }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      .select('place_id')
+      .eq('user_id', user_id)
+    if (existingError) {
+      console.warn('Fetch existing user_destinations for reconcile failed:', existingError)
+    } else {
+      const stalePlaceIds = (allExisting || [])
+        .map((r: { place_id: string }) => r.place_id)
+        .filter((pid: string) => !newPlaceIds.has(pid))
+      if (stalePlaceIds.length > 0) {
+        const { error: deleteError } = await supabaseAdmin
+          .from('user_destinations')
+          .delete()
+          .eq('user_id', user_id)
+          .in('place_id', stalePlaceIds)
+        if (deleteError) {
+          // Insert succeeded; surface delete failure but don't 500 the request.
+          console.warn('Delete stale user_destinations rows failed:', deleteError)
+        } else {
+          deleted = stalePlaceIds.length
+        }
+      }
     }
   }
 
@@ -329,9 +359,11 @@ serve(async (req) => {
     JSON.stringify({
       success: true,
       user_id,
-      inserted: toInsert.length,
-      skipped: rows.length - toInsert.length,
+      inserted: upserted,
+      skipped: skippedExisting,
+      deleted,
       total_geocoded: rows.length,
+      reconciled: safeToReconcile,
     }),
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
   )

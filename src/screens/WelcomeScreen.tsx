@@ -4,6 +4,7 @@ import {
   StyleSheet,
   TouchableOpacity,
   TouchableWithoutFeedback,
+  Pressable,
   Platform,
   Alert,
   Image,
@@ -283,6 +284,27 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
   };
 
   const [isVerifying, setIsVerifying] = useState(false);
+
+  // Hidden recovery: 3-second long-press on the block error message clears the
+  // device-local age-gate block. Lets a supervised tester (e.g. an underage
+  // beta user being demoed) retry without reinstalling. Server-side gating
+  // would still catch a real underage signup elsewhere.
+  const handleSecretUnblock = async () => {
+    await ageGateService.clearBlock();
+    setIsAgeBlocked(false);
+    setAgeSheetError(false);
+    setPickerDate(defaultDate);
+    setTimeout(() => {
+      const monthIndex = defaultDate.getMonth();
+      const dayIndex = defaultDate.getDate() - 1;
+      const yearIndex = defaultDate.getFullYear() - (currentYear - 120);
+      isSnapping.current = true;
+      monthScrollRef.current?.scrollTo({ y: monthIndex * ITEM_HEIGHT, animated: false });
+      dayScrollRef.current?.scrollTo({ y: dayIndex * ITEM_HEIGHT, animated: false });
+      yearScrollRef.current?.scrollTo({ y: yearIndex * ITEM_HEIGHT, animated: false });
+      setTimeout(() => { isSnapping.current = false; }, 100);
+    }, 50);
+  };
 
   const handleAgeVerifyContinue = async () => {
     if (isVerifying) return;
@@ -983,9 +1005,11 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
 
             {/* Title */}
             {ageSheetError ? (
-              <RNText style={ageStyles.sheetTitleError}>
-                Sorry, but you are not eligible to use Swellyo at this time.
-              </RNText>
+              <Pressable onLongPress={handleSecretUnblock} delayLongPress={3000}>
+                <RNText style={ageStyles.sheetTitleError}>
+                  Sorry, but you are not eligible to use Swellyo at this time.
+                </RNText>
+              </Pressable>
             ) : (
               <>
                 <RNText style={ageStyles.sheetTitle}>Age verification</RNText>

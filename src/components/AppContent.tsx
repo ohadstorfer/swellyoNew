@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Alert, Keyboard, Platform, StyleSheet, View, TouchableOpacity, Text as RNText } from 'react-native';
+import { Alert, Keyboard, Platform, Pressable, StyleSheet, View, TouchableOpacity, Text as RNText } from 'react-native';
 import { WelcomeScreen } from '../screens/WelcomeScreen';
 import { OnboardingWelcomeScreen } from '../screens/OnboardingWelcomeScreen';
 import { OnboardingStep1Screen, OnboardingData } from '../screens/OnboardingStep1Screen';
@@ -1214,13 +1214,23 @@ export const AppContent: React.FC = () => {
     setCurrentStep(STEP_WELCOME);
   };
 
+  // Hidden recovery: 3-second long-press on the modal text clears the
+  // device-local age-gate block. Lets a supervised tester retry without
+  // reinstalling the app.
+  const handleAgeBlockSecretUnblock = async () => {
+    await ageGateService.clearBlock();
+    setShowAgeBlockOverlay(false);
+  };
+
   if (showAgeBlockOverlay) {
     return (
       <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center', padding: 24 }}>
         <View style={{ backgroundColor: '#fff', borderRadius: 16, padding: 28, maxWidth: 340, width: '100%', alignItems: 'center' }}>
-          <RNText style={{ fontSize: 17, lineHeight: 25, textAlign: 'center', color: '#333', marginBottom: 24, fontWeight: '500' }}>
-            We're sorry, but you are not eligible to use Swellyo as you are under the permitted age for using our app.
-          </RNText>
+          <Pressable onLongPress={handleAgeBlockSecretUnblock} delayLongPress={3000}>
+            <RNText style={{ fontSize: 17, lineHeight: 25, textAlign: 'center', color: '#333', marginBottom: 24, fontWeight: '500' }}>
+              We're sorry, but you are not eligible to use Swellyo as you are under the permitted age for using our app.
+            </RNText>
+          </Pressable>
           <TouchableOpacity
             onPress={handleAgeBlockOK}
             style={{ backgroundColor: '#333', borderRadius: 24, paddingVertical: 14, paddingHorizontal: 48 }}

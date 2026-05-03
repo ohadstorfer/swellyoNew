@@ -3354,7 +3354,14 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
         // This is a manual behavior='padding' that avoids measureLayout — so it
         // works correctly even nested inside react-native-screen-transitions'
         // transformed ContentLayer, where the normal KAV fails.
-        const useGestureArea = !isExpoGo && KeyboardGestureArea != null;
+        // KeyboardGestureArea is only useful on Android — iOS already supports
+        // interactive keyboard dismiss natively via FlatList's keyboardDismissMode.
+        // On iOS in react-native-keyboard-controller v1.18.5, wrapping the chat
+        // in KeyboardGestureArea was leaving a phantom gap between the input bar
+        // and the keyboard top, AND opening this screen polluted the native
+        // KeyboardController state so the gap then appeared in DMs too — same
+        // gating as DirectMessageScreen.tsx.
+        const useGestureArea = !isExpoGo && KeyboardGestureArea != null && Platform.OS === 'android';
         // Pairing nativeID + textInputNativeID extends the gesture-sensitive
         // zone up to include the composer, so a drag starting inside the
         // composer area moves the keyboard 1:1 with the finger (WhatsApp

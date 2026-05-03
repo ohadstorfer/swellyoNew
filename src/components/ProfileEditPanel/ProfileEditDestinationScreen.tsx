@@ -12,11 +12,18 @@ import {
   Keyboard,
   KeyboardEvent,
   PanResponder,
+  TextInput,
+  ScrollView,
+  FlatList,
+  ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { CountrySearchModal } from '../CountrySearchModal';
 import { DestinationDurationInput } from '../DestinationDurationInput';
+import { PlaceChip } from '../PlaceChip';
+import { normalizeMapPickerPlace } from '../../utils/googlePlaceNormalizer';
+import type { MapPickerPlace } from '../MapPickerModal';
 import type { DurationTimeUnit } from '../../utils/destinationDuration';
 import {
   computeDurationParts,
@@ -38,6 +45,7 @@ type Props = {
   destination: Destination | null;
   onSave?: (next: {
     country: string;
+    area: string[];
     time_in_days: number;
     time_in_text: string;
   }) => void | Promise<void>;
@@ -56,6 +64,96 @@ const FIGMA = {
   buttonBg: '#212121',
   buttonText: '#FFFFFF',
 };
+
+// Maps a country name to a Google Places region code so autocomplete results
+// stay scoped to the destination country. Mirrors the table in
+// DestinationMapPickerCard — kept local to avoid refactoring that file.
+const COUNTRY_TO_REGION: Record<string, string> = {
+  'USA': 'us',
+  'United States': 'us',
+  'Costa Rica': 'cr',
+  'Nicaragua': 'ni',
+  'Panama': 'pa',
+  'El Salvador': 'sv',
+  'Indonesia': 'id',
+  'Sri Lanka': 'lk',
+  'Philippines': 'ph',
+  'Australia': 'au',
+  'Mexico': 'mx',
+  'Brazil': 'br',
+  'Portugal': 'pt',
+  'France': 'fr',
+  'Spain': 'es',
+  'South Africa': 'za',
+  'Morocco': 'ma',
+  'Israel': 'il',
+  'Japan': 'jp',
+  'New Zealand': 'nz',
+  'Peru': 'pe',
+  'Ecuador': 'ec',
+  'Chile': 'cl',
+};
+
+const PLACES_AUTOCOMPLETE_URL = 'https://places.googleapis.com/v1/places:autocomplete';
+const PLACES_DETAILS_URL = 'https://places.googleapis.com/v1/places';
+const SUGGESTION_DEBOUNCE_MS = 250;
+const MIN_QUERY_LENGTH = 2;
+const MAX_SUGGESTIONS = 5;
+
+interface PlaceSuggestion {
+  placeId: string;
+  text: string;
+}
+
+// Saved chip: identified by placeId when known, displayed by label.
+interface SavedPlace {
+  placeId: string;
+  displayLabel: string;
+  areaParts?: string[];
+}
+
+function useDebounce<T>(value: T, delay: number): T {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedValue(value), delay);
+    return () => clearTimeout(timer);
+  }, [value, delay]);
+  return debouncedValue;
+}
+
+async function fetchPlaceDetails(placeId: string, apiKey: string): Promise<MapPickerPlace | null> {
+  try {
+    const res = await fetch(`${PLACES_DETAILS_URL}/${encodeURIComponent(placeId)}`, {
+      method: 'GET',
+      headers: {
+        'X-Goog-Api-Key': apiKey,
+        'X-Goog-FieldMask': 'displayName,formattedAddress,location',
+      },
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const lat = data?.location?.latitude;
+    const lng = data?.location?.longitude;
+    if (typeof lat !== 'number' || typeof lng !== 'number') return null;
+    return {
+      name: data?.displayName?.text ?? data?.formattedAddress ?? '',
+      placeId,
+      lat,
+      lng,
+      formatted_address: data?.formattedAddress ?? '',
+    };
+  } catch {
+    return null;
+  }
+}
+
+function placesFromAreaArray(area: string[] | undefined): SavedPlace[] {
+  if (!area || area.length === 0) return [];
+  return area
+    .map((s) => (typeof s === 'string' ? s.trim() : ''))
+    .filter(Boolean)
+    .map((displayLabel) => ({ placeId: '', displayLabel }));
+}
 
 export const ProfileEditDestinationScreen: React.FC<Props> = ({
   visible,
@@ -110,7 +208,6 @@ export const ProfileEditDestinationScreen: React.FC<Props> = ({
       const vv = (window as any).visualViewport as VisualViewport | undefined;
       if (!vv) return;
       const onResize = () => {
-        // Difference between layout viewport and visible viewport ≈ keyboard height.
         const diff = window.innerHeight - vv.height;
         setKeyboardHeight(Math.max(0, Math.round(diff)));
       };
@@ -144,24 +241,43 @@ export const ProfileEditDestinationScreen: React.FC<Props> = ({
   const [timeUnit, setTimeUnit] = useState<DurationTimeUnit>(initial.unit);
   const [selectedCountry, setSelectedCountry] = useState('');
   const [countryModalVisible, setCountryModalVisible] = useState(false);
+  const [places, setPlaces] = useState<SavedPlace[]>([]);
+  const [query, setQuery] = useState('');
+  const [suggestions, setSuggestions] = useState<PlaceSuggestion[]>([]);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+  const [inputRowHeight, setInputRowHeight] = useState(0);
+  const inputRef = useRef<TextInput>(null);
+  const autocompleteSeqRef = useRef(0);
+  const isMountedRef = useRef(true);
 
-  // Sync only on closed→open transition (see same pattern in slide-in editors).
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => { isMountedRef.current = false; };
+  }, []);
+
+  // Sync only on closed→open transition (matches every other slide-in editor).
   const prevVisibleRef = useRef(visible);
   useEffect(() => {
     if (visible && !prevVisibleRef.current) {
+      setQuery('');
+      setSuggestions([]);
+      setSuggestionsLoading(false);
       if (mode === 'add') {
         setSelectedCountry('');
+        setPlaces([]);
         const next = decomposeDaysForDurationInput(0);
         setDayValue(next.value);
         setTimeUnit(next.unit);
       } else {
+        setSelectedCountry(destination?.country ?? '');
+        setPlaces(placesFromAreaArray(destination?.area));
         const next = decomposeDaysForDurationInput(destination?.time_in_days ?? 0);
         setDayValue(next.value);
         setTimeUnit(next.unit);
       }
     }
     prevVisibleRef.current = visible;
-  }, [visible, mode, destination?.time_in_days]);
+  }, [visible, mode, destination?.country, destination?.area, destination?.time_in_days]);
 
   useEffect(() => {
     if (visible && !mounted) {
@@ -204,6 +320,122 @@ export const ProfileEditDestinationScreen: React.FC<Props> = ({
     }
   }, [mounted, visible, screenHeight, translateY, backdropOpacity]);
 
+  const apiKey = process.env.EXPO_PUBLIC_GOOGLE_PLACES_API_KEY;
+  const regionCode = useMemo(() => {
+    const country = selectedCountry || destination?.country || '';
+    return COUNTRY_TO_REGION[country];
+  }, [selectedCountry, destination?.country]);
+
+  const debouncedQuery = useDebounce(query, SUGGESTION_DEBOUNCE_MS);
+
+  useEffect(() => {
+    const trimmed = debouncedQuery.trim();
+    if (!apiKey || trimmed.length < MIN_QUERY_LENGTH) {
+      setSuggestions([]);
+      setSuggestionsLoading(false);
+      return;
+    }
+    const seq = ++autocompleteSeqRef.current;
+    setSuggestionsLoading(true);
+
+    const body: Record<string, unknown> = {
+      input: trimmed,
+      includeQueryPredictions: false,
+    };
+    if (regionCode && regionCode.length === 2) {
+      body.includedRegionCodes = [regionCode];
+    }
+
+    fetch(PLACES_AUTOCOMPLETE_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': apiKey,
+        'X-Goog-FieldMask': 'suggestions.placePrediction.placeId,suggestions.placePrediction.text',
+      },
+      body: JSON.stringify(body),
+    })
+      .then(async (res) => {
+        if (!isMountedRef.current || seq < autocompleteSeqRef.current) return;
+        if (!res.ok) {
+          setSuggestions([]);
+          return;
+        }
+        const data = await res.json();
+        if (!isMountedRef.current || seq < autocompleteSeqRef.current) return;
+        const list: PlaceSuggestion[] = [];
+        for (const s of data?.suggestions ?? []) {
+          const pred = s?.placePrediction;
+          if (pred?.text?.text && pred?.placeId) {
+            list.push({ placeId: pred.placeId, text: pred.text.text });
+          }
+          if (list.length >= MAX_SUGGESTIONS) break;
+        }
+        setSuggestions(list);
+      })
+      .catch(() => {
+        if (!isMountedRef.current || seq < autocompleteSeqRef.current) return;
+        setSuggestions([]);
+      })
+      .finally(() => {
+        if (!isMountedRef.current || seq !== autocompleteSeqRef.current) return;
+        setSuggestionsLoading(false);
+      });
+  }, [debouncedQuery, apiKey, regionCode]);
+
+  const addPlace = useCallback((place: MapPickerPlace) => {
+    const normalized = normalizeMapPickerPlace(place);
+    setPlaces((prev) => {
+      const existingPlaceIds = new Set(prev.filter((p) => p.placeId).map((p) => p.placeId));
+      if (place.placeId && existingPlaceIds.has(place.placeId)) return prev;
+      const mainName = (place.name || normalized.area[0] || '').trim();
+      if (!mainName) return prev;
+      const existingLabels = new Set(prev.map((p) => p.displayLabel.toLowerCase()));
+      if (existingLabels.has(mainName.toLowerCase())) return prev;
+      return [
+        ...prev,
+        {
+          placeId: place.placeId || '',
+          displayLabel: mainName,
+          areaParts: normalized.area,
+        },
+      ];
+    });
+  }, []);
+
+  const handleSuggestionSelect = useCallback(
+    async (suggestion: PlaceSuggestion) => {
+      if (!apiKey) return;
+      // Invalidate any in-flight autocomplete so a late response doesn't
+      // re-open the dropdown after we close it.
+      autocompleteSeqRef.current++;
+      setSuggestions([]);
+      setSuggestionsLoading(false);
+      // Clear both the controlled value and the native input buffer to avoid
+      // the iOS/Android autocorrect commit re-firing onChangeText with stale
+      // text after the suggestion tap. Same race we hit in the onboarding card.
+      setQuery('');
+      inputRef.current?.clear?.();
+      const place = await fetchPlaceDetails(suggestion.placeId, apiKey);
+      if (!isMountedRef.current) return;
+      if (place) {
+        addPlace(place);
+      } else {
+        addPlace({
+          name: suggestion.text,
+          placeId: suggestion.placeId,
+          lat: 0,
+          lng: 0,
+          formatted_address: suggestion.text,
+        });
+      }
+    },
+    [apiKey, addPlace],
+  );
+
+  const dropdownVisible =
+    query.trim().length >= MIN_QUERY_LENGTH && (suggestions.length > 0 || suggestionsLoading);
+
   const handleDelete = useCallback(() => {
     if (!onDelete) return;
     const country = destination?.country || 'this destination';
@@ -229,15 +461,9 @@ export const ProfileEditDestinationScreen: React.FC<Props> = ({
   }, [onDelete, onClose, destination?.country]);
 
   const handleSave = useCallback(async () => {
-    const country =
-      mode === 'add'
-        ? selectedCountry.trim()
-        : (destination?.country ?? '').trim();
+    const country = selectedCountry.trim();
     if (!country) {
-      Alert.alert(
-        mode === 'add' ? 'Select a country' : 'Missing country',
-        mode === 'add' ? 'Choose where you surfed before saving.' : 'This destination has no country set.',
-      );
+      Alert.alert('Select a country', 'Choose where you surfed before saving.');
       return;
     }
     const duration = computeDurationParts(dayValue, timeUnit);
@@ -245,10 +471,16 @@ export const ProfileEditDestinationScreen: React.FC<Props> = ({
       Alert.alert('Duration', 'Enter a valid time spent (a number greater than zero).');
       return;
     }
+    // Match the onboarding card: prefer the normalized address parts when we
+    // have them, otherwise fall back to the human-readable label.
+    const area = places.flatMap((p) =>
+      p.areaParts && p.areaParts.length > 0 ? p.areaParts : [p.displayLabel],
+    );
     try {
       if (onSave) {
         await onSave({
           country,
+          area,
           time_in_days: duration.timeInDays,
           time_in_text: duration.timeInText,
         });
@@ -257,12 +489,19 @@ export const ProfileEditDestinationScreen: React.FC<Props> = ({
     } catch {
       // Error already surfaced by parent — keep editor open for retry.
     }
-  }, [mode, selectedCountry, destination?.country, dayValue, timeUnit, onSave, onClose]);
+  }, [selectedCountry, places, dayValue, timeUnit, onSave, onClose]);
 
   if (!mounted) return null;
 
-  const displayCountry =
-    mode === 'add' ? selectedCountry : destination?.country || '';
+  const displayCountry = selectedCountry;
+  const placesInputDisabled = !selectedCountry || !apiKey;
+  const placesPlaceholder = !selectedCountry
+    ? 'Pick a country first'
+    : !apiKey
+      ? 'Spots unavailable'
+      : places.length === 0
+        ? 'City / town / surf spot...'
+        : 'Add another...';
 
   return (
     <View style={styles.root} pointerEvents={visible ? 'auto' : 'none'}>
@@ -277,8 +516,7 @@ export const ProfileEditDestinationScreen: React.FC<Props> = ({
           {
             transform: [{ translateY }],
             paddingBottom: Math.max(insets.bottom, 16) + 24,
-            // Lifts the sheet above the on-screen keyboard. When the keyboard
-            // is hidden this is 0 and has no effect.
+            // Lifts the sheet above the on-screen keyboard. 0 when hidden.
             marginBottom: keyboardHeight,
           },
         ]}
@@ -303,28 +541,116 @@ export const ProfileEditDestinationScreen: React.FC<Props> = ({
           </View>
         </View>
 
-        {mode === 'add' ? (
-          <TouchableOpacity
-            style={styles.countryField}
-            onPress={() => setCountryModalVisible(true)}
-            activeOpacity={0.7}
+        <TouchableOpacity
+          style={styles.countryField}
+          onPress={() => setCountryModalVisible(true)}
+          activeOpacity={0.7}
+        >
+          <Text
+            style={[styles.countryText, !displayCountry && styles.countryPlaceholder]}
+            numberOfLines={1}
           >
-            <Text
-              style={[styles.countryText, !displayCountry && styles.countryPlaceholder]}
-              numberOfLines={1}
+            {displayCountry || 'Select country'}
+          </Text>
+          <Ionicons name="chevron-forward" size={20} color={FIGMA.textPrimary} />
+        </TouchableOpacity>
+
+        {/* Places input + chips. The suggestions dropdown is positioned
+            absolutely below this row so it overlays the duration block. */}
+        <View style={styles.placesBlock}>
+          <View
+            style={[styles.placesField, placesInputDisabled && styles.placesFieldDisabled]}
+            onLayout={(e) => setInputRowHeight(e.nativeEvent.layout.height)}
+          >
+            <Ionicons
+              name="location-outline"
+              size={20}
+              color={FIGMA.textLight}
+              style={styles.placesIcon}
+            />
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.chipsScroll}
+              contentContainerStyle={styles.chipsContent}
+              keyboardShouldPersistTaps="always"
             >
-              {displayCountry || 'Select country'}
-            </Text>
-            <Ionicons name="chevron-forward" size={20} color={FIGMA.textPrimary} />
-          </TouchableOpacity>
-        ) : (
-          <View style={styles.countryField}>
-            <Text style={styles.countryText} numberOfLines={1}>
-              {destination?.country || 'Destination'}
-            </Text>
-            <Ionicons name="chevron-forward" size={20} color={FIGMA.textSecondary} />
+              {places.map((p, index) => (
+                <View key={p.placeId || `${p.displayLabel}-${index}`} style={styles.chipWrap}>
+                  <PlaceChip
+                    label={p.displayLabel}
+                    onRemove={() =>
+                      setPlaces((prev) => prev.filter((_, j) => j !== index))
+                    }
+                  />
+                </View>
+              ))}
+              <TextInput
+                ref={inputRef}
+                keyboardType="web-search"
+                underlineColorAndroid="transparent"
+                // Place-search input must treat user input literally — autocorrect
+                // re-fires onChangeText after suggestion tap and re-opens the
+                // dropdown with stale ghost text. Disable everything correction
+                // related on this field. Same fix as DestinationMapPickerCard.
+                autoCorrect={false}
+                autoCapitalize="none"
+                autoComplete="off"
+                spellCheck={false}
+                textContentType="none"
+                importantForAutofill="no"
+                style={styles.placesInput}
+                value={query}
+                onChangeText={setQuery}
+                placeholder={placesPlaceholder}
+                placeholderTextColor={FIGMA.textLight}
+                editable={!placesInputDisabled}
+              />
+            </ScrollView>
           </View>
-        )}
+
+          {dropdownVisible && inputRowHeight > 0 && (
+            <View
+              style={[styles.suggestionsDropdown, { top: inputRowHeight + 4 }]}
+              // Claim the touch responder at the RN layer so the gesture never
+              // falls through to anything below. Same pattern as the onboarding
+              // card and MultiPlaceAutocompleteInput.
+              onStartShouldSetResponder={() => true}
+            >
+              {suggestions.length > 0 ? (
+                <FlatList
+                  data={suggestions}
+                  keyExtractor={(item) => item.placeId}
+                  keyboardShouldPersistTaps="always"
+                  keyboardDismissMode="none"
+                  style={styles.suggestionsList}
+                  renderItem={({ item }) => (
+                    <TouchableOpacity
+                      style={styles.suggestionItem}
+                      onPress={() => handleSuggestionSelect(item)}
+                      activeOpacity={0.7}
+                    >
+                      <Ionicons
+                        name="location-outline"
+                        size={18}
+                        color="#808080"
+                        style={styles.suggestionItemIcon}
+                      />
+                      <Text style={styles.suggestionItemText} numberOfLines={2}>
+                        {item.text}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                />
+              ) : suggestionsLoading ? (
+                <View style={styles.suggestionsLoadingRow}>
+                  <ActivityIndicator size="small" color="#808080" />
+                  <Text style={styles.suggestionsLoadingText}>Searching…</Text>
+                </View>
+              ) : null}
+            </View>
+          )}
+        </View>
 
         <View style={styles.durationBlock}>
           <DestinationDurationInput
@@ -432,7 +758,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: FIGMA.fieldBorder,
     backgroundColor: FIGMA.fieldBg,
-    marginBottom: 16,
+    marginBottom: 12,
   },
   countryText: {
     flex: 1,
@@ -442,6 +768,102 @@ const styles = StyleSheet.create({
   },
   countryPlaceholder: {
     color: FIGMA.textLight,
+  },
+  placesBlock: {
+    position: 'relative',
+    marginBottom: 12,
+    // Lifts the suggestions dropdown above the duration block below it.
+    zIndex: 20,
+    elevation: 20,
+  },
+  placesField: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 56,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: FIGMA.fieldBorder,
+    backgroundColor: FIGMA.fieldBg,
+  },
+  placesFieldDisabled: {
+    backgroundColor: '#F5F5F5',
+    opacity: 0.7,
+  },
+  placesIcon: {
+    marginRight: 8,
+  },
+  chipsScroll: {
+    flex: 1,
+    maxHeight: 56,
+  },
+  chipsContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingRight: 4,
+  },
+  chipWrap: {
+    marginRight: 4,
+  },
+  placesInput: {
+    minWidth: 140,
+    flex: 1,
+    fontSize: 14,
+    lineHeight: 18,
+    color: FIGMA.textPrimary,
+    paddingVertical: 4,
+    paddingHorizontal: 0,
+    ...(Platform.OS === 'web' && { outlineStyle: 'none' as any }),
+  },
+  suggestionsDropdown: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    maxHeight: 240,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.18,
+    shadowRadius: 12,
+    elevation: 24,
+    zIndex: 22,
+  },
+  suggestionsList: { maxHeight: 240 },
+  suggestionItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#EAEAEA',
+  },
+  suggestionItemIcon: { marginRight: 10 },
+  suggestionItemText: {
+    flex: 1,
+    fontSize: 15,
+    color: '#222',
+    ...Platform.select({
+      web: { fontFamily: 'Inter, sans-serif' },
+      default: { fontFamily: 'Inter' },
+    }),
+  },
+  suggestionsLoadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+  },
+  suggestionsLoadingText: {
+    fontSize: 14,
+    color: '#808080',
+    ...Platform.select({
+      web: { fontFamily: 'Inter, sans-serif' },
+      default: { fontFamily: 'Inter' },
+    }),
   },
   durationBlock: {
     marginBottom: 16,

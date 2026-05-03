@@ -26,6 +26,7 @@ import {
   SupabaseSurfer,
   supabaseDatabaseService,
 } from '../../services/database/supabaseDatabaseService';
+import { supabase, isSupabaseConfigured } from '../../config/supabase';
 import { useUserProfile } from '../../context/UserProfileContext';
 import { Images } from '../../assets/images';
 import {
@@ -492,8 +493,32 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
     }
   }, [savingTarget, surfer?.user_id]);
 
+  // Fires the geocoder Edge Function to mirror destinations_array into the
+  // user_destinations table (insert new places, delete stale ones). Fire-and-
+  // forget so a Google API hiccup never blocks the user-facing save. Errors
+  // are logged; the function itself is conservative and skips deletes on
+  // partial geocoding failure (so a transient outage won't lose data).
+  const syncUserDestinations = useCallback(
+    (
+      destinationsArray: NonNullable<SupabaseSurfer['destinations_array']>,
+    ) => {
+      if (!isSupabaseConfigured()) return;
+      supabase.functions
+        .invoke('geocode-user-destinations', {
+          body: { destinations_array: destinationsArray },
+        })
+        .catch((err) => console.warn('Geocode destinations failed:', err));
+    },
+    [],
+  );
+
   const handleDestinationSave = useCallback(
-    async (next: { country: string; time_in_days: number; time_in_text: string }) => {
+    async (next: {
+      country: string;
+      area: string[];
+      time_in_days: number;
+      time_in_text: string;
+    }) => {
       if (editingDestinationIndex == null) return;
       const base = [...(surfer?.destinations_array ?? [])];
       if (editingDestinationIndex === 'new') {
@@ -501,12 +526,13 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
           ...base,
           {
             country: next.country,
-            area: [] as string[],
+            area: next.area,
             time_in_days: next.time_in_days,
             time_in_text: next.time_in_text,
           },
         ];
         await persist('destination', { destinationsArray: arr });
+        syncUserDestinations(arr);
         return;
       }
       const existing = base[editingDestinationIndex];
@@ -514,12 +540,14 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
       base[editingDestinationIndex] = {
         ...existing,
         country: next.country,
+        area: next.area,
         time_in_days: next.time_in_days,
         time_in_text: next.time_in_text,
       };
       await persist('destination', { destinationsArray: base });
+      syncUserDestinations(base);
     },
-    [persist, editingDestinationIndex, surfer?.destinations_array],
+    [persist, editingDestinationIndex, surfer?.destinations_array, syncUserDestinations],
   );
 
   const handleDestinationDelete = useCallback(async () => {
@@ -528,7 +556,8 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
     if (editingDestinationIndex < 0 || editingDestinationIndex >= base.length) return;
     base.splice(editingDestinationIndex, 1);
     await persist('destinationDelete', { destinationsArray: base });
-  }, [persist, editingDestinationIndex, surfer?.destinations_array]);
+    syncUserDestinations(base);
+  }, [persist, editingDestinationIndex, surfer?.destinations_array, syncUserDestinations]);
 
   // Mirrors destination handlers but for lifestyle keywords. The keyword text
   // is the source of truth in `lifestyle_keywords`; `lifestyle_image_urls` maps
