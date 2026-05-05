@@ -5,10 +5,7 @@
     "version": "1.1.0",
     "runtimeVersion": "1.1.0",
     "updates": {
-      "url": "https://u.expo.dev/c14ee9e6-bad8-43e2-b37a-d196b49f638f",
-      "enabled": true,
-      "checkAutomatically": "ON_LOAD",
-      "fallbackToCacheTimeout": 0
+      "url": "https://u.expo.dev/c14ee9e6-bad8-43e2-b37a-d196b49f638f"
     },
     "scheme": "swellyo",
     "orientation": "portrait",
@@ -22,7 +19,7 @@
     },
     "ios": {
       "bundleIdentifier": "com.swellyo.app",
-      "buildNumber": "25",
+      "buildNumber": "26",
       "supportsTablet": false,
       "usesNonExemptEncryption": false,
       "usesAppleSignIn": true,
@@ -38,7 +35,7 @@
     },
     "android": {
       "package": "com.swellyo.app",
-      "versionCode": 17,
+      "versionCode": 19,
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
@@ -83,9 +80,6 @@
       "eas": {
         "projectId": "c14ee9e6-bad8-43e2-b37a-d196b49f638f"
       }
-    },
-    "updates": {
-      "url": "https://u.expo.dev/c14ee9e6-bad8-43e2-b37a-d196b49f638f"
     }
   }
 }
