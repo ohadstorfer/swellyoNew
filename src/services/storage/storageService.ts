@@ -362,6 +362,17 @@ export const uploadProfileVideoThumbnail = async (
 };
 
 /**
+ * Upload a hero image for a surftrip group to the `surftrip-images` bucket.
+ * Same URI handling as uploadTripImage / uploadProfileImage.
+ */
+export const uploadSurftripImage = async (
+  imageUri: string,
+  userId: string
+): Promise<UploadResult> => {
+  return uploadToBucket(imageUri, userId, 'surftrip-images', 'hero');
+};
+
+/**
  * Upload a trip image (hero or accommodation) to the `trip-images` bucket.
  * Mirrors `uploadProfileImage` — same URI handling, different bucket and path.
  */
@@ -369,6 +380,15 @@ export const uploadTripImage = async (
   imageUri: string,
   userId: string,
   kind: 'hero' | 'accommodation' = 'hero'
+): Promise<UploadResult> => {
+  return uploadToBucket(imageUri, userId, 'trip-images', kind);
+};
+
+const uploadToBucket = async (
+  imageUri: string,
+  userId: string,
+  bucket: 'trip-images' | 'surftrip-images',
+  kind: string
 ): Promise<UploadResult> => {
   try {
     if (!imageUri || !userId) {
@@ -401,30 +421,30 @@ export const uploadTripImage = async (
     }
 
     const { data, error } = await supabase.storage
-      .from('trip-images')
+      .from(bucket)
       .upload(fileName, uploadBody, {
         contentType,
         upsert: true,
       });
 
     if (error) {
-      console.error('[StorageService] Trip image upload error:', error);
+      console.error(`[StorageService] ${bucket} upload error:`, error);
       if (error.message?.includes('Bucket not found') || error.message?.includes('does not exist')) {
         return {
           success: false,
-          error: 'Storage bucket "trip-images" does not exist. Please run the group_trips migration.'
+          error: `Storage bucket "${bucket}" does not exist. Please run the corresponding migration.`,
         };
       }
       return { success: false, error: error.message || 'Upload failed' };
     }
 
     const { data: urlData } = supabase.storage
-      .from('trip-images')
+      .from(bucket)
       .getPublicUrl(data.path);
 
     return { success: true, url: urlData.publicUrl };
   } catch (error) {
-    console.error('[StorageService] Trip image upload exception:', error);
+    console.error(`[StorageService] ${bucket} upload exception:`, error);
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error'

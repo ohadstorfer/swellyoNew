@@ -171,7 +171,7 @@ const styles = StyleSheet.create({
   },
   barFill: {
     height: '100%',
-    backgroundColor: '#B72DF2',
+    backgroundColor: '#0788B0',
     borderRadius: 4,
   },
   rowCount: {
@@ -186,12 +186,12 @@ const styles = StyleSheet.create({
   chip: {
     paddingHorizontal: 10,
     paddingVertical: 6,
-    backgroundColor: '#F4E8FB',
+    backgroundColor: '#E6F4F8',
     borderRadius: 999,
   },
   chipText: {
     fontSize: 12,
-    color: '#7A1FB0',
+    color: '#0788B0',
     fontWeight: '500',
   },
 });

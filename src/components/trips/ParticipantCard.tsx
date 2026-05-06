@@ -6,11 +6,8 @@ import { ParticipantProfile } from '../../services/trips/groupTripsService';
 interface ParticipantCardProps {
   participant: ParticipantProfile & { role?: 'host' | 'member'; committed?: boolean };
   rightSlot?: React.ReactNode;
-  /**
-   * When provided, renders a kebab/remove button. Used by hosts to expel a member.
-   * Not shown for the host card itself — the parent decides who to wire the callback for.
-   */
   onRemove?: (userId: string) => void;
+  isMe?: boolean;
 }
 
 const formatBoard = (board: string | null): string | null => {
@@ -27,12 +24,14 @@ export const ParticipantCard: React.FC<ParticipantCardProps> = ({
   participant,
   rightSlot,
   onRemove,
+  isMe,
 }) => {
   const { user_id, name, age, profile_image_url, surfboard_type, surf_level_category, role, committed } =
     participant;
 
   const board = formatBoard(surfboard_type);
   const level = formatLevel(surf_level_category);
+  const detailLine = [age != null ? `${age} yo` : null, level, board].filter(Boolean).join(' · ');
 
   return (
     <View style={styles.row}>
@@ -42,11 +41,6 @@ export const ParticipantCard: React.FC<ParticipantCardProps> = ({
         ) : (
           <View style={[styles.avatar, styles.avatarPlaceholder]}>
             <Text style={styles.avatarInitial}>{(name || 'U').charAt(0).toUpperCase()}</Text>
-          </View>
-        )}
-        {role === 'host' && (
-          <View style={styles.hostBadge}>
-            <Ionicons name="star" size={10} color="#FFFFFF" />
           </View>
         )}
         {committed && (
@@ -60,13 +54,22 @@ export const ParticipantCard: React.FC<ParticipantCardProps> = ({
       </View>
 
       <View style={styles.info}>
-        <Text style={styles.name} numberOfLines={1}>
-          {name || 'User'}
-          {role === 'host' ? <Text style={styles.hostLabel}>  · Host</Text> : null}
-        </Text>
-        <Text style={styles.detail} numberOfLines={1}>
-          {[age != null ? `${age} yo` : null, level, board].filter(Boolean).join(' · ')}
-        </Text>
+        <View style={styles.nameRow}>
+          <Text style={styles.name} numberOfLines={1}>
+            {name || 'User'}
+            {isMe ? <Text style={styles.youTag}>  (You)</Text> : null}
+          </Text>
+          {role === 'host' && (
+            <View style={styles.adminPill}>
+              <Text style={styles.adminPillText}>Admin</Text>
+            </View>
+          )}
+        </View>
+        {!!detailLine && (
+          <Text style={styles.detail} numberOfLines={1}>
+            {detailLine}
+          </Text>
+        )}
       </View>
 
       {rightSlot ? <View style={styles.right}>{rightSlot}</View> : null}
@@ -90,38 +93,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 10,
-    paddingHorizontal: 12,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#EEE',
-    marginBottom: 8,
   },
   avatarWrap: { position: 'relative', marginRight: 12 },
   avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     backgroundColor: '#F2F2F2',
   },
   avatarPlaceholder: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#A8DDE0' },
-  avatarInitial: { color: '#FFFFFF', fontWeight: '700', fontSize: 16 },
-  hostBadge: {
-    position: 'absolute',
-    bottom: -2,
-    right: -2,
-    backgroundColor: '#B72DF2',
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1.5,
-    borderColor: '#FFFFFF',
-  },
+  avatarInitial: { color: '#FFFFFF', fontWeight: '700', fontSize: 18 },
   committedBadge: {
     position: 'absolute',
-    top: -2,
+    bottom: -2,
     right: -2,
     backgroundColor: '#34C759',
     width: 16,
@@ -133,17 +117,31 @@ const styles = StyleSheet.create({
     borderColor: '#FFFFFF',
   },
   info: { flex: 1, minWidth: 0 },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   name: {
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '600',
     color: '#222B30',
-    marginBottom: 2,
+    flexShrink: 1,
     ...(Platform.OS === 'web' ? { fontFamily: 'Montserrat, sans-serif' } : {}),
   },
-  hostLabel: { color: '#B72DF2', fontWeight: '500', fontSize: 12 },
+  youTag: { color: '#7B7B7B', fontWeight: '500', fontSize: 13 },
+  adminPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    backgroundColor: '#E6F4F8',
+    borderRadius: 4,
+  },
+  adminPillText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#0788B0',
+    letterSpacing: 0.2,
+  },
   detail: {
-    fontSize: 12,
+    fontSize: 13,
     color: '#7B7B7B',
+    marginTop: 2,
     ...(Platform.OS === 'web' ? { fontFamily: 'Inter, sans-serif' } : {}),
   },
   right: { marginLeft: 8 },

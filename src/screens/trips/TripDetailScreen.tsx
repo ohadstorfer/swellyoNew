@@ -10,6 +10,7 @@ import {
   Alert,
   Platform,
   TextInput,
+  Share,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -85,9 +86,16 @@ const formatDestination = (trip: GroupTrip): string => {
 };
 
 // ---------------------------------------------------------------------------
-const Section: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => (
+const Section: React.FC<{
+  title: string;
+  children: React.ReactNode;
+  headerRight?: React.ReactNode;
+}> = ({ title, children, headerRight }) => (
   <View style={styles.section}>
-    <Text style={styles.sectionTitle}>{title}</Text>
+    <View style={styles.sectionHeaderRow}>
+      <Text style={styles.sectionTitle}>{title}</Text>
+      {headerRight ? <View>{headerRight}</View> : null}
+    </View>
     {children}
   </View>
 );
@@ -97,6 +105,55 @@ const InfoRow: React.FC<{ label: string; value: string }> = ({ label, value }) =
     <Text style={styles.infoLabel}>{label}</Text>
     <Text style={styles.infoValue}>{value}</Text>
   </View>
+);
+
+const ActionButton: React.FC<{
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  onPress: () => void;
+  loading?: boolean;
+  disabled?: boolean;
+}> = ({ icon, label, onPress, loading, disabled }) => (
+  <TouchableOpacity
+    style={[styles.actionBtn, disabled && styles.actionBtnDisabled]}
+    onPress={onPress}
+    disabled={disabled || loading}
+    activeOpacity={0.7}
+    accessibilityLabel={label}
+  >
+    <View style={styles.actionIconCircle}>
+      {loading ? (
+        <ActivityIndicator size="small" color="#0788B0" />
+      ) : (
+        <Ionicons name={icon} size={20} color="#0788B0" />
+      )}
+    </View>
+    <Text style={styles.actionLabel}>{label}</Text>
+  </TouchableOpacity>
+);
+
+const DangerRow: React.FC<{
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  onPress: () => void;
+  loading?: boolean;
+  showDivider?: boolean;
+}> = ({ icon, label, onPress, loading, showDivider }) => (
+  <TouchableOpacity
+    style={[styles.dangerRow, showDivider && styles.dangerRowDivider]}
+    onPress={onPress}
+    disabled={loading}
+    activeOpacity={0.6}
+  >
+    {loading ? (
+      <ActivityIndicator color="#C0392B" />
+    ) : (
+      <>
+        <Ionicons name={icon} size={20} color="#C0392B" />
+        <Text style={styles.dangerRowText}>{label}</Text>
+      </>
+    )}
+  </TouchableOpacity>
 );
 
 // ---------------------------------------------------------------------------
@@ -119,6 +176,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   const [editingPacking, setEditingPacking] = useState(false);
   const [packingDraft, setPackingDraft] = useState('');
   const [savingPacking, setSavingPacking] = useState(false);
+  const [muted, setMuted] = useState(false);
 
   // Group packing list state
   const [packingView, setPackingView] = useState<'personal' | 'group'>('personal');
@@ -351,6 +409,18 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     onEditTrip(trip);
   };
 
+  const handleShare = async () => {
+    if (!trip) return;
+    try {
+      const message = `${trip.title || 'Surftrip'} — ${formatDestination(trip)} · ${formatDates(trip)}`;
+      await Share.share({ message });
+    } catch {
+      // user cancelled or platform unavailable — silently no-op
+    }
+  };
+
+  const handleToggleMute = () => setMuted(m => !m);
+
   const handleToggleCommit = async () => {
     if (!currentUserId) return;
     const next = !myCommitted;
@@ -532,7 +602,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
       <SafeAreaView style={styles.root} edges={['top']}>
         <Header onBack={onBack} />
         <View style={styles.centered}>
-          <ActivityIndicator color="#B72DF2" />
+          <ActivityIndicator color="#0788B0" />
         </View>
       </SafeAreaView>
     );
@@ -577,25 +647,54 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           </View>
         )}
 
-        {/* Hero */}
-        {trip.hero_image_url ? (
-          <Image source={{ uri: trip.hero_image_url }} style={styles.hero} />
-        ) : (
-          <View style={[styles.hero, styles.heroPlaceholder]}>
-            <Ionicons name="image-outline" size={40} color="#B0B0B0" />
-          </View>
-        )}
-
-        {/* Title & destination */}
-        <View style={styles.titleBlock}>
-          {!!trip.title && <Text style={styles.title}>{trip.title}</Text>}
-          <Text style={styles.destination}>{formatDestination(trip)}</Text>
-          <Text style={styles.dates}>{formatDates(trip)}</Text>
-          {trip.host_been_there !== null && (
-            <Text style={styles.dates}>
-              {trip.host_been_there ? 'Host has been here before' : 'Host hasn’t been here yet'}
-            </Text>
+        {/* Top card — hero, title, action row (WhatsApp-style group header) */}
+        <View style={styles.topCard}>
+          {trip.hero_image_url ? (
+            <Image source={{ uri: trip.hero_image_url }} style={styles.hero} />
+          ) : (
+            <View style={[styles.hero, styles.heroPlaceholder]}>
+              <Ionicons name="image-outline" size={40} color="#B0B0B0" />
+            </View>
           )}
+
+          <View style={styles.titleBlock}>
+            {!!trip.title && <Text style={styles.title}>{trip.title}</Text>}
+            <View style={styles.metaRow}>
+              <Ionicons name="people" size={14} color="#7B7B7B" />
+              <Text style={styles.metaText}>
+                {participants.length} {participants.length === 1 ? 'member' : 'members'}
+              </Text>
+              <Text style={styles.metaDot}>·</Text>
+              <Text style={styles.metaText} numberOfLines={1}>
+                {formatDestination(trip)}
+              </Text>
+            </View>
+            <Text style={styles.dates}>{formatDates(trip)}</Text>
+            {trip.host_been_there !== null && (
+              <Text style={styles.dates}>
+                {trip.host_been_there ? 'Host has been here before' : 'Host hasn’t been here yet'}
+              </Text>
+            )}
+          </View>
+
+          <View style={styles.actionRow}>
+            {IS_LOCAL_MODE && (isHost || isApprovedMember) && (
+              <ActionButton
+                icon="chatbubbles"
+                label="Chat"
+                onPress={handleOpenGroupChat}
+                loading={openingChat}
+              />
+            )}
+            <ActionButton icon="share-outline" label="Share" onPress={handleShare} />
+            {(isHost || isApprovedMember) && (
+              <ActionButton
+                icon={muted ? 'notifications-off' : 'notifications-outline'}
+                label={muted ? 'Muted' : 'Mute'}
+                onPress={handleToggleMute}
+              />
+            )}
+          </View>
         </View>
 
         {/* Pending requests (host only) */}
@@ -611,27 +710,6 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
               />
             ))}
           </Section>
-        )}
-
-        {/* Group chat (local mode preview) — host always sees it; approved members see it after approval */}
-        {IS_LOCAL_MODE && (isHost || isApprovedMember) && (
-          <View style={styles.chatButtonWrapper}>
-            <TouchableOpacity
-              style={styles.chatButton}
-              onPress={handleOpenGroupChat}
-              disabled={openingChat}
-              activeOpacity={0.8}
-            >
-              {openingChat ? (
-                <ActivityIndicator color="#FFFFFF" />
-              ) : (
-                <>
-                  <Ionicons name="chatbubbles-outline" size={18} color="#FFFFFF" />
-                  <Text style={styles.chatButtonText}>Open group chat</Text>
-                </>
-              )}
-            </TouchableOpacity>
-          </View>
         )}
 
         {/* About */}
@@ -875,7 +953,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
                     onPress={addGroupDraftItem}
                     disabled={savingGroupPacking}
                   >
-                    <Ionicons name="add-circle-outline" size={18} color="#B72DF2" />
+                    <Ionicons name="add-circle-outline" size={18} color="#0788B0" />
                     <Text style={styles.addItemText}>Add item</Text>
                   </TouchableOpacity>
                   <View style={styles.packingActions}>
@@ -1000,21 +1078,24 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           </View>
         )}
 
-        {/* Participants */}
-        <Section title={`Participants (${participants.length})`}>
+        {/* Members (WhatsApp-style: count in title, rows separated by dividers) */}
+        <Section title={`${participants.length} ${participants.length === 1 ? 'Member' : 'Members'}`}>
           {participants.length === 0 ? (
             <Text style={styles.muted}>No participants yet.</Text>
           ) : (
-            participants.map(p => (
-              <ParticipantCard
-                key={p.user_id}
-                participant={p}
-                onRemove={
-                  isHost && !isCancelled && p.role !== 'host' && removingUserId !== p.user_id
-                    ? handleRemoveParticipant
-                    : undefined
-                }
-              />
+            participants.map((p, idx) => (
+              <View key={p.user_id}>
+                <ParticipantCard
+                  participant={p}
+                  isMe={p.user_id === currentUserId}
+                  onRemove={
+                    isHost && !isCancelled && p.role !== 'host' && removingUserId !== p.user_id
+                      ? handleRemoveParticipant
+                      : undefined
+                  }
+                />
+                {idx < participants.length - 1 && <View style={styles.memberDivider} />}
+              </View>
             ))
           )}
         </Section>
@@ -1026,41 +1107,39 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           </Section>
         )}
 
-        {/* Manage trip (host only, while active) */}
-        {isHost && !isCancelled && (
-          <Section title="Manage trip">
-            <TouchableOpacity
-              style={[styles.manageBtn, styles.manageBtnDanger, cancelling && styles.manageBtnDisabled]}
-              onPress={handleCancelTrip}
-              disabled={cancelling}
-              activeOpacity={0.8}
-            >
-              {cancelling ? (
-                <ActivityIndicator color="#C0392B" />
-              ) : (
-                <>
-                  <Ionicons name="trash-outline" size={18} color="#C0392B" />
-                  <Text style={styles.manageBtnDangerText}>Cancel trip</Text>
-                </>
-              )}
-            </TouchableOpacity>
-          </Section>
+        {/* Bottom destructive — Exit (member) / Cancel (host), WhatsApp-style red rows */}
+        {!isCancelled && (isApprovedMember || isHost) && (
+          <View style={styles.destructiveCard}>
+            {isApprovedMember && !isHost && (
+              <DangerRow
+                icon="exit-outline"
+                label="Exit trip"
+                onPress={handleLeaveTrip}
+                loading={leaving}
+              />
+            )}
+            {isHost && (
+              <DangerRow
+                icon="close-circle-outline"
+                label="Cancel trip"
+                onPress={handleCancelTrip}
+                loading={cancelling}
+              />
+            )}
+          </View>
         )}
 
         <View style={{ height: 80 }} />
       </ScrollView>
 
-      {/* Sticky CTA — hidden for the host and for cancelled trips */}
-      {!isHost && !isCancelled && (
+      {/* Sticky CTA — only for the join flow (non-host, non-member, active trip) */}
+      {!isHost && !isCancelled && !isApprovedMember && myRequest?.status !== 'approved' && (
         <View style={styles.cta}>
           <CtaButton
-            isApprovedMember={isApprovedMember}
             myRequest={myRequest}
             submitting={submitting}
-            leaving={leaving}
             onRequest={handleRequestToJoin}
             onWithdraw={handleWithdraw}
-            onLeave={handleLeaveTrip}
           />
         </View>
       )}
@@ -1084,36 +1163,11 @@ const Header: React.FC<{ onBack: () => void; title?: string; rightAction?: React
 );
 
 const CtaButton: React.FC<{
-  isApprovedMember: boolean;
   myRequest: GroupTripJoinRequest | null;
   submitting: boolean;
-  leaving: boolean;
   onRequest: () => void;
   onWithdraw: () => void;
-  onLeave: () => void;
-}> = ({ isApprovedMember, myRequest, submitting, leaving, onRequest, onWithdraw, onLeave }) => {
-  if (isApprovedMember || myRequest?.status === 'approved') {
-    return (
-      <View style={styles.ctaJoinedRow}>
-        <View style={[styles.ctaBtn, styles.ctaJoined, { flex: 1 }]}>
-          <Ionicons name="checkmark-circle" size={18} color="#FFFFFF" />
-          <Text style={styles.ctaJoinedText}>Joined</Text>
-        </View>
-        <TouchableOpacity
-          style={[styles.ctaBtn, styles.ctaLeave]}
-          onPress={onLeave}
-          disabled={leaving}
-          activeOpacity={0.7}
-        >
-          {leaving ? (
-            <ActivityIndicator color="#C0392B" />
-          ) : (
-            <Text style={styles.ctaLeaveText}>Leave</Text>
-          )}
-        </TouchableOpacity>
-      </View>
-    );
-  }
+}> = ({ myRequest, submitting, onRequest, onWithdraw }) => {
   if (myRequest?.status === 'pending') {
     return (
       <View style={styles.ctaPendingRow}>
@@ -1162,7 +1216,7 @@ const CtaButton: React.FC<{
 
 // ---------------------------------------------------------------------------
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#FFFFFF' },
+  root: { flex: 1, backgroundColor: '#F0F2F5' },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1170,6 +1224,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 8,
     paddingBottom: 12,
+    backgroundColor: '#FFFFFF',
   },
   backBtn: { padding: 4 },
   headerTitle: {
@@ -1180,32 +1235,84 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginHorizontal: 8,
   },
-  centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  headerRight: { width: 28, alignItems: 'flex-end' },
+  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFFFFF' },
   errorText: { color: '#7B7B7B' },
 
   scrollContent: { paddingBottom: 24 },
+
+  // Top card — hero, title, action row (WhatsApp group header)
+  topCard: { backgroundColor: '#FFFFFF', paddingBottom: 4 },
   hero: { width: '100%', height: 220, backgroundColor: '#F2F2F2' },
   heroPlaceholder: { alignItems: 'center', justifyContent: 'center' },
 
-  titleBlock: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 4 },
+  titleBlock: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 8,
+    alignItems: 'center',
+  },
   title: {
-    fontSize: 22,
+    fontSize: 24,
     fontWeight: '700',
     color: '#222B30',
     marginBottom: 6,
+    textAlign: 'center',
     ...(Platform.OS === 'web' ? { fontFamily: 'Montserrat, sans-serif' } : {}),
   },
-  destination: { fontSize: 15, color: '#555', marginBottom: 2 },
-  dates: { fontSize: 13, color: '#7B7B7B' },
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 4,
+    marginBottom: 4,
+  },
+  metaText: { fontSize: 14, color: '#7B7B7B' },
+  metaDot: { fontSize: 14, color: '#7B7B7B', marginHorizontal: 2 },
+  dates: { fontSize: 13, color: '#7B7B7B', textAlign: 'center', marginTop: 2 },
 
-  section: { paddingHorizontal: 16, paddingTop: 36 },
+  // Action row (Chat / Share / Mute) — circular brand-tinted icons
+  actionRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 16,
+    marginTop: 8,
+  },
+  actionBtn: { flex: 1, alignItems: 'center' },
+  actionBtnDisabled: { opacity: 0.5 },
+  actionIconCircle: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#E6F4F8',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 6,
+  },
+  actionLabel: { fontSize: 12, color: '#0788B0', fontWeight: '600' },
+
+  // Sectioned cards on light gray bg (WhatsApp pattern)
+  section: {
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    marginTop: 12,
+  },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
   sectionTitle: {
     fontSize: 13,
     fontWeight: '700',
     color: '#222B30',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
-    marginBottom: 10,
   },
   body: { fontSize: 14, color: '#333', lineHeight: 20 },
   muted: { fontSize: 13, color: '#7B7B7B' },
@@ -1214,7 +1321,32 @@ const styles = StyleSheet.create({
   infoLabel: { width: 110, fontSize: 13, color: '#7B7B7B' },
   infoValue: { flex: 1, fontSize: 13, color: '#222B30' },
 
-  // Sticky CTA
+  memberDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: '#ECECEC',
+    marginLeft: 60,
+  },
+
+  // Bottom destructive card — Exit / Cancel rows
+  destructiveCard: {
+    backgroundColor: '#FFFFFF',
+    marginTop: 12,
+    paddingVertical: 4,
+  },
+  dangerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  dangerRowDivider: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#ECECEC',
+  },
+  dangerRowText: { color: '#C0392B', fontSize: 15, fontWeight: '500' },
+
+  // Sticky CTA (join flow only)
   cta: {
     paddingHorizontal: 16,
     paddingVertical: 12,
@@ -1230,10 +1362,8 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     gap: 6,
   },
-  ctaPrimary: { backgroundColor: '#B72DF2' },
+  ctaPrimary: { backgroundColor: '#0788B0' },
   ctaPrimaryText: { color: '#FFFFFF', fontWeight: '700', fontSize: 15 },
-  ctaJoined: { backgroundColor: '#34C759' },
-  ctaJoinedText: { color: '#FFFFFF', fontWeight: '700', fontSize: 15, marginLeft: 6 },
   ctaPendingRow: { flexDirection: 'row', gap: 10 },
   ctaPending: { backgroundColor: '#F2F2F2' },
   ctaPendingText: { color: '#555', fontWeight: '600', fontSize: 14, marginLeft: 6 },
@@ -1242,10 +1372,9 @@ const styles = StyleSheet.create({
   ctaDeclined: { backgroundColor: '#F2F2F2' },
   ctaDeclinedText: { color: '#7B7B7B', fontWeight: '600', fontSize: 14 },
 
-  headerRight: { width: 28, alignItems: 'flex-end' },
   cancelledBanner: {
     marginHorizontal: 16,
-    marginTop: 8,
+    marginTop: 12,
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderRadius: 10,
@@ -1255,29 +1384,8 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   cancelledText: { color: '#C0392B', fontSize: 13, fontWeight: '500', flex: 1 },
-  manageBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
-    borderRadius: 10,
-    gap: 8,
-  },
-  manageBtnDanger: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#C0392B',
-  },
-  manageBtnDangerText: { color: '#C0392B', fontWeight: '600', fontSize: 14 },
   manageBtnDisabled: { opacity: 0.6 },
-  ctaJoinedRow: { flexDirection: 'row', gap: 10 },
-  ctaLeave: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#C0392B',
-    paddingHorizontal: 18,
-  },
-  ctaLeaveText: { color: '#C0392B', fontWeight: '600', fontSize: 14 },
+
   packingHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1294,11 +1402,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
   },
   packingToggleChipActive: {
-    borderColor: '#B72DF2',
-    backgroundColor: '#F4E6FB',
+    borderColor: '#0788B0',
+    backgroundColor: '#E6F4F8',
   },
   packingToggleText: { fontSize: 13, fontWeight: '600', color: '#7B7B7B' },
-  packingToggleTextActive: { color: '#B72DF2' },
+  packingToggleTextActive: { color: '#0788B0' },
   groupEditRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1324,11 +1432,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
   },
   singleMultiChipActive: {
-    borderColor: '#B72DF2',
-    backgroundColor: '#F4E6FB',
+    borderColor: '#0788B0',
+    backgroundColor: '#E6F4F8',
   },
   singleMultiText: { fontSize: 12, fontWeight: '600', color: '#7B7B7B' },
-  singleMultiTextActive: { color: '#B72DF2' },
+  singleMultiTextActive: { color: '#0788B0' },
   singleMultiChipSmall: {
     paddingHorizontal: 8,
     paddingVertical: 3,
@@ -1339,8 +1447,8 @@ const styles = StyleSheet.create({
     marginLeft: 4,
   },
   singleMultiChipSmallActive: {
-    borderColor: '#B72DF2',
-    backgroundColor: '#F4E6FB',
+    borderColor: '#0788B0',
+    backgroundColor: '#E6F4F8',
   },
   singleMultiTextSmall: { fontSize: 11, fontWeight: '600', color: '#7B7B7B' },
   addItemBtn: {
@@ -1350,7 +1458,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     marginTop: 4,
   },
-  addItemText: { color: '#B72DF2', fontWeight: '600', fontSize: 13 },
+  addItemText: { color: '#0788B0', fontWeight: '600', fontSize: 13 },
   avatarStack: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1408,11 +1516,16 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 12,
     borderRadius: 10,
-    backgroundColor: '#B72DF2',
+    backgroundColor: '#0788B0',
     alignItems: 'center',
   },
   packingSaveText: { color: '#FFFFFF', fontWeight: '700', fontSize: 14 },
-  commitWrapper: { paddingHorizontal: 16, paddingTop: 24 },
+  commitWrapper: {
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    marginTop: 12,
+  },
   commitBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1430,15 +1543,4 @@ const styles = StyleSheet.create({
   },
   commitBtnText: { color: '#34C759', fontWeight: '600', fontSize: 14 },
   commitBtnTextActive: { color: '#FFFFFF' },
-  chatButtonWrapper: { paddingHorizontal: 16, paddingTop: 16 },
-  chatButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#222B30',
-    paddingVertical: 12,
-    borderRadius: 12,
-    gap: 8,
-  },
-  chatButtonText: { color: '#FFFFFF', fontWeight: '600', fontSize: 15 },
 });

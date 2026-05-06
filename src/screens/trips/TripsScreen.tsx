@@ -147,7 +147,7 @@ const ExploreTripsView: React.FC<{ onOpenTrip: (tripId: string) => void }> = ({ 
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator color="#B72DF2" />
+        <ActivityIndicator color="#0788B0" />
       </View>
     );
   }
@@ -207,7 +207,7 @@ const MyTripsView: React.FC<{
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator color="#B72DF2" />
+        <ActivityIndicator color="#0788B0" />
       </View>
     );
   }
@@ -411,7 +411,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 10,
     borderRadius: 10,
-    backgroundColor: '#B72DF2',
+    backgroundColor: '#0788B0',
   },
   emptyCtaText: { color: '#FFFFFF', fontWeight: '600' },
 });

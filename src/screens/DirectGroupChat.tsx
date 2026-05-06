@@ -271,10 +271,14 @@ interface DirectGroupChatProps {
   onBack?: () => void;
   onConversationCreated?: (conversationId: string) => void; // Callback when conversation is created
   onViewProfile?: (userId: string) => void; // Callback when avatar or name is clicked
-  // Group-chat specific: when this conversation is linked to a surftrip, tapping the
-  // header avatar/name opens that trip's detail screen via this callback.
+  // Group-chat specific: when this conversation is linked to a surftrip / legacy trip,
+  // tapping the header avatar/name opens the corresponding detail screen via the
+  // matching callback. Surftrips take priority — `tripId` is the legacy `group_trips`
+  // path and only fires when no `surftripId` is present.
   tripId?: string;
   onOpenTripDetail?: (tripId: string) => void;
+  surftripId?: string;
+  onOpenSurftripDetail?: (surftripId: string) => void;
 }
 
 export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
@@ -289,6 +293,8 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
   onViewProfile,
   tripId,
   onOpenTripDetail,
+  surftripId,
+  onOpenSurftripDetail,
 }) => {
   // Get markAsRead and setCurrentConversationId from MessagingProvider
   const { markAsRead, setCurrentConversationId: setMessagingCurrentConversationId, dispatch: messagingDispatch } = useMessaging();
@@ -3276,11 +3282,13 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
               onPress={() => {
                 if (isDirect) {
                   if (onViewProfile) onViewProfile(otherUserId);
+                } else if (surftripId && onOpenSurftripDetail) {
+                  onOpenSurftripDetail(surftripId);
                 } else if (tripId && onOpenTripDetail) {
                   onOpenTripDetail(tripId);
                 }
               }}
-              activeOpacity={(isDirect || (tripId && onOpenTripDetail)) ? 0.7 : 1}
+              activeOpacity={(isDirect || (surftripId && onOpenSurftripDetail) || (tripId && onOpenTripDetail)) ? 0.7 : 1}
             >
               {isDirect ? (
                 <ProfileImage
@@ -3303,11 +3311,13 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
             onPress={() => {
               if (isDirect) {
                 if (onViewProfile) onViewProfile(otherUserId);
+              } else if (surftripId && onOpenSurftripDetail) {
+                onOpenSurftripDetail(surftripId);
               } else if (tripId && onOpenTripDetail) {
                 onOpenTripDetail(tripId);
               }
             }}
-            activeOpacity={(isDirect || (tripId && onOpenTripDetail)) ? 0.7 : 1}
+            activeOpacity={(isDirect || (surftripId && onOpenSurftripDetail) || (tripId && onOpenTripDetail)) ? 0.7 : 1}
           >
             <Reanimated.View
               style={styles.profileInfoInner}

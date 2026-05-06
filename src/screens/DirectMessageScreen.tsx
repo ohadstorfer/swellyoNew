@@ -271,10 +271,14 @@ interface DirectMessageScreenProps {
   onBack?: () => void;
   onConversationCreated?: (conversationId: string) => void; // Callback when conversation is created
   onViewProfile?: (userId: string) => void; // Callback when avatar or name is clicked
-  // Group-chat specific: when this conversation is linked to a surftrip, tapping the
-  // header avatar/name opens that trip's detail screen via this callback.
+  // Group-chat specific: when this conversation is linked to a surftrip / legacy trip,
+  // tapping the header opens the corresponding detail screen via the matching callback.
+  // DirectMessageScreen is only used for is_direct=true so these are typically unused —
+  // accepted here so the union with DirectGroupChat in routing layers type-checks.
   tripId?: string;
   onOpenTripDetail?: (tripId: string) => void;
+  surftripId?: string;
+  onOpenSurftripDetail?: (surftripId: string) => void;
 }
 
 export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
