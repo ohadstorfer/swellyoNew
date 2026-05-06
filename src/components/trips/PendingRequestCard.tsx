@@ -22,7 +22,7 @@ export const PendingRequestCard: React.FC<PendingRequestCardProps> = ({
         participant={request.requester}
         rightSlot={
           isProcessing ? (
-            <ActivityIndicator color="#B72DF2" />
+            <ActivityIndicator color="#0788B0" />
           ) : (
             <View style={styles.actions}>
               <TouchableOpacity
@@ -61,7 +61,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     marginLeft: 6,
   },
-  approveBtn: { backgroundColor: '#B72DF2' },
+  approveBtn: { backgroundColor: '#0788B0' },
   approveText: { color: '#FFFFFF', fontWeight: '600', fontSize: 12 },
   declineBtn: { backgroundColor: '#F2F2F2' },
   declineText: { color: '#555', fontWeight: '600', fontSize: 12 },

@@ -13,6 +13,7 @@ import { TripPlanningChatScreen } from '../screens/TripPlanningChatScreen';
 import { TripPlanningChatScreen as TripPlanningChatScreenCopy } from '../screens/TripPlanningChatScreenCopy';
 import ConversationsStack from '../navigation/ConversationsStack';
 import TripsScreen from '../screens/trips/TripsScreen';
+import SurftripDetailScreen from '../screens/surftrips/SurftripDetailScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
 import { DirectMessageScreen } from '../screens/DirectMessageScreen';
 import { DirectGroupChat } from '../screens/DirectGroupChat';
@@ -90,6 +91,38 @@ export const AppContent: React.FC = () => {
       if (blocked) setShowAgeBlockOverlay(true);
     });
   }, []);
+
+  // Parse ?surftrip=<id> from the URL on web boot. If present, defer opening
+  // the surftrip detail until the user is authenticated and onboarded.
+  const [pendingInviteSurftripId, setPendingInviteSurftripId] = useState<string | null>(null);
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    if (typeof window === 'undefined' || !window.location) return;
+    try {
+      const params = new URLSearchParams(window.location.search || '');
+      const sid = params.get('surftrip');
+      if (sid) {
+        setPendingInviteSurftripId(sid);
+        // Clean the URL so a refresh doesn't re-trigger the deep link.
+        params.delete('surftrip');
+        const remaining = params.toString();
+        const next = window.location.pathname + (remaining ? `?${remaining}` : '') + (window.location.hash || '');
+        window.history.replaceState({}, '', next);
+      }
+    } catch (e) {
+      console.warn('[AppContent] surftrip URL parse failed:', e);
+    }
+  }, []);
+
+  // Once the user is authenticated and onboarding is complete, open the
+  // pending surftrip detail (if any).
+  useEffect(() => {
+    if (!pendingInviteSurftripId) return;
+    if (user === null) return;
+    if (!isComplete && !isDemoUser) return;
+    setActiveSurftripDetailId(pendingInviteSurftripId);
+    setPendingInviteSurftripId(null);
+  }, [pendingInviteSurftripId, user, isComplete, isDemoUser]);
 
   // Validate session whenever a user is signed in (regardless of onboarding
   // completion). This unblocks mid-onboarding users who would otherwise be
@@ -627,6 +660,7 @@ export const AppContent: React.FC = () => {
   const [showSwellyShaper, setShowSwellyShaper] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showTrips, setShowTrips] = useState(false);
+  const [activeSurftripDetailId, setActiveSurftripDetailId] = useState<string | null>(null);
   const [viewingUserId, setViewingUserId] = useState<string | null>(null);
   const [profileFromSwellyShaper, setProfileFromSwellyShaper] = useState(false); // Track if profile was opened from Swelly Shaper
   const [profileFromTripPlanningChat, setProfileFromTripPlanningChat] = useState(false); // Track if profile was opened from trip planning chat
@@ -644,7 +678,8 @@ export const AppContent: React.FC = () => {
     otherUserName: string;
     otherUserAvatar: string | null;
     isDirect?: boolean; // false for group chats; defaults to true (1-on-1)
-    tripId?: string; // For trip-linked group chats: tapping header opens the trip
+    tripId?: string; // Legacy: for group_trips-linked group chats, tapping header opens the trip
+    surftripId?: string; // For surftrip group chats: tapping header opens the surftrip detail
     fromTripPlanning?: boolean; // If true, conversation was created from trip planning recommendations
     fromTripPlanningCopy?: boolean; // If true, conversation was created from the Copy variant of trip planning
     fromWelcomeOverlay?: boolean; // If true, conversation was created from WelcomeToLineupOverlay
@@ -955,6 +990,27 @@ export const AppContent: React.FC = () => {
     setPendingTripDetailId(tripId);
     setShowTrips(true);
   }, []);
+
+  const handleOpenSurftripDetail = useCallback((groupId: string) => {
+    setSelectedConversation(null);
+    setActiveSurftripDetailId(groupId);
+  }, []);
+
+  const handleOpenSurftripChat = useCallback(
+    (conversationId: string, title: string) => {
+      const surftripId = activeSurftripDetailId; // capture before clearing
+      setActiveSurftripDetailId(null);
+      setSelectedConversation({
+        id: conversationId,
+        otherUserId: '',
+        otherUserName: title,
+        otherUserAvatar: null,
+        isDirect: false,
+        surftripId: surftripId ?? undefined,
+      });
+    },
+    [activeSurftripDetailId]
+  );
 
   const handleStartConversation = async (userId: string, otherUserName?: string, otherUserAvatar?: string | null) => {
     console.log('[AppContent] ========== handleStartConversation START ==========');
@@ -1278,6 +1334,7 @@ export const AppContent: React.FC = () => {
       !showProfile &&
       !showSettings &&
       !showTrips &&
+      !activeSurftripDetailId &&
       !showSwellyShaper &&
       !showWelcomeToLineupOverlay &&
       !showProfileEditor;
@@ -1287,7 +1344,16 @@ export const AppContent: React.FC = () => {
     // survive navigation to Profile/Settings/Trips/DM/etc. Priority order matches
     // the original early-return cascade — first match wins.
     let activeOverlay: React.ReactNode = null;
-    if (showTrips) {
+    if (activeSurftripDetailId) {
+      activeOverlay = (
+        <SurftripDetailScreen
+          groupId={activeSurftripDetailId}
+          currentUserId={user?.id ? String(user.id) : null}
+          onBack={() => setActiveSurftripDetailId(null)}
+          onOpenChat={handleOpenSurftripChat}
+        />
+      );
+    } else if (showTrips) {
       activeOverlay = (
         <TripsScreen
           onBack={() => {
@@ -1358,9 +1424,11 @@ export const AppContent: React.FC = () => {
           isDirect={selectedConversation.isDirect !== false}
           fromTripPlanning={selectedConversation.fromTripPlanning || false}
           tripId={selectedConversation.tripId}
+          surftripId={selectedConversation.surftripId}
           onBack={handleBackFromChat}
           onViewProfile={handleViewUserProfile}
           onOpenTripDetail={handleOpenTripDetailFromChat}
+          onOpenSurftripDetail={handleOpenSurftripDetail}
           onConversationCreated={(conversationId) => {
             setSelectedConversation({
               ...selectedConversation,
@@ -1393,6 +1461,7 @@ export const AppContent: React.FC = () => {
             onSettingsPress={() => setShowSettings(true)}
             onTripsPress={() => setShowTrips(true)}
             onOpenTripDetail={handleOpenTripDetailFromChat}
+            onOpenSurftripDetail={handleOpenSurftripDetail}
             onViewUserProfile={handleViewUserProfile}
             onSwellyShaperViewProfile={handleSwellyShaperViewProfile}
             pendingNotificationConversationId={pendingNotificationConversationId}

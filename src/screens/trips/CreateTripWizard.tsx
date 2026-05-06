@@ -646,7 +646,7 @@ export default function CreateTripWizard({
                   <Ionicons
                     name={state.datesSetInStone ? 'checkbox' : 'square-outline'}
                     size={22}
-                    color="#B72DF2"
+                    color="#0788B0"
                   />
                   <Text style={styles.toggleLabel}>Dates are set in stone</Text>
                 </TouchableOpacity>
@@ -1096,7 +1096,7 @@ const styles = StyleSheet.create({
     padding: 14,
     marginBottom: 10,
   },
-  optionCardActive: { borderColor: '#B72DF2', backgroundColor: '#FAF2FE' },
+  optionCardActive: { borderColor: '#0788B0', backgroundColor: '#E6F4F8' },
   optionTitle: { fontSize: 15, fontWeight: '600', color: '#222B30', marginBottom: 4 },
   optionDesc: { fontSize: 13, color: '#7B7B7B' },
 
@@ -1111,7 +1111,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     backgroundColor: '#FFF',
   },
-  chipActive: { backgroundColor: '#B72DF2', borderColor: '#B72DF2' },
+  chipActive: { backgroundColor: '#0788B0', borderColor: '#0788B0' },
   chipText: { fontSize: 13, color: '#555', textTransform: 'capitalize' },
   chipTextActive: { color: '#FFF', fontWeight: '600' },
 
@@ -1129,10 +1129,10 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#B72DF2',
+    borderColor: '#0788B0',
     alignItems: 'center',
   },
-  secondaryBtnText: { color: '#B72DF2', fontWeight: '600' },
+  secondaryBtnText: { color: '#0788B0', fontWeight: '600' },
 
   reviewLine: { fontSize: 13, color: '#444', marginBottom: 4 },
 
@@ -1156,7 +1156,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     alignItems: 'center',
     borderRadius: 10,
-    backgroundColor: '#B72DF2',
+    backgroundColor: '#0788B0',
   },
   primaryBtnDisabled: { opacity: 0.6 },
   primaryBtnText: { color: '#FFF', fontWeight: '700' },
