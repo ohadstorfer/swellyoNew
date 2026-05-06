@@ -28,7 +28,8 @@ import { useOnboarding } from '../context/OnboardingContext';
 import { getImageUrl } from '../services/media/imageService';
 import { Images } from '../assets/images';
 import { UserSearchModal } from '../components/UserSearchModal';
-import { CreateGroupChatModal } from '../components/CreateGroupChatModal';
+import { CreateSurftripModal } from '../components/surftrips/CreateSurftripModal';
+import { SurftripsList } from '../components/surftrips/SurftripsList';
 import { analyticsService } from '../services/analytics/analyticsService';
 import { DirectMessageScreen } from './DirectMessageScreen';
 import { DirectGroupChat } from './DirectGroupChat';
@@ -52,6 +53,7 @@ interface ConversationsScreenProps {
   onSettingsPress?: () => void;
   onTripsPress?: () => void;
   onOpenTripDetail?: (tripId: string) => void;
+  onOpenSurftripDetail?: (surftripId: string) => void;
   pendingNotificationConversationId?: string | null;
   onPendingNotificationHandled?: () => void;
   // True when the conversations list is the topmost visible layer (no DM,
@@ -61,7 +63,7 @@ interface ConversationsScreenProps {
   isListFrontmost?: boolean;
 }
 
-type FilterType = 'all' | 'advisor' | 'seeker';
+type FilterType = 'all' | 'advisor' | 'seeker' | 'surftrips';
 
 // Placeholder row shown during the welcome guide only when the user has zero
 // real conversations. Not tappable — the tutorial backdrop blocks interaction.
@@ -208,6 +210,7 @@ export default function ConversationsScreen({
   onSettingsPress,
   onTripsPress,
   onOpenTripDetail,
+  onOpenSurftripDetail,
   pendingNotificationConversationId,
   onPendingNotificationHandled,
   isListFrontmost = true,
@@ -243,6 +246,7 @@ export default function ConversationsScreen({
     otherUserAvatar: string | null;
     isDirect?: boolean;
     tripId?: string;
+    surftripId?: string;
   }) => {
     if (stackCtx) {
       stackCtx.navigateToDM({
@@ -252,6 +256,7 @@ export default function ConversationsScreen({
         otherUserAvatar: sel.otherUserAvatar,
         isDirect: sel.isDirect,
         tripId: sel.tripId,
+        surftripId: sel.surftripId,
       });
     } else {
       if (sel.id) setCurrentConversationId(sel.id);
@@ -280,7 +285,8 @@ export default function ConversationsScreen({
   });
   const [showMenu, setShowMenu] = useState(false);
   const [showSearchModal, setShowSearchModal] = useState(false);
-  const [showCreateGroupModal, setShowCreateGroupModal] = useState(false);
+  const [showCreateSurftripModal, setShowCreateSurftripModal] = useState(false);
+  const [surftripsReloadKey, setSurftripsReloadKey] = useState(0);
   const [selectedConversation, setSelectedConversation] = useState<{
     id?: string; // Optional: undefined for pending conversations
     otherUserId: string; // Required: the user ID we're messaging
@@ -288,6 +294,7 @@ export default function ConversationsScreen({
     otherUserAvatar: string | null;
     isDirect?: boolean;
     tripId?: string; // For trip-linked group chats; tapping the header opens the trip
+    surftripId?: string; // For surftrip group chats; tapping the header opens the surftrip detail
   } | null>(null);
   const [showSwellyShaper, setShowSwellyShaper] = useState(false);
   const [showSwellyoTeamWelcome, setShowSwellyoTeamWelcome] = useState(false);
@@ -505,7 +512,7 @@ export default function ConversationsScreen({
   const getFilteredConversations = () => {
     const isLocalMode = process.env.EXPO_PUBLIC_LOCAL_MODE === 'true';
     let filtered = conversations.filter(conv => {
-      // Group chats: only show in local mode (feature is gated until promoted to prod).
+      // Group chats (surftrips) are gated to local mode while the feature is hidden.
       if (conv.is_direct === false) return isLocalMode && !!conv.title;
       // Direct chats: keep existing requirement that the other user is enriched.
       return !!conv.other_user?.name;
@@ -800,6 +807,7 @@ export default function ConversationsScreen({
       });
     } else if (!conv.is_direct) {
       const linkedTripId = typeof conv.metadata?.trip_id === 'string' ? conv.metadata.trip_id : undefined;
+      const linkedSurftripId = typeof conv.metadata?.surftrip_id === 'string' ? conv.metadata.surftrip_id : undefined;
       openConversation({
         id: conv.id,
         otherUserId: '',
@@ -807,6 +815,7 @@ export default function ConversationsScreen({
         otherUserAvatar: null,
         isDirect: false,
         tripId: linkedTripId,
+        surftripId: linkedSurftripId,
       });
     }
     // Also call the callback if provided
@@ -1325,9 +1334,36 @@ export default function ConversationsScreen({
             {renderFilterButton('all', 'All')}
             {renderFilterButton('advisor', 'Out', getTotalAdvisorCount(), undefined, '#333', '#BCAC99')}
             {renderFilterButton('seeker', 'In', getTotalSeekerCount(), undefined, '#333', '#05BCD3')}
+            {process.env.EXPO_PUBLIC_LOCAL_MODE === 'true' && renderFilterButton('surftrips', 'Surftrips')}
           </View>
 
-          {/* Conversations list */}
+          {filter === 'surftrips' ? (
+            <View style={styles.surftripsContainer}>
+              <SurftripsList
+                currentUserId={currentUserId}
+                reloadKey={surftripsReloadKey}
+                onCreatePress={() => setShowCreateSurftripModal(true)}
+                onOpenGroupChat={(group) => {
+                  openConversation({
+                    id: group.conversation_id,
+                    otherUserId: '',
+                    otherUserName: group.name,
+                    otherUserAvatar: group.hero_image_url ?? null,
+                    isDirect: false,
+                    surftripId: group.id,
+                  });
+                }}
+                onOpenGroupDetail={(groupId) => {
+                  if (stackCtx) {
+                    stackCtx.navigateToSurftripDetail(groupId);
+                  } else if (onOpenSurftripDetail) {
+                    onOpenSurftripDetail(groupId);
+                  }
+                }}
+              />
+            </View>
+          ) : (
+          /* Conversations list */
           <ScrollView
             ref={scrollViewRef}
             style={styles.conversationsList}
@@ -1442,6 +1478,7 @@ export default function ConversationsScreen({
               </>
             )}
           </ScrollView>
+          )}
         </View>
       </View>
       </View>
@@ -1560,19 +1597,19 @@ export default function ConversationsScreen({
                   </TouchableOpacity>
                 )}
 
-                {/* New group chat — local mode only */}
+                {/* New surftrip — local mode only while feature is gated */}
                 {process.env.EXPO_PUBLIC_LOCAL_MODE === 'true' && (
                   <TouchableOpacity
                     style={styles.menuItem}
                     onPress={(e) => {
                       e.stopPropagation();
                       setShowMenu(false);
-                      setShowCreateGroupModal(true);
+                      setShowCreateSurftripModal(true);
                     }}
                     activeOpacity={0.7}
                   >
                     <Ionicons name="people-outline" size={20} color="#222B30" />
-                    <Text style={styles.menuItemText}>New group</Text>
+                    <Text style={styles.menuItemText}>New surftrip</Text>
                   </TouchableOpacity>
                 )}
 
@@ -1676,21 +1713,19 @@ export default function ConversationsScreen({
         onUserSelect={handleUserSelect}
       />
 
-      {/* Create Group Chat Modal — local mode only */}
-      <CreateGroupChatModal
-        visible={showCreateGroupModal}
+      {/* Create Surftrip Modal — replaces the old group-chat creation flow */}
+      <CreateSurftripModal
+        visible={showCreateSurftripModal}
         currentUserId={currentUserId}
-        directConversations={conversations.filter(c => c.is_direct && !!c.other_user?.user_id)}
-        onClose={() => setShowCreateGroupModal(false)}
-        onCreated={(conv) => {
-          setShowCreateGroupModal(false);
-          openConversation({
-            id: conv.id,
-            otherUserId: '',
-            otherUserName: conv.title || 'Group',
-            otherUserAvatar: null,
-            isDirect: false,
-          });
+        onClose={() => setShowCreateSurftripModal(false)}
+        onCreated={(group) => {
+          setShowCreateSurftripModal(false);
+          setSurftripsReloadKey(k => k + 1);
+          if (stackCtx) {
+            stackCtx.navigateToSurftripDetail(group.id);
+          } else if (onOpenSurftripDetail) {
+            onOpenSurftripDetail(group.id);
+          }
         }}
       />
 
@@ -1937,6 +1972,9 @@ const styles = StyleSheet.create({
     color: '#FFF',
   },
   conversationsList: {
+    flex: 1,
+  },
+  surftripsContainer: {
     flex: 1,
   },
   conversationsListContent: {

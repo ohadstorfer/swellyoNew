@@ -46,7 +46,7 @@ import { ProfileEditSurfSkillScreen } from './ProfileEditSurfSkillScreen';
 import { ProfileEditSurfVideoScreen } from './ProfileEditSurfVideoScreen';
 import { ProfileEditDestinationScreen } from './ProfileEditDestinationScreen';
 import { ProfileEditLifestyleScreen } from './ProfileEditLifestyleScreen';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Reanimated, {
   useSharedValue,
   useAnimatedStyle,
@@ -832,7 +832,12 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
       onShow={runEnterAnimation}
       onRequestClose={onClose}
     >
-      <View style={styles.root}>
+      {/* Android: Modals render in a separate native window outside the
+          app's root GestureHandlerRootView, so gesture-handler gestures
+          (LongPress, Pan, etc.) don't activate. Wrapping the modal's
+          content in its own GestureHandlerRootView fixes this. On iOS the
+          wrapper is a no-op (shares the main window). */}
+      <GestureHandlerRootView style={styles.root}>
         <Animated.View
           style={[styles.backdrop, { opacity: backdropOpacity }]}
           pointerEvents="none"
@@ -1085,13 +1090,14 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
                         ))}
                       </View>
                     ) : (
-                      // Native: drag-to-reorder. Custom impl over gesture-handler v2 +
-                      // Reanimated. The pan gesture is attached only to the drag handle
-                      // (so finger-on-card scrolling still bubbles to the parent
-                      // ScrollView) and uses `activateAfterLongPress` so the row never
-                      // moves until the user starts sliding their finger. Drag state is
-                      // shared across all rows so non-dragged rows shift live to make
-                      // space.
+                      // Native (iOS + Android): in-place drag-to-reorder.
+                      // Custom impl over gesture-handler v2 + Reanimated.
+                      // The pan gesture is attached only to the drag handle
+                      // (so finger-on-card scrolling still bubbles to the
+                      // parent ScrollView) and uses `activateAfterLongPress`
+                      // so the row never moves until the user starts sliding
+                      // their finger. Drag state is shared across all rows
+                      // so non-dragged rows shift live to make space.
                       <LifestyleReorderableList
                         items={lifestyleKeywords.slice(0, 6)}
                         imageUrls={lifestyleImageUrls}
@@ -1293,7 +1299,7 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
             </TouchableOpacity>
           </TouchableOpacity>
         </Modal>
-      </View>
+      </GestureHandlerRootView>
     </Modal>
   );
 };
@@ -1733,7 +1739,11 @@ const LifestyleReorderableRow: React.FC<{
       // release, springs to the final slot's Y). Lifted above siblings.
       // No withSpring on translateY here — the dragged row must follow the
       // finger 1:1 with no perceptible lag.
+      // top:0 anchors the layout origin at the container top; translateY
+      // provides the absolute Y. This matters on Android — see inactive
+      // branch comment for the rationale.
       return {
+        top: 0,
         transform: [
           { translateY: activeTranslateY.value },
           { scale: withTiming(targetScale, { duration: SCALE_DURATION }) },
@@ -1744,12 +1754,18 @@ const LifestyleReorderableRow: React.FC<{
       };
     }
 
-    // Slot-aligned: animate to the slot the positions map says I belong in.
-    // withSpring picks up smoothly from the active branch's last value
-    // because translateY is the same transform position in both branches.
+    // Slot-aligned: animate `top` (not translateY) so the layout position
+    // matches the visual position. Android RN hit-tests absolute children
+    // by their LAYOUT bounds; if we used `transform: translateY` here, all
+    // rows would have layout at top:0 and only row 0 would be tappable.
+    // iOS hit-tests transformed bounds, so animating `top` instead of
+    // `translateY` is visually identical on iOS. withSpring picks up
+    // smoothly from the active branch's last value since the active row's
+    // translateY equals the inactive row's `top` at the swap moment
+    // (commit fires only after activeTranslateY has sprung to slot*H).
     return {
+      top: withSpring(slot * LIFESTYLE_ROW_HEIGHT, LIFESTYLE_SPRING),
       transform: [
-        { translateY: withSpring(slot * LIFESTYLE_ROW_HEIGHT, LIFESTYLE_SPRING) },
         { scale: withTiming(targetScale, { duration: SCALE_DURATION }) },
       ],
       zIndex: 0,

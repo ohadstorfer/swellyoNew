@@ -1,0 +1,22 @@
+diff --git a/node_modules/react-native-video-trim/android/src/main/java/com/videotrim/widgets/VideoTrimmerView.kt b/node_modules/react-native-video-trim/android/src/main/java/com/videotrim/widgets/VideoTrimmerView.kt
+index 5956db1..066b461 100644
+--- a/node_modules/react-native-video-trim/android/src/main/java/com/videotrim/widgets/VideoTrimmerView.kt
++++ b/node_modules/react-native-video-trim/android/src/main/java/com/videotrim/widgets/VideoTrimmerView.kt
+@@ -1680,7 +1680,7 @@ class VideoTrimmerView(
+   private fun onUndoTapped() {
+     if (undoStack.isEmpty()) return
+     redoStack.add(currentSnapshot())
+-    val snap = undoStack.removeLast()
++    val snap = undoStack.removeAt(undoStack.lastIndex)
+     applySnapshot(snap)
+     updateUndoRedoButtons()
+   }
+@@ -1688,7 +1688,7 @@ class VideoTrimmerView(
+   private fun onRedoTapped() {
+     if (redoStack.isEmpty()) return
+     undoStack.add(currentSnapshot())
+-    val snap = redoStack.removeLast()
++    val snap = redoStack.removeAt(redoStack.lastIndex)
+     applySnapshot(snap)
+     updateUndoRedoButtons()
+   }

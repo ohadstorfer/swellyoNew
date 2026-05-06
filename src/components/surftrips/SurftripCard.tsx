@@ -1,0 +1,105 @@
+import React from 'react';
+import { View, StyleSheet, TouchableOpacity, Image } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { Text } from '../Text';
+import type { SurftripGroupForUser } from '../../types/surftrips';
+
+interface SurftripCardProps {
+  group: SurftripGroupForUser;
+  onPress: () => void;
+  showDivider?: boolean;
+}
+
+const roleLabelFor = (role: SurftripGroupForUser['my_role']): string | null => {
+  if (role === 'host') return 'Host';
+  if (role === 'admin') return 'Admin';
+  return null;
+};
+
+export const SurftripCard: React.FC<SurftripCardProps> = ({ group, onPress, showDivider }) => {
+  const memberLabel = group.member_count === 1 ? '1 member' : `${group.member_count} members`;
+  const role = group.is_member ? roleLabelFor(group.my_role) : null;
+
+  return (
+    <TouchableOpacity activeOpacity={0.6} onPress={onPress} style={styles.row}>
+      <View style={styles.thumbWrap}>
+        {group.hero_image_url ? (
+          <Image source={{ uri: group.hero_image_url }} style={styles.thumb} />
+        ) : (
+          <View style={[styles.thumb, styles.thumbPlaceholder]}>
+            <Ionicons name="people" size={22} color="#FFFFFF" />
+          </View>
+        )}
+      </View>
+
+      <View style={styles.body}>
+        <View style={styles.titleLine}>
+          <Text style={styles.title} numberOfLines={1}>
+            {group.name}
+          </Text>
+          {role && (
+            <View style={styles.rolePill}>
+              <Text style={styles.rolePillText}>{role}</Text>
+            </View>
+          )}
+        </View>
+        {group.description ? (
+          <Text style={styles.description} numberOfLines={1}>
+            {group.description}
+          </Text>
+        ) : null}
+        <Text style={styles.meta} numberOfLines={1}>
+          {memberLabel}
+        </Text>
+        {showDivider && <View style={styles.divider} />}
+      </View>
+    </TouchableOpacity>
+  );
+};
+
+const styles = StyleSheet.create({
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    backgroundColor: '#FFFFFF',
+  },
+  thumbWrap: { marginRight: 12 },
+  thumb: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#F2F2F2',
+  },
+  thumbPlaceholder: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#A8DDE0',
+  },
+  body: { flex: 1, minWidth: 0, position: 'relative', paddingBottom: 10 },
+  titleLine: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  title: { fontSize: 16, fontWeight: '600', color: '#222B30', flexShrink: 1 },
+  rolePill: {
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    backgroundColor: '#E6F4F8',
+    borderRadius: 4,
+  },
+  rolePillText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#0788B0',
+    letterSpacing: 0.2,
+  },
+  description: { fontSize: 13, color: '#5A6066', marginTop: 2 },
+  meta: { fontSize: 12, color: '#7B7B7B', marginTop: 4 },
+  divider: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: '#ECECEC',
+  },
+});

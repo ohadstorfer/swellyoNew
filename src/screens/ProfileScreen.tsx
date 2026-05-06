@@ -49,8 +49,24 @@ import { useMessaging } from '../context/MessagingProvider';
 import { ReportUserScreen } from './ReportUserScreen';
 import { HomeBreakViewSheet } from '../components/HomeBreakViewSheet';
 import Reanimated, { useSharedValue, useAnimatedStyle, withTiming, runOnJS, Easing } from 'react-native-reanimated';
-import { Gesture, GestureDetector, ScrollView } from 'react-native-gesture-handler';
+import { Gesture, GestureDetector, ScrollView as RNGHScrollView } from 'react-native-gesture-handler';
+import { ScrollView as RNScrollView } from 'react-native';
 import { LIFESTYLE_ICON_MAP } from '../utils/lifestyleIconMap';
+
+// Android: RNGH's ScrollView + GestureDetector composition completely blocks
+// vertical scroll (the inner native scroll never wins). Fall back to RN's
+// ScrollView on Android — we don't need the simultaneousWithExternalGesture
+// composition there because swipe-to-dismiss is disabled (see isSwipeDisabled).
+const ScrollView: typeof RNGHScrollView = (Platform.OS === 'android' ? RNScrollView : RNGHScrollView) as any;
+
+// Android: disable the GestureDetector wrappers entirely. Even with the swipe
+// Pan gesture set to enabled(false), the GestureDetector's underlying native
+// view still intercepts touch dispatch on Android and prevents the inner
+// ScrollView from receiving touches.
+const MaybeGestureDetector: React.FC<{ gesture: any; children: React.ReactNode }> = ({ gesture, children }) => {
+  if (Platform.OS === 'android') return <>{children}</>;
+  return <GestureDetector gesture={gesture}>{children}</GestureDetector>;
+};
 
 interface ProfileScreenProps {
   onBack?: () => void;
@@ -943,6 +959,11 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
 
   const isSwipeDisabled =
     Platform.OS === 'web' ||
+    // Android: the swipe-to-dismiss Pan + simultaneousWithExternalGesture
+    // composition that works on iOS holds the touch in BEGAN state on
+    // Android and prevents the inner ScrollView from scrolling vertically.
+    // Android already has system back-gesture/button for dismiss.
+    Platform.OS === 'android' ||
     fromOnboardingChat ||
     showReportOverlay ||
     (showVideoUploadModal && isUploadingVideo) ||
@@ -1920,7 +1941,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
 
   return (
     <>
-    <GestureDetector gesture={swipeGesture}>
+    <MaybeGestureDetector gesture={swipeGesture}>
     <Reanimated.View
       style={[
         styles.container,
@@ -2160,7 +2181,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
           </TouchableOpacity>
         )}
 
-        <GestureDetector gesture={nativeGesture}>
+        <MaybeGestureDetector gesture={nativeGesture}>
         <ScrollView
           style={styles.scrollView}
           contentContainerStyle={[
@@ -2576,7 +2597,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
           </View>
         </View>
       </ScrollView>
-      </GestureDetector>
+      </MaybeGestureDetector>
       </ImageBackground>
       {/* Connect Button with fading overlay - Floating at bottom when viewing other user's profile */}
       {!isViewingOwnProfile && userId && onMessage && (
@@ -2670,7 +2691,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
         </>
       )}
     </Reanimated.View>
-    </GestureDetector>
+    </MaybeGestureDetector>
     {/* Destinations bottom sheet — opens when the user taps the Travel
         Experience card. Renders the same destination cards as the inline
         Top Destinations section, just inside a slide-up sheet. */}
