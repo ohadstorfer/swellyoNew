@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Alert, Keyboard, Platform, Pressable, StyleSheet, View, TouchableOpacity, Text as RNText } from 'react-native';
+import { Alert, Keyboard, Linking, Platform, Pressable, StyleSheet, View, TouchableOpacity, Text as RNText } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { WelcomeScreen } from '../screens/WelcomeScreen';
 import { OnboardingWelcomeScreen } from '../screens/OnboardingWelcomeScreen';
 import { OnboardingStep1Screen, OnboardingData } from '../screens/OnboardingStep1Screen';
@@ -25,6 +26,8 @@ import { ProfileEditPanel } from './ProfileEditPanel/ProfileEditPanel';
 import { useUserProfile } from '../context/UserProfileContext';
 import { useTutorial } from '../context/TutorialContext';
 import { messagingService } from '../services/messaging/messagingService';
+import { acceptSurftripInvite } from '../services/surftrips/surftripsService';
+import SurftripInviteLanding from '../screens/surftrips/SurftripInviteLanding';
 import { supabaseAuthService } from '../services/auth/supabaseAuthService';
 import { useOnboarding } from '../context/OnboardingContext';
 import { analyticsService } from '../services/analytics/analyticsService';
@@ -92,19 +95,43 @@ export const AppContent: React.FC = () => {
     });
   }, []);
 
-  // Parse ?surftrip=<id> from the URL on web boot. If present, defer opening
-  // the surftrip detail until the user is authenticated and onboarded.
-  const [pendingInviteSurftripId, setPendingInviteSurftripId] = useState<string | null>(null);
+  // ----- Surftrip invite link handling -----
+  // The URL format is `https://www.swellyo.com/?surftrip=<groupId>&t=<token>`
+  // and is also catchable via the `swellyo://` scheme on native. On web, we
+  // always render a "Get the app" landing instead of processing the invite —
+  // acceptance is native-only by product decision.
+  const [pendingInviteGroupId, setPendingInviteGroupId] = useState<string | null>(null);
+  const [pendingInviteToken, setPendingInviteToken] = useState<string | null>(null);
+  const inviteResolverRef = useRef(false);
+
+  const parseInviteFromUrl = useCallback((url: string | null) => {
+    if (!url) return;
+    try {
+      const q = url.indexOf('?');
+      if (q < 0) return;
+      const params = new URLSearchParams(url.substring(q + 1));
+      const sid = params.get('surftrip');
+      const token = params.get('t');
+      if (sid) setPendingInviteGroupId(sid);
+      if (token) setPendingInviteToken(token);
+    } catch (e) {
+      console.warn('[AppContent] invite URL parse failed:', e);
+    }
+  }, []);
+
+  // Web: parse window.location and clean the URL so refresh doesn't re-trigger.
   useEffect(() => {
     if (Platform.OS !== 'web') return;
     if (typeof window === 'undefined' || !window.location) return;
     try {
       const params = new URLSearchParams(window.location.search || '');
       const sid = params.get('surftrip');
-      if (sid) {
-        setPendingInviteSurftripId(sid);
-        // Clean the URL so a refresh doesn't re-trigger the deep link.
+      const token = params.get('t');
+      if (sid || token) {
+        if (sid) setPendingInviteGroupId(sid);
+        if (token) setPendingInviteToken(token);
         params.delete('surftrip');
+        params.delete('t');
         const remaining = params.toString();
         const next = window.location.pathname + (remaining ? `?${remaining}` : '') + (window.location.hash || '');
         window.history.replaceState({}, '', next);
@@ -114,15 +141,101 @@ export const AppContent: React.FC = () => {
     }
   }, []);
 
-  // Once the user is authenticated and onboarding is complete, open the
-  // pending surftrip detail (if any).
+  // Native: getInitialURL on cold start + 'url' event for warm start.
   useEffect(() => {
-    if (!pendingInviteSurftripId) return;
+    if (Platform.OS === 'web') return;
+    let active = true;
+    Linking.getInitialURL()
+      .then(initial => {
+        if (active) parseInviteFromUrl(initial);
+      })
+      .catch(err => console.warn('[AppContent] getInitialURL failed:', err));
+
+    const sub = Linking.addEventListener('url', ({ url }) => {
+      parseInviteFromUrl(url);
+    });
+    return () => {
+      active = false;
+      sub.remove();
+    };
+  }, [parseInviteFromUrl]);
+
+  // Hydrate any persisted pending invite from a previous session (e.g. user
+  // tapped link, app cold-booted, signup flow began, then was killed).
+  useEffect(() => {
+    let cancelled = false;
+    AsyncStorage.getItem('pendingSurftripInvite')
+      .then(raw => {
+        if (cancelled || !raw) return;
+        try {
+          const parsed = JSON.parse(raw);
+          if (parsed?.groupId && !pendingInviteGroupId) setPendingInviteGroupId(parsed.groupId);
+          if (parsed?.token && !pendingInviteToken) setPendingInviteToken(parsed.token);
+        } catch {
+          // ignore
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []); // run once on mount
+
+  // While we're waiting for auth/onboarding, persist the pending invite so it
+  // survives a cold restart through the signup flow.
+  useEffect(() => {
+    if (!pendingInviteGroupId && !pendingInviteToken) return;
+    const payload = JSON.stringify({
+      groupId: pendingInviteGroupId,
+      token: pendingInviteToken,
+    });
+    AsyncStorage.setItem('pendingSurftripInvite', payload).catch(() => {});
+  }, [pendingInviteGroupId, pendingInviteToken]);
+
+  // Post-auth resolver: once the user is signed in and onboarded, accept the
+  // invite. Web is excluded — the landing screen handles web exclusively.
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    if (inviteResolverRef.current) return;
+    if (!pendingInviteToken && !pendingInviteGroupId) return;
     if (user === null) return;
     if (!isComplete && !isDemoUser) return;
-    setActiveSurftripDetailId(pendingInviteSurftripId);
-    setPendingInviteSurftripId(null);
-  }, [pendingInviteSurftripId, user, isComplete, isDemoUser]);
+
+    inviteResolverRef.current = true;
+    (async () => {
+      try {
+        if (pendingInviteToken) {
+          const result = await acceptSurftripInvite(pendingInviteToken);
+          if (result.outcome === 'joined' || result.outcome === 'already_member') {
+            setActiveSurftripDetailId(null);
+            setSelectedConversation({
+              id: result.conversation_id,
+              otherUserId: '',
+              otherUserName: '',
+              otherUserAvatar: null,
+              isDirect: false,
+              surftripId: result.group_id,
+            });
+          } else if (result.outcome === 'requested') {
+            setActiveSurftripDetailId(result.group_id);
+          } else if (result.outcome === 'group_full') {
+            Alert.alert('Surftrip is full', 'This group has reached its member limit.');
+          } else {
+            Alert.alert('Invite invalid', 'This invite link is no longer valid.');
+          }
+        } else if (pendingInviteGroupId) {
+          // Tokenless legacy link — just open the detail screen.
+          setActiveSurftripDetailId(pendingInviteGroupId);
+        }
+      } catch (e: any) {
+        console.warn('[AppContent] acceptSurftripInvite failed:', e);
+        Alert.alert('Could not open invite', e?.message || 'Please try again.');
+      } finally {
+        setPendingInviteGroupId(null);
+        setPendingInviteToken(null);
+        AsyncStorage.removeItem('pendingSurftripInvite').catch(() => {});
+        inviteResolverRef.current = false;
+      }
+    })();
+  }, [pendingInviteToken, pendingInviteGroupId, user, isComplete, isDemoUser]);
 
   // Validate session whenever a user is signed in (regardless of onboarding
   // completion). This unblocks mid-onboarding users who would otherwise be
@@ -1277,6 +1390,22 @@ export const AppContent: React.FC = () => {
     await ageGateService.clearBlock();
     setShowAgeBlockOverlay(false);
   };
+
+  // Web-only: invite links always render the "Get the app" landing.
+  // Acceptance is native-only by product decision.
+  if (Platform.OS === 'web' && (pendingInviteToken || pendingInviteGroupId)) {
+    return (
+      <SurftripInviteLanding
+        token={pendingInviteToken}
+        groupId={pendingInviteGroupId}
+        onDismiss={() => {
+          setPendingInviteToken(null);
+          setPendingInviteGroupId(null);
+          AsyncStorage.removeItem('pendingSurftripInvite').catch(() => {});
+        }}
+      />
+    );
+  }
 
   if (showAgeBlockOverlay) {
     return (

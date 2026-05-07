@@ -40,6 +40,7 @@ import { MatchedUsersCarousel } from '../components/MatchedUsersCarousel';
 import { messagingService } from '../services/messaging/messagingService';
 import { MatchedUser, TripPlanningRequest } from '../types/tripPlanning';
 import { analyticsService } from '../services/analytics/analyticsService';
+import { supabaseDatabaseService } from '../services/database/supabaseDatabaseService';
 import { ChatTextInput, ChatTextInputRef } from '../components/ChatTextInput';
 import { ReportAISheet } from '../components/ReportAISheet';
 import { blockingService } from '../services/blocking/blockingService';
@@ -281,7 +282,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   visible,
 }) => {
   const svc = service ?? swellyServiceCopy;
-  const { formData } = useOnboarding();
+  const { formData, isDemoUser } = useOnboarding();
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -1066,6 +1067,10 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   const runFindMatches = async (currentChatId: string, tripPlanningData: any, excludePrevious: boolean = false) => {
     if (!currentChatId) return;
     startLoadingWithTimeout();
+    // Analytics: first-ever Swelly search by this user. Idempotent (DB filters IS NULL). Skip demo users.
+    if (!isDemoUser) {
+      supabaseDatabaseService.markFirstEvent('swelly_first_search_at');
+    }
     const requestData = {
       destination_country: tripPlanningData.destination_country,
       area: tripPlanningData.area || null,

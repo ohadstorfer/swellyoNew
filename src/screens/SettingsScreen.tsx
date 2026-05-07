@@ -15,7 +15,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { ProfileImage } from '../components/ProfileImage';
 import { DeleteAccountScreen } from './DeleteAccountScreen';
 import { PrivacyPreferencesScreen } from './PrivacyPreferencesScreen';
+import { AnalyticsDashboardScreen } from './AnalyticsDashboardScreen';
 import { ReportBugOverlay } from '../components/ReportBugOverlay';
+import { isCurrentUserAdmin } from '../services/analytics/analyticsDashboardService';
 
 // Settings menu icons
 const iconPrivacyPreferences = require('../assets/icons/privacy-preferences.png');
@@ -37,6 +39,8 @@ export function SettingsScreen({ onBack, userName, userAvatar, userEmail }: Sett
   const [showDeleteAccount, setShowDeleteAccount] = useState(false);
   const [showPrivacyPreferences, setShowPrivacyPreferences] = useState(false);
   const [showReportBug, setShowReportBug] = useState(false);
+  const [showAnalytics, setShowAnalytics] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const slideAnim = useRef(new Animated.Value(600)).current;
 
   useEffect(() => {
@@ -47,6 +51,14 @@ export function SettingsScreen({ onBack, userName, userAvatar, userEmail }: Sett
       useNativeDriver: true,
     }).start();
   }, []);
+
+  useEffect(() => {
+    isCurrentUserAdmin().then(setIsAdmin);
+  }, []);
+
+  if (showAnalytics) {
+    return <AnalyticsDashboardScreen onBack={() => setShowAnalytics(false)} />;
+  }
 
   if (showPrivacyPreferences) {
     return (
@@ -132,6 +144,13 @@ export function SettingsScreen({ onBack, userName, userAvatar, userEmail }: Sett
             <Image source={iconDeleteAccount} style={styles.menuIcon} resizeMode="contain" />
             <Text style={styles.menuRowText}>Delete account</Text>
           </TouchableOpacity>
+
+          {isAdmin && (
+            <TouchableOpacity style={styles.menuRow} activeOpacity={0.7} onPress={() => setShowAnalytics(true)}>
+              <Ionicons name="stats-chart-outline" size={22} color="#333" style={styles.menuIcon} />
+              <Text style={styles.menuRowText}>Analytics (admin)</Text>
+            </TouchableOpacity>
+          )}
         </ScrollView>
       </Animated.View>
       <ReportBugOverlay visible={showReportBug} onClose={() => setShowReportBug(false)} />

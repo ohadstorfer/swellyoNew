@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { OnboardingData } from '../screens/OnboardingStep1Screen';
 import { User, databaseService } from '../services/database/databaseService';
@@ -68,6 +68,7 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const [isComplete, setIsComplete] = useState(false);
   const [isDemoUser, setIsDemoUser] = useState(false);
   const [isRestoringSession, setIsRestoringSession] = useState(true);
+  const earlyPushRegisteredRef = useRef(false);
 
   // Restore session from Supabase on mount
   // This runs FIRST to check if user has a valid session before any other logic
@@ -194,6 +195,20 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   useEffect(() => {
     restoreSession();
   }, [restoreSession]);
+
+  // Register for push notifications as soon as the user enters step 1.
+  // We need the token before they finish onboarding so abandonment reminders
+  // have somewhere to deliver. Service is idempotent — safe to call again later.
+  useEffect(() => {
+    if (currentStep === 1 && user && !earlyPushRegisteredRef.current) {
+      earlyPushRegisteredRef.current = true;
+      import('../services/notifications/pushNotificationService').then(({ pushNotificationService }) =>
+        pushNotificationService.registerForPushNotifications().catch(err =>
+          console.warn('[OnboardingContext] Early push registration failed (non-blocking):', err)
+        )
+      );
+    }
+  }, [currentStep, user]);
 
   // Load saved data on mount - runs after session restoration AND whenever
   // the user identity changes (sign-in / sign-out). Without the user dep, a

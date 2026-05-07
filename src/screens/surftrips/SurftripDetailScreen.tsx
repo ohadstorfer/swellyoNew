@@ -20,7 +20,9 @@ import { SurftripParticipantRow } from '../../components/surftrips/SurftripParti
 import { PendingSurftripRequestCard } from '../../components/surftrips/PendingSurftripRequestCard';
 import { ParticipantMenuSheet } from '../../components/surftrips/ParticipantMenuSheet';
 import { CreateSurftripModal } from '../../components/surftrips/CreateSurftripModal';
+import { AddMembersSheet } from '../../components/surftrips/AddMembersSheet';
 import {
+  addMembersFromDms,
   approveRequest,
   declineRequest,
   deleteSurftripGroup,
@@ -29,6 +31,7 @@ import {
   getSurftripGroup,
   getSurftripInviteUrl,
   leaveGroup,
+  listAddableDmPartners,
   listMembers,
   listPendingRequests,
   promoteToAdmin,
@@ -67,6 +70,7 @@ export default function SurftripDetailScreen({
   const [showRequestModal, setShowRequestModal] = useState(false);
   const [requestNote, setRequestNote] = useState('');
   const [showEditModal, setShowEditModal] = useState(false);
+  const [showAddMembers, setShowAddMembers] = useState(false);
 
   const myMember = useMemo(
     () => (currentUserId ? members.find(m => m.user_id === currentUserId) : null) || null,
@@ -158,7 +162,13 @@ export default function SurftripDetailScreen({
 
   const handleShareInvite = async () => {
     if (!group) return;
-    const url = getSurftripInviteUrl(group.id);
+    let url: string;
+    try {
+      url = await getSurftripInviteUrl(group.id);
+    } catch (e: any) {
+      Alert.alert('Could not create invite link', e?.message || 'Please try again.');
+      return;
+    }
     const message = `Join "${group.name}" on Swellyo: ${url}`;
 
     try {
@@ -397,7 +407,21 @@ export default function SurftripDetailScreen({
 
         {/* Members — rounded card, hairline dividers between rows */}
         <View style={styles.section}>
-          <Text style={styles.sectionLabel}>Members</Text>
+          <View style={styles.membersHeader}>
+            <Text style={styles.sectionLabel}>Members</Text>
+            {canManage && group.max_members > members.length ? (
+              <TouchableOpacity
+                style={styles.addMembersBtn}
+                onPress={() => setShowAddMembers(true)}
+                hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                accessibilityLabel="Add members from your chats"
+                activeOpacity={0.7}
+              >
+                <Ionicons name="add" size={16} color="#0788B0" />
+                <Text style={styles.addMembersBtnText}>Add</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
           <View style={styles.sectionBody}>
             {members.map((m, idx) => (
               <View key={m.user_id}>
@@ -474,6 +498,21 @@ export default function SurftripDetailScreen({
         onUpdated={(updated) => {
           setShowEditModal(false);
           setGroup(updated);
+        }}
+      />
+
+      <AddMembersSheet
+        visible={showAddMembers}
+        loadPartners={() => listAddableDmPartners(groupId)}
+        commitSelection={(ids) => addMembersFromDms(groupId, ids)}
+        remainingSlots={Math.max(0, group.max_members - members.length)}
+        onClose={() => setShowAddMembers(false)}
+        onCommitted={(applied) => {
+          setShowAddMembers(false);
+          if (applied.length > 0) {
+            // Refresh members list (and pending requests, in case added users had pending rows).
+            load();
+          }
         }}
       />
 
@@ -758,6 +797,25 @@ const styles = StyleSheet.create({
     color: '#7B7B7B',
     paddingHorizontal: 32,
     marginBottom: 6,
+  },
+  membersHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingRight: 32,
+  },
+  addMembersBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    paddingVertical: 4,
+    paddingHorizontal: 6,
+    marginBottom: 6,
+  },
+  addMembersBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#0788B0',
   },
   sectionBody: {
     backgroundColor: '#FFFFFF',

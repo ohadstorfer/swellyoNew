@@ -44,3 +44,18 @@ fs.writeFileSync(
 );
 
 console.log('✓ Created _redirects file in dist directory');
+
+// Copy .well-known/ (AASA + assetlinks.json) into dist so Netlify serves them
+// at https://www.swellyo.com/.well-known/... — required by iOS Universal Links
+// and Android App Links to open the native app from https links.
+const wellKnownSrc = path.join(__dirname, 'public', '.well-known');
+const wellKnownDest = path.join(distDir, '.well-known');
+if (fs.existsSync(wellKnownSrc)) {
+  fs.mkdirSync(wellKnownDest, { recursive: true });
+  for (const file of fs.readdirSync(wellKnownSrc)) {
+    fs.copyFileSync(path.join(wellKnownSrc, file), path.join(wellKnownDest, file));
+  }
+  console.log(`✓ Copied .well-known/ to dist (${fs.readdirSync(wellKnownDest).join(', ')})`);
+} else {
+  console.warn('Warning: public/.well-known not found — Universal Links / App Links will not work.');
+}

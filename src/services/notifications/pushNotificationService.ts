@@ -114,6 +114,20 @@ class PushNotificationService {
         return;
       }
 
+      // A single device token can only legitimately belong to one surfer row at
+      // a time. Clear it from any other rows first so onboarding-reminder /
+      // blast queries don't accidentally target a stale row attached to this
+      // device. Order matters: clear others BEFORE setting ours.
+      const { error: clearError } = await supabase
+        .from('surfers')
+        .update({ expo_push_token: null })
+        .eq('expo_push_token', token)
+        .neq('user_id', authUser.id);
+      if (clearError) {
+        console.warn('[PushNotificationService] Error clearing token from other rows:', clearError);
+        // Non-fatal — proceed to save our own row anyway.
+      }
+
       const { error } = await supabase
         .from('surfers')
         .update({ expo_push_token: token })

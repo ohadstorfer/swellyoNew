@@ -14,11 +14,14 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../Text';
 import {
+  addMembersFromDms,
   createSurftripGroup,
+  listMyDmPartners,
   updateSurftripGroup,
 } from '../../services/surftrips/surftripsService';
 import { uploadSurftripImage } from '../../services/storage/storageService';
 import type { SurftripGroup } from '../../types/surftrips';
+import { AddMembersSheet } from './AddMembersSheet';
 
 interface CreateSurftripModalProps {
   visible: boolean;
@@ -73,6 +76,8 @@ export const CreateSurftripModal: React.FC<CreateSurftripModalProps> = ({
   const [imageDirty, setImageDirty] = useState(false);
   const [maxMembersText, setMaxMembersText] = useState('50');
   const [submitting, setSubmitting] = useState(false);
+  const [invitedUserIds, setInvitedUserIds] = useState<string[]>([]);
+  const [showInviteSheet, setShowInviteSheet] = useState(false);
 
   // Hydrate state when entering edit mode (or reset when closing the edit-mode modal).
   useEffect(() => {
@@ -82,6 +87,7 @@ export const CreateSurftripModal: React.FC<CreateSurftripModalProps> = ({
       setImageUri(initialGroup.hero_image_url ?? null);
       setImageDirty(false);
       setMaxMembersText(String(initialGroup.max_members ?? 50));
+      setInvitedUserIds([]);
     }
     if (!visible) {
       // wipe local state on close so the next open starts fresh
@@ -90,6 +96,8 @@ export const CreateSurftripModal: React.FC<CreateSurftripModalProps> = ({
       setImageUri(null);
       setImageDirty(false);
       setMaxMembersText('50');
+      setInvitedUserIds([]);
+      setShowInviteSheet(false);
     }
   }, [visible, initialGroup]);
 
@@ -102,6 +110,7 @@ export const CreateSurftripModal: React.FC<CreateSurftripModalProps> = ({
     setImageUri(null);
     setImageDirty(false);
     setMaxMembersText('50');
+    setInvitedUserIds([]);
   };
 
   const parsedMaxMembers = (() => {
@@ -177,6 +186,19 @@ export const CreateSurftripModal: React.FC<CreateSurftripModalProps> = ({
           heroImageUrl: heroImageUrl ?? null,
           maxMembers: parsedMaxMembers,
         });
+        if (invitedUserIds.length > 0) {
+          try {
+            await addMembersFromDms(group.id, invitedUserIds);
+          } catch (e) {
+            // Group is created; only the bulk-invite step failed. Warn but
+            // don't block — the host can use "+ Add" on the detail screen.
+            console.warn('[CreateSurftripModal] addMembersFromDms failed:', e);
+            Alert.alert(
+              'Group created, invites partially failed',
+              "We couldn't add some of the people you picked. You can add them from the group's detail screen."
+            );
+          }
+        }
         reset();
         onCreated?.(group);
       }
@@ -288,9 +310,59 @@ export const CreateSurftripModal: React.FC<CreateSurftripModalProps> = ({
               />
               <Text style={styles.helper}>Between 2 and 200 · default 50</Text>
             </View>
+
+            {!editMode && (
+              <View style={styles.field}>
+                <Text style={styles.label}>Invite from your chats</Text>
+                <TouchableOpacity
+                  style={styles.invitePicker}
+                  onPress={() => setShowInviteSheet(true)}
+                  activeOpacity={0.7}
+                  disabled={submitting}
+                >
+                  <Ionicons
+                    name={invitedUserIds.length > 0 ? 'people' : 'person-add-outline'}
+                    size={20}
+                    color={invitedUserIds.length > 0 ? '#0788B0' : '#7B7B7B'}
+                  />
+                  <Text
+                    style={[
+                      styles.invitePickerText,
+                      invitedUserIds.length > 0 && styles.invitePickerTextActive,
+                    ]}
+                  >
+                    {invitedUserIds.length === 0
+                      ? 'Pick people'
+                      : invitedUserIds.length === 1
+                      ? '1 person selected'
+                      : `${invitedUserIds.length} people selected`}
+                  </Text>
+                  <Ionicons name="chevron-forward" size={18} color="#9AA3A8" />
+                </TouchableOpacity>
+                <Text style={styles.helper}>
+                  Optional · they&apos;ll be added straight into the group
+                </Text>
+              </View>
+            )}
           </ScrollView>
         </View>
       </View>
+
+      {!editMode && (
+        <AddMembersSheet
+          visible={showInviteSheet}
+          loadPartners={listMyDmPartners}
+          commitSelection={async (ids) => ids}
+          remainingSlots={Math.max(0, parsedMaxMembers - 1)}
+          initialSelectedIds={invitedUserIds}
+          submitLabel={(n) => (n === 0 ? 'Done' : `Confirm ${n}`)}
+          onClose={() => setShowInviteSheet(false)}
+          onCommitted={(ids) => {
+            setInvitedUserIds(ids);
+            setShowInviteSheet(false);
+          }}
+        />
+      )}
     </Modal>
   );
 };
@@ -385,4 +457,24 @@ const styles = StyleSheet.create({
     paddingTop: 10,
   },
   helper: { fontSize: 12, color: '#9AA3A8', marginTop: 2 },
+
+  invitePicker: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: '#E1E1E1',
+    borderRadius: 10,
+  },
+  invitePickerText: {
+    flex: 1,
+    fontSize: 15,
+    color: '#7B7B7B',
+  },
+  invitePickerTextActive: {
+    color: '#222B30',
+    fontWeight: '600',
+  },
 });
