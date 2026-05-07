@@ -1048,6 +1048,19 @@ class MessagingService {
 
       if (membersError) throw membersError;
 
+      // Analytics: first-ever Swelly match by this user. Idempotent (DB filters IS NULL).
+      // Only count when this conversation came from Swelly (fromTripPlanning) AND is newly created here.
+      if (fromTripPlanning) {
+        supabase
+          .from('surfers')
+          .update({ swelly_first_match_at: new Date().toISOString() })
+          .eq('user_id', user.id)
+          .is('swelly_first_match_at', null)
+          .then(({ error: markErr }) => {
+            if (markErr) console.warn('markFirstEvent(swelly_first_match_at) failed:', markErr);
+          });
+      }
+
       return conversation;
     } catch (error) {
       console.error('Error creating direct conversation:', error);

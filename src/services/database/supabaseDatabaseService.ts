@@ -780,19 +780,51 @@ class SupabaseDatabaseService {
         throw new Error('User not authenticated. Please sign in first.');
       }
 
+      // Always set finished_onboarding=true (idempotent if already true).
       const { error } = await supabase
         .from('surfers')
         .update({ finished_onboarding: true })
         .eq('user_id', authUser.id);
+      if (error) throw error;
 
-      if (error) {
-        throw error;
-      }
+      // Set onboarding_completed_at only if it hasn't been set before — preserves the
+      // FIRST completion timestamp for the analytics dashboard.
+      const { error: stampErr } = await supabase
+        .from('surfers')
+        .update({ onboarding_completed_at: new Date().toISOString() })
+        .eq('user_id', authUser.id)
+        .is('onboarding_completed_at', null);
+      if (stampErr) console.warn('onboarding_completed_at stamp failed (non-fatal):', stampErr);
 
       console.log('Marked onboarding as complete in database');
     } catch (error: any) {
       console.error('Error marking onboarding as complete:', error);
       throw new Error(`Failed to mark onboarding as complete: ${error.message || String(error)}`);
+    }
+  }
+
+  /**
+   * Set a "first event" timestamp on the surfer row, but only if it hasn't been set yet.
+   * Idempotent: subsequent calls are no-ops at the DB level (filter on IS NULL).
+   * Used by the analytics dashboard to bucket users by first occurrence.
+   */
+  async markFirstEvent(
+    column:
+      | 'onboarding_phase1_completed_at'
+      | 'swelly_first_search_at'
+      | 'swelly_first_match_at',
+  ): Promise<void> {
+    if (!isSupabaseConfigured()) return;
+    try {
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (!authUser) return;
+      await supabase
+        .from('surfers')
+        .update({ [column]: new Date().toISOString() })
+        .eq('user_id', authUser.id)
+        .is(column, null);
+    } catch (error) {
+      console.warn(`markFirstEvent(${column}) failed (non-fatal):`, error);
     }
   }
 

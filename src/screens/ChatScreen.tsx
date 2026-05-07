@@ -122,7 +122,34 @@ interface OnboardingChatScreenProps {
   onChatComplete?: () => void;
 }
 
-export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({ 
+// Convert a destination row from the carousel ({destination: "USA (California)", ...})
+// into the shape the surfers.destinations_array column stores.
+// Used for the partial save fired when the user submits destinations mid-chat.
+function parseDestinationToSurferShape(d: {
+  destination: string;
+  areas: string[];
+  timeInDays: number;
+  timeInText: string;
+}): Record<string, unknown> {
+  const m = d.destination.match(/^(.+?)\s*\((.+?)\)\s*$/);
+  if (m) {
+    return {
+      country: m[1].trim(),
+      state: m[2].trim(),
+      area: d.areas,
+      time_in_days: d.timeInDays,
+      time_in_text: d.timeInText,
+    };
+  }
+  return {
+    country: d.destination.trim(),
+    area: d.areas,
+    time_in_days: d.timeInDays,
+    time_in_text: d.timeInText,
+  };
+}
+
+export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
   onChatComplete,
 }) => {
   const { setCurrentStep, formData, isDemoUser } = useOnboarding();
@@ -225,6 +252,12 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
     let timeout1: ReturnType<typeof setTimeout> | null = null;
     let timeout2: ReturnType<typeof setTimeout> | null = null;
     let cancelled = false;
+
+    // Analytics: record first time this user landed on the Swelly onboarding chat (phase 1).
+    // Idempotent at the DB level (UPDATE ... IS NULL). Skip demo users.
+    if (!isDemoUser) {
+      supabaseDatabaseService.markFirstEvent('onboarding_phase1_completed_at');
+    }
 
     const initializeChat = async () => {
       try {
@@ -597,6 +630,21 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
     timeInDays: number;
     timeInText: string;
   }>) => {
+    // Fire-and-forget: persist destinations_array now so abandoners mid-chat
+    // keep this value in surfers. Not awaited — chat must not wait for DB.
+    if (isSupabaseConfigured()) {
+      const partialDestinations = allDestinationsData.map(parseDestinationToSurferShape);
+      supabase.auth.getUser()
+        .then(({ data: { user: authUser } }) => {
+          if (!authUser) return;
+          return supabase
+            .from('surfers')
+            .update({ destinations_array: partialDestinations })
+            .eq('user_id', authUser.id);
+        })
+        .catch(err => console.warn('[ChatScreen] destinations_array partial save failed:', err));
+    }
+
     // Send all destination data to backend
     const destinationsData = allDestinationsData.map(dest => {
       // Parse destination to extract country/state
@@ -665,7 +713,21 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
   const handleBudgetSelect = async (budget: BudgetOption) => {
     setSelectedBudget(budget);
     setBudgetSubmitted(true);
-    
+
+    // Fire-and-forget: persist travel_type now so abandoners mid-chat keep this
+    // value in surfers. Not awaited — the chat must not wait for the DB write.
+    if (isSupabaseConfigured()) {
+      supabase.auth.getUser()
+        .then(({ data: { user: authUser } }) => {
+          if (!authUser) return;
+          return supabase
+            .from('surfers')
+            .update({ travel_type: budget })
+            .eq('user_id', authUser.id);
+        })
+        .catch(err => console.warn('[ChatScreen] travel_type partial save failed:', err));
+    }
+
     // Send budget selection to backend
     const messageToSend = JSON.stringify({
       travel_type: budget,

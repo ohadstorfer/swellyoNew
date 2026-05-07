@@ -23,6 +23,7 @@
       "supportsTablet": false,
       "usesNonExemptEncryption": false,
       "usesAppleSignIn": true,
+      "associatedDomains": ["applinks:www.swellyo.com"],
       "entitlements": {
         "aps-environment": "production"
       },
@@ -47,7 +48,15 @@
         "android.permission.RECORD_AUDIO",
         "android.permission.POST_NOTIFICATIONS"
       ],
-      "blockedPermissions": []
+      "blockedPermissions": [],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [{ "scheme": "https", "host": "www.swellyo.com", "pathPrefix": "/" }],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png",

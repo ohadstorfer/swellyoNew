@@ -62,13 +62,77 @@ export async function getSurftripGroup(
 }
 
 /**
- * Build a public, shareable invite URL for a surftrip. The link doesn't expire
- * — anyone who opens it lands on the surftrip detail screen with the option to
- * Request to Join. Joining still requires admin/host approval.
+ * Build a tokenized invite URL for a surftrip. The token encodes who shared
+ * (and their role at creation time) so the accept-side RPC can decide whether
+ * to auto-join (admin-shared) or open a pending request (member-shared).
+ * One stable token per (group, sharer) — calling this repeatedly returns the
+ * same URL.
  */
-export function getSurftripInviteUrl(groupId: string): string {
+export async function getSurftripInviteUrl(groupId: string): Promise<string> {
+  const { data, error } = await supabase.rpc('create_surftrip_invite', {
+    p_group_id: groupId,
+  });
+  if (error || !data) {
+    console.error('[surftripsService] getSurftripInviteUrl error:', error);
+    throw new Error(error?.message || 'Could not create invite link');
+  }
+  const token = String(data);
   const base = 'https://www.swellyo.com';
-  return `${base}/?surftrip=${encodeURIComponent(groupId)}`;
+  return `${base}/?surftrip=${encodeURIComponent(groupId)}&t=${encodeURIComponent(token)}`;
+}
+
+export type AcceptInviteOutcome =
+  | { outcome: 'invalid' }
+  | { outcome: 'group_full' }
+  | { outcome: 'already_member'; group_id: string; conversation_id: string }
+  | { outcome: 'joined'; group_id: string; conversation_id: string }
+  | { outcome: 'requested'; group_id: string };
+
+/**
+ * Accept a surftrip invite via its token. The RPC decides between auto-join
+ * (admin-shared, sharer still authoritative) and creating a pending request.
+ * Caller must be authenticated.
+ */
+export async function acceptSurftripInvite(token: string): Promise<AcceptInviteOutcome> {
+  const { data, error } = await supabase.rpc('accept_surftrip_invite', {
+    p_token: token,
+  });
+  if (error) {
+    console.error('[surftripsService] acceptSurftripInvite error:', error);
+    throw new Error(error.message || 'Could not accept invite');
+  }
+  return data as AcceptInviteOutcome;
+}
+
+export interface SurftripInvitePreview {
+  group_name: string | null;
+  hero_image_url: string | null;
+  host_display_name: string | null;
+  member_count: number | null;
+  max_members: number | null;
+}
+
+/**
+ * Anonymous-callable preview for the web "Get the app" landing page.
+ * Returns null fields when token is invalid/revoked (don't leak existence).
+ */
+export async function getSurftripInvitePreview(
+  token: string
+): Promise<SurftripInvitePreview> {
+  const { data, error } = await supabase.rpc('get_surftrip_invite_preview', {
+    p_token: token,
+  });
+  if (error) {
+    console.error('[surftripsService] getSurftripInvitePreview error:', error);
+    return {
+      group_name: null,
+      hero_image_url: null,
+      host_display_name: null,
+      member_count: null,
+      max_members: null,
+    };
+  }
+  return data as SurftripInvitePreview;
 }
 
 export async function deleteSurftripGroup(groupId: string): Promise<void> {
@@ -225,6 +289,85 @@ export async function leaveGroup(
   userId: string
 ): Promise<void> {
   await deleteMembership(groupId, userId);
+}
+
+// ---------------------------------------------------------------------------
+// Admin: add members directly from existing DMs (no join request)
+// ---------------------------------------------------------------------------
+
+export interface AddableDmPartner extends ParticipantProfile {
+  last_dm_at: string | null;
+}
+
+/**
+ * Host/admin: list users the caller has 1-1 DMs with, excluding anyone
+ * already in the group. Sorted by most recent DM activity.
+ */
+export async function listAddableDmPartners(
+  groupId: string
+): Promise<AddableDmPartner[]> {
+  const { data, error } = await supabase.rpc('list_addable_dm_partners', {
+    p_group_id: groupId,
+  });
+  if (error) {
+    console.error('[surftripsService] listAddableDmPartners error:', error);
+    throw new Error(error.message || 'Could not load chat partners');
+  }
+  const rows = (data || []) as { user_id: string; last_dm_at: string | null }[];
+  if (rows.length === 0) return [];
+
+  const userIds = rows.map(r => r.user_id);
+  const profiles = await fetchProfiles(userIds);
+
+  return rows.map(r => ({
+    ...emptyProfile(r.user_id),
+    ...(profiles.get(r.user_id) || {}),
+    last_dm_at: r.last_dm_at,
+  }));
+}
+
+/**
+ * List the caller's 1-1 DM partners. Used at surftrip-creation time so the
+ * host can pick people to add immediately, before the group exists.
+ */
+export async function listMyDmPartners(): Promise<AddableDmPartner[]> {
+  const { data, error } = await supabase.rpc('list_my_dm_partners');
+  if (error) {
+    console.error('[surftripsService] listMyDmPartners error:', error);
+    throw new Error(error.message || 'Could not load chat partners');
+  }
+  const rows = (data || []) as { user_id: string; last_dm_at: string | null }[];
+  if (rows.length === 0) return [];
+
+  const userIds = rows.map(r => r.user_id);
+  const profiles = await fetchProfiles(userIds);
+
+  return rows.map(r => ({
+    ...emptyProfile(r.user_id),
+    ...(profiles.get(r.user_id) || {}),
+    last_dm_at: r.last_dm_at,
+  }));
+}
+
+/**
+ * Host/admin: bulk-add picked DM partners to the group. Caps to the group's
+ * remaining slots; returns the ids actually added so the caller can show a
+ * partial-success toast when the group fills up.
+ */
+export async function addMembersFromDms(
+  groupId: string,
+  userIds: string[]
+): Promise<string[]> {
+  if (userIds.length === 0) return [];
+  const { data, error } = await supabase.rpc('add_surftrip_members_from_dms', {
+    p_group_id: groupId,
+    p_user_ids: userIds,
+  });
+  if (error) {
+    console.error('[surftripsService] addMembersFromDms error:', error);
+    throw new Error(error.message || 'Could not add members');
+  }
+  return (data || []) as string[];
 }
 
 // ---------------------------------------------------------------------------
