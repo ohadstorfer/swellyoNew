@@ -434,6 +434,23 @@ export async function setTripCommitment(
  * linked group conversation. Their original join request stays approved (history).
  */
 export async function leaveTrip(tripId: string, userId: string): Promise<void> {
+  // Post the "<X> left the group" banner BEFORE deleting membership so RLS
+  // still permits the insert (sender must be a conversation member).
+  try {
+    const conv = await messagingService.getConversationByTripId(tripId);
+    if (conv?.id) {
+      const { data: surfer } = await supabase
+        .from('surfers')
+        .select('name')
+        .eq('user_id', userId)
+        .maybeSingle();
+      const name = (surfer as any)?.name?.trim() || 'User';
+      await messagingService.postSystemMessage(conv.id, `${name} left the group`);
+    }
+  } catch (bannerError) {
+    console.warn('[groupTripsService] leaveTrip banner failed:', bannerError);
+  }
+
   const { error } = await supabase
     .from('group_trip_participants')
     .delete()
@@ -465,6 +482,33 @@ export async function removeParticipant(
   tripId: string,
   userId: string
 ): Promise<void> {
+  // Post "<Host> removed <Target>" banner BEFORE deletion. Host stays in the
+  // group so RLS lets the insert through.
+  try {
+    const conv = await messagingService.getConversationByTripId(tripId);
+    if (conv?.id) {
+      const adminId = (await supabase.auth.getUser()).data.user?.id ?? null;
+      if (adminId) {
+        const { data: surfers } = await supabase
+          .from('surfers')
+          .select('user_id, name')
+          .in('user_id', [adminId, userId]);
+        const byId = new Map<string, string>();
+        (surfers || []).forEach((s: any) => {
+          if (s?.name) byId.set(s.user_id, String(s.name).trim());
+        });
+        const adminName = byId.get(adminId) || 'User';
+        const targetName = byId.get(userId) || 'User';
+        await messagingService.postSystemMessage(
+          conv.id,
+          `${adminName} removed ${targetName}`
+        );
+      }
+    }
+  } catch (bannerError) {
+    console.warn('[groupTripsService] removeParticipant banner failed:', bannerError);
+  }
+
   const { error } = await supabase
     .from('group_trip_participants')
     .delete()
@@ -713,6 +757,16 @@ export async function approveJoinRequest(requestId: string): Promise<void> {
       const conv = await messagingService.getConversationByTripId(updated.trip_id);
       if (conv?.id) {
         await messagingService.addConversationMember(conv.id, updated.requester_id);
+        const { data: surfer } = await supabase
+          .from('surfers')
+          .select('name')
+          .eq('user_id', updated.requester_id)
+          .maybeSingle();
+        const name = (surfer as any)?.name?.trim() || 'User';
+        await messagingService.postSystemMessage(
+          conv.id,
+          `${name} joined the group`
+        );
       }
     } catch (chatError) {
       console.warn('[groupTripsService] add to trip group chat failed:', chatError);

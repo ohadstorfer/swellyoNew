@@ -28,9 +28,9 @@ interface DashboardResponse {
   metric_4: Counter   // full onboarding
   metric_5: Counter   // first Swelly search
   metric_6: Counter   // first Swelly match
-  metric_7: number    // convos with 1+ message (total only)
-  metric_8: number    // both sides replied (total only)
-  metric_9: number    // 4+ msgs each side (total only)
+  metric_7: Counter   // convos with 1+ message — bucketed by first-message timestamp
+  metric_8: Counter   // both sides replied — bucketed by max(first-by-each-side) timestamp
+  metric_9: Counter   // 4+ msgs each — bucketed by max(4th-by-each-side) timestamp
   metric_10: {
     with_surfer: Counter   // distinct user_ids in user_activity that have a non-demo surfer row
     auth_only:   Counter   // distinct user_ids in user_activity with NO surfers row at all
@@ -140,7 +140,20 @@ async function countSurfersCreated(from: string | null, to: string | null): Prom
  * That said — convo counts are O(convos), small dataset for now. We fetch conversation_members rows
  * for direct conversations involving an adv_seeker, plus a per-user message count, and bucket in JS.
  */
-async function computeConvoMetrics(): Promise<{ m7: number; m8: number; m9: number }> {
+/**
+ * Compute m7/m8/m9 with criterion-satisfied timestamps so they can be bucketed by from/to and
+ * rendered as sparklines (matches the rest of the metrics).
+ *
+ * Per-convo "satisfied" timestamps:
+ *   m7: earliest message timestamp (when the convo first had any message).
+ *   m8: max(first-message-by-seeker, first-message-by-other) — both must exist; criterion
+ *       met when the LATER first-message lands.
+ *   m9: max(seeker_msgs[3].created_at, other_msgs[3].created_at) — both sides need ≥4.
+ */
+async function computeConvoMetrics(
+  from: string | null,
+  to: string | null,
+): Promise<{ m7: Counter; m8: Counter; m9: Counter }> {
   // 1. Build the demo-user exclusion set once, in JS — sidesteps any cross-table PostgREST FK assumptions.
   const { data: demoRows, error: demoErr } = await supabase
     .from('surfers')
@@ -155,7 +168,9 @@ async function computeConvoMetrics(): Promise<{ m7: number; m8: number; m9: numb
     .select('conversation_id, user_id, adv_role, conversations!inner ( is_direct )')
     .eq('conversations.is_direct', true)
   if (error) throw error
-  if (!rows) return { m7: 0, m8: 0, m9: 0 }
+
+  const empty: Counter = { total: 0, in_range: 0, series: new Array<number>(SPARKLINE_DAYS).fill(0) }
+  if (!rows) return { m7: empty, m8: empty, m9: empty }
 
   // 3. Group members by conversation. Only keep convos where:
   //    - one member has adv_role='adv_seeker' (= came from Swelly)
@@ -174,38 +189,73 @@ async function computeConvoMetrics(): Promise<{ m7: number; m8: number; m9: numb
   for (const [cid, v] of byConvo) {
     if (v.seeker && v.other && !v.hasDemo) swellyConvoIds.push({ id: cid, seeker: v.seeker, other: v.other })
   }
-  if (swellyConvoIds.length === 0) return { m7: 0, m8: 0, m9: 0 }
+  if (swellyConvoIds.length === 0) return { m7: empty, m8: empty, m9: empty }
 
-  // 2. For each convo, fetch message counts grouped by sender. We do a single SELECT scoped to those convo IDs
-  //    and bucket counts in JS.
+  // 4. Fetch all messages in those convos (ordered ascending) so we can pick by sender + position.
   const ids = swellyConvoIds.map(c => c.id)
   const { data: msgs, error: msgErr } = await supabase
     .from('messages')
-    .select('conversation_id, sender_id')
+    .select('conversation_id, sender_id, created_at')
     .in('conversation_id', ids)
     .eq('deleted', false)
     .eq('is_system', false)
+    .order('created_at', { ascending: true })
   if (msgErr) throw msgErr
 
-  const counts = new Map<string, Map<string, number>>() // conversation_id -> sender_id -> count
+  // Group messages by conversation, splitting per sender side.
+  // We rely on the ascending order from the query so seekerMsgs[k] / otherMsgs[k] are time-sorted.
+  const grouped = new Map<string, { seeker: string[]; other: string[] }>()
+  for (const c of swellyConvoIds) grouped.set(c.id, { seeker: [], other: [] })
   for (const m of msgs ?? []) {
-    const inner = counts.get(m.conversation_id) ?? new Map<string, number>()
-    inner.set(m.sender_id, (inner.get(m.sender_id) ?? 0) + 1)
-    counts.set(m.conversation_id, inner)
+    const g = grouped.get(m.conversation_id)
+    if (!g) continue
+    const c = swellyConvoIds.find(x => x.id === m.conversation_id)!
+    if (m.sender_id === c.seeker) g.seeker.push(m.created_at as string)
+    else if (m.sender_id === c.other) g.other.push(m.created_at as string)
   }
 
-  let m7 = 0, m8 = 0, m9 = 0
+  // Helper: max of two ISO timestamps.
+  const laterOf = (a: string, b: string) => (new Date(a).getTime() >= new Date(b).getTime() ? a : b)
+
+  // Per-metric arrays of "criterion satisfied" timestamps (one per qualifying convo).
+  const ts7: string[] = []
+  const ts8: string[] = []
+  const ts9: string[] = []
+
   for (const c of swellyConvoIds) {
-    const inner = counts.get(c.id)
-    if (!inner) continue
-    const seekerCount = inner.get(c.seeker) ?? 0
-    const otherCount = inner.get(c.other) ?? 0
-    const totalMsgs = seekerCount + otherCount
-    if (totalMsgs >= 1) m7++
-    if (seekerCount >= 1 && otherCount >= 1) m8++
-    if (seekerCount >= 4 && otherCount >= 4) m9++
+    const g = grouped.get(c.id)
+    if (!g) continue
+    const sk = g.seeker
+    const ot = g.other
+    const allMsgs = sk.length + ot.length
+
+    if (allMsgs >= 1) {
+      // Earliest message overall — sk[0] and ot[0] are each side's earliest, take the lesser.
+      const candidates = [sk[0], ot[0]].filter(Boolean) as string[]
+      const earliest = candidates.reduce((a, b) =>
+        new Date(a).getTime() <= new Date(b).getTime() ? a : b,
+      )
+      ts7.push(earliest)
+    }
+    if (sk.length >= 1 && ot.length >= 1) ts8.push(laterOf(sk[0], ot[0]))
+    if (sk.length >= 4 && ot.length >= 4) ts9.push(laterOf(sk[3], ot[3]))
   }
-  return { m7, m8, m9 }
+
+  const buildCounter = (timestamps: string[]): Counter => {
+    const total = timestamps.length
+    let in_range = total
+    if (from || to) {
+      const { fromMs, toMs } = rangeMs(from, to)
+      in_range = timestamps.filter(ts => tsBetween(ts, fromMs, toMs)).length
+    }
+    return { total, in_range, series: bucketSeries(timestamps) }
+  }
+
+  return {
+    m7: buildCounter(ts7),
+    m8: buildCounter(ts8),
+    m9: buildCounter(ts9),
+  }
 }
 
 /**
@@ -358,7 +408,7 @@ serve(async (req) => {
       countSurferEvent('onboarding_completed_at', from, to),
       countSurferEvent('swelly_first_search_at', from, to),
       countSurferEvent('swelly_first_match_at', from, to),
-      computeConvoMetrics(),
+      computeConvoMetrics(from, to),
       countActiveUsers(from, to),
     ])
 

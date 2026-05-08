@@ -101,7 +101,18 @@ export async function acceptSurftripInvite(token: string): Promise<AcceptInviteO
     console.error('[surftripsService] acceptSurftripInvite error:', error);
     throw new Error(error.message || 'Could not accept invite');
   }
-  return data as AcceptInviteOutcome;
+  const outcome = data as AcceptInviteOutcome;
+  if (outcome.outcome === 'joined') {
+    const userId = (await supabase.auth.getUser()).data.user?.id ?? null;
+    if (userId) {
+      const name = await displayNameFor(userId);
+      await messagingService.postSystemMessage(
+        outcome.conversation_id,
+        `${name} joined the group`
+      );
+    }
+  }
+  return outcome;
 }
 
 export interface SurftripInvitePreview {
@@ -266,11 +277,27 @@ async function deleteMembership(groupId: string, userId: string): Promise<void> 
 
 /**
  * Host or admin removes another member. Fires the removal push notification.
+ * The caller (admin) is captured from the auth session and used as the system
+ * banner's sender — yields "<Admin> removed <Target>" in the chat.
  */
 export async function removeMember(
   groupId: string,
   userId: string
 ): Promise<void> {
+  const group = await getSurftripGroup(groupId);
+  if (group?.conversation_id) {
+    const adminId = (await supabase.auth.getUser()).data.user?.id ?? null;
+    if (adminId) {
+      const [adminName, targetName] = await Promise.all([
+        displayNameFor(adminId),
+        displayNameFor(userId),
+      ]);
+      await messagingService.postSystemMessage(
+        group.conversation_id,
+        `${adminName} removed ${targetName}`
+      );
+    }
+  }
   await deleteMembership(groupId, userId);
   try {
     await supabase.functions.invoke('send-surftrip-removed-notification', {
@@ -283,11 +310,21 @@ export async function removeMember(
 
 /**
  * User self-leaves. Does NOT send the removal push (they did it themselves).
+ * Posts the "<X> left the group" banner BEFORE the membership row is deleted —
+ * RLS requires the actor to still be a member at insert time.
  */
 export async function leaveGroup(
   groupId: string,
   userId: string
 ): Promise<void> {
+  const group = await getSurftripGroup(groupId);
+  if (group?.conversation_id) {
+    const name = await displayNameFor(userId);
+    await messagingService.postSystemMessage(
+      group.conversation_id,
+      `${name} left the group`
+    );
+  }
   await deleteMembership(groupId, userId);
 }
 
@@ -367,7 +404,21 @@ export async function addMembersFromDms(
     console.error('[surftripsService] addMembersFromDms error:', error);
     throw new Error(error.message || 'Could not add members');
   }
-  return (data || []) as string[];
+  const addedIds = (data || []) as string[];
+  if (addedIds.length > 0) {
+    const group = await getSurftripGroup(groupId);
+    if (group?.conversation_id) {
+      const profiles = await fetchProfiles(addedIds);
+      for (const id of addedIds) {
+        const name = profiles.get(id)?.name?.trim() || 'User';
+        await messagingService.postSystemMessage(
+          group.conversation_id,
+          `${name} joined the group`
+        );
+      }
+    }
+  }
+  return addedIds;
 }
 
 // ---------------------------------------------------------------------------
@@ -450,6 +501,12 @@ export async function withdrawRequest(requestId: string): Promise<void> {
 
 export async function approveRequest(requestId: string): Promise<void> {
   const userId = (await supabase.auth.getUser()).data.user?.id ?? null;
+  const { data: req } = await supabase
+    .from('surftrip_join_requests')
+    .select('group_id, requester_id')
+    .eq('id', requestId)
+    .maybeSingle();
+
   const { error } = await supabase
     .from('surftrip_join_requests')
     .update({
@@ -459,6 +516,17 @@ export async function approveRequest(requestId: string): Promise<void> {
     })
     .eq('id', requestId);
   if (error) throw new Error(error.message);
+
+  if (req?.group_id && req.requester_id) {
+    const group = await getSurftripGroup(req.group_id);
+    if (group?.conversation_id) {
+      const name = await displayNameFor(req.requester_id);
+      await messagingService.postSystemMessage(
+        group.conversation_id,
+        `${name} joined the group`
+      );
+    }
+  }
 }
 
 export async function declineRequest(requestId: string): Promise<void> {
@@ -477,6 +545,11 @@ export async function declineRequest(requestId: string): Promise<void> {
 // ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
+
+async function displayNameFor(userId: string): Promise<string> {
+  const profiles = await fetchProfiles([userId]);
+  return profiles.get(userId)?.name?.trim() || 'User';
+}
 
 async function fetchProfiles(
   userIds: string[]

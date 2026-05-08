@@ -41,6 +41,7 @@ import { MessageActionsMenu } from '../components/MessageActionsMenu';
 import { ReplyPreviewBanner } from '../components/ReplyPreviewBanner';
 import { QuotedMessagePreview } from '../components/QuotedMessagePreview';
 import { MessageBubbleHighlight } from '../components/MessageBubbleHighlight';
+import { SwipeToReplyWrapper } from '../components/SwipeToReplyWrapper';
 import { useMessaging } from '../context/MessagingProvider';
 import { userPresenceService } from '../services/presence/userPresenceService';
 import { avatarCacheService } from '../services/media/avatarCacheService';
@@ -51,6 +52,7 @@ import { getImageCropPicker, isPickerCancelError } from '../utils/imageCropModul
 import { getSenderColor } from '../utils/senderColor';
 import { FullscreenVideoPlayer } from '../components/FullscreenVideoPlayer';
 import { ChatTextInput, ChatTextInputRef } from '../components/ChatTextInput';
+import { AudioMessageBubble } from '../components/AudioMessageBubble';
 import { WelcomeIntroMessage } from '../components/WelcomeIntroMessage';
 import { useChatKeyboardScroll } from '../hooks/useChatKeyboardScroll';
 import { useDismissKeyboardOnBlur } from '../hooks/useDismissKeyboardOnBlur';
@@ -1316,7 +1318,9 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
               ? 'Photo'
               : replyingTo.type === 'video'
                 ? 'Video'
-                : (replyingTo.body ?? ''),
+                : replyingTo.type === 'audio'
+                  ? 'Voice message'
+                  : (replyingTo.body ?? ''),
         }
       : undefined;
     if (replyingTo) setReplyingTo(null);
@@ -2239,6 +2243,94 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     }
   };
 
+  // Handle voice message send. Mirrors the image flow: DB-first row creation,
+  // optimistic insert with the local file as a preview, upload to storage,
+  // then patch the row with audio_metadata. The receiver picks it up via the
+  // existing realtime UPDATE handler.
+  const handleVoiceMessage = async (audio: import('../components/ChatTextInput').VoiceRecording) => {
+    if (!currentConversationId || !currentUserId) return;
+    const conversationId = currentConversationId;
+    const replyTo = replyingTo
+      ? {
+          message_id: replyingTo.id,
+          sender_id: replyingTo.sender_id,
+          sender_name: replyingTo.sender_name || replyingTo.sender?.name || otherUserName,
+          type: replyingTo.type || 'text',
+          body: replyingTo.body,
+        }
+      : null;
+    let messageRecord: Message | null = null;
+
+    try {
+      // Clear the reply banner immediately — match the image/text flow.
+      if (replyingTo) setReplyingTo(null);
+
+      messageRecord = await messagingService.createAudioMessage(conversationId, replyTo);
+
+      // Optimistic insert with the local file as the playable source until the
+      // upload finishes. We seed audio_metadata with the locally-known waveform
+      // and duration so the bubble can render the waveform during upload.
+      const optimisticMetadata = {
+        audio_url: '',
+        storage_path: '',
+        duration_ms: audio.durationMs,
+        waveform: audio.waveform,
+        mime_type: audio.mimeType,
+        size_bytes: audio.sizeBytes,
+      };
+
+      setMessages((prev) => {
+        const idx = prev.findIndex(m => m.id === messageRecord!.id);
+        const optimistic: Message = {
+          ...messageRecord!,
+          upload_state: 'uploading',
+          _localPreviewUri: audio.uri,
+          audio_metadata: optimisticMetadata,
+        };
+        if (idx !== -1) {
+          return prev.map(m => (m.id === messageRecord!.id ? optimistic : m));
+        }
+        return [...prev, optimistic];
+      });
+      scrollToBottom();
+
+      const { uploadAudioToStorage } = await import('../services/messaging/audioUploadService');
+      const { audio_url, storage_path } = await uploadAudioToStorage(
+        audio.uri,
+        conversationId,
+        messageRecord.id,
+        audio.mimeType
+      );
+
+      const audioMetadata = {
+        audio_url,
+        storage_path,
+        duration_ms: audio.durationMs,
+        waveform: audio.waveform,
+        mime_type: audio.mimeType,
+        size_bytes: audio.sizeBytes,
+      };
+
+      await messagingService.updateAudioMessageMetadata(messageRecord.id, audioMetadata);
+
+      setMessages((prev) => prev.map(m =>
+        m.id === messageRecord!.id
+          ? { ...m, audio_metadata: audioMetadata, upload_state: 'sent', _localPreviewUri: undefined }
+          : m
+      ));
+    } catch (error: any) {
+      console.error('Error sending voice message:', error);
+      if (messageRecord?.id) {
+        setMessages((prev) => prev.map(m =>
+          m.id === messageRecord!.id
+            ? { ...m, upload_state: 'failed', upload_error: error?.message }
+            : m
+        ));
+      }
+      Alert.alert('Error', error?.message || 'Failed to send voice message');
+    }
+  };
+
   // Handle retry upload for failed image messages
   const handleRetryUpload = async (message: Message) => {
     if (!message.image_metadata || !currentConversationId) return;
@@ -2683,9 +2775,21 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     const showSenderName = isGroupReceived && isLastInRun && !!senderName;
     const senderNameColor = isGroupReceived ? getSenderColor(message.sender_id) : undefined;
     
+    const canSwipeReply =
+      !isOwnMessage &&
+      !message.deleted &&
+      message.upload_state !== 'failed';
+
     return (
-      <TouchableOpacity
+      <SwipeToReplyWrapper
         key={message.id}
+        enabled={canSwipeReply}
+        onReply={() => {
+          setReplyingTo(message);
+          chatInputRef.current?.focus?.();
+        }}
+      >
+      <TouchableOpacity
         activeOpacity={0.7}
         onPress={() => Keyboard.dismiss()}
         onLongPress={(e) => handleMessageLongPress(message, e)}
@@ -2732,8 +2836,8 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                   otherUserAdvRole === 'adv_giver' && styles.botMessageBubbleGiveAdv,
                   otherUserAdvRole === 'adv_seeker' && styles.botMessageBubbleGetAdv,
                 ],
-            // Conditionally apply padding: 0 for images/videos, normal for text
-            (message.type === 'image' || message.image_metadata || message.type === 'video' || message.video_metadata) && styles.imageMessageBubble,
+            // Conditionally apply padding: 0 for images/videos/audio, normal for text
+            (message.type === 'image' || message.image_metadata || message.type === 'video' || message.video_metadata || message.type === 'audio') && styles.imageMessageBubble,
             // Remove maxWidth constraint for deleted messages from other user
             message.deleted && !isOwnMessage && {
               maxWidth: Dimensions.get('window').width - 120, // Screen width minus padding
@@ -2753,7 +2857,8 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             <View
               style={
                 (message.type === 'image' || message.image_metadata ||
-                 message.type === 'video' || message.video_metadata)
+                 message.type === 'video' || message.video_metadata ||
+                 message.type === 'audio')
                   ? styles.quotedPreviewMediaWrap
                   : undefined
               }
@@ -2766,7 +2871,13 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
               />
             </View>
           )}
-          {message.type === 'video' || message.video_metadata ? (
+          {message.type === 'audio' ? (
+            <AudioMessageBubble
+              message={message}
+              isOwn={isOwnMessage}
+              onLongPress={(e) => handleMessageLongPress(message, e)}
+            />
+          ) : message.type === 'video' || message.video_metadata ? (
             // Video message
             (() => {
               const thumbnailUri = message.video_metadata?.thumbnail_url || message._localPreviewUri || '';
@@ -3227,6 +3338,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
           )}
         </MessageBubbleHighlight>
       </TouchableOpacity>
+      </SwipeToReplyWrapper>
     );
   };
 
@@ -3466,6 +3578,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                 // the composer feels "themed" per chat: teal for seekers, beige
                 // for givers, Swelly purple (same as Swelly chat user bubbles) otherwise.
                 primaryColor={composerPrimaryColor}
+                onVoiceMessage={handleVoiceMessage}
                 leftAccessory={
                   <TouchableOpacity
                     style={styles.attachButton}

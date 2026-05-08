@@ -24,6 +24,8 @@ export const QuotedMessagePreview: React.FC<QuotedMessagePreviewProps> = ({
     preview = 'Photo';
   } else if (snapshot.type === 'video') {
     preview = 'Video';
+  } else if (snapshot.type === 'audio') {
+    preview = 'Voice message';
   } else {
     preview = (snapshot.body || '').trim();
   }
@@ -31,6 +33,7 @@ export const QuotedMessagePreview: React.FC<QuotedMessagePreviewProps> = ({
   const mediaIcon =
     snapshot.type === 'image' ? 'image-outline' :
     snapshot.type === 'video' ? 'videocam-outline' :
+    snapshot.type === 'audio' ? 'mic-outline' :
     null;
 
   // Swelly bubbles (own and other) are all light-background (white, beige, teal,

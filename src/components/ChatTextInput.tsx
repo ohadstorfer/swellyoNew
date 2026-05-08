@@ -12,7 +12,9 @@ import {
   TouchableOpacity,
   StyleSheet,
   Platform,
+  Keyboard,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import Svg, { Path } from 'react-native-svg';
 import Animated, {
   Easing,
@@ -23,6 +25,10 @@ import Animated, {
 
 import { colors } from '../styles/theme';
 import { useKeyboardVisible } from '../hooks/useKeyboardVisible';
+import { useVoiceRecorder, type VoiceRecording } from '../hooks/useVoiceRecorder';
+import { RecordingOverlay } from './RecordingOverlay';
+
+export type { VoiceRecording } from '../hooks/useVoiceRecorder';
 
 const KEYBOARD_GAP = 4;
 
@@ -80,6 +86,10 @@ export interface ChatTextInputProps {
    * `textInputNativeID` to extend the interactive-dismiss zone up to the
    * composer (so dragging from inside the composer also moves the keyboard). */
   nativeID?: string;
+  /** Push-to-talk voice messages. When provided AND the text field is empty,
+   * the send button is replaced by a mic button (native only). Press-and-hold
+   * records, release sends, slide-left cancels. Web does not render the mic.  */
+  onVoiceMessage?: (audio: VoiceRecording) => void;
 }
 
 export interface ChatTextInputRef {
@@ -103,6 +113,7 @@ export const ChatTextInput = forwardRef<ChatTextInputRef, ChatTextInputProps>(fu
     allowEmpty = false,
     testID,
     nativeID,
+    onVoiceMessage,
   },
   ref
 ) {
@@ -227,6 +238,50 @@ export const ChatTextInput = forwardRef<ChatTextInputRef, ChatTextInputProps>(fu
 
   const isSendDisabled = disabled || (!allowEmpty && !value.trim());
 
+  // Voice message recording — push-to-talk with slide-to-cancel.
+  // Mic shows only on native, when onVoiceMessage is provided AND the text
+  // field is empty. Anything in the text input takes precedence: typing always
+  // restores the send button.
+  const recorder = useVoiceRecorder();
+  const isRecording = recorder.state === 'recording' || recorder.state === 'finalizing';
+  const showMic = !!onVoiceMessage && !disabled && !value && Platform.OS !== 'web';
+  const [isCancelArmed, setIsCancelArmed] = useState(false);
+  const recordStartXRef = useRef<number>(0);
+  const cancelArmedRef = useRef<boolean>(false);
+  const CANCEL_THRESHOLD_PX = 80;
+
+  const beginVoiceRecord = useCallback(async (pageX: number) => {
+    recordStartXRef.current = pageX;
+    cancelArmedRef.current = false;
+    setIsCancelArmed(false);
+    Keyboard.dismiss();
+    await recorder.start();
+  }, [recorder]);
+
+  const updateVoiceCancelArmed = useCallback((pageX: number) => {
+    const dx = pageX - recordStartXRef.current;
+    const armed = dx <= -CANCEL_THRESHOLD_PX;
+    if (armed !== cancelArmedRef.current) {
+      cancelArmedRef.current = armed;
+      setIsCancelArmed(armed);
+    }
+  }, []);
+
+  const finishVoiceRecord = useCallback(async () => {
+    if (cancelArmedRef.current) {
+      await recorder.cancel();
+      setIsCancelArmed(false);
+      cancelArmedRef.current = false;
+      return;
+    }
+    const result = await recorder.stop();
+    setIsCancelArmed(false);
+    cancelArmedRef.current = false;
+    if (result && onVoiceMessage) {
+      onVoiceMessage(result);
+    }
+  }, [onVoiceMessage, recorder]);
+
   return (
     <View
       style={[
@@ -245,98 +300,144 @@ export const ChatTextInput = forwardRef<ChatTextInputRef, ChatTextInputProps>(fu
           shrinkAnimatedStyle,
         ]}
       >
-        <View style={styles.inputContainer}>
+        {isRecording ? (
+          <RecordingOverlay
+            durationMs={recorder.durationMs}
+            liveWaveform={recorder.liveWaveform}
+            isCancelArmed={isCancelArmed}
+          />
+        ) : (
+          <View style={styles.inputContainer}>
+            <View
+              style={styles.textWrapper}
+              onLayout={(e) => setMeasureWidth(e.nativeEvent.layout.width)}
+            >
+              {/* Web-only: hidden mirror to measure wrapped text height (onContentSizeChange is unreliable on web) */}
+              {Platform.OS === 'web' && measureWidth > 0 && (
+                <View
+                  style={[styles.webMeasureMirror, { width: measureWidth }]}
+                  onLayout={handleWebMeasureLayout}
+                >
+                  <Text style={styles.webMeasureText} numberOfLines={MAX_LINES}>
+                    {value || ' '}
+                  </Text>
+                </View>
+              )}
+              <TextInput
+                ref={inputRef}
+                nativeID={nativeID}
+                style={[
+                  styles.inputText,
+                  {
+                    // On web, drive height from mirror measurement; on native, let multiline auto-size.
+                    // The container's animated height owns the visible shrink animation.
+                    ...(Platform.OS === 'web' ? { height: inputHeight } : {}),
+                    minHeight: MIN_INPUT_HEIGHT,
+                    maxHeight: MAX_INPUT_HEIGHT,
+                    lineHeight: LINE_HEIGHT,
+                    // Single line: balance vertical centering on Web (textAlignVertical is ignored there).
+                    // Web-only — on iOS the padding flip interacts with onContentSizeChange sub-pixel deltas and produces a visible "shake" (Apple reject 2.1a)
+                    ...(Platform.OS === 'web' && inputHeight <= MIN_INPUT_HEIGHT && {
+                      paddingTop: 12,
+                      paddingBottom: 12,
+                    }),
+                    ...(textColor ? { color: textColor } : null),
+                  },
+                ]}
+                placeholder={placeholder}
+                placeholderTextColor={placeholderColor ?? colors.textSecondary}
+                value={value}
+                onChangeText={onChangeText}
+                multiline
+                scrollEnabled={inputHeight >= MAX_INPUT_HEIGHT}
+                maxLength={maxLength}
+                onContentSizeChange={handleContentSizeChange}
+                onBlur={() => {
+                  // Auto-refocus if blur fired during the send re-render window.
+                  // Synchronous to preempt the native dismiss (deferring with rAF
+                  // lets UIKit/IME commit the dismiss visually before we undo it).
+                  if (justSentRef.current) {
+                    inputRef.current?.focus();
+                  }
+                }}
+                blurOnSubmit={false}
+                returnKeyType="default"
+                textAlignVertical={inputHeight <= MIN_INPUT_HEIGHT ? 'center' : 'top'}
+                testID={testID}
+                {...(Platform.OS === 'web' && {
+                  outlineStyle: 'none',
+                  outlineWidth: 0,
+                  outlineColor: 'transparent',
+                  boxShadow: 'none',
+                  WebkitTapHighlightColor: 'rgba(0, 0, 0, 0)',
+                  WebkitAppearance: 'none',
+                  MozAppearance: 'none',
+                  appearance: 'none',
+                })}
+              />
+            </View>
+          </View>
+        )}
+
+        {showMic ? (
+          // Push-to-talk mic button. We use the React Native responder system
+          // directly (not Pressable / TouchableOpacity) because we need pan
+          // tracking for slide-to-cancel — the responder gives us a continuous
+          // pageX stream from press-in to release.
+          // Note: never set `transform: undefined`. New-architecture Reanimated
+          // does not tolerate it (processTransform → forEach on null). Spread
+          // the transform key in only when we actually want to scale.
           <View
-            style={styles.textWrapper}
-            onLayout={(e) => setMeasureWidth(e.nativeEvent.layout.width)}
+            style={[
+              styles.sendButton,
+              {
+                backgroundColor: isRecording
+                  ? (isCancelArmed ? '#E74C3C' : primaryColor)
+                  : primaryColor,
+                ...(isRecording ? { transform: [{ scale: 1.15 }] } : null),
+              },
+            ]}
+            onStartShouldSetResponder={() => true}
+            onResponderGrant={(e) => {
+              beginVoiceRecord(e.nativeEvent.pageX);
+            }}
+            onResponderMove={(e) => {
+              if (!isRecording) return;
+              updateVoiceCancelArmed(e.nativeEvent.pageX);
+            }}
+            onResponderRelease={() => { void finishVoiceRecord(); }}
+            onResponderTerminate={() => { void finishVoiceRecord(); }}
+            testID={testID ? `${testID}-mic` : undefined}
           >
-            {/* Web-only: hidden mirror to measure wrapped text height (onContentSizeChange is unreliable on web) */}
-            {Platform.OS === 'web' && measureWidth > 0 && (
-              <View
-                style={[styles.webMeasureMirror, { width: measureWidth }]}
-                onLayout={handleWebMeasureLayout}
-              >
-                <Text style={styles.webMeasureText} numberOfLines={MAX_LINES}>
-                  {value || ' '}
-                </Text>
-              </View>
-            )}
-            <TextInput
-              ref={inputRef}
-              nativeID={nativeID}
-              style={[
-                styles.inputText,
-                {
-                  // On web, drive height from mirror measurement; on native, let multiline auto-size.
-                  // The container's animated height owns the visible shrink animation.
-                  ...(Platform.OS === 'web' ? { height: inputHeight } : {}),
-                  minHeight: MIN_INPUT_HEIGHT,
-                  maxHeight: MAX_INPUT_HEIGHT,
-                  lineHeight: LINE_HEIGHT,
-                  // Single line: balance vertical centering on Web (textAlignVertical is ignored there).
-                  // Web-only — on iOS the padding flip interacts with onContentSizeChange sub-pixel deltas and produces a visible "shake" (Apple reject 2.1a)
-                  ...(Platform.OS === 'web' && inputHeight <= MIN_INPUT_HEIGHT && {
-                    paddingTop: 12,
-                    paddingBottom: 12,
-                  }),
-                  ...(textColor ? { color: textColor } : null),
-                },
-              ]}
-              placeholder={placeholder}
-              placeholderTextColor={placeholderColor ?? colors.textSecondary}
-              value={value}
-              onChangeText={onChangeText}
-              multiline
-              scrollEnabled={inputHeight >= MAX_INPUT_HEIGHT}
-              maxLength={maxLength}
-              onContentSizeChange={handleContentSizeChange}
-              onBlur={() => {
-                // Auto-refocus if blur fired during the send re-render window.
-                // Synchronous to preempt the native dismiss (deferring with rAF
-                // lets UIKit/IME commit the dismiss visually before we undo it).
-                if (justSentRef.current) {
-                  inputRef.current?.focus();
-                }
-              }}
-              blurOnSubmit={false}
-              returnKeyType="default"
-              textAlignVertical={inputHeight <= MIN_INPUT_HEIGHT ? 'center' : 'top'}
-              testID={testID}
-              {...(Platform.OS === 'web' && {
-                outlineStyle: 'none',
-                outlineWidth: 0,
-                outlineColor: 'transparent',
-                boxShadow: 'none',
-                WebkitTapHighlightColor: 'rgba(0, 0, 0, 0)',
-                WebkitAppearance: 'none',
-                MozAppearance: 'none',
-                appearance: 'none',
-              })}
+            <Ionicons
+              name={isCancelArmed ? 'trash' : 'mic'}
+              size={20}
+              color="#FFFFFF"
             />
           </View>
-        </View>
-
-        <TouchableOpacity
-          style={[
-            styles.sendButton,
-            { backgroundColor: primaryColor },
-            isSendDisabled && styles.sendButtonDisabled,
-          ]}
-          onPressIn={() => {
-            // Pre-empt any focus transfer from the touch-down gesture: claim
-            // the send window and re-assert focus synchronously on the same
-            // run loop as the native touch event.
-            if (disabled || (!allowEmpty && !value.trim())) return;
-            justSentRef.current = true;
-            inputRef.current?.focus();
-          }}
-          onPress={handleSend}
-          activeOpacity={0.7}
-          disabled={isSendDisabled}
-          testID={testID ? `${testID}-send` : undefined}
-        >
-          <SendIcon color="#FFFFFF" />
-        </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            style={[
+              styles.sendButton,
+              { backgroundColor: primaryColor },
+              isSendDisabled && styles.sendButtonDisabled,
+            ]}
+            onPressIn={() => {
+              // Pre-empt any focus transfer from the touch-down gesture: claim
+              // the send window and re-assert focus synchronously on the same
+              // run loop as the native touch event.
+              if (disabled || (!allowEmpty && !value.trim())) return;
+              justSentRef.current = true;
+              inputRef.current?.focus();
+            }}
+            onPress={handleSend}
+            activeOpacity={0.7}
+            disabled={isSendDisabled}
+            testID={testID ? `${testID}-send` : undefined}
+          >
+            <SendIcon color="#FFFFFF" />
+          </TouchableOpacity>
+        )}
       </Animated.View>
     </View>
   );

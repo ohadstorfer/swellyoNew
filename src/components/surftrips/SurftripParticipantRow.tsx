@@ -7,6 +7,7 @@ import type { EnrichedSurftripMember } from '../../types/surftrips';
 interface SurftripParticipantRowProps {
   participant: EnrichedSurftripMember;
   onMenuPress?: (participant: EnrichedSurftripMember) => void;
+  onPress?: (participant: EnrichedSurftripMember) => void;
   isMe?: boolean;
 }
 
@@ -18,6 +19,7 @@ const formatLevel = (level: string | null): string | null =>
 export const SurftripParticipantRow: React.FC<SurftripParticipantRowProps> = ({
   participant,
   onMenuPress,
+  onPress,
   isMe,
 }) => {
   const { name, age, profile_image_url, surfboard_type, surf_level_category, role } = participant;
@@ -26,8 +28,8 @@ export const SurftripParticipantRow: React.FC<SurftripParticipantRowProps> = ({
   const roleLabel = role === 'host' ? 'Host' : role === 'admin' ? 'Admin' : null;
   const detailLine = [age != null ? `${age} yo` : null, level, board].filter(Boolean).join(' · ');
 
-  return (
-    <View style={styles.row}>
+  const profileTarget = (
+    <>
       <View style={styles.avatarWrap}>
         {profile_image_url ? (
           <Image source={{ uri: profile_image_url }} style={styles.avatar} />
@@ -56,6 +58,23 @@ export const SurftripParticipantRow: React.FC<SurftripParticipantRowProps> = ({
           </Text>
         )}
       </View>
+    </>
+  );
+
+  return (
+    <View style={styles.row}>
+      {onPress ? (
+        <TouchableOpacity
+          style={styles.profileTouch}
+          onPress={() => onPress(participant)}
+          activeOpacity={0.6}
+          accessibilityLabel={`View ${name || 'member'}'s profile`}
+        >
+          {profileTarget}
+        </TouchableOpacity>
+      ) : (
+        <View style={styles.profileTouch}>{profileTarget}</View>
+      )}
 
       {onMenuPress ? (
         <TouchableOpacity
@@ -76,6 +95,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 10,
+  },
+  profileTouch: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    minWidth: 0,
   },
   avatarWrap: { marginRight: 12 },
   avatar: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#F2F2F2' },

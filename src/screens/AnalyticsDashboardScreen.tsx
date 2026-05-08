@@ -82,22 +82,8 @@ export function AnalyticsDashboardScreen({ onBack }: AnalyticsDashboardScreenPro
 
   const activityRows = useMemo(() => {
     if (!data) return [];
-    // Non-NEW items first, NEW items last (no historical data, so they always show low totals).
+    // Funnel order — each row is a step further into the user journey.
     return [
-      {
-        label: 'Completed full onboarding',
-        total: data.metric_4.total,
-        inRange: data.metric_4.in_range,
-        series: data.metric_4.series,
-        isNew: false,
-      },
-      {
-        label: 'Made a Swelly match (first time)',
-        total: data.metric_6.total,
-        inRange: data.metric_6.in_range,
-        series: data.metric_6.series,
-        isNew: false,
-      },
       {
         label: 'Completed onboarding phase 1 (Swelly animation)',
         total: data.metric_3.total,
@@ -106,11 +92,25 @@ export function AnalyticsDashboardScreen({ onBack }: AnalyticsDashboardScreenPro
         isNew: true,
       },
       {
+        label: 'Completed full onboarding',
+        total: data.metric_4.total,
+        inRange: data.metric_4.in_range,
+        series: data.metric_4.series,
+        isNew: false,
+      },
+      {
         label: 'Clicked Swelly search (first time)',
         total: data.metric_5.total,
         inRange: data.metric_5.in_range,
         series: data.metric_5.series,
         isNew: true,
+      },
+      {
+        label: 'Made a Swelly match (first time)',
+        total: data.metric_6.total,
+        inRange: data.metric_6.in_range,
+        series: data.metric_6.series,
+        isNew: false,
       },
     ];
   }, [data]);
@@ -118,9 +118,9 @@ export function AnalyticsDashboardScreen({ onBack }: AnalyticsDashboardScreenPro
   const totalsRows = useMemo(() => {
     if (!data) return [];
     return [
-      { value: data.metric_7, label: 'Conversations with 1+ message' },
-      { value: data.metric_8, label: 'Matches with replies (both sides 1+)' },
-      { value: data.metric_9, label: 'Conversations with 4+ msgs each side' },
+      { counter: data.metric_7, label: 'Conversations with 1+ message' },
+      { counter: data.metric_8, label: 'Matches with replies (both sides 1+)' },
+      { counter: data.metric_9, label: 'Conversations with 4+ msgs each side' },
     ];
   }, [data]);
 
@@ -225,14 +225,20 @@ export function AnalyticsDashboardScreen({ onBack }: AnalyticsDashboardScreenPro
             {/* Totals section card */}
             <View style={styles.sectionCard}>
               <View style={styles.totalsHeader}>
-                <Text style={styles.sectionTitle}>TOTALS</Text>
-                <Text style={styles.totalsSubtitle}>NOT AFFECTED BY TIME FILTER</Text>
+                <Text style={styles.sectionTitle}>Conversations</Text>
               </View>
               <View style={styles.totalsList}>
                 {totalsRows.map((row, i) => (
                   <View key={i} style={[styles.totalsRow, i > 0 && styles.totalsRowDivider]}>
-                    <Text style={styles.totalsNumber}>{row.value.toLocaleString()}</Text>
-                    <Text style={styles.totalsLabel}>{row.label}</Text>
+                    <Text style={styles.totalsNumber}>{row.counter.total.toLocaleString()}</Text>
+                    <View style={styles.totalsLabelCol}>
+                      <Text style={styles.totalsLabel}>{row.label}</Text>
+                      {!isAllTime && (
+                        <Text style={styles.deltaText}>
+                          +{row.counter.in_range.toLocaleString()} {rangeShort}
+                        </Text>
+                      )}
+                    </View>
                   </View>
                 ))}
               </View>
@@ -541,13 +547,6 @@ const styles = StyleSheet.create({
     alignItems: 'baseline',
     marginBottom: 4,
   },
-  totalsSubtitle: {
-    fontFamily: FONT_INTER,
-    fontSize: 10,
-    fontWeight: '700',
-    color: C.tertiary,
-    letterSpacing: 0.5,
-  },
   totalsList: {
     marginTop: 4,
   },
@@ -568,12 +567,14 @@ const styles = StyleSheet.create({
     color: C.primary,
     minWidth: 56,
   },
+  totalsLabelCol: {
+    flex: 1,
+  },
   totalsLabel: {
     fontFamily: FONT_INTER,
     fontSize: 11,
     fontWeight: '500',
     color: C.secondary,
-    flex: 1,
   },
   // Misc
   loader: {
