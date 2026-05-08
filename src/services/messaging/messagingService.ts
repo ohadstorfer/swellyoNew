@@ -40,7 +40,7 @@ export interface ConversationMember {
 }
 
 // Message type
-export type MessageType = 'text' | 'image' | 'video';
+export type MessageType = 'text' | 'image' | 'video' | 'audio';
 
 // Message upload state (client-side only, not stored in DB)
 export type MessageUploadState = 
@@ -73,6 +73,16 @@ export interface VideoMetadata {
   storage_path: string;        // S3 key path
 }
 
+// Audio (voice message) metadata interface
+export interface AudioMetadata {
+  audio_url: string;           // Public URL from Supabase Storage
+  storage_path: string;        // Path in message-images bucket: {convId}/{msgId}/audio.m4a
+  duration_ms: number;         // Recording duration in milliseconds
+  waveform: number[];          // Decimated amplitude samples (0..1), ~50 entries
+  mime_type: string;           // e.g., 'audio/m4a', 'audio/mp4'
+  size_bytes: number;          // File size
+}
+
 // Snapshot of the message being replied to. Frozen at send time — edits to the
 // original message don't mutate this snapshot (matches WhatsApp behavior).
 export interface ReplyToSnapshot {
@@ -80,7 +90,7 @@ export interface ReplyToSnapshot {
   sender_id: string;
   sender_name: string;
   type: MessageType;
-  body?: string; // short label for media: 'Photo' | 'Video'
+  body?: string; // short label for media: 'Photo' | 'Video' | 'Voice message'
 }
 
 // Message interface
@@ -99,6 +109,9 @@ export interface Message {
 
   // Video-specific fields (only populated for type='video')
   video_metadata?: VideoMetadata;
+
+  // Audio-specific fields (only populated for type='audio')
+  audio_metadata?: AudioMetadata | null;
 
   // Legacy attachments array (keep for backward compatibility)
   attachments: any[];
@@ -153,6 +166,10 @@ export interface MessageSubscriptionCallbacks {
   onTyping?: (userId: string, isTyping: boolean) => void;
   onSubscriptionStatus?: (status: RealtimeSubscriptionStatus) => void;
   onReadReceiptUpdate?: (userId: string, lastReadAt: string | null) => void;
+  // Fires when a conversation_members row is inserted or deleted — used by
+  // group-chat headers / detail screens to refresh the live participant list
+  // when someone joins, leaves, or is removed.
+  onMembersChanged?: () => void;
 }
 
 // Conversation list subscription callbacks
@@ -496,7 +513,7 @@ class MessagingService {
       
       const { data: messages, error } = await supabase
         .from('messages')
-        .select('id, conversation_id, sender_id, body, rendered_body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata, reply_to_message_id, reply_to_snapshot')
+        .select('id, conversation_id, sender_id, body, rendered_body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata, audio_metadata, reply_to_message_id, reply_to_snapshot')
         .eq('conversation_id', conversationId)
         // Note: We include deleted messages so they can be displayed with "deleted" placeholder
         .gt('updated_at', lastSyncDate)
@@ -573,7 +590,7 @@ class MessagingService {
 
       let query = supabase
         .from('messages')
-        .select('id, conversation_id, sender_id, body, rendered_body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata, reply_to_message_id, reply_to_snapshot')
+        .select('id, conversation_id, sender_id, body, rendered_body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata, audio_metadata, reply_to_message_id, reply_to_snapshot')
         .eq('conversation_id', conversationId)
         // Note: We include deleted messages so they can be displayed with "deleted" placeholder
         .order('created_at', { ascending: useAscending })
@@ -780,6 +797,52 @@ class MessagingService {
   }
 
   /**
+   * Insert an inline "system" banner message into a conversation
+   * (e.g. "X left the group", "Y removed X", "X joined the group").
+   *
+   * The current auth user is used as `sender_id` so RLS lets the row through —
+   * the actor MUST still be a conversation member at insert time, so callers
+   * doing a leave/remove must call this BEFORE removing the membership.
+   *
+   * Best-effort: failures are logged and swallowed so they cannot break the
+   * underlying membership operation. The row is broadcast to every other
+   * member via the existing `messages` realtime channel.
+   */
+  async postSystemMessage(conversationId: string, body: string): Promise<void> {
+    if (!isSupabaseConfigured()) return;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const senderId = session?.user?.id;
+      if (!senderId) {
+        console.warn('[messagingService] postSystemMessage: no auth user');
+        return;
+      }
+
+      const { error } = await supabase
+        .from('messages')
+        .insert({
+          conversation_id: conversationId,
+          sender_id: senderId,
+          body,
+          type: 'text',
+          is_system: true,
+          attachments: [],
+        });
+      if (error) {
+        console.warn('[messagingService] postSystemMessage insert failed:', error);
+        return;
+      }
+
+      await supabase
+        .from('conversations')
+        .update({ updated_at: new Date().toISOString() })
+        .eq('id', conversationId);
+    } catch (e) {
+      console.warn('[messagingService] postSystemMessage error:', e);
+    }
+  }
+
+  /**
    * Create an image message record (DB-first flow)
    * Creates the message record before upload, returns real message ID
    */
@@ -941,6 +1004,100 @@ class MessagingService {
       return data;
     } catch (error) {
       console.error('Error updating video message metadata:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Create a voice-message row in the database (DB-first flow, mirrors image/video).
+   * audio_metadata is populated by updateAudioMessageMetadata once the upload finishes.
+   */
+  async createAudioMessage(
+    conversationId: string,
+    replyTo?: ReplyToSnapshot | null
+  ): Promise<Message> {
+    if (!isSupabaseConfigured()) {
+      throw new Error('Supabase is not configured');
+    }
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        throw new Error('Not authenticated');
+      }
+
+      const payload: Record<string, unknown> = {
+        conversation_id: conversationId,
+        sender_id: user.id,
+        type: 'audio',
+        body: null,
+        audio_metadata: null,
+      };
+      if (replyTo) {
+        payload.reply_to_message_id = replyTo.message_id;
+        payload.reply_to_snapshot = replyTo;
+      }
+
+      const { data, error } = await supabase
+        .from('messages')
+        .insert(payload)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      await supabase
+        .from('conversations')
+        .update({ updated_at: new Date().toISOString() })
+        .eq('id', conversationId);
+
+      return data;
+    } catch (error) {
+      console.error('Error creating audio message:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Patch a voice-message row with its uploaded audio_metadata. Owner-only update.
+   */
+  async updateAudioMessageMetadata(
+    messageId: string,
+    audioMetadata: AudioMetadata
+  ): Promise<Message> {
+    if (!isSupabaseConfigured()) {
+      throw new Error('Supabase is not configured');
+    }
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        throw new Error('Not authenticated');
+      }
+
+      const { data, error } = await supabase
+        .from('messages')
+        .update({
+          audio_metadata: audioMetadata,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', messageId)
+        .eq('sender_id', user.id)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      if (data) {
+        await supabase
+          .from('conversations')
+          .update({ updated_at: new Date().toISOString() })
+          .eq('id', data.conversation_id);
+      }
+
+      return data;
+    } catch (error) {
+      console.error('Error updating audio message metadata:', error);
       throw error;
     }
   }
@@ -1338,7 +1495,7 @@ class MessagingService {
             try {
               const { data: fullMessage, error } = await supabase
                 .from('messages')
-                .select('id, conversation_id, sender_id, body, rendered_body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata, reply_to_message_id, reply_to_snapshot')
+                .select('id, conversation_id, sender_id, body, rendered_body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata, audio_metadata, reply_to_message_id, reply_to_snapshot')
                 .eq('id', newMessage.id)
                 .single();
               
@@ -1395,7 +1552,7 @@ class MessagingService {
           try {
             const { data: fullMessage, error } = await supabase
               .from('messages')
-              .select('id, conversation_id, sender_id, body, rendered_body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata, reply_to_message_id, reply_to_snapshot')
+              .select('id, conversation_id, sender_id, body, rendered_body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata, audio_metadata, reply_to_message_id, reply_to_snapshot')
               .eq('id', updatedMessage.id)
               .single();
             
@@ -1464,6 +1621,33 @@ class MessagingService {
           if (normalizedCallbacks.onReadReceiptUpdate && row?.user_id) {
             normalizedCallbacks.onReadReceiptUpdate(row.user_id, row.last_read_at ?? null);
           }
+        }
+      )
+      // Membership churn (joins / leaves / kicks). The chat thread itself shows
+      // a system banner via the messages INSERT path; this event lets the
+      // header / detail screen refresh the live member list.
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'conversation_members',
+          filter: `conversation_id=eq.${conversationId}`,
+        },
+        () => {
+          normalizedCallbacks.onMembersChanged?.();
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'DELETE',
+          schema: 'public',
+          table: 'conversation_members',
+          filter: `conversation_id=eq.${conversationId}`,
+        },
+        () => {
+          normalizedCallbacks.onMembersChanged?.();
         }
       )
       // Fast realtime path for read receipts — markAsRead broadcasts on the same
@@ -2131,7 +2315,7 @@ class MessagingService {
       const lastMessagesPromises = conversations.map(conv =>
         supabase
           .from('messages')
-          .select('id, conversation_id, sender_id, body, rendered_body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata, reply_to_message_id, reply_to_snapshot')
+          .select('id, conversation_id, sender_id, body, rendered_body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata, audio_metadata, reply_to_message_id, reply_to_snapshot')
           .eq('conversation_id', conv.id)
           // Note: We include deleted messages so they can be displayed with "deleted" placeholder
           .order('created_at', { ascending: false })

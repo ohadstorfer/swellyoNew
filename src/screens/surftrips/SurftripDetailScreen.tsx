@@ -21,6 +21,7 @@ import { PendingSurftripRequestCard } from '../../components/surftrips/PendingSu
 import { ParticipantMenuSheet } from '../../components/surftrips/ParticipantMenuSheet';
 import { CreateSurftripModal } from '../../components/surftrips/CreateSurftripModal';
 import { AddMembersSheet } from '../../components/surftrips/AddMembersSheet';
+import { EditIcon } from '../../components/icons/EditIcon';
 import {
   addMembersFromDms,
   approveRequest,
@@ -39,6 +40,7 @@ import {
   requestToJoin,
   withdrawRequest,
 } from '../../services/surftrips/surftripsService';
+import { supabase } from '../../config/supabase';
 import type {
   EnrichedSurftripMember,
   EnrichedSurftripRequest,
@@ -52,12 +54,14 @@ interface SurftripDetailScreenProps {
   currentUserId: string | null;
   onBack: () => void;
   onOpenChat: (conversationId: string, title: string) => void;
+  onViewProfile?: (userId: string) => void;
 }
 
 export default function SurftripDetailScreen({
   groupId,
   currentUserId,
   onBack,
+  onViewProfile,
 }: SurftripDetailScreenProps) {
   const [group, setGroup] = useState<SurftripGroup | null>(null);
   const [members, setMembers] = useState<EnrichedSurftripMember[]>([]);
@@ -102,6 +106,42 @@ export default function SurftripDetailScreen({
   useEffect(() => {
     load();
   }, [load]);
+
+  // Live refresh when membership churns (joins / leaves / kicks). The chat
+  // thread already paints a system banner via the messages channel; here we
+  // just keep the participant strip and pending-request list in sync without
+  // forcing the user to pull-to-refresh. Listens directly on
+  // conversation_members so it works even when this screen is mounted
+  // without a chat subscription.
+  useEffect(() => {
+    if (!group?.conversation_id) return;
+    const channel = supabase
+      .channel(`surftrip-detail-members:${group.conversation_id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'conversation_members',
+          filter: `conversation_id=eq.${group.conversation_id}`,
+        },
+        () => { load(); }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'DELETE',
+          schema: 'public',
+          table: 'conversation_members',
+          filter: `conversation_id=eq.${group.conversation_id}`,
+        },
+        () => { load(); }
+      )
+      .subscribe();
+    return () => {
+      try { supabase.removeChannel(channel); } catch { /* noop */ }
+    };
+  }, [group?.conversation_id, load]);
 
   // ---- Join / leave / request -------------------------------------------------
 
@@ -366,7 +406,7 @@ export default function SurftripDetailScreen({
                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                     accessibilityLabel="Edit surftrip"
                   >
-                    <Ionicons name="create-outline" size={20} color="#FFFFFF" />
+                    <EditIcon size={20} color="#FFFFFF" />
                   </TouchableOpacity>
                 ) : null}
               </View>
@@ -398,6 +438,7 @@ export default function SurftripDetailScreen({
                   request={r}
                   onApprove={handleApprove}
                   onDecline={handleDecline}
+                  onPressRequester={onViewProfile}
                   isProcessing={processingRequestId === r.id}
                 />
               ))}
@@ -428,6 +469,7 @@ export default function SurftripDetailScreen({
                 <SurftripParticipantRow
                   participant={m}
                   isMe={m.user_id === currentUserId}
+                  onPress={onViewProfile ? (p) => onViewProfile(p.user_id) : undefined}
                   onMenuPress={
                     canManage && m.user_id !== currentUserId
                       ? (p) => setMenuTarget(p)

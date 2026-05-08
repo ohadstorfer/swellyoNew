@@ -8,6 +8,7 @@ interface PendingSurftripRequestCardProps {
   request: EnrichedSurftripRequest;
   onApprove: (id: string) => void;
   onDecline: (id: string) => void;
+  onPressRequester?: (userId: string) => void;
   isProcessing?: boolean;
 }
 
@@ -15,25 +16,43 @@ export const PendingSurftripRequestCard: React.FC<PendingSurftripRequestCardProp
   request,
   onApprove,
   onDecline,
+  onPressRequester,
   isProcessing,
 }) => {
   const { name, profile_image_url, age, surf_level_category } = request.requester;
   const detail = [age != null ? `${age} yo` : null, surf_level_category].filter(Boolean).join(' · ');
 
+  const requesterContent = (
+    <>
+      {profile_image_url ? (
+        <Image source={{ uri: profile_image_url }} style={styles.avatar} />
+      ) : (
+        <View style={[styles.avatar, styles.avatarPlaceholder]}>
+          <Text style={styles.avatarInitial}>{(name || 'U').charAt(0).toUpperCase()}</Text>
+        </View>
+      )}
+      <View style={styles.info}>
+        <Text style={styles.name} numberOfLines={1}>{name || 'User'}</Text>
+        {detail ? <Text style={styles.detail} numberOfLines={1}>{detail}</Text> : null}
+      </View>
+    </>
+  );
+
   return (
     <View style={styles.wrap}>
       <View style={styles.row}>
-        {profile_image_url ? (
-          <Image source={{ uri: profile_image_url }} style={styles.avatar} />
+        {onPressRequester ? (
+          <TouchableOpacity
+            style={styles.profileTouch}
+            onPress={() => onPressRequester(request.requester_id)}
+            activeOpacity={0.6}
+            accessibilityLabel={`View ${name || 'requester'}'s profile`}
+          >
+            {requesterContent}
+          </TouchableOpacity>
         ) : (
-          <View style={[styles.avatar, styles.avatarPlaceholder]}>
-            <Text style={styles.avatarInitial}>{(name || 'U').charAt(0).toUpperCase()}</Text>
-          </View>
+          <View style={styles.profileTouch}>{requesterContent}</View>
         )}
-        <View style={styles.info}>
-          <Text style={styles.name} numberOfLines={1}>{name || 'User'}</Text>
-          {detail ? <Text style={styles.detail} numberOfLines={1}>{detail}</Text> : null}
-        </View>
         {isProcessing ? (
           <ActivityIndicator color="#0788B0" />
         ) : (
@@ -75,6 +94,12 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   row: { flexDirection: 'row', alignItems: 'center' },
+  profileTouch: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    minWidth: 0,
+  },
   avatar: { width: 40, height: 40, borderRadius: 20, marginRight: 10, backgroundColor: '#F2F2F2' },
   avatarPlaceholder: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#A8DDE0' },
   avatarInitial: { color: '#FFFFFF', fontWeight: '700', fontSize: 15 },

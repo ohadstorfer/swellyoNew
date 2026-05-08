@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, StyleSheet, TouchableOpacity, Platform } from 'react-native';
+import Reanimated, { FadeInDown, FadeOutDown } from 'react-native-reanimated';
 import { Text } from './Text';
 import { Ionicons } from '@expo/vector-icons';
 import type { Message } from '../services/messaging/messagingService';
@@ -27,6 +28,8 @@ export const ReplyPreviewBanner: React.FC<ReplyPreviewBannerProps> = ({
     preview = 'Photo';
   } else if (message.type === 'video') {
     preview = 'Video';
+  } else if (message.type === 'audio') {
+    preview = 'Voice message';
   } else {
     preview = (message.body || '').trim();
   }
@@ -34,10 +37,15 @@ export const ReplyPreviewBanner: React.FC<ReplyPreviewBannerProps> = ({
   const mediaIcon =
     message.type === 'image' ? 'image-outline' :
     message.type === 'video' ? 'videocam-outline' :
+    message.type === 'audio' ? 'mic-outline' :
     null;
 
   return (
-    <View style={styles.container}>
+    <Reanimated.View
+      style={styles.container}
+      entering={FadeInDown.duration(220).springify().damping(18).stiffness(220)}
+      exiting={FadeOutDown.duration(160)}
+    >
       <View style={styles.bar} />
       <View style={styles.content}>
         <Text style={styles.name} numberOfLines={1}>{displayName}</Text>
@@ -60,7 +68,7 @@ export const ReplyPreviewBanner: React.FC<ReplyPreviewBannerProps> = ({
       >
         <Ionicons name="close" size={22} color="rgba(255,255,255,0.85)" />
       </TouchableOpacity>
-    </View>
+    </Reanimated.View>
   );
 };
 

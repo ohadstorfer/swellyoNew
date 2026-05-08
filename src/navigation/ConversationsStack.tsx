@@ -38,6 +38,9 @@ type ConversationsScreenProps = React.ComponentProps<typeof ConversationsScreen>
 const slideFromRightOptions = {
   gestureEnabled: true,
   gestureDirection: 'horizontal' as const,
+  // Restrict the screen-pop swipe to the left edge of the screen so per-message
+  // swipe-to-reply can claim touches that land on incoming bubbles in the body.
+  gestureActivationArea: 'edge' as const,
   transitionSpec: {
     open: Transition.Specs.DefaultSpec,
     close: Transition.Specs.DefaultSpec,
@@ -93,7 +96,7 @@ export default function ConversationsStack(props: ConversationsScreenProps) {
         name="SurftripDetail"
         options={slideFromRightOptions}
       >
-        {() => <SurftripDetailRoute />}
+        {() => <SurftripDetailRoute onViewUserProfile={props.onViewUserProfile} />}
       </Stack.Screen>
     </Stack.Navigator>
   );
@@ -195,7 +198,11 @@ function DirectMessageRoute({
   );
 }
 
-function SurftripDetailRoute() {
+function SurftripDetailRoute({
+  onViewUserProfile,
+}: {
+  onViewUserProfile?: (userId: string) => void;
+}) {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const params = (route.params ?? {}) as { groupId: string };
@@ -226,6 +233,7 @@ function SurftripDetailRoute() {
       currentUserId={currentUserId}
       onBack={handleBack}
       onOpenChat={handleOpenChat}
+      onViewProfile={onViewUserProfile}
     />
   );
 }

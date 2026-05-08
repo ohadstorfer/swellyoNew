@@ -12,9 +12,9 @@ export interface DashboardData {
   metric_4: DashboardCounter;   // full onboarding
   metric_5: DashboardCounter;   // first Swelly search
   metric_6: DashboardCounter;   // first Swelly match
-  metric_7: number;             // convos with 1+ message
-  metric_8: number;             // both sides replied
-  metric_9: number;             // 4+ msgs each side
+  metric_7: DashboardCounter;   // convos with 1+ message — bucketed by first-message ts
+  metric_8: DashboardCounter;   // both sides replied — bucketed by 2nd-side first-message ts
+  metric_9: DashboardCounter;   // 4+ msgs each side — bucketed by 2nd-side 4th-message ts
   metric_10: {
     with_surfer: DashboardCounter;  // real users (have a non-demo surfer row)
     auth_only: DashboardCounter;    // opened the app but never created a surfer profile

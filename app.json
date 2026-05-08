@@ -30,7 +30,7 @@
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "This app needs access to your photo library to select profile pictures.",
         "NSCameraUsageDescription": "This app needs access to your camera to take profile pictures.",
-        "NSMicrophoneUsageDescription": "This app needs access to your microphone to record video with audio."
+        "NSMicrophoneUsageDescription": "Swellyo uses your microphone to record voice messages and capture audio for video clips."
       },
       "runtimeVersion": "1.1.0"
     },
