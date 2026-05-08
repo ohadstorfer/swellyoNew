@@ -19,11 +19,13 @@
     },
     "ios": {
       "bundleIdentifier": "com.swellyo.app",
-      "buildNumber": "26",
+      "buildNumber": "27",
       "supportsTablet": false,
       "usesNonExemptEncryption": false,
       "usesAppleSignIn": true,
-      "associatedDomains": ["applinks:www.swellyo.com"],
+      "associatedDomains": [
+        "applinks:www.swellyo.com"
+      ],
       "entitlements": {
         "aps-environment": "production"
       },
@@ -53,8 +55,17 @@
         {
           "action": "VIEW",
           "autoVerify": true,
-          "data": [{ "scheme": "https", "host": "www.swellyo.com", "pathPrefix": "/" }],
-          "category": ["BROWSABLE", "DEFAULT"]
+          "data": [
+            {
+              "scheme": "https",
+              "host": "www.swellyo.com",
+              "pathPrefix": "/"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         }
       ]
     },
