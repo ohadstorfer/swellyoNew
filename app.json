@@ -2,8 +2,8 @@
   "expo": {
     "name": "Swellyo",
     "slug": "swellyo",
-    "version": "1.1.0",
-    "runtimeVersion": "1.1.0",
+    "version": "1.1.1",
+    "runtimeVersion": "1.1.1",
     "updates": {
       "url": "https://u.expo.dev/c14ee9e6-bad8-43e2-b37a-d196b49f638f"
     },
@@ -32,7 +32,7 @@
         "NSCameraUsageDescription": "This app needs access to your camera to take profile pictures.",
         "NSMicrophoneUsageDescription": "Swellyo uses your microphone to record voice messages and capture audio for video clips."
       },
-      "runtimeVersion": "1.1.0"
+      "runtimeVersion": "1.1.1"
     },
     "android": {
       "package": "com.swellyo.app",
