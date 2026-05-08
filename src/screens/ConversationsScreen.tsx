@@ -836,6 +836,7 @@ export default function ConversationsScreen({
     // Check if last message is an image or video
     const isLastMessageImage = conv.last_message?.type === 'image' || !!conv.last_message?.image_metadata;
     const isLastMessageVideo = conv.last_message?.type === 'video' || !!(conv.last_message as any)?.video_metadata;
+    const isLastMessageAudio = conv.last_message?.type === 'audio' || !!(conv.last_message as any)?.audio_metadata;
     const lastMessageTime = conv.last_message ? formatTime(conv.last_message.created_at) : '';
     const unreadCount = conv.unread_count || 0;
 
@@ -912,6 +913,16 @@ export default function ConversationsScreen({
                   Video
                 </Text>
               </View>
+            ) : isLastMessageAudio ? (
+              <View style={styles.imageMessagePreview}>
+                <Ionicons name="mic-outline" size={14} color="#7B7B7B" style={styles.imageIcon} />
+                <Text style={[
+                  styles.lastMessage,
+                  Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
+                ]} numberOfLines={1}>
+                  Voice message
+                </Text>
+              </View>
             ) : (
               <Text style={[
                 styles.lastMessage,
@@ -963,6 +974,7 @@ export default function ConversationsScreen({
     // Check if last message is an image or video
     const isLastMessageImage = conv.last_message?.type === 'image' || !!conv.last_message?.image_metadata;
     const isLastMessageVideo = conv.last_message?.type === 'video' || !!(conv.last_message as any)?.video_metadata;
+    const isLastMessageAudio = conv.last_message?.type === 'audio' || !!(conv.last_message as any)?.audio_metadata;
 
     const lastMessageTime = conv.last_message ? formatTime(conv.last_message.created_at) : '';
     const unreadCount = conv.unread_count || 0;
@@ -1085,6 +1097,16 @@ export default function ConversationsScreen({
                   Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
                 ]} numberOfLines={1}>
                   Video
+                </Text>
+              </View>
+            ) : isLastMessageAudio ? (
+              <View style={styles.imageMessagePreview}>
+                <Ionicons name="mic-outline" size={14} color="#7B7B7B" style={styles.imageIcon} />
+                <Text style={[
+                  styles.lastMessage,
+                  Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
+                ]} numberOfLines={1}>
+                  Voice message
                 </Text>
               </View>
             ) : (
