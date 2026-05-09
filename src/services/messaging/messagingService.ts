@@ -138,6 +138,9 @@ export interface Message {
   reply_to_message_id?: string | null;
   reply_to_snapshot?: ReplyToSnapshot | null;
 
+  // WhatsApp-style emoji reactions. Aggregated for UI; one entry per distinct emoji.
+  reactions?: AggregatedReaction[];
+
   // Enriched from users/surfers
   sender_name?: string;
   sender_avatar?: string;
@@ -147,12 +150,21 @@ export interface Message {
   };
 }
 
-// Message reaction interface
+// Raw reaction row from the message_reactions table.
+// PK is (message_id, user_id) — one reaction per user per message.
 export interface MessageReaction {
   message_id: string;
   user_id: string;
   reaction: string;
   reacted_at: string;
+}
+
+// Aggregated view used by the UI: one entry per distinct emoji on a message.
+export interface AggregatedReaction {
+  emoji: string;
+  count: number;
+  userIds: string[];
+  hasMine: boolean;
 }
 
 // Realtime subscription status (from Supabase channel .subscribe() callback)
@@ -2408,6 +2420,100 @@ class MessagingService {
       return 0;
     }
   }
+
+  /**
+   * Set the current user's reaction on a message. Replaces any existing
+   * reaction by this user (WhatsApp behavior — one reaction per user per message,
+   * enforced by PK on (message_id, user_id)).
+   */
+  async setReaction(messageId: string, emoji: string): Promise<void> {
+    if (!isSupabaseConfigured()) {
+      throw new Error('Supabase is not configured');
+    }
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('Not authenticated');
+
+    const { error } = await supabase
+      .from('message_reactions')
+      .upsert(
+        {
+          message_id: messageId,
+          user_id: user.id,
+          reaction: emoji,
+          reacted_at: new Date().toISOString(),
+        },
+        { onConflict: 'message_id,user_id' },
+      );
+    if (error) throw error;
+  }
+
+  /**
+   * Remove the current user's reaction from a message (no-op if none).
+   */
+  async removeReaction(messageId: string): Promise<void> {
+    if (!isSupabaseConfigured()) {
+      throw new Error('Supabase is not configured');
+    }
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('Not authenticated');
+
+    const { error } = await supabase
+      .from('message_reactions')
+      .delete()
+      .eq('message_id', messageId)
+      .eq('user_id', user.id);
+    if (error) throw error;
+  }
+
+  /**
+   * Batch-fetch raw reaction rows for a list of message IDs.
+   * Caller is responsible for aggregating with `aggregateReactions`.
+   */
+  async fetchReactionsForMessages(messageIds: string[]): Promise<MessageReaction[]> {
+    if (!isSupabaseConfigured()) return [];
+    if (messageIds.length === 0) return [];
+
+    const { data, error } = await supabase
+      .from('message_reactions')
+      .select('message_id, user_id, reaction, reacted_at')
+      .in('message_id', messageIds);
+    if (error) {
+      console.error('[messagingService] fetchReactionsForMessages failed', error);
+      return [];
+    }
+    return (data || []) as MessageReaction[];
+  }
+}
+
+/**
+ * Group raw reaction rows for a single message into the UI-facing
+ * AggregatedReaction[] shape. Pure helper, safe to call inside reducers.
+ */
+export function aggregateReactions(
+  rows: MessageReaction[],
+  currentUserId: string | null | undefined,
+): AggregatedReaction[] {
+  if (rows.length === 0) return [];
+  const byEmoji = new Map<string, AggregatedReaction>();
+  for (const row of rows) {
+    const existing = byEmoji.get(row.reaction);
+    if (existing) {
+      existing.count += 1;
+      existing.userIds.push(row.user_id);
+      if (row.user_id === currentUserId) existing.hasMine = true;
+    } else {
+      byEmoji.set(row.reaction, {
+        emoji: row.reaction,
+        count: 1,
+        userIds: [row.user_id],
+        hasMine: row.user_id === currentUserId,
+      });
+    }
+  }
+  // Sort by count desc, then by emoji for stable order.
+  return Array.from(byEmoji.values()).sort((a, b) =>
+    b.count - a.count || a.emoji.localeCompare(b.emoji),
+  );
 }
 
 export const messagingService = new MessagingService();

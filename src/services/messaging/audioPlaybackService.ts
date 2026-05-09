@@ -8,6 +8,11 @@
  * Bubbles subscribe by messageId; the service fans out status updates from
  * the active expo-av Sound to whichever bubble currently owns playback.
  * Bubbles for inactive messages just see `isPlaying: false`.
+ *
+ * Preloading: bubbles call `preload(id, url)` on mount. This warms an LRU
+ * cache of loaded Sounds so the first tap on play is effectively instant
+ * (no network fetch + AAC decode in the tap path). Cap is small (6) so we
+ * don't pile up native decoders for long chats.
  */
 
 import { AppState, AppStateStatus } from 'react-native';
@@ -25,6 +30,11 @@ export interface PlaybackState {
 
 type Subscriber = (state: PlaybackState) => void;
 
+interface CacheEntry {
+  sound: Audio.Sound;
+  url: string;
+}
+
 const IDLE: PlaybackState = {
   isPlaying: false,
   isLoading: false,
@@ -32,18 +42,13 @@ const IDLE: PlaybackState = {
   durationMs: 0,
 };
 
+const CACHE_CAP = 6;
+
 class AudioPlaybackService {
-  private sound: Audio.Sound | null = null;
+  private cache = new Map<string, CacheEntry>();
+  private loadingPromises = new Map<string, Promise<Audio.Sound>>();
+  private cacheOrder: string[] = []; // LRU, newest at end
   private activeMessageId: string | null = null;
-  // Race guards. createAsync is async and starts playing on resolve, so
-  // rapid taps before the first Sound finishes constructing can each fire
-  // their own createAsync — both then play the same URL and one ends up
-  // orphaned outside the singleton. pendingLoadId de-dups taps for the
-  // SAME message during the load window; loadGeneration lets a newer
-  // play() call discard the older in-flight Sound when it eventually
-  // resolves (cross-message switching during load).
-  private pendingLoadId: string | null = null;
-  private loadGeneration = 0;
   private subscribers = new Map<string, Set<Subscriber>>();
   private appStateSubscription: { remove: () => void } | null = null;
 
@@ -68,99 +73,160 @@ class AudioPlaybackService {
     this.notify(messageId, IDLE);
   }
 
-  private handleStatus = (status: AVPlaybackStatus) => {
-    if (!this.activeMessageId) return;
+  private handleStatusFor = (messageId: string, status: AVPlaybackStatus) => {
+    // Background sounds (paused, in cache) still tick occasionally — ignore.
+    if (this.activeMessageId !== messageId) return;
     if (!status.isLoaded) {
-      // Errored or unloaded.
-      this.notifyIdle(this.activeMessageId);
+      this.notifyIdle(messageId);
       return;
     }
     const state: PlaybackState = {
       isPlaying: status.isPlaying === true,
-      isLoading: false, // Got a loaded status — we're past the load window.
+      isLoading: false,
       positionMs: status.positionMillis ?? 0,
       durationMs: status.durationMillis ?? 0,
     };
-    this.notify(this.activeMessageId, state);
+    this.notify(messageId, state);
 
     if (status.didJustFinish) {
-      // Reset so a second play starts from the beginning.
-      this.sound?.setPositionAsync(0).catch(() => undefined);
-      this.notify(this.activeMessageId, { ...state, isPlaying: false, positionMs: 0 });
+      const entry = this.cache.get(messageId);
+      entry?.sound.setPositionAsync(0).catch(() => undefined);
+      this.notify(messageId, { ...state, isPlaying: false, positionMs: 0 });
     }
   };
 
+  private touchLRU(id: string) {
+    const idx = this.cacheOrder.indexOf(id);
+    if (idx >= 0) this.cacheOrder.splice(idx, 1);
+    this.cacheOrder.push(id);
+    // Evict oldest beyond cap, but never the active message.
+    while (this.cacheOrder.length > CACHE_CAP) {
+      const oldestIdx = this.cacheOrder.findIndex((id) => id !== this.activeMessageId);
+      if (oldestIdx === -1) break;
+      const evicted = this.cacheOrder.splice(oldestIdx, 1)[0];
+      const entry = this.cache.get(evicted);
+      if (entry) {
+        entry.sound.unloadAsync().catch(() => undefined);
+        this.cache.delete(evicted);
+      }
+    }
+  }
+
+  private async loadInto(messageId: string, url: string): Promise<Audio.Sound> {
+    const { sound } = await Audio.Sound.createAsync(
+      { uri: url },
+      { shouldPlay: false, progressUpdateIntervalMillis: 50 },
+      (status) => this.handleStatusFor(messageId, status)
+    );
+    this.cache.set(messageId, { sound, url });
+    this.touchLRU(messageId);
+    return sound;
+  }
+
+  /** Warm the cache for a message. Idempotent and fire-and-forget. */
+  preload(messageId: string, url: string): void {
+    if (!url) return;
+    const existing = this.cache.get(messageId);
+    if (existing && existing.url === url) return;
+    if (this.loadingPromises.has(messageId)) return;
+
+    // URL changed (optimistic local URI → public URL after upload). Drop stale.
+    if (existing && existing.url !== url) {
+      existing.sound.unloadAsync().catch(() => undefined);
+      this.cache.delete(messageId);
+      const idx = this.cacheOrder.indexOf(messageId);
+      if (idx >= 0) this.cacheOrder.splice(idx, 1);
+    }
+
+    const promise = this.loadInto(messageId, url)
+      .catch((err) => {
+        console.warn('[audioPlaybackService] preload failed:', err);
+        throw err;
+      })
+      .finally(() => {
+        this.loadingPromises.delete(messageId);
+      });
+    this.loadingPromises.set(messageId, promise);
+  }
+
   /** Start (or resume) playback of a specific message. Pauses any other. */
   async play(messageId: string, url: string): Promise<void> {
-    // Already playing this message → just resume.
-    if (this.activeMessageId === messageId && this.sound) {
-      await this.sound.playAsync().catch(() => undefined);
-      return;
+    // Already active for this message — just resume in place.
+    if (this.activeMessageId === messageId) {
+      const entry = this.cache.get(messageId);
+      if (entry) {
+        await entry.sound.playAsync().catch(() => undefined);
+        return;
+      }
     }
 
-    // A load for this exact message is already in flight (rapid double-tap
-    // before the Sound finishes constructing) — drop the duplicate.
-    if (this.pendingLoadId === messageId) {
-      return;
-    }
-
-    const gen = ++this.loadGeneration;
-    this.pendingLoadId = messageId;
-
-    // Tear down any current sound. If a previous load is still in flight,
-    // the generation bump above causes it to discard its Sound when it
-    // resolves rather than overwriting this.sound.
-    if (this.sound) {
-      const previousId = this.activeMessageId;
-      const oldSound = this.sound;
-      this.sound = null;
-      oldSound.unloadAsync().catch(() => undefined);
-      if (previousId) this.notifyIdle(previousId);
+    // Switching messages: pause the previous one but keep it cached so a
+    // later tap on it is instant.
+    if (this.activeMessageId && this.activeMessageId !== messageId) {
+      const prev = this.cache.get(this.activeMessageId);
+      if (prev) {
+        prev.sound.pauseAsync().catch(() => undefined);
+        this.notifyIdle(this.activeMessageId);
+      }
     }
 
     this.activeMessageId = messageId;
-    // Immediately tell the bubble "you tapped, we're loading" so it can swap
-    // its play icon for a spinner. The first real status update from expo-av
-    // (firing once the Sound is loaded and starts playing) will flip
-    // isLoading back to false.
-    this.notify(messageId, {
-      isPlaying: false,
-      isLoading: true,
-      positionMs: 0,
-      durationMs: 0,
-    });
 
-    try {
-      const { sound } = await Audio.Sound.createAsync(
-        { uri: url },
-        { shouldPlay: true, progressUpdateIntervalMillis: 50 },
-        this.handleStatus
-      );
-      if (gen !== this.loadGeneration) {
-        // Superseded by a newer play() — orphan, unload immediately.
-        sound.unloadAsync().catch(() => undefined);
+    // Resolve a Sound: cached → in-flight preload → load now.
+    let sound: Audio.Sound | undefined = this.cache.get(messageId)?.sound;
+
+    if (!sound) {
+      // Show spinner only when we actually have to wait for I/O.
+      this.notify(messageId, {
+        isPlaying: false,
+        isLoading: true,
+        positionMs: 0,
+        durationMs: 0,
+      });
+      try {
+        if (this.loadingPromises.has(messageId)) {
+          sound = await this.loadingPromises.get(messageId)!;
+        } else {
+          this.preload(messageId, url);
+          sound = await this.loadingPromises.get(messageId)!;
+        }
+      } catch {
+        // Load failed; clear active state and reset bubble.
+        if (this.activeMessageId === messageId) {
+          this.activeMessageId = null;
+          this.notifyIdle(messageId);
+        }
         return;
       }
-      this.sound = sound;
+    }
+
+    // A newer play() may have raced and switched activeMessageId already.
+    if (this.activeMessageId !== messageId) return;
+
+    this.touchLRU(messageId);
+
+    try {
+      // Ensure status callback is bound to this message (createAsync wired it,
+      // but rebinding is cheap and survives any prior detach).
+      sound.setOnPlaybackStatusUpdate((status) => this.handleStatusFor(messageId, status));
+      await sound.playAsync();
     } catch (err) {
-      console.error('[audioPlaybackService] createAsync failed:', err);
-      if (gen === this.loadGeneration) {
+      console.error('[audioPlaybackService] playAsync failed:', err);
+      if (this.activeMessageId === messageId) {
         this.activeMessageId = null;
         this.notifyIdle(messageId);
-      }
-    } finally {
-      if (gen === this.loadGeneration) {
-        this.pendingLoadId = null;
       }
     }
   }
 
   /** Pause the active sound. Pass a messageId to no-op if it's not active. */
   async pause(messageId?: string): Promise<void> {
-    if (!this.sound) return;
+    if (!this.activeMessageId) return;
     if (messageId && this.activeMessageId !== messageId) return;
+    const entry = this.cache.get(this.activeMessageId);
+    if (!entry) return;
     try {
-      await this.sound.pauseAsync();
+      await entry.sound.pauseAsync();
     } catch {
       // ignore
     }

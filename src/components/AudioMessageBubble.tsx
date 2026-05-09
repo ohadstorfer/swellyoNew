@@ -13,6 +13,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Dimensions,
   GestureResponderEvent,
   Pressable,
   StyleSheet,
@@ -25,10 +26,23 @@ import { colors } from '../styles/theme';
 import { audioPlaybackService, PlaybackState } from '../services/messaging/audioPlaybackService';
 import type { Message } from '../services/messaging/messagingService';
 
-const BAR_COUNT = 50;
+const MAX_BAR_COUNT = 50;
 const BAR_WIDTH = 2;
 const BAR_GAP = 2;
-const BUBBLE_WIDTH = BAR_COUNT * (BAR_WIDTH + BAR_GAP) + 16 + 36 + 12 + 36; // ~250
+// Horizontal chrome inside the audio container: paddingH (20) + play button (36) +
+// play marginRight (8) + time marginLeft (12) + time minWidth (32).
+const CHROME_WIDTH = 108;
+const BUBBLE_IDEAL_WIDTH = MAX_BAR_COUNT * (BAR_WIDTH + BAR_GAP) + CHROME_WIDTH; // ~308
+// Must stay in sync with MESSAGE_BUBBLE_MAX_WIDTH in the chat screens (window.width - 106).
+// Otherwise the audio container's fixed width overflows the bubble's maxWidth and gets clipped
+// by `overflow: 'hidden'` on imageMessageBubble.
+const BUBBLE_WIDTH = Math.min(BUBBLE_IDEAL_WIDTH, Dimensions.get('window').width - 106);
+// Waveform-area width depends on the bubble width above; downsample bars to fit it
+// so they don't overflow into the time text on narrow screens.
+const BAR_COUNT = Math.max(
+  20,
+  Math.min(MAX_BAR_COUNT, Math.floor((BUBBLE_WIDTH - CHROME_WIDTH) / (BAR_WIDTH + BAR_GAP)))
+);
 const MIN_BAR_HEIGHT = 3;
 const MAX_BAR_HEIGHT = 22;
 
@@ -78,12 +92,22 @@ export const AudioMessageBubble: React.FC<AudioMessageBubbleProps> = ({
   // while the optimistic message is still uploading so the sender can hear it.
   const playUrl = audio_metadata?.audio_url || _localPreviewUri || '';
 
+  // Warm the cache as soon as the bubble mounts so tapping play is instant.
+  useEffect(() => {
+    if (!playUrl || isUploading) return;
+    audioPlaybackService.preload(id, playUrl);
+  }, [id, playUrl, isUploading]);
+
   const waveform: number[] = useMemo(() => {
     const samples = audio_metadata?.waveform;
-    if (samples && samples.length > 0) return samples;
-    // No waveform yet (received message that hasn't loaded, or no metadata) —
-    // show a flat-ish placeholder so the bubble doesn't visually collapse.
-    return new Array(BAR_COUNT).fill(0.3);
+    const source = (samples && samples.length > 0) ? samples : new Array(MAX_BAR_COUNT).fill(0.3);
+    if (source.length <= BAR_COUNT) return source;
+    // Downsample so bars never overflow the waveform area on narrow screens.
+    const out: number[] = new Array(BAR_COUNT);
+    for (let i = 0; i < BAR_COUNT; i++) {
+      out[i] = source[Math.floor((i / BAR_COUNT) * source.length)];
+    }
+    return out;
   }, [audio_metadata?.waveform]);
 
   const totalDurationMs = audio_metadata?.duration_ms ?? playback.durationMs ?? 0;

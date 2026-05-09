@@ -38,6 +38,8 @@ import { chatHistoryCache } from '../services/messaging/chatHistoryCache';
 import { messageOutbox } from '../services/messaging/messageOutbox';
 import * as Crypto from 'expo-crypto';
 import { MessageActionsMenu } from '../components/MessageActionsMenu';
+import { MessageReactionsRow } from '../components/MessageReactionsRow';
+import { useMessageReactions } from '../hooks/useMessageReactions';
 import { ReplyPreviewBanner } from '../components/ReplyPreviewBanner';
 import { QuotedMessagePreview } from '../components/QuotedMessagePreview';
 import { MessageBubbleHighlight } from '../components/MessageBubbleHighlight';
@@ -337,10 +339,27 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const pendingPickerRef = useRef<(() => void) | null>(null);
   const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
   const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
+  const [bubbleRect, setBubbleRect] = useState<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    radii?: { topLeft: number; topRight: number; bottomLeft: number; bottomRight: number };
+    isOwn?: boolean;
+  } | null>(null);
+  // Per-message refs to the MessageBubbleHighlight, so handleMessageLongPress
+  // can measureInWindow the exact bubble rect for the dim cutout.
+  const bubbleRefsRef = useRef<Map<string, any>>(new Map());
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const [resolvingReplyJumpId, setResolvingReplyJumpId] = useState<string | null>(null);
   const messagesRef = useRef<Message[]>([]);
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
+  const { setReaction, removeReaction } = useMessageReactions(
+    currentConversationId,
+    currentUserId,
+    messages,
+    setMessages,
+  );
   const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
   const [pendingDeleteMessageId, setPendingDeleteMessageId] = useState<string | null>(null);
   const [fullscreenImageUrl, setFullscreenImageUrl] = useState<string | null>(null);
@@ -2530,18 +2549,37 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     }
 
     const { pageX, pageY } = event.nativeEvent;
-    
-    
+
+
     // Set selected message first, then show menu
     // Use a small delay to ensure state is set before menu renders
     setSelectedMessage(message);
     setEditingText(message.body || ''); // Initialize edit text
     setMenuPosition({ x: pageX, y: pageY });
-    
+
+    // Measure the bubble in window coords so the dim overlay can carve a
+    // tight rectangular hole around it. Reset first so a stale rect from the
+    // previous selection doesn't briefly show under the new bubble.
+    setBubbleRect(null);
+    const bubbleRef = bubbleRefsRef.current.get(message.id);
+    if (bubbleRef && typeof bubbleRef.measureInWindow === 'function') {
+      bubbleRef.measureInWindow((x: number, y: number, width: number, height: number) => {
+        if (width > 0 && height > 0) {
+          // Per-corner radii must match styles.userMessageBubble /
+          // styles.botMessageBubble below so the dim cutout's curve aligns
+          // pixel-perfectly with the bubble's tail/pointy corner.
+          const radii = isOwnMessage
+            ? { topLeft: 16, topRight: 2, bottomLeft: 16, bottomRight: 16 }
+            : { topLeft: 16, topRight: 16, bottomLeft: 2, bottomRight: 16 };
+          setBubbleRect({ x, y, width, height, radii, isOwn: isOwnMessage });
+        }
+      });
+    }
+
     // Use setTimeout to ensure selectedMessage is set before menu becomes visible
     setTimeout(() => {
       setMenuVisible(true);
-     
+
     }, 0);
   };
 
@@ -2776,7 +2814,6 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     const senderNameColor = isGroupReceived ? getSenderColor(message.sender_id) : undefined;
     
     const canSwipeReply =
-      !isOwnMessage &&
       !message.deleted &&
       message.upload_state !== 'failed';
 
@@ -2825,6 +2862,10 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         )}
 
         <MessageBubbleHighlight
+          ref={(node) => {
+            if (node) bubbleRefsRef.current.set(message.id, node);
+            else bubbleRefsRef.current.delete(message.id);
+          }}
           isHighlighted={highlightedMessageId === message.id}
           onAnimationEnd={() => setHighlightedMessageId(null)}
           style={[
@@ -2968,7 +3009,10 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
               const thumbnailUri = message.image_metadata?.thumbnail_url || '';
               const imageWidth = message.image_metadata?.width || 1;
               const imageHeight = message.image_metadata?.height || 1;
-              const aspectRatio = imageWidth > 0 && imageHeight > 0 ? imageWidth / imageHeight : 1;
+              const rawAspectRatio = imageWidth > 0 && imageHeight > 0 ? imageWidth / imageHeight : 1;
+              // Clamp portrait images at 1:1 so the bubble doesn't dominate the screen.
+              // Matches the video bubble behavior; contentFit="cover" crops cleanly.
+              const aspectRatio = Math.max(rawAspectRatio, 1);
 
               if (!fullImageUri) {
                 console.warn('[DirectMessageScreen] ⚠️ Image message has no URL:', {
@@ -3338,6 +3382,20 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
           )}
         </MessageBubbleHighlight>
       </TouchableOpacity>
+      {message.reactions && message.reactions.length > 0 && (
+        <MessageReactionsRow
+          reactions={message.reactions}
+          ownAlignment={isOwnMessage ? 'right' : 'left'}
+          onPress={(emoji) => {
+            const mine = message.reactions?.find(r => r.hasMine);
+            if (mine?.emoji === emoji) {
+              removeReaction(message.id);
+            } else {
+              setReaction(message.id, emoji);
+            }
+          }}
+        />
+      )}
       </SwipeToReplyWrapper>
     );
   };
@@ -3632,6 +3690,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         onClose={() => {
           setMenuVisible(false);
           setSelectedMessage(null);
+          setBubbleRect(null);
         }}
         onEdit={() => {
           if (selectedMessage && canEditMessage(selectedMessage)) {
@@ -3692,6 +3751,27 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
           return canDelete;
         })()}
         messagePosition={menuPosition}
+        bubbleRect={bubbleRect}
+        isOwnSelected={!!selectedMessage && selectedMessage.sender_id === currentUserId}
+        showReactionsBar={
+          !!selectedMessage &&
+          selectedMessage.sender_id !== currentUserId &&
+          !selectedMessage.deleted &&
+          !selectedMessage.is_system &&
+          selectedMessage.upload_state !== 'failed'
+        }
+        currentReaction={
+          selectedMessage?.reactions?.find(r => r.hasMine)?.emoji
+        }
+        onReact={(emoji) => {
+          if (!selectedMessage) return;
+          const mine = selectedMessage.reactions?.find(r => r.hasMine);
+          if (mine?.emoji === emoji) {
+            removeReaction(selectedMessage.id);
+          } else {
+            setReaction(selectedMessage.id, emoji);
+          }
+        }}
       />
 
       {/* Delete Confirmation Modal (Web only) */}

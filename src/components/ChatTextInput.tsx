@@ -27,6 +27,7 @@ import { colors } from '../styles/theme';
 import { useKeyboardVisible } from '../hooks/useKeyboardVisible';
 import { useVoiceRecorder, type VoiceRecording } from '../hooks/useVoiceRecorder';
 import { RecordingOverlay } from './RecordingOverlay';
+import { LockedRecordingBar } from './LockedRecordingBar';
 
 export type { VoiceRecording } from '../hooks/useVoiceRecorder';
 
@@ -238,49 +239,118 @@ export const ChatTextInput = forwardRef<ChatTextInputRef, ChatTextInputProps>(fu
 
   const isSendDisabled = disabled || (!allowEmpty && !value.trim());
 
-  // Voice message recording — push-to-talk with slide-to-cancel.
-  // Mic shows only on native, when onVoiceMessage is provided AND the text
-  // field is empty. Anything in the text input takes precedence: typing always
-  // restores the send button.
+  // Voice message recording — WhatsApp-style push-to-talk with two release
+  // axes: slide LEFT to cancel, slide UP to lock. After lock, the composer is
+  // replaced by a hands-free recording bar (trash + send). Mic shows only on
+  // native, when onVoiceMessage is provided AND the text field is empty.
+  // Anything in the text input takes precedence: typing always restores send.
   const recorder = useVoiceRecorder();
-  const isRecording = recorder.state === 'recording' || recorder.state === 'finalizing';
-  const showMic = !!onVoiceMessage && !disabled && !value && Platform.OS !== 'web';
   const [isCancelArmed, setIsCancelArmed] = useState(false);
+  const [isLockArmed, setIsLockArmed] = useState(false);
+  const [isLocked, setIsLocked] = useState(false);
+  const isRecording =
+    recorder.state === 'recording' || recorder.state === 'finalizing';
+  // Hide the mic button (and force the locked bar to take over) once locked.
+  // typing in the input also kicks us back to the send button.
+  const showMic =
+    !!onVoiceMessage && !disabled && !value && Platform.OS !== 'web' && !isLocked;
   const recordStartXRef = useRef<number>(0);
+  const recordStartYRef = useRef<number>(0);
   const cancelArmedRef = useRef<boolean>(false);
+  const lockArmedRef = useRef<boolean>(false);
   const CANCEL_THRESHOLD_PX = 80;
+  const LOCK_THRESHOLD_PX = 60;
 
-  const beginVoiceRecord = useCallback(async (pageX: number) => {
+  const beginVoiceRecord = useCallback(async (pageX: number, pageY: number) => {
     recordStartXRef.current = pageX;
+    recordStartYRef.current = pageY;
     cancelArmedRef.current = false;
+    lockArmedRef.current = false;
     setIsCancelArmed(false);
+    setIsLockArmed(false);
     Keyboard.dismiss();
     await recorder.start();
   }, [recorder]);
 
-  const updateVoiceCancelArmed = useCallback((pageX: number) => {
+  const updateVoicePan = useCallback((pageX: number, pageY: number) => {
     const dx = pageX - recordStartXRef.current;
-    const armed = dx <= -CANCEL_THRESHOLD_PX;
-    if (armed !== cancelArmedRef.current) {
-      cancelArmedRef.current = armed;
-      setIsCancelArmed(armed);
+    const dy = pageY - recordStartYRef.current;
+    // Cancel takes precedence over lock — if the user has slid hard left,
+    // ignore any vertical component. WhatsApp behaves the same way.
+    const cancelArmed = dx <= -CANCEL_THRESHOLD_PX;
+    const lockArmed = !cancelArmed && dy <= -LOCK_THRESHOLD_PX;
+    if (cancelArmed !== cancelArmedRef.current) {
+      cancelArmedRef.current = cancelArmed;
+      setIsCancelArmed(cancelArmed);
     }
+    if (lockArmed !== lockArmedRef.current) {
+      lockArmedRef.current = lockArmed;
+      setIsLockArmed(lockArmed);
+    }
+  }, []);
+
+  const resetGestureFlags = useCallback(() => {
+    setIsCancelArmed(false);
+    setIsLockArmed(false);
+    cancelArmedRef.current = false;
+    lockArmedRef.current = false;
   }, []);
 
   const finishVoiceRecord = useCallback(async () => {
     if (cancelArmedRef.current) {
       await recorder.cancel();
-      setIsCancelArmed(false);
-      cancelArmedRef.current = false;
+      resetGestureFlags();
+      return;
+    }
+    if (lockArmedRef.current) {
+      // Lock — keep the recorder running, swap the composer for the
+      // hands-free locked bar. The recorder.state stays 'recording' so
+      // stop()/cancel() from the locked bar work without changes.
+      resetGestureFlags();
+      setIsLocked(true);
       return;
     }
     const result = await recorder.stop();
-    setIsCancelArmed(false);
-    cancelArmedRef.current = false;
+    resetGestureFlags();
+    if (result && onVoiceMessage) {
+      onVoiceMessage(result);
+    }
+  }, [onVoiceMessage, recorder, resetGestureFlags]);
+
+  const cancelLockedRecording = useCallback(async () => {
+    await recorder.cancel();
+    setIsLocked(false);
+  }, [recorder]);
+
+  const sendLockedRecording = useCallback(async () => {
+    const result = await recorder.stop();
+    setIsLocked(false);
     if (result && onVoiceMessage) {
       onVoiceMessage(result);
     }
   }, [onVoiceMessage, recorder]);
+
+  // Locked recording — entire composer (input + mic + leftAccessory) is
+  // replaced by the hands-free bar. Returning early keeps the rest of the
+  // render simple.
+  if (isLocked) {
+    return (
+      <View
+        style={[
+          styles.wrapper,
+          keyboardVisible && Platform.OS !== 'web' && { paddingBottom: KEYBOARD_GAP },
+        ]}
+      >
+        <LockedRecordingBar
+          durationMs={recorder.durationMs}
+          liveWaveform={recorder.liveWaveform}
+          primaryColor={primaryColor}
+          onCancel={() => { void cancelLockedRecording(); }}
+          onSend={() => { void sendLockedRecording(); }}
+        />
+      </View>
+    );
+  }
 
   return (
     <View
@@ -289,6 +359,28 @@ export const ChatTextInput = forwardRef<ChatTextInputRef, ChatTextInputProps>(fu
         keyboardVisible && Platform.OS !== 'web' && { paddingBottom: KEYBOARD_GAP },
       ]}
     >
+      {/* Lock pill — sits above the mic during a held recording. As the user
+          slides their finger up past LOCK_THRESHOLD_PX the lock icon flips to
+          'closed' to signal that releasing now will lock. pointerEvents=none
+          so the touch stream stays on the mic responder underneath. */}
+      {isRecording && (
+        <View
+          pointerEvents="none"
+          style={[styles.lockPill, isLockArmed && styles.lockPillArmed]}
+        >
+          <Ionicons
+            name={isLockArmed ? 'lock-closed' : 'lock-open-outline'}
+            size={18}
+            color={isLockArmed ? colors.brandTeal : colors.textPrimary}
+          />
+          <Ionicons
+            name="chevron-up"
+            size={14}
+            color={isLockArmed ? colors.brandTeal : colors.textSecondary}
+            style={{ marginTop: 4 }}
+          />
+        </View>
+      )}
       {leftAccessory != null && (
         <View style={styles.attachButtonWrapper}>{leftAccessory}</View>
       )}
@@ -382,8 +474,8 @@ export const ChatTextInput = forwardRef<ChatTextInputRef, ChatTextInputProps>(fu
         {showMic ? (
           // Push-to-talk mic button. We use the React Native responder system
           // directly (not Pressable / TouchableOpacity) because we need pan
-          // tracking for slide-to-cancel — the responder gives us a continuous
-          // pageX stream from press-in to release.
+          // tracking on BOTH axes (left = cancel, up = lock) — the responder
+          // gives us a continuous pageX/pageY stream from press-in to release.
           // Note: never set `transform: undefined`. New-architecture Reanimated
           // does not tolerate it (processTransform → forEach on null). Spread
           // the transform key in only when we actually want to scale.
@@ -399,11 +491,11 @@ export const ChatTextInput = forwardRef<ChatTextInputRef, ChatTextInputProps>(fu
             ]}
             onStartShouldSetResponder={() => true}
             onResponderGrant={(e) => {
-              beginVoiceRecord(e.nativeEvent.pageX);
+              beginVoiceRecord(e.nativeEvent.pageX, e.nativeEvent.pageY);
             }}
             onResponderMove={(e) => {
               if (!isRecording) return;
-              updateVoiceCancelArmed(e.nativeEvent.pageX);
+              updateVoicePan(e.nativeEvent.pageX, e.nativeEvent.pageY);
             }}
             onResponderRelease={() => { void finishVoiceRecord(); }}
             onResponderTerminate={() => { void finishVoiceRecord(); }}
@@ -564,5 +656,30 @@ const styles = StyleSheet.create({
   sendButtonDisabled: {
     opacity: 0.4,
     backgroundColor: '#CCCCCC',
+  },
+  // Lock pill — floats above the mic button while a held recording is in
+  // flight. Anchored to the right of the wrapper, going UP via bottom:'100%'.
+  lockPill: {
+    position: 'absolute',
+    right: 4,
+    bottom: '100%',
+    marginBottom: 8,
+    width: 36,
+    paddingVertical: 12,
+    paddingHorizontal: 6,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    elevation: 4,
+    zIndex: 10,
+  },
+  lockPillArmed: {
+    borderWidth: 1.5,
+    borderColor: colors.brandTeal,
   },
 });
