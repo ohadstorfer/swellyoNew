@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo } from 'react';
-import { StyleSheet, StyleProp, ViewStyle, ViewProps } from 'react-native';
+import { StyleSheet, StyleProp, View, ViewStyle, ViewProps } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -16,13 +16,13 @@ interface MessageBubbleHighlightProps extends Omit<ViewProps, 'style'> {
   children: React.ReactNode;
 }
 
-export const MessageBubbleHighlight: React.FC<MessageBubbleHighlightProps> = ({
+export const MessageBubbleHighlight = React.forwardRef<View, MessageBubbleHighlightProps>(({
   isHighlighted,
   onAnimationEnd,
   style,
   children,
   ...rest
-}) => {
+}, ref) => {
   const flashOpacity = useSharedValue(0);
 
   useEffect(() => {
@@ -60,7 +60,7 @@ export const MessageBubbleHighlight: React.FC<MessageBubbleHighlightProps> = ({
   }, [style]);
 
   return (
-    <Animated.View style={style} {...rest}>
+    <Animated.View ref={ref as any} style={style} {...rest}>
       {children}
       <Animated.View
         pointerEvents="none"
@@ -73,7 +73,9 @@ export const MessageBubbleHighlight: React.FC<MessageBubbleHighlightProps> = ({
       />
     </Animated.View>
   );
-};
+});
+
+MessageBubbleHighlight.displayName = 'MessageBubbleHighlight';
 
 const styles = StyleSheet.create({
   flashColor: {

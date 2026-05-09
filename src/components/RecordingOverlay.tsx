@@ -11,7 +11,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Text } from './Text';
 import { colors } from '../styles/theme';
 
-const LIVE_BAR_COUNT = 30;
+const LIVE_BAR_COUNT = 22;
 const BAR_WIDTH = 2;
 const BAR_GAP = 2;
 const MIN_BAR_HEIGHT = 3;
@@ -121,6 +121,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-start',
     height: MAX_BAR_HEIGHT + 2,
     paddingHorizontal: 8,
+    overflow: 'hidden',
   },
   hint: {
     flexDirection: 'row',
