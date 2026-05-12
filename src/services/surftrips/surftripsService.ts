@@ -77,7 +77,7 @@ export async function getSurftripInviteUrl(groupId: string): Promise<string> {
     throw new Error(error?.message || 'Could not create invite link');
   }
   const token = String(data);
-  const base = 'https://www.swellyo.com';
+  const base = 'https://swellyo-invite.netlify.app';
   return `${base}/?surftrip=${encodeURIComponent(groupId)}&t=${encodeURIComponent(token)}`;
 }
 

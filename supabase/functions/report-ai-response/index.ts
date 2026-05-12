@@ -120,6 +120,13 @@ serve(async (req) => {
     const chatLabel = chatType === 'onboarding' ? 'Onboarding' : 'Matching';
     const emailText = `AI Response Report\n\nReason: ${reason}\nChat: ${chatLabel}\nReporter: ${userName || 'Unknown'} (${userEmail || 'Unknown'})\n\nReported message:\n${messageText}`;
 
+    // emails disabled — push only, see 2026-05-12
+    console.log('[AI Report] Email send short-circuited (emails disabled).');
+    return new Response(JSON.stringify({ success: true, emailDisabled: true }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+    });
+
     const resendResponse = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: {

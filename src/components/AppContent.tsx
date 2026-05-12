@@ -27,7 +27,6 @@ import { useUserProfile } from '../context/UserProfileContext';
 import { useTutorial } from '../context/TutorialContext';
 import { messagingService } from '../services/messaging/messagingService';
 import { acceptSurftripInvite } from '../services/surftrips/surftripsService';
-import SurftripInviteLanding from '../screens/surftrips/SurftripInviteLanding';
 import { supabaseAuthService } from '../services/auth/supabaseAuthService';
 import { useOnboarding } from '../context/OnboardingContext';
 import { analyticsService } from '../services/analytics/analyticsService';
@@ -95,11 +94,11 @@ export const AppContent: React.FC = () => {
     });
   }, []);
 
-  // ----- Surftrip invite link handling -----
-  // The URL format is `https://www.swellyo.com/?surftrip=<groupId>&t=<token>`
-  // and is also catchable via the `swellyo://` scheme on native. On web, we
-  // always render a "Get the app" landing instead of processing the invite —
-  // acceptance is native-only by product decision.
+  // ----- Surftrip invite link handling (native only) -----
+  // URL format: `https://swellyo-invite.netlify.app/?surftrip=<groupId>&t=<token>`.
+  // That domain is served by a separate static site that does AASA hosting +
+  // store redirect — the Expo web bundle never sees these URLs. All processing
+  // is native: Linking listener → AsyncStorage persistence → post-auth resolver.
   const [pendingInviteGroupId, setPendingInviteGroupId] = useState<string | null>(null);
   const [pendingInviteToken, setPendingInviteToken] = useState<string | null>(null);
   const inviteResolverRef = useRef(false);
@@ -116,28 +115,6 @@ export const AppContent: React.FC = () => {
       if (token) setPendingInviteToken(token);
     } catch (e) {
       console.warn('[AppContent] invite URL parse failed:', e);
-    }
-  }, []);
-
-  // Web: parse window.location and clean the URL so refresh doesn't re-trigger.
-  useEffect(() => {
-    if (Platform.OS !== 'web') return;
-    if (typeof window === 'undefined' || !window.location) return;
-    try {
-      const params = new URLSearchParams(window.location.search || '');
-      const sid = params.get('surftrip');
-      const token = params.get('t');
-      if (sid || token) {
-        if (sid) setPendingInviteGroupId(sid);
-        if (token) setPendingInviteToken(token);
-        params.delete('surftrip');
-        params.delete('t');
-        const remaining = params.toString();
-        const next = window.location.pathname + (remaining ? `?${remaining}` : '') + (window.location.hash || '');
-        window.history.replaceState({}, '', next);
-      }
-    } catch (e) {
-      console.warn('[AppContent] surftrip URL parse failed:', e);
     }
   }, []);
 
@@ -1390,22 +1367,6 @@ export const AppContent: React.FC = () => {
     await ageGateService.clearBlock();
     setShowAgeBlockOverlay(false);
   };
-
-  // Web-only: invite links always render the "Get the app" landing.
-  // Acceptance is native-only by product decision.
-  if (Platform.OS === 'web' && (pendingInviteToken || pendingInviteGroupId)) {
-    return (
-      <SurftripInviteLanding
-        token={pendingInviteToken}
-        groupId={pendingInviteGroupId}
-        onDismiss={() => {
-          setPendingInviteToken(null);
-          setPendingInviteGroupId(null);
-          AsyncStorage.removeItem('pendingSurftripInvite').catch(() => {});
-        }}
-      />
-    );
-  }
 
   if (showAgeBlockOverlay) {
     return (

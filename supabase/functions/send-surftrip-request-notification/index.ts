@@ -18,7 +18,7 @@ async function notifySurftripAdmins(
 ): Promise<void> {
   const { data: group, error: groupError } = await supabase
     .from('surftrip_groups')
-    .select('id, name')
+    .select('id, name, conversation_id')
     .eq('id', groupId)
     .single();
 
@@ -38,13 +38,44 @@ async function notifySurftripAdmins(
     return;
   }
 
-  const adminIds = (admins || [])
+  let adminIds = (admins || [])
     .map((r: any) => r.user_id)
     .filter((uid: string) => uid !== requesterId);
 
   if (adminIds.length === 0) {
     console.log('[Surftrip Request Notif] No admins to notify for', groupId);
     return;
+  }
+
+  // Mute filter — drop admins who muted the surftrip conversation.
+  if (group.conversation_id && adminIds.length > 0) {
+    const { data: mutedRows } = await supabase
+      .from('conversation_members')
+      .select('user_id, preferences')
+      .eq('conversation_id', group.conversation_id)
+      .in('user_id', adminIds);
+    const now = Date.now();
+    const mutedSet = new Set(
+      (mutedRows || [])
+        .filter((r: any) => {
+          const raw = r.preferences?.muted_until;
+          if (!raw) return false;
+          const ms = Date.parse(raw);
+          return !isNaN(ms) && ms > now;
+        })
+        .map((r: any) => r.user_id),
+    );
+    if (mutedSet.size > 0) {
+      console.log(
+        `[Surftrip Request Notif] Skipping ${mutedSet.size} muted admin(s):`,
+        [...mutedSet].join(', '),
+      );
+      adminIds = adminIds.filter((uid: string) => !mutedSet.has(uid));
+    }
+    if (adminIds.length === 0) {
+      console.log('[Surftrip Request Notif] All admins muted — nothing to send');
+      return;
+    }
   }
 
   const { data: surfers } = await supabase

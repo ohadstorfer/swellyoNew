@@ -1,4 +1,4 @@
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 import Constants from 'expo-constants';
@@ -156,15 +156,34 @@ class PushNotificationService {
     this.getCurrentConversationId = getCurrentConversationId;
     this.onNotificationTap = onNotificationTap;
 
-    // Foreground: decide whether to show the notification
+    // Foreground: decide whether to show the notification.
+    //
+    // Rule: if the app is in the foreground (AppState 'active'), NEVER show a
+    // heads-up banner / play a sound — the user is already in the app and an
+    // in-app indicator (unread badge, conversation list refresh) is enough.
+    // We still let the notification be delivered to data listeners so things
+    // like unread counts can update.
+    //
+    // Additionally, if we can read the currently-open conversation and the
+    // payload is for that same conversation, suppress regardless of AppState
+    // (defensive — should already be covered by the AppState check).
+    //
+    // Note: expo-notifications SDK 54 deprecated `shouldShowAlert` in favor of
+    // `shouldShowBanner` + `shouldShowList`. We set all three for safety so
+    // this keeps working across upgrades.
     Notifications.setNotificationHandler({
       handleNotification: async (notification) => {
         const conversationId = notification.request.content.data?.conversationId as string | undefined;
         const currentId = this.getCurrentConversationId?.();
-        // Suppress if user is already viewing this conversation
-        const shouldShow = !conversationId || conversationId !== currentId;
+        const isForeground = AppState.currentState === 'active';
+        const isSameConversation = !!conversationId && conversationId === currentId;
+        const shouldShow = !isForeground && !isSameConversation;
         return {
+          // Legacy key (pre-SDK 54) — kept for backwards compat
           shouldShowAlert: shouldShow,
+          // SDK 54+ replacement keys
+          shouldShowBanner: shouldShow,
+          shouldShowList: shouldShow,
           shouldPlaySound: shouldShow,
           shouldSetBadge: shouldShow,
         };

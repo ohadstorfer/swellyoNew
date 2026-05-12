@@ -1,0 +1,21 @@
+# Tiny static site for Swellyo invite link plumbing.
+# Hosted at https://swellyo-invite.netlify.app. The entire site is:
+#   1. /.well-known/apple-app-site-association   (Universal Links AASA)
+#   2. /.well-known/assetlinks.json              (Android App Links)
+#   3. /index.html                                (UA-detect → store redirect)
+# When a user with the Swellyo app installed taps a link, the OS opens the app
+# directly via Universal Links/App Links — the page never loads. When the app
+# is not installed, index.html redirects to the appropriate store.
+
+[build]
+  publish = "."
+
+[[headers]]
+  for = "/.well-known/apple-app-site-association"
+  [headers.values]
+    Content-Type = "application/json"
+
+[[headers]]
+  for = "/.well-known/assetlinks.json"
+  [headers.values]
+    Content-Type = "application/json"

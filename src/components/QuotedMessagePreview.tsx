@@ -9,6 +9,8 @@ const REPLY_PURPLE = '#A58DED';
 interface QuotedMessagePreviewProps {
   snapshot: ReplyToSnapshot;
   isOwnBubble: boolean;
+  currentUserId?: string | null;
+  fallbackName?: string;
   onPress?: () => void;
   isLoading?: boolean;
 }
@@ -16,6 +18,8 @@ interface QuotedMessagePreviewProps {
 export const QuotedMessagePreview: React.FC<QuotedMessagePreviewProps> = ({
   snapshot,
   isOwnBubble,
+  currentUserId,
+  fallbackName,
   onPress,
   isLoading,
 }) => {
@@ -29,6 +33,19 @@ export const QuotedMessagePreview: React.FC<QuotedMessagePreviewProps> = ({
   } else {
     preview = (snapshot.body || '').trim();
   }
+
+  // Resolve the badge name from the viewer's perspective. Older snapshots may
+  // have stored the literal 'You' (matched the sender at send-time, not the
+  // viewer) — treat that as a stale legacy value and fall back to the real
+  // name when the IDs don't match.
+  const isFromCurrentUser =
+    !!currentUserId && snapshot.sender_id === currentUserId;
+  const storedName = snapshot.sender_name;
+  const displayName = isFromCurrentUser
+    ? 'You'
+    : storedName && storedName !== 'You'
+      ? storedName
+      : fallbackName || 'User';
 
   const mediaIcon =
     snapshot.type === 'image' ? 'image-outline' :
@@ -45,7 +62,7 @@ export const QuotedMessagePreview: React.FC<QuotedMessagePreviewProps> = ({
     <>
       <View style={styles.bar} />
       <View style={styles.content}>
-        <Text style={styles.name} numberOfLines={1}>{snapshot.sender_name || 'User'}</Text>
+        <Text style={styles.name} numberOfLines={1}>{displayName}</Text>
         <View style={styles.previewRow}>
           {mediaIcon && (
             <Ionicons

@@ -34,6 +34,29 @@ async function sendHostNotification(
     return;
   }
 
+  // Mute check — if the host muted the linked group-trip conversation, skip the push.
+  const { data: tripConv } = await supabase
+    .from('conversations')
+    .select('id')
+    .eq('metadata->>trip_id', tripId)
+    .maybeSingle();
+  if (tripConv?.id) {
+    const { data: hostMember } = await supabase
+      .from('conversation_members')
+      .select('preferences')
+      .eq('conversation_id', tripConv.id)
+      .eq('user_id', hostId)
+      .maybeSingle();
+    const mutedUntilRaw = hostMember?.preferences?.muted_until;
+    if (mutedUntilRaw) {
+      const mutedUntilMs = Date.parse(mutedUntilRaw);
+      if (!isNaN(mutedUntilMs) && mutedUntilMs > Date.now()) {
+        console.log(`[Trip Request Notif] Skipping host ${hostId} — muted until ${mutedUntilRaw}`);
+        return;
+      }
+    }
+  }
+
   // Get host's push token
   const { data: hostSurfer } = await supabase
     .from('surfers')

@@ -25,6 +25,29 @@ async function sendRemovedNotification(
     return;
   }
 
+  // Mute check — if the removed user muted the linked group-trip conversation, skip the push.
+  const { data: tripConv } = await supabase
+    .from('conversations')
+    .select('id')
+    .eq('metadata->>trip_id', tripId)
+    .maybeSingle();
+  if (tripConv?.id) {
+    const { data: member } = await supabase
+      .from('conversation_members')
+      .select('preferences')
+      .eq('conversation_id', tripConv.id)
+      .eq('user_id', removedUserId)
+      .maybeSingle();
+    const mutedUntilRaw = member?.preferences?.muted_until;
+    if (mutedUntilRaw) {
+      const mutedUntilMs = Date.parse(mutedUntilRaw);
+      if (!isNaN(mutedUntilMs) && mutedUntilMs > Date.now()) {
+        console.log(`[Trip Removed Notif] Skipping ${removedUserId} — muted until ${mutedUntilRaw}`);
+        return;
+      }
+    }
+  }
+
   const { data: surfer } = await supabase
     .from('surfers')
     .select('expo_push_token')
