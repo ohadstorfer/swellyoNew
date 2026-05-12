@@ -89,7 +89,10 @@ android {
 
     namespace 'com.swellyo.app'
     defaultConfig {
-        applicationId System.getenv("APP_VARIANT") == "development" ? 'com.swellyo.app.dev' : 'com.swellyo.app'
+        applicationId 'com.swellyo.app'
+        if (System.getenv("APP_VARIANT") == "development") {
+            applicationIdSuffix '.dev'
+        }
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 23
