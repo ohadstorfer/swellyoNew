@@ -40,6 +40,22 @@ async function sendReactionPush(
     return;
   }
 
+  // Mute check — if the message author has muted this conversation, skip the push.
+  const { data: recipientMember } = await supabase
+    .from('conversation_members')
+    .select('preferences')
+    .eq('conversation_id', conversationId)
+    .eq('user_id', recipientId)
+    .maybeSingle();
+  const mutedUntilRaw = recipientMember?.preferences?.muted_until;
+  if (mutedUntilRaw) {
+    const mutedUntilMs = Date.parse(mutedUntilRaw);
+    if (!isNaN(mutedUntilMs) && mutedUntilMs > Date.now()) {
+      console.log(`[Reaction Push] Skipping ${recipientId} — muted until ${mutedUntilRaw}`);
+      return;
+    }
+  }
+
   const { data: recipientSurfer } = await supabase
     .from('surfers')
     .select('expo_push_token')

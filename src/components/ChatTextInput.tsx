@@ -91,6 +91,10 @@ export interface ChatTextInputProps {
    * the send button is replaced by a mic button (native only). Press-and-hold
    * records, release sends, slide-left cancels. Web does not render the mic.  */
   onVoiceMessage?: (audio: VoiceRecording) => void;
+  /** Native-camera capture. When provided AND the text field is empty, a small
+   * camera icon appears just left of the mic. Hidden on web (the leftAccessory's
+   * file picker covers web). Fades out while a voice recording is in flight. */
+  onCameraPress?: () => void;
 }
 
 export interface ChatTextInputRef {
@@ -115,6 +119,7 @@ export const ChatTextInput = forwardRef<ChatTextInputRef, ChatTextInputProps>(fu
     testID,
     nativeID,
     onVoiceMessage,
+    onCameraPress,
   },
   ref
 ) {
@@ -254,6 +259,21 @@ export const ChatTextInput = forwardRef<ChatTextInputRef, ChatTextInputProps>(fu
   // typing in the input also kicks us back to the send button.
   const showMic =
     !!onVoiceMessage && !disabled && !value && Platform.OS !== 'web' && !isLocked;
+  // Camera affordance follows the same visibility rules as the mic: native
+  // only, no text, not disabled, not locked. When the user starts holding the
+  // mic to record, the camera fades out — animating width + marginRight too so
+  // the space collapses and the RecordingOverlay can expand into it.
+  const showCamera =
+    !!onCameraPress && !disabled && !value && Platform.OS !== 'web' && !isLocked;
+  const cameraVisibleSv = useSharedValue<number>(1);
+  useEffect(() => {
+    cameraVisibleSv.value = withTiming(isRecording ? 0 : 1, { duration: 120 });
+  }, [isRecording, cameraVisibleSv]);
+  const cameraAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: cameraVisibleSv.value,
+    width: cameraVisibleSv.value * 32,
+    marginRight: cameraVisibleSv.value * 4,
+  }));
   const recordStartXRef = useRef<number>(0);
   const recordStartYRef = useRef<number>(0);
   const cancelArmedRef = useRef<boolean>(false);
@@ -471,6 +491,27 @@ export const ChatTextInput = forwardRef<ChatTextInputRef, ChatTextInputProps>(fu
           </View>
         )}
 
+        {showCamera && (
+          // Native-camera affordance. Sits just left of the mic; fades + collapses
+          // its width during a held recording so the RecordingOverlay can take
+          // over the row. pointerEvents off while recording (taps shouldn't fire
+          // mid-fade) and while collapsed.
+          <Animated.View
+            style={[styles.cameraButton, cameraAnimatedStyle]}
+            pointerEvents={isRecording ? 'none' : 'auto'}
+          >
+            <TouchableOpacity
+              onPress={onCameraPress}
+              disabled={disabled}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              style={styles.cameraButtonInner}
+              testID={testID ? `${testID}-camera` : undefined}
+            >
+              <Ionicons name="camera" size={24} color={colors.textPrimary} />
+            </TouchableOpacity>
+          </Animated.View>
+        )}
+
         {showMic ? (
           // Push-to-talk mic button. We use the React Native responder system
           // directly (not Pressable / TouchableOpacity) because we need pan
@@ -652,6 +693,18 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     marginLeft: 8,
     backgroundColor: '#B72DF2',
+  },
+  cameraButton: {
+    height: 32,
+    alignSelf: 'flex-end',
+    marginBottom: 4,
+    overflow: 'hidden',
+  },
+  cameraButtonInner: {
+    width: 32,
+    height: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   sendButtonDisabled: {
     opacity: 0.4,

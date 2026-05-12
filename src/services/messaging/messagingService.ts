@@ -39,6 +39,11 @@ export interface ConversationMember {
   email?: string;
 }
 
+// Mute sentinel for "Always" — far-future timestamp stored in preferences.muted_until.
+// WhatsApp's "Always" maps to this; auto-expiration logic still works (a real expiry
+// in the past would naturally pass), so callers don't need a special case.
+export const MUTE_ALWAYS_UNTIL = new Date('2099-01-01T00:00:00.000Z');
+
 // Message type
 export type MessageType = 'text' | 'image' | 'video' | 'audio';
 
@@ -322,7 +327,7 @@ class MessagingService {
       // OPTIMIZATION 3: Batch fetch all member data for all conversations
       const { data: allMembersData, error: allMembersError } = await supabase
         .from('conversation_members')
-        .select('conversation_id, user_id, role, adv_role, joined_at, last_read_message_id, last_read_at, preferences')
+        .select('conversation_id, user_id, role, joined_at, last_read_message_id, last_read_at, preferences')
         .in('conversation_id', conversationIds);
 
       if (allMembersError) {
@@ -1443,6 +1448,58 @@ class MessagingService {
   }
 
   /**
+   * Set or clear the mute state for the current user on a conversation.
+   * Pass `null` to unmute. Merges into preferences JSONB so other keys are preserved.
+   */
+  async setMuteUntil(conversationId: string, mutedUntil: Date | null): Promise<void> {
+    if (!isSupabaseConfigured()) {
+      throw new Error('Supabase is not configured');
+    }
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('Not authenticated');
+
+    const { data: existing, error: readErr } = await supabase
+      .from('conversation_members')
+      .select('preferences')
+      .eq('conversation_id', conversationId)
+      .eq('user_id', user.id)
+      .maybeSingle();
+    if (readErr) throw readErr;
+
+    const nextPreferences = {
+      ...(existing?.preferences ?? {}),
+      muted_until: mutedUntil ? mutedUntil.toISOString() : null,
+    };
+
+    const { error } = await supabase
+      .from('conversation_members')
+      .update({ preferences: nextPreferences })
+      .eq('conversation_id', conversationId)
+      .eq('user_id', user.id);
+    if (error) throw error;
+  }
+
+  /**
+   * Fetch the current user's mute state for a conversation.
+   * Returns null if not muted, or if the stored expiry is in the past.
+   */
+  async getMuteUntil(conversationId: string): Promise<Date | null> {
+    if (!isSupabaseConfigured()) return null;
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return null;
+
+    const { data, error } = await supabase
+      .from('conversation_members')
+      .select('preferences')
+      .eq('conversation_id', conversationId)
+      .eq('user_id', user.id)
+      .maybeSingle();
+    if (error || !data) return null;
+
+    return getMuteUntilFromMember(data as Pick<ConversationMember, 'preferences'>);
+  }
+
+  /**
    * Subscribe to messages in a conversation with unified subscription
    * Handles INSERT, UPDATE, DELETE events and typing indicators in a single channel
    */
@@ -2514,6 +2571,22 @@ export function aggregateReactions(
   return Array.from(byEmoji.values()).sort((a, b) =>
     b.count - a.count || a.emoji.localeCompare(b.emoji),
   );
+}
+
+/**
+ * Read mute state from a loaded ConversationMember (or a row with `preferences`).
+ * Returns null if not muted or if the stored expiry is already in the past,
+ * so callers can treat "expired" identically to "not muted".
+ */
+export function getMuteUntilFromMember(
+  member: Pick<ConversationMember, 'preferences'> | null | undefined,
+): Date | null {
+  const raw = member?.preferences?.muted_until;
+  if (!raw || typeof raw !== 'string') return null;
+  const parsed = new Date(raw);
+  if (isNaN(parsed.getTime())) return null;
+  if (parsed.getTime() <= Date.now()) return null;
+  return parsed;
 }
 
 export const messagingService = new MessagingService();

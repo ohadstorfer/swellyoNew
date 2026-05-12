@@ -2,7 +2,7 @@
   "applinks": {
     "details": [
       {
-        "appIDs": ["REPLACE_WITH_APPLE_TEAM_ID.com.swellyo.app"],
+        "appIDs": ["683UA9HZYT.com.swellyo.app"],
         "components": [
           { "/": "/*" }
         ]

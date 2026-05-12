@@ -27,7 +27,7 @@ import { Text } from '../components/Text';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GalleryPermissionOverlay } from '../components/GalleryPermissionOverlay';
 import { colors, spacing, typography, borderRadius } from '../styles/theme';
-import { messagingService, Message, RealtimeSubscriptionStatus, ReplyToSnapshot } from '../services/messaging/messagingService';
+import { messagingService, Message, RealtimeSubscriptionStatus, ReplyToSnapshot, MUTE_ALWAYS_UNTIL, getMuteUntilFromMember } from '../services/messaging/messagingService';
 import { supabaseAuthService } from '../services/auth/supabaseAuthService';
 import { getImageUrl } from '../services/media/imageService';
 import { Images } from '../assets/images';
@@ -36,6 +36,7 @@ import { ProfileImage } from '../components/ProfileImage';
 import { analyticsService } from '../services/analytics/analyticsService';
 import { chatHistoryCache } from '../services/messaging/chatHistoryCache';
 import { messageOutbox } from '../services/messaging/messageOutbox';
+import { loadCachedConversationList, saveCachedConversationList } from '../services/messaging/conversationListCache';
 import * as Crypto from 'expo-crypto';
 import { MessageActionsMenu } from '../components/MessageActionsMenu';
 import { MessageReactionsRow } from '../components/MessageReactionsRow';
@@ -299,11 +300,12 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   onOpenTripDetail,
 }) => {
   // Get markAsRead and setCurrentConversationId from MessagingProvider
-  const { markAsRead, setCurrentConversationId: setMessagingCurrentConversationId, dispatch: messagingDispatch } = useMessaging();
+  const { markAsRead, setCurrentConversationId: setMessagingCurrentConversationId, dispatch: messagingDispatch, conversations: providerConversations } = useMessaging();
   
   const [showBlockOverlay, setShowBlockOverlay] = useState(false);
   const [showDmMenu, setShowDmMenu] = useState(false);
   const [showReportUser, setShowReportUser] = useState(false);
+  const [showMuteModal, setShowMuteModal] = useState(false);
   // Composer (input bar) height — measured via onLayout. Passed to
   // KeyboardGestureArea's `offset` prop so the interactive-dismiss zone
   // extends UP to cover the composer, making the gesture feel 1:1.
@@ -325,7 +327,6 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const [currentUserId, setCurrentUserId] = useState<string | null>(
     () => supabaseAuthService.getCachedUserId()
   );
-  const [otherUserAdvRole, setOtherUserAdvRole] = useState<'adv_giver' | 'adv_seeker' | null>(null);
   const [otherUserIsOnline, setOtherUserIsOnline] = useState<boolean | null>(null);
   const [hasTrackedFirstMessage, setHasTrackedFirstMessage] = useState(false);
   const [hasTrackedFirstReply, setHasTrackedFirstReply] = useState(false);
@@ -398,15 +399,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     const p = Math.min(1, Math.max(0, kbProgress.value));
     return { paddingBottom: Math.round(composerRestPadding * (1 - p)) };
   });
-  // Send-button color themed by the other user's advice role. Used by the
-  // chat composer AND the image/video preview modals so the send button
-  // matches across all three surfaces.
-  const composerPrimaryColor =
-    otherUserAdvRole === 'adv_giver'
-      ? '#DBCDBC'
-      : otherUserAdvRole === 'adv_seeker'
-        ? '#05BCD3'
-        : '#B72DF2';
+  const composerPrimaryColor = '#05BCD3';
   const flatListRef = useRef<FlatList<Message>>(null);
   const { handleScroll: handleKeyboardScroll, handleLayout, scrollToBottom } = useChatKeyboardScroll(flatListRef, { inverted: true });
   useDismissKeyboardOnBlur();
@@ -904,6 +897,84 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     };
   }, [currentConversationId]);
 
+  // Mute state derived synchronously from the provider so the menu opens with the
+  // correct Mute/Unmute label immediately — no async fetch on mount.
+  const mutedUntil = useMemo(() => {
+    if (!currentConversationId || !currentUserId) return null;
+    const conv = providerConversations.find(c => c.id === currentConversationId);
+    const meMember = conv?.members?.find(m => m.user_id === currentUserId);
+    return getMuteUntilFromMember(meMember);
+  }, [providerConversations, currentConversationId, currentUserId]);
+
+  const applyMute = useCallback(async (until: Date | null) => {
+    if (!currentConversationId || !currentUserId) return;
+    const effective = until && until.getTime() > Date.now() ? until : null;
+    const newMutedUntil = effective?.toISOString() ?? null;
+
+    // Optimistic dispatch first so the menu and the conversations list reflect
+    // the change instantly. UPDATE_MEMBER_PREFERENCES does NOT reorder the list.
+    const currentConv = providerConversations.find(c => c.id === currentConversationId);
+    const existingPrefs = currentConv?.members?.find(m => m.user_id === currentUserId)?.preferences ?? {};
+    messagingDispatch({
+      type: 'UPDATE_MEMBER_PREFERENCES',
+      payload: {
+        conversationId: currentConversationId,
+        userId: currentUserId,
+        preferences: { ...existingPrefs, muted_until: newMutedUntil },
+      },
+    });
+
+    try {
+      await messagingService.setMuteUntil(currentConversationId, until);
+      // Re-dispatch after server confirms — guarantees the state survives any
+      // concurrent REPLACE_ALL / SYNC_FROM_SERVER that may have raced with the
+      // optimistic update.
+      messagingDispatch({
+        type: 'UPDATE_MEMBER_PREFERENCES',
+        payload: {
+          conversationId: currentConversationId,
+          userId: currentUserId,
+          preferences: { ...existingPrefs, muted_until: newMutedUntil },
+        },
+      });
+      // Persist to the conversation list cache so reload + useFocusEffect that
+      // re-loads from cache don't revert to stale preferences. Without this,
+      // REPLACE_ALL from cache overwrites the optimistic dispatch.
+      try {
+        const cached = await loadCachedConversationList();
+        if (cached) {
+          const updated = cached.map((c) =>
+            c.id === currentConversationId
+              ? {
+                  ...c,
+                  members: (c.members ?? []).map((m) =>
+                    m.user_id === currentUserId
+                      ? { ...m, preferences: { ...(m.preferences ?? {}), muted_until: newMutedUntil } }
+                      : m
+                  ),
+                }
+              : c
+          );
+          await saveCachedConversationList(updated);
+        }
+      } catch (cacheErr) {
+        console.warn('[DirectMessageScreen] cache update after mute failed:', cacheErr);
+      }
+    } catch (err) {
+      console.warn('[DirectMessageScreen] setMuteUntil failed:', err);
+      // Roll back the optimistic dispatch on failure.
+      messagingDispatch({
+        type: 'UPDATE_MEMBER_PREFERENCES',
+        payload: {
+          conversationId: currentConversationId,
+          userId: currentUserId,
+          preferences: existingPrefs,
+        },
+      });
+      Alert.alert('Error', 'Could not update mute settings. Please try again.');
+    }
+  }, [currentConversationId, providerConversations, currentUserId, messagingDispatch]);
+
   // Subscribe to other user's online status
   useEffect(() => {
     if (!otherUserId) {
@@ -934,35 +1005,6 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       });
     }
   }, [otherUserAvatar]);
-
-  const loadOtherUserAdvRole = async (): Promise<'adv_giver' | 'adv_seeker' | null> => {
-    if (!currentConversationId || !otherUserId) return null;
-    
-    try {
-      const { data, error } = await supabase
-        .from('conversation_members')
-        .select('adv_role')
-        .eq('conversation_id', currentConversationId)
-        .eq('user_id', otherUserId)
-        .single();
-      
-      if (error) {
-        console.error('Error fetching other user adv_role:', error);
-        return null;
-      }
-      
-      if (data && (data.adv_role === 'adv_giver' || data.adv_role === 'adv_seeker')) {
-        const advRole = data.adv_role as 'adv_giver' | 'adv_seeker';
-        setOtherUserAdvRole(advRole);
-        return advRole;
-      }
-      
-      return null;
-    } catch (error) {
-      console.error('Error loading other user adv_role:', error);
-      return null;
-    }
-  };
 
   const loadMessages = async () => {
     console.log('[DirectMessageScreen] 🔄 loadMessages called for conversation:', currentConversationId);
@@ -1003,11 +1045,6 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       const totalTime = Date.now() - loadStartTime;
       console.log(`[DirectMessageScreen] ✅ MEMORY CACHE HIT - Showing ${cachedMessages.length} messages instantly (${totalTime}ms total)`);
 
-      // Fire-and-forget adv_role load — must not block render. setOtherUserAdvRole
-      // triggers a re-render when it resolves; bubble color may briefly use the
-      // default before then, which is the trade for instant message visibility.
-      loadOtherUserAdvRole().catch(() => {});
-
       if (cachedMessages.length > 0) {
         oldestMessageIdRef.current = cachedMessages[0].id;
       }
@@ -1037,7 +1074,6 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       }
       
       // Memory cache hit - show instantly (no async delay, no loading state)
-      // But only after adv_role is loaded to ensure correct colors
       const deletedCount = cachedMessages.filter(m => m.deleted).length;
       console.log('[DirectMessageScreen] Loading messages from memory cache:', {
         totalMessages: cachedMessages.length,
@@ -1094,9 +1130,6 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
           oldestMessageIdRef.current = asyncCachedMessages[0].id;
         }
 
-        // Fire-and-forget — see memory-cache path for rationale.
-        loadOtherUserAdvRole().catch(() => {});
-        
         // Log image messages for debugging
         const imageMessages = asyncCachedMessages.filter(msg => msg.type === 'image' || msg.image_metadata);
         if (imageMessages.length > 0) {
@@ -1121,7 +1154,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
           console.log('[DirectMessageScreen] 📝 No image messages in AsyncStorage cache (total messages:', asyncCachedMessages.length, ')');
         }
         
-        // AsyncStorage cache hit - show messages (after adv_role is loaded)
+        // AsyncStorage cache hit - show messages
         const deletedCount = asyncCachedMessages.filter(m => m.deleted).length;
         console.log('[DirectMessageScreen] Loading messages from AsyncStorage cache:', {
           totalMessages: asyncCachedMessages.length,
@@ -1171,9 +1204,6 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
           oldestMessageIdRef.current = result.messages[0].id;
         }
         await chatHistoryCache.saveMessages(currentConversationId, result.messages);
-
-        // Fire-and-forget — see memory-cache path for rationale.
-        loadOtherUserAdvRole().catch(() => {});
 
         // Preserve any local-only messages already present for THIS conversation
         // (e.g. the optimistic first message after createDirectConversation
@@ -1450,9 +1480,6 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
 
           // Set in MessagingProvider
           setMessagingCurrentConversationId(targetConversationId);
-
-          // Load other user's adv_role for the new conversation
-          await loadOtherUserAdvRole();
 
           // Notify parent component that conversation was created
           if (onConversationCreated) {
@@ -1983,6 +2010,110 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     } catch (error) {
       console.error('Error picking image:', error);
       Alert.alert('Error', 'Failed to open image picker');
+    }
+  };
+
+  // Take a photo or record a video with the native camera and route it into
+  // the same preview modal that gallery picks use (ImagePreviewModal for
+  // photos, VideoPreviewModal for videos). Upload pipelines downstream are
+  // reused unchanged.
+  //
+  // Platform note: iOS's UIImagePickerController natively supports a
+  // Photo/Video toggle when mediaTypes is the mixed list, so we launch it
+  // directly. Android's intent system is single-mode (ACTION_IMAGE_CAPTURE
+  // vs ACTION_VIDEO_CAPTURE) and expo-image-picker silently falls back to
+  // photo-only when given the mixed list — so on Android we show a chooser
+  // dialog first.
+  const handleCameraCapture = async () => {
+    if (!currentConversationId) {
+      Alert.alert('Error', 'Please wait for the conversation to load');
+      return;
+    }
+    if (Platform.OS === 'web') return;
+
+    const ImagePicker = require('expo-image-picker');
+
+    // Single-mode launcher used after the user has chosen what to capture
+    // (or directly on iOS via the native toggle).
+    const launchCamera = async (mediaTypes: ('images' | 'videos')[]) => {
+      try {
+        const { status, canAskAgain } = await ImagePicker.requestCameraPermissionsAsync();
+        if (status !== 'granted') {
+          if (!canAskAgain) {
+            Alert.alert(
+              'Permission Required',
+              'Swellyo needs access to your camera. Please enable it in your device settings.',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Open Settings', onPress: () => Linking.openSettings() },
+              ]
+            );
+          } else {
+            Alert.alert('Permission Required', 'Sorry, we need camera permissions to take photos!');
+          }
+          return;
+        }
+
+        const result = await ImagePicker.launchCameraAsync({
+          mediaTypes,
+          allowsEditing: false,
+          quality: 1,
+          // 60s cap — keeps file sizes reasonable for mobile upload (~50-150MB
+          // depending on encoding) and matches WhatsApp behavior. Without this,
+          // a user on 4K HEVC can produce 1-2GB recordings that time out.
+          videoMaxDuration: 60,
+        });
+        if (result.canceled) return;
+        const asset = result.assets?.[0];
+        const uri = asset?.uri;
+        if (!uri) return;
+
+        // Classification mirrors handleImagePicker — asset.type when available,
+        // file extension as fallback. iOS camera returns .mov, Android .mp4.
+        const isVideo = asset?.type === 'video' || uri.endsWith('.mp4') || uri.endsWith('.mov');
+        if (isVideo) {
+          selectedVideoMetadataRef.current = {
+            width: asset?.width,
+            height: asset?.height,
+            duration: typeof asset?.duration === 'number' ? asset.duration / 1000 : undefined,
+            fileSize: asset?.fileSize,
+            mimeType: asset?.mimeType || (uri.endsWith('.mov') ? 'video/quicktime' : 'video/mp4'),
+          };
+          setSelectedVideoUri(uri);
+          setVideoPreviewVisible(true);
+        } else {
+          selectedImageUriForUploadRef.current = uri;
+          selectedImageDimensionsRef.current = {
+            width: asset?.width && asset.width > 0 ? asset.width : 0,
+            height: asset?.height && asset.height > 0 ? asset.height : 0,
+          };
+          setSelectedImageUri(uri);
+          setImagePreviewVisible(true);
+        }
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        if (/not available on simulator/i.test(msg)) {
+          Alert.alert('Camera unavailable', 'iOS Simulator has no camera. Test on a physical device.');
+          return;
+        }
+        console.error('Error capturing photo:', error);
+        Alert.alert('Error', 'Failed to open camera');
+      }
+    };
+
+    if (Platform.OS === 'android') {
+      Alert.alert(
+        'Capture',
+        undefined,
+        [
+          { text: 'Take Photo', onPress: () => { void launchCamera(['images']); } },
+          { text: 'Record Video', onPress: () => { void launchCamera(['videos']); } },
+          { text: 'Cancel', style: 'cancel' },
+        ],
+        { cancelable: true }
+      );
+    } else {
+      await launchCamera(['images', 'videos']);
     }
   };
 
@@ -2726,7 +2857,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         {renderMessage(item, isLastInRun)}
       </Reanimated.View>
     );
-  }, [currentUserId, editingMessageId, otherUserAdvRole, isDirect, menuVisible, selectedMessage, otherUserLastReadAt, invertedMessages, highlightedMessageId, resolvingReplyJumpId]);
+  }, [currentUserId, editingMessageId, isDirect, menuVisible, selectedMessage, otherUserLastReadAt, invertedMessages, highlightedMessageId, resolvingReplyJumpId]);
 
   // Prefer client_id so the React key stays stable across the optimistic →
   // server-confirmed swap. Without this, FlatList unmounts the old wrapper
@@ -2870,13 +3001,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
           onAnimationEnd={() => setHighlightedMessageId(null)}
           style={[
             styles.messageBubble,
-            isOwnMessage
-              ? styles.userMessageBubble
-              : [
-                  styles.botMessageBubble,
-                  otherUserAdvRole === 'adv_giver' && styles.botMessageBubbleGiveAdv,
-                  otherUserAdvRole === 'adv_seeker' && styles.botMessageBubbleGetAdv,
-                ],
+            isOwnMessage ? styles.userMessageBubble : styles.botMessageBubble,
             // Conditionally apply padding: 0 for images/videos/audio, normal for text
             (message.type === 'image' || message.image_metadata || message.type === 'video' || message.video_metadata || message.type === 'audio') && styles.imageMessageBubble,
             // Remove maxWidth constraint for deleted messages from other user
@@ -2990,8 +3115,6 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                     <Text style={[
                       styles.imageCaption,
                       isOwnMessage ? styles.userMessageText : styles.botMessageText,
-                      !isOwnMessage && otherUserAdvRole === 'adv_giver' && styles.botMessageTextGiveAdv,
-                      !isOwnMessage && otherUserAdvRole === 'adv_seeker' && styles.botMessageTextGetAdv,
                       { textAlign: bodyTextAlign },
                     ]}>
                       {message.body}
@@ -3133,8 +3256,6 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                       <Text style={[
                         isRtl ? null : { flex: 1 },
                         isOwnMessage ? styles.userMessageText : styles.botMessageText,
-                        !isOwnMessage && otherUserAdvRole === 'adv_giver' && styles.botMessageTextGiveAdv,
-                        !isOwnMessage && otherUserAdvRole === 'adv_seeker' && styles.botMessageTextGetAdv,
                         { textAlign: bodyTextAlign },
                       ]}>
                         {renderMessageBodyWithLinks(message.body || '')}
@@ -3226,8 +3347,6 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                   >
                     <Text style={[
                       isOwnMessage ? styles.userMessageText : styles.botMessageText,
-                      !isOwnMessage && otherUserAdvRole === 'adv_giver' && styles.botMessageTextGiveAdv,
-                      !isOwnMessage && otherUserAdvRole === 'adv_seeker' && styles.botMessageTextGetAdv,
                       { textAlign: bodyTextAlign },
                     ]}>
                       {renderMessageBodyWithLinks(message.body || '')}
@@ -3275,8 +3394,6 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                   >
                     <Text style={[
                       isOwnMessage ? styles.userMessageText : styles.botMessageText,
-                      !isOwnMessage && otherUserAdvRole === 'adv_giver' && styles.botMessageTextGiveAdv,
-                      !isOwnMessage && otherUserAdvRole === 'adv_seeker' && styles.botMessageTextGetAdv,
                       { textAlign: bodyTextAlign },
                     ]}>
                       {renderMessageBodyWithLinks(message.body || '')}
@@ -3451,7 +3568,6 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                   name={otherUserName}
                   style={styles.avatarImage}
                   showLoadingIndicator={false}
-                  advRole={otherUserAdvRole}
                 />
               ) : (
                 <View style={[styles.avatarImage, styles.groupAvatar]}>
@@ -3500,6 +3616,25 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       {/* DM menu dropdown - rendered outside header to avoid overflow clipping */}
       {showDmMenu && (
         <View style={styles.dmMenuDropdown}>
+          {mutedUntil ? (
+            <TouchableOpacity
+              style={styles.dmMenuItem}
+              activeOpacity={0.7}
+              onPress={() => { setShowDmMenu(false); applyMute(null); }}
+            >
+              <Ionicons name="notifications-outline" size={20} color="#222B30" />
+              <Text style={styles.dmMenuItemText}>Unmute</Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              style={styles.dmMenuItem}
+              activeOpacity={0.7}
+              onPress={() => { setShowDmMenu(false); setShowMuteModal(true); }}
+            >
+              <Ionicons name="notifications-off-outline" size={20} color="#222B30" />
+              <Text style={styles.dmMenuItemText}>Mute notifications</Text>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity style={styles.dmMenuItem} activeOpacity={0.7} onPress={() => { setShowDmMenu(false); setShowReportUser(true); }}>
             <Ionicons name="alert-circle-outline" size={20} color="#222B30" />
             <Text style={styles.dmMenuItemText}>Report</Text>
@@ -3515,6 +3650,52 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       {showDmMenu && (
         <TouchableOpacity style={[StyleSheet.absoluteFill, { zIndex: 9998 }]} activeOpacity={1} onPress={() => setShowDmMenu(false)} />
       )}
+
+      {/* Mute duration picker */}
+      <Modal
+        visible={showMuteModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowMuteModal(false)}
+      >
+        <TouchableOpacity
+          style={styles.muteModalBackdrop}
+          activeOpacity={1}
+          onPress={() => setShowMuteModal(false)}
+        >
+          <TouchableOpacity activeOpacity={1} style={styles.muteModalCard}>
+            <Text style={styles.muteModalTitle}>Mute notifications</Text>
+            <TouchableOpacity
+              style={styles.muteOption}
+              activeOpacity={0.7}
+              onPress={() => { setShowMuteModal(false); applyMute(new Date(Date.now() + 8 * 60 * 60 * 1000)); }}
+            >
+              <Text style={styles.muteOptionText}>8 hours</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.muteOption}
+              activeOpacity={0.7}
+              onPress={() => { setShowMuteModal(false); applyMute(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)); }}
+            >
+              <Text style={styles.muteOptionText}>1 week</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.muteOption}
+              activeOpacity={0.7}
+              onPress={() => { setShowMuteModal(false); applyMute(MUTE_ALWAYS_UNTIL); }}
+            >
+              <Text style={styles.muteOptionText}>Always</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.muteOption, styles.muteCancel]}
+              activeOpacity={0.7}
+              onPress={() => setShowMuteModal(false)}
+            >
+              <Text style={[styles.muteOptionText, styles.muteCancelText]}>Cancel</Text>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
 
       {/* Chat Messages */}
       {(() => {
@@ -3637,6 +3818,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                 // for givers, Swelly purple (same as Swelly chat user bubbles) otherwise.
                 primaryColor={composerPrimaryColor}
                 onVoiceMessage={handleVoiceMessage}
+                onCameraPress={handleCameraCapture}
                 leftAccessory={
                   <TouchableOpacity
                     style={styles.attachButton}
@@ -4090,6 +4272,53 @@ const styles = StyleSheet.create({
     backgroundColor: '#E8E8E8',
     marginHorizontal: 0,
   },
+  muteModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 32,
+  },
+  muteModalCard: {
+    width: '100%',
+    maxWidth: 320,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    paddingVertical: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  muteModalTitle: {
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter-Bold',
+    fontSize: 16,
+    fontWeight: '700' as const,
+    color: '#222B30',
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 8,
+  },
+  muteOption: {
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+  },
+  muteOptionText: {
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    fontSize: 15,
+    fontWeight: '400' as const,
+    color: '#222B30',
+  },
+  muteCancel: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#E8E8E8',
+    marginTop: 4,
+  },
+  muteCancelText: {
+    color: '#7A7A7A',
+    fontWeight: '500' as const,
+  },
   chatContainer: {
     flex: 1,
     backgroundColor: '#F5F5F5',
@@ -4212,8 +4441,8 @@ const styles = StyleSheet.create({
     flexDirection: 'column',
     justifyContent: 'flex-end',
     alignItems: 'flex-end',
-    backgroundColor: '#FFFFFF', // White background for outbound messages
-    
+    backgroundColor: '#05BCD3', // Celeste background for outbound messages
+
     borderTopLeftRadius: 16, // 16px 2px 16px 16px
     borderTopRightRadius: 2,
     borderBottomLeftRadius: 16,
@@ -4228,7 +4457,7 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   botMessageBubble: {
-    backgroundColor: colors.white, // Default, will be overridden by adv_role styles
+    backgroundColor: colors.white,
     paddingTop: 8,
     paddingHorizontal: 10,
     paddingBottom: 8,
@@ -4261,18 +4490,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     paddingTop: 6,
   },
-  botMessageBubbleGiveAdv: {
-    backgroundColor: '#DBCDBC', // adv_giver color
-  },
-  botMessageBubbleGetAdv: {
-    backgroundColor: '#05BCD3', // adv_seeker color
-  },
   messageTextContainer: {
     marginBottom: 0, // Gap is now handled by the flex-wrap body+timestamp row.
     width: '100%',
   },
   userMessageText: {
-    color: '#333333', // Dark text on white background for outbound messages
+    color: '#FFFFFF', // White text on celeste background for outbound messages
     fontSize: 17,
     fontWeight: '400',
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
@@ -4284,12 +4507,6 @@ const styles = StyleSheet.create({
     fontWeight: '400',
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     lineHeight: 22,
-  },
-  botMessageTextGiveAdv: {
-    color: '#333333', // Dark text on #DBCDBC (beige) background for adv_giver
-  },
-  botMessageTextGetAdv: {
-    color: '#FFFFFF', // White text on #05BCD3 (teal) background for adv_seeker
   },
   timestampContainer: {
     alignItems: 'flex-start', // Default, will be overridden for user messages
@@ -4311,7 +4528,7 @@ const styles = StyleSheet.create({
     lineHeight: 15,
   },
   userTimestamp: {
-    color: 'rgba(60, 60, 60, 0.75)', // Darker timestamp for better contrast on outbound (brown) bubbles
+    color: 'rgba(255, 255, 255, 0.85)', // Light timestamp for contrast on celeste outbound bubbles
   },
   botTimestamp: {
     color: 'rgba(60, 60, 60, 0.75)', // Match userTimestamp so sent/received times share the same styling

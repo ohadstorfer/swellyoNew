@@ -170,7 +170,16 @@ export const MessageActionsMenu: React.FC<MessageActionsMenuProps> = ({
   const screenH = Dimensions.get('window').height;
   const screenW = Dimensions.get('window').width;
 
-  const MENU_H_EST = 280;
+  // Menu height varies with which actions are visible. Each row is
+  // ~36px (16px line height + 8px padding × 2); menu has 4px vertical
+  // padding on each side. A fixed estimate of 280 over-budgeted the space
+  // needed below the bubble and pushed the menu far above when the bubble
+  // sat near the bottom of the screen.
+  const visibleItemCount =
+    (canReply ? 1 : 0) + (canEdit ? 1 : 0) + (canCopy ? 1 : 0) + (canDelete ? 1 : 0);
+  const MENU_ITEM_H = 36;
+  const MENU_PADDING_V = 8;
+  const MENU_H_EST = Math.max(1, visibleItemCount) * MENU_ITEM_H + MENU_PADDING_V;
   const GAP = 8;
   const BUBBLE_HALF_EST = 28;
   const SAFE_TOP = 60;
@@ -188,7 +197,11 @@ export const MessageActionsMenu: React.FC<MessageActionsMenuProps> = ({
   const spaceAbove = bubbleTop - SAFE_TOP;
   const spaceBelow = screenH - bubbleBottom - SAFE_BOTTOM;
 
-  const canBarAbove = spaceAbove >= REACTIONS_BAR_HEIGHT + GAP;
+  // Only budget vertical space for the reactions bar when it will actually
+  // render — own messages don't get one, so the bar's height shouldn't be
+  // considered when deciding above/below placement.
+  const barHeightBudget = showReactionsBar ? REACTIONS_BAR_HEIGHT + GAP : 0;
+  const canBarAbove = !showReactionsBar || spaceAbove >= REACTIONS_BAR_HEIGHT + GAP;
   const canMenuBelow = spaceBelow >= MENU_H_EST + GAP;
 
   let barTopRaw: number;
@@ -200,9 +213,9 @@ export const MessageActionsMenu: React.FC<MessageActionsMenuProps> = ({
   } else if (!canBarAbove) {
     // Bubble near top → flip both below.
     barTopRaw = bubbleBottom + GAP;
-    menuTopRaw = barTopRaw + REACTIONS_BAR_HEIGHT + GAP;
+    menuTopRaw = barTopRaw + barHeightBudget;
   } else {
-    // Bubble near bottom → flip both above.
+    // Bubble near bottom → flip menu above.
     menuTopRaw = bubbleTop - GAP - MENU_H_EST;
     barTopRaw = menuTopRaw - GAP - REACTIONS_BAR_HEIGHT;
   }
@@ -213,7 +226,7 @@ export const MessageActionsMenu: React.FC<MessageActionsMenuProps> = ({
   );
   const menuTop = Math.max(
     SAFE_TOP,
-    Math.min(screenH - SAFE_BOTTOM - 100, menuTopRaw),
+    Math.min(screenH - SAFE_BOTTOM - MENU_H_EST, menuTopRaw),
   );
 
   // Side detection: own bubbles are right-aligned, other bubbles left-aligned.
@@ -240,14 +253,18 @@ export const MessageActionsMenu: React.FC<MessageActionsMenuProps> = ({
   // Actions menu: align with the bubble like WhatsApp.
   // - Other (left-aligned bubble): menu left edge = bubble left edge.
   // - Own (right-aligned bubble): menu right edge = bubble right edge.
+  // For own bubbles we anchor by `right` instead of computing `left` from a
+  // width estimate — the menu's intrinsic width varies with which actions are
+  // shown (Reply/Edit/Copy/Delete), so estimating leaves a visible gap.
   const MENU_W_EST = 220;
-  let menuLeft: number;
+  let menuLeft: number | undefined;
+  let menuRight: number | undefined;
   if (bubbleRect) {
-    menuLeft = isRightAligned
-      ? bubbleRect.x + bubbleRect.width - MENU_W_EST
-      : bubbleRect.x;
-    // Clamp horizontally so it never clips the screen edges.
-    menuLeft = Math.max(8, Math.min(screenW - MENU_W_EST - 8, menuLeft));
+    if (isRightAligned) {
+      menuRight = Math.max(8, screenW - (bubbleRect.x + bubbleRect.width));
+    } else {
+      menuLeft = Math.max(8, Math.min(screenW - MENU_W_EST - 8, bubbleRect.x));
+    }
   } else {
     menuLeft =
       messagePosition.x > 200 ? messagePosition.x - 150 : messagePosition.x;
@@ -334,7 +351,7 @@ export const MessageActionsMenu: React.FC<MessageActionsMenuProps> = ({
             styles.menu,
             {
               top: menuTop,
-              left: menuLeft,
+              ...(menuRight !== undefined ? { right: menuRight } : { left: menuLeft }),
             },
           ]}
         >

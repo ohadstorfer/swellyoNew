@@ -39,7 +39,8 @@ type ConversationAction =
   | { type: 'REPLACE_ALL'; payload: { conversations: Conversation[] } }
   | { type: 'APPEND_CONVERSATIONS'; payload: { conversations: Conversation[] } }
   | { type: 'SYNC_FROM_SERVER'; payload: { conversations: Conversation[] } }
-  | { type: 'UPDATE_CONVERSATION'; payload: { conversation: Conversation } };
+  | { type: 'UPDATE_CONVERSATION'; payload: { conversation: Conversation } }
+  | { type: 'UPDATE_MEMBER_PREFERENCES'; payload: { conversationId: string; userId: string; preferences: any } };
 
 // Conversation reducer with O(n) reordering
 const conversationReducer = (state: Conversation[], action: ConversationAction): Conversation[] => {
@@ -255,7 +256,23 @@ const conversationReducer = (state: Conversation[], action: ConversationAction):
       updated.unshift(merged);       // Add merged conversation to top
       return updated;
     }
-    
+
+    case 'UPDATE_MEMBER_PREFERENCES': {
+      // In-place mutation of a single member's preferences (e.g. mute state).
+      // Critically does NOT reorder the list — used when user changes preferences
+      // and we want the conversation row to stay in its current position.
+      const { conversationId, userId, preferences } = action.payload;
+      const index = state.findIndex(c => c.id === conversationId);
+      if (index === -1) return state;
+      const existing = state[index];
+      const updatedMembers = (existing.members ?? []).map(m =>
+        m.user_id === userId ? { ...m, preferences } : m
+      );
+      const next = [...state];
+      next[index] = { ...existing, members: updatedMembers };
+      return next;
+    }
+
     case 'REPLACE_ALL': {
       const { conversations: newConversations } = action.payload;
       
@@ -410,7 +427,7 @@ const fetchAndEnrichConversation = async (
     // Fetch conversation members
     const { data: members, error: membersError } = await supabase
       .from('conversation_members')
-      .select('user_id, role, adv_role, joined_at, last_read_at, preferences')
+      .select('user_id, role, joined_at, last_read_at, preferences')
       .eq('conversation_id', conversationId);
 
     if (membersError || !members || members.length === 0) {
@@ -633,7 +650,7 @@ const enrichConversationWithUserData = async (
     // Fetch conversation members
     const { data: members, error: membersError } = await supabase
       .from('conversation_members')
-      .select('user_id, role, adv_role, joined_at, last_read_at, preferences')
+      .select('user_id, role, joined_at, last_read_at, preferences')
       .eq('conversation_id', conversation.id);
 
     if (membersError || !members || members.length === 0) {
