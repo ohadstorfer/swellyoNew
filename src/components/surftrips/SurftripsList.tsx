@@ -87,7 +87,7 @@ export const SurftripsList: React.FC<SurftripsListProps> = ({
     >
       {/* My surftrips */}
       <View style={styles.sectionHeaderRow}>
-        <Text style={styles.sectionTitle}>My surftrips</Text>
+        <Text style={styles.sectionTitle}>My Surf Trips</Text>
         <TouchableOpacity
           style={styles.newChatBtn}
           onPress={onCreatePress}
@@ -103,7 +103,7 @@ export const SurftripsList: React.FC<SurftripsListProps> = ({
         {mine.length === 0 ? (
           <View style={styles.emptyMine}>
             <Text style={styles.emptyText}>
-              You haven't joined or created a surftrip yet.
+              You haven't joined or created a surf trip yet.
             </Text>
           </View>
         ) : (
@@ -120,13 +120,13 @@ export const SurftripsList: React.FC<SurftripsListProps> = ({
 
       {/* Browse surftrips */}
       <View style={[styles.sectionHeaderRow, styles.browseHeader]}>
-        <Text style={styles.sectionTitle}>Browse surftrips</Text>
+        <Text style={styles.sectionTitle}>Browse Surf Trips</Text>
       </View>
       <View style={styles.sectionCard}>
         {browse.length === 0 ? (
           <View style={styles.emptyBrowse}>
             <Ionicons name="compass-outline" size={36} color="#B0B0B0" />
-            <Text style={styles.emptyText}>No other surftrips out there yet.</Text>
+            <Text style={styles.emptyText}>No other surf trips out there yet.</Text>
           </View>
         ) : (
           browse.map((g, i) => (

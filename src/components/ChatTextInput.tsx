@@ -66,6 +66,28 @@ const SendIcon = ({ color = '#FFFFFF' }: { color?: string }) => (
   </Svg>
 );
 
+// WhatsApp-style camera glyph — outlined body with a small lens bump on top
+// and a circular lens in the center. Matches the Feather "camera" geometry,
+// which is what WhatsApp uses in their composer.
+const CameraIcon = ({ size = 22, color = '#000000' }: { size?: number; color?: string }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Path
+      d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"
+      stroke={color}
+      strokeWidth={2.0}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+    <Path
+      d="M12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"
+      stroke={color}
+      strokeWidth={2.0}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </Svg>
+);
+
 export interface ChatTextInputProps {
   value: string;
   onChangeText: (text: string) => void;
@@ -272,7 +294,7 @@ export const ChatTextInput = forwardRef<ChatTextInputRef, ChatTextInputProps>(fu
   const cameraAnimatedStyle = useAnimatedStyle(() => ({
     opacity: cameraVisibleSv.value,
     width: cameraVisibleSv.value * 32,
-    marginRight: cameraVisibleSv.value * 4,
+    marginRight: cameraVisibleSv.value * 2,
   }));
   const recordStartXRef = useRef<number>(0);
   const recordStartYRef = useRef<number>(0);
@@ -507,7 +529,7 @@ export const ChatTextInput = forwardRef<ChatTextInputRef, ChatTextInputProps>(fu
               style={styles.cameraButtonInner}
               testID={testID ? `${testID}-camera` : undefined}
             >
-              <Ionicons name="camera" size={24} color={colors.textPrimary} />
+              <CameraIcon size={22} color={colors.textPrimary} />
             </TouchableOpacity>
           </Animated.View>
         )}
@@ -517,18 +539,13 @@ export const ChatTextInput = forwardRef<ChatTextInputRef, ChatTextInputProps>(fu
           // directly (not Pressable / TouchableOpacity) because we need pan
           // tracking on BOTH axes (left = cancel, up = lock) — the responder
           // gives us a continuous pageX/pageY stream from press-in to release.
-          // Note: never set `transform: undefined`. New-architecture Reanimated
-          // does not tolerate it (processTransform → forEach on null). Spread
-          // the transform key in only when we actually want to scale.
+          // Visual style mirrors the camera button: icon-only, no background,
+          // black outline. Recording state uses icon scale (1.15x) for
+          // feedback, and cancel-armed swaps to a red trash glyph.
           <View
             style={[
-              styles.sendButton,
-              {
-                backgroundColor: isRecording
-                  ? (isCancelArmed ? '#E74C3C' : primaryColor)
-                  : primaryColor,
-                ...(isRecording ? { transform: [{ scale: 1.15 }] } : null),
-              },
+              styles.micButton,
+              isRecording ? { transform: [{ scale: 1.15 }] } : null,
             ]}
             onStartShouldSetResponder={() => true}
             onResponderGrant={(e) => {
@@ -543,9 +560,9 @@ export const ChatTextInput = forwardRef<ChatTextInputRef, ChatTextInputProps>(fu
             testID={testID ? `${testID}-mic` : undefined}
           >
             <Ionicons
-              name={isCancelArmed ? 'trash' : 'mic'}
-              size={20}
-              color="#FFFFFF"
+              name={isCancelArmed ? 'trash-outline' : 'mic-outline'}
+              size={26}
+              color={isCancelArmed ? '#E74C3C' : colors.textPrimary}
             />
           </View>
         ) : (
@@ -705,6 +722,15 @@ const styles = StyleSheet.create({
     height: 32,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  micButton: {
+    width: 32,
+    height: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+    alignSelf: 'flex-end',
+    marginBottom: 4,
+    marginLeft: 2,
   },
   sendButtonDisabled: {
     opacity: 0.4,

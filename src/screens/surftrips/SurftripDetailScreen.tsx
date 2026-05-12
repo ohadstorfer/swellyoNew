@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   StyleSheet,
@@ -86,33 +86,69 @@ export default function SurftripDetailScreen({
   const isAdmin = myRole === 'admin';
   const canManage = isHost || isAdmin;
 
+  const refreshGroup = useCallback(async () => {
+    const g = await getSurftripGroup(groupId);
+    setGroup(g);
+  }, [groupId]);
+
+  const refreshMembers = useCallback(async () => {
+    const ms = await listMembers(groupId);
+    setMembers(ms);
+  }, [groupId]);
+
+  const refreshPendingRequests = useCallback(async () => {
+    const prs = await listPendingRequests(groupId);
+    setPendingRequests(prs);
+  }, [groupId]);
+
+  const refreshMyRequest = useCallback(async () => {
+    if (!currentUserId) {
+      setMyRequest(null);
+      return;
+    }
+    const mine = await getMyRequest(groupId, currentUserId);
+    setMyRequest(mine);
+  }, [groupId, currentUserId]);
+
   const load = useCallback(async () => {
     try {
-      const g = await getSurftripGroup(groupId);
-      setGroup(g);
-      const [ms, prs, mine] = await Promise.all([
-        listMembers(groupId),
-        listPendingRequests(groupId),
-        currentUserId ? getMyRequest(groupId, currentUserId) : Promise.resolve(null),
+      await Promise.all([
+        refreshGroup(),
+        refreshMembers(),
+        refreshPendingRequests(),
+        refreshMyRequest(),
       ]);
-      setMembers(ms);
-      setPendingRequests(prs);
-      setMyRequest(mine);
     } finally {
       setLoading(false);
     }
-  }, [groupId, currentUserId]);
+  }, [refreshGroup, refreshMembers, refreshPendingRequests, refreshMyRequest]);
 
   useEffect(() => {
     load();
   }, [load]);
 
-  // Live refresh when membership churns (joins / leaves / kicks). The chat
-  // thread already paints a system banner via the messages channel; here we
-  // just keep the participant strip and pending-request list in sync without
-  // forcing the user to pull-to-refresh. Listens directly on
-  // conversation_members so it works even when this screen is mounted
-  // without a chat subscription.
+  // Debounced member refetch — two rapid membership changes (e.g. an admin
+  // adding three DM partners at once) used to fire three full refetches that
+  // could race; coalesce into a single refresh ~150ms after the last event.
+  const memberRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleMemberRefresh = useCallback(() => {
+    if (memberRefreshTimerRef.current) clearTimeout(memberRefreshTimerRef.current);
+    memberRefreshTimerRef.current = setTimeout(() => {
+      memberRefreshTimerRef.current = null;
+      refreshMembers();
+    }, 150);
+  }, [refreshMembers]);
+  useEffect(() => () => {
+    if (memberRefreshTimerRef.current) clearTimeout(memberRefreshTimerRef.current);
+  }, []);
+
+  // Live refresh when membership churns (joins / leaves / kicks / role
+  // changes). The chat thread itself paints a system banner via the messages
+  // channel; here we keep the participant strip in sync without a
+  // pull-to-refresh. Listens directly on conversation_members so it works
+  // even when this screen is mounted without a chat subscription.
+  // surftrip_group_members covers the role column (promote / demote), which
+  // doesn't write to conversation_members.role.
   useEffect(() => {
     if (!group?.conversation_id) return;
     const channel = supabase
@@ -125,7 +161,7 @@ export default function SurftripDetailScreen({
           table: 'conversation_members',
           filter: `conversation_id=eq.${group.conversation_id}`,
         },
-        () => { load(); }
+        () => { scheduleMemberRefresh(); }
       )
       .on(
         'postgres_changes',
@@ -135,13 +171,73 @@ export default function SurftripDetailScreen({
           table: 'conversation_members',
           filter: `conversation_id=eq.${group.conversation_id}`,
         },
-        () => { load(); }
+        () => { scheduleMemberRefresh(); }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'surftrip_group_members',
+          filter: `group_id=eq.${groupId}`,
+        },
+        () => { scheduleMemberRefresh(); }
       )
       .subscribe();
     return () => {
       try { supabase.removeChannel(channel); } catch { /* noop */ }
     };
-  }, [group?.conversation_id, load]);
+  }, [group?.conversation_id, groupId, scheduleMemberRefresh]);
+
+  // Group metadata updates (name, description, hero image, max_members).
+  // surftrip_groups is published as of the realtime migration; before that,
+  // a host renaming the group only updated the linked conversations.title in
+  // realtime, while description / hero / max_members went stale until remount.
+  useEffect(() => {
+    if (!groupId) return;
+    const channel = supabase
+      .channel(`surftrip-detail-group:${groupId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'surftrip_groups',
+          filter: `id=eq.${groupId}`,
+        },
+        () => { refreshGroup(); }
+      )
+      .subscribe();
+    return () => {
+      try { supabase.removeChannel(channel); } catch { /* noop */ }
+    };
+  }, [groupId, refreshGroup]);
+
+  // Join-request churn — admins see incoming requests / withdrawals live, and
+  // requesters see their own status flip from pending to approved/declined
+  // without remounting.
+  useEffect(() => {
+    if (!groupId) return;
+    const channel = supabase
+      .channel(`surftrip-detail-requests:${groupId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'surftrip_join_requests',
+          filter: `group_id=eq.${groupId}`,
+        },
+        () => {
+          refreshPendingRequests();
+          refreshMyRequest();
+        }
+      )
+      .subscribe();
+    return () => {
+      try { supabase.removeChannel(channel); } catch { /* noop */ }
+    };
+  }, [groupId, refreshPendingRequests, refreshMyRequest]);
 
   // ---- Join / leave / request -------------------------------------------------
 
