@@ -17,7 +17,6 @@ const roleLabelFor = (role: SurftripGroupForUser['my_role']): string | null => {
 };
 
 export const SurftripCard: React.FC<SurftripCardProps> = ({ group, onPress, showDivider }) => {
-  const memberLabel = group.member_count === 1 ? '1 member' : `${group.member_count} members`;
   const role = group.is_member ? roleLabelFor(group.my_role) : null;
 
   return (
@@ -48,9 +47,6 @@ export const SurftripCard: React.FC<SurftripCardProps> = ({ group, onPress, show
             {group.description}
           </Text>
         ) : null}
-        <Text style={styles.meta} numberOfLines={1}>
-          {memberLabel}
-        </Text>
         {showDivider && <View style={styles.divider} />}
       </View>
     </TouchableOpacity>
@@ -77,7 +73,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: '#A8DDE0',
   },
-  body: { flex: 1, minWidth: 0, position: 'relative', paddingBottom: 10 },
+  body: {
+    flex: 1,
+    minWidth: 0,
+    justifyContent: 'center',
+  },
   titleLine: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   title: { fontSize: 16, fontWeight: '600', color: '#222B30', flexShrink: 1 },
   rolePill: {
@@ -93,7 +93,6 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
   },
   description: { fontSize: 13, color: '#5A6066', marginTop: 2 },
-  meta: { fontSize: 12, color: '#7B7B7B', marginTop: 4 },
   divider: {
     position: 'absolute',
     bottom: 0,

@@ -187,6 +187,10 @@ export interface MessageSubscriptionCallbacks {
   // group-chat headers / detail screens to refresh the live participant list
   // when someone joins, leaves, or is removed.
   onMembersChanged?: () => void;
+  // Fires when a conversation_members row's role column changes (promote /
+  // demote). Read receipts ride on the same UPDATE event but only touch
+  // last_read_at, so we surface role separately to avoid spurious refetches.
+  onRoleChanged?: (userId: string, newRole: string | null) => void;
 }
 
 // Conversation list subscription callbacks
@@ -1675,8 +1679,11 @@ class MessagingService {
           }
         }
       )
-      // Handle read-receipt updates (conversation_members.last_read_at changes).
-      // Fires when the other participant opens the conversation and markAsRead updates their row.
+      // Handle conversation_members.UPDATE — covers two distinct cases:
+      //   1) last_read_at changes (read receipts), fires onReadReceiptUpdate
+      //   2) role changes (promote / demote), fires onRoleChanged
+      // We diff against payload.old so a read-receipt UPDATE doesn't spuriously
+      // trigger the role callback and force a member refetch.
       .on(
         'postgres_changes',
         {
@@ -1686,9 +1693,15 @@ class MessagingService {
           filter: `conversation_id=eq.${conversationId}`,
         },
         (payload) => {
-          const row = payload.new as { user_id: string; last_read_at: string | null };
-          if (normalizedCallbacks.onReadReceiptUpdate && row?.user_id) {
-            normalizedCallbacks.onReadReceiptUpdate(row.user_id, row.last_read_at ?? null);
+          const row = payload.new as { user_id: string; last_read_at: string | null; role: string | null };
+          const prev = (payload.old ?? {}) as { role?: string | null };
+          if (row?.user_id) {
+            if (normalizedCallbacks.onReadReceiptUpdate) {
+              normalizedCallbacks.onReadReceiptUpdate(row.user_id, row.last_read_at ?? null);
+            }
+            if (normalizedCallbacks.onRoleChanged && row.role !== undefined && prev.role !== row.role) {
+              normalizedCallbacks.onRoleChanged(row.user_id, row.role ?? null);
+            }
           }
         }
       )

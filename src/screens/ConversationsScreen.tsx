@@ -1199,7 +1199,7 @@ export default function ConversationsScreen({
           {/* Filter buttons */}
           <View style={styles.filterContainer}>
             {renderFilterButton('all', 'All')}
-            {process.env.EXPO_PUBLIC_LOCAL_MODE === 'true' && renderFilterButton('surftrips', 'Surftrips')}
+            {renderFilterButton('surftrips', 'Surf Trips')}
           </View>
 
           {filter === 'surftrips' ? (
@@ -1476,7 +1476,7 @@ export default function ConversationsScreen({
                     activeOpacity={0.7}
                   >
                     <Ionicons name="people-outline" size={20} color="#222B30" />
-                    <Text style={styles.menuItemText}>New surftrip</Text>
+                    <Text style={styles.menuItemText}>New Surf Trip</Text>
                   </TouchableOpacity>
                 )}
 

@@ -29,8 +29,14 @@ export function SwipeToReplyWrapper({ enabled, onReply, children }: Props) {
   const pan = useMemo(
     () =>
       Gesture.Pan()
-        .activeOffsetX([10, 999])
-        .failOffsetY([-12, 12])
+        // First value must be the negative-direction threshold; using a large
+        // negative so left swipes never activate. Right swipe activates at 15px,
+        // giving the FlatList room to win slow vertical scrolls.
+        .activeOffsetX([-999, 15])
+        // Tight Y fail so any vertical drift releases the touch to the scroll
+        // view quickly — fixes "slow scroll feels stuck" while reply swipe still
+        // works at typical swipe speeds.
+        .failOffsetY([-6, 6])
         .onUpdate((e) => {
           'worklet';
           translateX.value = Math.max(0, Math.min(e.translationX, MAX_TRANSLATION));
