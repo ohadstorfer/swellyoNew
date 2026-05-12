@@ -5,8 +5,8 @@
       "namespace": "android_app",
       "package_name": "com.swellyo.app",
       "sha256_cert_fingerprints": [
-        "REPLACE_WITH_PROD_RELEASE_SHA256",
-        "REPLACE_WITH_PLAY_STORE_UPLOAD_SHA256"
+        "DE:E4:34:DE:0D:4A:BD:7A:E2:52:6A:48:5E:0E:04:DF:F9:40:9D:9F:9A:18:0A:BD:FE:F0:63:E8:52:85:76:9E",
+        "46:41:BD:32:29:02:F8:7F:B9:BB:46:E0:59:1F:15:8B:1B:87:FE:19:4E:DC:D0:33:4A:FF:6D:41:A3:DC:8B:60"
       ]
     }
   }

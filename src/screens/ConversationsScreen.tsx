@@ -16,9 +16,9 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { supabase } from '../config/supabase';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import Svg, { Path, G, ClipPath, Defs, Rect } from 'react-native-svg';
+import Svg, { Path } from 'react-native-svg';
 import { usePostHog } from 'posthog-react-native';
-import { messagingService, Conversation } from '../services/messaging/messagingService';
+import { messagingService, Conversation, getMuteUntilFromMember } from '../services/messaging/messagingService';
 import { blockingService } from '../services/blocking/blockingService';
 import { useMessaging } from '../context/MessagingProvider';
 import { useUserProfile } from '../context/UserProfileContext';
@@ -63,7 +63,7 @@ interface ConversationsScreenProps {
   isListFrontmost?: boolean;
 }
 
-type FilterType = 'all' | 'advisor' | 'seeker' | 'surftrips';
+type FilterType = 'all' | 'surftrips';
 
 // Placeholder row shown during the welcome guide only when the user has zero
 // real conversations. Not tappable — the tutorial backdrop blocks interaction.
@@ -134,36 +134,6 @@ const ShaperIcon: React.FC = () => {
        stroke="#222B30"
         strokeWidth="1.1"
         strokeMiterlimit="10"
-      />
-    </Svg>
-  );
-};
-
-// Get Adv Filter Icon Component (map/flag icon)
-const GetAdvIcon: React.FC = () => {
-  return (
-    <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
-      <Path
-        d="M9 18L2 22V6L9 2M9 18L16 22M9 18V2M16 22L22 18V2L16 6M16 22V6M16 6L9 2"
-        stroke="#333333"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </Svg>
-  );
-};
-
-// Give Adv Filter Icon Component (binoculars icon)
-const GiveAdvIcon: React.FC = () => {
-  return (
-    <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
-      <Path
-        d="M14 12.4653C12.7665 13.1782 11.2337 13.1782 10.0001 12.4653M15.1716 14.8284C13.6095 13.2663 13.6095 10.7337 15.1716 9.17157C16.7337 7.60948 19.2663 7.60948 20.8284 9.17157C22.3905 10.7337 22.3905 13.2663 20.8284 14.8284C19.2663 16.3905 16.7337 16.3905 15.1716 14.8284ZM3.17157 14.8284C1.60948 13.2663 1.60948 10.7337 3.17157 9.17157C4.73366 7.60948 7.26633 7.60948 8.82843 9.17157C10.3905 10.7337 10.3905 13.2663 8.82843 14.8284C7.26634 16.3905 4.73367 16.3905 3.17157 14.8284Z"
-        stroke="#333333"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
       />
     </Svg>
   );
@@ -359,6 +329,14 @@ export default function ConversationsScreen({
     ])
   );
 
+  // Refresh on focus so mute state (and other server-side changes) from other
+  // devices propagate when the user returns to the list.
+  useFocusEffect(
+    React.useCallback(() => {
+      refreshConversations();
+    }, [refreshConversations])
+  );
+
   // Update user info when context user changes (immediate sync); reset header when logged out
   useEffect(() => {
     if (contextUser) {
@@ -499,7 +477,6 @@ export default function ConversationsScreen({
         conversation_id: 'welcome-conversation-fake-id',
         user_id: 'swellyo-team',
         role: 'member',
-        adv_role: null,
         joined_at: now.toISOString(),
         preferences: {},
         name: 'Swellyo Team',
@@ -511,79 +488,18 @@ export default function ConversationsScreen({
 
   const getFilteredConversations = () => {
     const isLocalMode = process.env.EXPO_PUBLIC_LOCAL_MODE === 'true';
-    let filtered = conversations.filter(conv => {
+    const filtered = conversations.filter(conv => {
       // Group chats (surftrips) are gated to local mode while the feature is hidden.
       if (conv.is_direct === false) return isLocalMode && !!conv.title;
       // Direct chats: keep existing requirement that the other user is enriched.
       return !!conv.other_user?.name;
     });
 
-    if (filter !== 'all' && currentUserId) {
-      filtered = conversations.filter(conv => {
-        // Skip welcome conversation for filters
-        if (conv.metadata?.isWelcome) return false;
-        
-        // Find the current user's member record in this conversation
-        const currentUserMember = conv.members?.find(member => member.user_id === currentUserId);
-        
-        if (!currentUserMember) return false;
-        
-        // "Get Adv" (advisor filter) = user is adv_seeker (seeking advice)
-        if (filter === 'advisor') {
-          return currentUserMember.adv_role === 'adv_seeker';
-        }
-        
-        // "Give Adv" (seeker filter) = user is adv_giver (giving advice)
-        if (filter === 'seeker') {
-          return currentUserMember.adv_role === 'adv_giver';
-        }
-        
-        return true;
-      });
-    }
-    
-    // Add welcome conversation only if:
-    // 1. MessagingProvider has finished loading (cache + server)
-    // 2. No real conversations exist
-    // 3. Filter is 'all' (welcome message doesn't apply to filtered views)
     if (!loading && filtered.length === 0 && filter === 'all') {
       return [createWelcomeConversation()];
     }
-    
+
     return filtered;
-  };
-
-  const getAdvisorCount = () => {
-    if (!currentUserId) return 0;
-    return conversations.filter(c => {
-      const currentUserMember = c.members?.find(member => member.user_id === currentUserId);
-      return currentUserMember?.adv_role === 'adv_seeker' && (c.unread_count || 0) > 0;
-    }).length;
-  };
-
-  const getSeekerCount = () => {
-    if (!currentUserId) return 0;
-    return conversations.filter(c => {
-      const currentUserMember = c.members?.find(member => member.user_id === currentUserId);
-      return currentUserMember?.adv_role === 'adv_giver' && (c.unread_count || 0) > 0;
-    }).length;
-  };
-
-  // Get total conversation counts (not just unread)
-  const getTotalAdvisorCount = () => {
-    if (!currentUserId) return 0;
-    return conversations.filter(c => {
-      const currentUserMember = c.members?.find(member => member.user_id === currentUserId);
-      return currentUserMember?.adv_role === 'adv_seeker';
-    }).length;
-  };
-
-  const getTotalSeekerCount = () => {
-    if (!currentUserId) return 0;
-    return conversations.filter(c => {
-      const currentUserMember = c.members?.find(member => member.user_id === currentUserId);
-      return currentUserMember?.adv_role === 'adv_giver';
-    }).length;
   };
 
   const formatTime = (timestamp: string) => {
@@ -607,10 +523,6 @@ export default function ConversationsScreen({
       return `${date.getDate().toString().padStart(2, '0')}/${(date.getMonth() + 1).toString().padStart(2, '0')}`;
     }
     return `${date.getDate().toString().padStart(2, '0')}/${(date.getMonth() + 1).toString().padStart(2, '0')}/${date.getFullYear()}`;
-  };
-
-  const getConversationType = (conv: Conversation): 'advisor' | 'seeker' | 'both' | null => {
-    return conv.metadata?.type || null;
   };
 
   const handleUserSelect = async (userId: string) => {
@@ -750,14 +662,7 @@ export default function ConversationsScreen({
     }
   };
 
-  const renderFilterButton = (
-    type: FilterType,
-    label: string,
-    count?: number,
-    iconPath?: string,
-    iconColor?: string,
-    badgeColor?: string
-  ) => {
+  const renderFilterButton = (type: FilterType, label: string) => {
     const isActive = filter === type;
 
     return (
@@ -768,29 +673,10 @@ export default function ConversationsScreen({
         ]}
         onPress={() => setFilter(type)}
       >
-        {type === 'advisor' && <GetAdvIcon />}
-        {type === 'seeker' && <GiveAdvIcon />}
         <Text style={[
           styles.filterButtonText,
           Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
         ]}>{label}</Text>
-        {count !== undefined && count > 0 && (
-          <View style={[
-            styles.filterBadge,
-            { 
-              backgroundColor: Platform.OS === 'web' && badgeColor
-                ? (type === 'advisor' 
-                    ? 'var(--Colors-Secondary-200, #BCAC99)'
-                    : 'var(--Fill-secondary, #05BCD3)')
-                : badgeColor || '#BCAC99'
-            }
-          ]}>
-            <Text style={[
-              styles.filterBadgeText,
-              Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
-            ]}>{count}</Text>
-          </View>
-        )}
       </TouchableOpacity>
     );
   };
@@ -965,7 +851,6 @@ export default function ConversationsScreen({
     const isFirstTutorialAnchor = index === 0;
     const isTutorialHighlight = isFirstTutorialAnchor && tutorial.currentStep === 1;
 
-    const conversationType = getConversationType(conv);
     const displayName = conv.is_direct
       ? conv.other_user?.name || 'Unknown User'
       : conv.title || 'Group Chat';
@@ -978,12 +863,8 @@ export default function ConversationsScreen({
 
     const lastMessageTime = conv.last_message ? formatTime(conv.last_message.created_at) : '';
     const unreadCount = conv.unread_count || 0;
-
-    // Get current user's adv_role in this conversation
-    const currentUserMember = currentUserId 
-      ? conv.members?.find(member => member.user_id === currentUserId)
-      : null;
-    const userAdvRole = currentUserMember?.adv_role;
+    const meMember = conv.members?.find(m => m.user_id === currentUserId);
+    const isMuted = getMuteUntilFromMember(meMember) !== null;
 
     return (
       <View
@@ -1017,44 +898,6 @@ export default function ConversationsScreen({
               </View>
             )}
 
-            {/* Adv role icon badge */}
-            {userAdvRole === 'adv_seeker' && (
-              <View style={styles.advRoleBadgeGetAdv}>
-                <View style={{ width: 10, height: 10, justifyContent: 'center', alignItems: 'center' }}>
-                  <Svg width={10} height={10} viewBox="0 0 10 10" fill="none">
-                    <G clipPath="url(#clip0_5183_5404)">
-                      <Path
-                        d="M3.74967 7.50004L0.833008 9.16671V2.50004L3.74967 0.833374M3.74967 7.50004L6.66634 9.16671M3.74967 7.50004V0.833374M6.66634 9.16671L9.16634 7.50004V0.833374L6.66634 2.50004M6.66634 9.16671V2.50004M6.66634 2.50004L3.74967 0.833374"
-                        stroke="#FFFFFF"
-                        strokeWidth="0.5"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </G>
-                    <Defs>
-                      <ClipPath id="clip0_5183_5404">
-                        <Rect width={10} height={10} fill="white" />
-                      </ClipPath>
-                    </Defs>
-                  </Svg>
-                </View>
-              </View>
-            )}
-            {userAdvRole === 'adv_giver' && (
-              <View style={styles.advRoleBadgeGiveAdv}>
-                <View style={{ width: 10, height: 10, justifyContent: 'center', alignItems: 'center' }}>
-                  <Svg width={10} height={10} viewBox="0 0 10 10" fill="none">
-                    <Path
-                      d="M5.83366 5.19383C5.31969 5.49089 4.68102 5.49089 4.16704 5.19383M6.32181 6.17847C5.67094 5.5276 5.67094 4.47232 6.32181 3.82145C6.97269 3.17057 8.02796 3.17057 8.67884 3.82145C9.32971 4.47232 9.32971 5.5276 8.67884 6.17847C8.02797 6.82934 6.97269 6.82934 6.32181 6.17847ZM1.32181 6.17847C0.670941 5.5276 0.670941 4.47232 1.32181 3.82145C1.97269 3.17057 3.02796 3.17057 3.67884 3.82145C4.32971 4.47232 4.32971 5.52759 3.67884 6.17847C3.02797 6.82934 1.97269 6.82934 1.32181 6.17847Z"
-                      stroke="#FFFFFF"
-                      strokeWidth="0.5"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </Svg>
-                </View>
-              </View>
-            )}
           </View>
 
           {/* Text content */}
@@ -1120,7 +963,7 @@ export default function ConversationsScreen({
           </View>
         </View>
 
-        {/* Time and unread badge */}
+        {/* Time, mute icon, unread badge */}
         <View style={styles.timeContainer}>
           {lastMessageTime ? (
             <Text style={[
@@ -1128,17 +971,19 @@ export default function ConversationsScreen({
               Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
             ]}>{lastMessageTime}</Text>
           ) : null}
-          {unreadCount > 0 ? (
-            <View style={[
-              styles.unreadBadge,
-              userAdvRole === 'adv_giver' ? styles.unreadBadgeGiveAdv :
-              userAdvRole === 'adv_seeker' ? styles.unreadBadgeGetAdv :
-              styles.unreadBadgeDefault
-            ]}>
-              <Text style={[
-                styles.unreadBadgeText,
-                Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
-              ]}>{unreadCount}</Text>
+          {(isMuted || unreadCount > 0) ? (
+            <View style={styles.timeMetaRow}>
+              {isMuted ? (
+                <Ionicons name="notifications-off" size={14} color="#7B7B7B" />
+              ) : null}
+              {unreadCount > 0 ? (
+                <View style={[styles.unreadBadge, styles.unreadBadgeDefault]}>
+                  <Text style={[
+                    styles.unreadBadgeText,
+                    Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
+                  ]}>{unreadCount}</Text>
+                </View>
+              ) : null}
             </View>
           ) : null}
         </View>
@@ -1354,8 +1199,6 @@ export default function ConversationsScreen({
           {/* Filter buttons */}
           <View style={styles.filterContainer}>
             {renderFilterButton('all', 'All')}
-            {renderFilterButton('advisor', 'Out', getTotalAdvisorCount(), undefined, '#333', '#BCAC99')}
-            {renderFilterButton('seeker', 'In', getTotalSeekerCount(), undefined, '#333', '#05BCD3')}
             {process.env.EXPO_PUBLIC_LOCAL_MODE === 'true' && renderFilterButton('surftrips', 'Surftrips')}
           </View>
 
@@ -1507,6 +1350,7 @@ export default function ConversationsScreen({
 
       {/* Swelly conversation card - positioned at bottom */}
       <View style={[styles.swellyCardWrapper, Platform.OS !== 'web' && { paddingBottom: Math.max(insets.bottom, 16) }]}>
+        {/* Swelly Copy-Copy (Dev) card — hidden
         {showSwellyCopyCard && (
           <TouchableOpacity
             style={[styles.swellyContainer, { marginBottom: 4, borderColor: '#00BCD4' }]}
@@ -1542,6 +1386,7 @@ export default function ConversationsScreen({
             </View>
           </TouchableOpacity>
         )}
+        */}
         {renderSwellyConversation()}
       </View>
 
@@ -1971,28 +1816,6 @@ const styles = StyleSheet.create({
     lineHeight: 15,
     color: '#000000',
   },
-  filterIcon: {
-    width: 24,
-    height: 24,
-  },
-  filterBadge: {
-    display: 'flex',
-    minWidth: 18,
-    paddingVertical: 2,
-    paddingHorizontal: 4,
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 10,
-    borderRadius: 28,
-    // Background color is set inline via badgeColor prop
-  },
-  filterBadgeText: {
-    fontFamily: Platform.OS === 'web' ? 'var(--Family-Body, Inter), sans-serif' : 'Inter',
-    fontSize: 12,
-    fontWeight: '400',
-    lineHeight: 14,
-    color: '#FFF',
-  },
   conversationsList: {
     flex: 1,
   },
@@ -2077,53 +1900,6 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#7B7B7B',
   },
-  advRoleBadgeGetAdv: {
-    display: 'flex',
-    width: 16,
-    height: 16,
-    padding: 3,
-    justifyContent: 'center',
-    alignItems: 'center',
-    position: 'absolute',
-    right: -2,
-    bottom: 1,
-    borderRadius: 12,
-    borderWidth: 1,
-    ...(Platform.OS === 'web' ? {
-      borderColor: 'var(--Colors-Neutral-White, #FFF)',
-      backgroundColor: 'var(--Colors-Secondary-200, #BCAC99)',
-    } : {
-      borderColor: '#FFF',
-      backgroundColor: '#BCAC99',
-    }),
-  },
-  advRoleBadgeGiveAdv: {
-    display: 'flex',
-    width: 16,
-    height: 16,
-    padding: 3,
-    justifyContent: 'center',
-    alignItems: 'center',
-    position: 'absolute',
-    right: -2,
-    bottom: 1,
-    borderRadius: 12,
-    borderWidth: 1,
-    ...(Platform.OS === 'web' ? {
-      borderColor: 'var(--Colors-Neutral-White, #FFF)',
-      backgroundColor: 'var(--Fill-secondary, #05BCD3)',
-    } : {
-      borderColor: '#FFF',
-      backgroundColor: '#05BCD3',
-    }),
-  },
-  advRoleIcon: {
-    width: 10,
-    height: 10,
-    flexShrink: 0,
-    aspectRatio: 1,
-    alignSelf: 'center',
-  },
   textContainer: {
     flex: 1,
     flexShrink: 1,
@@ -2159,6 +1935,11 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-start',
     flexShrink: 0,
   },
+  timeMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
   timeText: {
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     fontSize: 12,
@@ -2177,20 +1958,6 @@ const styles = StyleSheet.create({
   },
   unreadBadgeDefault: {
     backgroundColor: '#05BCD3',
-  },
-  unreadBadgeGiveAdv: {
-    ...(Platform.OS === 'web' ? {
-      backgroundColor: 'var(--Colors-Primary-Solid-100, #05BCD3)',
-    } : {
-      backgroundColor: '#05BCD3',
-    }),
-  },
-  unreadBadgeGetAdv: {
-    ...(Platform.OS === 'web' ? {
-      backgroundColor: 'var(--Colors-Secondary-200, #BCAC99)',
-    } : {
-      backgroundColor: '#BCAC99',
-    }),
   },
   unreadBadgeText: {
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',

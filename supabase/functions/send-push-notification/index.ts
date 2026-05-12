@@ -177,7 +177,7 @@ serve(async (req) => {
     // Get conversation members (exclude sender)
     const { data: members, error: membersError } = await supabase
       .from('conversation_members')
-      .select('user_id')
+      .select('user_id, preferences')
       .eq('conversation_id', conversation_id)
       .neq('user_id', sender_id);
 
@@ -197,8 +197,19 @@ serve(async (req) => {
       );
     }
 
-    // Send push notification to each recipient
+    const now = Date.now();
+
+    // Send push notification to each recipient, skipping muted members
     for (const member of members) {
+      const mutedUntilRaw = member.preferences?.muted_until;
+      if (mutedUntilRaw) {
+        const mutedUntilMs = Date.parse(mutedUntilRaw);
+        if (!isNaN(mutedUntilMs) && mutedUntilMs > now) {
+          console.log(`[Push Notification] [${requestId}] Skipping ${member.user_id} — muted until ${mutedUntilRaw}`);
+          continue;
+        }
+      }
+
       try {
         await sendPushNotification(supabase, member.user_id, sender_id, message_id, conversation_id);
       } catch (error) {

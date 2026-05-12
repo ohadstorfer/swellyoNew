@@ -95,7 +95,7 @@ export const SurftripsList: React.FC<SurftripsListProps> = ({
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           accessibilityLabel="New surftrip"
         >
-          <Ionicons name="create-outline" size={22} color="#222B30" />
+          <Ionicons name="add" size={26} color="#222B30" />
         </TouchableOpacity>
       </View>
 

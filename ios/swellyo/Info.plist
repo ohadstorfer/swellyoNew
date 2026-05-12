@@ -19,7 +19,7 @@
     <key>CFBundlePackageType</key>
     <string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.1.1</string>
+    <string>1.1.2</string>
     <key>CFBundleSignature</key>
     <string>????</string>
     <key>CFBundleURLTypes</key>
@@ -58,11 +58,11 @@
       <true/>
     </dict>
     <key>NSCameraUsageDescription</key>
-    <string>The app accesses your camera to let you take photos.</string>
+    <string>Swellyo uses your camera so you can take photos and record videos for your profile and to send in chats.</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>This app needs access to your microphone to record video with audio.</string>
+    <string>Swellyo uses your microphone to record voice messages and capture audio for video clips.</string>
     <key>NSPhotoLibraryUsageDescription</key>
-    <string>The app accesses your photos to let you share them.</string>
+    <string>Swellyo accesses your photo library so you can select photos and videos for your profile, your surf trips, and to share in chats.</string>
     <key>RCTNewArchEnabled</key>
     <true/>
     <key>UILaunchStoryboardName</key>
