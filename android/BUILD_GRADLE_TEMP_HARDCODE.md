@@ -1,42 +1,27 @@
-# ⚠️ android/app/build.gradle — TEMP HARDCODE
+# android/app/build.gradle — applicationId setup
 
-**Status:** `android/app/build.gradle` currently has the `applicationId` temporarily hardcoded.
-
-## Current state (in repo)
+The `applicationId` is set in two parts to satisfy both Expo CLI (local dev) and EAS dev/prod variant split:
 
 ```gradle
-// TEMP HARDCODE — revert before committing
-applicationId 'com.swellyo.app'
+defaultConfig {
+    applicationId 'com.swellyo.app'
+    if (System.getenv("APP_VARIANT") == "development") {
+        applicationIdSuffix '.dev'
+    }
+    ...
+}
 ```
 
-## What it MUST be before any commit / push / PR
+## Why it's split
 
-```gradle
-applicationId System.getenv("APP_VARIANT") == "development" ? 'com.swellyo.app.dev' : 'com.swellyo.app'
-```
+- **Expo CLI** (`npm run android`, `npx expo start`) parses `build.gradle` with a regex that only matches a literal `applicationId 'string'`. A ternary like `System.getenv("APP_VARIANT") == "development" ? 'a' : 'b'` fails the regex and Expo CLI throws:
+  ```
+  CommandError: Failed to locate the android application identifier in the "android/" folder.
+  ```
+- **EAS dev profile** (`eas.json` → `build.development.env.APP_VARIANT = "development"`) needs the final `applicationId` to be `com.swellyo.app.dev` so dev + prod can coexist on the same device.
 
-## Why the hardcode exists
+The literal `applicationId 'com.swellyo.app'` keeps Expo CLI happy. The conditional `applicationIdSuffix '.dev'` appends the suffix at Gradle config time only when `APP_VARIANT=development` is set — same effective behavior as the previous ternary, but no longer breaks local dev.
 
-Running `npm run android` / `npx expo start --dev-client` fails with:
+## What this replaces
 
-```
-CommandError: Failed to locate the android application identifier in the "android/" folder.
-```
-
-Expo CLI parses `build.gradle` statically and cannot resolve the `System.getenv(...)` ternary, so local Android dev runs break. Hardcoding the value to `'com.swellyo.app'` unblocks local dev against the emulator.
-
-## Rules for Claude agents working on this repo
-
-1. **NEVER commit the hardcoded version.** Before any `git commit`, `git push`, or `gh pr create` that touches `android/app/build.gradle`, run:
-   ```
-   git checkout android/app/build.gradle
-   ```
-   to restore the env-var ternary.
-
-2. **If you see the ternary restored and Ohad reports the Expo CLI error**, re-apply the hardcode (it was reverted after the last commit and now local Android dev is broken again).
-
-3. **Do not "fix" this file by picking one form or the other permanently** — both forms are needed: ternary for EAS / CI builds (so the `.dev` variant is produced), hardcode for local Expo CLI runs.
-
-4. **Remind Ohad about this every session** where Android work or committing is happening. He has explicitly asked for frequent reminders.
-
-5. Until reverted, the `com.swellyo.app.dev` variant is NOT produced, which may conflict with EAS dev builds or split install of prod + dev on the same device.
+Before, this file had a "TEMP HARDCODE — revert before committing" comment and the `applicationId` was swapped between `'com.swellyo.app'` (for local dev) and the ternary (for EAS builds) by hand every commit. That workflow is gone — the current setup is the permanent shape, do not change it.
