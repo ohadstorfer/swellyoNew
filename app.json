@@ -24,7 +24,7 @@
       "usesNonExemptEncryption": false,
       "usesAppleSignIn": true,
       "associatedDomains": [
-        "applinks:www.swellyo.com"
+        "applinks:swellyo-invite.netlify.app"
       ],
       "entitlements": {
         "aps-environment": "production"
@@ -58,7 +58,7 @@
           "data": [
             {
               "scheme": "https",
-              "host": "www.swellyo.com",
+              "host": "swellyo-invite.netlify.app",
               "pathPrefix": "/"
             }
           ],

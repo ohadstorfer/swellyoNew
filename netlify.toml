@@ -29,14 +29,7 @@
     X-Content-Type-Options = "nosniff"
     Cache-Control = "public, max-age=0, must-revalidate"
 
-# Universal Links (iOS) require the AASA file to be served as application/json
-# with no redirects. The file has no extension so Netlify won't auto-detect MIME.
-[[headers]]
-  for = "/.well-known/apple-app-site-association"
-  [headers.values]
-    Content-Type = "application/json"
-
-[[headers]]
-  for = "/.well-known/assetlinks.json"
-  [headers.values]
-    Content-Type = "application/json"
+# Note: AASA + assetlinks.json for Universal Links / App Links live at
+# https://swellyo-invite.netlify.app (separate Netlify site, see
+# swellyo-invite-redirect/), not here. The main web app's Netlify deploy
+# doesn't need to serve them.

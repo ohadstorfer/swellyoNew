@@ -127,6 +127,14 @@ serve(async (req) => {
     const emailHtml = generateEmailHtml(userName, userEmail, reason);
     const emailText = `Account Deletion Request\n\nName: ${userName}\nEmail: ${userEmail}\nReason: ${reason}\n\nThe user has been told their account will be permanently deleted within 30 days.`;
 
+    // emails disabled — push only, see 2026-05-12
+    // NOTE: pending_deletion flag above still runs; only the Resend call is skipped
+    console.log('[Delete Account] Email send short-circuited (emails disabled).');
+    return new Response(JSON.stringify({ success: true, emailDisabled: true }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+    });
+
     const resendResponse = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: {

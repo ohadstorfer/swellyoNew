@@ -149,8 +149,11 @@ export const ProfileImage: React.FC<ProfileImageProps> = React.memo(({
         />
       ) : null}
       
-      {/* Show surfer placeholder image while loading or when no valid image */}
-      {(!hasValidImage || isLoading) && (
+      {/* Surfer placeholder only as a fallback when there's no valid image URL.
+          Avoid showing it during the initial isLoading=true window over a valid
+          URL — that caused a cartoon flash on chat entry before the real avatar
+          rendered. The gray container background covers the load gap instead. */}
+      {!hasValidImage && (
         <View style={[styles.loadingIconContainer, { borderRadius }]}>
           <Image
             source={Images.surferPlaceholder}

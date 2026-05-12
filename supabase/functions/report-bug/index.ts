@@ -116,6 +116,13 @@ serve(async (req) => {
 
     const emailText = `Bug Report\n\nFrom: ${userName || 'Unknown'} (${userEmail || 'Unknown'})\nPlatform: ${platform || 'Unknown'}\n\nDescription:\n${description}`;
 
+    // emails disabled — push only, see 2026-05-12
+    console.log('[Bug Report] Email send short-circuited (emails disabled).');
+    return new Response(JSON.stringify({ success: true, emailDisabled: true }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+    });
+
     const resendResponse = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: {

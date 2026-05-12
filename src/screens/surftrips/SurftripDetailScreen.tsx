@@ -11,6 +11,7 @@ import {
   TextInput,
   Modal,
   Share,
+  KeyboardAvoidingView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -325,7 +326,11 @@ export default function SurftripDetailScreen({
         return;
       }
 
-      await Share.share({ message, url });
+      // Pass ONLY `message` (URL is already inside the message string).
+      // Passing both `message` and `url` causes iOS to serialize the URL as
+      // a binary plist and concatenate it to the text — recipient apps then
+      // show "bplist00..." garbage after the link.
+      await Share.share({ message });
     } catch (e) {
       // User cancelled — silent. Other errors → log.
       console.warn('[SurftripDetailScreen] share failed:', e);
@@ -495,6 +500,16 @@ export default function SurftripDetailScreen({
                 <Ionicons name="chevron-back" size={22} color="#FFFFFF" />
               </TouchableOpacity>
               <View style={styles.floatingHeaderActions}>
+                {isMember ? (
+                  <TouchableOpacity
+                    style={[styles.headerOrb, { marginRight: 8 }]}
+                    onPress={handleShareInvite}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    accessibilityLabel="Share invite link"
+                  >
+                    <Ionicons name="share-outline" size={20} color="#FFFFFF" />
+                  </TouchableOpacity>
+                ) : null}
                 {canManage ? (
                   <TouchableOpacity
                     style={styles.headerOrb}
@@ -659,46 +674,52 @@ export default function SurftripDetailScreen({
         transparent
         animationType="slide"
         onRequestClose={() => setShowRequestModal(false)}
+        statusBarTranslucent={Platform.OS === 'android'}
       >
-        <View style={styles.requestBackdrop}>
-          <View style={styles.requestSheet}>
-            <Text style={styles.requestTitle}>Request to join</Text>
-            <Text style={styles.requestHelper}>
-              Add a short note for the host (optional).
-            </Text>
-            <TextInput
-              value={requestNote}
-              onChangeText={setRequestNote}
-              placeholder="Hey! I'd love to join this trip…"
-              placeholderTextColor="#9AA3A8"
-              style={styles.requestInput}
-              multiline
-              maxLength={300}
-              autoFocus
-            />
-            <View style={styles.requestActions}>
-              <TouchableOpacity
-                style={[styles.requestBtn, styles.requestCancel]}
-                onPress={() => setShowRequestModal(false)}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.requestCancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.requestBtn, styles.requestSubmit]}
-                onPress={handleRequestToJoin}
-                activeOpacity={0.85}
-                disabled={submitting}
-              >
-                {submitting ? (
-                  <ActivityIndicator color="#FFFFFF" />
-                ) : (
-                  <Text style={styles.requestSubmitText}>Send request</Text>
-                )}
-              </TouchableOpacity>
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <View style={styles.requestBackdrop}>
+            <View style={styles.requestSheet}>
+              <Text style={styles.requestTitle}>Request to join</Text>
+              <Text style={styles.requestHelper}>
+                Add a short note for the host (optional).
+              </Text>
+              <TextInput
+                value={requestNote}
+                onChangeText={setRequestNote}
+                placeholder="Hey! I'd love to join this trip…"
+                placeholderTextColor="#9AA3A8"
+                style={styles.requestInput}
+                multiline
+                maxLength={300}
+                autoFocus
+              />
+              <View style={styles.requestActions}>
+                <TouchableOpacity
+                  style={[styles.requestBtn, styles.requestCancel]}
+                  onPress={() => setShowRequestModal(false)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.requestCancelText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.requestBtn, styles.requestSubmit]}
+                  onPress={handleRequestToJoin}
+                  activeOpacity={0.85}
+                  disabled={submitting}
+                >
+                  {submitting ? (
+                    <ActivityIndicator color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.requestSubmitText}>Send request</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );

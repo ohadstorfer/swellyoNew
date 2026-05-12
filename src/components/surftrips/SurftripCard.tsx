@@ -47,8 +47,8 @@ export const SurftripCard: React.FC<SurftripCardProps> = ({ group, onPress, show
             {group.description}
           </Text>
         ) : null}
-        {showDivider && <View style={styles.divider} />}
       </View>
+      {showDivider && <View style={styles.divider} />}
     </TouchableOpacity>
   );
 };

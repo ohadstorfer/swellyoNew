@@ -10,6 +10,7 @@ import {
   Image,
   ScrollView,
   Platform,
+  KeyboardAvoidingView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../Text';
@@ -218,7 +219,12 @@ export const CreateSurftripModal: React.FC<CreateSurftripModalProps> = ({
       animationType="slide"
       transparent
       onRequestClose={handleClose}
+      statusBarTranslucent={Platform.OS === 'android'}
     >
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
       <View style={styles.backdrop}>
         <View style={styles.sheet}>
           <View style={styles.header}>
@@ -347,6 +353,7 @@ export const CreateSurftripModal: React.FC<CreateSurftripModalProps> = ({
           </ScrollView>
         </View>
       </View>
+      </KeyboardAvoidingView>
 
       {!editMode && (
         <AddMembersSheet
@@ -445,11 +452,11 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderBottomWidth: 1,
     borderBottomColor: '#E1E1E1',
+    textAlign: 'left',
   },
   inputMultiline: {
     minHeight: 90,
     textAlignVertical: 'top',
-    borderBottomWidth: 0,
     borderWidth: 1,
     borderColor: '#E1E1E1',
     borderRadius: 10,

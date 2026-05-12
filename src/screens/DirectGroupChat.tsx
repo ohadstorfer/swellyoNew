@@ -1360,10 +1360,16 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
       ? {
           message_id: replyingTo.id,
           sender_id: replyingTo.sender_id,
+          // Store the real name; QuotedMessagePreview decides "You" at render
+          // time based on whether snapshot.sender_id matches the viewer.
+          // In groups, otherUserName is the group title — fall back to the
+          // per-sender map first so a self-reply doesn't end up labeled with
+          // the group name.
           sender_name:
-            replyingTo.sender_id === currentUserId
-              ? 'You'
-              : (replyingTo.sender_name || otherUserName || ''),
+            replyingTo.sender_name ||
+            replyingTo.sender?.name ||
+            senderNamesById.get(replyingTo.sender_id) ||
+            '',
           type: replyingTo.type ?? 'text',
           body:
             replyingTo.type === 'image'
@@ -2399,10 +2405,16 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
       ? {
           message_id: replyingTo.id,
           sender_id: replyingTo.sender_id,
+          // Store the real name; QuotedMessagePreview decides "You" at render
+          // time based on whether snapshot.sender_id matches the viewer.
+          // In groups, otherUserName is the group title — fall back to the
+          // per-sender map first so a self-reply doesn't end up labeled with
+          // the group name.
           sender_name:
-            replyingTo.sender_id === currentUserId
-              ? 'You'
-              : (replyingTo.sender_name || otherUserName || ''),
+            replyingTo.sender_name ||
+            replyingTo.sender?.name ||
+            senderNamesById.get(replyingTo.sender_id) ||
+            '',
           type: replyingTo.type || 'text',
           body:
             replyingTo.type === 'image'
@@ -2807,6 +2819,22 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
   // State keeps messages chronological (oldest-first) for easy append/merge
   const invertedMessages = useMemo(() => [...messages].reverse(), [messages]);
 
+  // Map of sender_id → display name, harvested from any message we have that
+  // was already enriched. Lets reply previews resolve the original author's
+  // name even when the stored snapshot is missing it (or has the legacy 'You'
+  // value). Groups use this instead of `otherUserName`, which is the group
+  // title, not a user's name.
+  const senderNamesById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const m of messages) {
+      const name = m.sender_name || m.sender?.name;
+      if (m.sender_id && name && !map.has(m.sender_id)) {
+        map.set(m.sender_id, name);
+      }
+    }
+    return map;
+  }, [messages]);
+
   // FlatList helpers for inverted list
   const renderItem = useCallback(({ item, index }: { item: Message; index: number }) => {
     // Track BOTH `id` and `client_id` so the optimistic→server swap (client_id
@@ -3044,6 +3072,10 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
               <QuotedMessagePreview
                 snapshot={message.reply_to_snapshot}
                 isOwnBubble={isOwnMessage}
+                currentUserId={currentUserId}
+                fallbackName={
+                  senderNamesById.get(message.reply_to_snapshot.sender_id) || ''
+                }
                 onPress={() => handleReplyPreviewPress(message.reply_to_snapshot!.message_id)}
                 isLoading={resolvingReplyJumpId === message.reply_to_snapshot.message_id}
               />
@@ -3421,8 +3453,14 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
                           Telegram's float-right .MessageMeta technique. */}
                       <Text style={[
                         styles.timestamp,
-                        isOwnMessage ? styles.userTimestamp : styles.botTimestamp,
-                        { color: 'transparent' },
+                        // Match the bubble background instead of using
+                        // `color: 'transparent'`. Android's nested-Text
+                        // renderer treats fully-transparent foreground spans
+                        // as "unset" and falls back to the parent color, so
+                        // the spacer ends up visible (duplicate timestamp).
+                        // Background-matched color is invisible to the eye
+                        // but rendered as a concrete value Android respects.
+                        { color: isOwnMessage ? '#05BCD3' : '#FFFFFF' },
                       ]}>
                         {`  ${formatTime(message.created_at)}${message.edited && !message.deleted ? '  (edited)' : ''}${isOwnMessage ? '    ' : ''}`}
                       </Text>
@@ -3551,7 +3589,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
     <>
     <SafeAreaView style={[styles.container, { backgroundColor: '#212121' }]} edges={['top']}>
       {/* Header */}
-      <View style={styles.headerContainer}>
+      <View style={[styles.headerContainer, { paddingTop: insets.top + (Platform.OS === 'web' ? 24 : 12) }]}>
         <View style={styles.headerGradientBorder} />
         <View style={styles.header}>
           <View style={styles.headerLeft}>
@@ -3604,19 +3642,12 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
             }}
             activeOpacity={(isDirect || (surftripId && onOpenSurftripDetail) || (tripId && onOpenTripDetail)) ? 0.7 : 1}
           >
-            <Reanimated.View
-              style={styles.profileInfoInner}
-              layout={LinearTransition.duration(240)}
-            >
-              <Reanimated.Text
-                style={styles.profileName}
-                layout={LinearTransition.duration(240)}
-                numberOfLines={1}
-              >
+            <View style={styles.profileInfoInner}>
+              <Text style={styles.profileName} numberOfLines={1}>
                 {otherUserName}
-              </Reanimated.Text>
+              </Text>
               {onlineStatusElement}
-            </Reanimated.View>
+            </View>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -4164,7 +4195,16 @@ const styles = StyleSheet.create({
     paddingBottom: 14,
     paddingHorizontal: 0,
     alignItems: 'center',
-    position: 'relative',
+    // Pin to the top so the chat body can't visually displace the header
+    // mid-transition (heavy FlatList commits on screens with many messages
+    // were leaving the header rendered at the wrong place until the slide-in
+    // settled — pinning + high zIndex keeps it stable from the first frame).
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 100,
+    elevation: 100,
   },
   header: {
     flexDirection: 'row',
@@ -4363,6 +4403,9 @@ const styles = StyleSheet.create({
   chatContainer: {
     flex: 1,
     backgroundColor: '#F5F5F5',
+    // Leave room for the absolute headerContainer above.
+    // headerContainer height = paddingTop + content (avatar 52) + paddingBottom 14.
+    paddingTop: (Platform.OS === 'web' ? 24 : 12) + 52 + 14,
   },
   backgroundImage: {
     ...StyleSheet.absoluteFillObject,

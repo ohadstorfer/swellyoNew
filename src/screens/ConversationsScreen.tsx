@@ -11,6 +11,7 @@ import {
   Alert,
   Animated,
   ActivityIndicator,
+  AppState,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../config/supabase';
@@ -329,13 +330,18 @@ export default function ConversationsScreen({
     ])
   );
 
-  // Refresh on focus so mute state (and other server-side changes) from other
-  // devices propagate when the user returns to the list.
-  useFocusEffect(
-    React.useCallback(() => {
-      refreshConversations();
-    }, [refreshConversations])
-  );
+  // Refresh when the app returns from background so mute state (and other
+  // server-side changes) from other devices propagate. Avoid useFocusEffect:
+  // refreshing on every navigation focus causes a delayed REPLACE_ALL that
+  // wipes scroll position after returning from a chat.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next === 'active') {
+        refreshConversations();
+      }
+    });
+    return () => sub.remove();
+  }, [refreshConversations]);
 
   // Update user info when context user changes (immediate sync); reset header when logged out
   useEffect(() => {

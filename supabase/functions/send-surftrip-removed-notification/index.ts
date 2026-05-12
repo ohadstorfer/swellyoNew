@@ -16,13 +16,31 @@ async function sendRemovedNotification(
 ): Promise<void> {
   const { data: group, error: groupError } = await supabase
     .from('surftrip_groups')
-    .select('name')
+    .select('name, conversation_id')
     .eq('id', groupId)
     .single();
 
   if (groupError || !group) {
     console.error('[Surftrip Removed Notif] Error loading group:', groupError);
     return;
+  }
+
+  // Mute check — if the removed user muted the surftrip conversation, skip the push.
+  if (group.conversation_id) {
+    const { data: member } = await supabase
+      .from('conversation_members')
+      .select('preferences')
+      .eq('conversation_id', group.conversation_id)
+      .eq('user_id', removedUserId)
+      .maybeSingle();
+    const mutedUntilRaw = member?.preferences?.muted_until;
+    if (mutedUntilRaw) {
+      const mutedUntilMs = Date.parse(mutedUntilRaw);
+      if (!isNaN(mutedUntilMs) && mutedUntilMs > Date.now()) {
+        console.log(`[Surftrip Removed Notif] Skipping ${removedUserId} — muted until ${mutedUntilRaw}`);
+        return;
+      }
+    }
   }
 
   const { data: surfer } = await supabase
