@@ -13,7 +13,7 @@ import {
   Share,
   KeyboardAvoidingView,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Text } from '../../components/Text';
@@ -75,6 +75,7 @@ export default function SurftripDetailScreen({
   const [showRequestModal, setShowRequestModal] = useState(false);
   const [requestNote, setRequestNote] = useState('');
   const [showEditModal, setShowEditModal] = useState(false);
+  const insets = useSafeAreaInsets();
   const [showAddMembers, setShowAddMembers] = useState(false);
 
   const myMember = useMemo(
@@ -623,7 +624,7 @@ export default function SurftripDetailScreen({
 
       {/* Sticky CTA — only for non-members in the join flow */}
       {!isMember && (
-        <View style={styles.ctaBar}>
+        <View style={[styles.ctaBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
           <CtaButton
             myRequest={myRequest}
             submitting={submitting}

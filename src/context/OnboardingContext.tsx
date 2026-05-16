@@ -54,7 +54,7 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       const path = window.location.pathname || '';
       const hash = window.location.hash || '';
       if (path.includes('swelly_chat') || hash.includes('swelly_chat')) {
-        return 5; // Go directly to chat screen
+        return 8; // Go directly to chat screen (renumbered after destinations/budget/lifestyle insertion)
       }
     }
     return STEP_WELCOME; // Default to WelcomeScreen, not OnboardingWelcomeScreen (0)

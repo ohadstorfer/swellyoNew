@@ -13,6 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { PlaceChip } from './PlaceChip';
 import { Text } from './Text';
 import { colors } from '../styles/theme';
+import { useDebounce } from '../hooks/useDebounce';
 
 const PLACES_AUTOCOMPLETE_URL = 'https://places.googleapis.com/v1/places:autocomplete';
 const DEBOUNCE_MS = 300;
@@ -45,15 +46,6 @@ export interface MultiPlaceAutocompleteInputRef {
 interface PlaceSuggestion {
   placeId: string;
   text: string;
-}
-
-function useDebounce<T>(value: T, delay: number): T {
-  const [debouncedValue, setDebouncedValue] = useState(value);
-  useEffect(() => {
-    const timer = setTimeout(() => setDebouncedValue(value), delay);
-    return () => clearTimeout(timer);
-  }, [value, delay]);
-  return debouncedValue;
 }
 
 export const MultiPlaceAutocompleteInput = forwardRef<

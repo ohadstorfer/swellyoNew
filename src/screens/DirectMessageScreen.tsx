@@ -61,6 +61,13 @@ import { useChatKeyboardScroll } from '../hooks/useChatKeyboardScroll';
 import { useDismissKeyboardOnBlur } from '../hooks/useDismissKeyboardOnBlur';
 import { BlockUserOverlay } from '../components/BlockUserOverlay';
 import { ReportUserScreen } from './ReportUserScreen';
+import { CommitmentMessageBubble } from '../components/trips/commitment/CommitmentMessageBubble';
+import { CommitmentReviewBar } from '../components/trips/commitment/CommitmentReviewBar';
+import {
+  listPendingCommitmentsToReviewFromUser,
+  approveCommitment,
+  type PendingCommitmentToReview,
+} from '../services/trips/groupTripsService';
 
 // WhatsApp-style read receipts for own messages.
 // - 'pending'   → no tick (upload in flight / failed; existing UI shows "Sending…" / "Tap to retry")
@@ -312,6 +319,9 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const [composerHeight, setComposerHeight] = useState(0);
   const [currentConversationId, setCurrentConversationId] = useState<string | undefined>(conversationId);
   const [messages, setMessages] = useState<Message[]>([]);
+  // Pending commitment requests from the DM partner that the current user (as
+  // trip host) can approve. Only populated for 1-1 conversations.
+  const [pendingCommitments, setPendingCommitments] = useState<PendingCommitmentToReview[]>([]);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState<string>('');
@@ -996,6 +1006,49 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       unsubscribe();
     };
   }, [otherUserId]);
+
+  // Pending commitment requests — only for 1-1 DMs where the partner has
+  // submitted a commitment to a trip the current viewer hosts. Refetched
+  // whenever a new commitment_request message lands so a fresh submission
+  // surfaces the Review bar without remount.
+  const latestPartnerCommitmentMessageId = useMemo(() => {
+    if (!isDirect || !otherUserId) return null;
+    const found = messages.find(
+      (m) => m.type === 'commitment_request' && m.sender_id === otherUserId
+    );
+    return found?.id ?? null;
+  }, [messages, isDirect, otherUserId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!isDirect || !otherUserId || !currentUserId) {
+      setPendingCommitments([]);
+      return;
+    }
+    listPendingCommitmentsToReviewFromUser(otherUserId, currentUserId)
+      .then((rows) => {
+        if (!cancelled) setPendingCommitments(rows);
+      })
+      .catch((err) => {
+        console.warn('[DirectMessageScreen] listPendingCommitments failed:', err);
+        if (!cancelled) setPendingCommitments([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isDirect, otherUserId, currentUserId, latestPartnerCommitmentMessageId]);
+
+  const handleApproveCommitment = async (req: PendingCommitmentToReview) => {
+    if (!currentUserId) return;
+    try {
+      await approveCommitment(req.id, currentUserId);
+      // Drop the approved one locally — the realtime banner + bubble status
+      // update will arrive via the messages channel.
+      setPendingCommitments((prev) => prev.filter((r) => r.id !== req.id));
+    } catch (e: any) {
+      Alert.alert('Could not approve', e?.message || 'Please try again.');
+    }
+  };
 
   // Prefetch avatar when component mounts or avatar URL changes
   useEffect(() => {
@@ -2658,6 +2711,10 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     if (message.is_system) {
       return;
     }
+    if (message.type === 'commitment_request') {
+      // Commitment bubbles aren't editable, replyable, or copyable. No menu.
+      return;
+    }
 
     const isOwnMessage = message.sender_id === currentUserId;
     const hasCopyableText = !!message.body && message.body.trim().length > 0;
@@ -2942,6 +2999,20 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     // For now, render all messages as received (will update when currentUserId loads)
     // This allows messages to appear instantly while currentUserId loads in background
 
+    // Commitment request: short-circuit with a custom bubble (own border, own
+    // layout) so the standard chat-bubble wrapper doesn't double-frame it.
+    if (message.type === 'commitment_request' && message.commitment_metadata) {
+      const isOwn = currentUserId ? message.sender_id === currentUserId : false;
+      const senderName =
+        message.sender_name || message.sender?.name || (isOwn ? 'You' : otherUserName);
+      return (
+        <CommitmentMessageBubble
+          metadata={message.commitment_metadata}
+          senderName={senderName}
+          isOwn={isOwn}
+        />
+      );
+    }
 
     const isOwnMessage = currentUserId ? message.sender_id === currentUserId : false;
     const isEditing = editingMessageId === message.id;
@@ -3826,6 +3897,13 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                 currentUserId={currentUserId}
                 otherUserName={otherUserName}
                 onCancel={() => setReplyingTo(null)}
+              />
+            )}
+            {isDirect && pendingCommitments.length > 0 && (
+              <CommitmentReviewBar
+                pending={pendingCommitments}
+                requesterName={otherUserName}
+                onApprove={handleApproveCommitment}
               />
             )}
             <View style={styles.inputWrapper}>

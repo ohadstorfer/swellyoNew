@@ -4,8 +4,8 @@ import { Ionicons } from '@expo/vector-icons';
 import Svg, { Rect, Defs, LinearGradient as SvgLinearGradient, Stop } from 'react-native-svg';
 
 interface TutorialTooltipCardProps {
-  step: number;
-  total: number;
+  step?: number;
+  total?: number;
   title: string;
   body: string;
   ctaLabel: string;
@@ -23,8 +23,6 @@ const RADIUS = 24;
 const webPointerEventsNone = Platform.OS === 'web' ? ({ pointerEvents: 'none' } as any) : null;
 
 export const TutorialTooltipCard: React.FC<TutorialTooltipCardProps> = ({
-  step,
-  total,
   title,
   body,
   ctaLabel,
@@ -54,7 +52,6 @@ export const TutorialTooltipCard: React.FC<TutorialTooltipCardProps> = ({
           </View>
         </View>
         <View style={styles.footer}>
-          <Text style={styles.progress}>{`${step}/${total}`}</Text>
           <Pressable onPress={onPressCta} hitSlop={12}>
             <Text style={styles.cta}>{ctaLabel}</Text>
           </Pressable>
@@ -156,13 +153,7 @@ const styles = StyleSheet.create({
     marginTop: 20,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  progress: {
-    fontSize: 14,
-    lineHeight: 18,
-    fontWeight: '600',
-    color: '#A0A0A0',
+    justifyContent: 'flex-end',
   },
   cta: {
     fontSize: 14,

@@ -57,6 +57,12 @@ export interface OnboardingData {
   homeBreakCountry?: string;
   homeBreakLat?: number;
   homeBreakLng?: number;
+  // Trip preferences captured directly in onboarding (steps 4/5/6). Same DB
+  // columns the Swelly chat fills in step 8 — both paths upsert into `surfers`.
+  destinations_array?: Array<{ country: string; state?: string; area: string[]; time_in_days: number; time_in_text?: string }>;
+  travel_type?: 'budget' | 'mid' | 'high' | 'premium';
+  lifestyle_keywords?: string[];
+  lifestyle_image_urls?: Record<string, string>;
 }
 
 const BOARD_TYPES: BoardType[] = [
@@ -255,18 +261,18 @@ export const OnboardingStep1Screen: React.FC<OnboardingStep1ScreenProps> = ({
           </TouchableOpacity>
 
           <View style={styles.stepTextContainer}>
-            <Text style={styles.stepText}>Step 1/4</Text>
+            <Text style={styles.stepText}>Surf Juice 1/3</Text>
           </View>
 
           <View style={styles.homepageButton}>
-            {/* Empty space to balance the back button and keep Step 1/4 centered */}
+            {/* Empty space to balance the back button and keep the step indicator centered */}
           </View>
         </View>
 
         {/* Progress Bar */}
         <View style={[styles.progressContainer, isDesktop && styles.progressContainerDesktop]}>
           <View style={[styles.progressBar, { width: progressBarWidth }]}>
-            <View style={[styles.progressFill, { width: '20%' }]} />
+            <View style={[styles.progressFill, { width: '14.3%' }]} />
           </View>
         </View>
 
@@ -391,7 +397,7 @@ const styles = StyleSheet.create({
   },
   homepageButton: {
     width: 60,
-    // Empty space to balance the back button and keep Step 1/5 centered
+    // Empty space to balance the back button and keep the step indicator centered
   },
   progressContainer: {
     paddingHorizontal: spacing.md,

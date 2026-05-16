@@ -74,8 +74,8 @@ interface ProfileScreenProps {
   onMessage?: (userId: string, name?: string, avatar?: string | null) => void; // Callback when message button is clicked
   onContinueEdit?: () => void; // Callback when "continue edit" button is clicked
   onEdit?: () => void; // Callback when edit button is clicked
-  fromOnboardingChat?: boolean; // When true, show Edit (left) + Save (right) header buttons
-  onSaveAndGoToConversations?: () => void; // When Save is pressed from onboarding profile: navigate to conversations and schedule welcome overlay
+  fromOnboardingChat?: boolean; // When true, hide all header buttons (back/edit) and show the "Got it!" floating button at the bottom
+  onSaveAndGoToConversations?: () => void; // Tap handler for the "Got it!" button on the post-onboarding profile: navigates to the conversations home
   noTransition?: boolean; // When true, skip the slide-in/slide-out animations (e.g. when layered under a modal that handles its own fade)
 }
 
@@ -755,32 +755,6 @@ const EditButtonIcon: React.FC = () => {
     </Svg>
   );
 };
-
-// Onboarding-completion header: back arrow (left = Edit) - Figma 18x18
-const OnboardingBackArrowIcon: React.FC = () => (
-  <Svg width={18} height={18} viewBox="0 0 18 18" fill="none">
-    <Path
-      d="M11.25 13.5L6.75 9L11.25 4.5"
-      stroke="#222B30"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    />
-  </Svg>
-);
-
-// Onboarding-completion header: save/cloud icon (right = Save) - Figma 18x18
-const OnboardingSaveIcon: React.FC = () => (
-  <Svg width={18} height={18} viewBox="0 0 18 18" fill="none">
-    <Path
-      d="M3 12.1817C2.09551 11.5762 1.5 10.5452 1.5 9.375C1.5 7.61732 2.84363 6.17347 4.55981 6.01453C4.91086 3.8791 6.76518 2.25 9 2.25C11.2348 2.25 13.0891 3.8791 13.4402 6.01453C15.1564 6.17347 16.5 7.61732 16.5 9.375C16.5 10.5452 15.9045 11.5762 15 12.1817M6 12L9 9M9 9L12 12M9 9V15.75"
-      stroke="#222B30"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    />
-  </Svg>
-);
 
 // Plus Icon SVG Component
 const PlusIcon: React.FC<{ size?: number }> = ({ size = 40 }) => {
@@ -1638,9 +1612,9 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
         ]}
       >
         <SafeAreaView style={styles.fill}>
-          {fromOnboardingChat && isViewingOwnProfile && onEdit && onBack ? (
-            // Onboarding profile: no header buttons. The single "Got it!"
-            // button at the bottom replaces both Edit (left) and Save (right).
+          {fromOnboardingChat && isViewingOwnProfile ? (
+            // Post-onboarding profile: no header buttons. The "Got it!"
+            // floating button at the bottom is the only action.
             null
           ) : (
             <>
@@ -1759,6 +1733,16 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
     : [];
   const topDestinations = allDestinations.slice(0, 3);
 
+  // Count destinations per country so renderDestinationCard can disambiguate
+  // siblings — e.g. two Costa Rica trips should render "Costa Rica, Pavones"
+  // and "Costa Rica, Santa Teresa" instead of two identical "Costa Rica" rows.
+  const countryCountMap = new Map<string, number>();
+  for (const d of allDestinations) {
+    const key = (d?.country || '').trim().toLowerCase();
+    if (!key) continue;
+    countryCountMap.set(key, (countryCountMap.get(key) || 0) + 1);
+  }
+
   // Get lifestyle keywords
   const lifestyleKeywords = profileData.lifestyle_keywords || [];
 
@@ -1844,9 +1828,27 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
     const { displayLabel, flagKey } = getDisplayLabelAndFlagKey(country);
     const isUSA = ['USA', 'United States', 'US', 'U.S.', 'U.S.A.'].includes(country);
     const primaryLocation = isUSA && state ? state : displayLabel;
-    const stateLower = primaryLocation.trim().toLowerCase();
-    const areaToShow = isUSA && areas.length > 0
-      ? (areas.find((a: any) => (a != null && String(a).trim().toLowerCase() !== stateLower)) ?? '')
+    // Show the area sub-line when (a) it's USA (existing behavior) or (b) the
+    // user has 2+ destinations in the same country — that's when seeing just
+    // "Costa Rica" twice would be ambiguous.
+    const sameCountryDuplicate =
+      (countryCountMap.get((country || '').trim().toLowerCase()) || 0) > 1;
+    // Reject area entries that are redundant with what we're already showing.
+    // Compare against primaryLocation, displayLabel and raw country — the
+    // places API often dumps the country/state name into area[] when the user
+    // typed a coarse query, which is exactly how "California, California"
+    // would slip through.
+    const redundant = new Set(
+      [primaryLocation, displayLabel, country]
+        .map((s) => (s || '').trim().toLowerCase())
+        .filter(Boolean),
+    );
+    const areaToShow = (isUSA || sameCountryDuplicate) && areas.length > 0
+      ? (areas.find((a: any) => {
+          if (a == null) return false;
+          const al = String(a).trim().toLowerCase();
+          return al.length > 0 && !redundant.has(al);
+        }) ?? '')
       : '';
     const displayName = areaToShow ? `${primaryLocation}, ${areaToShow}` : primaryLocation;
     const locationForAssets = isUSA && state ? state : flagKey;
@@ -2214,9 +2216,9 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
         </View>
 
         {/* Header Buttons */}
-        {fromOnboardingChat && isViewingOwnProfile && onEdit && onBack ? (
-          // Onboarding profile: no header buttons. The "Got it!" floating
-          // button at the bottom replaces both Edit and Save.
+        {fromOnboardingChat && isViewingOwnProfile ? (
+          // Post-onboarding profile: no header buttons. The "Got it!"
+          // floating button at the bottom is the only action.
           null
         ) : (
           <>
@@ -2646,9 +2648,9 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
         </>
       )}
 
-      {/* "Got it!" floating button — shown only on the post-Swelly
-          onboarding profile (own profile). Mirrors the Connect button
-          styling, fading overlay, and shimmer animation. */}
+      {/* "Got it!" floating button — shown only on the post-onboarding
+          profile (own profile). Mirrors the Connect button styling,
+          fading overlay, and shimmer animation. */}
       {fromOnboardingChat && isViewingOwnProfile && (
         <>
           <View style={styles.connectOverlay} pointerEvents="none">

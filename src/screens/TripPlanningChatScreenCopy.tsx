@@ -416,9 +416,51 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     });
   };
 
-  // Show step 3 tooltip as soon as the chat is ready — don't wait for the
-  // welcome messages to arrive.
-  const showTutorialStep3 = tutorial.currentStep === 3 && !isInitializing;
+  // First-entry trigger: starts the welcome guide the first time the user
+  // opens Swelly chat. Gated by the DB-backed `isSeen` flag (NULL means never
+  // shown) — survives reinstall, cross-device, and decouples "shown" from
+  // "completed" so abandoning the guide doesn't lock the trigger.
+  useEffect(() => {
+    // DEBUG: remove once first-open trigger is verified stable.
+    console.log('[Tutorial trigger]', {
+      visible,
+      isHydrated: tutorial.isHydrated,
+      isSeen: tutorial.isSeen,
+      isActive: tutorial.isActive,
+      currentStep: tutorial.currentStep,
+      isDemoUser,
+      mvpMode: process.env.EXPO_PUBLIC_MVP_MODE,
+    });
+    if (!visible) { console.log('[Tutorial trigger] bail: not visible'); return; }
+    if (!tutorial.isHydrated) { console.log('[Tutorial trigger] bail: not hydrated'); return; }
+    if (tutorial.isSeen) { console.log('[Tutorial trigger] bail: already seen'); return; }
+    if (tutorial.isActive) { console.log('[Tutorial trigger] bail: already active'); return; }
+    if (process.env.EXPO_PUBLIC_MVP_MODE === 'true') { console.log('[Tutorial trigger] bail: MVP mode'); return; }
+    if (isDemoUser) { console.log('[Tutorial trigger] bail: demo user'); return; }
+    console.log('[Tutorial trigger] FIRING goTo(3) + markSeen()');
+    tutorial.goTo(3);
+    // Mark seen immediately — not on "Done" — so that swipe-back / app kill
+    // mid-tutorial doesn't re-fire it next time. Best-effort DB write inside.
+    tutorial.markSeen();
+  }, [visible, tutorial.isHydrated, tutorial.isSeen, tutorial.isActive, isDemoUser]);
+
+  // Safety: if the tutorial activates while the topic-selection overlay is
+  // showing (e.g. on Replay re-entry where the persistent screen still has
+  // showTopicOverlay=true from a prior session), close the overlay so the
+  // tutorial Modal isn't covered by it. SwellyTopicOverlay uses RN <Modal>,
+  // which renders above the TutorialOverlay <View> and would otherwise win.
+  useEffect(() => {
+    if (tutorial.isActive && showTopicOverlay) {
+      setShowTopicOverlay(false);
+    }
+  }, [tutorial.isActive, showTopicOverlay]);
+
+  // Show step 3 tooltip as soon as the screen is mounted. The filters button
+  // is part of the screen chrome and is laid out before the edge-function
+  // call resolves, so its measureInWindow works from the first frame. Not
+  // waiting on `isInitializing` here means the tutorial stays visible even
+  // if the swelly-trip-planning edge function hangs or fails silently.
+  const showTutorialStep3 = tutorial.currentStep === 3;
 
   useEffect(() => {
     if (!showTutorialStep3) return;
@@ -984,11 +1026,15 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             ]);
             setTimeout(() => scrollToBottom(), 100);
           }, 2000);
-        } else if (tutorial.isActive) {
+        } else if (tutorial.isActive || (tutorial.isHydrated && !tutorial.isSeen)) {
           // During the welcome tutorial the topic-selection overlay would
           // cover the chat and block step 3's spotlight. Skip the overlay
           // and append the generic greeting + info directly, so the tutorial
           // can highlight the filters button immediately.
+          // The `!isSeen` branch wins a race with the tutorial trigger effect:
+          // on first mount both effects run in the same render, so `isActive`
+          // here is still its pre-`goTo(3)` value. Reading `isSeen` (DB-backed,
+          // hydrated before mount) keeps us out of the topic-overlay branch.
           const tsNow = () => new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
           setMessages([]);
           setIsInitializing(false);
@@ -2567,7 +2613,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         </Pressable>
       </Modal>
       <SwellyTopicOverlay
-        visible={showTopicOverlay}
+        visible={showTopicOverlay && !tutorial.isActive}
         onSelect={handleTopicSelected}
       />
       <ReportAISheet
@@ -2596,7 +2642,6 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
           if (tutorial.currentStep === 4) {
             tutorial.complete();
             setFiltersMenuVisible(false);
-            onChatComplete?.();
           } else {
             setFiltersMenuVisible(true);
             tutorial.advance();
