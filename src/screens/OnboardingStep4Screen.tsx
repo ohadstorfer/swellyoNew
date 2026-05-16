@@ -1038,7 +1038,7 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
             <Ionicons name="arrow-back" size={24} color="#222B30" />
           </TouchableOpacity>
 
-              <Text style={styles.stepText}>Step 4/4</Text>
+              <Text style={styles.stepText}>Finish up! 3/3</Text>
 
           <View style={styles.skipButton}>
             {/* Skip button is hidden in this step */}
@@ -1252,7 +1252,7 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
           >
             <View style={styles.gradientButton}>
               <Text style={styles.buttonText}>
-                {isUploading ? 'Uploading...' : isLoading ? 'Loading...' : 'Next'}
+                {isUploading ? 'Uploading...' : isLoading ? 'Loading...' : 'Create Profile'}
               </Text>
             </View>
           </TouchableOpacity>
@@ -1280,6 +1280,7 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
         setHomeBreak(selection);
         setShowHomeBreakSheet(false);
       }}
+      countryFilter={location}
     />
 
 

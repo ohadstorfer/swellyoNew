@@ -39,10 +39,7 @@ import { SwellyoTeamWelcome } from './SwellyoTeamWelcome';
 import { ProfileImage } from '../components/ProfileImage';
 import { ConversationListSkeleton } from '../components/skeletons';
 import { useConversationsStack } from '../navigation/ConversationsStack';
-import { useFocusEffect } from '@react-navigation/native';
 import { useTutorial } from '../context/TutorialContext';
-import { TutorialOverlay, type AnchorRect } from '../components/TutorialOverlay';
-import { TUTORIAL_ANCHOR_Y_OFFSET } from '../utils/tutorialAnchorOffset';
 
 interface ConversationsScreenProps {
   onConversationPress?: (conversationId: string) => void;
@@ -65,35 +62,6 @@ interface ConversationsScreenProps {
 }
 
 type FilterType = 'all' | 'surftrips';
-
-// Placeholder row shown during the welcome guide only when the user has zero
-// real conversations. Not tappable — the tutorial backdrop blocks interaction.
-const TUTORIAL_MOCK_CONVERSATION: Conversation = {
-  id: '__tutorial_mock__',
-  is_direct: true,
-  metadata: { __tutorialMock: true },
-  created_by: '',
-  created_at: new Date().toISOString(),
-  updated_at: new Date().toISOString(),
-  other_user: {
-    conversation_id: '__tutorial_mock__',
-    user_id: '__tutorial_mock_user__',
-    role: 'member',
-    joined_at: new Date().toISOString(),
-    preferences: {},
-    name: 'Reef Ryder',
-    profile_image_url: undefined,
-  },
-  last_message: {
-    id: '__tutorial_mock_msg__',
-    conversation_id: '__tutorial_mock__',
-    sender_id: '__tutorial_mock_user__',
-    body: "I'm going to be near the Bean later.",
-    type: 'text',
-    created_at: new Date().toISOString(),
-  } as any,
-  unread_count: 0,
-};
 
 // Cache helper functions are now imported from '../utils/userProfileCache'
 
@@ -206,7 +174,7 @@ export default function ConversationsScreen({
 
   // Logged-in user's surfer profile — loaded once at the provider level and
   // reused across navigations, so the header renders instantly on return.
-  const { profile: myProfile } = useUserProfile();
+  const { profile: myProfile, refresh: refreshMyProfile } = useUserProfile();
 
   // When wrapped by ConversationsStack (native only), push DM via navigation instead of local state.
   const stackCtx = useConversationsStack();
@@ -274,61 +242,9 @@ export default function ConversationsScreen({
   const scrollViewRef = useRef<ScrollView>(null);
   const loadMoreDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // ——— Welcome Guide (tutorial overlay) ———
+  // Welcome guide now lives entirely inside Swelly chat; only the replay
+  // button in the dev menu still touches this context here.
   const tutorial = useTutorial();
-  const { isDemoUser: onboardingIsDemoUser } = useOnboarding();
-  const firstRowRef = useRef<View>(null);
-  const swellyCardRef = useRef<View>(null);
-  const [firstRowRect, setFirstRowRect] = useState<AnchorRect | null>(null);
-  const [swellyCardRect, setSwellyCardRect] = useState<AnchorRect | null>(null);
-
-  const measureFirstRow = () => {
-    firstRowRef.current?.measureInWindow?.((x, y, width, height) => {
-      setFirstRowRect({ x, y: y + TUTORIAL_ANCHOR_Y_OFFSET, width, height });
-    });
-  };
-  const measureSwellyCard = () => {
-    swellyCardRef.current?.measureInWindow?.((x, y, width, height) => {
-      setSwellyCardRect({ x, y: y + TUTORIAL_ANCHOR_Y_OFFSET, width, height });
-    });
-  };
-
-  // Re-measure anchors whenever the active step changes.
-  useEffect(() => {
-    if (tutorial.currentStep === 1) {
-      const t = setTimeout(measureFirstRow, 80);
-      return () => clearTimeout(t);
-    }
-    if (tutorial.currentStep === 2) {
-      const t = setTimeout(measureSwellyCard, 80);
-      return () => clearTimeout(t);
-    }
-  }, [tutorial.currentStep]);
-
-  // Trigger check: fires every time the screen gains focus.
-  useFocusEffect(
-    React.useCallback(() => {
-      // The DM and other full-screen layers are rendered as overlays on top of
-      // this screen (not via navigation push), so this screen never blurs.
-      // Without this gate, dependency changes would re-run the callback and
-      // start the tutorial while the user is inside a DM/overlay.
-      if (!isListFrontmost) return;
-      if (!tutorial.isHydrated) return;
-      if (tutorial.isCompleted) return;
-      if (tutorial.isActive) return;
-      if (!tutorial.welcomeLineupDismissedAt) return;
-      if (isMVPMode || onboardingIsDemoUser) return;
-      tutorial.start();
-    }, [
-      isListFrontmost,
-      tutorial.isHydrated,
-      tutorial.isCompleted,
-      tutorial.isActive,
-      tutorial.welcomeLineupDismissedAt,
-      isMVPMode,
-      onboardingIsDemoUser,
-    ])
-  );
 
   // Refresh when the app returns from background so mute state (and other
   // server-side changes) from other devices propagate. Avoid useFocusEffect:
@@ -847,21 +763,17 @@ export default function ConversationsScreen({
     );
   };
 
-  const renderConversationItem = (conv: Conversation, index: number = -1) => {
+  const renderConversationItem = (conv: Conversation) => {
     // Skip rendering welcome conversation here - it's handled separately
     if (conv.metadata?.isWelcome) {
       return renderWelcomeConversation(conv);
     }
 
-    const isTutorialMock = conv.metadata?.__tutorialMock === true;
-    const isFirstTutorialAnchor = index === 0;
-    const isTutorialHighlight = isFirstTutorialAnchor && tutorial.currentStep === 1;
-
     const displayName = conv.is_direct
       ? conv.other_user?.name || 'Unknown User'
       : conv.title || 'Group Chat';
     const avatarUrl = conv.is_direct ? conv.other_user?.profile_image_url : null;
-    
+
     // Check if last message is an image or video
     const isLastMessageImage = conv.last_message?.type === 'image' || !!conv.last_message?.image_metadata;
     const isLastMessageVideo = conv.last_message?.type === 'video' || !!(conv.last_message as any)?.video_metadata;
@@ -875,18 +787,12 @@ export default function ConversationsScreen({
     return (
       <View
         key={conv.id}
-        ref={isFirstTutorialAnchor ? firstRowRef : undefined}
-        onLayout={isFirstTutorialAnchor ? measureFirstRow : undefined}
         collapsable={false}
-        style={isTutorialHighlight ? styles.tutorialHighlightWrapper : undefined}
       >
       <TouchableOpacity
-        style={[styles.conversationItem, isTutorialHighlight && styles.tutorialHighlightItem]}
-        onPress={() => {
-          if (isTutorialMock) return;
-          handleConversationPress(conv);
-        }}
-        activeOpacity={isTutorialMock ? 1 : 0.2}
+        style={styles.conversationItem}
+        onPress={() => handleConversationPress(conv)}
+        activeOpacity={0.2}
       >
         <View style={styles.conversationContent}>
           {/* Avatar with adv role icon */}
@@ -1000,15 +906,10 @@ export default function ConversationsScreen({
 
   const renderSwellyConversation = () => {
     return (
-      <View ref={swellyCardRef} onLayout={measureSwellyCard} collapsable={false}>
+      <View collapsable={false}>
       <TouchableOpacity
         style={styles.swellyContainer}
-        onPress={() => {
-          if (tutorial.currentStep === 2) {
-            tutorial.advance();
-          }
-          onSwellyPress?.();
-        }}
+        onPress={() => onSwellyPress?.()}
       >
         <View style={styles.conversationContent}>
           {/* Swelly avatar with ellipse design - matching ChatScreen */}
@@ -1061,9 +962,6 @@ export default function ConversationsScreen({
   };
 
   const filteredConversations = getFilteredConversations();
-  const conversationsForTutorial = (tutorial.isActive && filteredConversations.length === 0)
-    ? [TUTORIAL_MOCK_CONVERSATION]
-    : filteredConversations;
 
   // Set body and html background color on web to ensure dark background is visible
   // This hook MUST be called before any early returns to follow Rules of Hooks
@@ -1261,7 +1159,7 @@ export default function ConversationsScreen({
               <ConversationListSkeleton count={5} />
             ) : (
               <>
-                {conversationsForTutorial.map((conv, idx) => renderConversationItem(conv, idx))}
+                {filteredConversations.map((conv) => renderConversationItem(conv))}
                 
                 {/* Loading indicator for pagination */}
                 {isLoadingMoreConversations && (
@@ -1486,14 +1384,32 @@ export default function ConversationsScreen({
                   </TouchableOpacity>
                 )}
 
-                {/* Replay welcome guide — local mode only */}
+                {/* Replay welcome guide — local mode only. Clears the
+                    completed flag so the guide fires again the next time the
+                    user enters Swelly chat. */}
                 {process.env.EXPO_PUBLIC_LOCAL_MODE === 'true' && (
                   <TouchableOpacity
                     style={styles.menuItem}
-                    onPress={(e) => {
+                    onPress={async (e) => {
                       e.stopPropagation();
                       setShowMenu(false);
-                      tutorial.goTo(1);
+                      // 1. Clear local state + AS + DB. resetForReplay now
+                      //    awaits the DB clear so the column is verified NULL
+                      //    before we move on.
+                      await tutorial.resetForReplay();
+                      // 2. Refresh the local profile so the reconciliation
+                      //    effect sees welcome_guide_seen_at=NULL and isSeen
+                      //    stays false. Without this, the cached profile
+                      //    object still has the backfill timestamp and
+                      //    reconciliation can flip isSeen back to true.
+                      try {
+                        await refreshMyProfile();
+                      } catch (err) {
+                        console.warn('[ReplayGuide] profile refresh failed:', err);
+                      }
+                      // 3. Open Swelly chat — its auto-trigger fires with
+                      //    isSeen=false.
+                      onSwellyPress?.();
                     }}
                     activeOpacity={0.7}
                   >
@@ -1619,38 +1535,6 @@ export default function ConversationsScreen({
         </Modal>
       )}
 
-      {/* Welcome Guide — single overlay that swaps content between step 1 & 2 */}
-      <TutorialOverlay
-        visible={tutorial.currentStep === 1 || tutorial.currentStep === 2}
-        step={tutorial.currentStep === 2 ? 2 : 1}
-        total={4}
-        title={tutorial.currentStep === 2 ? 'Click Swelly' : 'Your DM space'}
-        body={
-          tutorial.currentStep === 2
-            ? 'To explore new surfers and connect with them'
-            : 'Chat with surfers and travelers you got connected to'
-        }
-        ctaLabel="Next"
-        onPressCta={() => {
-          if (tutorial.currentStep === 2) {
-            tutorial.advance();
-            onSwellyPress?.();
-          } else {
-            tutorial.advance();
-          }
-        }}
-        onAnchorPress={
-          tutorial.currentStep === 2
-            ? () => {
-                tutorial.advance();
-                onSwellyPress?.();
-              }
-            : undefined
-        }
-        anchorRect={tutorial.currentStep === 2 ? swellyCardRect : firstRowRect}
-        arrowDirection={tutorial.currentStep === 2 ? 'down' : 'up'}
-        arrowAlignment={tutorial.currentStep === 2 ? 'center' : 'right'}
-      />
     </Container>
   );
 
@@ -1861,16 +1745,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     borderBottomWidth: 1,
     borderBottomColor: '#EEEEEE',
-  },
-  tutorialHighlightWrapper: {
-    marginHorizontal: 16,
-    borderRadius: 16,
-    overflow: 'hidden',
-    backgroundColor: '#FFFFFF',
-  },
-  tutorialHighlightItem: {
-    borderBottomWidth: 0,
-    paddingHorizontal: 16,
   },
   conversationContent: {
     flexDirection: 'row',

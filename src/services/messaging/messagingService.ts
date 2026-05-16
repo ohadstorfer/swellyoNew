@@ -45,7 +45,7 @@ export interface ConversationMember {
 export const MUTE_ALWAYS_UNTIL = new Date('2099-01-01T00:00:00.000Z');
 
 // Message type
-export type MessageType = 'text' | 'image' | 'video' | 'audio';
+export type MessageType = 'text' | 'image' | 'video' | 'audio' | 'commitment_request';
 
 // Message upload state (client-side only, not stored in DB)
 export type MessageUploadState = 
@@ -88,6 +88,18 @@ export interface AudioMetadata {
   size_bytes: number;          // File size
 }
 
+// Commitment-request metadata. Carried on messages of type 'commitment_request'
+// to render the structured "X requested to be Committed" bubble in chat and to
+// power the host's Review-bar Approve flow.
+export interface CommitmentMetadata {
+  trip_id: string;
+  request_id: string;
+  trip_title?: string | null;
+  items: string[];             // e.g. ['flight_booked', 'insurance_sorted', 'something_else']
+  note?: string | null;
+  status?: 'pending' | 'approved' | 'superseded'; // mirrors group_trip_commitment_requests.status
+}
+
 // Snapshot of the message being replied to. Frozen at send time — edits to the
 // original message don't mutate this snapshot (matches WhatsApp behavior).
 export interface ReplyToSnapshot {
@@ -117,6 +129,9 @@ export interface Message {
 
   // Audio-specific fields (only populated for type='audio')
   audio_metadata?: AudioMetadata | null;
+
+  // Commitment-request fields (only populated for type='commitment_request')
+  commitment_metadata?: CommitmentMetadata | null;
 
   // Legacy attachments array (keep for backward compatibility)
   attachments: any[];
@@ -534,7 +549,7 @@ class MessagingService {
       
       const { data: messages, error } = await supabase
         .from('messages')
-        .select('id, conversation_id, sender_id, body, rendered_body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata, audio_metadata, reply_to_message_id, reply_to_snapshot')
+        .select('id, conversation_id, sender_id, body, rendered_body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata, audio_metadata, commitment_metadata, reply_to_message_id, reply_to_snapshot')
         .eq('conversation_id', conversationId)
         // Note: We include deleted messages so they can be displayed with "deleted" placeholder
         .gt('updated_at', lastSyncDate)
@@ -611,7 +626,7 @@ class MessagingService {
 
       let query = supabase
         .from('messages')
-        .select('id, conversation_id, sender_id, body, rendered_body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata, audio_metadata, reply_to_message_id, reply_to_snapshot')
+        .select('id, conversation_id, sender_id, body, rendered_body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata, audio_metadata, commitment_metadata, reply_to_message_id, reply_to_snapshot')
         .eq('conversation_id', conversationId)
         // Note: We include deleted messages so they can be displayed with "deleted" placeholder
         .order('created_at', { ascending: useAscending })
@@ -861,6 +876,51 @@ class MessagingService {
     } catch (e) {
       console.warn('[messagingService] postSystemMessage error:', e);
     }
+  }
+
+  /**
+   * Insert a 'commitment_request' message — the structured bubble surfaced in
+   * the host's DM with the member when the member submits their commitment.
+   *
+   * Returns the inserted row so the caller can link it back from
+   * group_trip_commitment_requests.message_id.
+   */
+  async postCommitmentRequest(
+    conversationId: string,
+    metadata: CommitmentMetadata,
+    body: string = ''
+  ): Promise<Message> {
+    if (!isSupabaseConfigured()) {
+      throw new Error('Supabase is not configured');
+    }
+    const { data: { session } } = await supabase.auth.getSession();
+    const senderId = session?.user?.id;
+    if (!senderId) throw new Error('Not authenticated');
+
+    const { data, error } = await supabase
+      .from('messages')
+      .insert({
+        conversation_id: conversationId,
+        sender_id: senderId,
+        body,
+        type: 'commitment_request',
+        commitment_metadata: metadata,
+        attachments: [],
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('[messagingService] postCommitmentRequest insert failed:', error);
+      throw error;
+    }
+
+    await supabase
+      .from('conversations')
+      .update({ updated_at: new Date().toISOString() })
+      .eq('id', conversationId);
+
+    return data as Message;
   }
 
   /**
@@ -1568,7 +1628,7 @@ class MessagingService {
             try {
               const { data: fullMessage, error } = await supabase
                 .from('messages')
-                .select('id, conversation_id, sender_id, body, rendered_body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata, audio_metadata, reply_to_message_id, reply_to_snapshot')
+                .select('id, conversation_id, sender_id, body, rendered_body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata, audio_metadata, commitment_metadata, reply_to_message_id, reply_to_snapshot')
                 .eq('id', newMessage.id)
                 .single();
               
@@ -1625,7 +1685,7 @@ class MessagingService {
           try {
             const { data: fullMessage, error } = await supabase
               .from('messages')
-              .select('id, conversation_id, sender_id, body, rendered_body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata, audio_metadata, reply_to_message_id, reply_to_snapshot')
+              .select('id, conversation_id, sender_id, body, rendered_body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata, audio_metadata, commitment_metadata, reply_to_message_id, reply_to_snapshot')
               .eq('id', updatedMessage.id)
               .single();
             
@@ -2397,7 +2457,7 @@ class MessagingService {
       const lastMessagesPromises = conversations.map(conv =>
         supabase
           .from('messages')
-          .select('id, conversation_id, sender_id, body, rendered_body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata, audio_metadata, reply_to_message_id, reply_to_snapshot')
+          .select('id, conversation_id, sender_id, body, rendered_body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata, audio_metadata, commitment_metadata, reply_to_message_id, reply_to_snapshot')
           .eq('conversation_id', conv.id)
           // Note: We include deleted messages so they can be displayed with "deleted" placeholder
           .order('created_at', { ascending: false })

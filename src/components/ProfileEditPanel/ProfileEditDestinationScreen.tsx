@@ -24,12 +24,14 @@ import { DestinationDurationInput } from '../DestinationDurationInput';
 import { PlaceChip } from '../PlaceChip';
 import { normalizeMapPickerPlace } from '../../utils/googlePlaceNormalizer';
 import { getDisplayLabelAndFlagKey } from '../../utils/destinationDisplay';
+import { getPlacesDestinationRegionCode } from '../../utils/placesDestinationRegionCode';
 import type { MapPickerPlace } from '../MapPickerModal';
 import type { DurationTimeUnit } from '../../utils/destinationDuration';
 import {
   computeDurationParts,
   decomposeDaysForDurationInput,
 } from '../../utils/destinationDuration';
+import { useDebounce } from '../../hooks/useDebounce';
 
 type Destination = {
   country: string;
@@ -66,35 +68,6 @@ const FIGMA = {
   buttonText: '#FFFFFF',
 };
 
-// Maps a country name to a Google Places region code so autocomplete results
-// stay scoped to the destination country. Mirrors the table in
-// DestinationMapPickerCard — kept local to avoid refactoring that file.
-const COUNTRY_TO_REGION: Record<string, string> = {
-  'USA': 'us',
-  'United States': 'us',
-  'Costa Rica': 'cr',
-  'Nicaragua': 'ni',
-  'Panama': 'pa',
-  'El Salvador': 'sv',
-  'Indonesia': 'id',
-  'Sri Lanka': 'lk',
-  'Philippines': 'ph',
-  'Australia': 'au',
-  'Mexico': 'mx',
-  'Brazil': 'br',
-  'Portugal': 'pt',
-  'France': 'fr',
-  'Spain': 'es',
-  'South Africa': 'za',
-  'Morocco': 'ma',
-  'Israel': 'il',
-  'Japan': 'jp',
-  'New Zealand': 'nz',
-  'Peru': 'pe',
-  'Ecuador': 'ec',
-  'Chile': 'cl',
-};
-
 const PLACES_AUTOCOMPLETE_URL = 'https://places.googleapis.com/v1/places:autocomplete';
 const PLACES_DETAILS_URL = 'https://places.googleapis.com/v1/places';
 const SUGGESTION_DEBOUNCE_MS = 250;
@@ -111,15 +84,6 @@ interface SavedPlace {
   placeId: string;
   displayLabel: string;
   areaParts?: string[];
-}
-
-function useDebounce<T>(value: T, delay: number): T {
-  const [debouncedValue, setDebouncedValue] = useState(value);
-  useEffect(() => {
-    const timer = setTimeout(() => setDebouncedValue(value), delay);
-    return () => clearTimeout(timer);
-  }, [value, delay]);
-  return debouncedValue;
 }
 
 async function fetchPlaceDetails(placeId: string, apiKey: string): Promise<MapPickerPlace | null> {
@@ -324,12 +288,7 @@ export const ProfileEditDestinationScreen: React.FC<Props> = ({
   const apiKey = process.env.EXPO_PUBLIC_GOOGLE_PLACES_API_KEY;
   const regionCode = useMemo(() => {
     const country = selectedCountry || destination?.country || '';
-    // California / Hawaii are stored as "United States - California" / etc.
-    // and aren't in COUNTRY_TO_REGION directly — fall back to "us" for those.
-    // Same handling as DestinationMapPickerCard in onboarding.
-    const { flagKey } = getDisplayLabelAndFlagKey(country);
-    if (flagKey === 'California' || flagKey === 'Hawaii') return 'us';
-    return COUNTRY_TO_REGION[country];
+    return getPlacesDestinationRegionCode(country);
   }, [selectedCountry, destination?.country]);
 
   const debouncedQuery = useDebounce(query, SUGGESTION_DEBOUNCE_MS);
@@ -477,11 +436,10 @@ export const ProfileEditDestinationScreen: React.FC<Props> = ({
       Alert.alert('Duration', 'Enter a valid time spent (a number greater than zero).');
       return;
     }
-    // Match the onboarding card: prefer the normalized address parts when we
-    // have them, otherwise fall back to the human-readable label.
-    const area = places.flatMap((p) =>
-      p.areaParts && p.areaParts.length > 0 ? p.areaParts : [p.displayLabel],
-    );
+    // One area string per place the user picked — the chip in the card maps 1:1
+    // to a single saved place. Don't expand `areaParts` (Google's formatted
+    // address parts) because that turns one pick into N badges.
+    const area = places.map((p) => p.displayLabel);
     try {
       if (onSave) {
         await onSave({

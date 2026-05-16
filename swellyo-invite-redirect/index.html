@@ -5,7 +5,20 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="robots" content="noindex" />
   <meta name="theme-color" content="#0E0E10" />
-  <title>Opening Swellyo…</title>
+  <title>You're invited to a Swellyo Surftrip</title>
+
+  <!-- Open Graph tags drive link previews in WhatsApp, iMessage, Telegram, etc. -->
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="You're invited to a Swellyo Surftrip" />
+  <meta property="og:description" content="Tap to open the trip in the Swellyo app." />
+  <meta property="og:image" content="https://swellyo-invite.netlify.app/swellyo-logo.png" />
+  <meta property="og:image:width" content="768" />
+  <meta property="og:image:height" content="768" />
+  <meta property="og:url" content="https://swellyo-invite.netlify.app/" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="You're invited to a Swellyo Surftrip" />
+  <meta name="twitter:description" content="Tap to open the trip in the Swellyo app." />
+  <meta name="twitter:image" content="https://swellyo-invite.netlify.app/swellyo-logo.png" />
 
   <!-- Universal Links / App Links handle the happy path before this page ever
        renders. This page only appears when the app is not installed. -->
@@ -119,23 +132,56 @@
       var MARKETING  = "https://www.swellyo.com";
 
       var ua = (navigator.userAgent || "").toLowerCase();
-      var dest;
-      if (/iphone|ipad|ipod/.test(ua)) {
-        dest = APP_STORE;
-      } else if (/android/.test(ua)) {
-        dest = PLAY_STORE;
-      } else {
-        dest = MARKETING;
-      }
-      // Defer the redirect a single frame so the page paint has a chance to
-      // render (avoids a white flash on slow connections). Universal Links
-      // intercept before this runs anyway when the app is installed.
-      requestAnimationFrame(function () {
-        window.location.replace(dest);
-      });
+      var isIOS = /iphone|ipad|ipod/.test(ua);
+      var isAndroid = /android/.test(ua);
 
-      // Expose for manual fallback button.
-      window.__swellyoDest = dest;
+      // Forward the surftrip params from this URL into the app via the
+      // custom scheme. The native Linking listener (AppContent.tsx) parses
+      // the query string and resolves the invite.
+      var query = (window.location.search || "").replace(/^\?/, "");
+      var schemeUrl = query ? "swellyo://?" + query : "swellyo://";
+
+      var storeUrl;
+      if (isIOS) storeUrl = APP_STORE;
+      else if (isAndroid) storeUrl = PLAY_STORE;
+      else storeUrl = MARKETING;
+      window.__swellyoDest = storeUrl;
+
+      // Desktop: skip scheme attempt, go straight to marketing.
+      if (!isIOS && !isAndroid) {
+        requestAnimationFrame(function () { window.location.replace(storeUrl); });
+        return;
+      }
+
+      // Mobile flow: try the custom scheme first. If the app is installed,
+      // it intercepts the navigation (page becomes hidden) and we cancel
+      // the fallback. If nothing happens within 1500ms, redirect to store.
+      // This works even when Universal Links don't fire (in-app browsers
+      // like WhatsApp, or iOS swcd cache issues).
+      var fired = false;
+      var fallbackTimer = null;
+      function fireStore() {
+        if (fired) return;
+        fired = true;
+        window.location.replace(storeUrl);
+      }
+      function cancelFallback() {
+        if (fallbackTimer) { clearTimeout(fallbackTimer); fallbackTimer = null; }
+      }
+      document.addEventListener("visibilitychange", function () {
+        if (document.hidden) cancelFallback();
+      });
+      window.addEventListener("pagehide", cancelFallback);
+      window.addEventListener("blur", cancelFallback);
+
+      requestAnimationFrame(function () {
+        fallbackTimer = setTimeout(fireStore, 1500);
+        try {
+          window.location.replace(schemeUrl);
+        } catch (e) {
+          fireStore();
+        }
+      });
     })();
   </script>
   <noscript>
@@ -146,8 +192,8 @@
   <div class="wrap">
     <img src="swellyo-logo.png" class="logo" alt="Swellyo" />
 
-    <h1>Opening Swellyo…</h1>
-    <p class="sub">Taking you to your surftrip. If you don't have the app yet, we'll send you to the store.</p>
+    <h1>You're invited to a surftrip</h1>
+    <p class="sub">Opening Swellyo. If you don't have the app yet, we'll send you to the store.</p>
 
     <div class="dots" aria-hidden="true">
       <span></span><span></span><span></span>

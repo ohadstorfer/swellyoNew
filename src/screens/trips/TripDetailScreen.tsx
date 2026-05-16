@@ -21,8 +21,19 @@ import {
   EnrichedJoinRequest,
   GroupTripJoinRequest,
   PackingItem,
-  GroupPackingItem,
-  GroupPackingClaim,
+  PersonalGearItem,
+  AdminUpdate,
+  EnrichedGearItem,
+  EnrichedGearRequest,
+  listGearItems,
+  addGearItem,
+  updateGearItem,
+  deleteGearItem,
+  setMyGearClaim,
+  listGearRequests,
+  createGearRequest,
+  approveGearRequest,
+  declineGearRequest,
   getTripById,
   getTripParticipants,
   getMyJoinRequest,
@@ -34,17 +45,28 @@ import {
   cancelTrip,
   leaveTrip,
   removeParticipant,
-  setTripCommitment,
+  submitCommitment,
+  type CommitmentItem,
+  type CommitmentStatus,
   setTripPackingList,
   setMyPackingList,
-  setTripGroupPackingList,
-  listTripGroupPackingClaims,
-  claimGroupPackingItem,
-  unclaimGroupPackingItem,
+  setMyPersonalGearList,
+  listAdminUpdates,
+  addAdminUpdate,
+  updateAdminUpdate,
+  deleteAdminUpdate,
 } from '../../services/trips/groupTripsService';
 import ParticipantCard from '../../components/trips/ParticipantCard';
 import PendingRequestCard from '../../components/trips/PendingRequestCard';
 import TripParticipantsBreakdown from '../../components/trips/TripParticipantsBreakdown';
+import { GearItemCard } from '../../components/trips/gear/GearItemCard';
+import { GearItemSheet } from '../../components/trips/gear/GearItemSheet';
+import { RequestGearSheet } from '../../components/trips/gear/RequestGearSheet';
+import { ManageGearSheet } from '../../components/trips/gear/ManageGearSheet';
+import { GearRequestsSheet } from '../../components/trips/gear/GearRequestsSheet';
+import { CommitmentSheet } from '../../components/trips/commitment/CommitmentSheet';
+import { RequestToJoinSheet } from '../../components/trips/joinRequest/RequestToJoinSheet';
+import { supabase } from '../../config/supabase';
 import { messagingService } from '../../services/messaging/messagingService';
 
 const IS_LOCAL_MODE = process.env.EXPO_PUBLIC_LOCAL_MODE === 'true';
@@ -83,6 +105,19 @@ const formatDates = (trip: GroupTrip): string => {
 const formatDestination = (trip: GroupTrip): string => {
   const parts = [trip.destination_area, trip.destination_country].filter(Boolean);
   return parts.length > 0 ? parts.join(', ') : 'Destination TBD';
+};
+
+const formatRelativeTime = (iso: string): string => {
+  const diff = Date.now() - new Date(iso).getTime();
+  const sec = Math.max(0, Math.floor(diff / 1000));
+  if (sec < 60) return 'just now';
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min} minute${min === 1 ? '' : 's'} ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr} hour${hr === 1 ? '' : 's'} ago`;
+  const day = Math.floor(hr / 24);
+  if (day < 7) return `${day} day${day === 1 ? '' : 's'} ago`;
+  return new Date(iso).toLocaleDateString();
 };
 
 // ---------------------------------------------------------------------------
@@ -172,19 +207,39 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   const [removingUserId, setRemovingUserId] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [leaving, setLeaving] = useState(false);
-  const [togglingCommit, setTogglingCommit] = useState(false);
+  const [commitSheetOpen, setCommitSheetOpen] = useState(false);
+  const [joinSheetOpen, setJoinSheetOpen] = useState(false);
+  const [myJoinProfile, setMyJoinProfile] = useState<{
+    name: string | null;
+    avatarUrl: string | null;
+    surfLevel: string | null;
+  } | null>(null);
   const [editingPacking, setEditingPacking] = useState(false);
   const [packingDraft, setPackingDraft] = useState('');
   const [savingPacking, setSavingPacking] = useState(false);
+  // Member-private gear: each user adds/removes only their own; host items
+  // live in trip.packing_list and aren't editable from here.
+  const [addingPersonalItem, setAddingPersonalItem] = useState(false);
+  const [personalItemDraft, setPersonalItemDraft] = useState('');
+  const [savingPersonalItem, setSavingPersonalItem] = useState(false);
   const [muted, setMuted] = useState(false);
 
-  // Group packing list state
-  const [packingView, setPackingView] = useState<'personal' | 'group'>('personal');
-  const [groupClaims, setGroupClaims] = useState<GroupPackingClaim[]>([]);
-  const [editingGroupPacking, setEditingGroupPacking] = useState(false);
-  const [groupPackingDraft, setGroupPackingDraft] = useState<GroupPackingItem[]>([]);
-  const [savingGroupPacking, setSavingGroupPacking] = useState(false);
-  const [claimingItem, setClaimingItem] = useState<string | null>(null);
+  // Group Gear — shared items with required quantities + request flow.
+  // Replaces the old (group_packing_list jsonb + group_trip_group_packing_claims) model.
+  const [gearItems, setGearItems] = useState<EnrichedGearItem[]>([]);
+  const [gearRequests, setGearRequests] = useState<EnrichedGearRequest[]>([]); // host only
+  const [gearItemSheetItem, setGearItemSheetItem] = useState<EnrichedGearItem | null>(null);
+  const [requestSheetVisible, setRequestSheetVisible] = useState(false);
+  const [manageSheetVisible, setManageSheetVisible] = useState(false);
+  const [requestsSheetVisible, setRequestsSheetVisible] = useState(false);
+  const [processingGearRequestId, setProcessingGearRequestId] = useState<string | null>(null);
+
+  // Admin updates — host-posted free-text lines, visible to all members.
+  const [adminUpdates, setAdminUpdates] = useState<AdminUpdate[]>([]);
+  const [addingUpdate, setAddingUpdate] = useState(false);
+  const [updateDraft, setUpdateDraft] = useState('');
+  const [editingUpdateId, setEditingUpdateId] = useState<string | null>(null);
+  const [savingUpdate, setSavingUpdate] = useState(false);
 
   const isHost = !!trip && !!currentUserId && trip.host_id === currentUserId;
   const isApprovedMember = useMemo(
@@ -197,64 +252,112 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     () => participants.some(p => p.role !== 'host'),
     [participants]
   );
-  const myCommitted = useMemo(
-    () => !!participants.find(p => p.user_id === currentUserId)?.committed,
+  const meParticipant = useMemo(
+    () => participants.find(p => p.user_id === currentUserId),
     [participants, currentUserId]
   );
+  const myCommitmentStatus: CommitmentStatus = meParticipant?.commitment_status ?? 'none';
+  const myCommitmentItems = meParticipant?.commitment_items ?? [];
+  const myCommitmentNote = meParticipant?.commitment_note ?? null;
   const myPackingList = useMemo<PackingItem[]>(
     () => participants.find(p => p.user_id === currentUserId)?.packing_list ?? [],
     [participants, currentUserId]
   );
-  const claimsByItem = useMemo(() => {
-    const m = new Map<string, GroupPackingClaim[]>();
-    groupClaims.forEach(c => {
-      const arr = m.get(c.item_name) ?? [];
-      arr.push(c);
-      m.set(c.item_name, arr);
-    });
-    return m;
-  }, [groupClaims]);
-
+  const myPersonalGear = useMemo<PersonalGearItem[]>(
+    () => participants.find(p => p.user_id === currentUserId)?.personal_gear ?? [],
+    [participants, currentUserId]
+  );
+  const gearTotalCount = (trip?.packing_list?.length ?? 0) + myPersonalGear.length;
+  const gearDoneCount =
+    myPackingList.filter(it => it.done && (trip?.packing_list ?? []).includes(it.name)).length +
+    myPersonalGear.filter(it => it.done).length;
   const loadAll = useCallback(async () => {
-    const [tripData, participantsData, claimsData] = await Promise.all([
+    const [tripData, participantsData, updatesData, gearItemsData] = await Promise.all([
       getTripById(tripId),
       getTripParticipants(tripId),
-      listTripGroupPackingClaims(tripId),
+      listAdminUpdates(tripId),
+      listGearItems(tripId, currentUserId),
     ]);
     setTrip(tripData);
     setParticipants(participantsData);
-    setGroupClaims(claimsData);
+    setAdminUpdates(updatesData);
+    setGearItems(gearItemsData);
 
     if (currentUserId && tripData) {
       const userIsHost = tripData.host_id === currentUserId;
       if (userIsHost) {
-        const pending = await listPendingRequests(tripId);
+        const [pending, gearReqs] = await Promise.all([
+          listPendingRequests(tripId),
+          listGearRequests(tripId, 'pending'),
+        ]);
         setPendingRequests(pending);
+        setGearRequests(gearReqs);
         setMyRequest(null);
       } else {
         const req = await getMyJoinRequest(tripId, currentUserId);
         setMyRequest(req);
         setPendingRequests([]);
+        setGearRequests([]);
       }
     }
     setLoading(false);
   }, [tripId, currentUserId]);
 
+  const refreshGear = useCallback(async () => {
+    const items = await listGearItems(tripId, currentUserId);
+    setGearItems(items);
+  }, [tripId, currentUserId]);
+
+  const refreshGearRequests = useCallback(async () => {
+    if (!isHost) return;
+    const reqs = await listGearRequests(tripId, 'pending');
+    setGearRequests(reqs);
+  }, [tripId, isHost]);
+
   useEffect(() => {
     loadAll();
   }, [loadAll]);
 
+  // Lazy-fetch the user's own profile preview the first time it could be shown
+  // in the join sheet. Skipped for host/approved-member; cached after first load.
+  useEffect(() => {
+    let cancelled = false;
+    if (!currentUserId || isHost || isApprovedMember || myJoinProfile) return;
+    supabase
+      .from('surfers')
+      .select('name, profile_image_url, surf_level_category')
+      .eq('user_id', currentUserId)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (cancelled || !data) return;
+        setMyJoinProfile({
+          name: (data as any).name ?? null,
+          avatarUrl: (data as any).profile_image_url ?? null,
+          surfLevel: (data as any).surf_level_category ?? null,
+        });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUserId, isHost, isApprovedMember, myJoinProfile]);
+
   // -------------------------------------------------------------------------
   // Actions
   // -------------------------------------------------------------------------
-  const handleRequestToJoin = async () => {
+  const handleOpenJoinSheet = () => {
+    if (!currentUserId) return;
+    setJoinSheetOpen(true);
+  };
+
+  const handleSubmitJoinRequest = async (note: string) => {
     if (!currentUserId) return;
     setSubmitting(true);
     try {
-      const newReq = await requestToJoinTrip(tripId, currentUserId);
+      const newReq = await requestToJoinTrip(tripId, currentUserId, note || undefined);
       setMyRequest(newReq);
     } catch (e: any) {
       Alert.alert('Could not send request', e?.message || 'Please try again.');
+      throw e;
     } finally {
       setSubmitting(false);
     }
@@ -421,20 +524,49 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
 
   const handleToggleMute = () => setMuted(m => !m);
 
-  const handleToggleCommit = async () => {
+  const handleOpenCommitSheet = () => {
     if (!currentUserId) return;
-    const next = !myCommitted;
-    // Optimistic flip
-    setParticipants(prev => prev.map(p => (p.user_id === currentUserId ? { ...p, committed: next } : p)));
-    setTogglingCommit(true);
+    setCommitSheetOpen(true);
+  };
+
+  const handleSubmitCommitment = async (items: CommitmentItem[], note: string) => {
+    if (!currentUserId) return;
+    // Optimistic: flip the local participant to pending so the button updates
+    // immediately. If the request fails we restore the prior status.
+    const prior = {
+      status: myCommitmentStatus,
+      items: myCommitmentItems,
+      note: myCommitmentNote,
+    };
+    setParticipants(prev =>
+      prev.map(p =>
+        p.user_id === currentUserId
+          ? {
+              ...p,
+              commitment_status: 'pending',
+              commitment_items: items,
+              commitment_note: note || null,
+            }
+          : p
+      )
+    );
     try {
-      await setTripCommitment(tripId, currentUserId, next);
+      await submitCommitment(tripId, currentUserId, items, note || null);
     } catch (e: any) {
-      // Revert on failure
-      setParticipants(prev => prev.map(p => (p.user_id === currentUserId ? { ...p, committed: !next } : p)));
-      Alert.alert('Could not update', e?.message || 'Please try again.');
-    } finally {
-      setTogglingCommit(false);
+      setParticipants(prev =>
+        prev.map(p =>
+          p.user_id === currentUserId
+            ? {
+                ...p,
+                commitment_status: prior.status,
+                commitment_items: prior.items,
+                commitment_note: prior.note,
+              }
+            : p
+        )
+      );
+      Alert.alert('Could not submit', e?.message || 'Please try again.');
+      throw e;
     }
   };
 
@@ -456,6 +588,77 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         prev.map(p => (p.user_id === currentUserId ? { ...p, packing_list: current } : p))
       );
       Alert.alert('Could not update', e?.message || 'Please try again.');
+    }
+  };
+
+  // -------------------------------------------------------------------------
+  // Personal gear (member-private) handlers
+  // -------------------------------------------------------------------------
+  const persistPersonalGear = async (next: PersonalGearItem[], previous: PersonalGearItem[]) => {
+    if (!currentUserId) return;
+    // Optimistic
+    setParticipants(prev =>
+      prev.map(p => (p.user_id === currentUserId ? { ...p, personal_gear: next } : p))
+    );
+    try {
+      await setMyPersonalGearList(tripId, currentUserId, next);
+    } catch (e: any) {
+      setParticipants(prev =>
+        prev.map(p => (p.user_id === currentUserId ? { ...p, personal_gear: previous } : p))
+      );
+      Alert.alert('Could not update', e?.message || 'Please try again.');
+    }
+  };
+
+  const handleTogglePersonalItem = (itemName: string) => {
+    const current = myPersonalGear;
+    const next = current.map(it => (it.name === itemName ? { ...it, done: !it.done } : it));
+    persistPersonalGear(next, current);
+  };
+
+  const handleRemovePersonalItem = (itemName: string) => {
+    const current = myPersonalGear;
+    const next = current.filter(it => it.name !== itemName);
+    persistPersonalGear(next, current);
+  };
+
+  const handleStartAddPersonalItem = () => {
+    setPersonalItemDraft('');
+    setAddingPersonalItem(true);
+  };
+
+  const handleCancelAddPersonalItem = () => {
+    setAddingPersonalItem(false);
+    setPersonalItemDraft('');
+  };
+
+  const handleSavePersonalItem = async () => {
+    if (!currentUserId) return;
+    const name = personalItemDraft.trim();
+    if (!name) {
+      handleCancelAddPersonalItem();
+      return;
+    }
+    // Reject duplicates against host list or my own list.
+    const hostNames = (trip?.packing_list ?? []).map(n => n.toLowerCase());
+    const myNames = myPersonalGear.map(i => i.name.toLowerCase());
+    if (hostNames.includes(name.toLowerCase()) || myNames.includes(name.toLowerCase())) {
+      Alert.alert('Already on your list', `"${name}" is already in your gear.`);
+      return;
+    }
+    setSavingPersonalItem(true);
+    const current = myPersonalGear;
+    const next: PersonalGearItem[] = [...current, { name, done: false }];
+    try {
+      await setMyPersonalGearList(tripId, currentUserId, next);
+      setParticipants(prev =>
+        prev.map(p => (p.user_id === currentUserId ? { ...p, personal_gear: next } : p))
+      );
+      handleCancelAddPersonalItem();
+    } catch (e: any) {
+      Alert.alert('Could not add', e?.message || 'Please try again.');
+    } finally {
+      setSavingPersonalItem(false);
     }
   };
 
@@ -495,105 +698,143 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     }
   };
 
-  const handleToggleGroupClaim = async (item: GroupPackingItem) => {
+  // -------------------------------------------------------------------------
+  // Group Gear handlers
+  // -------------------------------------------------------------------------
+  const handleSetGearClaim = async (itemId: string, quantity: number) => {
     if (!currentUserId) return;
-    const claims = claimsByItem.get(item.name) ?? [];
-    const myClaim = claims.find(c => c.user_id === currentUserId);
-    const otherClaims = claims.filter(c => c.user_id !== currentUserId);
-
-    // Single + already taken by someone else: button is disabled in the UI,
-    // but guard here too in case a stale render slips through.
-    if (item.single && !myClaim && otherClaims.length > 0) return;
-
-    setClaimingItem(item.name);
     try {
-      if (myClaim) {
-        // Optimistic remove
-        setGroupClaims(prev =>
-          prev.filter(c => !(c.item_name === item.name && c.user_id === currentUserId))
-        );
-        try {
-          await unclaimGroupPackingItem(tripId, currentUserId, item.name);
-        } catch (e: any) {
-          setGroupClaims(prev => [...prev, myClaim]);
-          throw e;
-        }
-      } else {
-        // Optimistic add — will be replaced by server name/avatar after refetch
-        const myProfile = participants.find(p => p.user_id === currentUserId);
-        const optimistic: GroupPackingClaim = {
-          item_name: item.name,
-          user_id: currentUserId,
-          user_name: myProfile?.name ?? null,
-          user_profile_image_url: myProfile?.profile_image_url ?? null,
-        };
-        setGroupClaims(prev => [...prev, optimistic]);
-        try {
-          await claimGroupPackingItem(tripId, currentUserId, item.name);
-        } catch (e: any) {
-          setGroupClaims(prev =>
-            prev.filter(c => !(c.item_name === item.name && c.user_id === currentUserId))
-          );
-          throw e;
-        }
-      }
+      await setMyGearClaim(itemId, currentUserId, quantity);
+      await refreshGear();
     } catch (e: any) {
       Alert.alert('Could not update', e?.message || 'Please try again.');
-    } finally {
-      setClaimingItem(null);
     }
   };
 
-  const handleStartEditGroupPacking = () => {
-    if (!trip) return;
-    setGroupPackingDraft((trip.group_packing_list ?? []).map(i => ({ ...i })));
-    setEditingGroupPacking(true);
-  };
-
-  const handleCancelEditGroupPacking = () => {
-    setEditingGroupPacking(false);
-    setGroupPackingDraft([]);
-  };
-
-  const updateGroupDraftItem = (idx: number, patch: Partial<GroupPackingItem>) => {
-    setGroupPackingDraft(prev => prev.map((it, i) => (i === idx ? { ...it, ...patch } : it)));
-  };
-
-  const removeGroupDraftItem = (idx: number) => {
-    setGroupPackingDraft(prev => prev.filter((_, i) => i !== idx));
-  };
-
-  const addGroupDraftItem = () => {
-    setGroupPackingDraft(prev => [...prev, { name: '', single: false }]);
-  };
-
-  const handleSaveGroupPacking = async () => {
-    if (!trip) return;
-    setSavingGroupPacking(true);
+  const handleSubmitGearRequest = async (itemName: string, note: string) => {
+    if (!currentUserId) return;
     try {
-      await setTripGroupPackingList(tripId, groupPackingDraft);
-      const [tripData, claimsData] = await Promise.all([
-        getTripById(tripId),
-        listTripGroupPackingClaims(tripId),
-      ]);
-      if (tripData) setTrip(tripData);
-      setGroupClaims(claimsData);
-      setEditingGroupPacking(false);
-      setGroupPackingDraft([]);
+      await createGearRequest(tripId, currentUserId, itemName, note || undefined);
+      Alert.alert('Request sent', 'The host will review your request.');
     } catch (e: any) {
-      Alert.alert('Could not save list', e?.message || 'Please try again.');
-    } finally {
-      setSavingGroupPacking(false);
+      Alert.alert('Could not send request', e?.message || 'Please try again.');
+      throw e;
     }
   };
 
-  const handleSwitchPackingView = (next: 'personal' | 'group') => {
-    // Defensive: cancel an open editor on the OTHER view to avoid a hidden draft.
-    if (next !== packingView) {
-      if (editingPacking) handleCancelEditPacking();
-      if (editingGroupPacking) handleCancelEditGroupPacking();
+  const handleSaveGearItem = async (
+    patch: { name: string; needed_qty: number },
+    itemId?: string
+  ) => {
+    if (!currentUserId) return;
+    if (itemId) {
+      await updateGearItem(itemId, patch);
+    } else {
+      await addGearItem(tripId, currentUserId, patch.name, patch.needed_qty);
     }
-    setPackingView(next);
+    await refreshGear();
+  };
+
+  const handleDeleteGearItem = async (itemId: string) => {
+    await deleteGearItem(itemId);
+    await refreshGear();
+  };
+
+  const handleApproveGearRequest = async (request: EnrichedGearRequest) => {
+    setProcessingGearRequestId(request.id);
+    try {
+      await approveGearRequest(request.id, 1);
+      await Promise.all([refreshGear(), refreshGearRequests()]);
+    } catch (e: any) {
+      Alert.alert('Could not approve', e?.message || 'Please try again.');
+    } finally {
+      setProcessingGearRequestId(null);
+    }
+  };
+
+  const handleDeclineGearRequest = async (request: EnrichedGearRequest) => {
+    setProcessingGearRequestId(request.id);
+    try {
+      await declineGearRequest(request.id);
+      await refreshGearRequests();
+    } catch (e: any) {
+      Alert.alert('Could not decline', e?.message || 'Please try again.');
+    } finally {
+      setProcessingGearRequestId(null);
+    }
+  };
+
+  // -------------------------------------------------------------------------
+  // Admin updates handlers
+  // -------------------------------------------------------------------------
+  const handleStartAddUpdate = () => {
+    setEditingUpdateId(null);
+    setUpdateDraft('');
+    setAddingUpdate(true);
+  };
+
+  const handleCancelUpdateDraft = () => {
+    setAddingUpdate(false);
+    setEditingUpdateId(null);
+    setUpdateDraft('');
+  };
+
+  const handleSubmitUpdate = async () => {
+    if (!currentUserId) return;
+    const body = updateDraft.trim();
+    if (!body) {
+      handleCancelUpdateDraft();
+      return;
+    }
+    setSavingUpdate(true);
+    try {
+      if (editingUpdateId) {
+        const updated = await updateAdminUpdate(editingUpdateId, body);
+        setAdminUpdates(prev => prev.map(u => (u.id === updated.id ? updated : u)));
+      } else {
+        const created = await addAdminUpdate(tripId, currentUserId, body);
+        setAdminUpdates(prev => [created, ...prev]);
+      }
+      handleCancelUpdateDraft();
+    } catch (e: any) {
+      Alert.alert('Could not save update', e?.message || 'Please try again.');
+    } finally {
+      setSavingUpdate(false);
+    }
+  };
+
+  const handleEditUpdate = (update: AdminUpdate) => {
+    setAddingUpdate(false);
+    setEditingUpdateId(update.id);
+    setUpdateDraft(update.body);
+  };
+
+  const handleDeleteUpdate = (update: AdminUpdate) => {
+    Alert.alert('Delete update', 'This update will be removed for everyone.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await deleteAdminUpdate(update.id);
+            setAdminUpdates(prev => prev.filter(u => u.id !== update.id));
+            if (editingUpdateId === update.id) handleCancelUpdateDraft();
+          } catch (e: any) {
+            Alert.alert('Could not delete', e?.message || 'Please try again.');
+          }
+        },
+      },
+    ]);
+  };
+
+  const handleLongPressUpdate = (update: AdminUpdate) => {
+    if (!isHost) return;
+    Alert.alert('Update', undefined, [
+      { text: 'Edit', onPress: () => handleEditUpdate(update) },
+      { text: 'Delete', style: 'destructive', onPress: () => handleDeleteUpdate(update) },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
   };
 
   // -------------------------------------------------------------------------
@@ -804,44 +1045,81 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           </Section>
         )}
 
-        {/* Packing list — Personal (per-user done state) and Group (claim-able items) */}
-        {(((trip.packing_list && trip.packing_list.length > 0) ||
-           (trip.group_packing_list && trip.group_packing_list.length > 0) ||
-           (isHost && !isCancelled))) && (
+        {/* Group Gear — shared items the host wants the group to bring. */}
+        {(gearItems.length > 0 || isHost) && !isCancelled && (
+          <View style={styles.section}>
+            <View style={styles.gearHeaderRow}>
+              <View>
+                <Text style={styles.gearHeaderTitle}>GROUP GEAR</Text>
+                <Text style={styles.gearHeaderSub}>Shared items for the trip</Text>
+              </View>
+              {isHost && (
+                <TouchableOpacity
+                  style={styles.gearManageBtn}
+                  onPress={() => setManageSheetVisible(true)}
+                >
+                  <Text style={styles.gearManageBtnText}>Manage</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {gearItems.length === 0 ? (
+              <Text style={styles.muted}>
+                {isHost ? 'No items yet — tap Manage to add some.' : 'No items yet.'}
+              </Text>
+            ) : (
+              gearItems.map(item => (
+                <GearItemCard
+                  key={item.id}
+                  item={item}
+                  onPress={() => setGearItemSheetItem(item)}
+                />
+              ))
+            )}
+
+            {(isApprovedMember || isHost) && (
+              <TouchableOpacity
+                style={styles.requestLinkBtn}
+                onPress={() => setRequestSheetVisible(true)}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.requestLinkText}>Missing something? Request item</Text>
+              </TouchableOpacity>
+            )}
+
+            {isHost && gearRequests.length > 0 && (
+              <TouchableOpacity
+                style={styles.gearReqsBadge}
+                onPress={() => setRequestsSheetVisible(true)}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="notifications-outline" size={16} color="#222B30" />
+                <Text style={styles.gearReqsBadgeText}>
+                  {gearRequests.length} pending {gearRequests.length === 1 ? 'request' : 'requests'}
+                </Text>
+                <Ionicons name="chevron-forward" size={16} color="#222B30" />
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
+
+        {/* Personal packing list — per-user items with done state. */}
+        {((trip.packing_list && trip.packing_list.length > 0) || (isHost && !isCancelled)) && (
           <View style={styles.section}>
             <View style={styles.packingHeader}>
-              <Text style={styles.sectionTitle}>Packing list</Text>
-              {isHost && !isCancelled && !editingPacking && !editingGroupPacking && (
+              <Text style={styles.sectionTitle}>Your gear</Text>
+              {isHost && !isCancelled && !editingPacking && (
                 <TouchableOpacity
-                  onPress={packingView === 'personal' ? handleStartEditPacking : handleStartEditGroupPacking}
+                  onPress={handleStartEditPacking}
                   hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                  accessibilityLabel={`Edit ${packingView} packing list`}
+                  accessibilityLabel="Edit personal packing list"
                 >
                   <Ionicons name="create-outline" size={18} color="#7B7B7B" />
                 </TouchableOpacity>
               )}
             </View>
 
-            {/* View toggle */}
-            <View style={styles.packingToggleRow}>
-              {(['personal', 'group'] as const).map(v => {
-                const active = packingView === v;
-                return (
-                  <TouchableOpacity
-                    key={v}
-                    style={[styles.packingToggleChip, active && styles.packingToggleChipActive]}
-                    onPress={() => handleSwitchPackingView(v)}
-                  >
-                    <Text style={[styles.packingToggleText, active && styles.packingToggleTextActive]}>
-                      {v === 'personal' ? 'Personal' : 'Group'}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-
-            {/* PERSONAL VIEW */}
-            {packingView === 'personal' && (
+            {(
               editingPacking ? (
                 <>
                   <Text style={styles.muted}>One item per line.</Text>
@@ -876,18 +1154,26 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
                     </TouchableOpacity>
                   </View>
                 </>
-              ) : trip.packing_list && trip.packing_list.length > 0 ? (
+              ) : (
                 <>
-                  {(isHost || isApprovedMember) ? (
-                    <Text style={styles.muted}>Tap an item to mark it done.</Text>
-                  ) : null}
-                  {trip.packing_list.map(name => {
+                  {gearTotalCount > 0 ? (
+                    <Text style={styles.muted}>
+                      {gearTotalCount} items · {gearDoneCount} done
+                    </Text>
+                  ) : (
+                    <Text style={styles.muted}>
+                      {isHost ? 'No items yet — tap the pencil to add suggestions.' : 'No items yet — tap "Add item" to start.'}
+                    </Text>
+                  )}
+
+                  {/* Host items — shown to all participants with the "Host suggestion" tag. */}
+                  {(trip.packing_list ?? []).map(name => {
                     const myItem = myPackingList.find(it => it.name === name);
                     const done = !!myItem?.done;
                     const canToggle = !!currentUserId && (isHost || isApprovedMember) && !isCancelled;
                     return (
                       <TouchableOpacity
-                        key={name}
+                        key={`host-${name}`}
                         style={styles.packingRow}
                         onPress={() => canToggle && handleTogglePackingItem(name)}
                         disabled={!canToggle}
@@ -901,180 +1187,134 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
                         <Text style={[styles.packingItemText, done && styles.packingItemTextDone]}>
                           {name}
                         </Text>
+                        <Text style={styles.hostSuggestionTag}>Host suggestion</Text>
                       </TouchableOpacity>
                     );
                   })}
+
+                  {/* Personal items — visible only to the user who added them. Trash icon to remove. */}
+                  {myPersonalGear.map(item => {
+                    const canToggle = !!currentUserId && (isHost || isApprovedMember) && !isCancelled;
+                    return (
+                      <View key={`mine-${item.name}`} style={styles.packingRow}>
+                        <TouchableOpacity
+                          style={styles.personalToggleHit}
+                          onPress={() => canToggle && handleTogglePersonalItem(item.name)}
+                          disabled={!canToggle}
+                          activeOpacity={canToggle ? 0.6 : 1}
+                        >
+                          <Ionicons
+                            name={item.done ? 'checkbox' : 'square-outline'}
+                            size={20}
+                            color={item.done ? '#34C759' : '#B0B0B0'}
+                          />
+                          <Text
+                            style={[styles.packingItemText, item.done && styles.packingItemTextDone]}
+                          >
+                            {item.name}
+                          </Text>
+                        </TouchableOpacity>
+                        {canToggle && (
+                          <TouchableOpacity
+                            onPress={() => handleRemovePersonalItem(item.name)}
+                            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                            accessibilityLabel={`Remove ${item.name}`}
+                          >
+                            <Ionicons name="trash-outline" size={18} color="#C0392B" />
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    );
+                  })}
+
+                  {/* Inline "+ Add item" editor for the current user. */}
+                  {(isHost || isApprovedMember) && !isCancelled && (
+                    addingPersonalItem ? (
+                      <View style={styles.personalAddEditor}>
+                        <TextInput
+                          style={styles.personalAddInput}
+                          value={personalItemDraft}
+                          onChangeText={setPersonalItemDraft}
+                          placeholder="e.g. passport, phone charger"
+                          placeholderTextColor="#9AA0A6"
+                          autoFocus
+                          editable={!savingPersonalItem}
+                          onSubmitEditing={handleSavePersonalItem}
+                          returnKeyType="done"
+                        />
+                        <View style={styles.personalAddActions}>
+                          <TouchableOpacity
+                            onPress={handleCancelAddPersonalItem}
+                            disabled={savingPersonalItem}
+                            style={styles.personalAddCancel}
+                          >
+                            <Text style={styles.personalAddCancelText}>Cancel</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            onPress={handleSavePersonalItem}
+                            disabled={!personalItemDraft.trim() || savingPersonalItem}
+                            style={[
+                              styles.personalAddSave,
+                              (!personalItemDraft.trim() || savingPersonalItem) && styles.btnDisabled,
+                            ]}
+                          >
+                            {savingPersonalItem ? (
+                              <ActivityIndicator color="#FFFFFF" size="small" />
+                            ) : (
+                              <Text style={styles.personalAddSaveText}>Add</Text>
+                            )}
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    ) : (
+                      <TouchableOpacity
+                        style={styles.personalAddBtn}
+                        onPress={handleStartAddPersonalItem}
+                        activeOpacity={0.7}
+                      >
+                        <Ionicons name="add" size={18} color="#0788B0" />
+                        <Text style={styles.personalAddBtnText}>Add item</Text>
+                      </TouchableOpacity>
+                    )
+                  )}
                 </>
-              ) : (
-                <Text style={styles.muted}>
-                  {isHost ? 'No items yet — tap the pencil to add some.' : 'No items yet.'}
-                </Text>
               )
             )}
 
-            {/* GROUP VIEW */}
-            {packingView === 'group' && (
-              editingGroupPacking ? (
-                <>
-                  <Text style={styles.muted}>
-                    One row per item. Toggle Single/Multi to control whether multiple users can claim it.
-                  </Text>
-                  {groupPackingDraft.map((it, idx) => (
-                    <View key={idx} style={styles.groupEditRow}>
-                      <TextInput
-                        style={[styles.groupEditInput, { flex: 1 }]}
-                        value={it.name}
-                        onChangeText={t => updateGroupDraftItem(idx, { name: t })}
-                        placeholder="e.g. tent, snacks, first aid kit"
-                        placeholderTextColor="#B0B0B0"
-                        editable={!savingGroupPacking}
-                      />
-                      <TouchableOpacity
-                        style={[styles.singleMultiChip, it.single && styles.singleMultiChipActive]}
-                        onPress={() => updateGroupDraftItem(idx, { single: !it.single })}
-                        disabled={savingGroupPacking}
-                      >
-                        <Text style={[styles.singleMultiText, it.single && styles.singleMultiTextActive]}>
-                          {it.single ? 'Single' : 'Multi'}
-                        </Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        onPress={() => removeGroupDraftItem(idx)}
-                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                        disabled={savingGroupPacking}
-                        accessibilityLabel={`Remove ${it.name || 'item'}`}
-                      >
-                        <Ionicons name="trash-outline" size={20} color="#C0392B" />
-                      </TouchableOpacity>
-                    </View>
-                  ))}
-                  <TouchableOpacity
-                    style={styles.addItemBtn}
-                    onPress={addGroupDraftItem}
-                    disabled={savingGroupPacking}
-                  >
-                    <Ionicons name="add-circle-outline" size={18} color="#0788B0" />
-                    <Text style={styles.addItemText}>Add item</Text>
-                  </TouchableOpacity>
-                  <View style={styles.packingActions}>
-                    <TouchableOpacity
-                      style={styles.packingCancel}
-                      onPress={handleCancelEditGroupPacking}
-                      disabled={savingGroupPacking}
-                    >
-                      <Text style={styles.packingCancelText}>Cancel</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.packingSave, savingGroupPacking && styles.manageBtnDisabled]}
-                      onPress={handleSaveGroupPacking}
-                      disabled={savingGroupPacking}
-                    >
-                      {savingGroupPacking ? (
-                        <ActivityIndicator color="#FFFFFF" />
-                      ) : (
-                        <Text style={styles.packingSaveText}>Save</Text>
-                      )}
-                    </TouchableOpacity>
-                  </View>
-                </>
-              ) : trip.group_packing_list && trip.group_packing_list.length > 0 ? (
-                <>
-                  {(isHost || isApprovedMember) ? (
-                    <Text style={styles.muted}>Tap to claim. Single = one person; Multi = anyone.</Text>
-                  ) : null}
-                  {trip.group_packing_list.map(item => {
-                    const claims = claimsByItem.get(item.name) ?? [];
-                    const myClaim = claims.find(c => c.user_id === currentUserId);
-                    const otherClaims = claims.filter(c => c.user_id !== currentUserId);
-                    // Strikethrough rules:
-                    // - Single: any claim → strike for everyone.
-                    // - Multi: only strike for users who claimed it themselves.
-                    const struck = item.single ? claims.length > 0 : !!myClaim;
-                    const lockedSingle = item.single && !myClaim && otherClaims.length > 0;
-                    const canToggle =
-                      !!currentUserId && (isHost || isApprovedMember) && !isCancelled && !lockedSingle;
-                    const busy = claimingItem === item.name;
-                    return (
-                      <TouchableOpacity
-                        key={item.name}
-                        style={styles.packingRow}
-                        onPress={() => canToggle && !busy && handleToggleGroupClaim(item)}
-                        disabled={!canToggle || busy}
-                        activeOpacity={canToggle ? 0.6 : 1}
-                      >
-                        <Ionicons
-                          name={struck ? 'checkbox' : 'square-outline'}
-                          size={20}
-                          color={struck ? '#34C759' : '#B0B0B0'}
-                        />
-                        <Text style={[styles.packingItemText, struck && styles.packingItemTextDone]}>
-                          {item.name}
-                        </Text>
-                        <View style={[styles.singleMultiChipSmall, item.single && styles.singleMultiChipSmallActive]}>
-                          <Text style={[styles.singleMultiTextSmall, item.single && styles.singleMultiTextActive]}>
-                            {item.single ? 'Single' : 'Multi'}
-                          </Text>
-                        </View>
-                        {claims.length > 0 && (
-                          <View style={styles.avatarStack}>
-                            {claims.slice(0, 3).map(c => (
-                              <View key={c.user_id} style={styles.avatarSmallWrap}>
-                                {c.user_profile_image_url ? (
-                                  <Image
-                                    source={{ uri: c.user_profile_image_url }}
-                                    style={styles.avatarSmall}
-                                  />
-                                ) : (
-                                  <View style={[styles.avatarSmall, styles.avatarSmallPlaceholder]}>
-                                    <Text style={styles.avatarSmallInitial}>
-                                      {(c.user_name || 'U').charAt(0).toUpperCase()}
-                                    </Text>
-                                  </View>
-                                )}
-                              </View>
-                            ))}
-                            {claims.length > 3 && (
-                              <Text style={styles.avatarMoreText}>+{claims.length - 3}</Text>
-                            )}
-                          </View>
-                        )}
-                      </TouchableOpacity>
-                    );
-                  })}
-                </>
-              ) : (
-                <Text style={styles.muted}>
-                  {isHost ? 'No group items yet — tap the pencil to add some.' : 'No group items yet.'}
-                </Text>
-              )
-            )}
           </View>
         )}
 
-        {/* Commitment toggle — visible to host + approved members on active trips */}
-        {(isHost || isApprovedMember) && !isCancelled && (
+        {/* Commitment CTA — only approved members. The host doesn't commit to
+            their own trip (nobody to approve them; semantically meaningless). */}
+        {isApprovedMember && !isCancelled && (
           <View style={styles.commitWrapper}>
             <TouchableOpacity
-              style={[styles.commitBtn, myCommitted && styles.commitBtnActive, togglingCommit && styles.manageBtnDisabled]}
-              onPress={handleToggleCommit}
-              disabled={togglingCommit}
+              style={[
+                styles.commitCta,
+                myCommitmentStatus === 'approved' && styles.commitCtaApproved,
+                myCommitmentStatus === 'pending' && styles.commitCtaPending,
+              ]}
+              onPress={handleOpenCommitSheet}
               activeOpacity={0.85}
             >
-              {togglingCommit ? (
-                <ActivityIndicator color={myCommitted ? '#FFFFFF' : '#34C759'} />
-              ) : (
-                <>
-                  <Ionicons
-                    name={myCommitted ? 'checkmark-circle' : 'checkmark-circle-outline'}
-                    size={18}
-                    color={myCommitted ? '#FFFFFF' : '#34C759'}
-                  />
-                  <Text style={[styles.commitBtnText, myCommitted && styles.commitBtnTextActive]}>
-                    {myCommitted ? "I'm committed" : "I'm in — mark me committed"}
-                  </Text>
-                </>
+              {myCommitmentStatus === 'approved' && (
+                <Ionicons name="checkmark-circle" size={18} color="#FFFFFF" />
               )}
+              <Text style={styles.commitCtaText}>
+                {myCommitmentStatus === 'approved'
+                  ? 'Committed'
+                  : myCommitmentStatus === 'pending'
+                  ? 'Commitment Pending…'
+                  : 'Committed to this trip'}
+              </Text>
             </TouchableOpacity>
+            <Text style={styles.commitCtaCaption}>
+              {myCommitmentStatus === 'approved'
+                ? "You're locked in. Tap to update your details."
+                : myCommitmentStatus === 'pending'
+                ? 'Waiting for the host to approve. Tap to update.'
+                : "Let the host know how you're committed"}
+            </Text>
           </View>
         )}
 
@@ -1104,6 +1344,88 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         {hasNonHostMembers && (
           <Section title="Group breakdown">
             <TripParticipantsBreakdown participants={participants} />
+          </Section>
+        )}
+
+        {/* Admin updates — host-posted free-text lines, visible to all members. */}
+        {(adminUpdates.length > 0 || isHost) && (
+          <Section
+            title="Recent admin updates"
+            headerRight={
+              isHost && !addingUpdate && !editingUpdateId ? (
+                <TouchableOpacity
+                  style={styles.addUpdateBtn}
+                  onPress={handleStartAddUpdate}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="add" size={14} color="#222B30" />
+                  <Text style={styles.addUpdateBtnText}>Add update</Text>
+                </TouchableOpacity>
+              ) : null
+            }
+          >
+            {(addingUpdate || editingUpdateId) && (
+              <View style={styles.updateEditor}>
+                <TextInput
+                  style={styles.updateEditorInput}
+                  value={updateDraft}
+                  onChangeText={setUpdateDraft}
+                  placeholder="e.g. Updated accommodation"
+                  placeholderTextColor="#9AA0A6"
+                  multiline
+                  autoFocus
+                  editable={!savingUpdate}
+                />
+                <View style={styles.updateEditorActions}>
+                  <TouchableOpacity
+                    style={styles.updateEditorCancel}
+                    onPress={handleCancelUpdateDraft}
+                    disabled={savingUpdate}
+                  >
+                    <Text style={styles.updateEditorCancelText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      styles.updateEditorSave,
+                      (!updateDraft.trim() || savingUpdate) && styles.updateEditorSaveDisabled,
+                    ]}
+                    onPress={handleSubmitUpdate}
+                    disabled={!updateDraft.trim() || savingUpdate}
+                  >
+                    {savingUpdate ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <Text style={styles.updateEditorSaveText}>
+                        {editingUpdateId ? 'Save' : 'Post'}
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+
+            {adminUpdates.length === 0 && !addingUpdate && !editingUpdateId ? (
+              <Text style={styles.updatesEmpty}>No updates yet.</Text>
+            ) : (
+              adminUpdates.map(u => (
+                <TouchableOpacity
+                  key={u.id}
+                  style={styles.updateRow}
+                  onLongPress={() => handleLongPressUpdate(u)}
+                  activeOpacity={isHost ? 0.7 : 1}
+                  disabled={!isHost}
+                >
+                  <View style={styles.updateBullet} />
+                  <View style={styles.updateBody}>
+                    <Text style={styles.updateText}>
+                      <Text style={styles.updateAuthor}>Host </Text>
+                      {u.body}
+                    </Text>
+                    <Text style={styles.updateTime}>{formatRelativeTime(u.created_at)}</Text>
+                  </View>
+                </TouchableOpacity>
+              ))
+            )}
           </Section>
         )}
 
@@ -1138,11 +1460,53 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           <CtaButton
             myRequest={myRequest}
             submitting={submitting}
-            onRequest={handleRequestToJoin}
+            onRequest={handleOpenJoinSheet}
             onWithdraw={handleWithdraw}
           />
         </View>
       )}
+
+      {/* Gear bottom sheets */}
+      <GearItemSheet
+        visible={!!gearItemSheetItem}
+        item={gearItemSheetItem}
+        currentUserId={currentUserId}
+        onClose={() => setGearItemSheetItem(null)}
+        onSetClaim={handleSetGearClaim}
+      />
+      <RequestGearSheet
+        visible={requestSheetVisible}
+        onClose={() => setRequestSheetVisible(false)}
+        onSubmit={handleSubmitGearRequest}
+      />
+      <ManageGearSheet
+        visible={manageSheetVisible}
+        items={gearItems}
+        onClose={() => setManageSheetVisible(false)}
+        onSave={handleSaveGearItem}
+        onDelete={handleDeleteGearItem}
+      />
+      <GearRequestsSheet
+        visible={requestsSheetVisible}
+        requests={gearRequests}
+        processingId={processingGearRequestId}
+        onClose={() => setRequestsSheetVisible(false)}
+        onApprove={handleApproveGearRequest}
+        onDecline={handleDeclineGearRequest}
+      />
+      <CommitmentSheet
+        visible={commitSheetOpen}
+        onClose={() => setCommitSheetOpen(false)}
+        initialItems={myCommitmentItems}
+        initialNote={myCommitmentNote}
+        onSubmit={handleSubmitCommitment}
+      />
+      <RequestToJoinSheet
+        visible={joinSheetOpen}
+        onClose={() => setJoinSheetOpen(false)}
+        profile={myJoinProfile}
+        onSubmit={handleSubmitJoinRequest}
+      />
     </SafeAreaView>
   );
 }
@@ -1543,4 +1907,189 @@ const styles = StyleSheet.create({
   },
   commitBtnText: { color: '#34C759', fontWeight: '600', fontSize: 14 },
   commitBtnTextActive: { color: '#FFFFFF' },
+  commitCta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    borderRadius: 10,
+    gap: 8,
+    backgroundColor: '#222B30',
+  },
+  commitCtaPending: { backgroundColor: '#7B7B7B' },
+  commitCtaApproved: { backgroundColor: '#16A34A' },
+  commitCtaText: { color: '#FFFFFF', fontWeight: '700', fontSize: 15 },
+  commitCtaCaption: {
+    textAlign: 'center',
+    fontSize: 12,
+    color: '#7B7B7B',
+    marginTop: 8,
+  },
+
+  // Personal gear extras (host suggestion tag + add button + inline editor)
+  hostSuggestionTag: {
+    marginLeft: 'auto',
+    fontSize: 11,
+    color: '#7B7B7B',
+    fontStyle: 'italic',
+  },
+  personalToggleHit: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  personalAddBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    marginTop: 4,
+  },
+  personalAddBtnText: {
+    color: '#0788B0',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  personalAddEditor: {
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 10,
+    backgroundColor: '#FAFAFA',
+    padding: 10,
+  },
+  personalAddInput: {
+    fontSize: 14,
+    color: '#222B30',
+    padding: 0,
+    minHeight: 32,
+  },
+  personalAddActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 8,
+    marginTop: 8,
+  },
+  personalAddCancel: { paddingHorizontal: 12, paddingVertical: 8 },
+  personalAddCancelText: { color: '#7B7B7B', fontWeight: '600', fontSize: 14 },
+  personalAddSave: {
+    backgroundColor: '#0788B0',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    minWidth: 64,
+    alignItems: 'center',
+  },
+  personalAddSaveText: { color: '#FFFFFF', fontWeight: '700', fontSize: 14 },
+  btnDisabled: { opacity: 0.4 },
+
+  // Group Gear section
+  gearHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  gearHeaderTitle: { fontSize: 12, fontWeight: '700', color: '#4A5565', letterSpacing: 0.5 },
+  gearHeaderSub: { fontSize: 13, color: '#7B7B7B', marginTop: 2 },
+  gearManageBtn: {
+    borderWidth: 1,
+    borderColor: '#0788B0',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  gearManageBtnText: { fontSize: 13, fontWeight: '700', color: '#0788B0' },
+  requestLinkBtn: { paddingVertical: 12, alignItems: 'center' },
+  requestLinkText: {
+    color: '#0788B0',
+    fontSize: 14,
+    fontWeight: '600',
+    textDecorationLine: 'underline',
+  },
+  gearReqsBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFF7E6',
+    borderWidth: 1.5,
+    borderColor: '#F59E0B',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 8,
+    marginTop: 8,
+    gap: 8,
+  },
+  gearReqsBadgeText: { flex: 1, color: '#222B30', fontWeight: '700', fontSize: 13 },
+
+  // Admin updates
+  addUpdateBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#0788B0',
+  },
+  addUpdateBtnText: { fontSize: 13, fontWeight: '600', color: '#0788B0' },
+
+  updateEditor: {
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 12,
+    backgroundColor: '#FAFAFA',
+  },
+  updateEditorInput: {
+    fontSize: 14,
+    color: '#222B30',
+    minHeight: 44,
+    padding: 0,
+    textAlignVertical: 'top',
+  },
+  updateEditorActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 8,
+    marginTop: 8,
+  },
+  updateEditorCancel: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  updateEditorCancelText: { color: '#7B7B7B', fontWeight: '600', fontSize: 14 },
+  updateEditorSave: {
+    backgroundColor: '#0788B0',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    minWidth: 64,
+    alignItems: 'center',
+  },
+  updateEditorSaveDisabled: { opacity: 0.4 },
+  updateEditorSaveText: { color: '#FFFFFF', fontWeight: '600', fontSize: 14 },
+
+  updatesEmpty: { color: '#7B7B7B', fontSize: 14, fontStyle: 'italic' },
+
+  updateRow: {
+    flexDirection: 'row',
+    paddingVertical: 10,
+    alignItems: 'flex-start',
+  },
+  updateBullet: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    borderWidth: 1.5,
+    borderColor: '#0788B0',
+    marginTop: 4,
+    marginRight: 12,
+  },
+  updateBody: { flex: 1 },
+  updateText: { fontSize: 15, color: '#222B30', lineHeight: 20 },
+  updateAuthor: { fontWeight: '700' },
+  updateTime: { fontSize: 12, color: '#7B7B7B', marginTop: 2 },
 });

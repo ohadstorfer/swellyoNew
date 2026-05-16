@@ -13,6 +13,7 @@ import { Text } from './Text';
 import { colors, spacing } from '../styles/theme';
 import { getCountryFlag } from '../utils/countryFlags';
 import { getDisplayLabelAndFlagKey } from '../utils/destinationDisplay';
+import { getPlacesDestinationRegionCode } from '../utils/placesDestinationRegionCode';
 import {
   getCountryImageFromStorage,
   getCountryImageFallback,
@@ -23,33 +24,6 @@ import type { SwipeExcludeZoneRect } from './DestinationInputCard';
 import { DestinationDurationInput } from './DestinationDurationInput';
 import type { DurationTimeUnit } from '../utils/destinationDuration';
 import { computeDurationParts } from '../utils/destinationDuration';
-
-/** Country name (as shown in UI) to CLDR 2-letter region code for Places API bias. */
-const COUNTRY_TO_REGION: Record<string, string> = {
-  'USA': 'us',
-  'United States': 'us',
-  'Costa Rica': 'cr',
-  'Nicaragua': 'ni',
-  'Panama': 'pa',
-  'El Salvador': 'sv',
-  'Indonesia': 'id',
-  'Sri Lanka': 'lk',
-  'Philippines': 'ph',
-  'Australia': 'au',
-  'Mexico': 'mx',
-  'Brazil': 'br',
-  'Portugal': 'pt',
-  'France': 'fr',
-  'Spain': 'es',
-  'South Africa': 'za',
-  'Morocco': 'ma',
-  'Israel': 'il',
-  'Japan': 'jp',
-  'New Zealand': 'nz',
-  'Peru': 'pe',
-  'Ecuador': 'ec',
-  'Chile': 'cl',
-};
 
 interface DestinationInputCardCopyProps {
   destination: string;
@@ -151,12 +125,9 @@ export const DestinationInputCardCopy = forwardRef<
   );
 
   const regionCodes = useMemo(() => {
-    if (flagKey === 'California' || flagKey === 'Hawaii') {
-      return ['us'];
-    }
-    const code = COUNTRY_TO_REGION[destination];
+    const code = getPlacesDestinationRegionCode(destination);
     return code ? [code] : undefined;
-  }, [destination, flagKey]);
+  }, [destination]);
 
   useImperativeHandle(ref, () => ({
     focusAreaInput: () => placesInputRef.current?.focus(),

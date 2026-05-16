@@ -59,12 +59,15 @@ export const OnboardingStep3Screen: React.FC<OnboardingStep3ScreenProps> = ({
     
     // Progress bar: 4px + padding
     const progressHeight = 4 + (isDesktop ? spacing.sm * 2 : spacing.md * 2);
-    
+
+    // Title block: accent (28.8) + gap (4) + question (24) + paddings (8 + 16)
+    const titleBlockHeight = 81;
+
     // Button: 56px + padding
     const buttonHeight = 56 + spacing.xl;
-    
+
     // Calculate total used space
-    const totalUsedSpace = headerHeight + progressHeight + buttonHeight;
+    const totalUsedSpace = headerHeight + progressHeight + titleBlockHeight + buttonHeight;
     
     // Available space for content
     const availableSpace = screenHeight - totalUsedSpace - 16; // 16px buffer
@@ -114,7 +117,7 @@ export const OnboardingStep3Screen: React.FC<OnboardingStep3ScreenProps> = ({
             <Ionicons name="arrow-back" size={24} color="#222B30" />
           </TouchableOpacity>
 
-          <Text style={styles.stepText}>Step 3/4</Text>
+          <Text style={styles.stepText}>Surf Juice 1/3</Text>
 
           <View style={styles.skipButton}>
             {/* Skip button is hidden/opacity 0 in Figma */}
@@ -124,8 +127,14 @@ export const OnboardingStep3Screen: React.FC<OnboardingStep3ScreenProps> = ({
         {/* Progress Bar */}
         <View style={[styles.progressContainer, isDesktop && styles.progressContainerDesktop]}>
           <View style={[styles.progressBar, { width: progressBarWidth }]}>
-            <View style={[styles.progressFill, { width: '60%' }]} />
+            <View style={[styles.progressFill, { width: '42.9%' }]} />
           </View>
+        </View>
+
+        {/* Title block (cyan accent + bold question) */}
+        <View style={styles.titleBlock}>
+          <Text style={styles.titleAccent}>Travel Experience</Text>
+          <Text style={styles.titleQuestion}>How many surf trips have you taken?</Text>
         </View>
 
         {/* Content - Travel Experience Slider */}
@@ -135,6 +144,7 @@ export const OnboardingStep3Screen: React.FC<OnboardingStep3ScreenProps> = ({
             onValueChange={handleTravelExperienceChange}
             error={errors.travelExperience}
             availableHeight={availableContentHeight}
+            hideTitle
           />
         </View>
 
@@ -221,6 +231,30 @@ const styles = StyleSheet.create({
     height: '100%',
     backgroundColor: '#333333',
     borderRadius: 8,
+  },
+  titleBlock: {
+    alignItems: 'center',
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.md,
+    
+    gap: 4,
+  },
+  titleAccent: {
+    fontSize: 24,
+    fontWeight: '700',
+    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'System',
+    color: '#05BCD3',
+    textAlign: 'center',
+    lineHeight: 28.8,
+  },
+  titleQuestion: {
+    fontSize: 18,
+    fontWeight: '700',
+    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'System',
+    color: '#333333',
+    textAlign: 'center',
+    lineHeight: 24,
+    maxWidth: 345,
   },
   sliderContainer: {
     flex: 1,

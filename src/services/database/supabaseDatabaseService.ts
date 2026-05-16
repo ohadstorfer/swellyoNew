@@ -58,6 +58,9 @@ export interface SupabaseSurfer {
   home_break_country?: string; // text - ISO 2-letter code
   home_break_lat?: number; // float8
   home_break_lng?: number; // float8
+  // Tutorial state: timestamp when the Swelly welcome guide was first shown
+  // to this user. NULL = never seen, the guide fires on next Swelly chat open.
+  welcome_guide_seen_at?: string | null; // timestamptz, nullable
   created_at: string; // timestamptz
   updated_at: string; // timestamptz
 }
@@ -510,6 +513,48 @@ class SupabaseDatabaseService {
   }
 
   /**
+   * Mark the Swelly welcome guide as shown to the current user. Idempotent —
+   * the chat trigger calls this the moment the tutorial fires, so subsequent
+   * opens of Swelly chat do not re-fire it. NULL → timestamp transition is
+   * the only state change; we don't overwrite existing timestamps.
+   */
+  async markWelcomeGuideSeen(): Promise<boolean> {
+    if (!isSupabaseConfigured()) return false;
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) return false;
+    const { error } = await supabase
+      .from('surfers')
+      .update({ welcome_guide_seen_at: new Date().toISOString() })
+      .eq('user_id', user.id)
+      .is('welcome_guide_seen_at', null);
+    if (error) {
+      console.warn('markWelcomeGuideSeen failed:', error);
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Clear the welcome-guide-seen timestamp for the current user. Used only by
+   * the "Replay welcome guide" dev button so the tutorial fires again on the
+   * next Swelly chat open.
+   */
+  async clearWelcomeGuideSeen(): Promise<boolean> {
+    if (!isSupabaseConfigured()) return false;
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) return false;
+    const { error } = await supabase
+      .from('surfers')
+      .update({ welcome_guide_seen_at: null })
+      .eq('user_id', user.id);
+    if (error) {
+      console.warn('clearWelcomeGuideSeen failed:', error);
+      return false;
+    }
+    return true;
+  }
+
+  /**
    * Update only lifestyle_image_urls for the current user's surfer row.
    * Used after background enrichment so we don't send a full payload that could clear other columns.
    */
@@ -660,7 +705,7 @@ class SupabaseDatabaseService {
       // destinations_map does NOT exist - only destinations_array exists
       const { data, error } = await supabase
         .from('surfers')
-        .select('user_id, name, age, date_of_birth, pronoun, country_from, surfboard_type, surf_level, surf_level_description, surf_level_category, travel_experience, bio, profile_image_url, cover_image_url, profile_video_url, profile_video_thumbnail_url, destinations_array, lifestyle_keywords, lifestyle_image_urls, wave_type_keywords, travel_buddies, home_break_place_id, home_break_full, home_break_short, home_break_locality, home_break_country, home_break_lat, home_break_lng, created_at, updated_at, finished_onboarding')
+        .select('user_id, name, age, date_of_birth, pronoun, country_from, surfboard_type, surf_level, surf_level_description, surf_level_category, travel_experience, bio, profile_image_url, cover_image_url, profile_video_url, profile_video_thumbnail_url, destinations_array, lifestyle_keywords, lifestyle_image_urls, wave_type_keywords, travel_buddies, home_break_place_id, home_break_full, home_break_short, home_break_locality, home_break_country, home_break_lat, home_break_lng, welcome_guide_seen_at, created_at, updated_at, finished_onboarding')
         .eq('user_id', userId)
         .single();
 

@@ -7,9 +7,10 @@ import { OnboardingStep1Screen, OnboardingData } from '../screens/OnboardingStep
 import { OnboardingStep2Screen } from '../screens/OnboardingStep2Screen';
 import { OnboardingStep3Screen } from '../screens/OnboardingStep3Screen';
 import { OnboardingStep4Screen } from '../screens/OnboardingStep4Screen';
+import { OnboardingStep4DestinationsScreen } from '../screens/OnboardingStep4DestinationsScreen';
+import { OnboardingStep5BudgetScreen } from '../screens/OnboardingStep5BudgetScreen';
+import { OnboardingStep6LifestyleScreen } from '../screens/OnboardingStep6LifestyleScreen';
 import { OnboardingVideoUploadScreen } from '../screens/OnboardingVideoUploadScreen';
-import { LoadingScreen } from '../screens/LoadingScreen';
-import { OnboardingChatScreen } from '../screens/ChatScreen';
 import { TripPlanningChatScreen } from '../screens/TripPlanningChatScreen';
 import { TripPlanningChatScreen as TripPlanningChatScreenCopy } from '../screens/TripPlanningChatScreenCopy';
 import ConversationsStack from '../navigation/ConversationsStack';
@@ -22,6 +23,13 @@ import { SwellyShaperScreen } from '../screens/SwellyShaperScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { ConversationLoadingScreen } from '../components/ConversationLoadingScreen';
 import { WelcomeToLineupOverlay } from '../components/WelcomeToLineupOverlay';
+import { JoinDecisionOverlay } from '../components/trips/joinRequest/JoinDecisionOverlay';
+import {
+  listUnseenJoinDecisions,
+  markJoinDecisionSeen,
+  type UnseenJoinDecision,
+} from '../services/trips/groupTripsService';
+import { supabase } from '../config/supabase';
 import { ProfileEditPanel } from './ProfileEditPanel/ProfileEditPanel';
 import { useUserProfile } from '../context/UserProfileContext';
 import { useTutorial } from '../context/TutorialContext';
@@ -31,7 +39,7 @@ import { supabaseAuthService } from '../services/auth/supabaseAuthService';
 import { useOnboarding } from '../context/OnboardingContext';
 import { analyticsService } from '../services/analytics/analyticsService';
 import { useAuthGuard } from '../hooks/useAuthGuard';
-import { isFirstVideoReadyForBoardType, getVideoPreloadStatus, waitForVideoReady, preloadLoadingVideo, getLoadingVideoUrl } from '../services/media/videoPreloadService';
+import { isFirstVideoReadyForBoardType } from '../services/media/videoPreloadService';
 import { STEP_WELCOME, STEP_ONBOARDING_WELCOME } from '../constants/onboardingSteps';
 import { ageGateService } from '../services/ageGate/ageGateService';
 import { swellyServiceCopy, swellyServiceCopyCopy } from '../services/swelly/swellyServiceCopy';
@@ -42,16 +50,18 @@ import { useMessaging } from '../context/MessagingProvider';
 export const AppContent: React.FC = () => {
   const { currentStep, formData, setCurrentStep, updateFormData, saveStepToSupabase, isComplete, markOnboardingComplete, isDemoUser, setIsDemoUser, setUser, resetOnboarding, user, isRestoringSession, isLoaded: isOnboardingLoaded, completionCheckedForUserId } = useOnboarding();
   const onboardingCheckedForCurrentUser = user !== null && completionCheckedForUserId === user.id;
-  const { markWelcomeLineupDismissed } = useTutorial();
+  const { markWelcomeLineupDismissed, setSeenFromProfile: setTutorialSeenFromProfile } = useTutorial();
   
   // Initialize auth guard - this will automatically redirect unauthenticated users
   useAuthGuard();
-  const [showLoading, setShowLoading] = useState(false);
   const [isSavingStep1, setIsSavingStep1] = useState(false);
   const [isSavingStep2, setIsSavingStep2] = useState(false);
   const [showVideoUploadStep, setShowVideoUploadStep] = useState(false);
   const [isSavingStep3, setIsSavingStep3] = useState(false);
   const [isSavingStep4, setIsSavingStep4] = useState(false);
+  const [isSavingStep5, setIsSavingStep5] = useState(false);
+  const [isSavingStep6, setIsSavingStep6] = useState(false);
+  const [isSavingStep7, setIsSavingStep7] = useState(false);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const [showAgeBlockOverlay, setShowAgeBlockOverlay] = useState(false);
   const authCheckStartTime = useRef<number>(Date.now());
@@ -191,7 +201,7 @@ export const AppContent: React.FC = () => {
               isDirect: false,
               surftripId: result.group_id,
             });
-          } else if (result.outcome === 'requested') {
+          } else if (result.outcome === 'open_detail') {
             setActiveSurftripDetailId(result.group_id);
           } else if (result.outcome === 'group_full') {
             Alert.alert('Surftrip is full', 'This group has reached its member limit.');
@@ -295,27 +305,6 @@ export const AppContent: React.FC = () => {
     );
   }, [getCurrentConversationId]);
 
-  // Preload loading video when arriving at step 4 (not after submitting)
-  // This reduces loading time after step 4 submission
-  useEffect(() => {
-    if (currentStep === 4) {
-      if (__DEV__) {
-        console.log('[AppContent] Arrived at step 4, preloading loading video...');
-      }
-      
-      // Start preloading loading video in background (non-blocking)
-      preloadLoadingVideo('high')
-        .then(result => {
-          if (__DEV__) {
-            console.log(`[AppContent] Loading video preload completed while on step 4: ready=${result.ready}`);
-          }
-        })
-        .catch(err => {
-          console.warn('[AppContent] Loading video preload failed (non-blocking):', err);
-        });
-    }
-  }, [currentStep]);
-  
   // Check if MVP and dev modes are enabled
   const isMVPMode = process.env.EXPO_PUBLIC_MVP_MODE === 'true';
   const isDevMode = process.env.EXPO_PUBLIC_DEV_MODE === 'true';
@@ -626,7 +615,7 @@ export const AppContent: React.FC = () => {
       const { onboardingService } = await import('../services/onboarding/onboardingService');
       await onboardingService.saveStep3(data.boardType!, data.surfLevel!, data.travelExperience!);
       
-      setCurrentStep(4); // Go to step 4 (profile details)
+      setCurrentStep(4); // Go to step 4 (destinations — renumbered from old profile step)
     } catch (error) {
       console.error('Error in Step 3 Next:', error);
       // Still allow navigation even if save fails
@@ -637,14 +626,70 @@ export const AppContent: React.FC = () => {
   };
 
   const handleStep4Next = async (data: OnboardingData) => {
-    if (isSavingStep4) return; // Prevent multiple clicks
-    
-    console.log('Step 4 next called with data:', data);
+    if (isSavingStep4) return;
+    console.log('Step 4 next (destinations) called with data:', data);
     setIsSavingStep4(true);
-    
     try {
       updateFormData(data);
-      
+      const { onboardingService } = await import('../services/onboarding/onboardingService');
+      await onboardingService.saveStep4Destinations(data.destinations_array || []);
+      setCurrentStep(5);
+    } catch (error) {
+      console.error('Error in Step 4 (destinations) Next:', error);
+      setCurrentStep(5);
+    } finally {
+      setIsSavingStep4(false);
+    }
+  };
+
+  const handleStep5Next = async (data: OnboardingData) => {
+    if (isSavingStep5) return;
+    console.log('Step 5 next (budget) called with data:', data);
+    setIsSavingStep5(true);
+    try {
+      updateFormData(data);
+      const { onboardingService } = await import('../services/onboarding/onboardingService');
+      if (data.travel_type) {
+        await onboardingService.saveStep5Budget(data.travel_type);
+      }
+      setCurrentStep(6);
+    } catch (error) {
+      console.error('Error in Step 5 (budget) Next:', error);
+      setCurrentStep(6);
+    } finally {
+      setIsSavingStep5(false);
+    }
+  };
+
+  const handleStep6Next = async (data: OnboardingData) => {
+    if (isSavingStep6) return;
+    console.log('Step 6 next (lifestyle) called with data:', data);
+    setIsSavingStep6(true);
+    try {
+      updateFormData(data);
+      const { onboardingService } = await import('../services/onboarding/onboardingService');
+      await onboardingService.saveStep6Lifestyle(
+        data.lifestyle_keywords || [],
+        data.lifestyle_image_urls || {},
+      );
+      setCurrentStep(7);
+    } catch (error) {
+      console.error('Error in Step 6 (lifestyle) Next:', error);
+      setCurrentStep(7);
+    } finally {
+      setIsSavingStep6(false);
+    }
+  };
+
+  const handleStep7Next = async (data: OnboardingData) => {
+    if (isSavingStep7) return; // Prevent multiple clicks
+
+    console.log('Step 7 (profile) next called with data:', data);
+    setIsSavingStep7(true);
+
+    try {
+      updateFormData(data);
+
       // Save complete onboarding data to Supabase (all profile details) using onboarding service
       const { onboardingService } = await import('../services/onboarding/onboardingService');
       await onboardingService.saveStep4({
@@ -680,58 +725,60 @@ export const AppContent: React.FC = () => {
         analyticsService.identify(userId, userProperties);
         console.log('[AppContent] User name updated in PostHog:', userId, userProperties);
       }
-      
-      // Check if loading video is already preloaded (should be, since we preload on step 4 arrival)
-      const loadingVideoUrl = getLoadingVideoUrl();
-      const preloadStatus = getVideoPreloadStatus(loadingVideoUrl);
-      
-      if (preloadStatus?.ready) {
-        // Video is ready, navigate immediately
-        if (__DEV__) {
-          console.log('[AppContent] Loading video is preloaded and ready, navigating to loading screen immediately');
-        }
-        setShowLoading(true);
-      } else {
-        // Video not ready yet (should be rare if preload started on step 4 arrival)
-        // Wait briefly (up to 2 seconds) for preload to complete, then navigate anyway
-        if (__DEV__) {
-          console.log('[AppContent] Loading video not ready yet, waiting briefly before navigating...');
-        }
-        
-        const preloadReady = await waitForVideoReady(loadingVideoUrl, 2000);
-        
-        if (preloadReady) {
-          if (__DEV__) {
-            console.log('[AppContent] Loading video became ready, navigating to loading screen');
-          }
-          setShowLoading(true);
-        } else {
-          // Timeout reached, navigate anyway (graceful degradation)
-          if (__DEV__) {
-            console.warn('[AppContent] Navigating to loading screen (video will load normally)');
-          }
-          setShowLoading(true);
-        }
-      }
-    } catch (error) {
-      console.error('Error in Step 4 Next:', error);
-      // Still allow navigation even if save fails
-      setShowLoading(true);
-    } finally {
-      setIsSavingStep4(false);
-    }
-  };
 
-  const handleLoadingComplete = () => {
-    setShowLoading(false);
-    setCurrentStep(5); // Go to step 5 (Swelly chat screen)
-    // Start tracking onboarding abandonment (12 min timer)
-    analyticsService.startOnboardingAbandonTracking();
+      // Skip LoadingScreen + Swelly onboarding chat — go straight to profile.
+      // Order matters: set showProfile + flag BEFORE markOnboardingComplete so
+      // the "isComplete && !showProfile → home" branch doesn't redirect us.
+      setProfileFromOnboardingChat(true);
+      setShowProfile(true);
+      await markOnboardingComplete();
+      // Refresh the user profile now that saveStep4 created the surfers row.
+      // Before this refresh, useUserProfile's initial fetch ran when the
+      // surfers row didn't exist yet (returned PGRST116 / null), so the local
+      // profile would stay null and the tutorial reconciliation effect would
+      // bail. Refreshing ensures welcome_guide_seen_at gets read from the
+      // freshly-inserted row (defaults to NULL → isSeen=false → tutorial
+      // fires on first Swelly chat open).
+      refreshUserProfile().catch(err =>
+        console.warn('[AppContent] post-onboarding profile refresh failed:', err),
+      );
+    } catch (error) {
+      console.error('Error in Step 7 (profile) Next:', error);
+      // Still navigate to profile even if save failed — local form data is in
+      // AsyncStorage and the user can fix from the profile edit panel.
+      setProfileFromOnboardingChat(true);
+      setShowProfile(true);
+      await markOnboardingComplete();
+      refreshUserProfile().catch(err =>
+        console.warn('[AppContent] post-onboarding profile refresh failed:', err),
+      );
+    } finally {
+      setIsSavingStep7(false);
+    }
   };
 
   const [showProfile, setShowProfile] = useState(false);
   const [showProfileEditor, setShowProfileEditor] = useState(false);
-  const { profile: currentUserSurfer } = useUserProfile();
+  const { profile: currentUserSurfer, refresh: refreshUserProfile } = useUserProfile();
+
+  // Reconcile the tutorial "seen" flag with the DB once the profile loads.
+  // AsyncStorage hydrates instantly on app start (fast-path cache) but the DB
+  // is the source of truth — a user who saw the guide on another device
+  // shouldn't see it again here. Reciprocal: a fresh user whose AS cache
+  // somehow says "seen" gets corrected back to NULL → trigger fires.
+  useEffect(() => {
+    if (!currentUserSurfer) {
+      console.log('[Tutorial reconcile] no profile yet, skip');
+      return;
+    }
+    const seen = currentUserSurfer.welcome_guide_seen_at != null;
+    console.log('[Tutorial reconcile] profile loaded', {
+      user_id: currentUserSurfer.user_id,
+      welcome_guide_seen_at: currentUserSurfer.welcome_guide_seen_at,
+      derivedSeen: seen,
+    });
+    setTutorialSeenFromProfile(seen);
+  }, [currentUserSurfer?.welcome_guide_seen_at, currentUserSurfer?.user_id, setTutorialSeenFromProfile]);
   const [showTripPlanningChat, setShowTripPlanningChat] = useState(false);
   const [showTripPlanningChatCopy, setShowTripPlanningChatCopy] = useState(false);
   // "Ever shown" flags so we mount TripPlanningChat / -Copy lazily on first
@@ -792,23 +839,122 @@ export const AppContent: React.FC = () => {
   const [welcomeOverlayHiddenByProfile, setWelcomeOverlayHiddenByProfile] = useState(false);
   const [onboardingMatchResult, setOnboardingMatchResult] = useState<OnboardingMatchResult | null>(null);
   const [pendingOnboardingMatches, setPendingOnboardingMatches] = useState<OnboardingMatchResult['matches'] | null>(null);
+  // Queue of unseen host decisions on the user's join requests. We pop the
+  // front item as the active overlay; closing it advances to the next one.
+  const [joinDecisionQueue, setJoinDecisionQueue] = useState<UnseenJoinDecision[]>([]);
+  const joinDecisionsFetchedForUserRef = useRef<string | null>(null);
 
-  const handleChatComplete = async () => {
-    console.log('[AppContent] handleChatComplete called');
-    
-    // Set showProfile and from-onboarding flag FIRST to prevent race condition
-    setProfileFromOnboardingChat(true); // Show special header (Swelly Shaper left, Save right)
-    setShowProfile(true);
-    console.log('[AppContent] Navigating to profile screen (from onboarding chat)');
-    
-    // Mark onboarding as complete AFTER setting showProfile
-    // This ensures showProfile is true when isComplete becomes true, preventing blocking logic from redirecting
-    await markOnboardingComplete();
-    console.log('[AppContent] Onboarding marked as complete');
-    
-    // Note: onboarding_step2_completed is already tracked in ChatScreen.tsx with duration
-    // This duplicate call is removed to avoid double tracking
-  };
+  // Fetch unseen host decisions once per signed-in user. Runs after auth is
+  // validated. The overlay itself is gated on whether the queue is non-empty
+  // and the user is in the main app (not onboarding/welcome).
+  useEffect(() => {
+    const userId = user?.id ? String(user.id) : null;
+    if (!userId) {
+      joinDecisionsFetchedForUserRef.current = null;
+      setJoinDecisionQueue([]);
+      return;
+    }
+    if (joinDecisionsFetchedForUserRef.current === userId) return;
+    joinDecisionsFetchedForUserRef.current = userId;
+    listUnseenJoinDecisions(userId)
+      .then((rows) => setJoinDecisionQueue(rows))
+      .catch((err) => {
+        console.warn('[AppContent] listUnseenJoinDecisions failed:', err);
+        setJoinDecisionQueue([]);
+      });
+  }, [user?.id]);
+
+  // Live listener — if the host approves/declines while the user is in the app,
+  // the overlay fires immediately instead of waiting for the next cold open.
+  // Deduped by request_id against the queue so the boot fetch + live event can
+  // race without showing twice.
+  useEffect(() => {
+    const userId = user?.id ? String(user.id) : null;
+    if (!userId) return;
+    const channel = supabase
+      .channel(`join-decisions:${userId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'group_trip_join_requests',
+          filter: `requester_id=eq.${userId}`,
+        },
+        async (payload) => {
+          const row = (payload as { new?: Record<string, unknown> }).new;
+          if (!row) return;
+          const status = row.status;
+          if (status !== 'approved' && status !== 'declined') return;
+          if (row.seen_decision_at) return; // host or another tab already marked
+          const requestId = row.id as string;
+          const tripId = row.trip_id as string;
+
+          const { data: trip } = await supabase
+            .from('group_trips')
+            .select('id, title, hero_image_url, destination_country, destination_area, start_date, end_date')
+            .eq('id', tripId)
+            .maybeSingle();
+          if (!trip) return;
+
+          const decision: UnseenJoinDecision = {
+            request_id: requestId,
+            status: status as 'approved' | 'declined',
+            decided_at: (row.reviewed_at as string | null) ?? null,
+            trip: {
+              id: (trip as any).id,
+              title: (trip as any).title ?? null,
+              hero_image_url: (trip as any).hero_image_url ?? '',
+              destination_country: (trip as any).destination_country ?? null,
+              destination_area: (trip as any).destination_area ?? null,
+              start_date: (trip as any).start_date ?? null,
+              end_date: (trip as any).end_date ?? null,
+            },
+          };
+
+          setJoinDecisionQueue((prev) => {
+            if (prev.some((d) => d.request_id === decision.request_id)) return prev;
+            return [...prev, decision];
+          });
+        }
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user?.id]);
+
+  const activeJoinDecision = joinDecisionQueue[0] ?? null;
+
+  const advanceJoinDecisionQueue = useCallback((decision: UnseenJoinDecision) => {
+    // Mark seen server-side (RPC); pop from local queue regardless of whether
+    // the RPC succeeded (it's idempotent and the worst case is the overlay
+    // re-appears next session, which is acceptable).
+    markJoinDecisionSeen(decision.request_id).catch(() => undefined);
+    setJoinDecisionQueue((prev) => prev.filter((d) => d.request_id !== decision.request_id));
+  }, []);
+
+  const handleJoinDecisionPrimary = useCallback(
+    (decision: UnseenJoinDecision) => {
+      advanceJoinDecisionQueue(decision);
+      if (decision.status === 'approved') {
+        // Open this specific trip's detail screen.
+        setPendingTripDetailId(decision.trip.id);
+        setShowTrips(true);
+      } else {
+        // Declined → land on the trips/explore list.
+        setShowTrips(true);
+      }
+    },
+    [advanceJoinDecisionQueue]
+  );
+
+  const handleJoinDecisionDismiss = useCallback(
+    (decision: UnseenJoinDecision) => {
+      advanceJoinDecisionQueue(decision);
+    },
+    [advanceJoinDecisionQueue]
+  );
 
   const handleProfileBack = () => {
     console.log('[AppContent] handleProfileBack called');
@@ -851,19 +997,18 @@ export const AppContent: React.FC = () => {
   };
 
   const handleSaveAndGoToConversations = useCallback(() => {
+    // "Got it!" on the post-onboarding profile: go to the homepage, then
+    // celebrate matches with the WelcomeToLineupOverlay if any were found.
     handleProfileBack();
-
-    // Find top 3 matches, create conversations, and store result for the overlay
     findAndConnectMatches()
       .then((result) => {
         if (result && result.match_count > 0) {
-          console.log(`[AppContent] Created ${result.match_count} match conversations`);
           setOnboardingMatchResult(result);
           setShowWelcomeToLineupOverlay(true);
         }
       })
       .catch((err) => {
-        console.warn('[AppContent] Matching failed (non-blocking):', err);
+        console.warn('[AppContent] Background matching failed (non-blocking):', err);
       });
   }, []);
 
@@ -1244,11 +1389,6 @@ export const AppContent: React.FC = () => {
     }
   };
 
-  const handleLoadingBack = () => {
-    setShowLoading(false);
-    setCurrentStep(4); // Go back to step 4
-  };
-
   const handleStep1Back = () => {
     // Prevent multiple simultaneous navigation calls
     if (isNavigatingRef.current) {
@@ -1315,7 +1455,19 @@ export const AppContent: React.FC = () => {
   };
 
   const handleStep4Back = () => {
-    setCurrentStep(3); // Go back to step 3
+    setCurrentStep(3); // Destinations back to travel experience
+  };
+
+  const handleStep5Back = () => {
+    setCurrentStep(4); // Budget back to destinations
+  };
+
+  const handleStep6Back = () => {
+    setCurrentStep(5); // Lifestyle back to budget
+  };
+
+  const handleStep7Back = () => {
+    setCurrentStep(6); // Profile back to lifestyle (renumbered from step-3-back)
   };
 
 
@@ -1704,6 +1856,12 @@ export const AppContent: React.FC = () => {
           onClose={() => setShowProfileEditor(false)}
           surfer={currentUserSurfer}
         />
+        <JoinDecisionOverlay
+          visible={!!activeJoinDecision}
+          decision={activeJoinDecision}
+          onPrimaryAction={handleJoinDecisionPrimary}
+          onDismiss={handleJoinDecisionDismiss}
+        />
       </View>
     );
   }
@@ -1842,36 +2000,57 @@ export const AppContent: React.FC = () => {
     );
   }
 
-  // Show loading screen if triggered
-  if (showLoading) {
-    return (
-      <LoadingScreen
-        onComplete={handleLoadingComplete}
-        onBack={handleLoadingBack}
-      />
-    );
-  }
-
-  // Show onboarding step 4 if we're on step 4
+  // Step 4 — Destinations (new). Optional carousel; Skip shows a disclaimer.
   if (currentStep === 4) {
-    console.log('Rendering OnboardingStep4Screen with initialData:', formData);
     return (
-      <OnboardingStep4Screen
+      <OnboardingStep4DestinationsScreen
         onNext={handleStep4Next}
         onBack={handleStep4Back}
         initialData={formData}
         updateFormData={updateFormData}
         isLoading={isSavingStep4}
-        onAgeBlocked={() => setShowAgeBlockOverlay(true)}
       />
     );
   }
 
-  // Show onboarding chat screen if we're on step 5 (Swelly chat). Service uses copy edge when LOCAL_MODE.
+  // Step 5 — Budget (new). BudgetCardsCarousel; Next always enabled.
   if (currentStep === 5) {
     return (
-      <OnboardingChatScreen
-        onChatComplete={handleChatComplete}
+      <OnboardingStep5BudgetScreen
+        onNext={handleStep5Next}
+        onBack={handleStep5Back}
+        initialData={formData}
+        updateFormData={updateFormData}
+        isLoading={isSavingStep5}
+      />
+    );
+  }
+
+  // Step 6 — Lifestyle (new). Preset grid + Pexels-backed "add your own".
+  if (currentStep === 6) {
+    return (
+      <OnboardingStep6LifestyleScreen
+        onNext={handleStep6Next}
+        onBack={handleStep6Back}
+        initialData={formData}
+        updateFormData={updateFormData}
+        isLoading={isSavingStep6}
+      />
+    );
+  }
+
+  // Step 7 — Profile (was step 4). Renumbered when destinations/budget/lifestyle
+  // were inserted before this screen.
+  if (currentStep === 7) {
+    console.log('Rendering OnboardingStep4Screen (profile, step 7) with initialData:', formData);
+    return (
+      <OnboardingStep4Screen
+        onNext={handleStep7Next}
+        onBack={handleStep7Back}
+        initialData={formData}
+        updateFormData={updateFormData}
+        isLoading={isSavingStep7}
+        onAgeBlocked={() => setShowAgeBlockOverlay(true)}
       />
     );
   }

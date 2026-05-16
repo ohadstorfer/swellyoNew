@@ -152,9 +152,70 @@ class OnboardingService {
   }
 
   /**
+   * Save Step 4 data (Destinations)
+   * Persists the destinations array directly to `surfers.destinations_array`.
+   * Same column the Swelly chat writes — both paths merge via upsert.
+   */
+  async saveStep4Destinations(
+    destinations: Array<{ country: string; state?: string; area: string[]; time_in_days: number; time_in_text?: string }>,
+  ): Promise<void> {
+    if (!isSupabaseConfigured()) {
+      console.log('Supabase not configured, skipping Step 4 (destinations) save');
+      return;
+    }
+    try {
+      await supabaseDatabaseService.saveSurfer({ destinationsArray: destinations });
+      console.log('Step 4 (destinations) saved to Supabase successfully');
+    } catch (error: any) {
+      console.error('Error saving Step 4 (destinations) to Supabase:', error);
+      throw new Error(`Failed to save Step 4 (destinations): ${error.message || String(error)}`);
+    }
+  }
+
+  /**
+   * Save Step 5 data (Budget / travel_type)
+   */
+  async saveStep5Budget(travelType: 'budget' | 'mid' | 'high' | 'premium'): Promise<void> {
+    if (!isSupabaseConfigured()) {
+      console.log('Supabase not configured, skipping Step 5 (budget) save');
+      return;
+    }
+    try {
+      await supabaseDatabaseService.saveSurfer({ travelType });
+      console.log('Step 5 (budget) saved to Supabase successfully');
+    } catch (error: any) {
+      console.error('Error saving Step 5 (budget) to Supabase:', error);
+      throw new Error(`Failed to save Step 5 (budget): ${error.message || String(error)}`);
+    }
+  }
+
+  /**
+   * Save Step 6 data (Lifestyle keywords + image URLs)
+   */
+  async saveStep6Lifestyle(
+    keywords: string[],
+    imageUrls: Record<string, string>,
+  ): Promise<void> {
+    if (!isSupabaseConfigured()) {
+      console.log('Supabase not configured, skipping Step 6 (lifestyle) save');
+      return;
+    }
+    try {
+      await supabaseDatabaseService.saveSurfer({
+        lifestyleKeywords: keywords,
+        lifestyleImageUrls: Object.keys(imageUrls).length > 0 ? imageUrls : null,
+      });
+      console.log('Step 6 (lifestyle) saved to Supabase successfully');
+    } catch (error: any) {
+      console.error('Error saving Step 6 (lifestyle) to Supabase:', error);
+      throw new Error(`Failed to save Step 6 (lifestyle): ${error.message || String(error)}`);
+    }
+  }
+
+  /**
    * Save partial onboarding data (used for incremental saves)
    * This is useful when you want to save data from multiple steps at once
-   * 
+   *
    * @param data - Partial onboarding data
    */
   async saveOnboardingData(data: Partial<OnboardingStepData>): Promise<void> {

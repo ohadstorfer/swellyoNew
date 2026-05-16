@@ -27,11 +27,11 @@ export const LIFESTYLE_BUCKET_IMAGE_FILENAMES = new Set([
   'Mobility_Training_Stretching.jpg', 'Mountain_Biking.jpg', 'Music_Festivals.jpg', 'Nature.jpg', 'Nature_Conservation.jpg',
   'Nightlife.jpg', 'Ocean_Conservation.jpg', 'Overlanding_Van_Life.jpg', 'Paragliding.jpg', 'Photography.jpg',
   'Pickleball.jpg', 'Pilates.jpg', 'Pingpong.jpg', 'Playing_Music.jpg', 'Pool_Billiards_Snooker.jpg',
-  'Reading.jpg', 'Rock_Climbing.jpg', 'Rugby.jpg', 'Running.jpg', 'SUP_Surfing.jpg', 'Safari_Wild_Animal.jpg',
-  'Sailing.jpg', 'Scuba_Diving.jpg', 'Skateboarding.jpg', 'Skiing_Snowboarding.jpg', 'Skydiving.jpg',
+  'Reading.jpg', 'Climbing.jpg', 'Rugby.jpg', 'Running.jpg', 'SUP_Surfing.jpg', 'Safari_Wild_Animal.jpg',
+  'Sailing.jpg', 'Scuba_Diving.jpg', 'Skateboarding.jpg', 'Skiing.jpg', 'Snowboarding.jpg', 'Skydiving.jpg',
   'Snorkeling.jpg', 'Snowmobiling.jpg', 'Soccer.jpg', 'Spear_Fishing.jpg', 'Spin_Fishing.jpg',
   'Swimming.jpg', 'Tennis.jpg', 'Travel.jpg', 'Volleyball.jpg', 'Wakeboarding_Waterskiing.jpg',
-  'Whale_Watching_Dolphin_Watching.jpg', 'Wildlife_Conservation.jpg', 'Wind_Surfing.jpg', 'Wing_Foiling.jpg', 'Yoga.jpg',
+  'Whale_Watching_Dolphin_Watching.jpg', 'Wildlifle_Conservation.jpg', 'Wind_Surfing.jpg', 'Wing_Foiling.jpg', 'Yoga.jpg',
 ]);
 
 /**
@@ -533,13 +533,24 @@ export const getLifestyleImageFromPexels = async (lifestyleKeyword: string): Pro
 /**
  * Return public bucket URL for a known lifestyle image filename (from LLM lifestyle_keyword_images).
  * Returns null if filename is not in the allowed set.
+ *
+ * Uses Supabase Storage image transforms (`/render/image/...?width=...`) so
+ * thumbnails are served at the size we actually render. The transform endpoint
+ * also responds with `cache-control: max-age=3600` (the raw `/object/` route
+ * sends `no-cache`), so we get browser/CDN caching for free.
+ *
+ * `size` defaults to 300 (matches a 110px card on @2.5x density). Pass a
+ * smaller value (e.g. 24) when you only need a tiny placeholder for blur-up.
  */
-export const getLifestyleImageBucketUrlForFilename = (bucketFilename: string): string | null => {
+export const getLifestyleImageBucketUrlForFilename = (
+  bucketFilename: string,
+  size: number = 300,
+): string | null => {
   if (!bucketFilename || !SUPABASE_URL) return null;
   const trimmed = bucketFilename.trim();
   if (!LIFESTYLE_BUCKET_IMAGE_FILENAMES.has(trimmed)) return null;
   const path = `${LIFESTYLE_IMAGES_BUCKET}/${encodeURIComponent(trimmed)}`;
-  return `${SUPABASE_URL}/storage/v1/object/public/${path}`;
+  return `${SUPABASE_URL}/storage/v1/render/image/public/${path}?width=${size}&height=${size}&resize=cover&quality=75`;
 };
 
 /**

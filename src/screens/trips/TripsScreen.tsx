@@ -5,6 +5,7 @@ import {
   StyleSheet,
   TouchableOpacity,
   FlatList,
+  SectionList,
   Image,
   ActivityIndicator,
   RefreshControl,
@@ -14,8 +15,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { useOnboarding } from '../../context/OnboardingContext';
 import {
   GroupTrip,
+  MyTripsBuckets,
   listExploreTrips,
-  listMyTrips,
+  listMyTripsByBucket,
 } from '../../services/trips/groupTripsService';
 import CreateTripWizard from './CreateTripWizard';
 import TripDetailScreen from './TripDetailScreen';
@@ -91,9 +93,21 @@ const formatDestination = (trip: GroupTrip): string => {
   return parts.join(', ');
 };
 
-const TripCard: React.FC<{ trip: GroupTrip; onPress?: () => void }> = ({ trip, onPress }) => (
+type TripCardBadge = 'approved' | 'pending' | 'completed';
+
+const BADGE_LABEL: Record<TripCardBadge, string> = {
+  approved: 'Approved',
+  pending: 'Pending',
+  completed: 'Completed',
+};
+
+const TripCard: React.FC<{
+  trip: GroupTrip;
+  onPress?: () => void;
+  badge?: TripCardBadge;
+}> = ({ trip, onPress, badge }) => (
   <TouchableOpacity
-    style={styles.card}
+    style={[styles.card, badge === 'completed' && styles.cardPast]}
     activeOpacity={onPress ? 0.85 : 1}
     onPress={onPress}
     disabled={!onPress}
@@ -106,6 +120,13 @@ const TripCard: React.FC<{ trip: GroupTrip; onPress?: () => void }> = ({ trip, o
       </View>
     )}
     <View style={styles.cardBody}>
+      {badge && (
+        <View style={[styles.badge, badge === 'completed' && styles.badgeCompleted]}>
+          <Text style={[styles.badgeText, badge === 'completed' && styles.badgeTextCompleted]}>
+            {BADGE_LABEL[badge]}
+          </Text>
+        </View>
+      )}
       {!!trip.title && <Text style={styles.cardTitle}>{trip.title}</Text>}
       <Text style={styles.cardDest}>{formatDestination(trip)}</Text>
       <Text style={styles.cardDates}>{formatTripDates(trip)}</Text>
@@ -180,12 +201,18 @@ const ExploreTripsView: React.FC<{ onOpenTrip: (tripId: string) => void }> = ({ 
 // ---------------------------------------------------------------------------
 // My Trips view
 // ---------------------------------------------------------------------------
+interface TripSection {
+  title: string;
+  badge: TripCardBadge;
+  data: GroupTrip[];
+}
+
 const MyTripsView: React.FC<{
   userId: string | null;
   onGoCreate: () => void;
   onOpenTrip: (tripId: string) => void;
 }> = ({ userId, onGoCreate, onOpenTrip }) => {
-  const [trips, setTrips] = useState<GroupTrip[]>([]);
+  const [buckets, setBuckets] = useState<MyTripsBuckets>({ approved: [], pending: [], past: [] });
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -194,8 +221,8 @@ const MyTripsView: React.FC<{
       setLoading(false);
       return;
     }
-    const data = await listMyTrips(userId);
-    setTrips(data);
+    const data = await listMyTripsByBucket(userId);
+    setBuckets(data);
     setLoading(false);
     setRefreshing(false);
   }, [userId]);
@@ -203,6 +230,13 @@ const MyTripsView: React.FC<{
   useEffect(() => {
     load();
   }, [load]);
+
+  const allSections: TripSection[] = [
+    { title: 'APPROVED', badge: 'approved', data: buckets.approved },
+    { title: 'PENDING APPROVAL', badge: 'pending', data: buckets.pending },
+    { title: 'PAST TRIPS', badge: 'completed', data: buckets.past },
+  ];
+  const sections = allSections.filter(s => s.data.length > 0);
 
   if (loading) {
     return (
@@ -212,12 +246,36 @@ const MyTripsView: React.FC<{
     );
   }
 
+  if (sections.length === 0) {
+    return (
+      <View style={styles.emptyState}>
+        <Ionicons name="airplane-outline" size={48} color="#B0B0B0" />
+        <Text style={styles.emptyText}>You haven't joined or created any trips yet.</Text>
+        <TouchableOpacity style={styles.emptyCta} onPress={onGoCreate}>
+          <Text style={styles.emptyCtaText}>Create your first trip</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   return (
-    <FlatList
-      data={trips}
+    <SectionList
+      sections={sections}
       keyExtractor={t => t.id}
-      renderItem={({ item }) => <TripCard trip={item} onPress={() => onOpenTrip(item.id)} />}
+      renderItem={({ item, section }) => (
+        <TripCard
+          trip={item}
+          badge={(section as TripSection).badge}
+          onPress={() => onOpenTrip(item.id)}
+        />
+      )}
+      renderSectionHeader={({ section }) => (
+        <Text style={styles.sectionHeader}>
+          {(section as TripSection).title} ({(section as TripSection).data.length})
+        </Text>
+      )}
       contentContainerStyle={styles.listContent}
+      stickySectionHeadersEnabled={false}
       refreshControl={
         <RefreshControl
           refreshing={refreshing}
@@ -226,15 +284,6 @@ const MyTripsView: React.FC<{
             load();
           }}
         />
-      }
-      ListEmptyComponent={
-        <View style={styles.emptyState}>
-          <Ionicons name="airplane-outline" size={48} color="#B0B0B0" />
-          <Text style={styles.emptyText}>You haven't created any trips yet.</Text>
-          <TouchableOpacity style={styles.emptyCta} onPress={onGoCreate}>
-            <Text style={styles.emptyCtaText}>Create your first trip</Text>
-          </TouchableOpacity>
-        </View>
       }
     />
   );
@@ -379,6 +428,15 @@ const styles = StyleSheet.create({
 
   listContent: { paddingHorizontal: 16, paddingBottom: 24, flexGrow: 1 },
 
+  sectionHeader: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#4A5565',
+    letterSpacing: 0.5,
+    marginTop: 16,
+    marginBottom: 8,
+  },
+
   card: {
     backgroundColor: '#FFFFFF',
     borderRadius: 14,
@@ -387,6 +445,23 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#EEE',
   },
+  cardPast: { opacity: 0.6 },
+  badge: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#0A0A0A',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 4,
+    marginBottom: 8,
+  },
+  badgeCompleted: { backgroundColor: '#D1D5DC' },
+  badgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    letterSpacing: 0.2,
+  },
+  badgeTextCompleted: { color: '#0A0A0A' },
   cardImage: { width: '100%', height: 160, backgroundColor: '#F2F2F2' },
   cardImagePlaceholder: { alignItems: 'center', justifyContent: 'center' },
   cardBody: { padding: 12 },

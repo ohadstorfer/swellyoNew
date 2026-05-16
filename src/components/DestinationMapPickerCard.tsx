@@ -19,6 +19,7 @@ import { Text } from './Text';
 import { colors, spacing } from '../styles/theme';
 import { getCountryFlag } from '../utils/countryFlags';
 import { getDisplayLabelAndFlagKey } from '../utils/destinationDisplay';
+import { getPlacesDestinationRegionCode } from '../utils/placesDestinationRegionCode';
 import {
   getCountryImageFromStorage,
   getCountryImageFallback,
@@ -29,6 +30,7 @@ import { MapPopover, type MapPickerPlace } from './MapPickerModal';
 import { getMapPickerInlineHtml, COUNTRY_CENTERS } from '../utils/mapPickerHtml';
 import type { SwipeExcludeZoneRect } from './DestinationInputCard';
 import { normalizeMapPickerPlace } from '../utils/googlePlaceNormalizer';
+import { useDebounce } from '../hooks/useDebounce';
 
 const DEBUG_MAP_PICKER =
   process.env.EXPO_PUBLIC_MAP_PICKER_DEBUG === 'true' ||
@@ -50,15 +52,6 @@ const MAX_SUGGESTIONS = 5;
 interface PlaceSuggestion {
   placeId: string;
   text: string;
-}
-
-function useDebounce<T>(value: T, delay: number): T {
-  const [debouncedValue, setDebouncedValue] = useState(value);
-  useEffect(() => {
-    const timer = setTimeout(() => setDebouncedValue(value), delay);
-    return () => clearTimeout(timer);
-  }, [value, delay]);
-  return debouncedValue;
 }
 
 async function fetchPlaceDetails(placeId: string, apiKey: string): Promise<MapPickerPlace | null> {
@@ -86,32 +79,6 @@ async function fetchPlaceDetails(placeId: string, apiKey: string): Promise<MapPi
     return null;
   }
 }
-
-const COUNTRY_TO_REGION: Record<string, string> = {
-  'USA': 'us',
-  'United States': 'us',
-  'Costa Rica': 'cr',
-  'Nicaragua': 'ni',
-  'Panama': 'pa',
-  'El Salvador': 'sv',
-  'Indonesia': 'id',
-  'Sri Lanka': 'lk',
-  'Philippines': 'ph',
-  'Australia': 'au',
-  'Mexico': 'mx',
-  'Brazil': 'br',
-  'Portugal': 'pt',
-  'France': 'fr',
-  'Spain': 'es',
-  'South Africa': 'za',
-  'Morocco': 'ma',
-  'Israel': 'il',
-  'Japan': 'jp',
-  'New Zealand': 'nz',
-  'Peru': 'pe',
-  'Ecuador': 'ec',
-  'Chile': 'cl',
-};
 
 interface DestinationMapPickerCardProps {
   destination: string;
@@ -264,10 +231,10 @@ export const DestinationMapPickerCard = forwardRef<
     () => getDisplayLabelAndFlagKey(destination),
     [destination]
   );
-  const regionCode = useMemo(() => {
-    if (flagKey === 'California' || flagKey === 'Hawaii') return 'us';
-    return COUNTRY_TO_REGION[destination];
-  }, [destination, flagKey]);
+  const regionCode = useMemo(
+    () => getPlacesDestinationRegionCode(destination),
+    [destination],
+  );
   const apiKey = process.env.EXPO_PUBLIC_GOOGLE_PLACES_API_KEY;
   const countryCenter = useMemo(() => (regionCode ? COUNTRY_CENTERS[regionCode] : undefined), [regionCode]);
   const inlineMapHtml = useMemo(

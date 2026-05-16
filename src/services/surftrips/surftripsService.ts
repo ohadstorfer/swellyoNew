@@ -86,7 +86,7 @@ export type AcceptInviteOutcome =
   | { outcome: 'group_full' }
   | { outcome: 'already_member'; group_id: string; conversation_id: string }
   | { outcome: 'joined'; group_id: string; conversation_id: string }
-  | { outcome: 'requested'; group_id: string };
+  | { outcome: 'open_detail'; group_id: string };
 
 /**
  * Accept a surftrip invite via its token. The RPC decides between auto-join

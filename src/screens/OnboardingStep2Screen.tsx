@@ -245,7 +245,7 @@ export const OnboardingStep2Screen: React.FC<OnboardingStep2ScreenProps> = ({
             <Ionicons name="arrow-back" size={24} color="#222B30" />
           </TouchableOpacity>
 
-          <Text style={styles.stepText}>Step 2/4</Text>
+          <Text style={styles.stepText}>Surf Juice 1/3</Text>
 
           <View style={styles.skipButton}>
             {/* Skip button is hidden/opacity 0 in Figma */}
@@ -255,7 +255,7 @@ export const OnboardingStep2Screen: React.FC<OnboardingStep2ScreenProps> = ({
         {/* Progress Bar */}
         <View style={[styles.progressContainer, isDesktop && styles.progressContainerDesktop]}>
           <View style={[styles.progressBar, { width: progressBarWidth }]}>
-            <View style={[styles.progressFill, { width: '40%' }]} />
+            <View style={[styles.progressFill, { width: '28.6%' }]} />
           </View>
         </View>
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Modal,
   View,
@@ -17,6 +17,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { Text } from './Text';
 import { colors, spacing } from '../styles/theme';
 import { InlineMapView } from './MapPickerModal';
+import { useDebounce } from '../hooks/useDebounce';
+import { getPlacesDestinationRegionCode } from '../utils/placesDestinationRegionCode';
 
 const PLACES_AUTOCOMPLETE_URL = 'https://places.googleapis.com/v1/places:autocomplete';
 const PLACE_DETAILS_URL = 'https://places.googleapis.com/v1/places';
@@ -40,6 +42,9 @@ type HomeBreakSearchSheetProps = {
   visible: boolean;
   onClose: () => void;
   onSelect: (selection: HomeBreakSelection) => void;
+  // Display name of the user's country (e.g. "Australia", "United States").
+  // If set, scopes Places autocomplete to that country via includedRegionCodes.
+  countryFilter?: string;
 };
 
 type Suggestion = {
@@ -47,15 +52,6 @@ type Suggestion = {
   mainText: string;
   secondaryText: string;
 };
-
-function useDebounce<T>(value: T, delay: number): T {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const t = setTimeout(() => setDebounced(value), delay);
-    return () => clearTimeout(t);
-  }, [value, delay]);
-  return debounced;
-}
 
 // Generate a UUID v4 for Places session tokens. Same session token must be
 // passed to autocomplete requests AND the final place-details call so the
@@ -142,8 +138,13 @@ export const HomeBreakSearchSheet: React.FC<HomeBreakSearchSheetProps> = ({
   visible,
   onClose,
   onSelect,
+  countryFilter,
 }) => {
   const apiKey = process.env.EXPO_PUBLIC_GOOGLE_PLACES_API_KEY;
+  const regionCode = useMemo(
+    () => (countryFilter ? getPlacesDestinationRegionCode(countryFilter) : undefined),
+    [countryFilter],
+  );
   const [query, setQuery] = useState('');
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [loading, setLoading] = useState(false);
@@ -232,6 +233,16 @@ export const HomeBreakSearchSheet: React.FC<HomeBreakSearchSheetProps> = ({
 
     (async () => {
       try {
+        const body: Record<string, unknown> = {
+          input: trimmed,
+          sessionToken: sessionTokenRef.current,
+          includeQueryPredictions: false,
+        };
+        // Scope suggestions to the user's country (entered earlier in the same
+        // step). Same mechanism the destination editor uses for area picks.
+        if (regionCode && regionCode.length === 2) {
+          body.includedRegionCodes = [regionCode];
+        }
         const res = await fetch(PLACES_AUTOCOMPLETE_URL, {
           method: 'POST',
           headers: {
@@ -240,11 +251,7 @@ export const HomeBreakSearchSheet: React.FC<HomeBreakSearchSheetProps> = ({
             'X-Goog-FieldMask':
               'suggestions.placePrediction.placeId,suggestions.placePrediction.structuredFormat',
           },
-          body: JSON.stringify({
-            input: trimmed,
-            sessionToken: sessionTokenRef.current,
-            includeQueryPredictions: false,
-          }),
+          body: JSON.stringify(body),
         });
         if (!isMountedRef.current || seq < requestSeqRef.current) return;
         if (!res.ok) {
@@ -275,7 +282,7 @@ export const HomeBreakSearchSheet: React.FC<HomeBreakSearchSheetProps> = ({
         if (isMountedRef.current && seq === requestSeqRef.current) setLoading(false);
       }
     })();
-  }, [debouncedQuery, apiKey, pending]);
+  }, [debouncedQuery, apiKey, pending, regionCode]);
 
   const handlePick = async (s: Suggestion) => {
     if (!apiKey) return;

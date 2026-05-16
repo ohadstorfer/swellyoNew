@@ -257,6 +257,7 @@ export const BudgetCardsCarousel: React.FC<BudgetCardsCarouselProps> = ({
           renderItem={({ item: budgetItem }) => {
             const gradient = BUDGET_GRADIENTS[budgetItem.value];
             const structuredCard = STRUCTURED_CARDS[budgetItem.value];
+            const isSelected = selectedBudget === budgetItem.value;
 
             return (
               <View style={[styles.cardWrapper, { width: cardWidth, height: CARD_HEIGHT, marginRight: CARD_GAP }]}>
@@ -290,9 +291,19 @@ export const BudgetCardsCarousel: React.FC<BudgetCardsCarouselProps> = ({
                             onPress={() => handleCardPress(budgetItem.value)}
                             disabled={isReadOnly}
                             activeOpacity={0.8}
-                            style={styles.structuredCardSelectButton}
+                            style={[
+                              styles.structuredCardSelectButton,
+                              isSelected && styles.structuredCardSelectButtonSelected,
+                            ]}
                           >
-                            <Text style={styles.structuredCardSelectButtonText}>Select</Text>
+                            <Text
+                              style={[
+                                styles.structuredCardSelectButtonText,
+                                isSelected && styles.structuredCardSelectButtonTextSelected,
+                              ]}
+                            >
+                              {isSelected ? 'Selected' : 'Select'}
+                            </Text>
                           </TouchableOpacity>
                         </View>
                       ) : (
@@ -425,5 +436,15 @@ const styles = StyleSheet.create({
     fontSize: 18,
     lineHeight: 20,
     color: '#333',
+  },
+  // Selected state: filled dark button so the user sees their pick — same
+  // colors as the primary Next button so the visual language is consistent
+  // across the onboarding step and the swelly chat.
+  structuredCardSelectButtonSelected: {
+    backgroundColor: '#212121',
+  },
+  structuredCardSelectButtonTextSelected: {
+    color: '#FFFFFF',
+    fontWeight: '600',
   },
 });
