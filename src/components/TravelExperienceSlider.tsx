@@ -102,8 +102,8 @@ interface TravelExperienceSliderProps {
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const BAR_WIDTH = Math.min(330, SCREEN_WIDTH - 2 * spacing.xl);
-const BAR_HEIGHT = 4;
-const KNOB_SIZE = 28;
+const BAR_HEIGHT = 6;
+const KNOB_SIZE = 36;
 
 const MAX_TRIPS = 20; // Maximum value for the slider (20+)
 
@@ -632,10 +632,10 @@ const styles = StyleSheet.create({
     left: 0, // translateX handles positioning
     zIndex: 3,
     shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.10,
-    shadowRadius: 12,
-    elevation: 8,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.22,
+    shadowRadius: 16,
+    elevation: 12,
   },
   customThumb: {
     position: 'absolute',
@@ -647,14 +647,14 @@ const styles = StyleSheet.create({
     pointerEvents: 'none', // Allow touches to pass through to slider
     // iOS shadow
     shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.10,
-    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.22,
+    shadowRadius: 16,
     // Android elevation
-    elevation: 8,
+    elevation: 12,
     // Web filter shadow
     ...(Platform.OS === 'web' && {
-      filter: 'drop-shadow(0 6px 12px rgba(0, 0, 0, 0.10)) drop-shadow(0 0.5px 4px rgba(0, 0, 0, 0.10))',
+      filter: 'drop-shadow(0 8px 16px rgba(0, 0, 0, 0.22)) drop-shadow(0 1px 5px rgba(0, 0, 0, 0.16))',
     } as any),
   },
   errorText: {

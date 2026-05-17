@@ -272,7 +272,7 @@ export const OnboardingStep1Screen: React.FC<OnboardingStep1ScreenProps> = ({
         {/* Progress Bar */}
         <View style={[styles.progressContainer, isDesktop && styles.progressContainerDesktop]}>
           <View style={[styles.progressBar, { width: progressBarWidth }]}>
-            <View style={[styles.progressFill, { width: '14.3%' }]} />
+            <View style={[styles.progressFill, { width: '33.3%' }]} />
           </View>
         </View>
 
@@ -377,7 +377,7 @@ const styles = StyleSheet.create({
     zIndex: 0,
   },
   stepText: {
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: '400',
     color: colors.textPrimary,
     textAlign: 'center',

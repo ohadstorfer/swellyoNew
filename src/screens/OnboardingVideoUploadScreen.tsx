@@ -446,7 +446,7 @@ export const OnboardingVideoUploadScreen: React.FC<OnboardingVideoUploadScreenPr
         {/* Progress Bar */}
         <View style={[styles.progressContainer, isDesktop && styles.progressContainerDesktop]}>
           <View style={[styles.progressBar, { width: progressBarWidth }]}>
-            <View style={[styles.progressFill, { width: '35.7%' }]} />
+            <View style={[styles.progressFill, { width: '33.3%' }]} />
           </View>
         </View>
 
@@ -574,7 +574,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
   },
   stepText: {
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: '400',
     color: colors.textPrimary,
     textAlign: 'center',

@@ -16,6 +16,7 @@ import {
   ScrollView,
   FlatList,
   ActivityIndicator,
+  Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -24,6 +25,10 @@ import { DestinationDurationInput } from '../DestinationDurationInput';
 import { PlaceChip } from '../PlaceChip';
 import { normalizeMapPickerPlace } from '../../utils/googlePlaceNormalizer';
 import { getDisplayLabelAndFlagKey } from '../../utils/destinationDisplay';
+import {
+  getCountryImageFromStorage,
+  getCountryImageFallback,
+} from '../../services/media/imageService';
 import { getPlacesDestinationRegionCode } from '../../utils/placesDestinationRegionCode';
 import type { MapPickerPlace } from '../MapPickerModal';
 import type { DurationTimeUnit } from '../../utils/destinationDuration';
@@ -291,6 +296,17 @@ export const ProfileEditDestinationScreen: React.FC<Props> = ({
     return getPlacesDestinationRegionCode(country);
   }, [selectedCountry, destination?.country]);
 
+  // Warm the destination image into cache as soon as a country is chosen, so
+  // the card shows it instantly once the user saves.
+  useEffect(() => {
+    if (!selectedCountry) return;
+    const { flagKey } = getDisplayLabelAndFlagKey(selectedCountry);
+    const uri = getCountryImageFromStorage(flagKey) || getCountryImageFallback(flagKey);
+    if (typeof uri === 'string' && uri) {
+      Image.prefetch(uri).catch(() => {});
+    }
+  }, [selectedCountry]);
+
   const debouncedQuery = useDebounce(query, SUGGESTION_DEBOUNCE_MS);
 
   useEffect(() => {
@@ -425,6 +441,17 @@ export const ProfileEditDestinationScreen: React.FC<Props> = ({
     );
   }, [onDelete, onClose, destination?.country]);
 
+  const handleClosePress = useCallback(() => {
+    Alert.alert(
+      'Discard destination?',
+      "Your changes won't be saved.",
+      [
+        { text: 'Keep editing', style: 'cancel' },
+        { text: 'Discard', style: 'destructive', onPress: onClose },
+      ],
+    );
+  }, [onClose]);
+
   const handleSave = useCallback(async () => {
     const country = selectedCountry.trim();
     if (!country) {
@@ -483,9 +510,14 @@ export const ProfileEditDestinationScreen: React.FC<Props> = ({
           styles.sheet,
           {
             transform: [{ translateY }],
-            paddingBottom: Math.max(insets.bottom, 16) + 24,
-            // Lifts the sheet above the on-screen keyboard. 0 when hidden.
-            marginBottom: keyboardHeight,
+            // The white sheet runs all the way to the bottom of the screen
+            // (behind the keyboard); paddingBottom lifts the content above
+            // the keyboard instead of moving the whole sheet up. Skip the
+            // keyboard padding while the country modal is open — that
+            // keyboard belongs to the modal on top, not to this sheet.
+            paddingBottom:
+              Math.max(insets.bottom, 16) + 24 +
+              (countryModalVisible ? 0 : keyboardHeight),
           },
         ]}
       >
@@ -497,11 +529,11 @@ export const ProfileEditDestinationScreen: React.FC<Props> = ({
 
           <View style={styles.header}>
             <Text style={styles.title}>
-              {mode === 'add' ? 'Add destination' : 'Top Destination'}
+              {mode === 'add' ? 'Add Destination' : 'Top Destination'}
             </Text>
             <TouchableOpacity
               style={styles.closeButton}
-              onPress={onClose}
+              onPress={handleClosePress}
               activeOpacity={0.7}
             >
               <Ionicons name="close" size={24} color={FIGMA.textPrimary} />
@@ -626,6 +658,7 @@ export const ProfileEditDestinationScreen: React.FC<Props> = ({
             timeUnit={timeUnit}
             onTimeValueChange={setDayValue}
             onTimeUnitChange={setTimeUnit}
+            fieldHeight={64}
           />
         </View>
 
@@ -660,6 +693,9 @@ export const ProfileEditDestinationScreen: React.FC<Props> = ({
         onSelect={c => {
           setSelectedCountry(c);
           setCountryModalVisible(false);
+          // Focus the city/spot field once the country modal has closed so
+          // the keyboard carries over to it.
+          setTimeout(() => inputRef.current?.focus(), 250);
         }}
         onClose={() => setCountryModalVisible(false)}
       />
@@ -699,13 +735,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingTop: 8,
-    paddingBottom: 16,
+    paddingBottom: 24,
   },
   title: {
-    fontSize: 24,
+    fontSize: 22,
     lineHeight: 32,
     fontWeight: '700',
     color: FIGMA.textPrimary,
+    marginLeft: 8,
     ...Platform.select({
       web: { fontFamily: 'Montserrat, sans-serif' },
       default: { fontFamily: 'Montserrat' },
@@ -720,13 +757,14 @@ const styles = StyleSheet.create({
   countryField: {
     flexDirection: 'row',
     alignItems: 'center',
-    height: 56,
+    height: 64,
     paddingHorizontal: 16,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: FIGMA.fieldBorder,
     backgroundColor: FIGMA.fieldBg,
-    marginBottom: 12,
+    marginBottom: 20,
+    marginHorizontal: 16,
   },
   countryText: {
     flex: 1,
@@ -739,7 +777,8 @@ const styles = StyleSheet.create({
   },
   placesBlock: {
     position: 'relative',
-    marginBottom: 12,
+    marginBottom: 20,
+    marginHorizontal: 16,
     // Lifts the suggestions dropdown above the duration block below it.
     zIndex: 20,
     elevation: 20,
@@ -747,15 +786,15 @@ const styles = StyleSheet.create({
   placesField: {
     flexDirection: 'row',
     alignItems: 'center',
-    minHeight: 56,
-    paddingHorizontal: 12,
+    minHeight: 64,
+    paddingHorizontal: 16,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: FIGMA.fieldBorder,
     backgroundColor: FIGMA.fieldBg,
   },
   placesFieldDisabled: {
-    backgroundColor: '#F5F5F5',
+    backgroundColor: '#F7F7F7',
     opacity: 0.7,
   },
   placesIcon: {
@@ -763,7 +802,7 @@ const styles = StyleSheet.create({
   },
   chipsScroll: {
     flex: 1,
-    maxHeight: 56,
+    maxHeight: 64,
   },
   chipsContent: {
     flexDirection: 'row',
@@ -834,7 +873,8 @@ const styles = StyleSheet.create({
     }),
   },
   durationBlock: {
-    marginBottom: 16,
+    marginBottom: 20,
+    marginHorizontal: 16,
   },
   saveButton: {
     height: 56,
@@ -842,7 +882,8 @@ const styles = StyleSheet.create({
     backgroundColor: FIGMA.buttonBg,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 8,
+    marginTop: 24,
+    marginHorizontal: 16,
   },
   saveButtonDisabled: {
     opacity: 0.6,

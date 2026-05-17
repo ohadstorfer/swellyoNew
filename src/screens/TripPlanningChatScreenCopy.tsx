@@ -54,7 +54,7 @@ import { useDismissKeyboardOnBlur } from '../hooks/useDismissKeyboardOnBlur';
 import { useTutorial } from '../context/TutorialContext';
 import { TutorialOverlay, type AnchorRect } from '../components/TutorialOverlay';
 import { TUTORIAL_ANCHOR_Y_OFFSET } from '../utils/tutorialAnchorOffset';
-import { SwellyTopicOverlay, type SwellyTopicId } from '../components/SwellyTopicOverlay';
+import { SwellyTopicOverlay, TOPIC_SEEDS, type SwellyTopicId } from '../components/SwellyTopicOverlay';
 import { useKeyboardVisible, useKeyboardHeight } from '../hooks/useKeyboardVisible';
 
 /** Split filter label into prefix and value for chip display (e.g. "Origin – Israel" -> prefix "Origin", value "Israel"). */
@@ -444,17 +444,6 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     tutorial.markSeen();
   }, [visible, tutorial.isHydrated, tutorial.isSeen, tutorial.isActive, isDemoUser]);
 
-  // Safety: if the tutorial activates while the topic-selection overlay is
-  // showing (e.g. on Replay re-entry where the persistent screen still has
-  // showTopicOverlay=true from a prior session), close the overlay so the
-  // tutorial Modal isn't covered by it. SwellyTopicOverlay uses RN <Modal>,
-  // which renders above the TutorialOverlay <View> and would otherwise win.
-  useEffect(() => {
-    if (tutorial.isActive && showTopicOverlay) {
-      setShowTopicOverlay(false);
-    }
-  }, [tutorial.isActive, showTopicOverlay]);
-
   // Show step 3 tooltip as soon as the screen is mounted. The filters button
   // is part of the screen chrome and is laid out before the edge-function
   // call resolves, so its measureInWindow works from the first frame. Not
@@ -804,7 +793,24 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
                 onChatStateChange(chatIdToRestore, allRestoredMatchedUsers, latestRestoredDestination);
               }
 
-              setMessages(restoredMessages);
+              {
+                // The topic-selection seed is auto-sent, not typed by the
+                // user — it doesn't count as the user having texted Swelly.
+                const hasUserMsg = restoredMessages.some(
+                  (m) => m.isUser && !TOPIC_SEEDS.includes(m.text),
+                );
+                console.log(
+                  `[Swelly init] restored chat (ui_messages) — hasUserMessage=${hasUserMsg} → topic overlay ${hasUserMsg ? 'OFF' : 'ON'}`,
+                );
+                if (hasUserMsg) {
+                  setMessages(restoredMessages);
+                } else {
+                  // No real user message yet → treat it as fresh so the topic
+                  // overlay slides up and re-seeds the chat.
+                  setMessages([]);
+                  setShowTopicOverlay(true);
+                }
+              }
               setIsInitializing(false);
               return;
             }
@@ -963,7 +969,24 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
                 onChatStateChange(chatIdToRestore, allRestoredMatchedUsers, latestRestoredDestination);
               }
 
-              setMessages(restoredMessages);
+              {
+                // The topic-selection seed is auto-sent, not typed by the
+                // user — it doesn't count as the user having texted Swelly.
+                const hasUserMsg = restoredMessages.some(
+                  (m) => m.isUser && !TOPIC_SEEDS.includes(m.text),
+                );
+                console.log(
+                  `[Swelly init] restored chat (legacy) — hasUserMessage=${hasUserMsg} → topic overlay ${hasUserMsg ? 'OFF' : 'ON'}`,
+                );
+                if (hasUserMsg) {
+                  setMessages(restoredMessages);
+                } else {
+                  // No real user message yet → treat it as fresh so the topic
+                  // overlay slides up and re-seeds the chat.
+                  setMessages([]);
+                  setShowTopicOverlay(true);
+                }
+              }
               setIsInitializing(false);
               return;
             }
@@ -1026,28 +1049,6 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             ]);
             setTimeout(() => scrollToBottom(), 100);
           }, 2000);
-        } else if (tutorial.isActive || (tutorial.isHydrated && !tutorial.isSeen)) {
-          // During the welcome tutorial the topic-selection overlay would
-          // cover the chat and block step 3's spotlight. Skip the overlay
-          // and append the generic greeting + info directly, so the tutorial
-          // can highlight the filters button immediately.
-          // The `!isSeen` branch wins a race with the tutorial trigger effect:
-          // on first mount both effects run in the same render, so `isActive`
-          // here is still its pre-`goTo(3)` value. Reading `isSeen` (DB-backed,
-          // hydrated before mount) keeps us out of the topic-overlay branch.
-          const tsNow = () => new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
-          setMessages([]);
-          setIsInitializing(false);
-          setIsLoading(true);
-          setTimeout(() => {
-            setIsLoading(false);
-            setMessages(prev => [
-              ...prev,
-              { id: 'greeting', text: TRIP_PLANNING_FIRST_QUESTION, isUser: false, timestamp: tsNow() },
-              { id: 'info', text: TRIP_PLANNING_SECOND_MESSAGE, isUser: false, timestamp: tsNow() },
-            ]);
-            setTimeout(() => scrollToBottom(), 100);
-          }, 2000);
         } else {
           // Normal new chat: start with an empty chat behind the topic-selection overlay. The
           // greeting + info messages are appended locally after the user picks a topic (see
@@ -1057,6 +1058,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
           setIsInitializing(false);
           setIsLoading(false);
           setShowTopicOverlay(true);
+          console.log('[Swelly init] new chat → topic overlay ON');
         }
 
         // Create the backend chat in background
@@ -1666,9 +1668,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     // Reset all conversation state
     setMessages([]);
     setIsInitializing(true);
-    // Don't show the topic overlay during the welcome tutorial — it would
-    // cover the chat and block the tutorial spotlight.
-    if (!tutorial.isActive) setShowTopicOverlay(true);
+    setShowTopicOverlay(true);
     setIsFinished(false);
     setMatchedUsers([]);
     setDestinationCountry('');
@@ -2613,7 +2613,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         </Pressable>
       </Modal>
       <SwellyTopicOverlay
-        visible={showTopicOverlay && !tutorial.isActive}
+        visible={showTopicOverlay}
         onSelect={handleTopicSelected}
       />
       <ReportAISheet

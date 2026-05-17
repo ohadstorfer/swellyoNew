@@ -55,8 +55,9 @@ export const OnboardingStep5BudgetScreen: React.FC<Props> = ({
   );
 
   const handleNext = () => {
+    if (!selected) return;
     const data = { ...initialData } as OnboardingData;
-    if (selected) data.travel_type = selected;
+    data.travel_type = selected;
     onNext(data);
   };
 
@@ -67,13 +68,13 @@ export const OnboardingStep5BudgetScreen: React.FC<Props> = ({
           <TouchableOpacity onPress={onBack} style={styles.backButton}>
             <Ionicons name="arrow-back" size={24} color="#222B30" />
           </TouchableOpacity>
-          <Text style={styles.stepText}>Surf deets 2/3</Text>
+          <Text style={styles.stepText}>Travel Deets 2/3</Text>
           <View style={styles.skipButton} />
         </View>
 
         <View style={[styles.progressContainer, isDesktop && styles.progressContainerDesktop]}>
           <View style={[styles.progressBar, { width: progressBarWidth }]}>
-            <View style={[styles.progressFill, { width: '71.4%' }]} />
+            <View style={[styles.progressFill, { width: '66.7%' }]} />
           </View>
         </View>
 
@@ -100,8 +101,8 @@ export const OnboardingStep5BudgetScreen: React.FC<Props> = ({
           <TouchableOpacity
             onPress={handleNext}
             activeOpacity={0.8}
-            disabled={isLoading}
-            style={isLoading && styles.buttonDisabled}
+            disabled={isLoading || !selected}
+            style={(isLoading || !selected) && styles.buttonDisabled}
           >
             <View style={[styles.primaryButton, { width: buttonWidth }]}>
               <Text style={styles.buttonText}>{isLoading ? 'Loading...' : 'Next'}</Text>
@@ -145,7 +146,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
   },
   stepText: {
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: '400',
     color: colors.textPrimary,
     textAlign: 'center',
@@ -178,14 +179,14 @@ const styles = StyleSheet.create({
   },
   headerCopy: {
     alignItems: 'center',
-    paddingTop: spacing.md,
+    paddingTop: spacing.xl,
     paddingHorizontal: spacing.md,
-    paddingBottom: spacing.md,
-    gap: 4,
+    paddingBottom: spacing.xl,
+    gap: 14,
   },
   titleAccent: {
-    fontSize: 24,
-    lineHeight: 28,
+    fontSize: 32,
+    lineHeight: 38,
     fontWeight: '700',
     color: '#05BCD3',
     textAlign: 'center',
@@ -196,8 +197,8 @@ const styles = StyleSheet.create({
     }),
   },
   subtitle: {
-    fontSize: 18,
-    lineHeight: 24,
+    fontSize: 22,
+    lineHeight: 28,
     fontWeight: '700',
     color: '#000000',
     textAlign: 'center',

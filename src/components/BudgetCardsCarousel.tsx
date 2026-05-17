@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import {
   View,
   StyleSheet,
@@ -7,11 +7,11 @@ import {
   Platform,
   TouchableOpacity,
   Image,
+  Animated,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Text } from './Text';
 import { Images } from '../assets/images';
-import { spacing } from '../styles/theme';
 
 export type BudgetOption = 'budget' | 'mid' | 'high' | 'premium';
 
@@ -19,8 +19,8 @@ export type BudgetOption = 'budget' | 'mid' | 'high' | 'premium';
 const FIGMA_OUTER_PADDING = 10.703;
 const FIGMA_OUTER_RADIUS = 21;
 const FIGMA_INNER_RADIUS = 14;
-// Fixed height so all cards are the same; content spacing ~365px (16/18/18/24 spec)
-const CARD_HEIGHT = 368;
+// Fallback card height, used until the available space has been measured.
+const FALLBACK_HEIGHT = 368;
 const FIGMA_SHADOW = {
   shadowColor: 'rgba(89, 110, 124, 0.15)',
   shadowOffset: { width: 0, height: 1.8 },
@@ -68,6 +68,17 @@ const BUDGET_ITEMS: { value: BudgetOption; imageSource: any; label: string }[] =
 
 const NUM_REAL = BUDGET_ITEMS.length;
 
+// Infinite loop: render the 4 cards repeated many times and keep the user near
+// the middle. FlatList virtualises, so only the visible cards are mounted.
+const INFINITE_SIZE = 400;
+const START_INDEX = INFINITE_SIZE / 2; // 200 — a multiple of 4, lands on 'budget'
+const EDGE_THRESHOLD = 8;
+
+// Side cards are smaller + dimmer than the centred one; the scroll position
+// drives a smooth interpolation between the two states.
+const SIDE_SCALE = 0.72;
+const SIDE_OPACITY = 0.5;
+
 // Figma structured cards – same layout, different copy and coin image
 const STRUCTURED_CARDS: Record<BudgetOption, { title: string; tagline: string; description: string; coinImageSource: any }> = {
   budget: {
@@ -96,6 +107,8 @@ const STRUCTURED_CARDS: Record<BudgetOption, { title: string; tagline: string; d
   },
 };
 
+const mod = (n: number, m: number) => ((n % m) + m) % m;
+
 interface BudgetCardsCarouselProps {
   onSelect: (budget: BudgetOption) => void;
   isReadOnly?: boolean;
@@ -110,212 +123,231 @@ export const BudgetCardsCarousel: React.FC<BudgetCardsCarouselProps> = ({
   isReadOnly = false,
   initialSelection,
   onCenteredCardChange,
-  parentScrollNativeRef,
 }) => {
   const [selectedBudget, setSelectedBudget] = useState<BudgetOption | null>(initialSelection ?? null);
-  const [centeredIndex, setCenteredIndex] = useState(0);
-  const centeredIndexRef = useRef(0);
   const flatListRef = useRef<FlatList>(null);
 
+  const PEEK = 24;
+  // 0 gap: the card itself is wider instead — the per-card step (itemWidth)
+  // stays the same, so the side-peek / snap behaviour is unchanged.
+  const CARD_GAP = 0;
+
+  // Measured carousel box. Width drives horizontal centring — the parent
+  // screen has side padding, so the window width would push cards off-centre.
+  // Height drives the card size.
+  const [carouselSize, setCarouselSize] = useState({
+    width: Dimensions.get('window').width,
+    height: 0,
+  });
+  const cardWidth = Math.min(290, carouselSize.width - 2 * PEEK - CARD_GAP);
+  const itemWidth = cardWidth + CARD_GAP;
+  // Pad so a card at scroll offset i*itemWidth ends up centred in the carousel.
+  const sidePad = Math.max(0, (carouselSize.width - cardWidth) / 2);
+  // Centre card fills 70% of the available height (subtitle → Next button).
+  const cardHeight =
+    carouselSize.height > 0 ? Math.round(carouselSize.height * 0.7) : FALLBACK_HEIGHT;
+
+  const initialReal = initialSelection
+    ? Math.max(0, BUDGET_ITEMS.findIndex((b) => b.value === initialSelection))
+    : 0;
+  const initialIndex = START_INDEX + initialReal;
+
+  // Drives the scale/opacity interpolation for every card.
+  const scrollX = useRef(new Animated.Value(initialIndex * itemWidth)).current;
+
+  const [centeredIndex, setCenteredIndex] = useState(initialIndex);
+  const centeredIndexRef = useRef(initialIndex);
   centeredIndexRef.current = centeredIndex;
 
-  const screenWidth = Dimensions.get('window').width;
-  const PEEK = 24;
-  const CARD_GAP = 27;
-  const cardWidth = Math.min(258, screenWidth - 2 * PEEK - CARD_GAP);
-  const itemWidth = cardWidth + CARD_GAP;
-  const contentWidth = 2 * PEEK + NUM_REAL * itemWidth;
-  const maxScroll = Math.max(0, contentWidth - screenWidth);
-
-  // Center offset for card at list index i (0..NUM_REAL-1).
-  const getCenterOffsetForIndex = useCallback(
-    (realIndex: number) => {
-      const raw = PEEK + realIndex * itemWidth + cardWidth / 2 - screenWidth / 2;
-      return Math.max(0, Math.min(maxScroll, raw));
-    },
-    [itemWidth, cardWidth, screenWidth, maxScroll]
+  const infiniteData = useMemo(
+    () => Array.from({ length: INFINITE_SIZE }, (_, i) => BUDGET_ITEMS[i % NUM_REAL]),
+    [],
   );
 
-  const snapToOffsets = BUDGET_ITEMS.map((_, i) => getCenterOffsetForIndex(i));
-
-  const carouselData = BUDGET_ITEMS;
-
-  // Select button on card = submit: call onSelect directly (no separate Submit button)
+  // Select button on card = submit: call onSelect directly.
   const handleCardPress = useCallback(
     (budget: BudgetOption) => {
       if (isReadOnly) return;
       setSelectedBudget(budget);
       onSelect(budget);
     },
-    [isReadOnly, onSelect]
+    [isReadOnly, onSelect],
   );
 
-  const getScrollOffsetForIndex = getCenterOffsetForIndex;
-
-  const scrollOffsetToRealIndex = useCallback(
-    (offsetX: number) => {
-      const centerInContent = offsetX + screenWidth / 2;
-      const rawListIndex = (centerInContent - PEEK - cardWidth / 2) / itemWidth;
-      return Math.max(0, Math.min(NUM_REAL - 1, Math.round(rawListIndex)));
-    },
-    [screenWidth, cardWidth, itemWidth]
-  );
-
-  const handleScrollEnd = useCallback(
-    (event: { nativeEvent: { contentOffset: { x: number } } }) => {
-      const offsetX = event?.nativeEvent?.contentOffset?.x ?? 0;
-      const targetIndex = scrollOffsetToRealIndex(offsetX);
-      centeredIndexRef.current = targetIndex;
-      lastReportedCenteredIndexRef.current = targetIndex;
-      setCenteredIndex(targetIndex);
-    },
-    [scrollOffsetToRealIndex]
-  );
-
-  const onViewableItemsChanged = useRef(
-    ({ viewableItems }: { viewableItems: Array<{ index: number | null }> }) => {
-      if (viewableItems.length > 0) {
-        const listIndex = viewableItems[0].index;
-        if (listIndex !== null && listIndex !== undefined && listIndex >= 0 && listIndex < NUM_REAL) {
-          setCenteredIndex(listIndex);
-        }
-      }
-    }
-  ).current;
-
-  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50 }).current;
-
-  // Keep centeredIndex in sync with scroll position (e.g. during drag or external scroll)
-  const lastReportedCenteredIndexRef = useRef<number>(0);
-  const handleScroll = useCallback(
-    (event: { nativeEvent: { contentOffset: { x: number } } }) => {
-      const offsetX = event?.nativeEvent?.contentOffset?.x ?? 0;
-      const index = scrollOffsetToRealIndex(offsetX);
-      if (index !== lastReportedCenteredIndexRef.current) {
-        lastReportedCenteredIndexRef.current = index;
-        setCenteredIndex(index);
-      }
-    },
-    [scrollOffsetToRealIndex]
-  );
-
-  // Notify parent when the centered card changes
+  // Keep the centred card centred — on mount, and whenever a width change
+  // resizes the items.
   useEffect(() => {
-    if (onCenteredCardChange) {
-      const budget = BUDGET_ITEMS[centeredIndex]?.value;
-      if (budget !== undefined) {
-        onCenteredCardChange(budget, centeredIndex);
-      }
-    }
-  }, [centeredIndex, onCenteredCardChange]);
-
-  // Center the first card on mount (carousel uses center-based offsets)
-  const hasInitialScroll = useRef(false);
-  useEffect(() => {
-    if (hasInitialScroll.current) return;
-    hasInitialScroll.current = true;
-    const offset = getScrollOffsetForIndex(0);
+    const offset = centeredIndexRef.current * itemWidth;
     const t = setTimeout(() => {
       flatListRef.current?.scrollToOffset({ offset, animated: false });
+      scrollX.setValue(offset);
     }, 0);
     return () => clearTimeout(t);
-  }, [getScrollOffsetForIndex]);
+  }, [itemWidth, scrollX]);
+
+  // Notify the parent which card is centred.
+  useEffect(() => {
+    if (!onCenteredCardChange) return;
+    const real = mod(centeredIndex, NUM_REAL);
+    onCenteredCardChange(BUDGET_ITEMS[real].value, real);
+  }, [centeredIndex, onCenteredCardChange]);
+
+  const handleMomentumEnd = useCallback(
+    (event: { nativeEvent: { contentOffset: { x: number } } }) => {
+      const offsetX = event?.nativeEvent?.contentOffset?.x ?? 0;
+      const idx = Math.max(0, Math.min(INFINITE_SIZE - 1, Math.round(offsetX / itemWidth)));
+      // Near an end → jump to the equivalent card in the middle (invisible,
+      // the content is identical) so the loop never actually runs out.
+      if (idx < EDGE_THRESHOLD || idx > INFINITE_SIZE - 1 - EDGE_THRESHOLD) {
+        const jumped = START_INDEX + mod(idx, NUM_REAL);
+        const jumpedOffset = jumped * itemWidth;
+        flatListRef.current?.scrollToOffset({ offset: jumpedOffset, animated: false });
+        scrollX.setValue(jumpedOffset);
+        setCenteredIndex(jumped);
+      } else {
+        setCenteredIndex(idx);
+      }
+    },
+    [itemWidth, scrollX],
+  );
 
   return (
-    <View style={styles.container}>
+    <View
+      style={[styles.container, { paddingTop: Math.round(carouselSize.height * 0.06) }]}
+      onLayout={(e) => {
+        const { width, height } = e.nativeEvent.layout;
+        setCarouselSize((prev) =>
+          Math.abs(prev.width - width) < 0.5 && Math.abs(prev.height - height) < 0.5
+            ? prev
+            : { width, height },
+        );
+      }}
+    >
       <View style={styles.carouselContainer}>
         <FlatList
-          ref={(r) => { flatListRef.current = r; }}
-          data={carouselData}
-          keyExtractor={(item) => item.value}
+          ref={flatListRef}
+          data={infiniteData}
+          keyExtractor={(_, i) => `budget-${i}`}
           horizontal
-          scrollEnabled
           directionalLockEnabled
           showsHorizontalScrollIndicator={false}
-          snapToOffsets={snapToOffsets}
+          snapToInterval={itemWidth}
           snapToAlignment="start"
-          onScroll={handleScroll}
-          onScrollEndDrag={handleScrollEnd}
-          onMomentumScrollEnd={handleScrollEnd}
-          onViewableItemsChanged={onViewableItemsChanged}
-          viewabilityConfig={viewabilityConfig}
-          contentContainerStyle={[styles.carouselContent, { paddingHorizontal: PEEK }]}
+          decelerationRate="fast"
+          disableIntervalMomentum
+          scrollEventThrottle={16}
+          onScroll={(e) => {
+            scrollX.setValue(e.nativeEvent.contentOffset.x);
+          }}
+          onMomentumScrollEnd={handleMomentumEnd}
+          initialScrollIndex={initialIndex}
           getItemLayout={(_, index) => ({
             length: itemWidth,
-            offset: PEEK + index * itemWidth,
+            offset: index * itemWidth,
             index,
           })}
-          ListFooterComponent={<View style={{ width: PEEK }} />}
+          onScrollToIndexFailed={(info) => {
+            setTimeout(() => {
+              flatListRef.current?.scrollToOffset({
+                offset: info.index * itemWidth,
+                animated: false,
+              });
+            }, 100);
+          }}
+          contentContainerStyle={[styles.carouselContent, { paddingHorizontal: sidePad }]}
           {...(Platform.OS === 'web' && {
             style: {
               overflowX: 'auto' as any,
               overflowY: 'hidden' as any,
               WebkitOverflowScrolling: 'touch' as any,
             } as any,
-            scrollEventThrottle: 16,
           })}
-          renderItem={({ item: budgetItem }) => {
+          renderItem={({ item: budgetItem, index }) => {
             const gradient = BUDGET_GRADIENTS[budgetItem.value];
             const structuredCard = STRUCTURED_CARDS[budgetItem.value];
             const isSelected = selectedBudget === budgetItem.value;
 
+            // Centred when scrollX === index * itemWidth; shrinks/dims either side.
+            const inputRange = [
+              (index - 1) * itemWidth,
+              index * itemWidth,
+              (index + 1) * itemWidth,
+            ];
+            const scale = scrollX.interpolate({
+              inputRange,
+              outputRange: [SIDE_SCALE, 1, SIDE_SCALE],
+              extrapolate: 'clamp',
+            });
+            const opacity = scrollX.interpolate({
+              inputRange,
+              outputRange: [SIDE_OPACITY, 1, SIDE_OPACITY],
+              extrapolate: 'clamp',
+            });
+
             return (
-              <View style={[styles.cardWrapper, { width: cardWidth, height: CARD_HEIGHT, marginRight: CARD_GAP }]}>
-                <View style={[styles.cardOuterTouchable, isReadOnly && styles.cardReadOnly]}>
-                  <LinearGradient
-                    colors={gradient.colors}
-                    start={gradient.start}
-                    end={gradient.end}
-                    style={[
-                      styles.cardGradientOuter,
-                      {
-                        padding: FIGMA_OUTER_PADDING,
-                        borderRadius: FIGMA_OUTER_RADIUS,
-                      },
-                    ]}
-                  >
-                    <View style={[styles.cardInner, { borderRadius: FIGMA_INNER_RADIUS }]}>
-                      {structuredCard ? (
-                        <View style={styles.structuredCardContent}>
-                          <Text style={styles.structuredCardTitle}>{structuredCard.title}</Text>
-                          <View style={styles.structuredCardCoin}>
-                            <Image
-                              source={structuredCard.coinImageSource}
-                              style={styles.structuredCardCoinImage}
-                              resizeMode="contain"
-                            />
-                          </View>
-                          <Text style={styles.structuredCardTagline}>{structuredCard.tagline}</Text>
-                          <Text style={styles.structuredCardDescription}>{structuredCard.description}</Text>
-                          <TouchableOpacity
-                            onPress={() => handleCardPress(budgetItem.value)}
-                            disabled={isReadOnly}
-                            activeOpacity={0.8}
-                            style={[
-                              styles.structuredCardSelectButton,
-                              isSelected && styles.structuredCardSelectButtonSelected,
-                            ]}
-                          >
-                            <Text
+              <View style={[styles.cardSlot, { width: cardWidth, height: cardHeight, marginRight: CARD_GAP }]}>
+                <Animated.View
+                  style={[
+                    styles.cardScaler,
+                    { width: cardWidth, height: cardHeight, transform: [{ scale }], opacity },
+                  ]}
+                >
+                  <View style={[styles.cardOuterTouchable, isReadOnly && styles.cardReadOnly]}>
+                    <LinearGradient
+                      colors={gradient.colors}
+                      start={gradient.start}
+                      end={gradient.end}
+                      style={[
+                        styles.cardGradientOuter,
+                        {
+                          padding: FIGMA_OUTER_PADDING,
+                          borderRadius: FIGMA_OUTER_RADIUS,
+                        },
+                      ]}
+                    >
+                      <View style={[styles.cardInner, { borderRadius: FIGMA_INNER_RADIUS }]}>
+                        {structuredCard ? (
+                          <View style={styles.structuredCardContent}>
+                            <Text style={styles.structuredCardTitle}>{structuredCard.title}</Text>
+                            <View style={styles.structuredCardCoin}>
+                              <Image
+                                source={structuredCard.coinImageSource}
+                                style={styles.structuredCardCoinImage}
+                                resizeMode="contain"
+                              />
+                            </View>
+                            <Text style={styles.structuredCardTagline}>{structuredCard.tagline}</Text>
+                            <Text style={styles.structuredCardDescription}>{structuredCard.description}</Text>
+                            <TouchableOpacity
+                              onPress={() => handleCardPress(budgetItem.value)}
+                              disabled={isReadOnly}
+                              activeOpacity={0.8}
                               style={[
-                                styles.structuredCardSelectButtonText,
-                                isSelected && styles.structuredCardSelectButtonTextSelected,
+                                styles.structuredCardSelectButton,
+                                isSelected && styles.structuredCardSelectButtonSelected,
                               ]}
                             >
-                              {isSelected ? 'Selected' : 'Select'}
-                            </Text>
-                          </TouchableOpacity>
-                        </View>
-                      ) : (
-                        <Image
-                          source={budgetItem.imageSource}
-                          style={[styles.cardImage, { width: cardWidth - FIGMA_OUTER_PADDING * 2, height: CARD_HEIGHT - FIGMA_OUTER_PADDING * 2, borderRadius: FIGMA_INNER_RADIUS }]}
-                          resizeMode="cover"
-                        />
-                      )}
-                    </View>
-                  </LinearGradient>
-                </View>
+                              <Text
+                                style={[
+                                  styles.structuredCardSelectButtonText,
+                                  isSelected && styles.structuredCardSelectButtonTextSelected,
+                                ]}
+                              >
+                                {isSelected ? 'Selected' : 'Select'}
+                              </Text>
+                            </TouchableOpacity>
+                          </View>
+                        ) : (
+                          <Image
+                            source={budgetItem.imageSource}
+                            style={[styles.cardImage, { width: cardWidth - FIGMA_OUTER_PADDING * 2, height: cardHeight - FIGMA_OUTER_PADDING * 2, borderRadius: FIGMA_INNER_RADIUS }]}
+                            resizeMode="cover"
+                          />
+                        )}
+                      </View>
+                    </LinearGradient>
+                  </View>
+                </Animated.View>
               </View>
             );
           }}
@@ -327,10 +359,10 @@ export const BudgetCardsCarousel: React.FC<BudgetCardsCarouselProps> = ({
 
 const styles = StyleSheet.create({
   container: {
+    flex: 1,
     width: '100%',
     alignItems: 'center',
-    paddingVertical: spacing.md,
-    gap: spacing.md,
+    justifyContent: 'flex-start',
   },
   carouselContainer: {
     width: '100%',
@@ -338,7 +370,11 @@ const styles = StyleSheet.create({
   carouselContent: {
     alignItems: 'center',
   },
-  cardWrapper: {
+  cardSlot: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cardScaler: {
     overflow: 'hidden',
   },
   cardOuterTouchable: {
@@ -437,9 +473,7 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     color: '#333',
   },
-  // Selected state: filled dark button so the user sees their pick — same
-  // colors as the primary Next button so the visual language is consistent
-  // across the onboarding step and the swelly chat.
+  // Selected state: filled dark button so the user sees their pick.
   structuredCardSelectButtonSelected: {
     backgroundColor: '#212121',
   },

@@ -1,5 +1,6 @@
 import { supabaseDatabaseService } from '../database/supabaseDatabaseService';
 import { isSupabaseConfigured } from '../../config/supabase';
+import { syncUserDestinations } from '../destinations/userDestinationsSync';
 
 /**
  * Onboarding Service
@@ -153,7 +154,11 @@ class OnboardingService {
 
   /**
    * Save Step 4 data (Destinations)
-   * Persists the destinations array directly to `surfers.destinations_array`.
+   * Persists the destinations array directly to `surfers.destinations_array`,
+   * then mirrors it into the `user_destinations` table via the geocoder —
+   * exactly as the edit-profile flow does (`ProfileEditPanel`). Without this
+   * mirror, onboarding-origin destinations would never reach `user_destinations`.
+   *
    * Same column the Swelly chat writes — both paths merge via upsert.
    */
   async saveStep4Destinations(
@@ -169,6 +174,13 @@ class OnboardingService {
     } catch (error: any) {
       console.error('Error saving Step 4 (destinations) to Supabase:', error);
       throw new Error(`Failed to save Step 4 (destinations): ${error.message || String(error)}`);
+    }
+    // Mirror into `user_destinations` (fire-and-forget). Runs only after the
+    // surfers write succeeded above; a failure here never blocks onboarding.
+    // Skipped on an empty array (a "Skip" with no destinations) — a brand-new
+    // user has no prior rows to reconcile.
+    if (destinations.length > 0) {
+      syncUserDestinations(destinations);
     }
   }
 

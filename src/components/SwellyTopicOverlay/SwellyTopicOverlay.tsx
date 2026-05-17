@@ -54,6 +54,11 @@ const TOPICS: Topic[] = [
   },
 ];
 
+// Auto-sent "seed" messages — the text pushed into the chat when a topic is
+// picked. Exported so the chat screen can tell these apart from messages the
+// user actually typed.
+export const TOPIC_SEEDS: string[] = TOPICS.map((t) => t.seed);
+
 type Props = {
   visible: boolean;
   onSelect: (topicId: SwellyTopicId, seedMessage: string) => void;

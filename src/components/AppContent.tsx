@@ -636,7 +636,18 @@ export const AppContent: React.FC = () => {
       setCurrentStep(5);
     } catch (error) {
       console.error('Error in Step 4 (destinations) Next:', error);
-      setCurrentStep(5);
+      // Don't silently advance — the user's destinations live in local
+      // AsyncStorage but never reached the server. Surface it and let them
+      // retry, while still offering a way out so a network blip can't trap
+      // them mid-onboarding.
+      Alert.alert(
+        "Couldn't save your destinations",
+        'Your destinations are saved on this device but not yet synced to your profile. Check your connection and try again.',
+        [
+          { text: 'Retry', onPress: () => handleStep4Next(data) },
+          { text: 'Continue anyway', style: 'cancel', onPress: () => setCurrentStep(5) },
+        ],
+      );
     } finally {
       setIsSavingStep4(false);
     }

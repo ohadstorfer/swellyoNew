@@ -406,8 +406,9 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
             const legacyUser = convertSupabaseUserToAppUser(rawSupabaseUser);
 
             setUser(legacyUser);
+            // Carry only the email through. Never auto-fill the nickname from
+            // Google's display name — the user picks their own in step 4.
             updateFormData({
-              nickname: legacyUser.nickname,
               userEmail: legacyUser.email,
             });
 
@@ -454,10 +455,9 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
             const user = await authService.signInWithGoogle();
             console.log('Legacy OAuth return successful, setting user:', user);
             setUser(user);
-            
-            // Set default nickname and email in form data
+
+            // Carry only the email through — never auto-fill nickname from Google.
             updateFormData({
-              nickname: user.nickname,
               userEmail: user.email,
             });
             
@@ -582,10 +582,9 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
           
           console.log('Google Sign-In successful, setting user:', user);
           setUser(user);
-          
-          // Set default nickname and email in form data
+
+          // Carry only the email through — never auto-fill nickname from Google.
           updateFormData({
-            nickname: user.nickname,
             userEmail: user.email,
           });
           
@@ -644,10 +643,9 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
         const user = await authService.signInWithGoogle();
         console.log('Google Sign-In successful, setting user:', user);
         setUser(user);
-        
-        // Set default nickname and email in form data
+
+        // Carry only the email through — never auto-fill nickname from Google.
         updateFormData({
-          nickname: user.nickname,
           userEmail: user.email,
         });
         

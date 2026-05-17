@@ -4,6 +4,7 @@ import {
   StyleSheet,
   TouchableOpacity,
   Platform,
+  Alert,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -77,8 +78,18 @@ export const OnboardingStep4DestinationsScreen: React.FC<Props> = ({
   };
 
   const handleRemove = (index: number) => {
-    const next = destinations.filter((_, i) => i !== index);
-    persist(next);
+    Alert.alert(
+      'Remove destination?',
+      'This destination will be removed from your list.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: () => persist(destinations.filter((_, i) => i !== index)),
+        },
+      ],
+    );
   };
 
   const handleSheetSave = async (saved: {
@@ -129,22 +140,21 @@ export const OnboardingStep4DestinationsScreen: React.FC<Props> = ({
           <TouchableOpacity onPress={onBack} style={styles.backButton}>
             <Ionicons name="arrow-back" size={24} color="#222B30" />
           </TouchableOpacity>
-          <Text style={styles.stepText}>Surf deets 2/3</Text>
+          <Text style={styles.stepText}>Travel Deets 2/3</Text>
           <View style={styles.skipButton} />
         </View>
 
         <View style={[styles.progressContainer, isDesktop && styles.progressContainerDesktop]}>
           <View style={[styles.progressBar, { width: progressBarWidth }]}>
-            <View style={[styles.progressFill, { width: '57.1%' }]} />
+            <View style={[styles.progressFill, { width: '66.7%' }]} />
           </View>
         </View>
 
         <View style={styles.headerCopy}>
-          <Text style={styles.titleAccent}>Your Destinations!</Text>
+          <Text style={styles.titleAccent}>Where have you traveled?</Text>
           <Text style={styles.subtitle}>
-            Throughout your adventures what are your top destinations?
+            Travelers wanna know what destinations did you experience!
           </Text>
-          <Text style={styles.helper}>This helps us align users & trips for you!</Text>
         </View>
 
         <View style={styles.carouselContainer}>
@@ -232,7 +242,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
   },
   stepText: {
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: '400',
     color: colors.textPrimary,
     textAlign: 'center',
@@ -265,14 +275,14 @@ const styles = StyleSheet.create({
   },
   headerCopy: {
     alignItems: 'center',
-    paddingTop: spacing.md,
+    paddingTop: spacing.xl,
     paddingHorizontal: spacing.md,
     paddingBottom: spacing.md,
-    gap: 4,
+    gap: 8,
   },
   titleAccent: {
-    fontSize: 24,
-    lineHeight: 28,
+    fontSize: 31,
+    lineHeight: 37,
     fontWeight: '700',
     color: '#05BCD3',
     textAlign: 'center',
@@ -283,8 +293,8 @@ const styles = StyleSheet.create({
     }),
   },
   subtitle: {
-    fontSize: 18,
-    lineHeight: 24,
+    fontSize: 20,
+    lineHeight: 26,
     fontWeight: '700',
     color: '#000000',
     textAlign: 'center',
@@ -307,7 +317,7 @@ const styles = StyleSheet.create({
   },
   carouselContainer: {
     flex: 1,
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
   },
   buttonContainer: {
     paddingHorizontal: spacing.xl,

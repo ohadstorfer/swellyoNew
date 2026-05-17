@@ -286,7 +286,7 @@ const CountryField: React.FC<CountryFieldProps> = ({
 };
 
 // Pronoun Field Component - similar to CountryField but with 3 simple options
-const PRONOUN_OPTIONS = ['Name Only', 'Sis', 'Bro'];
+const PRONOUN_OPTIONS = ['Bro', 'Sis', 'Name Only'];
 
 // Date of Birth Field Component
 interface DateOfBirthFieldProps {
@@ -769,7 +769,7 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
   const [nameError, setNameError] = useState(false);
   const [locationError, setLocationError] = useState(false);
   const [pronounError, setPronounError] = useState(false);
-  const [pronoun, setPronoun] = useState<string>(initialData.pronouns || 'name only');
+  const [pronoun, setPronoun] = useState<string>(initialData.pronouns || 'sis');
   const [homeBreak, setHomeBreak] = useState<HomeBreakSelection | null>(null);
   const [showHomeBreakSheet, setShowHomeBreakSheet] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -1038,7 +1038,7 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
             <Ionicons name="arrow-back" size={24} color="#222B30" />
           </TouchableOpacity>
 
-              <Text style={styles.stepText}>Finish up! 3/3</Text>
+              <Text style={styles.stepText}>Finish Up! 3/3</Text>
 
           <View style={styles.skipButton}>
             {/* Skip button is hidden in this step */}
@@ -1197,7 +1197,7 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
                   >
                     {isSelected && (
                       <LinearGradient
-                        colors={['#00A2B6', '#0788B0']}
+                        colors={['#212121', '#212121']}
                         start={{ x: 0, y: 0.5 }}
                         end={{ x: 1, y: 0.5 }}
                         style={styles.pronounPillGradient}
@@ -1384,7 +1384,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
   },
   stepText: {
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: '400',
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     color: colors.textPrimary,
@@ -1752,7 +1752,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   pronounPillSelected: {
-    borderColor: '#0788B0',
+    borderColor: '#212121',
     overflow: 'hidden',
   },
   pronounPillGradient: {

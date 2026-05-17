@@ -60,8 +60,8 @@ export const OnboardingStep3Screen: React.FC<OnboardingStep3ScreenProps> = ({
     // Progress bar: 4px + padding
     const progressHeight = 4 + (isDesktop ? spacing.sm * 2 : spacing.md * 2);
 
-    // Title block: accent (28.8) + gap (4) + question (24) + paddings (8 + 16)
-    const titleBlockHeight = 81;
+    // Title block: accent (38) + gap (14) + question (~29) + paddings (32 + 32)
+    const titleBlockHeight = 145;
 
     // Button: 56px + padding
     const buttonHeight = 56 + spacing.xl;
@@ -117,7 +117,7 @@ export const OnboardingStep3Screen: React.FC<OnboardingStep3ScreenProps> = ({
             <Ionicons name="arrow-back" size={24} color="#222B30" />
           </TouchableOpacity>
 
-          <Text style={styles.stepText}>Surf Juice 1/3</Text>
+          <Text style={styles.stepText}>Travel Deets 2/3</Text>
 
           <View style={styles.skipButton}>
             {/* Skip button is hidden/opacity 0 in Figma */}
@@ -127,7 +127,7 @@ export const OnboardingStep3Screen: React.FC<OnboardingStep3ScreenProps> = ({
         {/* Progress Bar */}
         <View style={[styles.progressContainer, isDesktop && styles.progressContainerDesktop]}>
           <View style={[styles.progressBar, { width: progressBarWidth }]}>
-            <View style={[styles.progressFill, { width: '42.9%' }]} />
+            <View style={[styles.progressFill, { width: '66.7%' }]} />
           </View>
         </View>
 
@@ -200,7 +200,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
   },
   stepText: {
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: '400',
     color: colors.textPrimary,
     textAlign: 'center',
@@ -235,20 +235,20 @@ const styles = StyleSheet.create({
   titleBlock: {
     alignItems: 'center',
     paddingHorizontal: spacing.md,
-    paddingTop: spacing.md,
-    
-    gap: 4,
+    paddingTop: spacing.xl,
+    paddingBottom: spacing.xl,
+    gap: 14,
   },
   titleAccent: {
-    fontSize: 24,
+    fontSize: 32,
     fontWeight: '700',
     fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'System',
     color: '#05BCD3',
     textAlign: 'center',
-    lineHeight: 28.8,
+    lineHeight: 38,
   },
   titleQuestion: {
-    fontSize: 18,
+    fontSize: 22,
     fontWeight: '700',
     fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'System',
     color: '#333333',

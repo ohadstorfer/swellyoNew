@@ -39,6 +39,7 @@ export const CountrySearchModal: React.FC<CountrySearchModalProps> = ({
   const [mounted, setMounted] = useState(visible);
   const overlayAnim = useRef(new Animated.Value(0)).current;
   const sheetAnim = useRef(new Animated.Value(0)).current;
+  const searchRef = useRef<TextInput>(null);
 
   // Swipe-down to dismiss
   const onCloseRef = useRef(onClose);
@@ -75,6 +76,9 @@ export const CountrySearchModal: React.FC<CountrySearchModalProps> = ({
         Animated.timing(overlayAnim, { toValue: 1, duration: 250, useNativeDriver: true }),
         Animated.spring(sheetAnim, { toValue: 1, tension: 65, friction: 11, useNativeDriver: true }),
       ]).start();
+      // Raise the keyboard as the sheet slides in.
+      const focusTimer = setTimeout(() => searchRef.current?.focus(), 350);
+      return () => clearTimeout(focusTimer);
     } else if (mounted) {
       Animated.parallel([
         Animated.timing(overlayAnim, { toValue: 0, duration: 200, useNativeDriver: true }),
@@ -116,6 +120,7 @@ export const CountrySearchModal: React.FC<CountrySearchModalProps> = ({
           </View>
 
           <TextInput
+            ref={searchRef}
             style={[styles.search, Platform.OS === 'web' && styles.searchWeb]}
             placeholder="Search countries..."
             value={query}

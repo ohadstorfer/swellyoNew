@@ -9,6 +9,7 @@ import {
   Alert,
   FlatList,
   ListRenderItemInfo,
+  Keyboard,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -42,8 +43,31 @@ type GridItem =
 
 const COLUMNS = 3;
 const GRID_GAP = 8;
-const SCROLL_HORIZONTAL_PAD = spacing.md;
+const SCROLL_HORIZONTAL_PAD = spacing.sm;
 const SEARCH_DEBOUNCE_MS = 150;
+
+// Some images cover several distinct activities. The filename can't tell us
+// which underscores separate words ("Rock_Climbing") vs separate titles
+// ("Adventure_Explore"), so the multi-title labels are listed explicitly and
+// shown with " / " between the titles. (Best guess — adjust freely.)
+const MULTI_TITLE_LABELS: Record<string, string> = {
+  'Adventure_Explore.jpg': 'Adventure / Explore',
+  'Baseball_Softball.jpg': 'Baseball / Softball',
+  'Calisthenics_Body_Weight.jpg': 'Calisthenics / Body Weight',
+  'Cold_Plunges_Ice_Bath.jpg': 'Cold Plunges / Ice Bath',
+  'Concerts_Festivals.jpg': 'Concerts / Festivals',
+  'Cycling_Triathlon.jpg': 'Cycling / Triathlon',
+  'Dirt_Biking_Motocross.jpg': 'Dirt Biking / Motocross',
+  'Gym_Fitness_Workout_Crossfit.jpg': 'Gym / Fitness / Workout / Crossfit',
+  'Mindfullness_Meditation.jpg': 'Mindfullness / Meditation',
+  'Mobility_Training_Stretching.jpg': 'Mobility Training / Stretching',
+  'Overlanding_Van_Life.jpg': 'Overlanding / Van Life',
+  'Pool_Billiards_Snooker.jpg': 'Pool / Billiards / Snooker',
+  'Safari_Wild_Animal.jpg': 'Safari / Wild Animal',
+  'Skiing_Snowboarding.jpg': 'Skiing / Snowboarding',
+  'Wakeboarding_Waterskiing.jpg': 'Wakeboarding / Waterskiing',
+  'Whale_Watching_Dolphin_Watching.jpg': 'Whale Watching / Dolphin Watching',
+};
 
 export const OnboardingStep6LifestyleScreen: React.FC<Props> = ({
   onNext,
@@ -81,7 +105,7 @@ export const OnboardingStep6LifestyleScreen: React.FC<Props> = ({
         const stem = filename.replace(/\.jpg$/i, '');
         return {
           keyword: stem.toLowerCase().replace(/_/g, ' '),
-          label: stem.replace(/_/g, ' '),
+          label: MULTI_TITLE_LABELS[filename] ?? stem.replace(/_/g, ' '),
           imageUrl: url,
         };
       })
@@ -125,6 +149,8 @@ export const OnboardingStep6LifestyleScreen: React.FC<Props> = ({
   }, []);
 
   const handleToggle = useCallback((keyword: string, imageUrl: string) => {
+    // Tapping a card also drops the search keyboard if it's up.
+    Keyboard.dismiss();
     const current = selectedRef.current;
     const next = { ...current };
     if (next[keyword]) delete next[keyword];
@@ -133,6 +159,7 @@ export const OnboardingStep6LifestyleScreen: React.FC<Props> = ({
   }, [persist]);
 
   const handleAddYourOwn = useCallback(async () => {
+    Keyboard.dismiss();
     const term = debouncedSearch.trim();
     if (!term) return;
     setLoadingCustom(true);
@@ -209,11 +236,24 @@ export const OnboardingStep6LifestyleScreen: React.FC<Props> = ({
     [],
   );
 
+  // When searching with existing picks, the grid shows "Suggestions" first
+  // (this header) and "Your picks" after it (the footer below).
   const ListHeader = useMemo(() => {
-    const showHeader = search.trim().length > 0 && selectedEntries.length > 0;
-    if (!showHeader || cardWidth === 0) return null;
+    const showSections = search.trim().length > 0 && selectedEntries.length > 0;
+    if (!showSections || cardWidth === 0) return null;
+    if (filtered.length === 0 && !showAddYourOwn) return null;
     return (
       <View style={styles.headerWrap}>
+        <Text style={styles.sectionLabel}>Suggestions</Text>
+      </View>
+    );
+  }, [search, selectedEntries.length, cardWidth, filtered.length, showAddYourOwn]);
+
+  const ListFooter = useMemo(() => {
+    const showSections = search.trim().length > 0 && selectedEntries.length > 0;
+    if (!showSections || cardWidth === 0) return null;
+    return (
+      <View style={styles.footerWrap}>
         <Text style={styles.sectionLabel}>Your picks</Text>
         <View style={styles.picksGrid}>
           {selectedEntries.map(([keyword, url]) => (
@@ -228,12 +268,9 @@ export const OnboardingStep6LifestyleScreen: React.FC<Props> = ({
             />
           ))}
         </View>
-        {(filtered.length > 0 || showAddYourOwn) && (
-          <Text style={styles.sectionLabel}>Suggestions</Text>
-        )}
       </View>
     );
-  }, [search, selectedEntries, cardWidth, handleToggle, filtered.length, showAddYourOwn]);
+  }, [search, selectedEntries, cardWidth, handleToggle]);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -242,19 +279,19 @@ export const OnboardingStep6LifestyleScreen: React.FC<Props> = ({
           <TouchableOpacity onPress={onBack} style={styles.backButton}>
             <Ionicons name="arrow-back" size={24} color="#222B30" />
           </TouchableOpacity>
-          <Text style={styles.stepText}>Surf deets 2/3</Text>
+          <Text style={styles.stepText}>Finish Up! 3/3</Text>
           <View style={styles.skipButton} />
         </View>
 
         <View style={[styles.progressContainer, isDesktop && styles.progressContainerDesktop]}>
           <View style={[styles.progressBar, { width: progressBarWidth }]}>
-            <View style={[styles.progressFill, { width: '85.7%' }]} />
+            <View style={[styles.progressFill, { width: '100%' }]} />
           </View>
         </View>
 
         <View style={styles.headerCopy}>
           <Text style={styles.subtitle}>What's your lifestyle?</Text>
-          <Text style={styles.helper}>Pick the ones that match you</Text>
+          <Text style={styles.helper}>Pick at least 3!</Text>
         </View>
 
         <View style={styles.searchBarWrap}>
@@ -285,6 +322,8 @@ export const OnboardingStep6LifestyleScreen: React.FC<Props> = ({
           numColumns={COLUMNS}
           columnWrapperStyle={styles.columnWrapper}
           ListHeaderComponent={ListHeader}
+          ListFooterComponent={ListFooter}
+          keyboardShouldPersistTaps="handled"
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
           // Virtualization tuning — mirrors DirectMessageScreen.
@@ -459,7 +498,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
   },
   stepText: {
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: '400',
     color: colors.textPrimary,
     textAlign: 'center',
@@ -493,12 +532,13 @@ const styles = StyleSheet.create({
   headerCopy: {
     alignItems: 'center',
     paddingHorizontal: spacing.md,
+    paddingTop: spacing.md,
     paddingBottom: spacing.md,
     gap: 4,
   },
   subtitle: {
-    fontSize: 18,
-    lineHeight: 24,
+    fontSize: 21,
+    lineHeight: 28,
     fontWeight: '700',
     color: '#000000',
     textAlign: 'center',
@@ -521,7 +561,7 @@ const styles = StyleSheet.create({
   },
   searchBarWrap: {
     paddingHorizontal: spacing.md,
-    paddingBottom: spacing.md,
+    paddingBottom: spacing.sm,
   },
   searchBar: {
     flexDirection: 'row',
@@ -546,9 +586,13 @@ const styles = StyleSheet.create({
   },
   flatList: {
     flex: 1,
+    // End the scroll area above the Next button so cards clip with a gap,
+    // not flush against it.
+    marginBottom: spacing.md,
   },
   scrollContent: {
     paddingHorizontal: SCROLL_HORIZONTAL_PAD,
+    paddingTop: spacing.md,
     paddingBottom: spacing.lg,
     rowGap: GRID_GAP,
   },
@@ -557,6 +601,9 @@ const styles = StyleSheet.create({
   },
   headerWrap: {
     paddingBottom: GRID_GAP,
+  },
+  footerWrap: {
+    paddingTop: GRID_GAP,
   },
   picksGrid: {
     flexDirection: 'row',
@@ -580,6 +627,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
     padding: 6,
+    // Border is always present (transparent until selected) so toggling the
+    // selection only recolours it — the card never changes size.
+    borderWidth: 2,
+    borderColor: 'transparent',
     alignItems: 'center',
     ...Platform.select({
       ios: {
@@ -593,7 +644,6 @@ const styles = StyleSheet.create({
     }),
   },
   cardSelected: {
-    borderWidth: 1,
     borderColor: '#05BCD3',
   },
   cardAddOwn: {
@@ -601,7 +651,7 @@ const styles = StyleSheet.create({
   },
   cardImageWrap: {
     width: '100%',
-    height: 83,
+    height: 108,
     position: 'relative',
     borderRadius: 8,
     overflow: 'hidden',
@@ -627,6 +677,7 @@ const styles = StyleSheet.create({
   cardLabel: {
     fontSize: 10,
     lineHeight: 14,
+    fontWeight: '500',
     color: '#333333',
     textAlign: 'center',
     textTransform: 'capitalize',

@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   StyleSheet,
@@ -8,6 +8,7 @@ import {
   Dimensions,
   Platform,
   ScrollView,
+  Animated,
 } from 'react-native';
 
 const DEFAULT_DESTINATION_IMAGE = require('../../../assets/onboarding/destinations-default.png');
@@ -35,11 +36,15 @@ interface Props {
   onRemoveAt: (index: number) => void;
 }
 
-// Figma: card 316px wide, peek visible on right; gap 16px. Cap so the design
-// holds on narrow phones without overlapping the screen edge.
-const CARD_WIDTH_TARGET = 316;
-const CARD_GAP = 16;
-const PEEK = 24;
+// Card width/height both scale with the carousel width (see component below).
+// PEEK governs how much of the neighbouring card shows; CARD_GAP the spacing.
+// CARD_WIDTH_TARGET just caps the width on very wide screens (tablet/web).
+const CARD_WIDTH_TARGET = 400;
+const CARD_GAP = 12;
+const PEEK = 30;
+// Card image height is derived from its width — landscape-ish so destination
+// photos sit naturally without looking stretched.
+const CARD_IMAGE_RATIO = 0.75;
 
 const formatDays = (days: number, text?: string): string => {
   if (text && text.trim()) return text.trim();
@@ -52,6 +57,7 @@ const formatDays = (days: number, text?: string): string => {
 interface DestinationCardProps {
   destination: OnboardingDestination;
   width: number;
+  imageHeight: number;
   onPress: () => void;
   onRemove: () => void;
 }
@@ -59,6 +65,7 @@ interface DestinationCardProps {
 const DestinationCard: React.FC<DestinationCardProps> = ({
   destination,
   width,
+  imageHeight,
   onPress,
   onRemove,
 }) => {
@@ -70,7 +77,7 @@ const DestinationCard: React.FC<DestinationCardProps> = ({
   return (
     <TouchableOpacity activeOpacity={0.85} onPress={onPress} style={[styles.card, { width }]}>
       <View style={styles.cardInner}>
-        <View style={styles.imageWrap}>
+        <View style={[styles.imageWrap, { height: imageHeight }]}>
           <ImageBackground
             source={{ uri: imageUri }}
             style={styles.image}
@@ -108,26 +115,32 @@ const DestinationCard: React.FC<DestinationCardProps> = ({
 
 interface AddCardProps {
   width: number;
+  imageHeight: number;
   onPress: () => void;
 }
 
-const AddDestinationCard: React.FC<AddCardProps> = ({ width, onPress }) => {
+const AddDestinationCard: React.FC<AddCardProps> = ({ width, imageHeight, onPress }) => {
   return (
-    <TouchableOpacity activeOpacity={0.85} onPress={onPress} style={[styles.card, { width }]}>
+    <View style={[styles.card, { width }]}>
       <View style={styles.cardInner}>
         <Image
           source={DEFAULT_DESTINATION_IMAGE}
-          style={styles.addImagePlaceholder}
+          style={[styles.addImagePlaceholder, { height: imageHeight }]}
           resizeMode="cover"
         />
         <View style={styles.addBody}>
-          <View style={styles.addButton}>
+          {/* Only the button gets the press feedback, not the whole card. */}
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={onPress}
+            style={styles.addButton}
+          >
             <Ionicons name="add" size={20} color="#212121" />
             <Text style={styles.addButtonText}>Add Destination</Text>
-          </View>
+          </TouchableOpacity>
         </View>
       </View>
-    </TouchableOpacity>
+    </View>
   );
 };
 
@@ -137,44 +150,141 @@ export const DestinationsCarousel: React.FC<Props> = ({
   onEditAt,
   onRemoveAt,
 }) => {
-  const screenWidth = Dimensions.get('window').width;
-  const cardWidth = Math.min(CARD_WIDTH_TARGET, screenWidth - PEEK * 2);
+  // Measured width of the carousel itself — parent padding makes this
+  // narrower than the window, so window width would mis-center the card.
+  const [containerWidth, setContainerWidth] = useState(Dimensions.get('window').width);
+  const cardWidth = Math.min(CARD_WIDTH_TARGET, containerWidth - PEEK * 2);
+  // Center the snapped card; with multiple cards this leaves a symmetric
+  // peek (sidePadding - CARD_GAP) of the neighbouring card.
+  const sidePadding = Math.max(PEEK, (containerWidth - cardWidth) / 2);
+  // Card image height scales with the (screen-derived) card width.
+  const imageHeight = Math.round(cardWidth * CARD_IMAGE_RATIO);
+
+  const scrollRef = useRef<ScrollView>(null);
+  const cardWidthRef = useRef(cardWidth);
+  cardWidthRef.current = cardWidth;
+  const prevCountRef = useRef(destinations.length);
+
+  // When a destination was just added, let the user see the filled card for
+  // a moment, then glide to the Add card so they can enter the next one.
+  useEffect(() => {
+    const prev = prevCountRef.current;
+    prevCountRef.current = destinations.length;
+    if (destinations.length <= prev) return;
+    const addCardIndex = destinations.length; // [...cards, addCard, ghost]
+    const timer = setTimeout(() => {
+      scrollRef.current?.scrollTo({
+        x: addCardIndex * (cardWidthRef.current + CARD_GAP),
+        animated: true,
+      });
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, [destinations.length]);
+
+  // Hint shown when the user tries to slide past the Add card to the ghost.
+  const [limitHintVisible, setLimitHintVisible] = useState(false);
+  const hintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hintOpacity = useRef(new Animated.Value(0)).current;
+  const showLimitHint = useCallback(() => {
+    setLimitHintVisible(true);
+    hintOpacity.stopAnimation();
+    hintOpacity.setValue(1);
+    if (hintTimerRef.current) clearTimeout(hintTimerRef.current);
+    // Hold briefly, then fade out over 1.5s before unmounting.
+    hintTimerRef.current = setTimeout(() => {
+      Animated.timing(hintOpacity, {
+        toValue: 0,
+        duration: 1500,
+        useNativeDriver: true,
+      }).start(({ finished }) => {
+        if (finished) setLimitHintVisible(false);
+      });
+    }, 1000);
+  }, [hintOpacity]);
+  useEffect(
+    () => () => {
+      if (hintTimerRef.current) clearTimeout(hintTimerRef.current);
+    },
+    [],
+  );
+
+  // Snap targets for every real card + the Add card. The trailing ghost is
+  // deliberately excluded so it can't be slid to.
+  const snapOffsets = useMemo(
+    () =>
+      Array.from({ length: destinations.length + 1 }, (_, i) => i * (cardWidth + CARD_GAP)),
+    [destinations.length, cardWidth],
+  );
 
   const items = useMemo(
     () => [
       ...destinations.map((d, index) => ({ kind: 'card' as const, destination: d, index })),
       { kind: 'add' as const },
+      // Trailing ghost so the next slot always peeks beside the last real card.
+      { kind: 'ghost' as const },
     ],
     [destinations],
   );
 
   return (
+    <View style={styles.wrapper}>
     <ScrollView
+      ref={scrollRef}
       horizontal
       showsHorizontalScrollIndicator={false}
-      contentContainerStyle={[styles.scrollContent, { paddingHorizontal: PEEK }]}
+      scrollEventThrottle={16}
+      onScroll={(e) => {
+        const x = e.nativeEvent.contentOffset.x;
+        const interval = cardWidth + CARD_GAP;
+        const maxOffset = destinations.length * interval;
+        // Hard-block scrolling past the Add card toward the ghost.
+        if (x > maxOffset + 1) {
+          scrollRef.current?.scrollTo({ x: maxOffset, animated: false });
+          showLimitHint();
+        }
+      }}
+      onLayout={(e) => {
+        const w = e.nativeEvent.layout.width;
+        if (w > 0) setContainerWidth(w);
+      }}
+      contentContainerStyle={[styles.scrollContent, { paddingHorizontal: sidePadding }]}
       decelerationRate="fast"
-      snapToInterval={cardWidth + CARD_GAP}
-      snapToAlignment="start"
+      snapToOffsets={snapOffsets}
       {...(Platform.OS === 'web' && {
         style: {
           overflowX: 'auto' as any,
           overflowY: 'hidden' as any,
           WebkitOverflowScrolling: 'touch' as any,
+          scrollSnapType: 'x mandatory' as any,
         } as any,
       })}
     >
       {items.map((item, idx) => (
         <View
-          key={item.kind === 'add' ? 'add-card' : `dest-${item.index}`}
-          style={{ marginRight: idx === items.length - 1 ? 0 : CARD_GAP }}
+          key={
+            item.kind === 'add'
+              ? 'add-card'
+              : item.kind === 'ghost'
+              ? 'ghost-card'
+              : `dest-${item.index}`
+          }
+          style={[
+            { marginRight: idx === items.length - 1 ? 0 : CARD_GAP },
+            Platform.OS === 'web' &&
+              ({ scrollSnapAlign: item.kind === 'ghost' ? 'none' : 'center' } as any),
+          ]}
         >
-          {item.kind === 'add' ? (
-            <AddDestinationCard width={cardWidth} onPress={onAdd} />
+          {item.kind === 'add' || item.kind === 'ghost' ? (
+            <AddDestinationCard
+              width={cardWidth}
+              imageHeight={imageHeight}
+              onPress={onAdd}
+            />
           ) : (
             <DestinationCard
               destination={item.destination}
               width={cardWidth}
+              imageHeight={imageHeight}
               onPress={() => onEditAt(item.index)}
               onRemove={() => onRemoveAt(item.index)}
             />
@@ -182,6 +292,14 @@ export const DestinationsCarousel: React.FC<Props> = ({
         </View>
       ))}
     </ScrollView>
+      <View style={styles.limitHintArea} pointerEvents="none">
+        {limitHintVisible ? (
+          <Animated.View style={{ opacity: hintOpacity }}>
+            <Text style={styles.limitHintText}>Add this destination first</Text>
+          </Animated.View>
+        ) : null}
+      </View>
+    </View>
   );
 };
 
@@ -190,20 +308,37 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 8,
   },
+  wrapper: {
+    flex: 1,
+  },
+  limitHintArea: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  limitHintText: {
+    color: '#212121',
+    fontSize: 13,
+    fontWeight: '500',
+    ...Platform.select({
+      web: { fontFamily: 'Inter, sans-serif' },
+      default: { fontFamily: 'Inter' },
+    }),
+  },
   card: {
-    // Figma outer card uses translucent white + soft drop shadow.
-    backgroundColor: 'rgba(255, 255, 255, 0.4)',
+    // Solid white card with a soft downward drop shadow.
+    backgroundColor: '#FFFFFF',
     borderRadius: 20,
     padding: 10,
     ...Platform.select({
       ios: {
-        shadowColor: '#0D1827',
-        shadowOffset: { width: 0, height: 0 },
-        shadowOpacity: 0.09,
-        shadowRadius: 24,
+        shadowColor: '#000000',
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.16,
+        shadowRadius: 14,
       },
-      android: { elevation: 4 },
-      web: { boxShadow: '0px 0px 24px rgba(13, 24, 39, 0.09)' as any },
+      android: { elevation: 8 },
+      web: { boxShadow: '0px 10px 20px rgba(0, 0, 0, 0.16)' as any },
     }),
   },
   cardInner: {
@@ -211,7 +346,6 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   imageWrap: {
-    height: 235,
     width: '100%',
     position: 'relative',
   },
@@ -291,7 +425,7 @@ const styles = StyleSheet.create({
   },
   // Add-destination card — large gray placeholder image + outlined button below.
   addImagePlaceholder: {
-    height: 235,
+    width: '100%',
     backgroundColor: '#F2F2F2',
     borderTopLeftRadius: 12,
     borderTopRightRadius: 12,
@@ -316,6 +450,7 @@ const styles = StyleSheet.create({
   },
   addButtonText: {
     fontSize: 14,
+    fontWeight: '500',
     color: '#333333',
     ...Platform.select({
       web: { fontFamily: 'Inter, sans-serif' },

@@ -255,7 +255,7 @@ export const OnboardingStep2Screen: React.FC<OnboardingStep2ScreenProps> = ({
         {/* Progress Bar */}
         <View style={[styles.progressContainer, isDesktop && styles.progressContainerDesktop]}>
           <View style={[styles.progressBar, { width: progressBarWidth }]}>
-            <View style={[styles.progressFill, { width: '28.6%' }]} />
+            <View style={[styles.progressFill, { width: '33.3%' }]} />
           </View>
         </View>
 
@@ -333,7 +333,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
   },
   stepText: {
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: '400',
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'System',
     color: colors.textPrimary || '#333333',
