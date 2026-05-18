@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>analytics_events — Supabase Table Preview</title>
+<style>
+  :root {
+    --bg: #1c1c1c;
+    --bg-soft: #232323;
+    --panel: #2a2a2a;
+    --panel-2: #303030;
+    --border: #353535;
+    --border-soft: #2c2c2c;
+    --text: #ededed;
+    --text-dim: #a1a1a1;
+    --text-mute: #6e6e6e;
+    --accent: #3ecf8e;
+    --accent-dim: #2a9d6f;
+    --signup: #f472b6;
+    --client: #38bdf8;
+    --trigger: #a78bfa;
+    --conv: #fb923c;
+    --session: #34d399;
+    --code-bg: #181818;
+    --code-text: #d4d4d4;
+    --null: #5e5e5e;
+    --true: #3ecf8e;
+    --false: #6e6e6e;
+    --bad: #f87171;
+    --warn: #fbbf24;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 13px;
+    line-height: 1.4;
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  code, .mono { font-family: "SF Mono", Menlo, Monaco, Consolas, monospace; font-size: 12px; }
+
+  /* ---------- HEADER ---------- */
+  .topbar {
+    background: var(--bg-soft);
+    border-bottom: 1px solid var(--border);
+    padding: 10px 20px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    height: 48px;
+    flex-shrink: 0;
+  }
+  .logo {
+    width: 24px; height: 24px;
+    background: var(--accent);
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #000;
+    font-weight: 900;
+    font-size: 14px;
+  }
+  .breadcrumb {
+    color: var(--text-dim);
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .breadcrumb .sep { color: var(--text-mute); }
+  .breadcrumb .current { color: var(--text); font-weight: 500; }
+
+  /* ---------- TABLE TOOLBAR ---------- */
+  .toolbar {
+    background: var(--bg-soft);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+  }
+  .table-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .table-title .icon {
+    width: 18px; height: 18px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--accent);
+    font-size: 11px;
+  }
+  .row-count {
+    color: var(--text-mute);
+    font-size: 12px;
+    padding: 4px 10px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+  }
+  .toolbar .grow { flex: 1; }
+  .toolbar button, .toolbar .btn {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .toolbar button.primary, .toolbar .btn.primary {
+    background: var(--accent);
+    color: #000;
+    border-color: var(--accent);
+    font-weight: 600;
+  }
+  .toolbar button:hover { background: var(--panel-2); color: var(--text); }
+  .toolbar .filter-input {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-family: inherit;
+    min-width: 220px;
+  }
+  .toolbar .filter-input::placeholder { color: var(--text-mute); }
+
+  /* ---------- FILTER CHIPS ---------- */
+  .chips {
+    background: var(--bg-soft);
+    border-bottom: 1px solid var(--border);
+    padding: 10px 20px;
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+    flex-shrink: 0;
+  }
+  .chips .label {
+    color: var(--text-mute);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-right: 4px;
+  }
+  .chip {
+    padding: 4px 10px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    font-size: 11px;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-family: "SF Mono", Menlo, Monaco, Consolas, monospace;
+    user-select: none;
+  }
+  .chip.active {
+    background: var(--accent);
+    color: #000;
+    border-color: var(--accent);
+    font-weight: 600;
+  }
+  .chip:hover:not(.active) { background: var(--panel-2); color: var(--text); }
+
+  /* ---------- TABLE ---------- */
+  .table-wrap {
+    flex: 1;
+    overflow: auto;
+    background: var(--bg);
+  }
+  table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 12px;
+  }
+  thead {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    background: var(--bg-soft);
+  }
+  thead th {
+    background: var(--bg-soft);
+    border-bottom: 1px solid var(--border);
+    border-right: 1px solid var(--border-soft);
+    padding: 10px 14px;
+    text-align: left;
+    font-weight: 500;
+    font-size: 12px;
+    color: var(--text);
+    white-space: nowrap;
+    position: relative;
+  }
+  thead th .col-name {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  thead th .col-type {
+    font-family: "SF Mono", Menlo, Monaco, Consolas, monospace;
+    font-size: 10px;
+    color: var(--text-mute);
+    background: var(--panel);
+    padding: 2px 6px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+  }
+  thead th .col-key {
+    color: var(--accent);
+    font-size: 10px;
+  }
+
+  tbody td {
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--border-soft);
+    border-right: 1px solid var(--border-soft);
+    vertical-align: middle;
+    white-space: nowrap;
+    color: var(--text);
+    font-family: "SF Mono", Menlo, Monaco, Consolas, monospace;
+    font-size: 12px;
+  }
+  tbody tr:hover td { background: var(--panel); }
+
+  .id-cell { color: var(--text-dim); }
+  .ts-cell { color: var(--text-dim); }
+  .uuid-cell {
+    color: var(--text);
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .uuid-cell .short { color: var(--text); }
+  .uuid-cell .tail { color: var(--text-mute); }
+
+  /* ---------- BADGES ---------- */
+  .event-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 500;
+    border: 1px solid;
+  }
+  .event-pill .dot { width: 6px; height: 6px; border-radius: 50%; }
+  .ev-signup    { color: var(--signup);  border-color: rgba(244,114,182,0.4); background: rgba(244,114,182,0.08); }
+  .ev-signup    .dot { background: var(--signup); }
+  .ev-client    { color: var(--client);  border-color: rgba(56,189,248,0.4);  background: rgba(56,189,248,0.08); }
+  .ev-client    .dot { background: var(--client); }
+  .ev-trigger   { color: var(--trigger); border-color: rgba(167,139,250,0.4); background: rgba(167,139,250,0.08); }
+  .ev-trigger   .dot { background: var(--trigger); }
+  .ev-conv      { color: var(--conv);    border-color: rgba(251,146,60,0.4);  background: rgba(251,146,60,0.08); }
+  .ev-conv      .dot { background: var(--conv); }
+  .ev-session   { color: var(--session); border-color: rgba(52,211,153,0.4);  background: rgba(52,211,153,0.08); }
+  .ev-session   .dot { background: var(--session); }
+
+  .null {
+    color: var(--null);
+    font-style: italic;
+  }
+  .bool {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+  }
+  .bool.t { color: var(--bad); background: rgba(248,113,113,0.12); border: 1px solid rgba(248,113,113,0.3); }
+  .bool.f { color: var(--text-mute); background: var(--panel); border: 1px solid var(--border); }
+
+  .jsonb {
+    color: var(--code-text);
+    background: var(--code-bg);
+    padding: 2px 8px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    font-size: 11px;
+    max-width: 280px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: inline-block;
+  }
+
+  /* ---------- FOOTER ---------- */
+  .footer {
+    background: var(--bg-soft);
+    border-top: 1px solid var(--border);
+    padding: 8px 20px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    font-size: 12px;
+    color: var(--text-mute);
+    flex-shrink: 0;
+  }
+  .footer .grow { flex: 1; }
+  .footer .stat {
+    padding: 2px 8px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-family: "SF Mono", Menlo, Monaco, Consolas, monospace;
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+  .footer .stat strong { color: var(--text); }
+
+  /* ---------- HIDDEN ROWS (filtered) ---------- */
+  tr.hidden { display: none; }
+</style>
+</head>
+<body>
+
+<!-- TOP BAR -->
+<div class="topbar">
+  <div class="logo">S</div>
+  <div class="breadcrumb">
+    <span>swellyo</span>
+    <span class="sep">›</span>
+    <span>public</span>
+    <span class="sep">›</span>
+    <span class="current">analytics_events</span>
+  </div>
+</div>
+
+<!-- TOOLBAR -->
+<div class="toolbar">
+  <div class="table-title">
+    <span class="icon">▤</span>
+    analytics_events
+  </div>
+  <span class="row-count" id="rowCount">— rows</span>
+  <input class="filter-input" id="searchInput" type="text" placeholder="Search user_id, conversation_id, properties...">
+  <div class="grow"></div>
+  <button>Filter</button>
+  <button>Sort</button>
+  <button class="primary">+ Insert</button>
+</div>
+
+<!-- FILTER CHIPS -->
+<div class="chips">
+  <span class="label">event_name</span>
+  <span class="chip active" data-event="">all</span>
+  <span class="chip" data-event="user_signed_up">user_signed_up</span>
+  <span class="chip" data-event="onboarding_step">onboarding_step_*</span>
+  <span class="chip" data-event="onboarding_finalized">onboarding_finalized</span>
+  <span class="chip" data-event="swelly_search_clicked">swelly_search_clicked</span>
+  <span class="chip" data-event="swelly_connect_clicked">swelly_connect_clicked</span>
+  <span class="chip" data-event="first_message_sent">first_message_sent</span>
+  <span class="chip" data-event="conversation_two_sided">conversation_two_sided</span>
+  <span class="chip" data-event="conversation_deep_engaged">conversation_deep_engaged</span>
+  <span class="chip" data-event="app_opened">app_opened</span>
+</div>
+
+<!-- TABLE -->
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th><div class="col-name">id <span class="col-key">PK</span> <span class="col-type">int8</span></div></th>
+        <th><div class="col-name">event_name <span class="col-type">text</span></div></th>
+        <th><div class="col-name">user_id <span class="col-type">uuid</span></div></th>
+        <th><div class="col-name">conversation_id <span class="col-type">uuid</span></div></th>
+        <th><div class="col-name">occurred_at <span class="col-type">timestamptz</span></div></th>
+        <th><div class="col-name">properties <span class="col-type">jsonb</span></div></th>
+        <th><div class="col-name">is_demo_user <span class="col-type">bool</span></div></th>
+        <th><div class="col-name">is_admin <span class="col-type">bool</span></div></th>
+      </tr>
+    </thead>
+    <tbody id="rowsBody"></tbody>
+  </table>
+</div>
+
+<!-- FOOTER -->
+<div class="footer">
+  <span class="stat">Schema: <strong>public</strong></span>
+  <span class="stat">Table: <strong>analytics_events</strong></span>
+  <span class="stat">Total rows: <strong id="totalRows">—</strong></span>
+  <span class="stat">Showing: <strong id="visibleRows">—</strong></span>
+  <div class="grow"></div>
+  <span>Demo data · not connected to Supabase</span>
+</div>
+
+<script>
+/* ====== EVENT TYPE → COLOR MAP ====== */
+function eventClass(name) {
+  if (name === 'user_signed_up')              return 'ev-signup';
+  if (name === 'app_opened')                  return 'ev-session';
+  if (name === 'first_message_sent')          return 'ev-trigger';
+  if (name === 'conversation_two_sided')      return 'ev-conv';
+  if (name === 'conversation_deep_engaged')   return 'ev-conv';
+  return 'ev-client'; // onboarding_step_*, finalized, swelly_*
+}
+
+/* ====== UUIDs (fabricated; constant per user) ====== */
+const U = {
+  A:  'a1b2c3d4-1234-4abc-9def-111111111111',
+  F:  'f6a7b8c9-6789-4fff-9ccc-666666666666',
+  B:  'b2c3d4e5-2345-4bcd-9eff-222222222222',
+  C:  'c3d4e5f6-3456-4cde-9fff-333333333333',
+  G:  'a7b8c9d0-789a-4abc-9ddd-777777777777',
+  H:  'b8c9d0e1-89ab-4bcd-9eee-888888888888',
+  D:  'd4e5f6a7-4567-4def-9aaa-444444444444',  // demo
+  E:  'e5f6a7b8-5678-4eff-9bbb-555555555555',  // admin
+};
+const CV = {
+  X: 'c1234567-1111-4abc-9def-aaaaaaaaaaaa',  // A <-> F
+  Y: 'c2345678-2222-4bcd-9eff-bbbbbbbbbbbb',  // C <-> someone (incomplete)
+};
+
+/* ====== ROWS ====== */
+const rows = [
+  // ===== User A: full journey, very active =====
+  [ 'user_signed_up',           U.A,  null, '2026-04-18T09:15:23Z', null, false, false ],
+  [ 'onboarding_step_1',        U.A,  null, '2026-04-18T09:17:11Z', null, false, false ],
+  [ 'onboarding_step_2',        U.A,  null, '2026-04-18T09:18:45Z', null, false, false ],
+  [ 'onboarding_step_3',        U.A,  null, '2026-04-18T09:21:02Z', null, false, false ],
+  [ 'onboarding_step_4',        U.A,  null, '2026-04-18T09:23:30Z', null, false, false ],
+  [ 'onboarding_step_5',        U.A,  null, '2026-04-18T09:25:14Z', null, false, false ],
+  [ 'onboarding_step_6',        U.A,  null, '2026-04-18T09:27:08Z', null, false, false ],
+  [ 'onboarding_step_7',        U.A,  null, '2026-04-18T09:29:51Z', null, false, false ],
+  [ 'onboarding_step_8',        U.A,  null, '2026-04-18T09:32:18Z', null, false, false ],
+  [ 'onboarding_finalized',     U.A,  null, '2026-04-18T09:33:02Z', null, false, false ],
+  [ 'app_opened',               U.A,  null, '2026-04-19T14:22:01Z', {platform:'web',  app_version:'1.1.3'}, false, false ],
+  [ 'swelly_search_clicked',    U.A,  null, '2026-04-19T14:25:43Z', null, false, false ],
+  [ 'swelly_connect_clicked',   U.A,  null, '2026-04-19T14:32:17Z', {target_user_id:U.F}, false, false ],
+  [ 'first_message_sent',       U.A,  CV.X, '2026-04-19T14:33:08Z', null, false, false ],
+  [ 'app_opened',               U.A,  null, '2026-04-21T19:18:32Z', {platform:'ios', app_version:'1.1.3'}, false, false ],
+  [ 'app_opened',               U.A,  null, '2026-04-24T08:45:11Z', {platform:'ios', app_version:'1.1.3'}, false, false ],
+  [ 'app_opened',               U.A,  null, '2026-05-01T12:30:15Z', {platform:'web', app_version:'1.1.3'}, false, false ],
+  [ 'app_opened',               U.A,  null, '2026-05-10T20:11:42Z', {platform:'ios', app_version:'1.1.3'}, false, false ],
+  [ 'app_opened',               U.A,  null, '2026-05-17T09:05:33Z', {platform:'web', app_version:'1.1.3'}, false, false ],
+
+  // ===== User F: signed up earlier, replies to A =====
+  [ 'user_signed_up',           U.F,  null, '2026-04-15T11:30:00Z', null, false, false ],
+  [ 'onboarding_step_1',        U.F,  null, '2026-04-15T11:32:18Z', null, false, false ],
+  [ 'onboarding_step_2',        U.F,  null, '2026-04-15T11:34:02Z', null, false, false ],
+  [ 'onboarding_step_3',        U.F,  null, '2026-04-15T11:36:41Z', null, false, false ],
+  [ 'onboarding_step_4',        U.F,  null, '2026-04-15T11:38:55Z', null, false, false ],
+  [ 'onboarding_step_5',        U.F,  null, '2026-04-15T11:41:22Z', null, false, false ],
+  [ 'onboarding_step_6',        U.F,  null, '2026-04-15T11:43:09Z', null, false, false ],
+  [ 'onboarding_step_7',        U.F,  null, '2026-04-15T11:46:00Z', null, false, false ],
+  [ 'onboarding_step_8',        U.F,  null, '2026-04-15T11:48:14Z', null, false, false ],
+  [ 'onboarding_finalized',     U.F,  null, '2026-04-15T11:49:01Z', null, false, false ],
+  [ 'app_opened',               U.F,  null, '2026-04-19T16:05:11Z', {platform:'ios', app_version:'1.1.3'}, false, false ],
+  [ 'first_message_sent',       U.F,  CV.X, '2026-04-19T16:08:24Z', null, false, false ],
+  [ 'app_opened',               U.F,  null, '2026-04-22T10:14:00Z', {platform:'ios', app_version:'1.1.3'}, false, false ],
+  [ 'app_opened',               U.F,  null, '2026-05-05T18:32:09Z', {platform:'web', app_version:'1.1.3'}, false, false ],
+  [ 'app_opened',               U.F,  null, '2026-05-15T08:22:31Z', {platform:'ios', app_version:'1.1.3'}, false, false ],
+
+  // ===== Conversation X (A <-> F): two-sided + deep engaged =====
+  [ 'conversation_two_sided',    null, CV.X, '2026-04-19T16:08:24Z', null, false, false ],
+  [ 'conversation_deep_engaged', null, CV.X, '2026-04-22T21:47:55Z', null, false, false ],
+
+  // ===== User B: dropped at step 5 =====
+  [ 'user_signed_up',           U.B,  null, '2026-05-01T14:22:15Z', null, false, false ],
+  [ 'onboarding_step_1',        U.B,  null, '2026-05-01T14:23:40Z', null, false, false ],
+  [ 'onboarding_step_2',        U.B,  null, '2026-05-01T14:25:12Z', null, false, false ],
+  [ 'onboarding_step_3',        U.B,  null, '2026-05-01T14:27:33Z', null, false, false ],
+  [ 'onboarding_step_4',        U.B,  null, '2026-05-01T14:30:18Z', null, false, false ],
+  [ 'onboarding_step_5',        U.B,  null, '2026-05-01T14:32:45Z', null, false, false ],
+  [ 'app_opened',               U.B,  null, '2026-05-03T09:11:22Z', {platform:'web', app_version:'1.1.3'}, false, false ],
+  [ 'app_opened',               U.B,  null, '2026-05-08T17:42:09Z', {platform:'web', app_version:'1.1.3'}, false, false ],
+
+  // ===== User C: completed onboarding, low engagement =====
+  [ 'user_signed_up',           U.C,  null, '2026-05-05T18:45:09Z', null, false, false ],
+  [ 'onboarding_step_1',        U.C,  null, '2026-05-05T18:46:50Z', null, false, false ],
+  [ 'onboarding_step_2',        U.C,  null, '2026-05-05T18:48:22Z', null, false, false ],
+  [ 'onboarding_step_3',        U.C,  null, '2026-05-05T18:50:14Z', null, false, false ],
+  [ 'onboarding_step_4',        U.C,  null, '2026-05-05T18:52:36Z', null, false, false ],
+  [ 'onboarding_step_5',        U.C,  null, '2026-05-05T18:54:08Z', null, false, false ],
+  [ 'onboarding_step_6',        U.C,  null, '2026-05-05T18:56:45Z', null, false, false ],
+  [ 'onboarding_step_7',        U.C,  null, '2026-05-05T18:58:11Z', null, false, false ],
+  [ 'onboarding_step_8',        U.C,  null, '2026-05-05T19:01:02Z', null, false, false ],
+  [ 'onboarding_finalized',     U.C,  null, '2026-05-05T19:01:45Z', null, false, false ],
+  [ 'swelly_search_clicked',    U.C,  null, '2026-05-12T11:20:18Z', null, false, false ],
+  [ 'app_opened',               U.C,  null, '2026-05-12T11:18:00Z', {platform:'web', app_version:'1.1.3'}, false, false ],
+  [ 'app_opened',               U.C,  null, '2026-05-16T20:05:42Z', {platform:'ios', app_version:'1.1.3'}, false, false ],
+
+  // ===== User G: dropped at step 1 =====
+  [ 'user_signed_up',           U.G,  null, '2026-05-10T07:14:55Z', null, false, false ],
+  [ 'onboarding_step_1',        U.G,  null, '2026-05-10T07:16:01Z', null, false, false ],
+  [ 'app_opened',               U.G,  null, '2026-05-11T19:30:12Z', {platform:'android', app_version:'1.1.3'}, false, false ],
+
+  // ===== User H: just signed up =====
+  [ 'user_signed_up',           U.H,  null, '2026-05-17T22:08:44Z', null, false, false ],
+
+  // ===== User D: DEMO USER (excluded from dashboard) =====
+  [ 'user_signed_up',           U.D,  null, '2026-04-20T10:00:00Z', null, true, false ],
+  [ 'onboarding_step_1',        U.D,  null, '2026-04-20T10:01:30Z', null, true, false ],
+  [ 'onboarding_step_2',        U.D,  null, '2026-04-20T10:03:15Z', null, true, false ],
+  [ 'app_opened',               U.D,  null, '2026-05-14T14:22:01Z', {platform:'web', app_version:'1.1.3'}, true, false ],
+
+  // ===== User E: ADMIN (excluded from dashboard) =====
+  [ 'user_signed_up',           U.E,  null, '2026-01-10T09:00:00Z', null, false, true ],
+  [ 'onboarding_step_1',        U.E,  null, '2026-01-10T09:02:00Z', null, false, true ],
+  [ 'onboarding_step_2',        U.E,  null, '2026-01-10T09:04:00Z', null, false, true ],
+  [ 'onboarding_step_3',        U.E,  null, '2026-01-10T09:06:00Z', null, false, true ],
+  [ 'onboarding_step_4',        U.E,  null, '2026-01-10T09:08:00Z', null, false, true ],
+  [ 'onboarding_step_5',        U.E,  null, '2026-01-10T09:10:00Z', null, false, true ],
+  [ 'onboarding_step_6',        U.E,  null, '2026-01-10T09:12:00Z', null, false, true ],
+  [ 'onboarding_step_7',        U.E,  null, '2026-01-10T09:14:00Z', null, false, true ],
+  [ 'onboarding_step_8',        U.E,  null, '2026-01-10T09:16:00Z', null, false, true ],
+  [ 'onboarding_finalized',     U.E,  null, '2026-01-10T09:17:00Z', null, false, true ],
+  [ 'app_opened',               U.E,  null, '2026-05-17T08:00:00Z', {platform:'web', app_version:'1.1.3'}, false, true ],
+  [ 'app_opened',               U.E,  null, '2026-05-18T07:55:00Z', {platform:'web', app_version:'1.1.3'}, false, true ],
+];
+
+/* ====== RENDER ====== */
+function formatUuid(u) {
+  if (!u) return '<span class="null">NULL</span>';
+  const short = u.slice(0, 8);
+  const tail  = u.slice(8);
+  return `<span class="uuid-cell"><span class="short">${short}</span><span class="tail">${tail}</span></span>`;
+}
+function formatTs(ts) {
+  return ts ? ts.replace('T', ' ').replace('Z', '+00') : '<span class="null">NULL</span>';
+}
+function formatProps(p) {
+  if (!p) return '<span class="null">NULL</span>';
+  return `<code class="jsonb">${JSON.stringify(p)}</code>`;
+}
+function formatBool(b) {
+  return b
+    ? '<span class="bool t">▲ true</span>'
+    : '<span class="bool f">— false</span>';
+}
+function formatEvent(name) {
+  return `<span class="event-pill ${eventClass(name)}"><span class="dot"></span>${name}</span>`;
+}
+
+function render() {
+  const body = document.getElementById('rowsBody');
+  body.innerHTML = rows.map((r, i) => {
+    const [eventName, userId, convId, ts, props, demo, admin] = r;
+    return `<tr data-event="${eventName}">
+      <td class="id-cell">${i + 1}</td>
+      <td>${formatEvent(eventName)}</td>
+      <td>${formatUuid(userId)}</td>
+      <td>${formatUuid(convId)}</td>
+      <td class="ts-cell">${formatTs(ts)}</td>
+      <td>${formatProps(props)}</td>
+      <td>${formatBool(demo)}</td>
+      <td>${formatBool(admin)}</td>
+    </tr>`;
+  }).join('');
+  document.getElementById('totalRows').textContent = rows.length;
+  document.getElementById('rowCount').textContent = `${rows.length} rows · last updated 2 min ago`;
+  updateVisible();
+}
+
+function updateVisible() {
+  const visible = document.querySelectorAll('tbody tr:not(.hidden)').length;
+  document.getElementById('visibleRows').textContent = visible;
+}
+
+/* ====== FILTERING ====== */
+let activeFilter = '';
+let activeSearch = '';
+
+function applyFilters() {
+  document.querySelectorAll('tbody tr').forEach(tr => {
+    const ev = tr.dataset.event;
+    const txt = tr.textContent.toLowerCase();
+    const matchEvent = !activeFilter
+      || ev === activeFilter
+      || (activeFilter === 'onboarding_step' && ev.startsWith('onboarding_step'));
+    const matchSearch = !activeSearch || txt.includes(activeSearch);
+    tr.classList.toggle('hidden', !(matchEvent && matchSearch));
+  });
+  updateVisible();
+}
+
+document.querySelectorAll('.chip').forEach(chip => {
+  chip.addEventListener('click', () => {
+    document.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+    chip.classList.add('active');
+    activeFilter = chip.dataset.event;
+    applyFilters();
+  });
+});
+
+document.getElementById('searchInput').addEventListener('input', e => {
+  activeSearch = e.target.value.toLowerCase().trim();
+  applyFilters();
+});
+
+render();
+</script>
+</body>
+</html>

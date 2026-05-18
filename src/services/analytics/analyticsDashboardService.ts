@@ -1,25 +1,44 @@
 import { supabase, isSupabaseConfigured } from '../../config/supabase';
 
+/**
+ * Counter shape returned by the analytics-dashboard edge function for every event.
+ *  - total:  count within the selected range (all-time if no range)
+ *  - prev:   count within the equivalent prior range (for delta % calc; 0 if no range)
+ *  - series: daily counts over the last 30 days, oldest -> newest (for the sparkline)
+ *
+ * For "repeatable" events (app_opened, swelly_search_clicked, swelly_connect_clicked),
+ * total/prev/series-day-values are COUNT(DISTINCT user_id) — each user counts once per
+ * range/day. For one-shot events they are COUNT(*).
+ */
 export interface DashboardCounter {
   total: number;
-  in_range: number;
-  series: number[]; // daily counts, last 30 days, oldest -> newest
+  prev: number;
+  series: number[];
 }
 
+export const EVENT_NAMES = [
+  'user_signed_up',
+  'onboarding_step_1',
+  'onboarding_step_2',
+  'onboarding_step_3',
+  'onboarding_step_4',
+  'onboarding_step_5',
+  'onboarding_step_6',
+  'onboarding_step_7',
+  'onboarding_finalized',
+  'swelly_search_clicked',
+  'swelly_connect_clicked',
+  'first_message_sent',
+  'conversation_two_sided',
+  'conversation_deep_engaged',
+  'app_opened',
+] as const;
+export type EventName = typeof EVENT_NAMES[number];
+
 export interface DashboardData {
-  metric_2: DashboardCounter;   // users created
-  metric_3: DashboardCounter;   // onboarding phase 1
-  metric_4: DashboardCounter;   // full onboarding
-  metric_5: DashboardCounter;   // first Swelly search
-  metric_6: DashboardCounter;   // first Swelly match
-  metric_7: DashboardCounter;   // convos with 1+ message — bucketed by first-message ts
-  metric_8: DashboardCounter;   // both sides replied — bucketed by 2nd-side first-message ts
-  metric_9: DashboardCounter;   // 4+ msgs each side — bucketed by 2nd-side 4th-message ts
-  metric_10: {
-    with_surfer: DashboardCounter;  // real users (have a non-demo surfer row)
-    auth_only: DashboardCounter;    // opened the app but never created a surfer profile
-  };
   range: { from: string | null; to: string | null };
+  prev_range: { from: string | null; to: string | null };
+  metrics: Record<EventName, DashboardCounter>;
 }
 
 export interface DashboardRange {

@@ -37,6 +37,7 @@ import { uploadProfileImage, uploadProfileVideoS3 } from '../services/storage/st
 import { validateVideoComplete } from '../utils/videoValidation';
 import { ProfileImage } from '../components/ProfileImage';
 import { analyticsService } from '../services/analytics/analyticsService';
+import { logEvent } from '../services/analytics/eventLogger';
 import { getSurfLevelMappingFromEnum } from '../utils/surfLevelMapping';
 import { useScreenDimensions } from '../utils/responsive';
 import { updateCachedUserProfilePhoto } from '../utils/userProfileCache';
@@ -2613,7 +2614,15 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
           </View>
           <TouchableOpacity
             style={[styles.connectButton, { bottom: Math.max(insets.bottom, 16) + 24 }]}
-            onPress={() => onMessage(userId, profileData.name ?? undefined, profileData.profile_image_url ?? null)}
+            onPress={() => {
+              if (!isAlreadyConnected && currentUserId) {
+                logEvent('swelly_connect_clicked', {
+                  userId: currentUserId,
+                  properties: { target_user_id: userId },
+                });
+              }
+              onMessage(userId, profileData.name ?? undefined, profileData.profile_image_url ?? null);
+            }}
             activeOpacity={0.8}
           >
             <View style={[styles.connectButtonInner, isAlreadyConnected && styles.messageButtonInner]}>
