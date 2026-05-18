@@ -27,6 +27,7 @@ import { findMatchingUsersV3 } from '../services/matching/matchingServiceV3';
 import { supabaseAuthService } from '../services/auth/supabaseAuthService';
 import { MatchedUser, TripPlanningRequest } from '../types/tripPlanning';
 import { analyticsService } from '../services/analytics/analyticsService';
+import { logEvent } from '../services/analytics/eventLogger';
 import { ChatTextInput, ChatTextInputRef } from '../components/ChatTextInput';
 import { useChatKeyboardScroll } from '../hooks/useChatKeyboardScroll';
 import { useKeyboardVisible, useKeyboardHeight } from '../hooks/useKeyboardVisible';
@@ -236,7 +237,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   persistedDestination,
   onChatStateChange,
 }) => {
-  const { formData } = useOnboarding();
+  const { formData, user } = useOnboarding();
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -259,8 +260,9 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   useEffect(() => {
     const initializeChat = async () => {
       try {
-        // Track swelly_chat_entered
+        // Track swelly_chat_entered (PostHog) + DB event (every click — dashboard counts distinct users)
         analyticsService.trackSwellyChatEntered();
+        logEvent('swelly_search_clicked', { userId: user?.id });
         
         console.log('Testing API connection...');
         const health = await swellyService.healthCheck();

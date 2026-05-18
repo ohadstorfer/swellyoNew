@@ -38,6 +38,11 @@ import { acceptSurftripInvite } from '../services/surftrips/surftripsService';
 import { supabaseAuthService } from '../services/auth/supabaseAuthService';
 import { useOnboarding } from '../context/OnboardingContext';
 import { analyticsService } from '../services/analytics/analyticsService';
+import { logEvent } from '../services/analytics/eventLogger';
+import Constants from 'expo-constants';
+
+const APP_OPENED_THROTTLE_MS = 30 * 60 * 1000; // 30 minutes
+const APP_OPENED_STORAGE_KEY_PREFIX = 'last_app_open_logged_'; // suffix is the user id so different users on the same device don't block each other
 import { useAuthGuard } from '../hooks/useAuthGuard';
 import { isFirstVideoReadyForBoardType } from '../services/media/videoPreloadService';
 import { STEP_WELCOME, STEP_ONBOARDING_WELCOME } from '../constants/onboardingSteps';
@@ -251,6 +256,28 @@ export const AppContent: React.FC = () => {
           }
 
           setHasValidatedSession(true);
+
+          // Log app_opened (throttled per-user per 30min) — fire and forget.
+          // Key is per-user so different users on the same device don't block each other.
+          try {
+            if (user?.id) {
+              const storageKey = `${APP_OPENED_STORAGE_KEY_PREFIX}${user.id}`;
+              const last = await AsyncStorage.getItem(storageKey);
+              const now = Date.now();
+              if (!last || now - parseInt(last, 10) > APP_OPENED_THROTTLE_MS) {
+                logEvent('app_opened', {
+                  userId: user.id,
+                  properties: {
+                    platform: Platform.OS,
+                    app_version: Constants.expoConfig?.version ?? null,
+                  },
+                });
+                await AsyncStorage.setItem(storageKey, String(now));
+              }
+            }
+          } catch (err) {
+            console.warn('[AppContent] app_opened logging failed (non-blocking):', err);
+          }
         } catch (error) {
           console.error('[AppContent] Error validating session:', error);
           setHasValidatedSession(true);
@@ -548,6 +575,7 @@ export const AppContent: React.FC = () => {
 
       // Track onboarding step 1 completion
       analyticsService.trackOnboardingStep1Completed();
+      logEvent('onboarding_step_1', { userId: user?.id });
 
       // Soft Top (id: 3) skips step 2 and goes directly to step 3
       if (data.boardType === 3) {
@@ -592,6 +620,8 @@ export const AppContent: React.FC = () => {
       const { onboardingService } = await import('../services/onboarding/onboardingService');
       await onboardingService.saveStep2(data.boardType!, data.surfLevel!, dobFromDevice ?? undefined);
 
+      logEvent('onboarding_step_2', { userId: user?.id });
+
       setShowVideoUploadStep(true); // Show video upload mid-step
     } catch (error) {
       console.error('Error in Step 2 Next:', error);
@@ -614,7 +644,9 @@ export const AppContent: React.FC = () => {
       // Save Step 3 data to Supabase (travel experience) using onboarding service
       const { onboardingService } = await import('../services/onboarding/onboardingService');
       await onboardingService.saveStep3(data.boardType!, data.surfLevel!, data.travelExperience!);
-      
+
+      logEvent('onboarding_step_3', { userId: user?.id });
+
       setCurrentStep(4); // Go to step 4 (destinations — renumbered from old profile step)
     } catch (error) {
       console.error('Error in Step 3 Next:', error);
@@ -633,6 +665,7 @@ export const AppContent: React.FC = () => {
       updateFormData(data);
       const { onboardingService } = await import('../services/onboarding/onboardingService');
       await onboardingService.saveStep4Destinations(data.destinations_array || []);
+      logEvent('onboarding_step_4', { userId: user?.id });
       setCurrentStep(5);
     } catch (error) {
       console.error('Error in Step 4 (destinations) Next:', error);
@@ -663,6 +696,7 @@ export const AppContent: React.FC = () => {
       if (data.travel_type) {
         await onboardingService.saveStep5Budget(data.travel_type);
       }
+      logEvent('onboarding_step_5', { userId: user?.id });
       setCurrentStep(6);
     } catch (error) {
       console.error('Error in Step 5 (budget) Next:', error);
@@ -683,6 +717,7 @@ export const AppContent: React.FC = () => {
         data.lifestyle_keywords || [],
         data.lifestyle_image_urls || {},
       );
+      logEvent('onboarding_step_6', { userId: user?.id });
       setCurrentStep(7);
     } catch (error) {
       console.error('Error in Step 6 (lifestyle) Next:', error);
@@ -737,12 +772,15 @@ export const AppContent: React.FC = () => {
         console.log('[AppContent] User name updated in PostHog:', userId, userProperties);
       }
 
+      logEvent('onboarding_step_7', { userId: user?.id });
+
       // Skip LoadingScreen + Swelly onboarding chat — go straight to profile.
       // Order matters: set showProfile + flag BEFORE markOnboardingComplete so
       // the "isComplete && !showProfile → home" branch doesn't redirect us.
       setProfileFromOnboardingChat(true);
       setShowProfile(true);
       await markOnboardingComplete();
+      logEvent('onboarding_finalized', { userId: user?.id });
       // Refresh the user profile now that saveStep4 created the surfers row.
       // Before this refresh, useUserProfile's initial fetch ran when the
       // surfers row didn't exist yet (returned PGRST116 / null), so the local
