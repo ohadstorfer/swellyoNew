@@ -1,5 +1,6 @@
 import { supabase, isSupabaseConfigured } from '../../config/supabase';
 import { Platform } from 'react-native';
+import { logEvent } from '../analytics/eventLogger';
 
 /**
  * Supabase Database Service
@@ -482,6 +483,8 @@ class SupabaseDatabaseService {
         }
 
         savedSurfer = data;
+
+        logEvent('user_signed_up', { userId: authUser.id });
       }
 
       console.log('Surfer data saved to Supabase:', savedSurfer);

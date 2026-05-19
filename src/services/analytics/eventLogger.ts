@@ -1,0 +1,74 @@
+import { supabase } from '../../config/supabase';
+import { analyticsService } from './analyticsService';
+
+/**
+ * Names of events that should only fire once per user. The DB enforces this
+ * via a UNIQUE partial index, so subsequent inserts with the same
+ * (user_id, event_name) are silently dropped via ON CONFLICT DO NOTHING.
+ *
+ * Events NOT in this set (app_opened, swelly_search_clicked, swelly_connect_clicked)
+ * write a new row every time — the dashboard counts distinct users in the date range.
+ */
+const ONE_SHOT_EVENTS = new Set<string>([
+  'user_signed_up',
+  'onboarding_step_1',
+  'onboarding_step_2',
+  'onboarding_step_3',
+  'onboarding_step_4',
+  'onboarding_step_5',
+  'onboarding_step_6',
+  'onboarding_step_7',
+  'onboarding_finalized',
+  // first_message_sent is also one-shot but it's written by a DB trigger, not the client.
+]);
+
+export interface LogEventOptions {
+  userId?: string;
+  conversationId?: string;
+  properties?: Record<string, unknown>;
+}
+
+/**
+ * Write an analytics event to Supabase.
+ *
+ * - Respects the user's analytics opt-out (skips silently if opted out).
+ * - For one-shot events, duplicate writes are ignored at the DB level.
+ * - For repeatable events, every call creates a new row.
+ * - `is_demo_user` and `is_admin` are NOT passed from the client —
+ *   a BEFORE INSERT trigger sets them from the surfers row, so a malicious
+ *   client can't mark itself as demo to evade dashboard exclusion.
+ *
+ * Fire-and-forget by design: failures are logged but do not throw or block the UI.
+ */
+export async function logEvent(
+  eventName: string,
+  opts: LogEventOptions = {}
+): Promise<void> {
+  if (analyticsService.getIsOptedOut()) return;
+
+  const row = {
+    event_name: eventName,
+    user_id: opts.userId ?? null,
+    conversation_id: opts.conversationId ?? null,
+    occurred_at: new Date().toISOString(),
+    properties: opts.properties ?? null,
+  };
+
+  try {
+    // Always plain INSERT. The DB's UNIQUE partial index enforces "one row per user"
+    // for one-shot events; duplicate inserts get rejected at the constraint level
+    // (Postgres code 23505), which we silently swallow — that's the expected
+    // "already recorded" path for one-shot events. We can't use PostgREST upsert
+    // here because partial unique indexes aren't supported as ON CONFLICT targets.
+    const { error } = await supabase.from('analytics_events').insert(row);
+    if (error) {
+      const code = (error as { code?: string }).code;
+      const isExpectedDuplicate = code === '23505' && ONE_SHOT_EVENTS.has(eventName);
+      if (!isExpectedDuplicate) {
+        console.warn(`[analytics] logEvent(${eventName}) error:`, error.message);
+      }
+    }
+  } catch (err) {
+    console.warn(`[analytics] logEvent(${eventName}) threw:`, err);
+  }
+}

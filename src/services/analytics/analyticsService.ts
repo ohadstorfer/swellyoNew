@@ -242,6 +242,13 @@ class AnalyticsService {
   }
 
   /**
+   * Public read of the opt-out state. Used by eventLogger to gate DB writes.
+   */
+  getIsOptedOut(): boolean {
+    return this.isOptedOut;
+  }
+
+  /**
    * Sync opt-out preference from server (called after login/session restore).
    * Server value wins over local — ensures a user who opted out on another device stays opted out.
    */
