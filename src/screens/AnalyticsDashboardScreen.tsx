@@ -318,6 +318,7 @@ export function AnalyticsDashboardScreen({ onBack }: AnalyticsDashboardScreenPro
               events={ENGAGEMENT_FUNNEL_EVENTS}
               metrics={data.metrics}
               onInfo={setInfoEvent}
+              showDropoff={false}
             />
           </>
         )}
@@ -503,9 +504,10 @@ interface FunnelSectionProps {
   events: EventName[];
   metrics: Record<EventName, DashboardCounter>;
   onInfo: (e: EventName) => void;
+  showDropoff?: boolean;
 }
 
-function FunnelSection({ title, subtitle, icon, events, metrics, onInfo }: FunnelSectionProps) {
+function FunnelSection({ title, subtitle, icon, events, metrics, onInfo, showDropoff = true }: FunnelSectionProps) {
   const counts = events.map(e => metrics[e]?.total ?? 0);
   const max = counts[0] || 1;
   const allZero = counts.every(c => c === 0);
@@ -548,7 +550,7 @@ function FunnelSection({ title, subtitle, icon, events, metrics, onInfo }: Funne
                       <Ionicons name="information-circle-outline" size={13} color={C.tertiary} />
                     </TouchableOpacity>
                   </View>
-                  {i > 0 && dropoff > 0 && (
+                  {showDropoff && i > 0 && dropoff > 0 && (
                     <Text style={styles.funnelDropoff}>
                       ↓ {dropoff.toLocaleString()} ({dropoffPct.toFixed(0)}% drop)
                     </Text>
