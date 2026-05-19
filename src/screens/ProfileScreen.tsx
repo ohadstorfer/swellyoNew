@@ -2615,11 +2615,15 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
           <TouchableOpacity
             style={[styles.connectButton, { bottom: Math.max(insets.bottom, 16) + 24 }]}
             onPress={() => {
-              if (!isAlreadyConnected && currentUserId) {
-                logEvent('swelly_connect_clicked', {
-                  userId: currentUserId,
-                  properties: { target_user_id: userId },
-                });
+              if (!isAlreadyConnected) {
+                // Resolve viewer id with fallback chain (state may not have hydrated yet).
+                const viewerId = currentUserId ?? currentUserIdRef.current ?? myProfile?.user_id ?? null;
+                if (viewerId) {
+                  logEvent('swelly_connect_clicked', {
+                    userId: viewerId,
+                    properties: { target_user_id: userId },
+                  });
+                }
               }
               onMessage(userId, profileData.name ?? undefined, profileData.profile_image_url ?? null);
             }}
