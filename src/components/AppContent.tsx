@@ -55,7 +55,7 @@ import { useMessaging } from '../context/MessagingProvider';
 export const AppContent: React.FC = () => {
   const { currentStep, formData, setCurrentStep, updateFormData, saveStepToSupabase, isComplete, markOnboardingComplete, isDemoUser, setIsDemoUser, setUser, resetOnboarding, user, isRestoringSession, isLoaded: isOnboardingLoaded, completionCheckedForUserId } = useOnboarding();
   const onboardingCheckedForCurrentUser = user !== null && completionCheckedForUserId === user.id;
-  const { markWelcomeLineupDismissed, setSeenFromProfile: setTutorialSeenFromProfile } = useTutorial();
+  const { markWelcomeLineupDismissed, setSeenFromProfile: setTutorialSeenFromProfile, setSurftripsTipSeenFromProfile } = useTutorial();
   
   // Initialize auth guard - this will automatically redirect unauthenticated users
   useAuthGuard();
@@ -828,6 +828,12 @@ export const AppContent: React.FC = () => {
     });
     setTutorialSeenFromProfile(seen);
   }, [currentUserSurfer?.welcome_guide_seen_at, currentUserSurfer?.user_id, setTutorialSeenFromProfile]);
+
+  // Same reconciliation for the one-time "Surf Trips tab" coach-mark flag.
+  useEffect(() => {
+    if (!currentUserSurfer) return;
+    setSurftripsTipSeenFromProfile(currentUserSurfer.surftrips_tip_seen_at != null);
+  }, [currentUserSurfer?.surftrips_tip_seen_at, currentUserSurfer?.user_id, setSurftripsTipSeenFromProfile]);
   const [showTripPlanningChat, setShowTripPlanningChat] = useState(false);
   const [showTripPlanningChatCopy, setShowTripPlanningChatCopy] = useState(false);
   // "Ever shown" flags so we mount TripPlanningChat / -Copy lazily on first
@@ -1684,6 +1690,7 @@ export const AppContent: React.FC = () => {
           fromOnboardingChat={profileFromOnboardingChat}
           onSaveAndGoToConversations={handleSaveAndGoToConversations}
           noTransition={profileFromWelcomeOverlay}
+          suppressConnectAnalytics={profileFromWelcomeOverlay}
           onEdit={() => {
             setShowProfileEditor(true);
           }}

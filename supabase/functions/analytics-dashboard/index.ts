@@ -156,6 +156,37 @@ async function seriesFor(name: EventName): Promise<number[]> {
   return buckets
 }
 
+/** Distinct active 1:1 conversations (>=1 message in range), excluding demo/admin. */
+async function countActiveConversations(from: string | null, to: string | null): Promise<number> {
+  const { data, error } = await supabase.rpc('count_active_conversations', {
+    p_from: from,
+    p_to: to,
+  })
+  if (error) throw error
+  return typeof data === 'number' ? data : Number(data) || 0
+}
+
+/** Daily active-conversation counts for the last SPARKLINE_DAYS days. */
+async function activeConversationsSeries(): Promise<number[]> {
+  const { data, error } = await supabase.rpc('active_conversations_series', {
+    p_days: SPARKLINE_DAYS,
+  })
+  if (error) throw error
+
+  const todayMidnight = new Date()
+  todayMidnight.setUTCHours(0, 0, 0, 0)
+  const cutoffMs = todayMidnight.getTime() - (SPARKLINE_DAYS - 1) * DAY_MS
+
+  const buckets = new Array<number>(SPARKLINE_DAYS).fill(0)
+  for (const row of (data ?? []) as Array<{ day: string; n: number }>) {
+    const t = new Date(`${row.day}T00:00:00Z`).getTime()
+    if (Number.isNaN(t)) continue
+    const idx = Math.round((t - cutoffMs) / DAY_MS)
+    if (idx >= 0 && idx < SPARKLINE_DAYS) buckets[idx] = Number(row.n) || 0
+  }
+  return buckets
+}
+
 
 // ---------- auth ----------
 
@@ -210,16 +241,21 @@ serve(async (req) => {
     // For each event: compute total in range, prev in prior range, series for last 30d.
     // Series and counts share the underlying table — three round-trips per event in the
     // worst case, but they're tiny indexed queries, run in parallel below.
-    const results = await Promise.all(
-      EVENT_NAMES.map(async (name) => {
-        const [total, prev, series] = await Promise.all([
-          countFor(name, from, to),
-          hasRange ? countFor(name, prevFrom, prevTo) : Promise.resolve(0),
-          seriesFor(name),
-        ])
-        return [name, { total, prev, series } as Counter] as const
-      }),
-    )
+    const [results, acTotal, acPrev, acSeries] = await Promise.all([
+      Promise.all(
+        EVENT_NAMES.map(async (name) => {
+          const [total, prev, series] = await Promise.all([
+            countFor(name, from, to),
+            hasRange ? countFor(name, prevFrom, prevTo) : Promise.resolve(0),
+            seriesFor(name),
+          ])
+          return [name, { total, prev, series } as Counter] as const
+        }),
+      ),
+      countActiveConversations(from, to),
+      hasRange ? countActiveConversations(prevFrom, prevTo) : Promise.resolve(0),
+      activeConversationsSeries(),
+    ])
 
     const metrics: Record<string, Counter> = {}
     for (const [name, counter] of results) metrics[name] = counter
@@ -228,6 +264,7 @@ serve(async (req) => {
       range: { from, to },
       prev_range: { from: prevFrom, to: prevTo },
       metrics,
+      active_conversations: { total: acTotal, prev: acPrev, series: acSeries } as Counter,
     }), { status: 200, headers: jsonHeaders })
   } catch (e) {
     console.error('[analytics-dashboard] error:', e)

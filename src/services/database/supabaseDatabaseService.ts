@@ -62,6 +62,9 @@ export interface SupabaseSurfer {
   // Tutorial state: timestamp when the Swelly welcome guide was first shown
   // to this user. NULL = never seen, the guide fires on next Swelly chat open.
   welcome_guide_seen_at?: string | null; // timestamptz, nullable
+  // Timestamp when the one-time "Surf Trips tab" coach-mark was first shown.
+  // NULL = never seen, the tip fires once on the home screen.
+  surftrips_tip_seen_at?: string | null; // timestamptz, nullable
   created_at: string; // timestamptz
   updated_at: string; // timestamptz
 }
@@ -558,6 +561,46 @@ class SupabaseDatabaseService {
   }
 
   /**
+   * Mark the one-time "Surf Trips tab" coach-mark as shown for the current
+   * user. The home screen calls this the moment the tip appears, so it never
+   * fires again. The .is(..., null) guard keeps it idempotent.
+   */
+  async markSurftripsTipSeen(): Promise<boolean> {
+    if (!isSupabaseConfigured()) return false;
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) return false;
+    const { error } = await supabase
+      .from('surfers')
+      .update({ surftrips_tip_seen_at: new Date().toISOString() })
+      .eq('user_id', user.id)
+      .is('surftrips_tip_seen_at', null);
+    if (error) {
+      console.warn('markSurftripsTipSeen failed:', error);
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Clear the Surf Trips tip timestamp for the current user. Used only by the
+   * "Replay surftrips tip" dev button so the coach-mark shows again.
+   */
+  async clearSurftripsTipSeen(): Promise<boolean> {
+    if (!isSupabaseConfigured()) return false;
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) return false;
+    const { error } = await supabase
+      .from('surfers')
+      .update({ surftrips_tip_seen_at: null })
+      .eq('user_id', user.id);
+    if (error) {
+      console.warn('clearSurftripsTipSeen failed:', error);
+      return false;
+    }
+    return true;
+  }
+
+  /**
    * Update only lifestyle_image_urls for the current user's surfer row.
    * Used after background enrichment so we don't send a full payload that could clear other columns.
    */
@@ -708,7 +751,7 @@ class SupabaseDatabaseService {
       // destinations_map does NOT exist - only destinations_array exists
       const { data, error } = await supabase
         .from('surfers')
-        .select('user_id, name, age, date_of_birth, pronoun, country_from, surfboard_type, surf_level, surf_level_description, surf_level_category, travel_experience, bio, profile_image_url, cover_image_url, profile_video_url, profile_video_thumbnail_url, destinations_array, lifestyle_keywords, lifestyle_image_urls, wave_type_keywords, travel_buddies, home_break_place_id, home_break_full, home_break_short, home_break_locality, home_break_country, home_break_lat, home_break_lng, welcome_guide_seen_at, created_at, updated_at, finished_onboarding')
+        .select('user_id, name, age, date_of_birth, pronoun, country_from, surfboard_type, surf_level, surf_level_description, surf_level_category, travel_experience, bio, profile_image_url, cover_image_url, profile_video_url, profile_video_thumbnail_url, destinations_array, lifestyle_keywords, lifestyle_image_urls, wave_type_keywords, travel_buddies, home_break_place_id, home_break_full, home_break_short, home_break_locality, home_break_country, home_break_lat, home_break_lng, welcome_guide_seen_at, surftrips_tip_seen_at, created_at, updated_at, finished_onboarding')
         .eq('user_id', userId)
         .single();
 

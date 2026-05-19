@@ -14,6 +14,10 @@ export const WELCOME_GUIDE_COMPLETED_KEY = '@swellyo_welcome_guide_completed';
 // setSeenFromProfile when the user profile loads.
 export const WELCOME_GUIDE_SEEN_KEY = '@swellyo_welcome_guide_seen_v2';
 export const WELCOME_LINEUP_DISMISSED_AT_KEY = '@swellyo_welcome_lineup_dismissed_at';
+// One-time "Surf Trips tab" coach-mark seen flag. Same pattern as
+// WELCOME_GUIDE_SEEN_KEY — AsyncStorage is a fast-path cache, the DB column
+// surfers.surftrips_tip_seen_at is the source of truth.
+export const SURFTRIPS_TIP_SEEN_KEY = '@swellyo_surftrips_tip_seen_v1';
 
 interface TutorialContextValue {
   currentStep: TutorialStep;
@@ -36,6 +40,14 @@ interface TutorialContextValue {
   setSeenFromProfile: (seen: boolean) => void;
   /** Dev button — clears AsyncStorage cache, completion flag, AND nullifies the DB column. */
   resetForReplay: () => Promise<void>;
+  /** True once the one-time "Surf Trips tab" coach-mark has been shown to this user. */
+  surftripsTipSeen: boolean;
+  /** Marks the Surf Trips tip as shown — called the moment the coach-mark appears. Idempotent. */
+  markSurftripsTipSeen: () => Promise<void>;
+  /** Reconciliation hook: AppContent calls this when the user profile loads. */
+  setSurftripsTipSeenFromProfile: (seen: boolean) => void;
+  /** Dev button — clears the Surf Trips tip flag (AsyncStorage + DB) so it shows again. */
+  resetSurftripsTip: () => Promise<void>;
 }
 
 const TutorialContext = createContext<TutorialContextValue | undefined>(undefined);
@@ -45,6 +57,7 @@ export const TutorialProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [isHydrated, setIsHydrated] = useState(false);
   const [isSeen, setIsSeen] = useState(false);
   const [isCompleted, setIsCompleted] = useState(false);
+  const [surftripsTipSeen, setSurftripsTipSeen] = useState(false);
   const [welcomeLineupDismissedAt, setWelcomeLineupDismissedAt] = useState<string | null>(null);
   // Tracks whether the DB has been reconciled at least once. Until then, the
   // value of `isSeen` comes from AsyncStorage and may be stale.
@@ -53,15 +66,17 @@ export const TutorialProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   useEffect(() => {
     (async () => {
       try {
-        const [completed, seen, dismissedAt] = await Promise.all([
+        const [completed, seen, dismissedAt, surftripsTip] = await Promise.all([
           AsyncStorage.getItem(WELCOME_GUIDE_COMPLETED_KEY),
           AsyncStorage.getItem(WELCOME_GUIDE_SEEN_KEY),
           AsyncStorage.getItem(WELCOME_LINEUP_DISMISSED_AT_KEY),
+          AsyncStorage.getItem(SURFTRIPS_TIP_SEEN_KEY),
         ]);
-        console.log('[Tutorial hydrate]', { completed, seen, dismissedAt });
+        console.log('[Tutorial hydrate]', { completed, seen, dismissedAt, surftripsTip });
         setIsCompleted(completed === 'true');
         setIsSeen(seen === 'true');
         setWelcomeLineupDismissedAt(dismissedAt);
+        setSurftripsTipSeen(surftripsTip === 'true');
       } catch (err) {
         console.warn('[TutorialContext] Hydration failed', err);
       } finally {
@@ -169,6 +184,45 @@ export const TutorialProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   }, []);
 
+  // ── One-time "Surf Trips tab" coach-mark ──────────────────────────────
+  // Independent of the welcome guide; same DB-backed seen-flag pattern.
+  const markSurftripsTipSeen = useCallback(async () => {
+    setSurftripsTipSeen(true);
+    try {
+      await AsyncStorage.setItem(SURFTRIPS_TIP_SEEN_KEY, 'true');
+    } catch (err) {
+      console.warn('[TutorialContext] surftrips tip AS write failed:', err);
+    }
+    // Best-effort DB write — fire and forget. The .is(..., null) guard in the
+    // service keeps it idempotent.
+    supabaseDatabaseService.markSurftripsTipSeen().catch(err =>
+      console.warn('[TutorialContext] DB markSurftripsTipSeen failed:', err),
+    );
+  }, []);
+
+  const setSurftripsTipSeenFromProfile = useCallback((seen: boolean) => {
+    setSurftripsTipSeen(prev => (prev === seen ? prev : seen));
+    AsyncStorage.setItem(SURFTRIPS_TIP_SEEN_KEY, seen ? 'true' : 'false').catch(err =>
+      console.warn('[TutorialContext] surftrips tip AS reconcile failed:', err),
+    );
+  }, []);
+
+  const resetSurftripsTip = useCallback(async () => {
+    setSurftripsTipSeen(false);
+    try {
+      await AsyncStorage.removeItem(SURFTRIPS_TIP_SEEN_KEY);
+    } catch (err) {
+      console.warn('[TutorialContext] Failed to clear surftrips tip AS flag', err);
+    }
+    // Awaited so the DB column is verified NULL before the caller refreshes
+    // the profile — otherwise reconciliation re-flips the flag back to true.
+    try {
+      await supabaseDatabaseService.clearSurftripsTipSeen();
+    } catch (err) {
+      console.warn('[TutorialContext] DB clear surftrips tip failed:', err);
+    }
+  }, []);
+
   const value = useMemo<TutorialContextValue>(() => ({
     currentStep,
     isActive: currentStep > 0,
@@ -185,7 +239,11 @@ export const TutorialProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     markSeen,
     setSeenFromProfile,
     resetForReplay,
-  }), [currentStep, isHydrated, isSeen, isCompleted, welcomeLineupDismissedAt, markWelcomeLineupDismissed, start, advance, goTo, complete, skip, markSeen, setSeenFromProfile, resetForReplay]);
+    surftripsTipSeen,
+    markSurftripsTipSeen,
+    setSurftripsTipSeenFromProfile,
+    resetSurftripsTip,
+  }), [currentStep, isHydrated, isSeen, isCompleted, welcomeLineupDismissedAt, markWelcomeLineupDismissed, start, advance, goTo, complete, skip, markSeen, setSeenFromProfile, resetForReplay, surftripsTipSeen, markSurftripsTipSeen, setSurftripsTipSeenFromProfile, resetSurftripsTip]);
 
   return <TutorialContext.Provider value={value}>{children}</TutorialContext.Provider>;
 };

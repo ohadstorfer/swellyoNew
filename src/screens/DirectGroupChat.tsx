@@ -3621,6 +3621,13 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
                   style={styles.avatarImage}
                   showLoadingIndicator={false}
                 />
+              ) : otherUserAvatar ? (
+                <ProfileImage
+                  imageUrl={otherUserAvatar}
+                  name={otherUserName}
+                  style={styles.avatarImage}
+                  showLoadingIndicator={false}
+                />
               ) : (
                 <View style={[styles.avatarImage, styles.groupAvatar]}>
                   <Ionicons name="people" size={22} color="#FFFFFF" />

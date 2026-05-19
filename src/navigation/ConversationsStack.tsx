@@ -2,7 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo } fro
 import { Platform } from 'react-native';
 import { createBlankStackNavigator } from 'react-native-screen-transitions/blank-stack';
 import Transition from 'react-native-screen-transitions';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useNavigation, useRoute, useIsFocused } from '@react-navigation/native';
 import { interpolate } from 'react-native-reanimated';
 import ConversationsScreen from '../screens/ConversationsScreen';
 import { DirectMessageScreen } from '../screens/DirectMessageScreen';
@@ -70,7 +70,8 @@ const slideFromRightOptions = {
 
 export default function ConversationsStack(props: ConversationsScreenProps) {
   if (Platform.OS === 'web') {
-    return <ConversationsScreen {...props} />;
+    // No inner stack on web — the list never blurs at the stack level.
+    return <ConversationsScreen {...props} stackScreenFocused />;
   }
   return (
     <Stack.Navigator
@@ -104,6 +105,8 @@ export default function ConversationsStack(props: ConversationsScreenProps) {
 
 function ConversationsListRoute(props: ConversationsScreenProps) {
   const navigation = useNavigation<any>();
+  // False while a DM / SurftripDetail is pushed on top within this stack.
+  const isFocused = useIsFocused();
   const { setCurrentConversationId } = useMessaging();
 
   const navigateToDM = useCallback(
@@ -139,7 +142,7 @@ function ConversationsListRoute(props: ConversationsScreenProps) {
 
   return (
     <ConversationsStackContext.Provider value={ctx}>
-      <ConversationsScreen {...props} />
+      <ConversationsScreen {...props} stackScreenFocused={isFocused} />
     </ConversationsStackContext.Provider>
   );
 }

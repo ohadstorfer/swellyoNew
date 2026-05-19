@@ -78,6 +78,7 @@ interface ProfileScreenProps {
   fromOnboardingChat?: boolean; // When true, hide all header buttons (back/edit) and show the "Got it!" floating button at the bottom
   onSaveAndGoToConversations?: () => void; // Tap handler for the "Got it!" button on the post-onboarding profile: navigates to the conversations home
   noTransition?: boolean; // When true, skip the slide-in/slide-out animations (e.g. when layered under a modal that handles its own fade)
+  suppressConnectAnalytics?: boolean; // When true, the Connect button does NOT log swelly_connect_clicked (e.g. opened from the post-onboarding matches overlay)
 }
 
 // Board type mapping
@@ -787,7 +788,7 @@ const SWIPE_DISMISS_DISTANCE = SWIPE_SCREEN_WIDTH * 0.3;
 const SWIPE_DISMISS_VELOCITY = 800;
 const SWIPE_ANIMATION_DURATION = 220;
 
-export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, onMessage, onContinueEdit, onEdit, fromOnboardingChat = false, onSaveAndGoToConversations, noTransition = false }) => {
+export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, onMessage, onContinueEdit, onEdit, fromOnboardingChat = false, onSaveAndGoToConversations, noTransition = false, suppressConnectAnalytics = false }) => {
   const insets = useSafeAreaInsets();
   // Get onboarding context for logout
   const { resetOnboarding, setUser, setCurrentStep, setIsDemoUser } = useOnboarding();
@@ -2615,7 +2616,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
           <TouchableOpacity
             style={[styles.connectButton, { bottom: Math.max(insets.bottom, 16) + 24 }]}
             onPress={() => {
-              if (!isAlreadyConnected) {
+              if (!isAlreadyConnected && !suppressConnectAnalytics) {
                 // Resolve viewer id with fallback chain (state may not have hydrated yet).
                 const viewerId = currentUserId ?? currentUserIdRef.current ?? myProfile?.user_id ?? null;
                 if (viewerId) {

@@ -27,7 +27,6 @@ import { findMatchingUsersV3 } from '../services/matching/matchingServiceV3';
 import { supabaseAuthService } from '../services/auth/supabaseAuthService';
 import { MatchedUser, TripPlanningRequest } from '../types/tripPlanning';
 import { analyticsService } from '../services/analytics/analyticsService';
-import { logEvent } from '../services/analytics/eventLogger';
 import { ChatTextInput, ChatTextInputRef } from '../components/ChatTextInput';
 import { useChatKeyboardScroll } from '../hooks/useChatKeyboardScroll';
 import { useKeyboardVisible, useKeyboardHeight } from '../hooks/useKeyboardVisible';
@@ -260,10 +259,13 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   useEffect(() => {
     const initializeChat = async () => {
       try {
-        // Track swelly_chat_entered (PostHog) + DB event (every click — dashboard counts distinct users)
+        // Track swelly_chat_entered (PostHog).
+        // NOTE: the swelly_search_clicked DB event is logged in AppContent's
+        // handleSwellyPress — on the button click itself, not here. This screen
+        // is mounted once and kept alive, so this effect only runs on the first
+        // open and would undercount every subsequent click.
         analyticsService.trackSwellyChatEntered();
-        logEvent('swelly_search_clicked', { userId: user?.id });
-        
+
         console.log('Testing API connection...');
         const health = await swellyService.healthCheck();
         console.log('API health check successful:', health);

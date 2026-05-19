@@ -46,6 +46,29 @@ export async function listSurftripsForUser(
   return (data || []) as SurftripGroupForUser[];
 }
 
+/**
+ * Hero (cover) images for surftrip group conversations, keyed by conversation_id.
+ * Used to show the surftrip cover photo as the group-chat avatar in lists.
+ */
+export async function getSurftripHeroImagesByConversation(
+  conversationIds: string[]
+): Promise<Record<string, string | null>> {
+  if (conversationIds.length === 0) return {};
+  const { data, error } = await supabase
+    .from('surftrip_groups')
+    .select('conversation_id, hero_image_url')
+    .in('conversation_id', conversationIds);
+  if (error) {
+    console.error('[surftripsService] getSurftripHeroImagesByConversation error:', error);
+    return {};
+  }
+  const map: Record<string, string | null> = {};
+  for (const row of (data || []) as Array<{ conversation_id: string; hero_image_url: string | null }>) {
+    map[row.conversation_id] = row.hero_image_url ?? null;
+  }
+  return map;
+}
+
 export async function getSurftripGroup(
   groupId: string
 ): Promise<SurftripGroup | null> {

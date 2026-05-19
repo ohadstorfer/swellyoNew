@@ -159,7 +159,7 @@ export const BudgetCardsCarousel: React.FC<BudgetCardsCarouselProps> = ({
   const centeredIndexRef = useRef(initialIndex);
   centeredIndexRef.current = centeredIndex;
 
-  const infiniteData = useMemo(
+  const infiniteData = useMemo<typeof BUDGET_ITEMS>(
     () => Array.from({ length: INFINITE_SIZE }, (_, i) => BUDGET_ITEMS[i % NUM_REAL]),
     [],
   );

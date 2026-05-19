@@ -39,6 +39,12 @@ export interface DashboardData {
   range: { from: string | null; to: string | null };
   prev_range: { from: string | null; to: string | null };
   metrics: Record<EventName, DashboardCounter>;
+  /**
+   * 1:1 conversations with >=1 message in the range. Sourced live from the
+   * `messages` table (not analytics_events). May be undefined if the
+   * analytics-dashboard edge function predates this field.
+   */
+  active_conversations?: DashboardCounter;
 }
 
 export interface DashboardRange {

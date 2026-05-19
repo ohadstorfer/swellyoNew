@@ -34,6 +34,7 @@ import { Text } from '../components/Text';
 import { colors, spacing } from '../styles/theme';
 import { swellyServiceCopy, SwellyChatResponse, UIMessage, type SwellyService as SwellyServiceType } from '../services/swelly/swellyServiceCopy';
 import { useOnboarding } from '../context/OnboardingContext';
+import { logEvent } from '../services/analytics/eventLogger';
 import { getImageUrl } from '../services/media/imageService';
 import { Images } from '../assets/images';
 import { MatchedUsersCarousel } from '../components/MatchedUsersCarousel';
@@ -282,7 +283,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   visible,
 }) => {
   const svc = service ?? swellyServiceCopy;
-  const { formData, isDemoUser } = useOnboarding();
+  const { formData, isDemoUser, user } = useOnboarding();
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -1115,10 +1116,13 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   const runFindMatches = async (currentChatId: string, tripPlanningData: any, excludePrevious: boolean = false) => {
     if (!currentChatId) return;
     startLoadingWithTimeout();
-    // Analytics: first-ever Swelly search by this user. Idempotent (DB filters IS NULL). Skip demo users.
+    // Analytics v1 (legacy): first-ever Swelly search — idempotent timestamp column on surfers.
     if (!isDemoUser) {
       supabaseDatabaseService.markFirstEvent('swelly_first_search_at');
     }
+    // NOTE: swelly_search_clicked is logged ONLY in the "Search Now" button's
+    // onPress — not here. runFindMatches also runs from auto-triggers and the
+    // "more" action, which must NOT count as a search-button click.
     const requestData = {
       destination_country: tripPlanningData.destination_country,
       area: tripPlanningData.area || null,
@@ -2103,6 +2107,11 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             <TouchableOpacity
               onPress={() => {
                 if (chatId && pendingSearch) {
+                  // The ONE and only place swelly_search_clicked is logged:
+                  // the user explicitly tapping the "Search Now" button.
+                  // No conversationId — the Swelly chat id is not a conversations
+                  // row, and that FK would reject the insert (error 23503).
+                  logEvent('swelly_search_clicked', { userId: user?.id });
                   setAwaitingSearchDecision(false);
                   runFindMatches(chatId, pendingSearch.data);
                 }

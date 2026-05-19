@@ -31,6 +31,8 @@ import { Images } from '../assets/images';
 import { UserSearchModal } from '../components/UserSearchModal';
 import { CreateSurftripModal } from '../components/surftrips/CreateSurftripModal';
 import { SurftripsList } from '../components/surftrips/SurftripsList';
+import { TutorialOverlay, AnchorRect } from '../components/TutorialOverlay';
+import { getSurftripHeroImagesByConversation } from '../services/surftrips/surftripsService';
 import { analyticsService } from '../services/analytics/analyticsService';
 import { DirectMessageScreen } from './DirectMessageScreen';
 import { DirectGroupChat } from './DirectGroupChat';
@@ -59,6 +61,10 @@ interface ConversationsScreenProps {
   // trigger so it doesn't fire while the user is inside a DM rendered as an
   // overlay above this still-focused screen.
   isListFrontmost?: boolean;
+  // Native only: false while a DM / SurftripDetail is pushed over the list in
+  // the inner ConversationsStack (those don't change isListFrontmost). Web
+  // always passes true. Combined with isListFrontmost for the surftrips tip.
+  stackScreenFocused?: boolean;
 }
 
 type FilterType = 'all' | 'surftrips';
@@ -153,6 +159,7 @@ export default function ConversationsScreen({
   pendingNotificationConversationId,
   onPendingNotificationHandled,
   isListFrontmost = true,
+  stackScreenFocused = true,
 }: ConversationsScreenProps) {
   const insets = useSafeAreaInsets();
   const { resetOnboarding, setCurrentStep, setUser, setIsDemoUser, user: contextUser } = useOnboarding();
@@ -226,6 +233,8 @@ export default function ConversationsScreen({
   const [showSearchModal, setShowSearchModal] = useState(false);
   const [showCreateSurftripModal, setShowCreateSurftripModal] = useState(false);
   const [surftripsReloadKey, setSurftripsReloadKey] = useState(0);
+  // Surftrip cover photos for group-chat avatars, keyed by conversation id.
+  const [surftripHeroImages, setSurftripHeroImages] = useState<Record<string, string | null>>({});
   const [selectedConversation, setSelectedConversation] = useState<{
     id?: string; // Optional: undefined for pending conversations
     otherUserId: string; // Required: the user ID we're messaging
@@ -245,6 +254,42 @@ export default function ConversationsScreen({
   // Welcome guide now lives entirely inside Swelly chat; only the replay
   // button in the dev menu still touches this context here.
   const tutorial = useTutorial();
+
+  // ── One-time "Surf Trips tab" coach-mark ────────────────────────────────
+  // Fires once when the home screen is the front-most layer ("coast is
+  // clear" — no DM/overlay/panel covering it), then never again. Marked
+  // seen the moment it shows so an app-kill mid-tip can't re-fire it.
+  const surftripsTabRef = useRef<any>(null);
+  const [surftripsTabRect, setSurftripsTabRect] = useState<AnchorRect | null>(null);
+  const [showSurftripsTip, setShowSurftripsTip] = useState(false);
+  const surftripsTipFiredRef = useRef(false);
+
+  useEffect(() => {
+    if (surftripsTipFiredRef.current) return;
+    if (isMVPMode) return;
+    if (!tutorial.isHydrated || tutorial.surftripsTipSeen) return;
+    if (!isListFrontmost || !stackScreenFocused) return;
+    // Let the screen settle (post-onboarding overlays clearing, layout done),
+    // then re-check it's still clear before showing.
+    const timer = setTimeout(() => {
+      if (
+        surftripsTipFiredRef.current ||
+        !isListFrontmost ||
+        !stackScreenFocused ||
+        tutorial.surftripsTipSeen
+      ) return;
+      surftripsTabRef.current?.measureInWindow?.(
+        (x: number, y: number, width: number, height: number) => {
+          if (surftripsTipFiredRef.current || width <= 0 || height <= 0) return;
+          surftripsTipFiredRef.current = true;
+          setSurftripsTabRect({ x, y, width, height });
+          setShowSurftripsTip(true);
+          tutorial.markSurftripsTipSeen();
+        },
+      );
+    }, 900);
+    return () => clearTimeout(timer);
+  }, [isListFrontmost, stackScreenFocused, isMVPMode, tutorial.isHydrated, tutorial.surftripsTipSeen, tutorial.markSurftripsTipSeen]);
 
   // Refresh when the app returns from background so mute state (and other
   // server-side changes) from other devices propagate. Avoid useFocusEffect:
@@ -589,6 +634,19 @@ export default function ConversationsScreen({
 
     return (
       <TouchableOpacity
+        ref={type === 'surftrips' ? surftripsTabRef : undefined}
+        onLayout={
+          type === 'surftrips'
+            ? () =>
+                surftripsTabRef.current?.measureInWindow?.(
+                  (x: number, y: number, width: number, height: number) => {
+                    if (width > 0 && height > 0) {
+                      setSurftripsTabRect({ x, y, width, height });
+                    }
+                  },
+                )
+            : undefined
+        }
         style={[
           styles.filterButton,
           isActive ? styles.filterButtonActive : styles.filterButtonInactive,
@@ -620,7 +678,7 @@ export default function ConversationsScreen({
         id: conv.id,
         otherUserId: '',
         otherUserName: conv.title || 'Group Chat',
-        otherUserAvatar: null,
+        otherUserAvatar: surftripHeroImages[conv.id] ?? null,
         isDirect: false,
         tripId: linkedTripId,
         surftripId: linkedSurftripId,
@@ -639,6 +697,20 @@ export default function ConversationsScreen({
     }
     onPendingNotificationHandled?.();
   }, [pendingNotificationConversationId, conversations]);
+
+  // Load surftrip cover photos for group conversations, used as the group-chat avatar.
+  useEffect(() => {
+    const groupIds = rawConversations.filter(c => !c.is_direct).map(c => c.id);
+    if (groupIds.length === 0) {
+      setSurftripHeroImages({});
+      return;
+    }
+    let cancelled = false;
+    getSurftripHeroImagesByConversation(groupIds)
+      .then(map => { if (!cancelled) setSurftripHeroImages(map); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [rawConversations]);
 
   const renderWelcomeConversation = (conv: Conversation) => {
     // Check if last message is an image or video
@@ -800,6 +872,13 @@ export default function ConversationsScreen({
             {conv.is_direct ? (
               <ProfileImage
                 imageUrl={avatarUrl}
+                name={displayName}
+                style={styles.avatar}
+                showLoadingIndicator={false}
+              />
+            ) : surftripHeroImages[conv.id] ? (
+              <ProfileImage
+                imageUrl={surftripHeroImages[conv.id]}
                 name={displayName}
                 style={styles.avatar}
                 showLoadingIndicator={false}
@@ -1294,6 +1373,20 @@ export default function ConversationsScreen({
         {renderSwellyConversation()}
       </View>
 
+      {/* One-time "Surf Trips tab" coach-mark */}
+      <TutorialOverlay
+        visible={showSurftripsTip}
+        step={1}
+        total={1}
+        title="Surf Trips"
+        body="Create and join group surf trips with fellow surfers — right from this tab."
+        ctaLabel="Got it!"
+        onPressCta={() => setShowSurftripsTip(false)}
+        anchorRect={surftripsTabRect}
+        arrowDirection="up"
+        enterDelay={150}
+      />
+
       {/* Menu Modal */}
       {showMenu && (
         <Modal
@@ -1335,21 +1428,6 @@ export default function ConversationsScreen({
                 >
                   <Ionicons name="person-outline" size={20} color="#222B30" />
                   <Text style={styles.menuItemText}>My Profile</Text>
-                </TouchableOpacity>
-
-                {/* My Shaper */}
-                <TouchableOpacity
-                  style={styles.menuItem}
-                  onPress={(e) => {
-                    e.stopPropagation();
-                    console.log('My Shaper menu item pressed');
-                    setShowMenu(false);
-                    setShowSwellyShaper(true);
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <ShaperIcon />
-                  <Text style={styles.menuItemText}>My Shaper</Text>
                 </TouchableOpacity>
 
                 {/* Trips — local mode only */}
@@ -1415,6 +1493,33 @@ export default function ConversationsScreen({
                   >
                     <Ionicons name="sparkles-outline" size={20} color="#B72DF2" />
                     <Text style={styles.menuItemText}>Replay welcome guide</Text>
+                  </TouchableOpacity>
+                )}
+
+                {/* Replay surftrips tip — local mode only. Re-opens the
+                    one-time "Surf Trips tab" coach-mark right away. */}
+                {process.env.EXPO_PUBLIC_LOCAL_MODE === 'true' && (
+                  <TouchableOpacity
+                    style={styles.menuItem}
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      setShowMenu(false);
+                      // Measure after the menu modal closes, then show the tip.
+                      setTimeout(() => {
+                        surftripsTabRef.current?.measureInWindow?.(
+                          (x: number, y: number, width: number, height: number) => {
+                            if (width > 0 && height > 0) {
+                              setSurftripsTabRect({ x, y, width, height });
+                            }
+                            setShowSurftripsTip(true);
+                          },
+                        );
+                      }, 50);
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="boat-outline" size={20} color="#B72DF2" />
+                    <Text style={styles.menuItemText}>Replay surftrips tip</Text>
                   </TouchableOpacity>
                 )}
 
