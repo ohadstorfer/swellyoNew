@@ -1131,7 +1131,7 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
                     updateFormData({ location: countryName });
                     setActiveModal(null);
                   }}
-                  placeholder="Country*"
+                  placeholder="Country / State*"
                   width={Platform.OS === 'web' ? 175 : undefined}
                   onOpen={() => {
                     Keyboard.dismiss();
@@ -1385,7 +1385,7 @@ const styles = StyleSheet.create({
   },
   stepText: {
     fontSize: 14,
-    fontWeight: '400',
+    fontWeight: '700',
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     color: colors.textPrimary,
     textAlign: 'center',

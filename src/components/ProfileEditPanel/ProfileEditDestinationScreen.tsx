@@ -550,7 +550,7 @@ export const ProfileEditDestinationScreen: React.FC<Props> = ({
             style={[styles.countryText, !displayCountry && styles.countryPlaceholder]}
             numberOfLines={1}
           >
-            {displayCountry || 'Select country'}
+            {displayCountry || 'Select country / state'}
           </Text>
           <Ionicons name="chevron-forward" size={20} color={FIGMA.textPrimary} />
         </TouchableOpacity>

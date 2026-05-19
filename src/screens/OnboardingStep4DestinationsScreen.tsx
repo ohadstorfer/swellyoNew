@@ -153,7 +153,7 @@ export const OnboardingStep4DestinationsScreen: React.FC<Props> = ({
         <View style={styles.headerCopy}>
           <Text style={styles.titleAccent}>Where have you traveled?</Text>
           <Text style={styles.subtitle}>
-            Travelers wanna know what destinations did you experience!
+            Connect to people who align with your surf journey.
           </Text>
         </View>
 
@@ -243,7 +243,7 @@ const styles = StyleSheet.create({
   },
   stepText: {
     fontSize: 14,
-    fontWeight: '400',
+    fontWeight: '700',
     color: colors.textPrimary,
     textAlign: 'center',
     lineHeight: 15,

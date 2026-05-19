@@ -201,7 +201,7 @@ const styles = StyleSheet.create({
   },
   stepText: {
     fontSize: 14,
-    fontWeight: '400',
+    fontWeight: '700',
     color: colors.textPrimary,
     textAlign: 'center',
     lineHeight: 15,

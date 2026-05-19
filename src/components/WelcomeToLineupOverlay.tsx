@@ -248,7 +248,7 @@ export const WelcomeToLineupOverlay: React.FC<WelcomeToLineupOverlayProps> = ({
           <View style={styles.content}>
             <Text style={styles.title}>Stoked!</Text>
             <Text style={styles.subtitle}>
-              Found strong matches{'\n'}for you
+              Found some aligned surfers
             </Text>
             <Text style={styles.subText}>
               You and these {matches.length || 3}  are on the same wave!

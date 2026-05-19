@@ -285,11 +285,7 @@ export const OnboardingStep1Screen: React.FC<OnboardingStep1ScreenProps> = ({
 
         {/* Subtitle */}
         <View style={[styles.subtitleContainer, isDesktop && styles.subtitleContainerDesktop]}>
-          <Text style={styles.subtitle}>Pick your go-to board.</Text>
-          <Text style={styles.description}>
-            Select one... 
-            you can add more to your quiver later!
-          </Text>
+          <Text style={styles.subtitle}>Sharing the board you ride creates more aligned connections.</Text>
         </View>
 
         {/* Board Carousel */}
@@ -378,7 +374,7 @@ const styles = StyleSheet.create({
   },
   stepText: {
     fontSize: 14,
-    fontWeight: '400',
+    fontWeight: '700',
     color: colors.textPrimary,
     textAlign: 'center',
     lineHeight: 15,
@@ -430,15 +426,16 @@ const styles = StyleSheet.create({
     paddingBottom: 36,
   },
   title: {
-    fontSize: 24, // var(--Size-2-xl, 24px)
-    fontWeight: '700', // Montserrat Bold
+    // Matches the "Travel Experience" accent title on Step 3.
+    fontSize: 32,
+    fontWeight: '700',
     fontFamily: Platform.select({
       web: 'Montserrat, sans-serif',
       default: 'Montserrat',
     }),
-    color: '#0788B0', // var(--Text-brand, #0788B0)
+    color: '#05BCD3',
     textAlign: 'center',
-    lineHeight: 28.8, // 120% of 24px
+    lineHeight: 38,
   },
   subtitleContainer: {
     paddingHorizontal: spacing.lg,

@@ -334,7 +334,7 @@ const styles = StyleSheet.create({
   },
   stepText: {
     fontSize: 14,
-    fontWeight: '400',
+    fontWeight: '700',
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'System',
     color: colors.textPrimary || '#333333',
     textAlign: 'center',

@@ -80,7 +80,7 @@ export const OnboardingStep5BudgetScreen: React.FC<Props> = ({
 
         <View style={styles.headerCopy}>
           <Text style={styles.titleAccent}>Budget Mode</Text>
-          <Text style={styles.subtitle}>how do you like to travel?</Text>
+          <Text style={styles.subtitle}>How do you like to travel?</Text>
         </View>
 
         <View style={styles.carouselContainer}>
@@ -147,7 +147,7 @@ const styles = StyleSheet.create({
   },
   stepText: {
     fontSize: 14,
-    fontWeight: '400',
+    fontWeight: '700',
     color: colors.textPrimary,
     textAlign: 'center',
     lineHeight: 15,

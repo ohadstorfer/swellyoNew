@@ -90,7 +90,9 @@ export const CountrySearchModal: React.FC<CountrySearchModalProps> = ({
 
   if (!mounted) return null;
 
-  const filtered = ONBOARDING_COUNTRIES.filter(c =>
+  // "USA" is surfaced as a convenience alias; picking it saves "United States"
+  // so the value never diverges from the canonical country name.
+  const filtered = ['USA', ...ONBOARDING_COUNTRIES].filter(c =>
     c.toLowerCase().includes(query.toLowerCase()),
   );
 
@@ -112,7 +114,7 @@ export const CountrySearchModal: React.FC<CountrySearchModalProps> = ({
           <View {...pan.panHandlers}>
             <View style={styles.handle} />
             <View style={styles.header}>
-              <Text style={styles.title}>Select Country</Text>
+              <Text style={styles.title}>Select Country / State</Text>
               <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
                 <Ionicons name="close" size={24} color="#333" />
               </TouchableOpacity>
@@ -135,7 +137,7 @@ export const CountrySearchModal: React.FC<CountrySearchModalProps> = ({
                   styles.item,
                   selectedCountry === country && styles.itemSelected,
                 ]}
-                onPress={() => onSelect(country)}
+                onPress={() => onSelect(country === 'USA' ? 'United States' : country)}
               >
                 <Text
                   style={[

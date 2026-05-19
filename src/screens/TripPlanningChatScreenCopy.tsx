@@ -2640,11 +2640,11 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         visible={showTutorialStep3 || (tutorial.currentStep === 4 && filtersMenuVisible)}
         step={tutorial.currentStep === 4 ? 4 : 3}
         total={4}
-        title={tutorial.currentStep === 4 ? 'Filters Review' : "Swelly's Chat"}
+        title={tutorial.currentStep === 4 ? 'Active filters' : "Swelly's filters"}
         body={
           tutorial.currentStep === 4
-            ? 'Review the active filters of your search, and delete the irrelevant ones by Drag-&-Drop'
-            : "Talk to Swelly and filter users based on what you're looking for"
+            ? 'View the active filters of your search & remove unwanted filters by Drag-&-Drop'
+            : "Use filters to connect with users based on what you’re looking for."
         }
         ctaLabel={tutorial.currentStep === 4 ? 'Done' : 'Next'}
         onPressCta={() => {
