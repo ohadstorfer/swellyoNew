@@ -12,12 +12,12 @@ import {
   Keyboard,
 } from 'react-native';
 import { Image } from 'expo-image';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../components/Text';
 import { colors, spacing } from '../styles/theme';
 import { OnboardingData } from './OnboardingStep1Screen';
-import { useIsDesktopWeb, responsiveWidth } from '../utils/responsive';
+import { useIsDesktopWeb } from '../utils/responsive';
+import { useRegisterOnboardingStep } from '../context/OnboardingStepContext';
 import {
   LIFESTYLE_BUCKET_IMAGE_FILENAMES,
   getLifestyleImageBucketUrlForFilename,
@@ -30,7 +30,6 @@ interface Props {
   onBack: () => void;
   initialData?: Partial<OnboardingData>;
   updateFormData: (data: Partial<OnboardingData>) => void;
-  isLoading?: boolean;
 }
 
 type Preset = { keyword: string; label: string; imageUrl: string };
@@ -74,9 +73,7 @@ export const OnboardingStep6LifestyleScreen: React.FC<Props> = ({
   onBack,
   initialData = {},
   updateFormData,
-  isLoading = false,
 }) => {
-  const insets = useSafeAreaInsets();
   const isDesktop = useIsDesktopWeb();
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<Record<string, string>>(
@@ -84,10 +81,6 @@ export const OnboardingStep6LifestyleScreen: React.FC<Props> = ({
   );
   const [loadingCustom, setLoadingCustom] = useState(false);
   const [flatListWidth, setFlatListWidth] = useState(0);
-
-  const progressBarWidth = isDesktop ? 300 : 237;
-  const buttonContainerMaxWidth = isDesktop ? 400 : undefined;
-  const buttonWidth = responsiveWidth(90, 280, 320, 0);
 
   const cardWidth = flatListWidth > 0
     ? Math.floor(
@@ -189,6 +182,13 @@ export const OnboardingStep6LifestyleScreen: React.FC<Props> = ({
     } as OnboardingData);
   };
 
+  useRegisterOnboardingStep({
+    nextLabel: 'Next',
+    canProceed: true,
+    onNext: handleNext,
+    onBack,
+  });
+
   // Data fed to FlatList. Filtered presets + optional "add" synthetic.
   const data = useMemo<GridItem[]>(() => {
     const items: GridItem[] = filtered.map((p) => ({
@@ -273,93 +273,57 @@ export const OnboardingStep6LifestyleScreen: React.FC<Props> = ({
   }, [search, selectedEntries, cardWidth, handleToggle]);
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <View style={[styles.content, isDesktop && styles.contentDesktop]}>
-        <View style={[styles.header, isDesktop && styles.headerDesktop]}>
-          <TouchableOpacity onPress={onBack} style={styles.backButton}>
-            <Ionicons name="arrow-back" size={24} color="#222B30" />
-          </TouchableOpacity>
-          <Text style={styles.stepText}>Finish Up! 3/3</Text>
-          <View style={styles.skipButton} />
-        </View>
+    <View style={styles.contentRoot}>
+      <View style={styles.headerCopy}>
+        <Text style={styles.subtitle}>What's your lifestyle?</Text>
+        <Text style={styles.helper}>Pick at least 3!</Text>
+      </View>
 
-        <View style={[styles.progressContainer, isDesktop && styles.progressContainerDesktop]}>
-          <View style={[styles.progressBar, { width: progressBarWidth }]}>
-            <View style={[styles.progressFill, { width: '100%' }]} />
-          </View>
-        </View>
-
-        <View style={styles.headerCopy}>
-          <Text style={styles.subtitle}>What's your lifestyle?</Text>
-          <Text style={styles.helper}>Pick at least 3!</Text>
-        </View>
-
-        <View style={styles.searchBarWrap}>
-          <View style={styles.searchBar}>
-            <Ionicons name="search" size={20} color="#A7B8C2" />
-            <TextInput
-              value={search}
-              onChangeText={setSearch}
-              placeholder="Search"
-              placeholderTextColor="#A7B8C2"
-              style={styles.searchInput}
-              autoCorrect={false}
-              autoCapitalize="none"
-              returnKeyType="search"
-            />
-            {search.length > 0 && (
-              <TouchableOpacity onPress={() => setSearch('')}>
-                <Ionicons name="close-circle" size={20} color="#A7B8C2" />
-              </TouchableOpacity>
-            )}
-          </View>
-        </View>
-
-        <FlatList
-          data={cardWidth > 0 ? data : []}
-          keyExtractor={keyExtractor}
-          renderItem={renderItem}
-          numColumns={COLUMNS}
-          columnWrapperStyle={styles.columnWrapper}
-          ListHeaderComponent={ListHeader}
-          ListFooterComponent={ListFooter}
-          keyboardShouldPersistTaps="handled"
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-          // Virtualization tuning — mirrors DirectMessageScreen.
-          initialNumToRender={12}
-          windowSize={5}
-          maxToRenderPerBatch={9}
-          updateCellsBatchingPeriod={32}
-          removeClippedSubviews={Platform.OS === 'android'}
-          style={styles.flatList}
-          onLayout={(e) => {
-            const w = e.nativeEvent.layout.width;
-            if (w > 0 && w !== flatListWidth) setFlatListWidth(w);
-          }}
-        />
-
-        <View
-          style={[
-            styles.buttonContainer,
-            isDesktop && styles.buttonContainerDesktop,
-            buttonContainerMaxWidth && { maxWidth: buttonContainerMaxWidth },
-            { paddingBottom: Math.max(insets.bottom, 24) },
-          ]}
-        >
-          <TouchableOpacity
-            onPress={handleNext}
-            activeOpacity={0.8}
-            disabled={isLoading}
-            style={isLoading && styles.buttonDisabled}
-          >
-            <View style={[styles.primaryButton, { width: buttonWidth }]}>
-              <Text style={styles.buttonText}>{isLoading ? 'Loading...' : 'Next'}</Text>
-            </View>
-          </TouchableOpacity>
+      <View style={styles.searchBarWrap}>
+        <View style={styles.searchBar}>
+          <Ionicons name="search" size={20} color="#A7B8C2" />
+          <TextInput
+            value={search}
+            onChangeText={setSearch}
+            placeholder="Search"
+            placeholderTextColor="#A7B8C2"
+            style={styles.searchInput}
+            autoCorrect={false}
+            autoCapitalize="none"
+            returnKeyType="search"
+          />
+          {search.length > 0 && (
+            <TouchableOpacity onPress={() => setSearch('')}>
+              <Ionicons name="close-circle" size={20} color="#A7B8C2" />
+            </TouchableOpacity>
+          )}
         </View>
       </View>
-    </SafeAreaView>
+
+      <FlatList
+        data={cardWidth > 0 ? data : []}
+        keyExtractor={keyExtractor}
+        renderItem={renderItem}
+        numColumns={COLUMNS}
+        columnWrapperStyle={styles.columnWrapper}
+        ListHeaderComponent={ListHeader}
+        ListFooterComponent={ListFooter}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        // Virtualization tuning — mirrors DirectMessageScreen.
+        initialNumToRender={12}
+        windowSize={5}
+        maxToRenderPerBatch={9}
+        updateCellsBatchingPeriod={32}
+        removeClippedSubviews={Platform.OS === 'android'}
+        style={styles.flatList}
+        onLayout={(e) => {
+          const w = e.nativeEvent.layout.width;
+          if (w > 0 && w !== flatListWidth) setFlatListWidth(w);
+        }}
+      />
+    </View>
   );
 };
 
@@ -467,6 +431,9 @@ const AddYourOwnCard = React.memo(
 );
 
 const styles = StyleSheet.create({
+  contentRoot: {
+    flex: 1,
+  },
   container: {
     flex: 1,
     backgroundColor: colors.backgroundGray || '#FAFAFA',

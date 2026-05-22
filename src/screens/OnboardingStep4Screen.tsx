@@ -35,6 +35,7 @@ import { HomeBreakSearchSheet, HomeBreakSelection } from '../components/HomeBrea
 import { formatDateOfBirth, isValidDateOfBirth, dateToISOString, calculateAgeFromDOB } from '../utils/ageCalculation';
 import AvatarCropModal from '../components/AvatarCropModal';
 import { CountrySearchModal } from '../components/CountrySearchModal';
+import { useRegisterOnboardingStep } from '../context/OnboardingStepContext';
 
 interface OnboardingStep4ScreenProps {
   onNext: (data: OnboardingData) => void;
@@ -1011,48 +1012,23 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
     onNext(formData);
   };
 
+  useRegisterOnboardingStep({
+    nextLabel: isUploading ? 'Uploading...' : 'Create Profile',
+    canProceed: !isUploading,
+    loadingLabel: 'Loading...',
+    onNext: () => {
+      Keyboard.dismiss();
+      handleNext();
+    },
+    onBack: () => {
+      Keyboard.dismiss();
+      onBack?.();
+    },
+  });
+
   return (
     <>
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <View style={styles.contentWrapper}>
-          {/* Sticky Header with Gradient */}
-          <View style={styles.stickyHeader}>
-            <LinearGradient
-              colors={[
-                colors.backgroundGray, 
-                'rgba(250, 250, 250, 0)' // transparent version of backgroundGray
-              ]}
-              start={{ x: 0.5, y: 0 }}
-              end={{ x: 0.5, y: 1 }}
-              style={styles.headerGradient}
-            />
-            
-        <View style={styles.header}>
-          <TouchableOpacity
-            onPress={() => {
-              Keyboard.dismiss();
-              onBack?.();
-            }}
-            style={styles.backButton}
-          >
-            <Ionicons name="arrow-back" size={24} color="#222B30" />
-          </TouchableOpacity>
-
-              <Text style={styles.stepText}>Finish Up! 3/3</Text>
-
-          <View style={styles.skipButton}>
-            {/* Skip button is hidden in this step */}
-          </View>
-        </View>
-
-        {/* Progress Bar */}
-        <View style={styles.progressContainer}>
-          <View style={styles.progressBar}>
-                <View style={[styles.progressFill, { width: '100%' }]} />
-              </View>
-            </View>
-          </View>
-
+    <View style={styles.contentRoot}>
           <KeyboardAwareScrollView
             ref={keyboardAwareScrollViewRef}
             extraHeight={180}
@@ -1238,27 +1214,7 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
           </View>
         </View>
           </KeyboardAwareScrollView>
-
-          {/* Next Button - Fixed at bottom, moves up with keyboard */}
-        <View style={[styles.buttonContainer, { paddingBottom: Math.max(insets.bottom, 24) }]}>
-          <TouchableOpacity
-            onPress={() => {
-              Keyboard.dismiss();
-              handleNext();
-            }}
-            activeOpacity={0.8}
-            disabled={isLoading || isUploading}
-            style={(isLoading || isUploading) && styles.buttonDisabled}
-          >
-            <View style={styles.gradientButton}>
-              <Text style={styles.buttonText}>
-                {isUploading ? 'Uploading...' : isLoading ? 'Loading...' : 'Create Profile'}
-              </Text>
-            </View>
-          </TouchableOpacity>
-        </View>
-        </View>
-    </SafeAreaView>
+    </View>
 
     {/* Modals rendered at screen level for proper stacking */}
     <CountrySearchModal
@@ -1317,6 +1273,12 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.backgroundGray,
   },
+  // Cancels the scaffold body's horizontal padding on native so the form keeps its
+  // original full-width layout (fields use fixed widths tuned to the full screen).
+  contentRoot: {
+    flex: 1,
+    marginHorizontal: Platform.OS !== 'web' ? -spacing.md : 0,
+  },
   contentWrapper: {
     flex: 1,
   },
@@ -1325,8 +1287,8 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
-    paddingBottom: 100, // Space for button
-    paddingTop: 80, // Space for sticky header
+    paddingBottom: spacing.lg,
+    paddingTop: spacing.lg,
   },
   stickyHeader: {
     position: 'absolute',

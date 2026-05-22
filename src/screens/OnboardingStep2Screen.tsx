@@ -4,7 +4,9 @@ import {
   StyleSheet,
   TouchableOpacity,
   Platform,
+  LayoutChangeEvent,
 } from 'react-native';
+import { useRegisterOnboardingStep } from '../context/OnboardingStepContext';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -78,60 +80,14 @@ export const OnboardingStep2Screen: React.FC<OnboardingStep2ScreenProps> = ({
   
   const titleFontSize = calculateTitleFontSize();
   
-  // Calculate available space between title and thumbnails for main video
-  // This will be used to dynamically size the main video
-  // Includes gaps for proper spacing
-  const calculateAvailableVideoHeight = () => {
-    // Header: 44px + padding
-    const headerHeight = 44 + (isDesktop ? spacing.lg : spacing.sm) + spacing.md;
-    
-    // Progress bar: 4px + padding
-    const progressHeight = 4 + (isDesktop ? spacing.sm * 2 : spacing.md * 2);
-    
-    // Title: 2 lines with dynamic font size + padding
-    // lineHeight is 1.4 * fontSize, so 2 lines = 2 * lineHeight
-    const titleLineHeight = titleFontSize * 1.4;
-    const titleTwoLinesHeight = titleLineHeight * 2;
-    const titlePadding = (isDesktop ? spacing.md : spacing.xs) + (Platform.OS !== 'web' ? spacing.lg : spacing.md);
-    const titleHeight = titleTwoLinesHeight + titlePadding;
-    
-    // Gap between title and video
-    const gapAboveVideo = spacing.md;
-    
-    // Thumbnails section: approximate height (~100px for thumbnails + padding)
-    const thumbnailsHeight = 100 + spacing.md;
-    
-    // Gap between video and thumbnails
-    const gapBelowVideo = spacing.md;
-    
-    // Button: 56px + padding
-    const buttonHeight = 56 + spacing.xl;
-    
-    // Calculate total used space including gaps
-    const totalUsedSpace = headerHeight + progressHeight + titleHeight + gapAboveVideo + gapBelowVideo + thumbnailsHeight + buttonHeight;
-    
-    // Available space for main video (in the spacer area)
-    const availableSpace = screenHeight - totalUsedSpace;
-    
-    // Ensure minimum height (at least 180px for smaller screens) and maximum reasonable height
-    // On smaller screens, be more conservative with minimum
-    const minHeight = screenWidth <= 375 ? 180 : 200;
-    if (availableSpace < minHeight) {
-      return minHeight;
-    }
-    
-    // Cap at reasonable maximum (smaller on smaller screens)
-    // Android has smaller safe area insets, so allow more space for the video
-    const androidBonus = Platform.OS === 'android' ? 40 : 0;
-    const maxHeight = (screenWidth <= 375 ? 400 : (screenWidth <= 414 ? 450 : 500)) + androidBonus;
-    if (availableSpace > maxHeight) {
-      return maxHeight;
-    }
-    
-    return availableSpace;
+  // Main video height is measured from its container (onLayout) instead of computed
+  // from the screen — the scaffold already excludes the header/Next chrome.
+  const [videoHeight, setVideoHeight] = useState(0);
+
+  const onVideoLayout = (e: LayoutChangeEvent) => {
+    const h = e.nativeEvent.layout.height;
+    if (h > 0 && h !== videoHeight) setVideoHeight(h);
   };
-  
-  const availableVideoHeight = calculateAvailableVideoHeight();
   
   // Get videos with resolved URLs for the selected board type
   const surfLevelVideos = React.useMemo(() => getSurfLevelVideos(boardType), [boardType]);
@@ -234,65 +190,39 @@ export const OnboardingStep2Screen: React.FC<OnboardingStep2ScreenProps> = ({
     handleNext();
   };
 
+  useRegisterOnboardingStep({
+    nextLabel: 'Next',
+    canProceed: true,
+    onNext: handleNext,
+    onBack,
+  });
+
   const selectedVideo = surfLevelVideos.find((v: VideoLevel) => v.id === selectedVideoId) || surfLevelVideos[0];
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <View style={[styles.content, isDesktop && styles.contentDesktop]}>
-        {/* Header */}
-        <View style={[styles.header, isDesktop && styles.headerDesktop]}>
-          <TouchableOpacity onPress={onBack} style={styles.backButton}>
-            <Ionicons name="arrow-back" size={24} color="#222B30" />
-          </TouchableOpacity>
+    <View style={styles.contentRoot}>
+      {/* Title */}
+      <View style={[styles.titleContainer, isDesktop && styles.titleContainerDesktop]}>
+        <Text style={[styles.title, { fontSize: titleFontSize, lineHeight: titleFontSize * 1.4 }]} numberOfLines={2}>
+          Select the video that best represents{'\n'}how you surf.
+        </Text>
+      </View>
 
-          <Text style={styles.stepText}>Surf Juice 1/3</Text>
-
-          <View style={styles.skipButton}>
-            {/* Skip button is hidden/opacity 0 in Figma */}
-          </View>
-        </View>
-
-        {/* Progress Bar */}
-        <View style={[styles.progressContainer, isDesktop && styles.progressContainerDesktop]}>
-          <View style={[styles.progressBar, { width: progressBarWidth }]}>
-            <View style={[styles.progressFill, { width: '33.3%' }]} />
-          </View>
-        </View>
-
-        {/* Title */}
-        <View style={[styles.titleContainer, isDesktop && styles.titleContainerDesktop]}>
-          <Text style={[styles.title, { fontSize: titleFontSize, lineHeight: titleFontSize * 1.4 }]} numberOfLines={2}>
-            Select the video that best represents{'\n'}how you surf.
-          </Text>
-        </View>
-
-        {/* Video Carousel - main video fills available space, thumbnails at bottom */}
-        <View style={[styles.videoCarouselContainer, isDesktop && styles.videoCarouselContainerDesktop]}>
+      {/* Video Carousel — main video fills the measured space, thumbnails at bottom */}
+      <View
+        style={[styles.videoCarouselContainer, isDesktop && styles.videoCarouselContainerDesktop]}
+        onLayout={onVideoLayout}
+      >
+        {videoHeight > 0 && (
           <VideoCarousel
             videos={surfLevelVideos}
             selectedVideoId={selectedVideoId}
             onVideoSelect={handleVideoSelect}
-            availableVideoHeight={availableVideoHeight}
+            availableVideoHeight={videoHeight}
           />
-        </View>
-
-        {/* Next Button - fixed at bottom */}
-        <View style={[styles.buttonContainer, isDesktop && styles.buttonContainerDesktop, buttonContainerMaxWidth && { maxWidth: buttonContainerMaxWidth }, { paddingBottom: Math.max(insets.bottom, 24) }]}>
-          <TouchableOpacity
-            onPress={handleNext}
-            activeOpacity={0.8}
-            disabled={isLoading}
-            style={isLoading && styles.buttonDisabled}
-          >
-            <View style={[styles.gradientButton, { width: buttonWidth }]}>
-              <Text style={styles.buttonText}>
-                {isLoading ? 'Loading...' : 'Next'}
-              </Text>
-            </View>
-          </TouchableOpacity>
-        </View>
+        )}
       </View>
-    </SafeAreaView>
+    </View>
   );
 };
 
@@ -302,6 +232,13 @@ const styles = StyleSheet.create({
     backgroundColor: colors.backgroundGray || '#FAFAFA',
     width: '100%',
     overflow: 'hidden',
+  },
+  contentRoot: {
+    flex: 1,
+    zIndex: 1,
+    width: '100%',
+    maxWidth: '100%',
+    overflow: Platform.OS === 'web' ? 'hidden' : 'visible',
   },
   content: {
     flex: 1,
