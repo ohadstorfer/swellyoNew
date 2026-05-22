@@ -75,8 +75,9 @@ const START_INDEX = INFINITE_SIZE / 2; // 200 — a multiple of 4, lands on 'bud
 const EDGE_THRESHOLD = 8;
 
 // Side cards are smaller + dimmer than the centred one; the scroll position
-// drives a smooth interpolation between the two states.
-const SIDE_SCALE = 0.72;
+// drives a smooth interpolation between the two states. Scale is kept fairly high
+// so the peeking neighbours stay clearly visible (a low scale eats the side peek).
+const SIDE_SCALE = 0.82;
 const SIDE_OPACITY = 0.5;
 
 // Figma structured cards – same layout, different copy and coin image
@@ -127,7 +128,9 @@ export const BudgetCardsCarousel: React.FC<BudgetCardsCarouselProps> = ({
   const [selectedBudget, setSelectedBudget] = useState<BudgetOption | null>(initialSelection ?? null);
   const flatListRef = useRef<FlatList>(null);
 
-  const PEEK = 24;
+  // Larger PEEK = more of the neighbouring cards shows on each side, so two
+  // adjacent cards are always visible.
+  const PEEK = 44;
   // 0 gap: the card itself is wider instead — the per-card step (itemWidth)
   // stays the same, so the side-peek / snap behaviour is unchanged.
   const CARD_GAP = 0;
@@ -139,7 +142,9 @@ export const BudgetCardsCarousel: React.FC<BudgetCardsCarouselProps> = ({
     width: Dimensions.get('window').width,
     height: 0,
   });
-  const cardWidth = Math.min(290, carouselSize.width - 2 * PEEK - CARD_GAP);
+  // Cap kept ≥ ~252 so the card's inner content (tagline minWidth 228 + padding)
+  // never overflows; below that the copy would clip.
+  const cardWidth = Math.min(264, carouselSize.width - 2 * PEEK - CARD_GAP);
   const itemWidth = cardWidth + CARD_GAP;
   // Pad so a card at scroll offset i*itemWidth ends up centred in the carousel.
   const sidePad = Math.max(0, (carouselSize.width - cardWidth) / 2);

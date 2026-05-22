@@ -16,6 +16,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GalleryPermissionOverlay } from '../components/GalleryPermissionOverlay';
 import { colors, spacing } from '../styles/theme';
 import { useIsDesktopWeb, responsiveWidth } from '../utils/responsive';
+import { useRegisterOnboardingStep } from '../context/OnboardingStepContext';
 import { getSurfLevelMapping } from '../utils/surfLevelMapping';
 import { validateVideoComplete } from '../utils/videoValidation';
 import { uploadProfileVideoS3 } from '../services/storage/storageService';
@@ -428,32 +429,17 @@ export const OnboardingVideoUploadScreen: React.FC<OnboardingVideoUploadScreenPr
     onNext();
   };
 
+  useRegisterOnboardingStep({
+    nextLabel: hasUserVideo ? 'Next' : 'Skip',
+    canProceed: true,
+    onNext: hasUserVideo ? handleNext : onSkip,
+    onBack,
+  });
+
   return (
     <>
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <View style={[styles.content, isDesktop && styles.contentDesktop]}>
-        {/* Header */}
-        <View style={[styles.header, isDesktop && styles.headerDesktop]}>
-          <TouchableOpacity onPress={onBack} style={styles.backButton}>
-            <Ionicons name="arrow-back" size={24} color="#222B30" />
-          </TouchableOpacity>
-
-          <Text style={styles.stepText}>Surf Juice 1/3</Text>
-
-          <View style={styles.placeholder} />
-        </View>
-
-        {/* Progress Bar */}
-        <View style={[styles.progressContainer, isDesktop && styles.progressContainerDesktop]}>
-          <View style={[styles.progressBar, { width: progressBarWidth }]}>
-            <View style={[styles.progressFill, { width: '33.3%' }]} />
-          </View>
-        </View>
-
-        
-
-        {/* Main Content */}
-        <View style={styles.mainContent}>
+      {/* Main Content */}
+      <View style={styles.mainContent}>
 
           {/* Title & Subtitle */}
         <View style={styles.titleContainer}>
@@ -509,25 +495,11 @@ export const OnboardingVideoUploadScreen: React.FC<OnboardingVideoUploadScreenPr
             </Text>
           </View>
 
-          {error && (
-            <Text style={styles.errorText}>{error}</Text>
-          )}
-        </View>
-
-        {/* Button */}
-        <View style={[styles.buttonContainer, { paddingBottom: Math.max(insets.bottom, 24) }]}>
-          <TouchableOpacity
-            onPress={hasUserVideo ? handleNext : onSkip}
-            activeOpacity={0.8}
-          >
-            <View style={[styles.gradientButton, { width: buttonWidth }]}>
-              <Text style={styles.buttonText}>{hasUserVideo ? 'Next' : 'Skip'}</Text>
-            </View>
-          </TouchableOpacity>
-        </View>
+        {error && (
+          <Text style={styles.errorText}>{error}</Text>
+        )}
       </View>
-    </SafeAreaView>
-    {Platform.OS !== 'web' && (
+      {Platform.OS !== 'web' && (
       <GalleryPermissionOverlay
         visible={showPermissionOverlay}
         onAllow={async () => {

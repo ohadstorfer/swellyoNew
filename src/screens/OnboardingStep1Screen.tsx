@@ -5,7 +5,9 @@ import {
   TouchableOpacity,
   Platform,
   Dimensions,
+  LayoutChangeEvent,
 } from 'react-native';
+import { useRegisterOnboardingStep } from '../context/OnboardingStepContext';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -108,74 +110,15 @@ export const OnboardingStep1Screen: React.FC<OnboardingStep1ScreenProps> = ({
     defaultBoardType >= 0 ? BOARD_TYPES.findIndex(b => b.id === defaultBoardType) : 0
   );
   
-  // Calculate responsive dimensions
-  const progressBarWidth = isDesktop ? 300 : 237;
   const buttonContainerMaxWidth = isDesktop ? 400 : undefined;
-  
-  // Calculate available space between subtitle text and dots/board name
-  // This will be used as the board height to fill the space dynamically
-  const calculateAvailableBoardHeight = () => {
-    // Calculate space from bottom of subtitle to top of label container
-    
-    // Subtitle ends at: 
-    // - subtitle lineHeight (24px) + description lineHeight (22px) + gap (8px)
-    // - Plus any paddingBottom from subtitleContainer
-    const subtitleBottom = 24 + 22 + 8 + (isDesktop ? spacing.sm : 0);
-    
-    // Label container starts at: 
-    // - It's positioned above the button, so we need to account for:
-    // - Label container paddingBottom (spacing.md)
-    // - The gap between label and button area
-    // Since carouselContainer has flex: 1 and justifyContent: 'center',
-    // and labelContainer is after it, we need to calculate the space differently
-    
-    // The carousel container uses flex: 1, so it takes available space
-    // We need to calculate: screenHeight - (everything above subtitle) - (subtitle) - (label + button)
-    
-    // Everything above subtitle:
-    const headerHeight = 44 + (isDesktop ? spacing.lg : (Platform.OS === 'web' ? spacing.md : spacing.sm));
-    const progressHeight = 4 + (isDesktop ? spacing.sm * 2 : spacing.md * 2);
-    const titleHeight = 28.8 + (isDesktop ? spacing.xl : spacing.lg) + 36; // lineHeight + paddingTop + paddingBottom
-    
-    // Subtitle height (already calculated above)
-    const subtitleTotalHeight = subtitleBottom;
-    
-    // Label + Button area:
-    const labelHeight = 24 + 24 + spacing.sm + spacing.md; // dots + board name + gap + padding
-    const buttonHeight = 56 + spacing.xl; // button + padding
-    
-    // Carousel marginTop (negative, adds space)
-    // Reclaim most of the negative margin, but reserve 4px minimum gap from subtitle
-    const carouselMarginTop = isDesktop ? spacing.lg : (spacing.xl - 16);
-    
-    // Calculate available space for board
-    // Total used space = everything above subtitle + subtitle + label + button
-    const totalUsedSpace = headerHeight + progressHeight + titleHeight + subtitleTotalHeight + labelHeight + buttonHeight;
-    
-    // On native, SafeAreaView consumes top/bottom insets
-    // but screenHeight is the full window height. Subtract these so boards fit within safe area.
-    // On Android with edge-to-edge, insets.bottom (nav bar) is large and over-shrinks boards.
-    // Only subtract top inset on Android; SafeAreaView already pads the bottom.
-    const safeAreaInsets = Platform.OS === 'web' ? 0 : (insets.top + (Platform.OS === 'android' ? 0 : insets.bottom));
+  // Board height is measured from the carousel container (onLayout). The scaffold
+  // already excludes the header/Next chrome, so it's no longer derived from the screen.
+  const [boardHeight, setBoardHeight] = useState(0);
 
-    // Available space = screen height - safe area - used space + carousel margin (negative margin adds space)
-    // Subtract a small buffer (8px) for visual spacing
-    const availableSpace = screenHeight - safeAreaInsets - totalUsedSpace + carouselMarginTop - 8;
-    
-    // Ensure minimum height (at least 200px) and maximum reasonable height
-    if (availableSpace < 200) {
-      return 200;
-    }
-    
-    // Cap at reasonable maximum to prevent boards from being too large on very tall screens
-    if (availableSpace > 600) {
-      return 600;
-    }
-    
-    return availableSpace;
+  const onBoardLayout = (e: LayoutChangeEvent) => {
+    const h = e.nativeEvent.layout.height;
+    if (h > 0 && h !== boardHeight) setBoardHeight(h);
   };
-  
-  const availableBoardHeight = calculateAvailableBoardHeight();
 
   // Track current preload promise to cancel if board type changes
   const preloadPromiseRef = useRef<Promise<any> | null>(null);
@@ -245,90 +188,60 @@ export const OnboardingStep1Screen: React.FC<OnboardingStep1ScreenProps> = ({
     onNext(formData);
   };
 
-  const handleSkip = () => {
-    handleNext();
-  };
-
-  // Removed handleHomepage - home button removed
+  useRegisterOnboardingStep({
+    nextLabel: 'Next',
+    canProceed: true,
+    onNext: handleNext,
+    onBack,
+  });
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <View style={[styles.content, isDesktop && styles.contentDesktop]}>
-        {/* Header */}
-        <View style={[styles.header, isDesktop && styles.headerDesktop]}>
-          <TouchableOpacity onPress={onBack} style={styles.backButton}>
-            <Ionicons name="arrow-back" size={24} color="#222B30" />
-          </TouchableOpacity>
+    <View style={styles.contentRoot}>
+      {/* Title */}
+      <View style={[styles.titleContainer, isDesktop && styles.titleContainerDesktop]}>
+        <Text style={styles.title}>What is your style?</Text>
+      </View>
 
-          <View style={styles.stepTextContainer}>
-            <Text style={styles.stepText}>Surf Juice 1/3</Text>
-          </View>
+      {/* Subtitle */}
+      <View style={[styles.subtitleContainer, isDesktop && styles.subtitleContainerDesktop]}>
+        <Text style={styles.subtitle}>Sharing the board you ride creates more aligned connections.</Text>
+      </View>
 
-          <View style={styles.homepageButton}>
-            {/* Empty space to balance the back button and keep the step indicator centered */}
-          </View>
-        </View>
-
-        {/* Progress Bar */}
-        <View style={[styles.progressContainer, isDesktop && styles.progressContainerDesktop]}>
-          <View style={[styles.progressBar, { width: progressBarWidth }]}>
-            <View style={[styles.progressFill, { width: '33.3%' }]} />
-          </View>
-        </View>
-
-        {/* Title */}
-        <View style={[styles.titleContainer, isDesktop && styles.titleContainerDesktop]}>
-          <Text style={styles.title}>
-          What is your style?
-          </Text>
-        </View>
-
-        {/* Subtitle */}
-        <View style={[styles.subtitleContainer, isDesktop && styles.subtitleContainerDesktop]}>
-          <Text style={styles.subtitle}>Sharing the board you ride creates more aligned connections.</Text>
-        </View>
-
-        {/* Board Carousel */}
-        <View style={[styles.carouselContainer, isDesktop && styles.carouselContainerDesktop]}>
+      {/* Board Carousel — fills remaining space; its height drives the board size. */}
+      <View
+        style={[styles.carouselContainer, isDesktop && styles.carouselContainerDesktop]}
+        onLayout={onBoardLayout}
+      >
+        {boardHeight > 0 && (
           <BoardCarousel
             boards={BOARD_TYPES}
             selectedBoardId={selectedBoardId}
             onBoardSelect={handleBoardSelect}
             onActiveIndexChange={setActiveBoardIndex}
-            availableBoardHeight={availableBoardHeight}
+            availableBoardHeight={boardHeight}
           />
-        </View>
-
-        {/* Dots and Board Name - positioned above Next button */}
-        <View style={[styles.labelContainer, isDesktop && styles.labelContainerDesktop, buttonContainerMaxWidth && { maxWidth: buttonContainerMaxWidth }]}>
-          <View style={styles.dotsContainer}>
-            {BOARD_TYPES.map((_board, index) => (
-              <View
-                key={index}
-                style={[styles.dot, index === activeBoardIndex ? styles.dotActive : styles.dotInactive]}
-              />
-            ))}
-          </View>
-          <Text style={styles.boardName}>{BOARD_TYPES[activeBoardIndex]?.name || ''}</Text>
-        </View>
-
-        {/* Next Button */}
-        <View style={[styles.buttonContainer, isDesktop && styles.buttonContainerDesktop, buttonContainerMaxWidth && { maxWidth: buttonContainerMaxWidth }, { paddingBottom: Math.max(insets.bottom, 24) }]}>
-          <TouchableOpacity
-            onPress={handleNext}
-            activeOpacity={0.8}
-            disabled={isLoading}
-            style={isLoading && styles.buttonDisabled}
-          >
-            <View style={styles.gradientButton}>
-              <Text style={styles.buttonText}>
-                {isLoading ? 'Loading...' : 'Next'}
-              </Text>
-            </View>
-          </TouchableOpacity>
-        </View>
+        )}
       </View>
-    </SafeAreaView>
+
+      {/* Dots and Board Name */}
+      <View
+        style={[
+          styles.labelContainer,
+          isDesktop && styles.labelContainerDesktop,
+          buttonContainerMaxWidth && { maxWidth: buttonContainerMaxWidth },
+        ]}
+      >
+        <View style={styles.dotsContainer}>
+          {BOARD_TYPES.map((_board, index) => (
+            <View
+              key={index}
+              style={[styles.dot, index === activeBoardIndex ? styles.dotActive : styles.dotInactive]}
+            />
+          ))}
+        </View>
+        <Text style={styles.boardName}>{BOARD_TYPES[activeBoardIndex]?.name || ''}</Text>
+      </View>
+    </View>
   );
 };
 
@@ -336,6 +249,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.backgroundGray,
+  },
+  contentRoot: {
+    flex: 1,
   },
   content: {
     flex: 1,
@@ -363,18 +279,9 @@ const styles = StyleSheet.create({
     width: 60,
     alignItems: 'flex-start',
   },
-  stepTextContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    zIndex: 0,
-  },
   stepText: {
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '400',
     color: colors.textPrimary,
     textAlign: 'center',
     lineHeight: 15,
@@ -397,11 +304,11 @@ const styles = StyleSheet.create({
   },
   progressContainer: {
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
+    paddingBottom: spacing.md,
     alignItems: 'center',
   },
   progressContainerDesktop: {
-    paddingVertical: spacing.sm,
+    paddingBottom: spacing.sm,
   },
   progressBar: {
     // Width is set dynamically via inline style
@@ -426,16 +333,15 @@ const styles = StyleSheet.create({
     paddingBottom: 36,
   },
   title: {
-    // Matches the "Travel Experience" accent title on Step 3.
-    fontSize: 32,
-    fontWeight: '700',
+    fontSize: 24, // var(--Size-2-xl, 24px)
+    fontWeight: '700', // Montserrat Bold
     fontFamily: Platform.select({
       web: 'Montserrat, sans-serif',
       default: 'Montserrat',
     }),
-    color: '#05BCD3',
+    color: '#0788B0', // var(--Text-brand, #0788B0)
     textAlign: 'center',
-    lineHeight: 38,
+    lineHeight: 28.8, // 120% of 24px
   },
   subtitleContainer: {
     paddingHorizontal: spacing.lg,

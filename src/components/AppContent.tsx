@@ -11,6 +11,7 @@ import { OnboardingStep4DestinationsScreen } from '../screens/OnboardingStep4Des
 import { OnboardingStep5BudgetScreen } from '../screens/OnboardingStep5BudgetScreen';
 import { OnboardingStep6LifestyleScreen } from '../screens/OnboardingStep6LifestyleScreen';
 import { OnboardingVideoUploadScreen } from '../screens/OnboardingVideoUploadScreen';
+import { OnboardingScaffold } from './onboarding/OnboardingScaffold';
 import { TripPlanningChatScreen } from '../screens/TripPlanningChatScreen';
 import { TripPlanningChatScreen as TripPlanningChatScreenCopy } from '../screens/TripPlanningChatScreenCopy';
 import ConversationsStack from '../navigation/ConversationsStack';
@@ -2001,112 +2002,112 @@ export const AppContent: React.FC = () => {
     );
   }
 
-  // Show onboarding step 1 if we're on step 1
-  if (currentStep === 1) {
-    console.log('Rendering OnboardingStep1Screen with initialData:', formData);
+  // Steps 1–7 (incl. the step-2 video-upload sub-state) — rendered through the shared
+  // OnboardingScaffold so the header + Next button stay fixed and content slides
+  // between them. Returning the same <OnboardingScaffold> element across these steps
+  // keeps it mounted so the animations run.
+  if (currentStep >= 1 && currentStep <= 7) {
+    const loadingByStep: Record<number, boolean> = {
+      1: isSavingStep1,
+      2: showVideoUploadStep ? false : isSavingStep2, // video upload has no blocking save
+      3: isSavingStep3,
+      4: isSavingStep4,
+      5: isSavingStep5,
+      6: isSavingStep6,
+      7: isSavingStep7,
+    };
     return (
-      <OnboardingStep1Screen
-        onNext={handleStep1Next}
-        onBack={handleStep1Back}
-        initialData={formData}
-        updateFormData={updateFormData}
-        isLoading={isSavingStep1}
-      />
-    );
-  }
-
-  // Show onboarding step 2 if we're on step 2
-  if (currentStep === 2) {
-    if (showVideoUploadStep) {
-      return (
-        <OnboardingVideoUploadScreen
-          onNext={handleVideoUploadNext}
-          onSkip={handleVideoUploadSkip}
-          onBack={handleVideoUploadBack}
-          boardType={formData.boardType!}
-          surfLevel={formData.surfLevel!}
-          userId={user?.id || ''}
-        />
-      );
-    }
-    console.log('Rendering OnboardingStep2Screen with initialData:', formData);
-    return (
-      <OnboardingStep2Screen
-        onNext={handleStep2Next}
-        onBack={handleStep2Back}
-        initialData={formData}
-        updateFormData={updateFormData}
-        isLoading={isSavingStep2}
-      />
-    );
-  }
-
-  
-  // Show onboarding step 3 if we're on step 3
-  if (currentStep === 3) {
-    console.log('Rendering OnboardingStep3Screen with initialData:', formData);
-    return (
-      <OnboardingStep3Screen
-        onNext={handleStep3Next}
-        onBack={handleStep3Back}
-        initialData={formData}
-        updateFormData={updateFormData}
-        isLoading={isSavingStep3}
-      />
-    );
-  }
-
-  // Step 4 — Destinations (new). Optional carousel; Skip shows a disclaimer.
-  if (currentStep === 4) {
-    return (
-      <OnboardingStep4DestinationsScreen
-        onNext={handleStep4Next}
-        onBack={handleStep4Back}
-        initialData={formData}
-        updateFormData={updateFormData}
-        isLoading={isSavingStep4}
-      />
-    );
-  }
-
-  // Step 5 — Budget (new). BudgetCardsCarousel; Next always enabled.
-  if (currentStep === 5) {
-    return (
-      <OnboardingStep5BudgetScreen
-        onNext={handleStep5Next}
-        onBack={handleStep5Back}
-        initialData={formData}
-        updateFormData={updateFormData}
-        isLoading={isSavingStep5}
-      />
-    );
-  }
-
-  // Step 6 — Lifestyle (new). Preset grid + Pexels-backed "add your own".
-  if (currentStep === 6) {
-    return (
-      <OnboardingStep6LifestyleScreen
-        onNext={handleStep6Next}
-        onBack={handleStep6Back}
-        initialData={formData}
-        updateFormData={updateFormData}
-        isLoading={isSavingStep6}
-      />
-    );
-  }
-
-  // Step 7 — Profile (was step 4). Renumbered when destinations/budget/lifestyle
-  // were inserted before this screen.
-  if (currentStep === 7) {
-    console.log('Rendering OnboardingStep4Screen (profile, step 7) with initialData:', formData);
-    return (
-      <OnboardingStep4Screen
-        onNext={handleStep7Next}
-        onBack={handleStep7Back}
-        initialData={formData}
-        updateFormData={updateFormData}
-        isLoading={isSavingStep7}
-        onAgeBlocked={() => setShowAgeBlockOverlay(true)}
+      <OnboardingScaffold
+        currentStep={currentStep}
+        showVideoUploadStep={showVideoUploadStep}
+        isLoading={loadingByStep[currentStep] ?? false}
+        renderStepContent={(key) => {
+          if (key === 'step1') {
+            return (
+              <OnboardingStep1Screen
+                onNext={handleStep1Next}
+                onBack={handleStep1Back}
+                initialData={formData}
+                updateFormData={updateFormData}
+              />
+            );
+          }
+          if (key === 'videoUpload') {
+            return (
+              <OnboardingVideoUploadScreen
+                onNext={handleVideoUploadNext}
+                onSkip={handleVideoUploadSkip}
+                onBack={handleVideoUploadBack}
+                boardType={formData.boardType!}
+                surfLevel={formData.surfLevel!}
+                userId={user?.id || ''}
+              />
+            );
+          }
+          if (key === 'step2') {
+            return (
+              <OnboardingStep2Screen
+                onNext={handleStep2Next}
+                onBack={handleStep2Back}
+                initialData={formData}
+                updateFormData={updateFormData}
+              />
+            );
+          }
+          if (key === 'step3') {
+            return (
+              <OnboardingStep3Screen
+                onNext={handleStep3Next}
+                onBack={handleStep3Back}
+                initialData={formData}
+                updateFormData={updateFormData}
+              />
+            );
+          }
+          if (key === 'step4') {
+            return (
+              <OnboardingStep4DestinationsScreen
+                onNext={handleStep4Next}
+                onBack={handleStep4Back}
+                initialData={formData}
+                updateFormData={updateFormData}
+              />
+            );
+          }
+          if (key === 'step5') {
+            return (
+              <OnboardingStep5BudgetScreen
+                onNext={handleStep5Next}
+                onBack={handleStep5Back}
+                initialData={formData}
+                updateFormData={updateFormData}
+              />
+            );
+          }
+          if (key === 'step6') {
+            return (
+              <OnboardingStep6LifestyleScreen
+                onNext={handleStep6Next}
+                onBack={handleStep6Back}
+                initialData={formData}
+                updateFormData={updateFormData}
+              />
+            );
+          }
+          if (key === 'step7') {
+            return (
+              <OnboardingStep4Screen
+                onNext={handleStep7Next}
+                onBack={handleStep7Back}
+                initialData={formData}
+                updateFormData={updateFormData}
+                isLoading={isSavingStep7}
+                onAgeBlocked={() => setShowAgeBlockOverlay(true)}
+              />
+            );
+          }
+          return null;
+        }}
       />
     );
   }
