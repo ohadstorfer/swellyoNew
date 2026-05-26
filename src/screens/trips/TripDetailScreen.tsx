@@ -958,9 +958,42 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           <Text style={styles.body}>{trip.description}</Text>
         </Section>
 
+        {/* Trip details */}
+        {(trip.trip_vibe || trip.surf_style || trip.visibility) && (
+          <Section title="Trip details">
+            {!!trip.trip_vibe && (
+              <InfoRow
+                label="Vibe"
+                value={
+                  ({ surf: 'Surf-focused', chill: 'Chill', mixed: 'Mixed' } as Record<string, string>)[
+                    trip.trip_vibe
+                  ] ?? trip.trip_vibe
+                }
+              />
+            )}
+            {!!trip.surf_style && <InfoRow label="Surf style" value={trip.surf_style} />}
+            {!!trip.visibility && (
+              <InfoRow
+                label="Visibility"
+                value={
+                  ({ public: 'Public', friends: 'Friends only', private: 'Private' } as Record<string, string>)[
+                    trip.visibility
+                  ] ?? trip.visibility
+                }
+              />
+            )}
+          </Section>
+        )}
+
         {/* Accommodation */}
-        {(trip.accommodation_name || trip.accommodation_type) && (
+        {(trip.accommodation_name || trip.accommodation_type || trip.accommodation_status) && (
           <Section title="Accommodation">
+            {!!trip.accommodation_status && (
+              <InfoRow
+                label="Status"
+                value={trip.accommodation_status === 'booked' ? 'Booked' : 'Not booked yet'}
+              />
+            )}
             {!!trip.accommodation_name && <InfoRow label="Name" value={trip.accommodation_name} />}
             {!!trip.accommodation_type && (
               <InfoRow
@@ -976,15 +1009,43 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           </Section>
         )}
 
-        {/* Budget */}
-        {(trip.budget_min != null || trip.budget_max != null) && (
+        {/* Pricing (Flow B: fixed cost) or approximate budget (Flow A: range) */}
+        {trip.cost_per_person != null || trip.total_cost != null ? (
+          <Section title="Price">
+            {trip.cost_per_person != null && (
+              <InfoRow
+                label="Per person"
+                value={`From $${trip.cost_per_person} ${trip.budget_currency ?? 'USD'}`}
+              />
+            )}
+            {trip.total_cost != null && (
+              <InfoRow label="Total" value={`$${trip.total_cost} ${trip.budget_currency ?? 'USD'}`} />
+            )}
+            {trip.price_includes && trip.price_includes.length > 0 && (
+              <InfoRow
+                label="Includes"
+                value={trip.price_includes
+                  .map(k =>
+                    ({
+                      accommodation: 'Accommodation',
+                      surf_guide: 'Surf guide',
+                      transport: 'Transport to surf spots',
+                      flights: 'Flights',
+                      meals: 'Meals',
+                    } as Record<string, string>)[k] ?? k
+                  )
+                  .join(', ')}
+              />
+            )}
+          </Section>
+        ) : (trip.budget_min != null || trip.budget_max != null) ? (
           <Section title="Approximate budget">
             <InfoRow
               label="Per person"
               value={`${trip.budget_min ?? '?'}–${trip.budget_max ?? '?'} ${trip.budget_currency ?? 'USD'}`}
             />
           </Section>
-        )}
+        ) : null}
 
         {/* Vibe */}
         {trip.vibe &&
@@ -1032,10 +1093,21 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         </Section>
 
         {/* Wave */}
-        {(trip.wave_size_min != null ||
+        {(trip.wave_type ||
+          trip.wave_size_min != null ||
           trip.wave_size_max != null ||
           trip.wave_fat_to_barreling != null) && (
           <Section title="Wave">
+            {!!trip.wave_type && (
+              <InfoRow
+                label="Type"
+                value={
+                  ({ reef: 'Reef break', beach: 'Beach break', point: 'Point break' } as Record<string, string>)[
+                    trip.wave_type
+                  ] ?? trip.wave_type
+                }
+              />
+            )}
             {trip.wave_size_min != null && trip.wave_size_max != null && (
               <InfoRow label="Size" value={`${trip.wave_size_min}–${trip.wave_size_max} ft`} />
             )}

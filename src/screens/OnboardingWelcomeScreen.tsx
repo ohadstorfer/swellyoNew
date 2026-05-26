@@ -7,8 +7,10 @@ import {
   Image,
   Platform,
   Alert,
+  LayoutChangeEvent,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useRegisterOnboardingStep } from '../context/OnboardingStepContext';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../components/Text';
 import { useOnboarding } from '../context/OnboardingContext';
@@ -101,39 +103,29 @@ export const OnboardingWelcomeScreen: React.FC<OnboardingWelcomeScreenProps> = (
   const progressWidth = 237;
   const progressFilled = 34; // 1/4 step
 
-  const { height: screenHeight } = useScreenDimensions();
-  const safeAreaInsets = Platform.OS === 'web' ? 0 : 90;
-  const availableContentHeight = Math.max(
-    MIN_CONTENT_HEIGHT,
-    screenHeight - STEP_HEADER_HEIGHT - BUTTON_CONTAINER_HEIGHT - safeAreaInsets
-  );
+  // Content height is measured from the host (onLayout) — the scaffold owns the
+  // header + Next button, so we no longer derive it from the screen size.
+  const [contentHeight, setContentHeight] = useState(0);
+
+  const onContentLayout = (e: LayoutChangeEvent) => {
+    const h = e.nativeEvent.layout.height;
+    if (h > 0 && h !== contentHeight) setContentHeight(h);
+  };
+
+  useRegisterOnboardingStep({
+    nextLabel: 'Next',
+    canProceed: selectedIds.length >= 2,
+    onNext: handleNext,
+    onBack: onBack ?? (() => {}),
+  });
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      {/* Step header: 16px above the title block (second headline) */}
-      <View style={styles.stepHeader}>
-        <View style={styles.stepHeaderRow}>
-          {onBack ? (
-            <TouchableOpacity
-              onPress={onBack}
-              style={styles.backButton}
-              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-            >
-              <Ionicons name="arrow-back" size={24} color="#222B30" />
-            </TouchableOpacity>
-          ) : (
-            <View style={styles.backPlaceholder} />
-          )}
-
-        </View>
- 
-      </View>
-
+    <View style={styles.contentRoot} onLayout={onContentLayout}>
       <ScrollView
         contentContainerStyle={[
           styles.scrollContent,
           {
-            minHeight: availableContentHeight,
+            minHeight: contentHeight > 0 ? contentHeight : MIN_CONTENT_HEIGHT,
             flexGrow: 1,
             justifyContent: 'space-evenly',
           },
@@ -143,13 +135,13 @@ export const OnboardingWelcomeScreen: React.FC<OnboardingWelcomeScreenProps> = (
       >
         {/* Title block */}
         <View style={styles.headerTitle}>
-        <Text
-              style={styles.greetingHeader}
-              numberOfLines={1}
-              adjustsFontSizeToFit
-            >
-              {displayName ? `Yo ${displayName}!` : 'Yo!'}
-            </Text>
+          <Text
+            style={styles.greetingHeader}
+            numberOfLines={1}
+            adjustsFontSizeToFit
+          >
+            {displayName ? `Yo ${displayName}!` : 'Yo!'}
+          </Text>
           <Text style={styles.title}>What are you here for?</Text>
           <Text style={styles.subtitle}>Pick at least two!</Text>
         </View>
@@ -178,11 +170,7 @@ export const OnboardingWelcomeScreen: React.FC<OnboardingWelcomeScreenProps> = (
                     ]}
                   >
                     {selected ? (
-                      <Ionicons
-                        name="checkmark"
-                        size={12}
-                        color={colors.white}
-                      />
+                      <Ionicons name="checkmark" size={12} color={colors.white} />
                     ) : null}
                   </View>
                 </View>
@@ -193,26 +181,15 @@ export const OnboardingWelcomeScreen: React.FC<OnboardingWelcomeScreenProps> = (
             );
           })}
         </View>
-
-        
       </ScrollView>
-
-      {/* Next button */}
-      <View style={[styles.buttonContainer, { paddingBottom: Math.max(insets.bottom, 24) }]}>
-        <TouchableOpacity
-          style={[styles.button, selectedIds.length < 2 && styles.buttonDisabled]}
-          onPress={handleNext}
-          activeOpacity={0.8}
-          disabled={selectedIds.length < 2}
-        >
-          <Text style={styles.buttonText}>Next</Text>
-        </TouchableOpacity>
-      </View>
-    </SafeAreaView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
+  contentRoot: {
+    flex: 1,
+  },
   container: {
     flex: 1,
     backgroundColor: '#FAFAFA',

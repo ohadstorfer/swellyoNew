@@ -9,6 +9,7 @@
  */
 
 export type OnboardingStepKey =
+  | 'welcome'
   | 'step1'
   | 'step2'
   | 'videoUpload'
@@ -26,6 +27,9 @@ export interface StepDisplay {
 }
 
 export const ONBOARDING_STEP_DISPLAY: Record<OnboardingStepKey, StepDisplay> = {
+  // Welcome ("What are you here for?") has no label or progress bar — the chrome
+  // hides both for this key; they fade/animate in on the first real step.
+  welcome: { label: '', progress: 0 },
   step1: { label: 'Surf Juice 1/3', progress: 1 / 3 },
   step2: { label: 'Surf Juice 1/3', progress: 1 / 3 },
   videoUpload: { label: 'Surf Juice 1/3', progress: 1 / 3 },
@@ -42,6 +46,7 @@ export const ONBOARDING_STEP_DISPLAY: Record<OnboardingStepKey, StepDisplay> = {
  * (step1 → step3, still forward) and the video-upload sub-state of step 2.
  */
 export const ONBOARDING_STEP_ORDER: OnboardingStepKey[] = [
+  'welcome',
   'step1',
   'step2',
   'videoUpload',
@@ -61,6 +66,8 @@ export function resolveStepKey(
   showVideoUploadStep: boolean,
 ): OnboardingStepKey | null {
   switch (currentStep) {
+    case 0:
+      return 'welcome';
     case 1:
       return 'step1';
     case 2:

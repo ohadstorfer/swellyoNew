@@ -82,6 +82,18 @@ export interface GroupTrip {
   budget_max: number | null;
   budget_currency: string | null;
 
+  // Flow B columns (nullable). trip_vibe/wave_type shared with Flow A.
+  trip_vibe: string | null; // 'surf' | 'chill' | 'mixed'
+  wave_type: string | null; // 'reef' | 'beach' | 'point'
+  included_components: string[] | null; // flights|accommodation|surf_spots|meals|activities
+  total_cost: number | null;
+  cost_per_person: number | null;
+  price_includes: string[] | null; // accommodation|surf_guide|transport|flights|meals
+
+  surf_style: string | null;
+  accommodation_status: string | null; // 'booked' | 'notyet'
+  visibility: string | null; // 'public' | 'friends' | 'private'
+
   packing_list: string[];
   group_packing_list: GroupPackingItem[];
 
@@ -238,6 +250,104 @@ export async function createGroupTrip(
   }
 
   return trip;
+}
+
+/** Precise geocode data for a trip's destination (lives in group_trip_destinations). */
+export interface TripDestinationGeo {
+  place_id: string | null;
+  name: string | null;
+  short_label: string | null;
+  formatted_address: string | null;
+  locality: string | null;
+  country: string | null; // ISO-2
+  lat: number | null;
+  lng: number | null;
+}
+
+/**
+ * Upsert the geocoded destination for a trip (1 row per trip). Called after
+ * createGroupTrip with the place the host picked in the Google Places picker.
+ * Best-effort at the call site — the trip still exists if this fails.
+ */
+export async function setTripDestination(
+  tripId: string,
+  geo: TripDestinationGeo
+): Promise<void> {
+  const { error } = await supabase
+    .from('group_trip_destinations')
+    .upsert({ trip_id: tripId, ...geo }, { onConflict: 'trip_id' });
+
+  if (error) {
+    console.error('[groupTripsService] setTripDestination error:', error);
+    throw new Error(error.message);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Budget estimate (Edge Function: estimate-trip-budget → OpenAI)
+// ---------------------------------------------------------------------------
+export interface BudgetTier {
+  min: number;
+  max: number;
+  label?: string;
+}
+export interface BudgetEstimate {
+  currency: 'USD';
+  ranges: { low: BudgetTier; medium: BudgetTier; high: BudgetTier };
+}
+export interface EstimateBudgetParams {
+  destination: string;
+  country?: string | null;
+  formattedAddress?: string | null;
+  durationDays: number;
+  accommodationType?: string | null;
+}
+
+const isTier = (t: any): boolean =>
+  t && typeof t.min === 'number' && typeof t.max === 'number';
+
+/**
+ * Ask the estimate-trip-budget Edge Function for 3 per-person USD ranges.
+ * Throws on any failure (no key / offline / bad shape) so the caller can fall
+ * back to manual entry.
+ */
+export async function estimateTripBudget(
+  params: EstimateBudgetParams
+): Promise<BudgetEstimate> {
+  const { data, error } = await supabase.functions.invoke('estimate-trip-budget', {
+    body: {
+      destination: params.destination,
+      country: params.country ?? null,
+      formatted_address: params.formattedAddress ?? null,
+      duration_days: params.durationDays,
+      accommodation_type: params.accommodationType ?? null,
+    },
+  });
+
+  if (error) throw new Error(error.message || 'Budget estimate failed');
+  if ((data as any)?.error) throw new Error((data as any).error);
+
+  const ranges = (data as any)?.ranges;
+  if (!ranges || !isTier(ranges.low) || !isTier(ranges.medium) || !isTier(ranges.high)) {
+    throw new Error('Bad estimate response');
+  }
+  return data as BudgetEstimate;
+}
+
+export async function getTripDestination(
+  tripId: string
+): Promise<TripDestinationGeo | null> {
+  const { data, error } = await supabase
+    .from('group_trip_destinations')
+    .select('place_id, name, short_label, formatted_address, locality, country, lat, lng')
+    .eq('trip_id', tripId)
+    .maybeSingle();
+
+  if (error) {
+    console.warn('[groupTripsService] getTripDestination error:', error);
+    return null;
+  }
+  return (data as TripDestinationGeo) ?? null;
 }
 
 export async function listExploreTrips(limit = 50, offset = 0): Promise<GroupTrip[]> {
