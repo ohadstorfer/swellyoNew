@@ -44,6 +44,8 @@ export const OnboardingHeader: React.FC<HeaderProps> = ({ stepKey }) => {
   const effectiveKey = view.labelKeyOverride ?? stepKey;
   const display = ONBOARDING_STEP_DISPLAY[effectiveKey];
   const targetFill = Math.max(0, Math.min(1, display.progress)) * progressBarWidth;
+  // Welcome has no label or progress bar — they appear on the first real step.
+  const isWelcome = effectiveKey === 'welcome';
 
   // Progress bar: animate the fill width (absolute px, not %, so it interpolates).
   const fill = useSharedValue(targetFill);
@@ -99,11 +101,13 @@ export const OnboardingHeader: React.FC<HeaderProps> = ({ stepKey }) => {
         <View style={styles.rightPlaceholder} />
       </View>
 
-      <View style={[styles.progressContainer, isDesktop && styles.progressContainerDesktop]}>
-        <View style={[styles.progressBar, { width: progressBarWidth }]}>
-          <Reanimated.View style={[styles.progressFill, fillStyle]} />
+      {!isWelcome && (
+        <View style={[styles.progressContainer, isDesktop && styles.progressContainerDesktop]}>
+          <View style={[styles.progressBar, { width: progressBarWidth }]}>
+            <Reanimated.View style={[styles.progressFill, fillStyle]} />
+          </View>
         </View>
-      </View>
+      )}
     </>
   );
 };

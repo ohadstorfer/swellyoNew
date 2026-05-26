@@ -45,6 +45,15 @@ type HomeBreakSearchSheetProps = {
   // Display name of the user's country (e.g. "Australia", "United States").
   // If set, scopes Places autocomplete to that country via includedRegionCodes.
   countryFilter?: string;
+  // Header title in the search state. Defaults to the home-break wording.
+  title?: string;
+  // Header title in the confirm/preview state. Defaults to the home-break wording.
+  confirmTitle?: string;
+  // Search field placeholder. Defaults to the home-break wording.
+  searchPlaceholder?: string;
+  // When true, the confirm screen shows just the place name (e.g. "Uluwatu")
+  // instead of name + locality ("Uluwatu, Badung Regency"). Default false.
+  nameOnly?: boolean;
 };
 
 type Suggestion = {
@@ -139,6 +148,10 @@ export const HomeBreakSearchSheet: React.FC<HomeBreakSearchSheetProps> = ({
   onClose,
   onSelect,
   countryFilter,
+  title = 'Select Home Break',
+  confirmTitle = 'Confirm Home Break',
+  searchPlaceholder = 'Search beaches, breaks, spots...',
+  nameOnly = false,
 }) => {
   const apiKey = process.env.EXPO_PUBLIC_GOOGLE_PLACES_API_KEY;
   const regionCode = useMemo(
@@ -359,7 +372,7 @@ export const HomeBreakSearchSheet: React.FC<HomeBreakSearchSheetProps> = ({
           <View {...pan.panHandlers}>
             <View style={styles.handle} />
             <View style={styles.header}>
-              <Text style={styles.title}>{pending ? 'Confirm Home Break' : 'Select Home Break'}</Text>
+              <Text style={styles.title}>{pending ? confirmTitle : title}</Text>
               <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
                 <Ionicons name="close" size={24} color="#333" />
               </TouchableOpacity>
@@ -384,7 +397,7 @@ export const HomeBreakSearchSheet: React.FC<HomeBreakSearchSheetProps> = ({
               </View>
 
               <View style={styles.previewMeta}>
-                <Text style={styles.previewName} numberOfLines={2}>{pending.short}</Text>
+                <Text style={styles.previewName} numberOfLines={2}>{nameOnly ? pending.name : pending.short}</Text>
                 <Text style={styles.previewFull} numberOfLines={2}>{pending.full}</Text>
               </View>
 
@@ -402,7 +415,7 @@ export const HomeBreakSearchSheet: React.FC<HomeBreakSearchSheetProps> = ({
               <TextInput
                 ref={searchInputRef}
                 style={[styles.search, Platform.OS === 'web' && styles.searchWeb]}
-                placeholder="Search beaches, breaks, spots..."
+                placeholder={searchPlaceholder}
                 value={query}
                 onChangeText={setQuery}
                 autoCorrect={false}

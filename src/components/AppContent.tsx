@@ -1923,91 +1923,82 @@ export const AppContent: React.FC = () => {
     );
   }
 
-  // Show onboarding welcome/explanation screen if we're on step 0
-  if (currentStep === 0) {
-    return (
-      <OnboardingWelcomeScreen
-        onNext={() => {
-          setCurrentStep(1);
-        }}
-        updateFormData={updateFormData}
-        onBack={async () => {
-          // Prevent multiple simultaneous logout calls
-          if (isLoggingOutRef.current) {
-            if (__DEV__) {
-              console.log('[AppContent] Logout already in progress, ignoring back button click');
-            }
-            return;
-          }
-          
-          isLoggingOutRef.current = true;
-          
+  // Back from the welcome step (step 0) logs the user out and returns to login.
+  const handleWelcomeBack = async () => {
+    // Prevent multiple simultaneous logout calls
+    if (isLoggingOutRef.current) {
+      if (__DEV__) {
+        console.log('[AppContent] Logout already in progress, ignoring back button click');
+      }
+      return;
+    }
+
+    isLoggingOutRef.current = true;
+
+    try {
+      console.log('[AppContent] Logging out user before going back to welcome screen...');
+
+      // Navigate immediately (synchronous) before async operations
+      // This ensures UI updates immediately even if logout takes time
+      setCurrentStep(STEP_WELCOME);
+      setUser(null);
+      setIsDemoUser(false);
+
+      // Then perform logout operations in background (non-blocking)
+      const { performLogout } = await import('../utils/logout');
+      const result = await performLogout({
+        resetOnboarding,
+        setUser: () => {}, // Already set above
+        setCurrentStep: () => {}, // Already set above
+        setIsDemoUser: () => {}, // Already set above
+      });
+
+      // Reset onboarding state (non-blocking)
+      try {
+        await resetOnboarding();
+      } catch (resetError) {
+        console.error('[AppContent] Error resetting onboarding:', resetError);
+      }
+
+      if (!result.success) {
+        console.error('[AppContent] Error during logout:', result.error);
+        // Navigation already happened above, so we're good
+      }
+    } catch (error) {
+      console.error('[AppContent] Error in logout handler:', error);
+      // Ensure navigation happened even if there's an error
+      try {
+        setCurrentStep(STEP_WELCOME);
+        setUser(null);
+        setIsDemoUser(false);
+      } catch (navError) {
+        console.error('[AppContent] Error setting navigation state:', navError);
+        // Retry after delay
+        setTimeout(() => {
           try {
-            console.log('[AppContent] Logging out user before going back to welcome screen...');
-            
-            // Navigate immediately (synchronous) before async operations
-            // This ensures UI updates immediately even if logout takes time
             setCurrentStep(STEP_WELCOME);
             setUser(null);
             setIsDemoUser(false);
-            
-            // Then perform logout operations in background (non-blocking)
-            const { performLogout } = await import('../utils/logout');
-            const result = await performLogout({
-              resetOnboarding,
-              setUser: () => {}, // Already set above
-              setCurrentStep: () => {}, // Already set above
-              setIsDemoUser: () => {}, // Already set above
-            });
-            
-            // Reset onboarding state (non-blocking)
-            try {
-              await resetOnboarding();
-            } catch (resetError) {
-              console.error('[AppContent] Error resetting onboarding:', resetError);
-            }
-            
-            if (!result.success) {
-              console.error('[AppContent] Error during logout:', result.error);
-              // Navigation already happened above, so we're good
-            }
-          } catch (error) {
-            console.error('[AppContent] Error in logout handler:', error);
-            // Ensure navigation happened even if there's an error
-            try {
-              setCurrentStep(STEP_WELCOME);
-              setUser(null);
-              setIsDemoUser(false);
-            } catch (navError) {
-              console.error('[AppContent] Error setting navigation state:', navError);
-              // Retry after delay
-              setTimeout(() => {
-                try {
-                  setCurrentStep(STEP_WELCOME);
-                  setUser(null);
-                  setIsDemoUser(false);
-                } catch (retryError) {
-                  console.error('[AppContent] Retry navigation also failed:', retryError);
-                }
-              }, 100);
-            }
-          } finally {
-            // Reset flag after a delay to allow state updates to propagate
-            setTimeout(() => {
-              isLoggingOutRef.current = false;
-            }, 1000);
+          } catch (retryError) {
+            console.error('[AppContent] Retry navigation also failed:', retryError);
           }
-        }}
-      />
-    );
-  }
+        }, 100);
+      }
+    } finally {
+      // Reset flag after a delay to allow state updates to propagate
+      setTimeout(() => {
+        isLoggingOutRef.current = false;
+      }, 1000);
+    }
+  };
 
-  // Steps 1–7 (incl. the step-2 video-upload sub-state) — rendered through the shared
+  // Steps 0–7 (incl. the step-2 video-upload sub-state) — rendered through the shared
   // OnboardingScaffold so the header + Next button stay fixed and content slides
   // between them. Returning the same <OnboardingScaffold> element across these steps
   // keeps it mounted so the animations run.
-  if (currentStep >= 1 && currentStep <= 7) {
+  if (currentStep >= 0 && currentStep <= 7) {
     const loadingByStep: Record<number, boolean> = {
+      0: false,
       1: isSavingStep1,
       2: showVideoUploadStep ? false : isSavingStep2, // video upload has no blocking save
       3: isSavingStep3,
@@ -2022,6 +2013,15 @@ export const AppContent: React.FC = () => {
         showVideoUploadStep={showVideoUploadStep}
         isLoading={loadingByStep[currentStep] ?? false}
         renderStepContent={(key) => {
+          if (key === 'welcome') {
+            return (
+              <OnboardingWelcomeScreen
+                onNext={() => setCurrentStep(1)}
+                onBack={handleWelcomeBack}
+                updateFormData={updateFormData}
+              />
+            );
+          }
           if (key === 'step1') {
             return (
               <OnboardingStep1Screen
