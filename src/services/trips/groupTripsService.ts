@@ -4,6 +4,58 @@ import { messagingService } from '../messaging/messagingService';
 export type HostingStyle = 'A' | 'B' | 'C';
 export type SurfLevel = 'beginner' | 'intermediate' | 'advanced' | 'pro' | 'all';
 export type SurfStyle = 'shortboard' | 'midlength' | 'longboard' | 'softtop' | 'all';
+export type WaveShapeKind = 'soft' | 'wally' | 'barrel';
+
+// -----------------------------------------------------------------------------
+// trip_structure + trip_vibes (multi-select tag columns added May 2026 — both
+// are `text[]` with DB-side CHECK constraints restricting values to the slugs
+// below). See migration 20260527000000_group_trips_trip_structure_vibes.sql.
+// -----------------------------------------------------------------------------
+export type TripStructureSlug =
+  | 'shared_decisions'
+  | 'structured_schedule'
+  | 'loose_schedule'
+  | 'book_own_stay'
+  | 'book_together'
+  | 'group_all_day'
+  | 'own_thing_day';
+export type TripVibeSlug =
+  | 'surf_focused'
+  | 'improve_surf'
+  | 'vacation'
+  | 'explore'
+  | 'slow_chill';
+
+export const TRIP_STRUCTURE_OPTIONS: { slug: TripStructureSlug; label: string }[] = [
+  { slug: 'shared_decisions',    label: 'Shared decisions on activities and schedule' },
+  { slug: 'structured_schedule', label: 'Structured daily schedule' },
+  { slug: 'loose_schedule',      label: 'Loose daily schedule' },
+  { slug: 'book_own_stay',       label: 'Book your own accommodation' },
+  { slug: 'book_together',       label: 'Accommodation booked together' },
+  { slug: 'group_all_day',       label: 'Group together most of the day' },
+  { slug: 'own_thing_day',       label: 'Do your own thing during the day' },
+];
+
+export const TRIP_VIBE_OPTIONS: { slug: TripVibeSlug; label: string }[] = [
+  { slug: 'surf_focused', label: 'Surf-focused — wake up early, surf a lot' },
+  { slug: 'improve_surf', label: 'Improve your surfing — training camp' },
+  { slug: 'vacation',     label: 'Vacation style — chill, loose surf, lay-days' },
+  { slug: 'explore',      label: 'Surf + Explore' },
+  { slug: 'slow_chill',   label: 'Slow + chill' },
+];
+
+export const TRIP_STRUCTURE_MUTEX: [TripStructureSlug, TripStructureSlug][] = [
+  ['structured_schedule', 'loose_schedule'],
+  ['book_own_stay', 'book_together'],
+  ['group_all_day', 'own_thing_day'],
+];
+
+export const TRIP_VIBE_MUTEX: [TripVibeSlug, TripVibeSlug][] = [
+  ['surf_focused', 'slow_chill'],
+  ['improve_surf', 'slow_chill'],
+  ['improve_surf', 'vacation'],
+  ['surf_focused', 'vacation'],
+];
 
 export interface TripVibe {
   morning?: string[];
@@ -73,7 +125,7 @@ export interface GroupTrip {
   age_max: number;
   target_surf_levels: SurfLevel[];
   target_surf_styles: SurfStyle[];
-  wave_fat_to_barreling: number | null;
+  wave_shapes: WaveShapeKind[] | null;
   wave_size_min: number | null;
   wave_size_max: number | null;
 
@@ -82,8 +134,12 @@ export interface GroupTrip {
   budget_max: number | null;
   budget_currency: string | null;
 
-  // Flow B columns (nullable). trip_vibe/wave_type shared with Flow A.
-  trip_vibe: string | null; // 'surf' | 'chill' | 'mixed'
+  // Multi-select tag columns (text[] with DB CHECK constraints). Replaces the
+  // legacy single-value `trip_vibe` column dropped in the May 2026 migration.
+  trip_structure: string[] | null;
+  trip_vibes: string[] | null;
+
+  // Flow B columns (nullable). wave_type shared with Flow A.
   wave_type: string | null; // 'reef' | 'beach' | 'point'
   included_components: string[] | null; // flights|accommodation|surf_spots|meals|activities
   total_cost: number | null;

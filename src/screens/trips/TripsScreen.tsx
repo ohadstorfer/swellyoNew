@@ -9,18 +9,55 @@ import {
   Image,
   ActivityIndicator,
   RefreshControl,
+  Modal,
+  Alert,
+  ScrollView,
+  Platform,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useOnboarding } from '../../context/OnboardingContext';
 import {
   GroupTrip,
+  HostingStyle,
   MyTripsBuckets,
   listExploreTrips,
   listMyTripsByBucket,
 } from '../../services/trips/groupTripsService';
 import CreateTripWizard from './CreateTripWizard';
 import TripDetailScreen from './TripDetailScreen';
+
+// Hosting-style chooser content. Lifted out of CreateTripWizard so the chooser
+// can live inline on the Create tab and the wizard becomes a pure router.
+const HOSTING_STYLE_OPTIONS: {
+  key: HostingStyle;
+  letter: string;
+  title: string;
+  desc: string;
+  icon: keyof typeof Ionicons.glyphMap;
+}[] = [
+  {
+    key: 'A',
+    letter: 'A',
+    title: 'Start with a vibe',
+    desc: 'Loose plan, lots of room to riff. Crew shapes the rest together.',
+    icon: 'sparkles-outline',
+  },
+  {
+    key: 'B',
+    letter: 'B',
+    title: 'Lead the call',
+    desc: 'You set the big stuff — dates, place. Crew weighs in on the rest.',
+    icon: 'compass-outline',
+  },
+  {
+    key: 'C',
+    letter: 'C',
+    title: 'Plan the whole trip',
+    desc: "Everything locked in. Others just join the ride you've built.",
+    icon: 'checkmark-done-outline',
+  },
+];
 
 export type TripsTab = 'explore' | 'my' | 'create';
 
@@ -301,14 +338,41 @@ export default function TripsScreen({ onBack, initialTripId, onOpenGroupChat }: 
   const [myTripsVersion, setMyTripsVersion] = useState(0); // bump to refresh after create
   const [selectedTripId, setSelectedTripId] = useState<string | null>(initialTripId ?? null);
   const [editingTrip, setEditingTrip] = useState<GroupTrip | null>(null);
+  // Which hosting style the user picked from the inline chooser on the Create
+  // tab. null = chooser visible; non-null = wizard open in the create modal.
+  const [pendingStyle, setPendingStyle] = useState<HostingStyle | null>(null);
+  const [wizardStarted, setWizardStarted] = useState(false);
+
+  const createModalVisible = pendingStyle !== null;
 
   // Deep-link into a trip from a push tap: when initialTripId changes, open it.
   useEffect(() => {
     if (initialTripId) setSelectedTripId(initialTripId);
   }, [initialTripId]);
 
+  const closeCreateModal = () => {
+    setPendingStyle(null);
+    setWizardStarted(false);
+  };
+
+  const handleRequestCloseModal = () => {
+    if (!wizardStarted) {
+      closeCreateModal();
+      return;
+    }
+    Alert.alert(
+      'Discard trip?',
+      "You'll lose your progress on this trip.",
+      [
+        { text: 'Keep editing', style: 'cancel' },
+        { text: 'Discard', style: 'destructive', onPress: closeCreateModal },
+      ],
+    );
+  };
+
   const handleCreated = () => {
     setMyTripsVersion(v => v + 1);
+    closeCreateModal();
     setActiveTab('my');
   };
 
@@ -334,6 +398,7 @@ export default function TripsScreen({ onBack, initialTripId, onOpenGroupChat }: 
         </View>
         <CreateTripWizard
           hostId={currentUserId}
+          hostingStyle={editingTrip.hosting_style}
           initialTrip={editingTrip}
           onCreated={handleSavedEdit}
           onCancel={() => setEditingTrip(null)}
@@ -376,13 +441,65 @@ export default function TripsScreen({ onBack, initialTripId, onOpenGroupChat }: 
           />
         )}
         {activeTab === 'create' && (
-          <CreateTripWizard
-            hostId={currentUserId}
-            onCreated={handleCreated}
-            onCancel={() => setActiveTab('explore')}
-          />
+          <ScrollView
+            contentContainerStyle={styles.chooserScroll}
+            showsVerticalScrollIndicator={false}
+          >
+            <Text style={styles.chooserHeading}>Start a trip</Text>
+            <Text style={styles.chooserSubheading}>
+              Pick how much you want to plan up front — you can change the rest later.
+            </Text>
+            {HOSTING_STYLE_OPTIONS.map(opt => (
+              <TouchableOpacity
+                key={opt.key}
+                style={styles.chooserCard}
+                onPress={() => setPendingStyle(opt.key)}
+                activeOpacity={0.85}
+                accessibilityRole="button"
+                accessibilityLabel={`${opt.title}. ${opt.desc}`}
+              >
+                <View style={styles.chooserIconWrap}>
+                  <Ionicons name={opt.icon} size={26} color="#0788B0" />
+                </View>
+                <View style={styles.chooserBody}>
+                  <View style={styles.chooserTitleRow}>
+                    <Text style={styles.chooserCardLetter}>{opt.letter}</Text>
+                    <Text style={styles.chooserCardTitle}>{opt.title}</Text>
+                  </View>
+                  <Text style={styles.chooserCardDesc}>{opt.desc}</Text>
+                </View>
+                <Ionicons
+                  name="chevron-forward"
+                  size={20}
+                  color="#B0B0B0"
+                  style={styles.chooserChevron}
+                />
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
         )}
       </View>
+
+      <Modal
+        visible={createModalVisible}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={handleRequestCloseModal}
+      >
+        {/* The wizard chrome owns the top safe-area + its own close X, so we
+            mount it directly in the modal — no SafeAreaView edge, no extra header. */}
+        <View style={{ flex: 1, backgroundColor: '#212121' }}>
+          {pendingStyle && (
+            <CreateTripWizard
+              hostId={currentUserId}
+              hostingStyle={pendingStyle}
+              onCreated={handleCreated}
+              onCancel={handleRequestCloseModal}
+              onStartedChange={setWizardStarted}
+            />
+          )}
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -489,4 +606,97 @@ const styles = StyleSheet.create({
     backgroundColor: '#0788B0',
   },
   emptyCtaText: { color: '#FFFFFF', fontWeight: '600' },
+
+  // Inline hosting-style chooser (moved out of CreateTripWizard).
+  chooserScroll: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 32,
+  },
+  chooserHeading: {
+    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat',
+    fontSize: 22,
+    lineHeight: 28,
+    fontWeight: '700',
+    color: '#222B30',
+    marginBottom: 6,
+  },
+  chooserSubheading: {
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: '400',
+    color: '#7B7B7B',
+    marginBottom: 20,
+  },
+  chooserCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 92,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#EEEEEE',
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    marginBottom: 12,
+    shadowColor: '#596E7C',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 2,
+  },
+  chooserIconWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: '#E6F4F8',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 14,
+  },
+  chooserBody: {
+    flex: 1,
+  },
+  chooserTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    marginBottom: 4,
+  },
+  chooserCardLetter: {
+    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat',
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#0788B0',
+    letterSpacing: 1,
+    marginRight: 8,
+  },
+  chooserCardTitle: {
+    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat',
+    fontSize: 16,
+    lineHeight: 22,
+    fontWeight: '700',
+    color: '#222B30',
+    flexShrink: 1,
+  },
+  chooserCardDesc: {
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#7B7B7B',
+  },
+  chooserChevron: {
+    marginLeft: 8,
+  },
+
+  modalRoot: { flex: 1, backgroundColor: '#FFFFFF' },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 8,
+  },
+  modalCloseBtn: { padding: 4 },
 });

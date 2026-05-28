@@ -91,7 +91,6 @@ interface WizardState {
   // 2.3
   targetSurfStyles: SurfStyle[];
   // 2.4
-  waveFatToBarreling: string;
   waveSizeMin: string;
   waveSizeMax: string;
   // 1.5b — host has been to this destination before
@@ -136,8 +135,6 @@ const stateFromTrip = (trip: GroupTrip): WizardState => ({
   ageMax: trip.age_max != null ? String(trip.age_max) : '',
   targetSurfLevels: trip.target_surf_levels ?? [],
   targetSurfStyles: trip.target_surf_styles ?? [],
-  waveFatToBarreling:
-    trip.wave_fat_to_barreling != null ? String(trip.wave_fat_to_barreling) : '',
   waveSizeMin: trip.wave_size_min != null ? String(trip.wave_size_min) : '',
   waveSizeMax: trip.wave_size_max != null ? String(trip.wave_size_max) : '',
   hostBeenThere: trip.host_been_there ?? null,
@@ -172,7 +169,6 @@ const INITIAL_STATE: WizardState = {
   ageMax: '',
   targetSurfLevels: [],
   targetSurfStyles: [],
-  waveFatToBarreling: '',
   waveSizeMin: '',
   waveSizeMax: '',
   hostBeenThere: null,
@@ -441,7 +437,6 @@ export default function CreateTripFlowBC({
         age_max: parseInt(state.ageMax, 10),
         target_surf_levels: state.targetSurfLevels,
         target_surf_styles: state.targetSurfStyles,
-        wave_fat_to_barreling: state.waveFatToBarreling ? parseInt(state.waveFatToBarreling, 10) : null,
         wave_size_min: state.waveSizeMin ? parseFloat(state.waveSizeMin) : null,
         wave_size_max: state.waveSizeMax ? parseFloat(state.waveSizeMax) : null,
 
@@ -451,7 +446,8 @@ export default function CreateTripFlowBC({
         budget_currency: state.budgetMin || state.budgetMax ? state.budgetCurrency : null,
 
         // Flow B / A-extra columns — not collected by the legacy flow.
-        trip_vibe: null,
+        trip_structure: null,
+        trip_vibes: null,
         wave_type: null,
         included_components: null,
         total_cost: null,
@@ -930,15 +926,6 @@ export default function CreateTripFlowBC({
             <Text style={styles.helper}>
               Optional. If you have multiple levels, consider skipping this step.
             </Text>
-            <Text style={styles.label}>Fat ↔ barreling (0 = fat, 10 = barreling)</Text>
-            <TextInput
-              style={styles.input}
-              value={state.waveFatToBarreling}
-              onChangeText={t => update('waveFatToBarreling', t)}
-              placeholder="5"
-              placeholderTextColor="#B0B0B0"
-              keyboardType="number-pad"
-            />
             <Text style={styles.label}>Size min (ft)</Text>
             <TextInput
               style={styles.input}

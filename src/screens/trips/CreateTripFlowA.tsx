@@ -1,26 +1,46 @@
-import React, { useMemo, useState } from 'react';
+// =============================================================================
+// CreateTripFlowA — sheet-driven create-trip wizard (May 2026 reshuffle).
+//
+// New 5-step list (no conditional stay step):
+//   1. audience  — "Who is it for?"
+//   2. basics    — "Basic deets"
+//   3. vibez     — "Trip vibez"            (specific-stay details open via sheet)
+//   4. budget    — "Budget"
+//   5. preview   — "Preview"
+//
+// Most inputs are now summary rows that open a WizardBottomSheet. Trip name,
+// description, cover photo, and the specific-stay Yes/No gate stay inline.
+//
+// Persistence, validation, draft autosave, edit-mode rules, and budget estimate
+// behavior all preserved from the prior implementation.
+// =============================================================================
+
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  TextInput,
-  ScrollView,
-  Image,
-  Alert,
   ActivityIndicator,
+  Alert,
+  Image,
   Platform,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import DateTimePicker from '@react-native-community/datetimepicker';
-import Slider from '@react-native-community/slider';
+
 import {
   HostingStyle,
   SurfLevel,
   SurfStyle,
+  WaveShapeKind,
   CreateGroupTripInput,
   UpdateGroupTripInput,
   GroupTrip,
+  TripStructureSlug,
+  TripVibeSlug,
+  TRIP_STRUCTURE_OPTIONS,
+  TRIP_VIBE_OPTIONS,
   createGroupTrip,
   updateGroupTrip,
   setTripDestination,
@@ -30,20 +50,38 @@ import {
 import { uploadTripImage } from '../../services/storage/storageService';
 import { HomeBreakSearchSheet, HomeBreakSelection } from '../../components/HomeBreakSearchSheet';
 
-// ---------------------------------------------------------------------------
-// New unified create-trip flow (wireframe stage)
-// ---------------------------------------------------------------------------
-// This replaces the previous A/B/C 16-step wizard with a single flow. Steps 3
-// and 5 are not designed yet — only the 4 below exist, so the counter is
-// dynamic ("Step X of 4") and will grow when the missing steps are added.
-//
-// Persistence: fields that map onto existing group_trips columns are saved;
-// the new wireframe concepts (trip vibe preset, wave type, accommodation
-// status, visibility) live in state only and are NOT persisted yet — no
-// migration. They are wired so adding columns later is a small change.
-// ---------------------------------------------------------------------------
+// Stream A — chrome + draft + validation + discard guard
+import { CreateTripWizardChrome } from '../../components/trips/CreateTripWizardChrome';
+import { useTripWizardDraft } from '../../hooks/useTripWizardDraft';
+import { useFieldErrors } from '../../hooks/useFieldErrors';
+import { useDiscardConfirm } from '../../hooks/useDiscardConfirm';
 
-type TripVibe = 'surf' | 'chill' | 'mixed';
+// Stream A — bottom sheet shell + the new wave-shape slider + big budget cards
+import { WizardBottomSheet } from '../../components/trips/WizardBottomSheet';
+import { WaveShapeSlider } from '../../components/trips/WaveShapeSlider';
+import { BudgetTierCardsBig } from '../../components/trips/BudgetTierCardsBig';
+
+// Sheet content modules
+import { LevelsSheetContent } from '../../components/trips/sheets/LevelsSheetContent';
+import { WaveSizeSheetContent } from '../../components/trips/sheets/WaveSizeSheetContent';
+import { StyleSheetContent } from '../../components/trips/sheets/StyleSheetContent';
+import { AgeSheetContent } from '../../components/trips/sheets/AgeSheetContent';
+import { WhenSheetContent } from '../../components/trips/sheets/WhenSheetContent';
+import { HowItWorksSheetContent } from '../../components/trips/sheets/HowItWorksSheetContent';
+import { VibeSheetContent } from '../../components/trips/sheets/VibeSheetContent';
+import { StayTypeSheetContent } from '../../components/trips/sheets/StayTypeSheetContent';
+import { SpecificStaySheetContent } from '../../components/trips/sheets/SpecificStaySheetContent';
+
+// Existing dependencies still used (preview card)
+import { TripPreviewCard } from '../../components/trips/TripPreviewCard';
+import { BoardSelectionPreview } from '../../components/trips/BoardSelectionPreview';
+import { InfoCard } from '../../components/trips/InfoCard';
+import { Images } from '../../assets/images';
+import { WaveSheetContent } from '../../components/trips/sheets/WaveSheetContent';
+
+// -----------------------------------------------------------------------------
+// Local types / constants
+// -----------------------------------------------------------------------------
 type AccommodationKind =
   | 'villa'
   | 'hostel'
@@ -55,223 +93,231 @@ type AccommodationKind =
   | 'ecolodge'
   | 'other';
 type Visibility = 'public' | 'friends' | 'private';
+type BudgetTier = 'low' | 'medium' | 'high';
 
-const TRIP_VIBES: { key: TripVibe; title: string; desc: string }[] = [
-  { key: 'surf', title: 'Surf-focused', desc: 'Dawn patrol and sunset sessions' },
-  { key: 'chill', title: 'Chill', desc: 'Relaxed surf + explore' },
-  { key: 'mixed', title: 'Mixed', desc: 'Flexible activities' },
-];
+// Bump 20-char limit per spec.
+const TRIP_TITLE_MAX_LENGTH = 20;
+const DESCRIPTION_MAX_LENGTH = 500;
+const DESCRIPTION_AMBER_THRESHOLD = 450;
 
-// These three are valid SurfLevel values, so the single pick maps straight to
-// target_surf_levels = [level].
-const SKILL_LEVELS: { key: SurfLevel; label: string }[] = [
+// Bump this when WizardState shape changes incompatibly. The draft hook will
+// drop drafts whose stored `version` doesn't match. v2 → v3: waveShapes (array)
+// became waveShape (single value).
+const WIZARD_STATE_VERSION = 3;
+
+// Step KEYS — flat 5-step list, no conditional.
+type StepKey = 'audience' | 'basics' | 'vibez' | 'budget' | 'preview';
+const STEPS: StepKey[] = ['audience', 'basics', 'vibez', 'budget', 'preview'];
+
+// DB constraint: minimum age-range span per hosting style.
+const AGE_WINDOW_BY_STYLE: Record<HostingStyle, number> = { A: 7, B: 5, C: 2 };
+
+// Step heading + subtitle copy.
+const STEP_META: Record<StepKey, { title: string; subtitle: string }> = {
+  audience: {
+    title: 'Who is it for?',
+    subtitle: 'The surfers, the levels, the wave.',
+  },
+  basics: { title: 'Basic deets', subtitle: 'Where, when, what to call it.' },
+  vibez: { title: 'Trip vibez', subtitle: 'How it runs, the feel, the stay.' },
+  budget: { title: 'Budget', subtitle: 'Per person, in USD.' },
+  preview: { title: 'Almost there', subtitle: 'One last look before you publish.' },
+};
+
+const SKILL_LEVEL_OPTIONS: { key: SurfLevel; label: string }[] = [
   { key: 'beginner', label: 'Beginner' },
   { key: 'intermediate', label: 'Intermediate' },
   { key: 'advanced', label: 'Advanced' },
 ];
 
-const SURF_STYLES: { key: SurfStyle; label: string }[] = [
+const BOARD_TYPE_OPTIONS: { key: SurfStyle; label: string }[] = [
   { key: 'shortboard', label: 'Shortboard' },
   { key: 'midlength', label: 'Mid-length' },
   { key: 'softtop', label: 'Soft-top' },
   { key: 'longboard', label: 'Longboard' },
 ];
 
-const ACCOMMODATION_KINDS: { key: AccommodationKind; title: string; desc: string }[] = [
-  { key: 'villa', title: 'Villa', desc: 'Shared house with private rooms' },
-  { key: 'hostel', title: 'Hostel', desc: 'Budget-friendly, social vibe' },
-  { key: 'hotel', title: 'Hotel', desc: 'Private rooms, more comfort' },
-  { key: 'surfcamp', title: 'Surf camp', desc: 'Surf-focused, all-in package' },
-  { key: 'bungalow', title: 'Bungalow', desc: 'Standalone, close to the beach' },
-  { key: 'apartment', title: 'Apartment', desc: 'Self-catering, your own space' },
-  { key: 'guesthouse', title: 'Guesthouse', desc: 'Homey, locally run' },
-  { key: 'ecolodge', title: 'Eco lodge', desc: 'Off-grid, nature-immersed' },
-  { key: 'other', title: 'Other', desc: 'Something else' },
+const VISIBILITIES: {
+  key: Visibility;
+  title: string;
+  desc: string;
+  icon: keyof typeof Ionicons.glyphMap;
+}[] = [
+  { key: 'public', title: 'Public', desc: 'Anyone can find it', icon: 'globe-outline' },
+  { key: 'friends', title: 'Friends', desc: 'Your connections', icon: 'people-outline' },
+  { key: 'private', title: 'Private', desc: 'Invite only', icon: 'lock-closed-outline' },
 ];
 
-const VISIBILITIES: { key: Visibility; title: string; desc: string }[] = [
-  { key: 'public', title: 'Public', desc: 'Anyone can discover and request to join' },
-  { key: 'friends', title: 'Friends', desc: 'Visible to your connections only' },
-  { key: 'private', title: 'Private', desc: 'Only people you invite can see and join' },
-];
-
-const BUDGET_TIERS: { key: 'low' | 'medium' | 'high'; title: string }[] = [
-  { key: 'low', title: 'Budget' },
-  { key: 'medium', title: 'Mid-range' },
-  { key: 'high', title: 'Premium' },
-];
-
-const DURATION_UNITS: { key: 'days' | 'weeks'; label: string }[] = [
-  { key: 'days', label: 'Days' },
-  { key: 'weeks', label: 'Weeks' },
-];
-
-const formatUsd = (n: number) => `$${Math.round(n).toLocaleString('en-US')}`;
-const formatRange = (r: { min: number; max: number }) =>
-  `${formatUsd(r.min)} – ${formatUsd(r.max)}`;
-const toDays = (value: string, unit: 'days' | 'weeks'): number => {
-  const n = parseInt(value, 10);
-  if (!Number.isFinite(n) || n <= 0) return 0;
-  return unit === 'weeks' ? n * 7 : n;
+const ACCOMMODATION_LABEL: Record<AccommodationKind, string> = {
+  villa: 'Villa',
+  hostel: 'Hostel',
+  hotel: 'Hotel',
+  surfcamp: 'Surf camp',
+  bungalow: 'Bungalow',
+  apartment: 'Apartment',
+  guesthouse: 'Guesthouse',
+  ecolodge: 'Eco lodge',
+  other: 'Other',
 };
 
-// DB constraint: minimum age-range span per hosting style (A:7, B:5, C:2).
-const AGE_WINDOW_BY_STYLE: Record<HostingStyle, number> = { A: 7, B: 5, C: 2 };
+const WAVE_SHAPE_TITLE: Record<WaveShapeKind, string> = {
+  soft: 'Mellow',
+  wally: 'Wally',
+  barrel: 'Barrel',
+};
 
-const STEPS = ['basics', 'surfSetup', 'accommodation', 'budget', 'preview'] as const;
-type StepKey = (typeof STEPS)[number];
+// Short month labels used by the When summary value.
+const MONTH_SHORT: Record<string, string> = {
+  '01': 'Jan', '02': 'Feb', '03': 'Mar', '04': 'Apr', '05': 'May', '06': 'Jun',
+  '07': 'Jul', '08': 'Aug', '09': 'Sep', '10': 'Oct', '11': 'Nov', '12': 'Dec',
+};
 
-interface CreateTripWizardProps {
-  hostId: string | null;
-  onCreated: () => void;
-  onCancel: () => void;
-  /** When provided, the wizard runs in edit mode (prefilled, partial update). */
-  initialTrip?: GroupTrip;
-  /** Hosting style this flow creates (create mode). Defaults to 'A'; 'B' reuses
-   *  this same flow. Edit mode keeps the trip's existing style. */
-  hostingStyle?: HostingStyle;
-}
+// -----------------------------------------------------------------------------
+// Field error keys (per spec). Used as keys in useFieldErrors.
+// -----------------------------------------------------------------------------
+type FieldKey =
+  | 'title'
+  | 'description'
+  | 'heroImage'
+  | 'destination'
+  | 'when'
+  | 'age'
+  | 'skill'
+  | 'waveShape'
+  | 'accommodationKind'
+  | 'accommodationGate'
+  | 'specificStay'
+  | 'budget';
 
-interface WizardState {
-  // Step 1 — Trip basics
-  title: string;
-  heroImageUri: string | null;
-  destination: string; // display label, also mirrored to group_trips.destination_country
-  destinationGeo: HomeBreakSelection | null; // precise geocode → group_trip_destinations
-  datesMode: 'months' | 'exact';
-  monthFrom: string; // YYYY-MM (months mode)
-  monthTo: string; // YYYY-MM (months mode)
-  startDate: Date | null; // exact mode
-  endDate: Date | null; // exact mode
-  durationValue: string; // estimate-only, not persisted
-  durationUnit: 'days' | 'weeks';
-  tripVibe: TripVibe | null;
-  // Step 2 — Surf setup
-  skillLevel: SurfLevel | null;
-  waveFat: number; // 0–10 (fat ↔ barreling slider)
-  waveSize: number; // ft (single size slider → stored as wave_size_min = wave_size_max)
-  surfStyles: SurfStyle[]; // board types → target_surf_styles
+// Component-only sheet keys (NOT serialized in draft state).
+type SheetKey =
+  | 'levels'
+  | 'wave'        // merged shape + size sheet (Step 1)
+  | 'waveSize'   // legacy — kept for back-compat
+  | 'waveShape'  // legacy — kept for back-compat
+  | 'style'
+  | 'age'
+  | 'when'
+  | 'where'
+  | 'howWorks'
+  | 'vibe'
+  | 'stayType'
+  | 'specificStay';
+
+// -----------------------------------------------------------------------------
+// Wizard state shape (serializable so it round-trips through AsyncStorage).
+// -----------------------------------------------------------------------------
+interface WizardState extends Record<string, unknown> {
+  version: number;
+
+  // Step 1 — audience
   ageMin: string;
   ageMax: string;
-  // Step 3 — Accommodation (all optional)
+  skillLevels: SurfLevel[];
+  waveShape: WaveShapeKind | null;
+  waveSizeMin: number;
+  waveSizeMax: number;
+  surfStyles: SurfStyle[];
+
+  // Step 2 — basics
+  destination: string;
+  destinationGeo: HomeBreakSelection | null;
+  datesMode: 'months' | 'exact';
+  monthFrom: string; // YYYY-MM
+  monthTo: string;
+  startDateISO: string | null;
+  endDateISO: string | null;
+  durationDays: number | null;
+  title: string;
+  heroImageUri: string | null;
+  description: string;
+
+  // Step 3 — vibez
+  tripStructure: TripStructureSlug[];
+  tripVibes: TripVibeSlug[];
   accommodationKind: AccommodationKind | null;
+  accommodationLocked: boolean | null;
+
+  // Specific-stay details (lives on Step 3 now, opened via sheet).
   accommodationName: string;
   accommodationUrl: string;
   accommodationImageUri: string | null;
-  // Step 5 — Budget (estimated via GPT, persisted to budget_min/max/currency)
-  budgetEstimate: BudgetEstimate | null;
-  budgetTier: 'low' | 'medium' | 'high' | null;
-  budgetManualMin: string; // fallback when estimate fails
+
+  // Step 4 — budget
+  budgetTier: BudgetTier | null;
+  manualBudget: boolean;
+  budgetManualMin: string;
   budgetManualMax: string;
-  budgetCurrency: string;
-  // Step 6 — Visibility
+
+  // Step 5 — preview
   visibility: Visibility;
 }
 
 const INITIAL_STATE: WizardState = {
-  title: '',
-  heroImageUri: null,
+  version: WIZARD_STATE_VERSION,
+  // Age has no default — host must enter.
+  ageMin: '',
+  ageMax: '',
+  // Levels default to all 3 → renders "Any" on the card.
+  skillLevels: ['beginner', 'intermediate', 'advanced'],
+  // Wave defaults: Mellow shape + 2-4 ft size.
+  waveShape: 'soft',
+  waveSizeMin: 2,
+  waveSizeMax: 4,
+  // Boards default to all 4 → renders "All" on the card.
+  surfStyles: ['shortboard', 'midlength', 'softtop', 'longboard'],
   destination: '',
   destinationGeo: null,
   datesMode: 'months',
   monthFrom: '',
   monthTo: '',
-  startDate: null,
-  endDate: null,
-  durationValue: '',
-  durationUnit: 'days',
-  tripVibe: null,
-  skillLevel: null,
-  waveFat: 5,
-  waveSize: 6,
-  surfStyles: [],
-  ageMin: '',
-  ageMax: '',
+  startDateISO: null,
+  endDateISO: null,
+  durationDays: null,
+  title: '',
+  heroImageUri: null,
+  description: '',
+  tripStructure: [],
+  tripVibes: [],
   accommodationKind: null,
+  accommodationLocked: null,
   accommodationName: '',
   accommodationUrl: '',
   accommodationImageUri: null,
-  budgetEstimate: null,
   budgetTier: null,
+  manualBudget: false,
   budgetManualMin: '',
   budgetManualMax: '',
-  budgetCurrency: 'USD',
   visibility: 'public',
 };
 
-const stateFromTrip = (trip: GroupTrip): WizardState => {
-  const months = trip.date_months ?? [];
-  const sorted = [...months].sort();
-  const firstLevel = (trip.target_surf_levels ?? []).find(l =>
-    SKILL_LEVELS.some(s => s.key === l)
-  ) as SurfLevel | undefined;
-  const firstKind = (trip.accommodation_type ?? []).find(t =>
-    ACCOMMODATION_KINDS.some(k => k.key === t)
-  ) as AccommodationKind | undefined;
-  return {
-    title: trip.title ?? '',
-    heroImageUri: trip.hero_image_url ?? null,
-    destination:
-      trip.destination_area?.trim() ||
-      trip.destination_country?.trim() ||
-      '',
-    destinationGeo: null, // not re-fetched in edit mode (destination is locked)
-    datesMode: trip.start_date ? 'exact' : 'months',
-    monthFrom: sorted[0] ?? '',
-    monthTo: sorted.length > 1 ? sorted[sorted.length - 1] : '',
-    startDate: parseISODate(trip.start_date),
-    endDate: parseISODate(trip.end_date),
-    durationValue: '', // not persisted; edit mode opens budget on manual fallback
-    durationUnit: 'days',
-    tripVibe: (trip.trip_vibe as TripVibe) ?? null,
-    skillLevel: firstLevel ?? null,
-    waveFat: trip.wave_fat_to_barreling ?? 5,
-    waveSize: trip.wave_size_min ?? 6,
-    surfStyles: (trip.target_surf_styles ?? []).filter(s =>
-      SURF_STYLES.some(x => x.key === s)
-    ) as SurfStyle[],
-    ageMin: trip.age_min != null ? String(trip.age_min) : '',
-    ageMax: trip.age_max != null ? String(trip.age_max) : '',
-    accommodationKind: firstKind ?? null,
-    accommodationName: trip.accommodation_name ?? '',
-    accommodationUrl: trip.accommodation_url ?? '',
-    accommodationImageUri: trip.accommodation_image_url ?? null,
-    budgetEstimate: null,
-    budgetTier: null,
-    budgetManualMin: trip.budget_min != null ? String(trip.budget_min) : '',
-    budgetManualMax: trip.budget_max != null ? String(trip.budget_max) : '',
-    budgetCurrency: trip.budget_currency ?? 'USD',
-    visibility: (trip.visibility as Visibility) ?? 'public',
-  };
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+const FONT_INTER = Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter';
+const FONT_MONTSERRAT = Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat';
+
+const COLORS = {
+  brandTeal: '#0788B0',
+  brandTealText: '#066b8c',
+  brandTealTint: '#E6F4F8',
+  cyan: '#05BCD3',
+  inkDark: '#212121',
+  inkBody: '#222B30',
+  textMuted: '#7B7B7B',
+  textPlaceholder: '#B0B0B0',
+  borderField: '#CFCFCF',
+  borderCard: '#E0E0E0',
+  borderHairline: '#EEEEEE',
+  surfaceCard: '#FFFFFF',
+  surfaceMuted: '#F2F2F2',
+  errorBorder: '#FF0000',
+  errorText: '#C0392B',
+  errorBg: '#FDECEA',
+  success: '#34C759',
+  amber: '#E5A100',
 };
 
-// ---------------------------------------------------------------------------
-// Month helpers — the wireframe shows From/To month boxes; we store the
-// inclusive range into date_months (capped) to keep "is past" logic working.
-// ---------------------------------------------------------------------------
-const upcomingMonths = (count = 12): { value: string; label: string }[] => {
-  const out: { value: string; label: string }[] = [];
-  const now = new Date();
-  const thisYear = now.getFullYear();
-  for (let i = 0; i < count; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
-    const value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-    const short = d.toLocaleString('en-US', { month: 'short' });
-    const label = d.getFullYear() === thisYear ? short : `${short} '${String(d.getFullYear()).slice(2)}`;
-    out.push({ value, label });
-  }
-  return out;
-};
-
-const monthLabel = (value: string): string => {
-  if (!value) return '';
-  const [y, m] = value.split('-').map(Number);
-  const d = new Date(y, (m || 1) - 1, 1);
-  const short = d.toLocaleString('en-US', { month: 'short' });
-  return d.getFullYear() === new Date().getFullYear() ? short : `${short} ${d.getFullYear()}`;
-};
-
-// Exact-date helpers (mirror FlowB)
 const startOfDay = (d: Date): Date => {
   const c = new Date(d);
   c.setHours(0, 0, 0, 0);
@@ -284,14 +330,11 @@ const parseISODate = (s: string | null): Date | null => {
   const d = new Date(`${s}T00:00:00`);
   return isNaN(d.getTime()) ? null : d;
 };
-const formatSingleDate = (d: Date | null): string =>
-  d ? d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
 const dayCount = (start: Date | null, end: Date | null): number => {
   if (!start || !end) return 0;
   const ms = startOfDay(end).getTime() - startOfDay(start).getTime();
   return ms < 0 ? 0 : Math.round(ms / 86400000);
 };
-
 const expandMonthRange = (from: string, to: string, cap = 6): string[] => {
   if (!from) return to ? [to] : [];
   if (!to || to === from) return [from];
@@ -306,11 +349,33 @@ const expandMonthRange = (from: string, to: string, cap = 6): string[] => {
   }
   return out;
 };
+const formatUsd = (n: number) => `$${Math.round(n).toLocaleString('en-US')}`;
+const formatRange = (r: { min: number; max: number }) =>
+  `${formatUsd(r.min)} – ${formatUsd(r.max)}`;
+const isRemoteUrl = (uri: string | null): boolean => !!uri && /^https?:\/\//.test(uri);
 
-// ---------------------------------------------------------------------------
-// Image picker (mirrors the previous wizard / OnboardingStep4Screen usage)
-// ---------------------------------------------------------------------------
-const pickImage = async (): Promise<string | null> => {
+// Short label for a YYYY-MM string. Empty input returns ''.
+const monthShort = (ym: string): string => {
+  if (!ym || ym.length < 7) return '';
+  return MONTH_SHORT[ym.slice(5, 7)] ?? '';
+};
+const monthYear = (ym: string): string => {
+  if (!ym || ym.length < 7) return '';
+  return ym.slice(0, 4);
+};
+
+// Format a YYYY-MM-DD ISO date as "Jun 15, 2027".
+const formatLongDate = (iso: string | null): string => {
+  if (!iso) return '';
+  const d = parseISODate(iso);
+  if (!d) return '';
+  return `${MONTH_SHORT[String(d.getMonth() + 1).padStart(2, '0')]} ${d.getDate()}, ${d.getFullYear()}`;
+};
+
+// -----------------------------------------------------------------------------
+// Image picker (mirrors the previous wizard behavior)
+// -----------------------------------------------------------------------------
+const pickImage = async (aspect: [number, number] = [12, 5]): Promise<string | null> => {
   try {
     const ImagePicker = require('expo-image-picker');
     const usePhotoPicker = Platform.OS === 'android' && Platform.Version >= 33;
@@ -324,116 +389,465 @@ const pickImage = async (): Promise<string | null> => {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       allowsEditing: true,
-      aspect: [16, 9],
+      aspect,
       quality: 0.85,
     });
     if (!result.canceled && result.assets?.[0]) {
       return result.assets[0].uri;
     }
   } catch (e) {
-    console.error('[CreateTripWizard] pickImage error:', e);
+    console.error('[CreateTripFlowA] pickImage error:', e);
   }
   return null;
 };
 
-// ---------------------------------------------------------------------------
-// Main wizard
-// ---------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
+// State <-> GroupTrip mapping
+// -----------------------------------------------------------------------------
+const stateFromTrip = (trip: GroupTrip): WizardState => {
+  const months = trip.date_months ?? [];
+  const sorted = [...months].sort();
+  const skillLevels = (trip.target_surf_levels ?? []).filter(l =>
+    SKILL_LEVEL_OPTIONS.some(s => s.key === l)
+  ) as SurfLevel[];
+  const firstKind = (trip.accommodation_type ?? []).find(t =>
+    Object.keys(ACCOMMODATION_LABEL).includes(t)
+  ) as AccommodationKind | undefined;
+  // Filter incoming slugs to known values so a stale row can't poison the UI.
+  const validStructureSlugs = new Set(TRIP_STRUCTURE_OPTIONS.map(o => o.slug));
+  const validVibeSlugs = new Set(TRIP_VIBE_OPTIONS.map(o => o.slug));
+  const tripStructure = (trip.trip_structure ?? []).filter((s): s is TripStructureSlug =>
+    validStructureSlugs.has(s as TripStructureSlug),
+  );
+  const tripVibes = (trip.trip_vibes ?? []).filter((v): v is TripVibeSlug =>
+    validVibeSlugs.has(v as TripVibeSlug),
+  );
+  const validWaveShapes = (trip.wave_shapes ?? []).filter(w =>
+    ['soft', 'wally', 'barrel'].includes(w as string)
+  ) as WaveShapeKind[];
+  return {
+    version: WIZARD_STATE_VERSION,
+    ageMin: trip.age_min != null ? String(trip.age_min) : '',
+    ageMax: trip.age_max != null ? String(trip.age_max) : '',
+    skillLevels,
+    // Trip rows still store an array; we keep the first entry as the single value.
+    waveShape: validWaveShapes[0] ?? null,
+    waveSizeMin: trip.wave_size_min ?? 4,
+    waveSizeMax: trip.wave_size_max ?? 8,
+    surfStyles: (trip.target_surf_styles ?? []).filter(s =>
+      BOARD_TYPE_OPTIONS.some(b => b.key === s)
+    ) as SurfStyle[],
+    destination:
+      trip.destination_area?.trim() ||
+      trip.destination_country?.trim() ||
+      '',
+    destinationGeo: null,
+    datesMode: trip.start_date ? 'exact' : 'months',
+    monthFrom: sorted[0] ?? '',
+    monthTo: sorted.length > 1 ? sorted[sorted.length - 1] : '',
+    startDateISO: trip.start_date ?? null,
+    endDateISO: trip.end_date ?? null,
+    durationDays: null,
+    title: trip.title ?? '',
+    heroImageUri: trip.hero_image_url ?? null,
+    description: trip.description ?? '',
+    tripStructure,
+    tripVibes,
+    accommodationKind: firstKind ?? null,
+    accommodationLocked: trip.accommodation_name ? true : false,
+    accommodationName: trip.accommodation_name ?? '',
+    accommodationUrl: trip.accommodation_url ?? '',
+    accommodationImageUri: trip.accommodation_image_url ?? null,
+    budgetTier: null,
+    // Edit mode skips the estimate; preload manual.
+    manualBudget: true,
+    budgetManualMin: trip.budget_min != null ? String(trip.budget_min) : '',
+    budgetManualMax: trip.budget_max != null ? String(trip.budget_max) : '',
+    visibility: (trip.visibility as Visibility) ?? 'public',
+  };
+};
+
+// -----------------------------------------------------------------------------
+// Summary-row helper
+// -----------------------------------------------------------------------------
+interface SummaryRowProps {
+  label: string;
+  value?: string | null;
+  placeholder?: string;
+  onPress: () => void;
+  error?: string;
+  optional?: boolean;
+  disabled?: boolean;
+  /** When true, the top divider is hidden (use on the first row of a group). */
+  noTopDivider?: boolean;
+}
+
+const SummaryRow: React.FC<SummaryRowProps> = ({
+  label,
+  value,
+  placeholder = 'Tap to set',
+  onPress,
+  error,
+  optional,
+  disabled,
+  noTopDivider,
+}) => {
+  const hasValue = !!(value && value.trim().length > 0);
+  const [pressed, setPressed] = useState(false);
+  return (
+    <View>
+      {!noTopDivider ? <View style={rowStyles.divider} /> : null}
+      <TouchableOpacity
+        activeOpacity={1}
+        disabled={disabled}
+        onPress={onPress}
+        onPressIn={() => !disabled && setPressed(true)}
+        onPressOut={() => setPressed(false)}
+        accessibilityRole="button"
+        accessibilityLabel={`${label}: ${hasValue ? value : placeholder}`}
+        style={[
+          rowStyles.row,
+          pressed && rowStyles.rowPressed,
+          !!error && rowStyles.rowError,
+          disabled && rowStyles.rowDisabled,
+        ]}
+      >
+        <Text style={[rowStyles.label, disabled && rowStyles.labelDisabled]}>{label}</Text>
+        <View style={rowStyles.valueWrap}>
+          {hasValue ? (
+            <Text
+              style={[rowStyles.value, disabled && rowStyles.valueDisabled]}
+              numberOfLines={1}
+            >
+              {value}
+            </Text>
+          ) : optional ? (
+            <Text style={rowStyles.placeholderOptional} numberOfLines={1}>
+              Optional · Tap to set
+            </Text>
+          ) : (
+            <Text style={rowStyles.placeholder} numberOfLines={1}>
+              {placeholder}
+            </Text>
+          )}
+          <Ionicons
+            name="chevron-forward"
+            size={18}
+            color={disabled ? COLORS.textPlaceholder : COLORS.textMuted}
+            style={{ marginLeft: 8 }}
+          />
+        </View>
+      </TouchableOpacity>
+      {error ? <Text style={rowStyles.error}>{error}</Text> : null}
+    </View>
+  );
+};
+
+const rowStyles = StyleSheet.create({
+  // Hairline at the top of each row creates a clean list rhythm without
+  // boxing every row in a 1px border.
+  divider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: COLORS.borderHairline,
+    marginHorizontal: 4,
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: 56,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    backgroundColor: COLORS.surfaceCard,
+    borderRadius: 10,
+  },
+  rowPressed: {
+    backgroundColor: '#F8FAFB',
+  },
+  rowError: {
+    borderLeftWidth: 3,
+    borderLeftColor: COLORS.errorBorder,
+    paddingLeft: 9,
+  },
+  rowDisabled: {
+    opacity: 0.6,
+  },
+  label: {
+    fontFamily: FONT_INTER,
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.inkBody,
+    marginRight: 12,
+    flexShrink: 0,
+  },
+  labelDisabled: {
+    color: COLORS.textMuted,
+  },
+  valueWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  value: {
+    flex: 1,
+    textAlign: 'right',
+    fontFamily: FONT_INTER,
+    fontSize: 14,
+    fontWeight: '400',
+    color: COLORS.inkBody,
+  },
+  valueDisabled: {
+    color: COLORS.textMuted,
+  },
+  placeholder: {
+    flex: 1,
+    textAlign: 'right',
+    fontFamily: FONT_INTER,
+    fontSize: 14,
+    fontWeight: '400',
+    color: COLORS.textPlaceholder,
+  },
+  placeholderOptional: {
+    flex: 1,
+    textAlign: 'right',
+    fontFamily: FONT_INTER,
+    fontSize: 14,
+    fontWeight: '400',
+    color: COLORS.textMuted,
+  },
+  error: {
+    marginTop: 4,
+    marginLeft: 12,
+    marginBottom: 4,
+    fontFamily: FONT_INTER,
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '500',
+    color: COLORS.errorText,
+  },
+});
+
+// -----------------------------------------------------------------------------
+// Summary value formatters
+// -----------------------------------------------------------------------------
+const formatLevelsSummary = (levels: SurfLevel[]): string => {
+  if (levels.length === 0) return '';
+  // Real selectable levels are beginner / intermediate / advanced (3).
+  // When all 3 are selected → collapse to "Any" for a clean value display.
+  const realLevels = levels.filter(l => l !== 'all' && l !== 'pro');
+  if (realLevels.length >= 3) return 'Any';
+  // Stack level names vertically (one per line).
+  return realLevels
+    .map(k => SKILL_LEVEL_OPTIONS.find(o => o.key === k)?.label ?? k)
+    .join('\n');
+};
+
+const formatWaveSizeSummary = (min: number, max: number): string => {
+  if (min === max) return `${min} ft`;
+  return `${min} – ${max} ft`;
+};
+
+const formatStyleSummary = (styles: SurfStyle[]): string => {
+  if (styles.length === 0) return '';
+  // Real selectable types are shortboard / midlength / softtop / longboard (4).
+  // When the host picks all 4 → collapse to "All" for a clean value display.
+  const realStyles = styles.filter(s => s !== 'all');
+  if (realStyles.length >= 4) return 'All';
+  // Stack board names vertically (one per line) — per Eyal's spec.
+  return realStyles
+    .map(k => BOARD_TYPE_OPTIONS.find(o => o.key === k)?.label ?? k)
+    .join('\n');
+};
+
+const formatAgeSummary = (min: string, max: string): string => {
+  if (!min || !max) return '';
+  return `${min} - ${max}`;
+};
+
+const formatWhenSummary = (state: WizardState): string => {
+  if (state.datesMode === 'exact') {
+    if (!state.startDateISO) return '';
+    const start = state.startDateISO;
+    const end = state.endDateISO;
+    const startD = parseISODate(start);
+    const endD = parseISODate(end);
+    const days = dayCount(startD, endD);
+    if (!end || !endD) {
+      return formatLongDate(start);
+    }
+    const startMonthDay = `${MONTH_SHORT[String(startD!.getMonth() + 1).padStart(2, '0')]} ${startD!.getDate()}`;
+    const endMonthDay = `${MONTH_SHORT[String(endD.getMonth() + 1).padStart(2, '0')]} ${endD.getDate()}`;
+    const endYear = endD.getFullYear();
+    // Specific dates already encode the length — no need to show " · N days".
+    return `${startMonthDay} – ${endMonthDay}, ${endYear}`;
+  }
+  // months mode
+  const from = state.monthFrom;
+  const to = state.monthTo;
+  const days = state.durationDays ?? 0;
+  if (!from && !to) {
+    if (days > 0) return `${days} day${days === 1 ? '' : 's'}`;
+    return '';
+  }
+  if (from && !to) {
+    const part = `${monthShort(from)} ${monthYear(from)}`.trim();
+    if (days > 0) return `${part} · ${days} day${days === 1 ? '' : 's'}`;
+    return part;
+  }
+  if (from && to) {
+    const sameYear = monthYear(from) === monthYear(to);
+    const part = sameYear
+      ? `${monthShort(from)} – ${monthShort(to)} ${monthYear(to)}`
+      : `${monthShort(from)} ${monthYear(from)} – ${monthShort(to)} ${monthYear(to)}`;
+    if (days > 0) return `${part} · ${days} day${days === 1 ? '' : 's'}`;
+    return part;
+  }
+  return '';
+};
+
+const formatTagsSummary = <T extends string>(
+  selected: T[],
+  options: { slug: T; label: string }[],
+  truncateAt = 2,
+): string => {
+  if (selected.length === 0) return '';
+  const labels = selected
+    .map(s => options.find(o => o.slug === s)?.label ?? s)
+    // Some labels have an em-dash with extra context — keep just the head.
+    .map(l => l.split(' — ')[0].split(' – ')[0]);
+  if (labels.length <= truncateAt) return labels.join(', ');
+  const head = labels.slice(0, truncateAt).join(', ');
+  return `${head} +${labels.length - truncateAt}`;
+};
+
+const formatSpecificStaySummary = (state: WizardState): string => {
+  const parts: string[] = [];
+  if (state.accommodationName.trim()) parts.push(state.accommodationName.trim());
+  if (state.accommodationUrl.trim()) parts.push('URL set');
+  if (state.accommodationImageUri) parts.push('Photo set');
+  return parts.join(' · ');
+};
+
+// =============================================================================
+// Component
+// =============================================================================
+export interface CreateTripFlowAProps {
+  hostId: string | null;
+  onCreated: () => void;
+  onCancel: () => void;
+  initialTrip?: GroupTrip;
+  hostingStyle?: HostingStyle;
+}
+
 export default function CreateTripFlowA({
   hostId,
   onCreated,
   onCancel,
   initialTrip,
   hostingStyle = 'A',
-}: CreateTripWizardProps) {
+}: CreateTripFlowAProps): React.ReactElement {
   const editMode = !!initialTrip;
   const effectiveStyle: HostingStyle = initialTrip?.hosting_style ?? hostingStyle;
   const ageWindow = AGE_WINDOW_BY_STYLE[effectiveStyle];
-  const [state, setState] = useState<WizardState>(
-    initialTrip ? stateFromTrip(initialTrip) : INITIAL_STATE
+
+  // ---- Wizard state (draft-backed) ----------------------------------------
+  const initialState = useMemo<WizardState>(
+    () => (initialTrip ? stateFromTrip(initialTrip) : INITIAL_STATE),
+    // initialTrip is stable for the wizard's lifetime; intentionally empty deps.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
   );
-  const [stepIdx, setStepIdx] = useState(0);
+  const { state, setState, hasRestoredDraft, clearDraft, startSaving } =
+    useTripWizardDraft<WizardState>(initialState, {
+      editMode,
+      tripId: initialTrip?.id ?? null,
+    });
+
+  // ---- Validation registry ------------------------------------------------
+  const { errors, setError, clearErrors, firstErrorField } = useFieldErrors<FieldKey>();
+
+  // ---- Step navigation ---------------------------------------------------
+  const [step, setStep] = useState<StepKey>('audience');
+  const stepIdx = useMemo(() => Math.max(0, STEPS.indexOf(step)), [step]);
+
+  // ---- Sheet management --------------------------------------------------
+  const [openSheet, setOpenSheet] = useState<SheetKey | null>(null);
+
+  // ---- Dirty tracking (drives discard-confirm prompt) ---------------------
+  const [hasBeenTouched, setHasBeenTouched] = useState(false);
+  const draftStartedRef = useRef(false);
+
+  // ---- Submit / budget UI state ------------------------------------------
   const [submitting, setSubmitting] = useState(false);
-  const [openMonthPicker, setOpenMonthPicker] = useState<'from' | 'to' | null>(null);
-  const [androidPicker, setAndroidPicker] = useState<null | 'start' | 'end'>(null);
-  const [showDestPicker, setShowDestPicker] = useState(false);
+  const [showResumeBanner, setShowResumeBanner] = useState(false);
+
+  // Budget estimate (transient — not persisted)
+  const [budgetEstimate, setBudgetEstimate] = useState<BudgetEstimate | null>(null);
   const [budgetLoading, setBudgetLoading] = useState(false);
   const [budgetError, setBudgetError] = useState<string | null>(null);
   const [lastEstimateKey, setLastEstimateKey] = useState<string | null>(null);
 
-  const step: StepKey = STEPS[stepIdx];
-  const months = useMemo(() => upcomingMonths(12), []);
-
-  const update = <K extends keyof WizardState>(key: K, value: WizardState[K]) =>
-    setState(s => ({ ...s, [key]: value }));
-
-  const onChangeDate = (which: 'start' | 'end', d?: Date) => {
-    if (!d) return;
-    if (which === 'start') {
-      setState(s => {
-        const next: WizardState = { ...s, startDate: d };
-        if (s.endDate && startOfDay(s.endDate) < startOfDay(d)) next.endDate = null;
-        return next;
-      });
-    } else {
-      update('endDate', d);
+  // Show the resume banner whenever a draft restore is detected — but if the
+  // restored draft is from a stale schema version, drop it instead.
+  useEffect(() => {
+    if (!hasRestoredDraft) return;
+    const v = (state as WizardState).version;
+    if (v !== WIZARD_STATE_VERSION) {
+      void clearDraft();
+      setState(initialState);
+      setShowResumeBanner(false);
+      return;
     }
-  };
+    setShowResumeBanner(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasRestoredDraft]);
 
-  const renderDateField = (which: 'start' | 'end') => {
-    const value = which === 'start' ? state.startDate : state.endDate;
-    const min = which === 'end' ? state.startDate ?? undefined : undefined;
-    if (Platform.OS === 'ios') {
-      return (
-        <View style={styles.dateField}>
-          <Text style={styles.dateFieldLabel}>{which === 'start' ? 'Start' : 'End'}</Text>
-          <DateTimePicker
-            value={value ?? new Date()}
-            mode="date"
-            display="compact"
-            minimumDate={min}
-            onChange={(_, d) => onChangeDate(which, d)}
-          />
-        </View>
-      );
+  // -----------------------------------------------------------------------
+  // Helpers tied to component scope
+  // -----------------------------------------------------------------------
+  const update = useCallback(
+    <K extends keyof WizardState>(key: K, value: WizardState[K]) => {
+      setState(prev => ({ ...prev, [key]: value }));
+      if (!hasBeenTouched) setHasBeenTouched(true);
+    },
+    [setState, hasBeenTouched],
+  );
+
+  const startDateObj = useMemo(() => parseISODate(state.startDateISO), [state.startDateISO]);
+  const endDateObj = useMemo(() => parseISODate(state.endDateISO), [state.endDateISO]);
+
+  // -----------------------------------------------------------------------
+  // Budget estimate
+  // -----------------------------------------------------------------------
+  const tripDurationDays = useCallback((): number => {
+    if (state.datesMode === 'exact') {
+      const d = dayCount(startDateObj, endDateObj);
+      return d > 0 ? d : 0;
     }
-    return (
-      <TouchableOpacity style={styles.dateBox} onPress={() => setAndroidPicker(which)}>
-        <Text style={[styles.dateBoxText, !value && styles.dateBoxPlaceholder]}>
-          {value ? formatSingleDate(value) : which === 'start' ? 'Start date' : 'End date'}
-        </Text>
-      </TouchableOpacity>
-    );
-  };
+    return state.durationDays ?? 0;
+  }, [state.datesMode, state.durationDays, startDateObj, endDateObj]);
 
-  // Fingerprint of the inputs the budget estimate depends on. Used to skip a
-  // redundant re-fetch when the user revisits the budget step unchanged.
-  // Exact dates → derive duration from start/end; months mode → the duration field.
-  const tripDurationDays = (): number =>
-    state.datesMode === 'exact'
-      ? dayCount(state.startDate, state.endDate)
-      : toDays(state.durationValue, state.durationUnit);
-
-  const estimateKey = () =>
-    [
+  const estimateKey = useCallback(() => {
+    return [
       state.destination,
       state.destinationGeo?.country ?? '',
       tripDurationDays(),
       state.accommodationKind ?? '',
     ].join('|');
+  }, [state.destination, state.destinationGeo, state.accommodationKind, tripDurationDays]);
 
-  // Fetch the GPT budget estimate (called when leaving the accommodation step,
-  // and by the "Retry estimate" button). Reuses the cache if inputs are unchanged.
-  const maybeEstimateBudget = async () => {
+  const maybeEstimateBudget = useCallback(async () => {
+    if (editMode) return;
     const key = estimateKey();
-    if (state.budgetEstimate && lastEstimateKey === key && !budgetError) return;
+    if (budgetEstimate && lastEstimateKey === key && !budgetError) return;
 
     const durationDays = tripDurationDays();
     const destination =
       state.destinationGeo?.short || state.destinationGeo?.name || state.destination;
     if (!destination || durationDays < 1) {
       setBudgetError('Missing trip details');
-      setState(s => ({ ...s, budgetEstimate: null }));
+      setBudgetEstimate(null);
       return;
     }
 
@@ -447,112 +861,203 @@ export default function CreateTripFlowA({
         durationDays,
         accommodationType: state.accommodationKind ?? null,
       });
-      setState(s => ({ ...s, budgetEstimate: est }));
+      setBudgetEstimate(est);
       setLastEstimateKey(key);
     } catch (e: any) {
       console.warn('[CreateTripFlowA] budget estimate failed:', e);
       setBudgetError(e?.message || 'Could not estimate budget');
-      setState(s => ({ ...s, budgetEstimate: null }));
+      setBudgetEstimate(null);
     } finally {
       setBudgetLoading(false);
     }
-  };
+  }, [
+    editMode,
+    estimateKey,
+    budgetEstimate,
+    lastEstimateKey,
+    budgetError,
+    tripDurationDays,
+    state.destination,
+    state.destinationGeo,
+    state.accommodationKind,
+  ]);
 
-  // Resolve the budget to persist: selected tier, else manual fallback fields.
-  const resolveBudget = (): { min: number | null; max: number | null; currency: string | null } => {
-    if (state.budgetEstimate && state.budgetTier) {
-      const r = state.budgetEstimate.ranges[state.budgetTier];
+  const resolveBudget = useCallback((): {
+    min: number | null;
+    max: number | null;
+    currency: string | null;
+  } => {
+    if (budgetEstimate && state.budgetTier && !state.manualBudget) {
+      const r = budgetEstimate.ranges[state.budgetTier];
       return { min: Math.round(r.min), max: Math.round(r.max), currency: 'USD' };
     }
     const min = state.budgetManualMin ? parseInt(state.budgetManualMin, 10) : null;
     const max = state.budgetManualMax ? parseInt(state.budgetManualMax, 10) : null;
     return { min, max, currency: min != null || max != null ? 'USD' : null };
-  };
+  }, [
+    budgetEstimate,
+    state.budgetTier,
+    state.manualBudget,
+    state.budgetManualMin,
+    state.budgetManualMax,
+  ]);
 
-  // Per-step validation — returns error message or null if valid.
-  const validateStep = (): string | null => {
-    const s = state;
+  // -----------------------------------------------------------------------
+  // Validation — per-step. Returns true if step is valid (no errors emitted).
+  // -----------------------------------------------------------------------
+  const validateStep = useCallback((): boolean => {
+    clearErrors();
+    let ok = true;
+    const fail = (field: FieldKey, msg: string) => {
+      setError(field, msg);
+      ok = false;
+    };
+
     switch (step) {
-      case 'basics':
-        if (!s.title.trim()) return 'Please add a trip name.';
-        if (!s.heroImageUri) return 'Please add a cover photo.';
-        if (!editMode && !s.destination.trim()) return 'Please pick a destination.';
-        // Duration feeds the budget estimate. In months mode it's a required
-        // field; in exact mode it's derived from the dates, so it's not asked.
-        if (!editMode && s.datesMode === 'months' && toDays(s.durationValue, s.durationUnit) < 1)
-          return 'Please enter a trip duration.';
-        if (
-          s.datesMode === 'exact' &&
-          s.startDate &&
-          s.endDate &&
-          startOfDay(s.endDate) < startOfDay(s.startDate)
-        )
-          return 'End date must be on or after the start date.';
-        return null;
-      case 'surfSetup': {
-        if (!s.skillLevel) return 'Please pick a skill level.';
-        const min = parseInt(s.ageMin, 10);
-        const max = parseInt(s.ageMax, 10);
-        if (Number.isNaN(min) || Number.isNaN(max)) return 'Please enter an age range.';
-        if (min < 16 || max > 99) return 'Ages must be between 16 and 99.';
-        if (max < min) return 'Max age must be ≥ min age.';
-        if (max - min < ageWindow) return `Age range must span at least ${ageWindow} years.`;
-        return null;
-      }
-      case 'accommodation':
-        return null; // optional — Continue acts as Skip
-      case 'budget': {
-        if (s.budgetEstimate) {
-          if (!s.budgetTier) return 'Please pick a budget tier.';
-          return null;
+      case 'audience': {
+        const min = parseInt(state.ageMin, 10);
+        const max = parseInt(state.ageMax, 10);
+        if (Number.isNaN(min) || Number.isNaN(max)) {
+          fail('age', 'Add a minimum and maximum age');
+        } else if (min < 16 || max > 99 || min > 99 || max < 16) {
+          fail('age', 'Ages must be 16–99');
+        } else if (max < min) {
+          fail('age', 'Maximum age must be at least the minimum');
+        } else if (max - min < ageWindow) {
+          fail(
+            'age',
+            `Age range must span at least ${ageWindow} years (currently ${max - min}).`,
+          );
         }
-        // Fallback manual path
-        if (!s.budgetManualMin || !s.budgetManualMax)
-          return 'Please enter a budget min and max.';
-        const min = parseInt(s.budgetManualMin, 10);
-        const max = parseInt(s.budgetManualMax, 10);
-        if (Number.isNaN(min) || Number.isNaN(max)) return 'Budget must be numeric.';
-        if (min < 0 || max < 0) return 'Budget must be ≥ 0.';
-        if (min > max) return 'Min must be ≤ max.';
-        return null;
+        if (state.skillLevels.length === 0) fail('skill', 'Pick at least one skill level');
+        if (state.waveShape === null) fail('waveShape', 'Pick a wave shape');
+        return ok;
+      }
+      case 'basics': {
+        if (!editMode && !state.destination.trim())
+          fail('destination', 'Pick a destination for your trip');
+
+        if (state.datesMode === 'months') {
+          if (!state.monthFrom) fail('when', 'Pick at least one month for your trip');
+          else if (!state.durationDays || state.durationDays < 1)
+            fail('when', 'Pick a trip length');
+        } else {
+          if (!state.startDateISO) fail('when', 'Pick a start date');
+          else if (
+            state.endDateISO &&
+            startDateObj &&
+            endDateObj &&
+            startOfDay(endDateObj) < startOfDay(startDateObj)
+          ) {
+            fail('when', 'End date must be on or after the start date');
+          }
+        }
+
+        if (!state.title.trim()) fail('title', 'Your trip needs a name');
+        if (!state.heroImageUri) fail('heroImage', 'Add a cover photo to publish your trip');
+        if (!state.description.trim())
+          fail('description', 'Add a description so people know what to expect');
+        return ok;
+      }
+      case 'vibez': {
+        if (!state.accommodationKind) fail('accommodationKind', 'Pick an accommodation type');
+        if (state.accommodationLocked === null)
+          fail('accommodationGate', 'Choose yes or no');
+        if (state.accommodationLocked === true) {
+          // All three details required when the gate is Yes.
+          if (
+            !state.accommodationName.trim() ||
+            !state.accommodationUrl.trim() ||
+            !state.accommodationImageUri
+          ) {
+            fail('specificStay', 'Add the stay name, link, and a photo');
+          }
+        }
+        return ok;
+      }
+      case 'budget': {
+        const usingManual = state.manualBudget || !budgetEstimate;
+        if (usingManual) {
+          if (!state.budgetManualMin || !state.budgetManualMax) {
+            fail('budget', 'Enter both a minimum and maximum');
+            return ok;
+          }
+          const mn = parseInt(state.budgetManualMin, 10);
+          const mx = parseInt(state.budgetManualMax, 10);
+          if (Number.isNaN(mn) || Number.isNaN(mx) || mn < 0 || mx < 0) {
+            fail('budget', 'Enter both a minimum and maximum');
+          } else if (mn > mx) {
+            fail('budget', 'Maximum must be at least the minimum');
+          }
+        } else {
+          if (!state.budgetTier) fail('budget', 'Pick a budget tier or enter a range');
+        }
+        return ok;
       }
       case 'preview':
-        return null;
+        return true;
     }
-  };
+  }, [
+    step,
+    state,
+    editMode,
+    ageWindow,
+    startDateObj,
+    endDateObj,
+    budgetEstimate,
+    clearErrors,
+    setError,
+  ]);
 
-  const handleNext = () => {
-    const err = validateStep();
-    if (err) {
-      Alert.alert('Hold on', err);
-      return;
-    }
-    // Kick off the budget estimate when leaving accommodation (skip in edit mode
-    // — there the budget step opens on the manual fallback prefilled from the trip).
-    if (step === 'accommodation' && !editMode) {
-      maybeEstimateBudget();
-    }
-    if (stepIdx < STEPS.length - 1) setStepIdx(stepIdx + 1);
-  };
+  // -----------------------------------------------------------------------
+  // Navigation handlers
+  // -----------------------------------------------------------------------
+  const handleNext = useCallback(() => {
+    if (!validateStep()) return;
 
-  const handleBack = () => {
-    if (stepIdx === 0) {
+    // First successful Next → enable draft autosave.
+    if (!draftStartedRef.current && !editMode) {
+      draftStartedRef.current = true;
+      startSaving();
+      setHasBeenTouched(true);
+    }
+
+    const idx = STEPS.indexOf(step);
+    const next = STEPS[idx + 1];
+    if (!next) return;
+    if (next === 'budget' && !editMode) {
+      void maybeEstimateBudget();
+    }
+    setStep(next);
+  }, [validateStep, step, editMode, startSaving, maybeEstimateBudget]);
+
+  const handleBack = useCallback(() => {
+    const idx = STEPS.indexOf(step);
+    if (idx <= 0) return;
+    setStep(STEPS[idx - 1]);
+  }, [step]);
+
+  // Discard guard — only triggers if the user has interacted with the form.
+  const { guardedCancel } = useDiscardConfirm({
+    dirty: hasBeenTouched,
+    onDiscard: async () => {
+      await clearDraft();
       onCancel();
-      return;
-    }
-    setStepIdx(stepIdx - 1);
-  };
+    },
+  });
 
-  const handleSubmit = async () => {
+  // -----------------------------------------------------------------------
+  // Submit
+  // -----------------------------------------------------------------------
+  const handleSubmit = useCallback(async () => {
+    if (!validateStep()) return;
     if (!hostId) {
       Alert.alert('Not signed in', 'Please sign in again.');
       return;
     }
     setSubmitting(true);
     try {
-      const isRemoteUrl = (uri: string | null): boolean => !!uri && /^https?:\/\//.test(uri);
-
-      // Upload hero image only if it's a freshly-picked local file.
+      // Hero image upload (skip if it's already remote).
       let heroUrl: string;
       if (isRemoteUrl(state.heroImageUri)) {
         heroUrl = state.heroImageUri!;
@@ -564,29 +1069,43 @@ export default function CreateTripFlowA({
         heroUrl = heroRes.url;
       }
 
-      // Upload accommodation photo if a fresh local file was picked.
+      // Accommodation photo upload (only when host locked in a stay).
+      const accommodationCommitted = state.accommodationLocked === true;
       let accommodationImageUrl: string | null = null;
-      if (state.accommodationImageUri) {
+      if (accommodationCommitted && state.accommodationImageUri) {
         if (isRemoteUrl(state.accommodationImageUri)) {
           accommodationImageUrl = state.accommodationImageUri;
         } else {
-          const accRes = await uploadTripImage(state.accommodationImageUri, hostId, 'accommodation');
-          if (accRes.success && accRes.url) accommodationImageUrl = accRes.url;
+          const accRes = await uploadTripImage(
+            state.accommodationImageUri,
+            hostId,
+            'accommodation',
+          );
+          if (!accRes.success || !accRes.url) {
+            throw new Error(accRes.error || 'Failed to upload accommodation photo');
+          }
+          accommodationImageUrl = accRes.url;
         }
       }
 
       const exactDates = state.datesMode === 'exact';
       const dateMonths = exactDates ? [] : expandMonthRange(state.monthFrom, state.monthTo);
-      const startISO = exactDates && state.startDate ? toISODate(state.startDate) : null;
-      const endISO = exactDates && state.endDate ? toISODate(state.endDate) : null;
-      const skillLevel = state.skillLevel ?? 'all';
+      const startISO = exactDates && startDateObj ? toISODate(startDateObj) : null;
+      const endISO = exactDates && endDateObj ? toISODate(endDateObj) : null;
+      const skillLevels: SurfLevel[] = state.skillLevels.length
+        ? state.skillLevels
+        : (['all'] as SurfLevel[]);
       const budget = resolveBudget();
+      const descriptionText = state.description.trim();
+      // DB still expects an array of wave shapes — wrap our single value.
+      const waveShapesArray: WaveShapeKind[] | null = state.waveShape
+        ? [state.waveShape]
+        : null;
 
       if (editMode && initialTrip) {
-        // Partial update — only fields the new flow edits. Everything else
-        // (description, age range, budget, etc.) is preserved in the DB.
         const editable: UpdateGroupTripInput = {
           title: state.title.trim() || null,
+          description: descriptionText,
           hero_image_url: heroUrl,
           start_date: startISO,
           end_date: endISO,
@@ -594,19 +1113,24 @@ export default function CreateTripFlowA({
           date_months: dateMonths.length ? dateMonths : null,
           age_min: parseInt(state.ageMin, 10),
           age_max: parseInt(state.ageMax, 10),
-          target_surf_levels: [skillLevel],
+          target_surf_levels: skillLevels,
           accommodation_type: state.accommodationKind ? [state.accommodationKind] : null,
-          accommodation_name: state.accommodationName.trim() || null,
-          accommodation_url: state.accommodationUrl.trim() || null,
-          accommodation_image_url: accommodationImageUrl,
+          accommodation_name: accommodationCommitted
+            ? state.accommodationName.trim() || null
+            : null,
+          accommodation_url: accommodationCommitted
+            ? state.accommodationUrl.trim() || null
+            : null,
+          accommodation_image_url: accommodationCommitted ? accommodationImageUrl : null,
           budget_min: budget.min,
           budget_max: budget.max,
           budget_currency: budget.currency,
-          trip_vibe: state.tripVibe,
+          trip_structure: state.tripStructure.length ? state.tripStructure : null,
+          trip_vibes: state.tripVibes.length ? state.tripVibes : null,
           wave_type: null,
-          wave_fat_to_barreling: Math.round(state.waveFat),
-          wave_size_min: state.waveSize,
-          wave_size_max: state.waveSize,
+          wave_shapes: waveShapesArray,
+          wave_size_min: state.waveSizeMin,
+          wave_size_max: state.waveSizeMax,
           target_surf_styles: state.surfStyles.length ? state.surfStyles : ['all'],
           surf_style: null,
           accommodation_status: null,
@@ -614,12 +1138,11 @@ export default function CreateTripFlowA({
         };
         await updateGroupTrip(initialTrip.id, editable);
       } else {
-        // Defaults fill the NOT-NULL columns the new flow doesn't collect yet.
         const input: CreateGroupTripInput = {
           hosting_style: hostingStyle,
           status: 'active',
           title: state.title.trim() || null,
-          description: '',
+          description: descriptionText,
           hero_image_url: heroUrl,
 
           start_date: startISO,
@@ -632,28 +1155,32 @@ export default function CreateTripFlowA({
           destination_spot: null,
 
           accommodation_type: state.accommodationKind ? [state.accommodationKind] : null,
-          accommodation_name: state.accommodationName.trim() || null,
-          accommodation_url: state.accommodationUrl.trim() || null,
-          accommodation_image_url: accommodationImageUrl,
+          accommodation_name: accommodationCommitted
+            ? state.accommodationName.trim() || null
+            : null,
+          accommodation_url: accommodationCommitted
+            ? state.accommodationUrl.trim() || null
+            : null,
+          accommodation_image_url: accommodationCommitted ? accommodationImageUrl : null,
 
           vibe: null,
           surf_spots: null,
 
           age_min: parseInt(state.ageMin, 10),
           age_max: parseInt(state.ageMax, 10),
-          target_surf_levels: [skillLevel],
+          target_surf_levels: skillLevels,
           target_surf_styles: state.surfStyles.length ? state.surfStyles : ['all'],
-          wave_fat_to_barreling: Math.round(state.waveFat),
-          wave_size_min: state.waveSize,
-          wave_size_max: state.waveSize,
+          wave_shapes: waveShapesArray,
+          wave_size_min: state.waveSizeMin,
+          wave_size_max: state.waveSizeMax,
 
           host_been_there: null,
           budget_min: budget.min,
           budget_max: budget.max,
           budget_currency: budget.currency,
 
-          // Flow B columns — A persists vibe; wave uses the old fat/size columns above.
-          trip_vibe: state.tripVibe,
+          trip_structure: state.tripStructure.length ? state.tripStructure : null,
+          trip_vibes: state.tripVibes.length ? state.tripVibes : null,
           wave_type: null,
           included_components: null,
           total_cost: null,
@@ -669,8 +1196,6 @@ export default function CreateTripFlowA({
         };
         const trip = await createGroupTrip(hostId, input);
 
-        // Persist the precise geocode into group_trip_destinations. Best-effort:
-        // the trip already exists, so a geo failure shouldn't block creation.
         if (state.destinationGeo) {
           const g = state.destinationGeo;
           try {
@@ -685,755 +1210,1517 @@ export default function CreateTripFlowA({
               lng: g.lng ?? null,
             });
           } catch (geoErr) {
-            console.warn('[CreateTripWizard] setTripDestination failed:', geoErr);
+            console.warn('[CreateTripFlowA] setTripDestination failed:', geoErr);
           }
         }
 
-        setState(INITIAL_STATE);
-        setStepIdx(0);
+        await clearDraft();
       }
       onCreated();
     } catch (e: any) {
-      console.error('[CreateTripWizard] submit error:', e);
+      console.error('[CreateTripFlowA] submit error:', e);
       Alert.alert(
-        editMode ? 'Could not save trip' : 'Could not create trip',
-        e?.message || 'Unknown error'
+        editMode ? 'Could not save trip' : 'Could not publish',
+        e?.message || 'Unknown error',
       );
     } finally {
       setSubmitting(false);
     }
-  };
+  }, [
+    validateStep,
+    hostId,
+    state,
+    editMode,
+    initialTrip,
+    hostingStyle,
+    startDateObj,
+    endDateObj,
+    resolveBudget,
+    clearDraft,
+    onCreated,
+  ]);
 
-  const stepMeta = useMemo(() => {
-    const meta: Record<StepKey, { title: string; subtitle: string }> = {
-      basics: { title: 'Trip basics', subtitle: 'Where and when are you going?' },
-      surfSetup: { title: 'Surf setup', subtitle: 'What kind of waves and level?' },
-      accommodation: { title: 'Accommodation', subtitle: 'Optional — add if already decided' },
-      budget: { title: 'Budget', subtitle: 'Estimated per person, in USD' },
-      preview: { title: 'Preview', subtitle: 'Who can see and join this trip?' },
-    };
-    return meta[step];
-  }, [step]);
+  // -----------------------------------------------------------------------
+  // Primary / secondary button handlers
+  // -----------------------------------------------------------------------
+  const onPrimary = useCallback(() => {
+    if (step === 'preview') {
+      void handleSubmit();
+    } else {
+      handleNext();
+    }
+  }, [step, handleSubmit, handleNext]);
 
-  // --- reusable bits -------------------------------------------------------
-  const renderOptionCards = <T extends string>(
-    options: { key: T; title: string; desc: string }[],
-    selected: T | null,
-    onSelect: (key: T) => void
-  ) => (
-    <View>
-      {options.map(opt => {
-        const active = selected === opt.key;
-        return (
-          <TouchableOpacity
-            key={opt.key}
-            style={[styles.optionCard, active && styles.optionCardActive]}
-            onPress={() => onSelect(opt.key)}
-            activeOpacity={0.7}
-          >
-            <Text style={[styles.optionTitle, active && styles.optionTitleActive]}>{opt.title}</Text>
-            <Text style={[styles.optionDesc, active && styles.optionDescActive]}>{opt.desc}</Text>
-          </TouchableOpacity>
-        );
-      })}
-    </View>
-  );
+  const onSecondary = useCallback(() => {
+    if (stepIdx === 0) {
+      guardedCancel();
+    } else {
+      handleBack();
+    }
+  }, [stepIdx, guardedCancel, handleBack]);
 
-  const renderSegmented = <T extends string>(
-    options: { key: T; label: string }[],
-    selected: T | null,
-    onSelect: (key: T) => void
-  ) => (
-    <View style={styles.segment}>
-      {options.map((opt, i) => {
-        const active = selected === opt.key;
-        return (
-          <TouchableOpacity
-            key={opt.key}
-            style={[
-              styles.segmentBtn,
-              i > 0 && styles.segmentBtnDivider,
-              active && styles.segmentBtnActive,
-            ]}
-            onPress={() => onSelect(opt.key)}
-            activeOpacity={0.8}
-          >
-            <Text style={[styles.segmentText, active && styles.segmentTextActive]}>{opt.label}</Text>
-          </TouchableOpacity>
-        );
-      })}
-    </View>
-  );
+  // CTA label per step (per spec).
+  const ctaLabel: string = useMemo(() => {
+    if (step === 'preview') return editMode ? 'Save changes' : 'Publish trip';
+    if (step === 'audience') return 'Next · basic deets';
+    if (step === 'basics') return 'Next · trip vibez';
+    if (step === 'vibez') return 'Next · budget';
+    if (step === 'budget') return 'Next · preview';
+    return 'Next';
+  }, [step, editMode]);
 
-  // --- step content --------------------------------------------------------
+  const meta = STEP_META[step];
+  const subtitle =
+    step === 'budget' && editMode ? 'Confirm the range for your trip.' : meta.subtitle;
+
   const renderStep = () => {
     switch (step) {
+      case 'audience':
+        return renderAudienceStep();
       case 'basics':
-        return (
-          <View>
-            <Text style={styles.label}>Trip name</Text>
-            <TextInput
-              style={styles.input}
-              value={state.title}
-              onChangeText={t => update('title', t)}
-              placeholder="e.g. Bali and Barrels"
-              placeholderTextColor="#B0B0B0"
-            />
-
-            <Text style={styles.label}>Cover photo</Text>
-            <TouchableOpacity
-              activeOpacity={0.8}
-              onPress={async () => {
-                const uri = await pickImage();
-                if (uri) update('heroImageUri', uri);
-              }}
-            >
-              {state.heroImageUri ? (
-                <Image source={{ uri: state.heroImageUri }} style={styles.heroPreview} />
-              ) : (
-                <View style={[styles.heroPreview, styles.heroPlaceholder]}>
-                  <Ionicons name="image-outline" size={28} color="#0788B0" />
-                  <Text style={styles.heroPlaceholderText}>Add cover photo</Text>
-                </View>
-              )}
-            </TouchableOpacity>
-
-            <Text style={styles.label}>Destination</Text>
-            <TouchableOpacity
-              style={[styles.input, styles.pickerBox, editMode && styles.inputDisabled]}
-              activeOpacity={editMode ? 1 : 0.7}
-              onPress={() => {
-                if (editMode) return;
-                setShowDestPicker(true);
-              }}
-            >
-              <Text
-                style={[styles.pickerBoxText, !state.destination && styles.pickerBoxPlaceholder]}
-                numberOfLines={1}
-              >
-                {state.destination || 'e.g. Uluwatu, Bali'}
-              </Text>
-              {!editMode && <Ionicons name="location-outline" size={18} color="#0788B0" />}
-            </TouchableOpacity>
-            {editMode && (
-              <Text style={styles.helper}>Destination is locked once a trip is created.</Text>
-            )}
-
-            <Text style={styles.label}>Dates</Text>
-            {renderSegmented(
-              [
-                { key: 'months' as const, label: 'Months' },
-                { key: 'exact' as const, label: 'Exact dates' },
-              ],
-              state.datesMode,
-              k => update('datesMode', k)
-            )}
-
-            {state.datesMode === 'exact' ? (
-              <>
-                <View style={[styles.row, { marginTop: 10 }]}>
-                  <View style={{ flex: 1, marginRight: 8 }}>{renderDateField('start')}</View>
-                  <View style={{ flex: 1 }}>{renderDateField('end')}</View>
-                </View>
-                {state.startDate && state.endDate && (
-                  <Text style={styles.helper}>
-                    {formatSingleDate(state.startDate)} → {formatSingleDate(state.endDate)}
-                  </Text>
-                )}
-                {Platform.OS === 'android' && androidPicker && (
-                  <DateTimePicker
-                    value={(androidPicker === 'start' ? state.startDate : state.endDate) ?? new Date()}
-                    mode="date"
-                    display="default"
-                    minimumDate={androidPicker === 'end' ? state.startDate ?? undefined : undefined}
-                    onChange={(_, d) => {
-                      const w = androidPicker;
-                      setAndroidPicker(null);
-                      onChangeDate(w, d);
-                    }}
-                  />
-                )}
-              </>
-            ) : (
-              <>
-                <View style={[styles.row, { marginTop: 10 }]}>
-                  <TouchableOpacity
-                    style={[styles.dateBox, { flex: 1, marginRight: 8 }, openMonthPicker === 'from' && styles.dateBoxActive]}
-                    onPress={() => setOpenMonthPicker(openMonthPicker === 'from' ? null : 'from')}
-                  >
-                    <Text style={[styles.dateBoxText, !state.monthFrom && styles.dateBoxPlaceholder]}>
-                      {state.monthFrom ? monthLabel(state.monthFrom) : 'From'}
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.dateBox, { flex: 1 }, openMonthPicker === 'to' && styles.dateBoxActive]}
-                    onPress={() => setOpenMonthPicker(openMonthPicker === 'to' ? null : 'to')}
-                  >
-                    <Text style={[styles.dateBoxText, !state.monthTo && styles.dateBoxPlaceholder]}>
-                      {state.monthTo ? monthLabel(state.monthTo) : 'To'}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-                {openMonthPicker && (
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.monthScroll}>
-                    {months.map(m => {
-                      const active =
-                        (openMonthPicker === 'from' && state.monthFrom === m.value) ||
-                        (openMonthPicker === 'to' && state.monthTo === m.value);
-                      return (
-                        <TouchableOpacity
-                          key={m.value}
-                          style={[styles.chip, active && styles.chipActive]}
-                          onPress={() => {
-                            update(openMonthPicker === 'from' ? 'monthFrom' : 'monthTo', m.value);
-                            setOpenMonthPicker(null);
-                          }}
-                        >
-                          <Text style={[styles.chipText, active && styles.chipTextActive]}>{m.label}</Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </ScrollView>
-                )}
-              </>
-            )}
-
-            {state.datesMode !== 'exact' && (
-              <>
-                <Text style={styles.label}>Estimated trip duration</Text>
-                <View style={styles.row}>
-                  <TextInput
-                    style={[styles.input, { flex: 1, marginRight: 8 }]}
-                    value={state.durationValue}
-                    onChangeText={t => update('durationValue', t.replace(/[^0-9]/g, ''))}
-                    placeholder="e.g. 10"
-                    placeholderTextColor="#B0B0B0"
-                    keyboardType="number-pad"
-                  />
-                  <View style={{ flex: 1 }}>
-                    {renderSegmented(DURATION_UNITS, state.durationUnit, k => update('durationUnit', k))}
-                  </View>
-                </View>
-              </>
-            )}
-
-            <Text style={styles.label}>Trip vibe</Text>
-            {renderOptionCards(TRIP_VIBES, state.tripVibe, k => update('tripVibe', k))}
-          </View>
-        );
-
-      case 'surfSetup':
-        return (
-          <View>
-            <Text style={styles.label}>Skill level</Text>
-            {renderSegmented(SKILL_LEVELS, state.skillLevel, k => update('skillLevel', k))}
-
-            <View style={styles.labelRow}>
-              <Text style={styles.label}>Fat ↔ barreling</Text>
-              <Text style={styles.sliderValue}>{state.waveFat}/10</Text>
-            </View>
-            <Slider
-              minimumValue={0}
-              maximumValue={10}
-              step={1}
-              value={state.waveFat}
-              onValueChange={v => update('waveFat', v)}
-              minimumTrackTintColor="#0788B0"
-              maximumTrackTintColor="#E0E0E0"
-              thumbTintColor="#0788B0"
-            />
-
-            <View style={styles.labelRow}>
-              <Text style={styles.label}>Wave size</Text>
-              <Text style={styles.sliderValue}>{state.waveSize} ft</Text>
-            </View>
-            <Slider
-              minimumValue={1}
-              maximumValue={20}
-              step={1}
-              value={state.waveSize}
-              onValueChange={v => update('waveSize', v)}
-              minimumTrackTintColor="#0788B0"
-              maximumTrackTintColor="#E0E0E0"
-              thumbTintColor="#0788B0"
-            />
-
-            <View style={styles.labelRow}>
-              <Text style={styles.label}>Surf style</Text>
-              <Text style={styles.optionalTag}>Optional</Text>
-            </View>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-              {SURF_STYLES.map(opt => {
-                const active = state.surfStyles.includes(opt.key);
-                return (
-                  <TouchableOpacity
-                    key={opt.key}
-                    style={[styles.chip, { marginBottom: 8 }, active && styles.chipActive]}
-                    onPress={() =>
-                      setState(s => ({
-                        ...s,
-                        surfStyles: active
-                          ? s.surfStyles.filter(x => x !== opt.key)
-                          : [...s.surfStyles, opt.key],
-                      }))
-                    }
-                  >
-                    <Text style={[styles.chipText, active && styles.chipTextActive]}>{opt.label}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-
-            <Text style={styles.label}>Age range</Text>
-            <View style={styles.row}>
-              <TextInput
-                style={[styles.input, { flex: 1, marginRight: 8 }]}
-                value={state.ageMin}
-                onChangeText={t => update('ageMin', t.replace(/[^0-9]/g, ''))}
-                placeholder="Min"
-                placeholderTextColor="#B0B0B0"
-                keyboardType="number-pad"
-              />
-              <TextInput
-                style={[styles.input, { flex: 1 }]}
-                value={state.ageMax}
-                onChangeText={t => update('ageMax', t.replace(/[^0-9]/g, ''))}
-                placeholder="Max"
-                placeholderTextColor="#B0B0B0"
-                keyboardType="number-pad"
-              />
-            </View>
-            <Text style={styles.helper}>Ages 16–99. Must span at least {ageWindow} years.</Text>
-          </View>
-        );
-
-      case 'accommodation':
-        return (
-          <View>
-            <Text style={styles.label}>Type</Text>
-            {renderOptionCards(ACCOMMODATION_KINDS, state.accommodationKind, k =>
-              update('accommodationKind', k)
-            )}
-
-            <View style={styles.labelRow}>
-              <Text style={styles.label}>Name</Text>
-              <Text style={styles.optionalTag}>Optional</Text>
-            </View>
-            <TextInput
-              style={styles.input}
-              value={state.accommodationName}
-              onChangeText={t => update('accommodationName', t)}
-              placeholder="e.g. Beachfront Villa Uluwatu"
-              placeholderTextColor="#B0B0B0"
-            />
-
-            <View style={styles.labelRow}>
-              <Text style={styles.label}>URL</Text>
-              <Text style={styles.optionalTag}>Optional</Text>
-            </View>
-            <TextInput
-              style={styles.input}
-              value={state.accommodationUrl}
-              onChangeText={t => update('accommodationUrl', t)}
-              placeholder="https://…"
-              placeholderTextColor="#B0B0B0"
-              autoCapitalize="none"
-              keyboardType="url"
-            />
-
-            <View style={styles.labelRow}>
-              <Text style={styles.label}>Photo</Text>
-              <Text style={styles.optionalTag}>Optional</Text>
-            </View>
-            <TouchableOpacity
-              activeOpacity={0.8}
-              onPress={async () => {
-                const uri = await pickImage();
-                if (uri) update('accommodationImageUri', uri);
-              }}
-            >
-              {state.accommodationImageUri ? (
-                <Image source={{ uri: state.accommodationImageUri }} style={styles.heroPreview} />
-              ) : (
-                <View style={[styles.heroPreview, styles.heroPlaceholder]}>
-                  <Ionicons name="image-outline" size={28} color="#0788B0" />
-                  <Text style={styles.heroPlaceholderText}>Add photo</Text>
-                </View>
-              )}
-            </TouchableOpacity>
-          </View>
-        );
-
-      case 'budget': {
-        if (budgetLoading) {
-          return (
-            <View style={{ alignItems: 'center', paddingVertical: 40 }}>
-              <ActivityIndicator color="#0788B0" />
-              <Text style={[styles.helper, { marginTop: 10 }]}>Estimating budget…</Text>
-            </View>
-          );
-        }
-
-        if (state.budgetEstimate) {
-          const r = state.budgetEstimate.ranges;
-          return (
-            <View>
-              <Text style={styles.label}>Estimated budget per person (USD)</Text>
-              <Text style={styles.helper}>Pick the tier that fits your trip.</Text>
-              {BUDGET_TIERS.map(tier => {
-                const range = r[tier.key];
-                const active = state.budgetTier === tier.key;
-                return (
-                  <TouchableOpacity
-                    key={tier.key}
-                    style={[styles.optionCard, active && styles.optionCardActive]}
-                    onPress={() => update('budgetTier', tier.key)}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={[styles.optionTitle, active && styles.optionTitleActive]}>
-                      {tier.title} · {formatRange(range)}
-                    </Text>
-                    {!!range.label && (
-                      <Text style={[styles.optionDesc, active && styles.optionDescActive]}>
-                        {range.label}
-                      </Text>
-                    )}
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          );
-        }
-
-        // Fallback: error / no key / offline → manual entry + retry
-        return (
-          <View>
-            {!!budgetError && (
-              <Text style={[styles.helper, { color: '#C0392B' }]}>
-                Couldn’t estimate automatically. Enter an approximate budget per person.
-              </Text>
-            )}
-            <Text style={styles.label}>Budget per person (USD)</Text>
-            <View style={styles.row}>
-              <TextInput
-                style={[styles.input, { flex: 1, marginRight: 8 }]}
-                value={state.budgetManualMin}
-                onChangeText={t => update('budgetManualMin', t.replace(/[^0-9]/g, ''))}
-                placeholder="Min"
-                placeholderTextColor="#B0B0B0"
-                keyboardType="number-pad"
-              />
-              <TextInput
-                style={[styles.input, { flex: 1 }]}
-                value={state.budgetManualMax}
-                onChangeText={t => update('budgetManualMax', t.replace(/[^0-9]/g, ''))}
-                placeholder="Max"
-                placeholderTextColor="#B0B0B0"
-                keyboardType="number-pad"
-              />
-            </View>
-            <TouchableOpacity
-              style={[styles.secondaryBtn, { marginTop: 16 }]}
-              onPress={maybeEstimateBudget}
-            >
-              <Text style={styles.secondaryBtnText}>Retry estimate</Text>
-            </TouchableOpacity>
-          </View>
-        );
-      }
-
-      case 'preview': {
-        const dateText =
-          state.datesMode === 'exact'
-            ? state.startDate
-              ? `${formatSingleDate(state.startDate)}${
-                  state.endDate ? ` – ${formatSingleDate(state.endDate)}` : ''
-                }`
-              : ''
-            : state.monthFrom && state.monthTo && state.monthFrom !== state.monthTo
-            ? `${monthLabel(state.monthFrom)} – ${monthLabel(state.monthTo)}`
-            : monthLabel(state.monthFrom || state.monthTo);
-        const skill = SKILL_LEVELS.find(s => s.key === state.skillLevel)?.label;
-        const vibe = TRIP_VIBES.find(v => v.key === state.tripVibe)?.title;
-        const chips = [skill, vibe].filter(Boolean) as string[];
-        const b = resolveBudget();
-        const budgetText =
-          b.min != null && b.max != null ? `${formatRange({ min: b.min, max: b.max })} USD` : null;
-        return (
-          <View>
-            <Text style={styles.previewKicker}>PREVIEW</Text>
-            <View style={styles.previewCard}>
-              {state.heroImageUri ? (
-                <Image source={{ uri: state.heroImageUri }} style={styles.previewImage} />
-              ) : (
-                <View style={[styles.previewImage, styles.heroPlaceholder]}>
-                  <Text style={styles.heroPlaceholderText}>Cover image</Text>
-                </View>
-              )}
-              <Text style={styles.previewTitle}>{state.title || 'Untitled trip'}</Text>
-              {!!state.destination && <Text style={styles.previewLine}>{state.destination}</Text>}
-              {!!dateText && <Text style={styles.previewLine}>{dateText}</Text>}
-              {!!budgetText && <Text style={styles.previewLine}>Budget: {budgetText}</Text>}
-              {chips.length > 0 && (
-                <View style={styles.previewChipRow}>
-                  {chips.map(c => (
-                    <View key={c} style={styles.previewChip}>
-                      <Text style={styles.previewChipText}>{c}</Text>
-                    </View>
-                  ))}
-                </View>
-              )}
-            </View>
-
-            <Text style={styles.sectionTitle}>Visibility & invite</Text>
-            {renderOptionCards(VISIBILITIES, state.visibility, k => update('visibility', k))}
-          </View>
-        );
-      }
+        return renderBasicsStep();
+      case 'vibez':
+        return renderVibezStep();
+      case 'budget':
+        return renderBudgetStep();
+      case 'preview':
+        return renderPreviewStep();
     }
   };
 
-  const isFinalStep = step === 'preview';
+  // -----------------------------------------------------------------------
+  // STEP 1 — AUDIENCE (all rows open sheets)
+  // -----------------------------------------------------------------------
+  const renderResumeBanner = () =>
+    showResumeBanner ? (
+      <View style={localStyles.resumeBanner}>
+        <View style={localStyles.resumeBannerIconWrap}>
+          <Ionicons name="bookmark-outline" size={18} color={COLORS.brandTeal} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={localStyles.resumeBannerTitle}>Pick up where you left off?</Text>
+          <Text style={localStyles.resumeBannerBody}>Your unsaved draft was restored.</Text>
+        </View>
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel="Start fresh"
+          onPress={async () => {
+            await clearDraft();
+            setState(INITIAL_STATE);
+            setShowResumeBanner(false);
+            setHasBeenTouched(false);
+            draftStartedRef.current = false;
+            clearErrors();
+          }}
+          style={localStyles.resumeBannerBtn}
+        >
+          <Text style={localStyles.resumeBannerBtnText}>Start fresh</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel="Dismiss"
+          onPress={() => setShowResumeBanner(false)}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          style={{ marginLeft: 8 }}
+        >
+          <Ionicons name="close" size={20} color={COLORS.textMuted} />
+        </TouchableOpacity>
+      </View>
+    ) : null;
 
-  return (
-    <View style={styles.root}>
-      <View style={styles.progressBar}>
-        <Text style={styles.progressText}>
-          Step {stepIdx + 1} of {STEPS.length}
-        </Text>
-        <View style={styles.progressTrack}>
-          <View
-            style={[styles.progressFill, { width: `${((stepIdx + 1) / STEPS.length) * 100}%` }]}
+  const renderAudienceStep = () => {
+    // The Wave card combines shape + size into a single value per the Figma:
+    // "Wally, 4 - 8 ft".
+    const waveValue = (() => {
+      const shape = state.waveShape ? WAVE_SHAPE_TITLE[state.waveShape] : '';
+      const size =
+        state.waveSizeMin === state.waveSizeMax
+          ? `${state.waveSizeMin} ft`
+          : `${state.waveSizeMin} - ${state.waveSizeMax} ft`;
+      if (!shape) return size;
+      return `${shape}, ${size}`;
+    })();
+    const waveError = errors.waveShape ?? undefined;
+
+    return (
+      <View>
+        {renderResumeBanner()}
+        <View style={localStyles.cardStack}>
+          {/* Top row — two narrow side-by-side cards (Figma node 12216:25261). */}
+          <View style={localStyles.topRow}>
+            <InfoCard
+              title="Surf Level"
+              variant="photo-top"
+              value={formatLevelsSummary(state.skillLevels)}
+              image={Images.whoIsItFor.surfLevel}
+              imageZoom={1.4}
+              onPress={() => setOpenSheet('levels')}
+            />
+            <InfoCard
+              title="Board Style"
+              variant="photo-bottom"
+              value={formatStyleSummary(state.surfStyles)}
+              imageContent={
+                <BoardSelectionPreview
+                  selected={state.surfStyles}
+                  height={272}
+                  embedded
+                />
+              }
+              onPress={() => setOpenSheet('style')}
+            />
+          </View>
+
+          {/* Bottom — full-width horizontal cards. */}
+          <InfoCard
+            title="The Wave"
+            value={waveValue}
+            image={Images.whoIsItFor.theWave}
+            onPress={() => setOpenSheet('wave')}
+          />
+          {waveError ? (
+            <Text style={localStyles.cardError}>{waveError}</Text>
+          ) : null}
+          <InfoCard
+            title="Age Range"
+            value={formatAgeSummary(state.ageMin, state.ageMax)}
+            image={Images.whoIsItFor.ageRange}
+            imageZoom={1.4}
+            onPress={() => setOpenSheet('age')}
           />
         </View>
       </View>
+    );
+  };
 
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
-        keyboardShouldPersistTaps="handled"
-      >
-        <Text style={styles.heading}>{stepMeta.title}</Text>
-        <Text style={styles.subheading}>{stepMeta.subtitle}</Text>
-        {renderStep()}
-      </ScrollView>
+  // -----------------------------------------------------------------------
+  // STEP 2 — BASICS (mixed sheets + inline)
+  // -----------------------------------------------------------------------
+  const renderBasicsStep = () => {
+    const titleLen = state.title.length;
+    const titleCounterColor =
+      titleLen >= TRIP_TITLE_MAX_LENGTH
+        ? COLORS.errorText
+        : titleLen >= TRIP_TITLE_MAX_LENGTH - 5
+          ? COLORS.amber
+          : COLORS.textMuted;
 
-      <View style={styles.footer}>
-        <TouchableOpacity style={styles.backBtnBar} onPress={handleBack} disabled={submitting}>
-          <Text style={styles.backBtnText}>{stepIdx === 0 ? 'Cancel' : 'Back'}</Text>
+    const descLen = state.description.length;
+    const descCounterColor =
+      descLen >= DESCRIPTION_MAX_LENGTH
+        ? COLORS.errorText
+        : descLen >= DESCRIPTION_AMBER_THRESHOLD
+          ? COLORS.amber
+          : COLORS.textMuted;
+
+    return (
+      <View>
+        {/* Where + When grouped */}
+        <View style={localStyles.summaryGroup}>
+          <SummaryRow
+            label="Where?"
+            value={state.destination}
+            placeholder={editMode ? 'Locked' : 'Tap to set'}
+            onPress={() => {
+              if (!editMode) setOpenSheet('where');
+            }}
+            error={errors.destination ?? undefined}
+            disabled={editMode}
+            noTopDivider
+          />
+          <SummaryRow
+            label="When?"
+            value={formatWhenSummary(state)}
+            onPress={() => setOpenSheet('when')}
+            error={errors.when ?? undefined}
+          />
+        </View>
+        {editMode ? (
+          <Text style={localStyles.helperRowFootnote}>
+            Destination can't be changed after a trip is created.
+          </Text>
+        ) : null}
+
+        {/* Trip name (inline) */}
+        <View style={[localStyles.labelRow, localStyles.groupTopGap]}>
+          <Text style={localStyles.fieldLabel}>Trip name</Text>
+          <Text style={[localStyles.counter, { color: titleCounterColor }]}>
+            {titleLen} / {TRIP_TITLE_MAX_LENGTH}
+          </Text>
+        </View>
+        <TextInput
+          style={[localStyles.input, !!errors.title && localStyles.inputError]}
+          value={state.title}
+          onChangeText={t => {
+            update('title', t);
+            if (errors.title) setError('title', null);
+          }}
+          placeholder="Bali and Barrels"
+          placeholderTextColor={COLORS.textPlaceholder}
+          maxLength={TRIP_TITLE_MAX_LENGTH}
+          returnKeyType="done"
+        />
+        {errors.title ? (
+          <Text style={localStyles.errorText}>{errors.title}</Text>
+        ) : null}
+
+        {/* Cover photo (inline) */}
+        <Text style={[localStyles.fieldLabel, localStyles.fieldTopGap]}>Cover photo</Text>
+        <Text style={localStyles.helper}>
+          Landscape looks best — we'll crop to 12:5.
+        </Text>
+        <TouchableOpacity
+          activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityLabel={state.heroImageUri ? 'Change cover photo' : 'Add cover photo'}
+          onLongPress={() => {
+            if (!state.heroImageUri) return;
+            Alert.alert('Remove cover photo?', '', [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Remove',
+                style: 'destructive',
+                onPress: () => update('heroImageUri', null),
+              },
+            ]);
+          }}
+          onPress={async () => {
+            const uri = await pickImage([12, 5]);
+            if (uri) {
+              update('heroImageUri', uri);
+              if (errors.heroImage) setError('heroImage', null);
+            }
+          }}
+          style={[
+            localStyles.photoZone,
+            !state.heroImageUri && localStyles.photoZoneEmpty,
+            !!errors.heroImage && localStyles.photoZoneError,
+          ]}
+        >
+          {state.heroImageUri ? (
+            <>
+              <Image source={{ uri: state.heroImageUri }} style={localStyles.photoFilled} />
+              <View style={localStyles.photoChangePill}>
+                <Ionicons name="camera-reverse-outline" size={14} color="#FFFFFF" />
+                <Text style={localStyles.photoChangePillText}>Change</Text>
+              </View>
+            </>
+          ) : (
+            <View style={localStyles.photoEmptyInner}>
+              <View style={localStyles.photoIconCircle}>
+                <Ionicons name="camera-outline" size={26} color={COLORS.brandTeal} />
+              </View>
+              <Text style={localStyles.photoEmptyText}>Tap to add cover photo</Text>
+              <Text style={localStyles.photoEmptyHint}>Long-press to remove later</Text>
+            </View>
+          )}
         </TouchableOpacity>
-        {isFinalStep ? (
-          <TouchableOpacity
-            style={[styles.primaryBtn, submitting && styles.primaryBtnDisabled]}
-            onPress={handleSubmit}
-            disabled={submitting}
-          >
-            {submitting ? (
-              <ActivityIndicator color="#FFF" />
-            ) : (
-              <Text style={styles.primaryBtnText}>{editMode ? 'Save changes' : 'Publish trip'}</Text>
-            )}
-          </TouchableOpacity>
-        ) : (
-          <TouchableOpacity style={styles.primaryBtn} onPress={handleNext}>
-            <Text style={styles.primaryBtnText}>
-              {step === 'accommodation' ? 'Continue' : 'Next'}
-            </Text>
-          </TouchableOpacity>
-        )}
-      </View>
+        {errors.heroImage ? <Text style={localStyles.errorText}>{errors.heroImage}</Text> : null}
 
+        {/* Description (inline) */}
+        <View style={[localStyles.labelRow, localStyles.fieldTopGap]}>
+          <Text style={localStyles.fieldLabel}>Description</Text>
+          <Text style={[localStyles.counter, { color: descCounterColor }]}>
+            {descLen} / {DESCRIPTION_MAX_LENGTH}
+          </Text>
+        </View>
+        <TextInput
+          style={[
+            localStyles.input,
+            localStyles.textarea,
+            !!errors.description && localStyles.inputError,
+          ]}
+          value={state.description}
+          onChangeText={t => {
+            const next = t.length > DESCRIPTION_MAX_LENGTH
+              ? t.slice(0, DESCRIPTION_MAX_LENGTH)
+              : t;
+            update('description', next);
+            if (errors.description) setError('description', null);
+          }}
+          placeholder="Tell people what makes this trip special — the surf, the crew, the place."
+          placeholderTextColor={COLORS.textPlaceholder}
+          multiline
+          numberOfLines={6}
+          textAlignVertical="top"
+          maxLength={DESCRIPTION_MAX_LENGTH}
+        />
+        <Text style={localStyles.helper}>Required · up to 500 characters.</Text>
+        {errors.description ? (
+          <Text style={localStyles.errorText}>{errors.description}</Text>
+        ) : null}
+      </View>
+    );
+  };
+
+  // -----------------------------------------------------------------------
+  // STEP 3 — VIBEZ (sheets + inline Yes/No gate + conditional details row)
+  // -----------------------------------------------------------------------
+  const renderVibezStep = () => {
+    const lockedAnswer = state.accommodationLocked;
+    const canToggle = !editMode;
+
+    return (
+      <View>
+        <View style={localStyles.summaryGroup}>
+          <SummaryRow
+            label="How it works"
+            value={formatTagsSummary(state.tripStructure, TRIP_STRUCTURE_OPTIONS)}
+            onPress={() => setOpenSheet('howWorks')}
+            noTopDivider
+          />
+          <SummaryRow
+            label="Vibe"
+            value={formatTagsSummary(state.tripVibes, TRIP_VIBE_OPTIONS)}
+            onPress={() => setOpenSheet('vibe')}
+          />
+          <SummaryRow
+            label="Stay type"
+            value={state.accommodationKind ? ACCOMMODATION_LABEL[state.accommodationKind] : ''}
+            onPress={() => setOpenSheet('stayType')}
+            error={errors.accommodationKind ?? undefined}
+          />
+        </View>
+
+        {/* Specific-stay Yes/No gate — INLINE */}
+        <Text style={[localStyles.fieldLabel, localStyles.groupTopGap]}>
+          Did you decide on a specific stay?
+        </Text>
+        <Text style={localStyles.helper}>
+          {editMode
+            ? 'Locked from when you first published.'
+            : "You can't change this after you publish."}
+        </Text>
+        <View style={localStyles.gateRow}>
+          {(
+            [
+              {
+                key: true as const,
+                icon: 'lock-closed-outline' as const,
+                title: 'Yes',
+                subtitle: 'I have a place locked in.',
+              },
+              {
+                key: false as const,
+                icon: 'search-outline' as const,
+                title: 'No',
+                subtitle: 'Still looking — flexible.',
+              },
+            ] as {
+              key: boolean;
+              icon: keyof typeof Ionicons.glyphMap;
+              title: string;
+              subtitle: string;
+            }[]
+          ).map(opt => {
+            const selected = lockedAnswer === opt.key;
+            // Yes card stays tappable even in edit mode so the user can re-open
+            // the sheet to view/edit the stay details. No card respects the lock.
+            const tapDisabled = opt.key === false ? !canToggle : false;
+            const dimmed = tapDisabled && !selected;
+            return (
+              <TouchableOpacity
+                key={String(opt.key)}
+                activeOpacity={tapDisabled ? 1 : 0.85}
+                disabled={tapDisabled}
+                onPress={() => {
+                  if (opt.key === true) {
+                    if (canToggle) update('accommodationLocked', true);
+                    if (errors.accommodationGate) setError('accommodationGate', null);
+                    // Open the bottom sheet directly — no inline "Stay details" row.
+                    setOpenSheet('specificStay');
+                  } else {
+                    update('accommodationLocked', false);
+                    if (errors.accommodationGate) setError('accommodationGate', null);
+                    if (errors.specificStay) setError('specificStay', null);
+                  }
+                }}
+                style={[
+                  localStyles.gateCard,
+                  selected && localStyles.gateCardActive,
+                  dimmed && localStyles.gateCardDisabled,
+                ]}
+              >
+                <Ionicons name={opt.icon} size={28} color={COLORS.brandTeal} />
+                <Text
+                  style={[
+                    localStyles.gateCardTitle,
+                    selected && localStyles.gateCardTitleActive,
+                  ]}
+                >
+                  {opt.title}
+                </Text>
+                <Text style={localStyles.gateCardSubtitle}>{opt.subtitle}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+        {errors.accommodationGate ? (
+          <Text style={localStyles.errorText}>{errors.accommodationGate}</Text>
+        ) : null}
+        {errors.specificStay ? (
+          <Text style={localStyles.errorText}>{errors.specificStay}</Text>
+        ) : null}
+      </View>
+    );
+  };
+
+  // -----------------------------------------------------------------------
+  // STEP 4 — BUDGET
+  // -----------------------------------------------------------------------
+  const renderBudgetStep = () => {
+    if (editMode || state.manualBudget || (!budgetEstimate && !budgetLoading)) {
+      const showEstimateError = !editMode && !!budgetError && !state.manualBudget;
+      return (
+        <View>
+          {showEstimateError ? (
+            <View style={localStyles.errorBanner}>
+              <Ionicons
+                name="alert-circle-outline"
+                size={18}
+                color={COLORS.errorText}
+              />
+              <Text style={localStyles.errorBannerText}>
+                We couldn't estimate this one — enter a range yourself.
+              </Text>
+            </View>
+          ) : null}
+          {editMode ? (
+            <Text style={localStyles.helper}>
+              Enter the budget range for your trip.
+            </Text>
+          ) : null}
+
+          <Text style={[localStyles.fieldLabel, localStyles.fieldTopGap]}>
+            Budget per person · USD
+          </Text>
+          <View style={localStyles.row}>
+            <TextInput
+              style={[
+                localStyles.input,
+                { flex: 1, marginRight: 8, textAlign: 'center' },
+                !!errors.budget && localStyles.inputError,
+              ]}
+              value={state.budgetManualMin}
+              onChangeText={t => {
+                update('budgetManualMin', t.replace(/[^0-9]/g, ''));
+                if (errors.budget) setError('budget', null);
+              }}
+              placeholder="Min"
+              placeholderTextColor={COLORS.textPlaceholder}
+              keyboardType="number-pad"
+              maxLength={6}
+            />
+            <TextInput
+              style={[
+                localStyles.input,
+                { flex: 1, marginLeft: 8, textAlign: 'center' },
+                !!errors.budget && localStyles.inputError,
+              ]}
+              value={state.budgetManualMax}
+              onChangeText={t => {
+                update('budgetManualMax', t.replace(/[^0-9]/g, ''));
+                if (errors.budget) setError('budget', null);
+              }}
+              placeholder="Max"
+              placeholderTextColor={COLORS.textPlaceholder}
+              keyboardType="number-pad"
+              maxLength={6}
+            />
+          </View>
+          {errors.budget ? (
+            <Text style={localStyles.errorText}>{errors.budget}</Text>
+          ) : null}
+
+          {showEstimateError ? (
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => {
+                setBudgetError(null);
+                setLastEstimateKey(null);
+                update('manualBudget', false);
+                void maybeEstimateBudget();
+              }}
+              style={localStyles.retryBtn}
+            >
+              <Text style={localStyles.retryBtnText}>Try estimate again</Text>
+            </TouchableOpacity>
+          ) : null}
+          {!editMode && state.manualBudget && budgetEstimate ? (
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => {
+                update('manualBudget', false);
+              }}
+              style={[localStyles.retryBtn, { marginTop: 8 }]}
+            >
+              <Text style={localStyles.retryBtnText}>Back to AI estimate</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
+      );
+    }
+
+    if (budgetLoading || !budgetEstimate) {
+      return (
+        <View>
+          <View style={localStyles.skeletonRow}>
+            <View style={localStyles.skeletonCard} />
+            <View style={localStyles.skeletonCard} />
+            <View style={localStyles.skeletonCard} />
+          </View>
+          <View style={localStyles.spinnerRow}>
+            <ActivityIndicator color={COLORS.brandTeal} />
+          </View>
+        </View>
+      );
+    }
+
+    const days = tripDurationDays();
+    const accKind = state.accommodationKind ? ACCOMMODATION_LABEL[state.accommodationKind] : '';
+    const derivation = `Based on ${state.destination || 'your destination'}, ${days} day${
+      days === 1 ? '' : 's'
+    }${accKind ? `, ${accKind.toLowerCase()}` : ''}.`;
+
+    return (
+      <View style={localStyles.budgetWrap}>
+        <BudgetTierCardsBig
+          ranges={budgetEstimate.ranges}
+          selected={state.budgetTier}
+          onChange={tier => {
+            update('budgetTier', tier);
+            if (errors.budget) setError('budget', null);
+          }}
+          derivation={derivation}
+          error={errors.budget ?? undefined}
+          onManualOverride={() => {
+            update('manualBudget', true);
+            if (state.budgetTier && budgetEstimate) {
+              const r = budgetEstimate.ranges[state.budgetTier];
+              if (!state.budgetManualMin) update('budgetManualMin', String(Math.round(r.min)));
+              if (!state.budgetManualMax) update('budgetManualMax', String(Math.round(r.max)));
+            }
+          }}
+        />
+      </View>
+    );
+  };
+
+  // -----------------------------------------------------------------------
+  // STEP 5 — PREVIEW (unchanged behavior)
+  // -----------------------------------------------------------------------
+  const renderPreviewStep = () => {
+    const synthesized: Partial<GroupTrip> = {
+      title: state.title || null,
+      description: state.description || '',
+      hero_image_url: isRemoteUrl(state.heroImageUri) ? (state.heroImageUri as string) : '',
+      destination_country: state.destination || null,
+      destination_area: null,
+      start_date: state.datesMode === 'exact' ? state.startDateISO : null,
+      end_date: state.datesMode === 'exact' ? state.endDateISO : null,
+      dates_set_in_stone: state.datesMode === 'exact' ? true : null,
+      date_months:
+        state.datesMode === 'months' ? expandMonthRange(state.monthFrom, state.monthTo) : null,
+      target_surf_levels: state.skillLevels.length
+        ? (state.skillLevels as SurfLevel[])
+        : null,
+      trip_structure: state.tripStructure.length ? state.tripStructure : null,
+      trip_vibes: state.tripVibes.length ? state.tripVibes : null,
+      age_min: state.ageMin ? parseInt(state.ageMin, 10) : undefined,
+      age_max: state.ageMax ? parseInt(state.ageMax, 10) : undefined,
+    } as Partial<GroupTrip>;
+
+    const b = resolveBudget();
+    const skillLabels = state.skillLevels
+      .map(k => SKILL_LEVEL_OPTIONS.find(s => s.key === k)?.label)
+      .filter(Boolean) as string[];
+    const vibeLabel = state.tripVibes.length
+      ? TRIP_VIBE_OPTIONS.find(v => v.slug === state.tripVibes[0])?.label ?? ''
+      : '';
+
+    const tierLabel =
+      !state.manualBudget && state.budgetTier
+        ? state.budgetTier === 'low'
+          ? 'Budget'
+          : state.budgetTier === 'medium'
+            ? 'Mid-range'
+            : 'Premium'
+        : '';
+    const budgetSummary =
+      b.min != null && b.max != null
+        ? `${tierLabel ? tierLabel + ' · ' : ''}${formatRange({ min: b.min, max: b.max })} per person`
+        : null;
+
+    const summaryRows: { key: string; value: string; goto: StepKey }[] = [
+      {
+        key: 'Wave shape',
+        value: state.waveShape ? WAVE_SHAPE_TITLE[state.waveShape] : '—',
+        goto: 'audience',
+      },
+      {
+        key: 'Wave size',
+        value:
+          state.waveSizeMin === state.waveSizeMax
+            ? `${state.waveSizeMin} ft`
+            : `${state.waveSizeMin}–${state.waveSizeMax} ft`,
+        goto: 'audience',
+      },
+      {
+        key: 'Board types',
+        value:
+          state.surfStyles.length === 0
+            ? 'Any'
+            : state.surfStyles
+                .map(s => BOARD_TYPE_OPTIONS.find(o => o.key === s)?.label || s)
+                .join(', '),
+        goto: 'audience',
+      },
+      {
+        key: 'Accommodation',
+        value:
+          (state.accommodationKind ? ACCOMMODATION_LABEL[state.accommodationKind] : '—') +
+          (state.accommodationLocked && state.accommodationName
+            ? ` · ${state.accommodationName}`
+            : ''),
+        goto: 'vibez',
+      },
+      {
+        key: 'Age range',
+        value: state.ageMin && state.ageMax ? `${state.ageMin}–${state.ageMax}` : '—',
+        goto: 'audience',
+      },
+    ];
+
+    return (
+      <View>
+        <TripPreviewCard
+          trip={synthesized}
+          heroImageOverride={
+            !isRemoteUrl(state.heroImageUri) ? state.heroImageUri ?? null : null
+          }
+        />
+
+        {budgetSummary || vibeLabel || skillLabels.length > 0 ? (
+          <View style={localStyles.previewExtraBlock}>
+            {budgetSummary ? (
+              <Text style={localStyles.previewBudget}>{budgetSummary}</Text>
+            ) : null}
+            {vibeLabel || skillLabels.length > 0 ? (
+              <View style={localStyles.previewChipRow}>
+                {vibeLabel ? (
+                  <View style={localStyles.previewChip}>
+                    <Text style={localStyles.previewChipText}>{vibeLabel}</Text>
+                  </View>
+                ) : null}
+                {skillLabels.map(l => (
+                  <View key={l} style={localStyles.previewChip}>
+                    <Text style={localStyles.previewChipText}>{l}</Text>
+                  </View>
+                ))}
+              </View>
+            ) : null}
+          </View>
+        ) : null}
+
+        <Text style={[localStyles.sectionTitle, { marginTop: 24 }]}>Trip details</Text>
+        <View style={localStyles.summaryGrid}>
+          {summaryRows.map((row, idx) => (
+            <TouchableOpacity
+              key={row.key}
+              activeOpacity={0.7}
+              onPress={() => setStep(row.goto)}
+              accessibilityRole="button"
+              accessibilityLabel={`Edit ${row.key}`}
+              style={[
+                localStyles.summaryGridCell,
+                // Right column on odd index → no right border
+                idx % 2 === 0 && localStyles.summaryGridCellLeft,
+              ]}
+            >
+              <Text style={localStyles.summaryKey}>{row.key}</Text>
+              <Text style={localStyles.summaryValue} numberOfLines={2}>
+                {row.value}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        <Text style={[localStyles.sectionTitle, { marginTop: 24 }]}>Who can see this trip</Text>
+        <View style={localStyles.visibilityRow}>
+          {VISIBILITIES.map(opt => {
+            const active = state.visibility === opt.key;
+            return (
+              <TouchableOpacity
+                key={opt.key}
+                activeOpacity={0.85}
+                onPress={() => update('visibility', opt.key)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={`${opt.title}. ${opt.desc}`}
+                style={[localStyles.visibilityCard, active && localStyles.visibilityCardActive]}
+              >
+                <Ionicons
+                  name={opt.icon}
+                  size={22}
+                  color={active ? COLORS.brandTealText : COLORS.inkBody}
+                />
+                <Text
+                  style={[
+                    localStyles.visibilityTitle,
+                    active && localStyles.visibilityTitleActive,
+                  ]}
+                >
+                  {opt.title}
+                </Text>
+                <Text style={localStyles.visibilityDesc} numberOfLines={2}>
+                  {opt.desc}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      </View>
+    );
+  };
+
+  // Suppress unused-variable warning while keeping the read for future use.
+  void firstErrorField;
+
+  // -----------------------------------------------------------------------
+  // Render
+  // -----------------------------------------------------------------------
+  const closeSheet = () => setOpenSheet(null);
+
+  return (
+    <View style={{ flex: 1 }}>
+      <CreateTripWizardChrome
+        stepIndex={stepIdx}
+        stepCount={STEPS.length}
+        stepTitle={meta.title}
+        stepSubtitle={subtitle}
+        primaryLabel={ctaLabel}
+        secondaryLabel={stepIdx === 0 ? 'Cancel' : 'Back'}
+        onPrimary={onPrimary}
+        onSecondary={onSecondary}
+        submitting={submitting}
+        hideProgress
+      >
+        {renderStep()}
+      </CreateTripWizardChrome>
+
+      {/* ------- Sheets ------- */}
+
+      {/* Step 1 sheets */}
+      <WizardBottomSheet
+        visible={openSheet === 'levels'}
+        title="Surf levels"
+        onClose={closeSheet}
+      >
+        <LevelsSheetContent
+          selected={state.skillLevels}
+          onChange={next => {
+            update('skillLevels', next);
+            if (errors.skill) setError('skill', null);
+          }}
+        />
+      </WizardBottomSheet>
+
+      {/* Merged Wave sheet — shape + size in one — per the new Figma. */}
+      <WizardBottomSheet
+        visible={openSheet === 'wave'}
+        title="The Wave"
+        subtitle="Pick the shape and size"
+        largeTitle
+        hideHeaderDivider
+        onClose={closeSheet}
+      >
+        <WaveSheetContent
+          shape={state.waveShape}
+          onShapeChange={next => {
+            update('waveShape', next);
+            if (errors.waveShape) setError('waveShape', null);
+          }}
+          sizeMin={state.waveSizeMin}
+          sizeMax={state.waveSizeMax}
+          onSizeChange={({ min, max }) => {
+            setState(s => ({ ...s, waveSizeMin: min, waveSizeMax: max }));
+            if (!hasBeenTouched) setHasBeenTouched(true);
+          }}
+        />
+      </WizardBottomSheet>
+
+      <WizardBottomSheet
+        visible={openSheet === 'style'}
+        title="Board style"
+        subtitle="You can select more than one"
+        largeTitle
+        hideHeaderDivider
+        onClose={closeSheet}
+      >
+        <StyleSheetContent
+          selected={state.surfStyles}
+          onChange={next => update('surfStyles', next)}
+        />
+      </WizardBottomSheet>
+
+      <WizardBottomSheet
+        visible={openSheet === 'age'}
+        title="Age range"
+        onClose={closeSheet}
+      >
+        <AgeSheetContent
+          ageMin={state.ageMin ? parseInt(state.ageMin, 10) : null}
+          ageMax={state.ageMax ? parseInt(state.ageMax, 10) : null}
+          ageWindow={ageWindow}
+          onChange={({ ageMin, ageMax }) => {
+            setState(s => ({
+              ...s,
+              ageMin: ageMin != null ? String(ageMin) : '',
+              ageMax: ageMax != null ? String(ageMax) : '',
+            }));
+            if (!hasBeenTouched) setHasBeenTouched(true);
+            if (errors.age) setError('age', null);
+          }}
+          error={errors.age ?? undefined}
+        />
+      </WizardBottomSheet>
+
+      {/* Step 2 sheets */}
       <HomeBreakSearchSheet
-        visible={showDestPicker}
-        title="Select destination"
-        confirmTitle="Confirm destination"
-        searchPlaceholder="Search destinations, towns, spots..."
+        visible={openSheet === 'where'}
+        title="Pick destination"
+        confirmTitle="Use this destination"
+        searchPlaceholder="Search beaches, towns, breaks…"
         nameOnly
-        onClose={() => setShowDestPicker(false)}
+        onClose={closeSheet}
         onSelect={sel => {
           setState(s => ({ ...s, destination: sel.name || sel.short, destinationGeo: sel }));
-          setShowDestPicker(false);
+          if (!hasBeenTouched) setHasBeenTouched(true);
+          if (errors.destination) setError('destination', null);
+          closeSheet();
         }}
       />
+
+      <WizardBottomSheet
+        visible={openSheet === 'when'}
+        title="When?"
+        onClose={closeSheet}
+        heightMode="full"
+        footer={
+          <TouchableOpacity
+            onPress={closeSheet}
+            activeOpacity={0.85}
+            style={localStyles.sheetSetBtn}
+            accessibilityRole="button"
+            accessibilityLabel="Set dates and close"
+          >
+            <Text style={localStyles.sheetSetBtnText}>Set</Text>
+          </TouchableOpacity>
+        }
+      >
+        <WhenSheetContent
+          mode={state.datesMode === 'exact' ? 'calendar' : 'months'}
+          onModeChange={m => update('datesMode', m === 'calendar' ? 'exact' : 'months')}
+          startDate={startDateObj}
+          endDate={endDateObj}
+          onCalendarChange={({ startDate, endDate }) => {
+            setState(s => ({
+              ...s,
+              startDateISO: startDate ? toISODate(startDate) : null,
+              endDateISO: endDate ? toISODate(endDate) : null,
+            }));
+            if (!hasBeenTouched) setHasBeenTouched(true);
+            if (errors.when) setError('when', null);
+          }}
+          monthFrom={state.monthFrom}
+          monthTo={state.monthTo}
+          onMonthsChange={({ monthFrom, monthTo }) => {
+            setState(s => ({ ...s, monthFrom, monthTo }));
+            if (!hasBeenTouched) setHasBeenTouched(true);
+            if (errors.when) setError('when', null);
+          }}
+          durationDays={state.durationDays}
+          onDurationChange={n => {
+            update('durationDays', n);
+            if (errors.when) setError('when', null);
+          }}
+        />
+      </WizardBottomSheet>
+
+      {/* Step 3 sheets */}
+      <WizardBottomSheet
+        visible={openSheet === 'howWorks'}
+        title="How does it work?"
+        onClose={closeSheet}
+        heightMode="full"
+      >
+        <HowItWorksSheetContent
+          selected={state.tripStructure}
+          onChange={next => update('tripStructure', next)}
+        />
+      </WizardBottomSheet>
+
+      <WizardBottomSheet
+        visible={openSheet === 'vibe'}
+        title="Vibe"
+        onClose={closeSheet}
+        heightMode="full"
+      >
+        <VibeSheetContent
+          selected={state.tripVibes}
+          onChange={next => update('tripVibes', next)}
+        />
+      </WizardBottomSheet>
+
+      <WizardBottomSheet
+        visible={openSheet === 'stayType'}
+        title="Stay type"
+        onClose={closeSheet}
+        heightMode="full"
+      >
+        <StayTypeSheetContent
+          selected={state.accommodationKind}
+          onChange={k => {
+            update('accommodationKind', k);
+            if (errors.accommodationKind) setError('accommodationKind', null);
+          }}
+          error={errors.accommodationKind ?? undefined}
+        />
+      </WizardBottomSheet>
+
+      <WizardBottomSheet
+        visible={openSheet === 'specificStay'}
+        title="Stay details"
+        onClose={closeSheet}
+        heightMode="full"
+      >
+        <SpecificStaySheetContent
+          name={state.accommodationName}
+          url={state.accommodationUrl}
+          photoUri={state.accommodationImageUri}
+          onChange={next => {
+            setState(s => ({
+              ...s,
+              accommodationName: next.name,
+              accommodationUrl: next.url,
+              accommodationImageUri: next.photoUri,
+            }));
+            if (!hasBeenTouched) setHasBeenTouched(true);
+            if (errors.specificStay) setError('specificStay', null);
+          }}
+        />
+      </WizardBottomSheet>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1 },
-  progressBar: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#EEE',
+// =============================================================================
+// Styles
+// =============================================================================
+const localStyles = StyleSheet.create({
+  // Step 1 card stack — gap tuned so the bigger "floating" shadow has room
+  // to bloom between adjacent cards without looking like the cards touch.
+  // Card stack — inset horizontally so cards are narrower than the screen
+  // (top vertical cards become taller/skinnier; bottom horizontal cards inherit
+  // the same width so they sit flush with the top row).
+  cardStack: {
+    gap: 20,
+    marginHorizontal: 12,
   },
-  progressText: { fontSize: 12, color: '#7B7B7B', fontWeight: '600', textAlign: 'center', marginBottom: 6 },
-  progressTrack: { height: 4, borderRadius: 2, backgroundColor: '#EEE', overflow: 'hidden' },
-  progressFill: { height: 4, borderRadius: 2, backgroundColor: '#0788B0' },
-
-  scroll: { flex: 1 },
-  scrollContent: { padding: 16, paddingBottom: 32 },
-
-  heading: { fontSize: 22, fontWeight: '700', color: '#222B30', marginBottom: 4 },
-  subheading: { fontSize: 14, color: '#7B7B7B', marginBottom: 12 },
-
-  label: { fontSize: 13, fontWeight: '600', color: '#222B30', marginTop: 16, marginBottom: 6 },
-  labelRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  optionalTag: { fontSize: 12, color: '#B0B0B0', marginTop: 16 },
-  sliderValue: { fontSize: 13, color: '#0788B0', fontWeight: '700', marginTop: 16 },
-  helper: { fontSize: 12, color: '#7B7B7B', marginTop: 6 },
-  sectionTitle: { fontSize: 18, fontWeight: '700', color: '#222B30', marginTop: 24, marginBottom: 10 },
-
-  input: {
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 15,
-    color: '#222B30',
-    backgroundColor: '#FFF',
+  // Step 1 top row — Surf Level + Board Style side-by-side. Gap matches the
+  // cardStack vertical gap so the rhythm reads as a clean grid.
+  topRow: {
+    flexDirection: 'row',
+    gap: 20,
   },
-  inputDisabled: { backgroundColor: '#F4F4F4', color: '#7B7B7B' },
-
-  pickerBox: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  pickerBoxText: { flex: 1, fontSize: 15, color: '#222B30' },
-  pickerBoxPlaceholder: { color: '#B0B0B0' },
-
-  row: { flexDirection: 'row' },
-
-  // Date boxes (From / To)
-  dateBox: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    backgroundColor: '#FFF',
+  cardError: {
+    marginTop: -8,
+    fontFamily: FONT_INTER,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '500',
+    color: '#C0392B',
+    paddingHorizontal: 4,
   },
-  dateBoxActive: { borderColor: '#0788B0' },
-  dateBoxText: { fontSize: 15, color: '#222B30' },
-  dateBoxPlaceholder: { color: '#B0B0B0' },
-  monthScroll: { marginTop: 10, flexGrow: 0 },
-  dateField: {
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    backgroundColor: '#FFF',
+  // Sheet footer CTA — "Set" button to confirm + dismiss the sheet.
+  sheetSetBtn: {
+    backgroundColor: '#212121',
+    paddingVertical: 16,
+    borderRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sheetSetBtnText: {
+    fontFamily: FONT_MONTSERRAT,
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    letterSpacing: 0.3,
+  },
+  // Common
+  labelRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    marginTop: 4,
   },
-  dateFieldLabel: { fontSize: 13, color: '#7B7B7B', fontWeight: '600' },
-
-  // Option cards (vibe, wave type, accommodation type, visibility)
-  optionCard: {
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 10,
-  },
-  optionCardActive: { borderColor: '#0788B0', backgroundColor: '#E6F4F8' },
-  optionTitle: { fontSize: 15, fontWeight: '600', color: '#222B30', marginBottom: 4 },
-  optionTitleActive: { color: '#066b8c' },
-  optionDesc: { fontSize: 13, color: '#7B7B7B' },
-  optionDescActive: { color: '#3a8aa3' },
-
-  // Segmented control (skill level, accommodation status)
-  segment: {
-    flexDirection: 'row',
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
-    borderRadius: 10,
-    overflow: 'hidden',
-  },
-  segmentBtn: { flex: 1, paddingVertical: 12, alignItems: 'center', backgroundColor: '#FFF' },
-  segmentBtnDivider: { borderLeftWidth: 1, borderLeftColor: '#E0E0E0' },
-  segmentBtnActive: { backgroundColor: '#0788B0' },
-  segmentText: { fontSize: 14, fontWeight: '600', color: '#555' },
-  segmentTextActive: { color: '#FFF' },
-
-  // Chips (month picker)
-  chip: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
-    marginRight: 8,
-    backgroundColor: '#FFF',
-  },
-  chipActive: { backgroundColor: '#0788B0', borderColor: '#0788B0' },
-  chipText: { fontSize: 13, color: '#555' },
-  chipTextActive: { color: '#FFF', fontWeight: '600' },
-
-  secondaryBtn: {
-    paddingVertical: 12,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#0788B0',
-    alignItems: 'center',
-  },
-  secondaryBtnText: { color: '#0788B0', fontWeight: '600' },
-
-  heroPreview: {
-    width: '100%',
-    height: 180,
-    borderRadius: 12,
-    backgroundColor: '#F2F2F2',
-  },
-  heroPlaceholder: { alignItems: 'center', justifyContent: 'center' },
-  heroPlaceholderText: { fontSize: 14, color: '#7B7B7B', marginTop: 6, fontWeight: '600' },
-
-  // Preview card
-  previewKicker: { fontSize: 12, fontWeight: '700', color: '#7B7B7B', letterSpacing: 1, marginBottom: 8 },
-  previewCard: {
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
-    borderRadius: 14,
-    padding: 12,
-  },
-  previewImage: { width: '100%', height: 160, borderRadius: 10, backgroundColor: '#F2F2F2', marginBottom: 12 },
-  previewTitle: { fontSize: 18, fontWeight: '700', color: '#222B30', marginBottom: 4 },
-  previewLine: { fontSize: 14, color: '#555', marginBottom: 2 },
-  previewChipRow: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 10 },
-  previewChip: {
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    marginRight: 8,
+  fieldLabel: {
+    fontFamily: FONT_INTER,
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: '600',
+    color: COLORS.inkBody,
     marginBottom: 8,
   },
-  previewChipText: { fontSize: 13, color: '#222B30' },
-
-  footer: {
+  fieldTopGap: {
+    marginTop: 20,
+  },
+  // Gap between two sections (groups). Per design language: ~24px between groups.
+  groupTopGap: {
+    marginTop: 24,
+  },
+  // Container that wraps a contiguous list of SummaryRows.
+  summaryGroup: {
+    backgroundColor: COLORS.surfaceCard,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.borderHairline,
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+  },
+  counter: {
+    fontFamily: FONT_INTER,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '600',
+  },
+  helper: {
+    fontFamily: FONT_INTER,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '400',
+    color: COLORS.textMuted,
+    marginTop: 4,
+  },
+  // Tighter helper that sits directly under a SummaryRow.
+  helperRowFootnote: {
+    marginTop: -2,
+    marginBottom: 10,
+    marginLeft: 4,
+    fontFamily: FONT_INTER,
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '400',
+    color: COLORS.textMuted,
+  },
+  errorText: {
+    marginTop: 6,
+    fontFamily: FONT_INTER,
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '500',
+    color: COLORS.errorText,
+  },
+  input: {
+    height: 56,
+    borderWidth: 1,
+    borderColor: COLORS.borderField,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    fontFamily: FONT_INTER,
+    fontSize: 16,
+    color: COLORS.inkBody,
+    backgroundColor: COLORS.surfaceCard,
+  },
+  textarea: {
+    height: 140,
+    paddingVertical: 12,
+    textAlignVertical: 'top',
+  },
+  inputError: {
+    borderColor: COLORS.errorBorder,
+  },
+  row: {
     flexDirection: 'row',
+    alignItems: 'center',
+  },
+
+  // Trip title preview line
+  titlePreview: {
+    marginTop: 8,
+    fontFamily: FONT_MONTSERRAT,
+    fontSize: 16,
+    lineHeight: 22,
+    fontWeight: '700',
+    color: COLORS.inkBody,
+  },
+
+  // Resume banner
+  resumeBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
     padding: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#EEE',
+    marginBottom: 16,
+    borderRadius: 14,
+    backgroundColor: COLORS.brandTealTint,
+    borderWidth: 1,
+    borderColor: '#9ED1E2',
+  },
+  resumeBannerIconWrap: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: COLORS.surfaceCard,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  resumeBannerTitle: {
+    fontFamily: FONT_INTER,
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.brandTealText,
+  },
+  resumeBannerBody: {
+    fontFamily: FONT_INTER,
+    fontSize: 12,
+    color: COLORS.inkBody,
+    marginTop: 2,
+  },
+  resumeBannerBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 14,
+    backgroundColor: COLORS.surfaceCard,
+    borderWidth: 1,
+    borderColor: COLORS.brandTeal,
+    marginLeft: 8,
+  },
+  resumeBannerBtnText: {
+    fontFamily: FONT_INTER,
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.brandTeal,
+  },
+
+  // Photo zones
+  photoZone: {
+    width: '100%',
+    aspectRatio: 12 / 5,
+    borderRadius: 16,
+    overflow: 'hidden',
+    backgroundColor: COLORS.surfaceMuted,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  photoZoneEmpty: {
+    borderWidth: 2,
+    borderStyle: 'dashed',
+    borderColor: COLORS.borderField,
+    backgroundColor: '#FAFAFA',
+  },
+  photoZoneError: {
+    borderColor: COLORS.errorBorder,
+  },
+  photoFilled: {
+    width: '100%',
+    height: '100%',
+    aspectRatio: 12 / 5,
+  },
+  photoEmptyInner: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+  },
+  photoIconCircle: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: COLORS.brandTealTint,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  photoEmptyText: {
+    fontFamily: FONT_INTER,
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: '600',
+    color: COLORS.brandTeal,
+  },
+  photoEmptyHint: {
+    marginTop: 2,
+    fontFamily: FONT_INTER,
+    fontSize: 12,
+    lineHeight: 16,
+    color: COLORS.textMuted,
+  },
+  photoChangePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    position: 'absolute',
+    bottom: 10,
+    right: 10,
+    backgroundColor: 'rgba(33,33,33,0.85)',
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  photoChangePillText: {
+    fontFamily: FONT_INTER,
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+
+  // Legacy option cards (kept for compat — visibility now uses visibilityCard).
+  optionCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: COLORS.borderCard,
+    backgroundColor: COLORS.surfaceCard,
+    marginBottom: 10,
+  },
+  optionCardActive: {
+    borderWidth: 2,
+    borderColor: COLORS.brandTeal,
+    backgroundColor: COLORS.brandTealTint,
+    padding: 15,
+  },
+  optionTitle: {
+    fontFamily: FONT_MONTSERRAT,
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.inkBody,
+    marginBottom: 4,
+  },
+  optionTitleActive: {
+    color: COLORS.brandTealText,
+  },
+  optionDesc: {
+    fontFamily: FONT_INTER,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '400',
+    color: COLORS.textMuted,
+  },
+  sectionTitle: {
+    fontFamily: FONT_MONTSERRAT,
+    fontSize: 18,
+    lineHeight: 24,
+    fontWeight: '700',
+    color: COLORS.inkBody,
+    marginBottom: 10,
+  },
+
+  // Accommodation gate
+  gateRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 12,
+  },
+  gateCard: {
+    flex: 1,
+    padding: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: COLORS.borderField,
+    backgroundColor: COLORS.surfaceCard,
+    alignItems: 'center',
+  },
+  gateCardActive: {
+    borderWidth: 2,
+    borderColor: COLORS.brandTeal,
+    backgroundColor: COLORS.brandTealTint,
+    padding: 15,
+  },
+  gateCardDisabled: {
+    opacity: 0.35,
+  },
+  gateCardTitle: {
+    marginTop: 8,
+    fontFamily: FONT_MONTSERRAT,
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.inkBody,
+  },
+  gateCardTitleActive: {
+    color: COLORS.brandTealText,
+  },
+  gateCardSubtitle: {
+    marginTop: 4,
+    fontFamily: FONT_INTER,
+    fontSize: 12,
+    lineHeight: 16,
+    color: COLORS.textMuted,
+    textAlign: 'center',
+  },
+
+  // Budget — center-stage container with breathing room above/below.
+  budgetWrap: {
+    paddingVertical: 8,
+  },
+
+  // Budget — error banner / skeleton / retry
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: COLORS.errorBg,
+    padding: 12,
+    borderRadius: 12,
+    marginBottom: 12,
+  },
+  errorBannerText: {
+    flex: 1,
+    fontFamily: FONT_INTER,
+    fontSize: 13,
+    lineHeight: 18,
+    color: COLORS.errorText,
+  },
+  skeletonRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 16,
+  },
+  skeletonCard: {
+    flex: 1,
+    height: 120,
+    borderRadius: 16,
+    backgroundColor: COLORS.surfaceMuted,
+  },
+  spinnerRow: {
+    marginTop: 16,
+    alignItems: 'center',
+  },
+  retryBtn: {
+    marginTop: 16,
+    height: 48,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: COLORS.brandTeal,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  retryBtnText: {
+    fontFamily: FONT_INTER,
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.brandTeal,
+  },
+
+  // Preview extras
+  previewExtraBlock: {
+    marginTop: 0,
+    marginBottom: 12,
+  },
+  previewBudget: {
+    fontFamily: FONT_INTER,
+    fontSize: 14,
+    color: COLORS.inkBody,
+    marginBottom: 6,
+  },
+  previewChipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  previewChip: {
+    backgroundColor: COLORS.surfaceMuted,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  previewChipText: {
+    fontFamily: FONT_INTER,
+    fontSize: 11,
+    color: '#555',
+  },
+
+  // Summary grid (preview step)
+  summaryGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginTop: 6,
+    marginBottom: 4,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: COLORS.borderHairline,
+  },
+  summaryGridCell: {
+    width: '50%',
+    paddingVertical: 12,
+    paddingRight: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: COLORS.borderHairline,
+  },
+  summaryGridCellLeft: {
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderRightColor: COLORS.borderHairline,
+    paddingLeft: 4,
+    paddingRight: 12,
+  },
+  summaryKey: {
+    fontFamily: FONT_INTER,
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+    color: COLORS.textMuted,
+    marginBottom: 4,
+    textTransform: 'uppercase',
+  },
+  summaryValue: {
+    fontFamily: FONT_INTER,
+    fontSize: 14,
+    fontWeight: '500',
+    color: COLORS.inkBody,
+  },
+
+  // Visibility — 3-column row of cards.
+  visibilityRow: {
+    flexDirection: 'row',
     gap: 10,
   },
-  backBtnBar: {
+  visibilityCard: {
     flex: 1,
+    minHeight: 96,
+    paddingHorizontal: 10,
     paddingVertical: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.borderField,
+    backgroundColor: COLORS.surfaceCard,
     alignItems: 'center',
-    borderRadius: 10,
-    backgroundColor: '#F2F2F2',
+    justifyContent: 'center',
   },
-  backBtnText: { color: '#222B30', fontWeight: '600' },
-  primaryBtn: {
-    flex: 2,
-    paddingVertical: 14,
-    alignItems: 'center',
-    borderRadius: 10,
-    backgroundColor: '#0788B0',
+  visibilityCardActive: {
+    borderWidth: 2,
+    borderColor: COLORS.brandTeal,
+    backgroundColor: COLORS.brandTealTint,
+    paddingHorizontal: 9,
+    paddingVertical: 13,
   },
-  primaryBtnDisabled: { opacity: 0.6 },
-  primaryBtnText: { color: '#FFF', fontWeight: '700' },
+  visibilityTitle: {
+    marginTop: 6,
+    fontFamily: FONT_MONTSERRAT,
+    fontSize: 14,
+    lineHeight: 18,
+    fontWeight: '700',
+    color: COLORS.inkBody,
+  },
+  visibilityTitleActive: {
+    color: COLORS.brandTealText,
+  },
+  visibilityDesc: {
+    marginTop: 2,
+    fontFamily: FONT_INTER,
+    fontSize: 11,
+    lineHeight: 14,
+    color: COLORS.textMuted,
+    textAlign: 'center',
+  },
 });

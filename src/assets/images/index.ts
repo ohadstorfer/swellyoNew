@@ -43,4 +43,18 @@ export const Images = {
     high: require('./budget/high_budget.png'),
     premium: require('./budget/premium_budget.png'),
   },
+  whoIsItFor: {
+    surfLevel: require('./who-is-it-for/surf-level.jpg'),
+    theWave: require('./who-is-it-for/the-wave.jpg'),
+    ageRange: require('./who-is-it-for/age-range.jpg'),
+  },
+  // Board renders — tightly cropped (no padding/shadow), correct proportional
+  // sizing across the four types. Used only in the Create-Trip "Board Style"
+  // card composition. NOT to be used as the board selector icons.
+  boards: {
+    shortboard: require('./boards/shortboard.png'),
+    midlength: require('./boards/midlength.png'),
+    softtop: require('./boards/softtop.png'),
+    longboard: require('./boards/longboard.png'),
+  },
 };
