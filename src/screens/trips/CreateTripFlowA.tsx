@@ -110,7 +110,7 @@ type StepKey = 'audience' | 'basics' | 'vibez' | 'budget' | 'preview';
 const STEPS: StepKey[] = ['audience', 'basics', 'vibez', 'budget', 'preview'];
 
 // DB constraint: minimum age-range span per hosting style.
-const AGE_WINDOW_BY_STYLE: Record<HostingStyle, number> = { A: 7, B: 5, C: 2 };
+const AGE_WINDOW_BY_STYLE: Record<HostingStyle, number> = { A: 4, B: 5, C: 2 };
 
 // Step heading + subtitle copy.
 const STEP_META: Record<StepKey, { title: string; subtitle: string }> = {
@@ -162,7 +162,7 @@ const ACCOMMODATION_LABEL: Record<AccommodationKind, string> = {
 
 const WAVE_SHAPE_TITLE: Record<WaveShapeKind, string> = {
   soft: 'Mellow',
-  wally: 'Wally',
+  wally: 'Standing',
   barrel: 'Barrel',
 };
 
@@ -661,8 +661,12 @@ const formatStyleSummary = (styles: SurfStyle[]): string => {
 };
 
 const formatAgeSummary = (min: string, max: string): string => {
-  if (!min || !max) return '';
-  return `${min} - ${max}`;
+  if (min && max) return `${min} - ${max}`;
+  if (min) return `${min}+`;
+  if (max) return `Up to ${max}`;
+  // Default "any age" — rendered as a real value (same bold styling as a
+  // number) instead of as the italic "tap to set" hint.
+  return 'Any';
 };
 
 const formatWhenSummary = (state: WizardState): string => {
@@ -915,19 +919,23 @@ export default function CreateTripFlowA({
 
     switch (step) {
       case 'audience': {
-        const min = parseInt(state.ageMin, 10);
-        const max = parseInt(state.ageMax, 10);
-        if (Number.isNaN(min) || Number.isNaN(max)) {
-          fail('age', 'Add a minimum and maximum age');
-        } else if (min < 16 || max > 99 || min > 99 || max < 16) {
+        // One-sided (only min OR only max) is valid — interpreted as "no
+        // upper limit" / "no lower limit". Both empty is also valid ("Any").
+        const minRaw = state.ageMin ? parseInt(state.ageMin, 10) : null;
+        const maxRaw = state.ageMax ? parseInt(state.ageMax, 10) : null;
+        const minOk = minRaw == null || (minRaw >= 16 && minRaw <= 99);
+        const maxOk = maxRaw == null || (maxRaw >= 16 && maxRaw <= 99);
+        if (!minOk || !maxOk) {
           fail('age', 'Ages must be 16–99');
-        } else if (max < min) {
-          fail('age', 'Maximum age must be at least the minimum');
-        } else if (max - min < ageWindow) {
-          fail(
-            'age',
-            `Age range must span at least ${ageWindow} years (currently ${max - min}).`,
-          );
+        } else if (minRaw != null && maxRaw != null) {
+          if (maxRaw < minRaw) {
+            fail('age', 'Maximum age must be at least the minimum');
+          } else if (maxRaw - minRaw < ageWindow) {
+            fail(
+              'age',
+              `Age range must span at least ${ageWindow} years (currently ${maxRaw - minRaw}).`,
+            );
+          }
         }
         if (state.skillLevels.length === 0) fail('skill', 'Pick at least one skill level');
         if (state.waveShape === null) fail('waveShape', 'Pick a wave shape');
@@ -1333,10 +1341,12 @@ export default function CreateTripFlowA({
     // "Wally, 4 - 8 ft".
     const waveValue = (() => {
       const shape = state.waveShape ? WAVE_SHAPE_TITLE[state.waveShape] : '';
+      const minStr = state.waveSizeMin >= 12 ? '12+' : `${state.waveSizeMin}`;
+      const maxStr = state.waveSizeMax >= 12 ? '12+' : `${state.waveSizeMax}`;
       const size =
         state.waveSizeMin === state.waveSizeMax
-          ? `${state.waveSizeMin} ft`
-          : `${state.waveSizeMin} - ${state.waveSizeMax} ft`;
+          ? `${maxStr} ft`
+          : `${minStr} - ${maxStr} ft`;
       if (!shape) return size;
       return `${shape}, ${size}`;
     })();
@@ -1859,10 +1869,13 @@ export default function CreateTripFlowA({
       },
       {
         key: 'Wave size',
-        value:
-          state.waveSizeMin === state.waveSizeMax
-            ? `${state.waveSizeMin} ft`
-            : `${state.waveSizeMin}–${state.waveSizeMax} ft`,
+        value: (() => {
+          const minStr = state.waveSizeMin >= 12 ? '12+' : `${state.waveSizeMin}`;
+          const maxStr = state.waveSizeMax >= 12 ? '12+' : `${state.waveSizeMax}`;
+          return state.waveSizeMin === state.waveSizeMax
+            ? `${maxStr} ft`
+            : `${minStr}–${maxStr} ft`;
+        })(),
         goto: 'audience',
       },
       {
@@ -1886,7 +1899,7 @@ export default function CreateTripFlowA({
       },
       {
         key: 'Age range',
-        value: state.ageMin && state.ageMax ? `${state.ageMin}–${state.ageMax}` : '—',
+        value: formatAgeSummary(state.ageMin, state.ageMax),
         goto: 'audience',
       },
     ];
@@ -2013,7 +2026,10 @@ export default function CreateTripFlowA({
       {/* Step 1 sheets */}
       <WizardBottomSheet
         visible={openSheet === 'levels'}
-        title="Surf levels"
+        title="Surf level"
+        subtitle="You can select more than one"
+        largeTitle
+        hideHeaderDivider
         onClose={closeSheet}
       >
         <LevelsSheetContent
@@ -2032,6 +2048,7 @@ export default function CreateTripFlowA({
         subtitle="Pick the shape and size"
         largeTitle
         hideHeaderDivider
+        heightMode="full"
         onClose={closeSheet}
       >
         <WaveSheetContent
@@ -2066,6 +2083,10 @@ export default function CreateTripFlowA({
       <WizardBottomSheet
         visible={openSheet === 'age'}
         title="Age range"
+        subtitle={`Must span at least ${ageWindow} ${ageWindow === 1 ? 'year' : 'years'}`}
+        largeTitle
+        hideHeaderDivider
+        extendBehindKeyboard
         onClose={closeSheet}
       >
         <AgeSheetContent
@@ -2081,6 +2102,7 @@ export default function CreateTripFlowA({
             if (!hasBeenTouched) setHasBeenTouched(true);
             if (errors.age) setError('age', null);
           }}
+          onClose={closeSheet}
           error={errors.age ?? undefined}
         />
       </WizardBottomSheet>

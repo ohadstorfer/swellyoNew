@@ -50,6 +50,15 @@ export interface WizardBottomSheetProps {
   hideHeaderDivider?: boolean;
   /** When true, the title renders bigger (24 instead of 18). */
   largeTitle?: boolean;
+  /**
+   * When true, the sheet stretches behind the keyboard instead of shrinking
+   * + shifting above it. The sheet's white surface fills the bottom of the
+   * screen even when the keyboard is up; content is bottom-padded so it
+   * stays above the keyboard. Use for keyboard-driven sheets (e.g. Age)
+   * where the visual "brick" should feel continuous from top of sheet to
+   * bottom of screen.
+   */
+  extendBehindKeyboard?: boolean;
 }
 
 const resolveSheetHeight = (mode: WizardSheetHeightMode): number | undefined => {
@@ -75,6 +84,7 @@ export const WizardBottomSheet: React.FC<WizardBottomSheetProps> = ({
   subtitle,
   hideHeaderDivider = false,
   largeTitle = false,
+  extendBehindKeyboard = false,
 }) => {
   const insets = useSafeAreaInsets();
   const [mounted, setMounted] = useState(visible);
@@ -149,15 +159,20 @@ export const WizardBottomSheet: React.FC<WizardBottomSheetProps> = ({
         }),
       ]).start();
     } else if (mounted) {
+      // Dismiss the keyboard the instant the sheet starts closing so the
+      // keyboard slides down WITH the sheet (rather than lingering). The
+      // 250ms close duration matches the iOS keyboard's hide animation so
+      // they land together — sheet + keyboard read as one moving brick.
+      Keyboard.dismiss();
       Animated.parallel([
         Animated.timing(overlayAnim, {
           toValue: 0,
-          duration: 180,
+          duration: 250,
           useNativeDriver: true,
         }),
         Animated.timing(sheetAnim, {
           toValue: 0,
-          duration: 180,
+          duration: 250,
           useNativeDriver: true,
         }),
       ]).start(() => setMounted(false));
@@ -205,8 +220,14 @@ export const WizardBottomSheet: React.FC<WizardBottomSheetProps> = ({
   // Reserve 40pt at the top so the sheet never crowds the status bar.
   const TOP_MARGIN = 40;
   const baseFixed = resolveSheetHeight(heightMode);
-  const availableHeight = Math.max(0, SCREEN_HEIGHT - keyboardHeight - TOP_MARGIN);
-  // Cap fixed heights so the sheet never extends behind the keyboard.
+  // When stretching BEHIND the keyboard, we don't subtract keyboard height
+  // from the available area — the sheet's white surface should fill the
+  // bottom of the screen even while the keyboard is up. Otherwise (the
+  // standard flow) the sheet shrinks + lifts to sit above the keyboard.
+  const availableHeight = Math.max(
+    0,
+    SCREEN_HEIGHT - (extendBehindKeyboard ? 0 : keyboardHeight) - TOP_MARGIN,
+  );
   const cappedFixed = baseFixed != null ? Math.min(baseFixed, availableHeight) : undefined;
   const cappedMax = Math.min(Math.round(SCREEN_HEIGHT * 0.9), availableHeight);
   // Slide-in translation: when sheetAnim=0 the sheet sits below screen.
@@ -214,7 +235,12 @@ export const WizardBottomSheet: React.FC<WizardBottomSheetProps> = ({
     inputRange: [0, 1],
     outputRange: [SCREEN_HEIGHT, 0],
   });
-  const translateY = Animated.add(Animated.add(slideTranslate, dragOffset), keyboardOffset);
+  // When extending behind the keyboard, omit the keyboardOffset shift —
+  // the sheet stays anchored to the screen bottom and the keyboard renders
+  // over its bottom portion.
+  const translateY = extendBehindKeyboard
+    ? Animated.add(slideTranslate, dragOffset)
+    : Animated.add(Animated.add(slideTranslate, dragOffset), keyboardOffset);
 
   return (
     <Modal visible transparent animationType="none" onRequestClose={onClose}>
@@ -233,8 +259,8 @@ export const WizardBottomSheet: React.FC<WizardBottomSheetProps> = ({
           ]}
         >
           {/* Drag area — swipe down on the handle/header to dismiss.
-              Body content underneath stays scrollable. Matches the proven
-              pattern used by HomeBreakSearchSheet et al. */}
+              Body content underneath stays scrollable. Close button is gone
+              from this flow since the drag-to-dismiss gesture is enough. */}
           <View {...pan.panHandlers}>
             <View style={styles.handle} />
             <View
@@ -244,9 +270,6 @@ export const WizardBottomSheet: React.FC<WizardBottomSheetProps> = ({
                 subtitle ? styles.headerWithSubtitle : null,
               ]}
             >
-              {/* Left spacer balances the close button width so the title
-                  stays optically centered. */}
-              <View style={styles.headerSide} />
               <View style={styles.headerTitleBlock}>
                 <Text
                   style={[styles.title, largeTitle && styles.titleLarge]}
@@ -260,26 +283,23 @@ export const WizardBottomSheet: React.FC<WizardBottomSheetProps> = ({
                   </Text>
                 ) : null}
               </View>
-              <TouchableOpacity
-                onPress={onClose}
-                style={styles.closeBtn}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                accessibilityRole="button"
-                accessibilityLabel="Close"
-              >
-                <Ionicons name="close" size={24} color={C.inkBody} />
-              </TouchableOpacity>
             </View>
           </View>
 
           {/* Content — scrollable if it overflows. Extra bottom padding when
               a footer is present so the last interactive element doesn't
-              crowd against the footer's top border. */}
+              crowd against the footer's top border. When extending behind
+              the keyboard, we add keyboardHeight to the content's bottom
+              padding so the inputs sit above the keyboard while the sheet's
+              white surface still fills the bottom of the screen. */}
           <ScrollView
             style={styles.content}
             contentContainerStyle={[
               styles.contentInner,
               footer ? styles.contentInnerWithFooter : null,
+              extendBehindKeyboard && keyboardHeight > 0
+                ? { paddingBottom: keyboardHeight + 72 }
+                : null,
             ]}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
@@ -296,7 +316,7 @@ export const WizardBottomSheet: React.FC<WizardBottomSheetProps> = ({
             >
               {footer}
             </View>
-          ) : (
+          ) : extendBehindKeyboard && keyboardHeight > 0 ? null : (
             <View style={{ height: Math.max(insets.bottom, 12) }} />
           )}
         </Animated.View>
@@ -388,8 +408,10 @@ const styles = StyleSheet.create({
   },
   contentInner: {
     paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 20,
+    // Extra room above + below the first/last items so floating cards' shadow
+    // has space to breathe instead of getting visually clipped at the edges.
+    paddingTop: 28,
+    paddingBottom: 32,
   },
   contentInnerWithFooter: {
     // Sheets with a footer (e.g. "Set" button) get extra breathing room

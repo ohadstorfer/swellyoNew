@@ -57,4 +57,9 @@ export const Images = {
     softtop: require('./boards/softtop.png'),
     longboard: require('./boards/longboard.png'),
   },
+  waveShapes: {
+    mellow: require('./wave-shapes/mellow.png'),
+    wally: require('./wave-shapes/wally.png'),
+    barrel: require('./wave-shapes/barrel.png'),
+  },
 };

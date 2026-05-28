@@ -22,19 +22,16 @@ import type { SurfStyle } from '../../services/trips/groupTripsService';
 
 const FONT_INTER = Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter';
 
-// Same URLs as OnboardingStep1Screen.tsx BOARD_TYPES — restored after the
-// bundled-image switch broke horizontal alignment. We'll need to revisit
-// the local images with their own positioning math separately.
+// Bundled board PNGs (tightly cropped, no padding/shadow). Use these in the
+// Create-Trip Board Style card preview. Positioning math is unchanged from
+// the URL-based version — only the image source swaps.
 import { LayoutChangeEvent } from 'react-native';
-const BOARD_IMAGE: Partial<Record<SurfStyle, string>> = {
-  shortboard:
-    'https://api.builder.io/api/v1/image/assets/TEMP/9761796f6e2272f3cacf14c4fc9342525bb54ff8?width=371',
-  midlength:
-    'https://api.builder.io/api/v1/image/assets/TEMP/377f67727b21485479e873ed3d93c57611722f74?width=371',
-  longboard:
-    'https://api.builder.io/api/v1/image/assets/TEMP/4692a28e8ac444a82eec1f691f5f008c8a9bbc8e?width=371',
-  softtop:
-    'https://api.builder.io/api/v1/image/assets/TEMP/1d104557a7a5ea05c3b36931c1ee56fd01a6d426?width=371',
+import { Images } from '../../assets/images';
+const BOARD_IMAGE: Partial<Record<SurfStyle, ReturnType<typeof require>>> = {
+  shortboard: Images.boards.shortboard,
+  midlength: Images.boards.midlength,
+  softtop: Images.boards.softtop,
+  longboard: Images.boards.longboard,
 };
 
 const BOARD_LABEL: Partial<Record<SurfStyle, string>> = {
@@ -124,6 +121,49 @@ const composeLayout = (selected: SurfStyle[], embedded: boolean): BoardSpec[] =>
     : { long: 0.5, short: 0.46, side: 0.38 };
 
   // -----------------------------------------------------------------------
+  // Single non-longboard case — shortboard / midlength / softtop alone.
+  // Use full stage height so the source contain-centers vertically (vs the
+  // default per-board heightPct which would anchor it to the slot bottom).
+  // centerX nudged right per Eyal's spec for single-board renders.
+  // -----------------------------------------------------------------------
+  if (
+    realSelected.length === 1 &&
+    (realSelected[0] === 'shortboard' ||
+      realSelected[0] === 'midlength' ||
+      realSelected[0] === 'softtop')
+  ) {
+    // Shortboard alone reads bulky at W.short — trim it down a touch.
+    const aloneWidth =
+      realSelected[0] === 'shortboard' ? W.short * 0.85 : W.short;
+    out.push({
+      slug: realSelected[0],
+      centerX: 0.55,
+      translateY: 0,
+      rotate: 0,
+      widthPct: aloneWidth,
+      heightPct: 1.0, // full stage → contain centers source vertically
+      zIndex: 4,
+    });
+    return out;
+  }
+
+  // -----------------------------------------------------------------------
+  // Longboard alone — same right-of-center nudge as the other singles.
+  // -----------------------------------------------------------------------
+  if (realSelected.length === 1 && realSelected[0] === 'longboard') {
+    out.push({
+      slug: 'longboard',
+      centerX: 0.62,
+      translateY: 0,
+      rotate: 0,
+      widthPct: W.long,
+      heightPct: heightFor('longboard'),
+      zIndex: 1,
+    });
+    return out;
+  }
+
+  // -----------------------------------------------------------------------
   // 2-board case — smaller front-left + bigger back-right, both upright.
   // -----------------------------------------------------------------------
   if (realSelected.length === 2) {
@@ -131,26 +171,47 @@ const composeLayout = (selected: SurfStyle[], embedded: boolean): BoardSpec[] =>
       (a, b) => (BOARD_SIZE_ORDER[a] ?? 99) - (BOARD_SIZE_ORDER[b] ?? 99),
     );
     const [smaller, bigger] = sorted;
+    // When neither board is the longboard, scale both up — pairs without
+    // the longboard read smaller naturally because nothing sets a tall anchor.
+    // Bump mostly height (so boards stand taller in the card), with a small
+    // width bump so they don't end up looking skinny.
+    const noLongboard = !realSelected.includes('longboard');
+    const HEIGHT_BUMP = 1.25; // tail stays at slot bottom; nose goes higher
+    const WIDTH_BUMP = 1.08;
+    const capH = (h: number) => Math.min(h * HEIGHT_BUMP, 1.0);
+    const smallerWidth = noLongboard ? W.side * WIDTH_BUMP : W.side;
+    const biggerWidth = noLongboard ? W.short * WIDTH_BUMP : W.short;
+    const smallerHeight = noLongboard
+      ? capH(heightFor(smaller))
+      : heightFor(smaller);
+    const biggerHeight = noLongboard
+      ? capH(heightFor(bigger))
+      : heightFor(bigger);
     out.push({
       slug: smaller,
-      centerX: 0.38,
+      centerX: 0.43,
       translateY: 0,
       rotate: 0,
-      widthPct: W.side,
-      heightPct: heightFor(smaller),
+      widthPct: smallerWidth,
+      heightPct: smallerHeight,
       zIndex: 3, // front
     });
     out.push({
       slug: bigger,
-      centerX: 0.62,
+      centerX: 0.67,
       translateY: 0,
       rotate: 0,
-      widthPct: W.short,
-      heightPct: heightFor(bigger),
+      widthPct: biggerWidth,
+      heightPct: biggerHeight,
       zIndex: 2, // behind smaller
     });
     return out;
   }
+
+  // Horizontal offset for the layered scatter. 3-board layouts get a small
+  // right-shift per Eyal's spec; 4-board stays centered so the composition
+  // stays balanced around the longboard.
+  const shiftRight = realSelected.length === 3 ? 0.05 : 0;
 
   // Back layer — longboard standing tall, biggest, anchored at slot bottom
   // (same as every other board) so every variation reads with consistent
@@ -158,7 +219,7 @@ const composeLayout = (selected: SurfStyle[], embedded: boolean): BoardSpec[] =>
   if (set.has('longboard')) {
     out.push({
       slug: 'longboard',
-      centerX: 0.5,
+      centerX: 0.5 + shiftRight,
       translateY: 0,
       rotate: 0,
       widthPct: W.long,
@@ -172,7 +233,7 @@ const composeLayout = (selected: SurfStyle[], embedded: boolean): BoardSpec[] =>
   if (front[0]) {
     out.push({
       slug: front[0],
-      centerX: 0.5,
+      centerX: 0.5 + shiftRight,
       translateY: 0,
       rotate: 0,
       widthPct: W.short,
@@ -183,7 +244,7 @@ const composeLayout = (selected: SurfStyle[], embedded: boolean): BoardSpec[] =>
   if (front[1]) {
     out.push({
       slug: front[1],
-      centerX: embedded ? 0.66 : 0.585,
+      centerX: (embedded ? 0.66 : 0.585) + shiftRight,
       translateY: 0,
       rotate: 14,
       widthPct: W.side,
@@ -194,7 +255,7 @@ const composeLayout = (selected: SurfStyle[], embedded: boolean): BoardSpec[] =>
   if (front[2]) {
     out.push({
       slug: front[2],
-      centerX: embedded ? 0.34 : 0.415,
+      centerX: (embedded ? 0.34 : 0.415) + shiftRight,
       translateY: 0,
       rotate: -14,
       widthPct: W.side,
@@ -235,39 +296,59 @@ const EmbeddedStage: React.FC<{ height: number; boards: BoardSpec[] }> = ({
       onLayout={onLayout}
     >
       {stageWidth > 0
-        ? boards.map((b, i) => {
-            const url = BOARD_IMAGE[b.slug];
-            if (!url) return null;
-            const slotWidthPx = b.widthPct * stageWidth;
-            const slotLeftPx = b.centerX * stageWidth - slotWidthPx / 2;
-            return (
-              <View
-                key={`${b.slug}-${i}`}
-                pointerEvents="none"
-                style={[
-                  styles.boardSlot,
-                  {
-                    width: slotWidthPx,
-                    height: `${b.heightPct * 100}%`,
-                    left: slotLeftPx,
-                    zIndex: b.zIndex,
-                    transform: [
-                      { translateY: b.translateY },
-                      { rotate: `${b.rotate}deg` },
-                    ],
-                  },
-                ]}
-              >
-                <View style={styles.boardClip}>
-                  <Image
-                    source={{ uri: url }}
-                    style={styles.boardImage}
-                    resizeMode="contain"
-                  />
-                </View>
-              </View>
+        ? (() => {
+            // Front-most (highest zIndex) gets the full floating shadow.
+            // In the 3-board case, the second-most board(s) get a lighter
+            // shadow so the depth layering reads naturally.
+            const maxZ = boards.reduce(
+              (m, b) => (b.zIndex > m ? b.zIndex : m),
+              -Infinity,
             );
-          })
+            const secondMaxZ = boards.reduce(
+              (m, b) => (b.zIndex < maxZ && b.zIndex > m ? b.zIndex : m),
+              -Infinity,
+            );
+            const isThreeBoard = boards.length === 3;
+            return boards.map((b, i) => {
+              const url = BOARD_IMAGE[b.slug];
+              if (!url) return null;
+              const slotWidthPx = b.widthPct * stageWidth;
+              const slotLeftPx = b.centerX * stageWidth - slotWidthPx / 2;
+              const isFrontMost =
+                b.zIndex === maxZ && boards.length > 1;
+              const isSecondMost =
+                isThreeBoard && !isFrontMost && b.zIndex === secondMaxZ;
+              return (
+                <View
+                  key={`${b.slug}-${i}`}
+                  pointerEvents="none"
+                  style={[
+                    styles.boardSlot,
+                    isSecondMost && styles.boardSlotFloatingLight,
+                    isFrontMost && styles.boardSlotFloating,
+                    {
+                      width: slotWidthPx,
+                      height: `${b.heightPct * 100}%`,
+                      left: slotLeftPx,
+                      zIndex: b.zIndex,
+                      transform: [
+                        { translateY: b.translateY },
+                        { rotate: `${b.rotate}deg` },
+                      ],
+                    },
+                  ]}
+                >
+                  <View style={styles.boardClip}>
+                    <Image
+                      source={url}
+                      style={styles.boardImage}
+                      resizeMode="contain"
+                    />
+                  </View>
+                </View>
+              );
+            });
+          })()
         : null}
     </View>
   );
@@ -343,7 +424,7 @@ export const BoardSelectionPreview: React.FC<BoardSelectionPreviewProps> = ({
               >
                 <View style={styles.boardClip}>
                   <Image
-                    source={{ uri: url }}
+                    source={url}
                     style={styles.boardImage}
                     resizeMode="contain"
                   />
@@ -401,6 +482,24 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: 0,
   },
+  // Applied to the front-most board only — even soft shadow so it floats
+  // above the others. shadowOffset is 0/0 for an aura-style shadow that
+  // bleeds equally on all sides.
+  boardSlotFloating: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.22,
+    shadowRadius: 10,
+    elevation: 10,
+  },
+  // Lighter variant — applied to the second-most board in 3-board layouts.
+  boardSlotFloatingLight: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.12,
+    shadowRadius: 7,
+    elevation: 5,
+  },
   // Clip fills the slot exactly; the image overflows top and bottom modestly
   // so the PNG's top whitespace + bottom drop shadow get trimmed without
   // chopping the actual board content (e.g. longboard's tail tip).
@@ -414,12 +513,14 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
-    // top:-40% pulls the image element up enough that the board content
-    // (which sits in the middle ~60% of the source PNG, between top padding
-    // and bottom drop shadow) ends up filling the slot vertically instead
-    // of being clipped halfway below the card.
-    top: '-40%',
-    height: '150%',
+    // The bundled board PNGs are tightly cropped (the image IS the board
+    // content — no top padding or bottom shadow). So the image element
+    // matches the slot exactly: bottom-anchored, full slot height. With
+    // resizeMode:contain on tall narrow boards in a wider slot, the source
+    // height-fits → source bottom at slot bottom → tails align across all
+    // boards.
+    bottom: 0,
+    height: '100%',
   },
   emptyHint: {
     flex: 1,

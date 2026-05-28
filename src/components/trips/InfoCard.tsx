@@ -6,7 +6,7 @@
 //   • 'standard' — image LEFT (96×112), text right. Height ~128pt.
 //   • 'board'    — image RIGHT (131×209) for the board composition. Height ~229pt.
 
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -15,6 +15,8 @@ import {
   Image,
   ImageSourcePropType,
   Platform,
+  Animated,
+  Easing,
 } from 'react-native';
 
 const FONT_INTER = Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter';
@@ -55,6 +57,78 @@ export interface InfoCardProps {
   imageZoom?: number;
 }
 
+// Photo-top inner content. Extracted from InfoCard's render so we can use
+// hooks (Animated.Value for the smooth image-height transition).
+//
+// The image's vertical share of the card animates between two states
+// based on how many lines the displayed value occupies:
+//   • 1 line of text (e.g. "Advanced", "Any") → image = 72% of card
+//   • 2+ lines (e.g. "Beginner\nIntermediate") → image = 50% of card
+// Transition takes 2s in each direction with an ease-in-out curve, so the
+// image visibly slides up / down rather than snapping.
+//
+// Layout: image wrap has an animated `height` in pixels; text block stays
+// `flex: 1` and naturally fills the remaining space below.
+const CARD_TOTAL_H = 340; // matches styles.shadowWrapVertical.height
+const IMAGE_H_ONE_LINE = Math.round(CARD_TOTAL_H * 0.72); // 245
+const IMAGE_H_MULTI_LINE = Math.round(CARD_TOTAL_H * 0.65); // 221
+const IMAGE_TRANSITION_MS = 2000;
+
+const PhotoTopInner: React.FC<{
+  title: string;
+  value?: string | null;
+  showHint: boolean;
+  emptyHint: string;
+  image?: ImageSourcePropType;
+  imageZoom: number;
+}> = ({ title, value, showHint, emptyHint, image, imageZoom }) => {
+  const displayedText = showHint ? emptyHint : (value ?? '');
+  const lineCount = displayedText.split('\n').length;
+  const targetHeight = lineCount <= 1 ? IMAGE_H_ONE_LINE : IMAGE_H_MULTI_LINE;
+
+  const imageHeight = useRef(new Animated.Value(targetHeight)).current;
+
+  useEffect(() => {
+    Animated.timing(imageHeight, {
+      toValue: targetHeight,
+      duration: IMAGE_TRANSITION_MS,
+      easing: Easing.inOut(Easing.cubic),
+      // Animating a layout prop (height) — must run on the JS thread.
+      useNativeDriver: false,
+    }).start();
+  }, [targetHeight, imageHeight]);
+
+  return (
+    <View style={[styles.cardInner, styles.cardInnerPhotoTop]}>
+      <Animated.View
+        style={[styles.photoTopImageWrap, { height: imageHeight }]}
+      >
+        {image ? (
+          <Image
+            source={image}
+            style={[
+              styles.photoTopImage,
+              imageZoom !== 1 && { transform: [{ scale: imageZoom }] },
+            ]}
+            resizeMode="cover"
+          />
+        ) : (
+          <View style={[styles.photoTopImage, styles.imagePlaceholder]} />
+        )}
+      </Animated.View>
+      <View style={styles.photoVerticalTextBlock}>
+        <Text style={styles.title} numberOfLines={1}>{title}</Text>
+        <Text
+          style={[styles.value, showHint && styles.valueHint]}
+          numberOfLines={4}
+        >
+          {showHint ? emptyHint : value}
+        </Text>
+      </View>
+    </View>
+  );
+};
+
 export const InfoCard: React.FC<InfoCardProps> = ({
   title,
   value,
@@ -79,34 +153,14 @@ export const InfoCard: React.FC<InfoCardProps> = ({
   // Render content based on variant — three distinct layouts.
   const renderInner = () => {
     if (variant === 'photo-top') {
-      // Image (top, full-width) + text (bottom).
-      return (
-        <View style={[styles.cardInner, styles.cardInnerPhotoTop]}>
-          <View style={styles.photoTopImageWrap}>
-            {image ? (
-              <Image
-                source={image}
-                style={[
-                  styles.photoTopImage,
-                  imageZoom !== 1 && { transform: [{ scale: imageZoom }] },
-                ]}
-                resizeMode="cover"
-              />
-            ) : (
-              <View style={[styles.photoTopImage, styles.imagePlaceholder]} />
-            )}
-          </View>
-          <View style={styles.photoVerticalTextBlock}>
-            <Text style={styles.title} numberOfLines={1}>{title}</Text>
-            <Text
-              style={[styles.value, showHint && styles.valueHint]}
-              numberOfLines={4}
-            >
-              {showHint ? emptyHint : value}
-            </Text>
-          </View>
-        </View>
-      );
+      return <PhotoTopInner
+        title={title}
+        value={value}
+        showHint={showHint}
+        emptyHint={emptyHint}
+        image={image}
+        imageZoom={imageZoom}
+      />;
     }
 
     if (variant === 'photo-bottom') {
@@ -232,7 +286,7 @@ const styles = StyleSheet.create({
     paddingRight: 16,
     paddingVertical: 0,
     alignItems: 'stretch',
-    gap: 16,
+    gap: 24,
   },
   cardInnerPhotoTop: {
     flexDirection: 'column',
@@ -259,20 +313,23 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   // Standard variant — image LEFT, flush to card edge, full card height.
+  // 30% width: image reads as a clear thumbnail while the value text on
+  // the right gets the majority of the card.
   imageLeftWrap: {
-    width: 104,
+    width: '30%',
     alignSelf: 'stretch',
     justifyContent: 'center',
     overflow: 'hidden',
   },
   imageLeft: {
-    width: 104,
+    width: '100%',
     height: '100%',
   },
-  // Photo-top variant — image fills the top half of the card (full width).
+  // Photo-top variant — image fills the top portion of the card (full
+  // width). Vertical share is set via `flex` at the call site so it can
+  // adapt to the value's line count (50% for multi-line, 66% for 1-line).
   photoTopImageWrap: {
     width: '100%',
-    height: 172,
     overflow: 'hidden',
   },
   photoTopImage: {

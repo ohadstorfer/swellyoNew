@@ -8,22 +8,17 @@ import {
   PanResponder,
   GestureResponderEvent,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 
 // --------------------------------------------------------------------------
-// RangeSlider — dual-thumb range slider with floating value labels.
+// RangeSlider — dual-thumb range slider, smooth drag, live onChange.
 //
-// Native (iOS / Android): react-native-gesture-handler v2 PanGesture +
-//   Reanimated v3 shared values for UI-thread thumb movement. Fixes
-//   friction-audit bug #5 (Android scroll-steal): the gesture is configured
-//   with activeOffsetX(2) / failOffsetY(8) so the parent ScrollView wins
-//   vertical scrolls.
+// Native (iOS / Android): RNGH v2 Pan gesture + Reanimated v3 shared values.
+//   Drag is smooth (no snap mid-drag). onChange fires live whenever the
+//   integer value changes so the parent can render a "X – Y ft" pill above
+//   the slider that updates live.
 //
-// Web: GestureDetector's mouse handling is unreliable in older RNGH
-//   builds; we fall back to PanResponder so mouse drag works. Floating
-//   labels and brand fill all still work because they're driven from
-//   React state on this path.
-//
-// Spec: docs/create-trip-redesign-spec.md §7.10 + §4.2.3.
+// Web: PanResponder so mouse drag works without RNGH web quirks.
 // --------------------------------------------------------------------------
 
 export interface RangeSliderProps {
@@ -33,39 +28,34 @@ export interface RangeSliderProps {
   lower: number;
   upper: number;
   onChange: (next: { lower: number; upper: number }) => void;
+  /** Custom text for the left endpoint label. Defaults to `${min} ft`. */
+  minLabel?: string;
+  /** Custom text for the right endpoint label. Defaults to `${max} ft`. */
+  maxLabel?: string;
 }
 
 const FONT_INTER =
   Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter';
 
 const C = {
-  brandTeal: '#0788B0',
-  inkDark: '#212121',
   textMuted: '#7B7B7B',
-  track: '#E0E0E0',
+  track: '#E1E1E1', // same as WaveShapeSlider
 };
 
-const THUMB = 28;
+// Geometry matches WaveShapeSlider exactly so the two bars read as a pair.
+const THUMB = 36;
 const TRACK_H = 6;
-const LABEL_GAP = 10; // gap between label bottom and thumb top
-const LABEL_H = 24;
-const CONTAINER_H = THUMB + LABEL_H + LABEL_GAP + 8;
-const TRACK_TOP = LABEL_H + LABEL_GAP + (THUMB - TRACK_H) / 2;
-const THUMB_TOP = LABEL_H + LABEL_GAP;
-const MERGE_THRESHOLD = 2; // when |upper - lower| <= 2 → single centered label
+const CONTAINER_H = THUMB + 8 + 18; // thumb + small gap + endpoint label row
+const TRACK_TOP = (THUMB - TRACK_H) / 2;
+const THUMB_TOP = 0;
 
-// --------------------------------------------------------------------------
-// Dynamic native module load. Mirrors TravelExperienceSlider.tsx so
-// type-check works even if RNGH/Reanimated native modules are missing on
-// the current platform.
-// --------------------------------------------------------------------------
 let Gesture: any = null;
 let GestureDetectorComp: any = null;
 let ReanimatedAnimated: any = null;
 let useSharedValue: any = null;
 let useAnimatedStyle: any = null;
-let runOnJS: any = null;
 let useDerivedValue: any = null;
+let runOnJS: any = null;
 let hasNativeGestures = false;
 
 if (Platform.OS !== 'web') {
@@ -87,9 +77,6 @@ if (Platform.OS !== 'web') {
   }
 }
 
-// --------------------------------------------------------------------------
-// Helpers shared across both native / web paths.
-// --------------------------------------------------------------------------
 const clamp = (v: number, lo: number, hi: number) =>
   Math.min(Math.max(v, lo), hi);
 
@@ -106,16 +93,13 @@ const NativeRangeSlider: React.FC<RangeSliderProps> = ({
   lower,
   upper,
   onChange,
+  minLabel,
+  maxLabel,
 }) => {
   const [trackWidth, setTrackWidth] = useState(0);
 
-  // Shared values for thumb positions in px (relative to track start).
   const lowerSV = useSharedValue(0);
   const upperSV = useSharedValue(0);
-  // Per-gesture baseline captured on onBegin so translationX (which is the
-  // *cumulative* offset since gesture start) maps correctly. Without this
-  // the thumb would runaway because we'd be re-applying full translation
-  // on every frame.
   const lowerStartSV = useSharedValue(0);
   const upperStartSV = useSharedValue(0);
   const draggingLower = useSharedValue(0);
@@ -129,19 +113,12 @@ const NativeRangeSlider: React.FC<RangeSliderProps> = ({
     return ((v - min) / range) * usable;
   };
 
-  // Sync SV with props (controlled component). Skip while user is dragging
-  // that thumb to avoid fighting their finger.
   useEffect(() => {
-    if (!draggingLower.value) {
-      lowerSV.value = valueToPx(lower);
-    }
-    if (!draggingUpper.value) {
-      upperSV.value = valueToPx(upper);
-    }
+    if (!draggingLower.value) lowerSV.value = valueToPx(lower);
+    if (!draggingUpper.value) upperSV.value = valueToPx(upper);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lower, upper, trackWidth, min, max]);
 
-  // Last reported {lower, upper} so we don't spam onChange.
   const lastReportedRef = useRef({ lower, upper });
   lastReportedRef.current = { lower, upper };
 
@@ -153,23 +130,6 @@ const NativeRangeSlider: React.FC<RangeSliderProps> = ({
     }
   };
 
-  // ---- Gestures ----
-  // Use a horizontal-prioritized pan: parent scroll wins vertical motion,
-  // slider wins horizontal motion. Closes friction-audit bug #5.
-  //
-  // The pixel <-> value transforms run on the UI thread inside gesture
-  // worklets, so they're declared inline as worklet helpers (Reanimated
-  // can't capture a non-worklet function reference).
-  const snapPxWorklet = (px: number) => {
-    'worklet';
-    if (usable <= 0) return px;
-    const range = max - min;
-    const ratio = px / usable;
-    const raw = min + ratio * range;
-    const stepped = Math.round((raw - min) / step) * step + min;
-    const cl = Math.min(Math.max(stepped, min), max);
-    return ((cl - min) / range) * usable;
-  };
   const pxToValueWorklet = (px: number) => {
     'worklet';
     if (usable <= 0) return min;
@@ -188,17 +148,15 @@ const NativeRangeSlider: React.FC<RangeSliderProps> = ({
       .onBegin(() => {
         'worklet';
         draggingLower.value = 1;
-        // Capture starting px so translationX (cumulative from start)
-        // maps correctly on every onUpdate frame.
         lowerStartSV.value = lowerSV.value;
       })
       .onUpdate((e: { translationX: number }) => {
         'worklet';
-        const candidate = Math.min(
+        // Smooth movement — no snap during drag. Clamp only.
+        lowerSV.value = Math.min(
           Math.max(lowerStartSV.value + e.translationX, 0),
           upperSV.value,
         );
-        lowerSV.value = snapPxWorklet(candidate);
       })
       .onEnd(() => {
         'worklet';
@@ -230,11 +188,10 @@ const NativeRangeSlider: React.FC<RangeSliderProps> = ({
       })
       .onUpdate((e: { translationX: number }) => {
         'worklet';
-        const candidate = Math.min(
+        upperSV.value = Math.min(
           Math.max(upperStartSV.value + e.translationX, lowerSV.value),
           usable,
         );
-        upperSV.value = snapPxWorklet(candidate);
       })
       .onEnd(() => {
         'worklet';
@@ -254,80 +211,37 @@ const NativeRangeSlider: React.FC<RangeSliderProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [usable, min, max, step]);
 
-  // Animated styles.
   const lowerThumbStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: lowerSV.value }],
   }));
   const upperThumbStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: upperSV.value }],
   }));
+  // Fill is a sibling of the track (NOT a child) so its left/top are in
+  // container coords — matching where the track itself is positioned.
   const fillStyle = useAnimatedStyle(() => ({
     left: lowerSV.value + THUMB / 2,
     width: Math.max(0, upperSV.value - lowerSV.value),
   }));
 
-  // Floating value labels: show only while dragging that thumb.
-  // useDerivedValue gives us cheap re-reads in animated styles.
-  const lowerLabelStyle = useAnimatedStyle(() => {
-    const visible = draggingLower.value === 1 || draggingUpper.value === 1;
-    // Merge into one centered label when thumbs are within MERGE_THRESHOLD.
-    const span = upperSV.value - lowerSV.value;
-    const merged =
-      usable > 0
-        ? (span / usable) * (max - min) <= MERGE_THRESHOLD
-        : false;
-    return {
-      opacity: visible && !merged ? 1 : 0,
-      transform: [{ translateX: lowerSV.value - 16 + THUMB / 2 }],
-    };
-  });
-  const upperLabelStyle = useAnimatedStyle(() => {
-    const visible = draggingLower.value === 1 || draggingUpper.value === 1;
-    const span = upperSV.value - lowerSV.value;
-    const merged =
-      usable > 0
-        ? (span / usable) * (max - min) <= MERGE_THRESHOLD
-        : false;
-    return {
-      opacity: visible && !merged ? 1 : 0,
-      transform: [{ translateX: upperSV.value - 16 + THUMB / 2 }],
-    };
-  });
-  const mergedLabelStyle = useAnimatedStyle(() => {
-    const visible = draggingLower.value === 1 || draggingUpper.value === 1;
-    const span = upperSV.value - lowerSV.value;
-    const merged =
-      usable > 0
-        ? (span / usable) * (max - min) <= MERGE_THRESHOLD
-        : false;
-    return {
-      opacity: visible && merged ? 1 : 0,
-      transform: [
-        { translateX: (lowerSV.value + upperSV.value) / 2 - 22 + THUMB / 2 },
-      ],
-    };
-  });
-
-  // Animated text values — useAnimatedProps requires Animated.Text which
-  // is awkward; we cheat by deriving ints into React state at low cost
-  // via useDerivedValue + runOnJS while dragging. We compare against the
-  // last value via shared values to avoid stale-closure bugs.
-  const [labelLower, setLabelLower] = useState(lower);
-  const [labelUpper, setLabelUpper] = useState(upper);
-  const lastLabelLowerSV = useSharedValue(lower);
-  const lastLabelUpperSV = useSharedValue(upper);
+  // Live emit during drag — pushes integer values to the parent so the
+  // top-of-sheet "X – Y ft" pill updates as you drag. Skipped while the
+  // track hasn't been measured yet, otherwise the first paint with
+  // usable=0 would emit (min, min) and wipe the parent's default range
+  // (e.g. 2–4 ft → 1–1 ft).
+  const lastIntLowerSV = useSharedValue(lower);
+  const lastIntUpperSV = useSharedValue(upper);
   useDerivedValue(() => {
-    const v = pxToValueWorklet(lowerSV.value);
-    if (v !== lastLabelLowerSV.value) {
-      lastLabelLowerSV.value = v;
-      runOnJS(setLabelLower)(v);
-    }
-  });
-  useDerivedValue(() => {
-    const v = pxToValueWorklet(upperSV.value);
-    if (v !== lastLabelUpperSV.value) {
-      lastLabelUpperSV.value = v;
-      runOnJS(setLabelUpper)(v);
+    if (usable <= 0) return;
+    const nextLower = pxToValueWorklet(lowerSV.value);
+    const nextUpper = pxToValueWorklet(upperSV.value);
+    if (
+      nextLower !== lastIntLowerSV.value ||
+      nextUpper !== lastIntUpperSV.value
+    ) {
+      lastIntLowerSV.value = nextLower;
+      lastIntUpperSV.value = nextUpper;
+      runOnJS(emit)(nextLower, nextUpper);
     }
   });
 
@@ -337,8 +251,6 @@ const NativeRangeSlider: React.FC<RangeSliderProps> = ({
   };
 
   if (!hasNativeGestures) {
-    // Defensive fallback: if native modules unexpectedly didn't load on
-    // a non-web platform, render the web (PanResponder) variant.
     return (
       <WebRangeSlider
         min={min}
@@ -356,30 +268,16 @@ const NativeRangeSlider: React.FC<RangeSliderProps> = ({
   return (
     <View style={styles.container} onLayout={onTrackLayout}>
       {/* Track */}
-      <View style={styles.track} pointerEvents="none">
-        <A.View style={[styles.fill, fillStyle]} />
-      </View>
-
-      {/* Floating labels */}
-      <A.View
-        style={[styles.label, lowerLabelStyle]}
-        pointerEvents="none"
-      >
-        <Text style={styles.labelText}>{labelLower}</Text>
-      </A.View>
-      <A.View
-        style={[styles.label, upperLabelStyle]}
-        pointerEvents="none"
-      >
-        <Text style={styles.labelText}>{labelUpper}</Text>
-      </A.View>
-      <A.View
-        style={[styles.labelMerged, mergedLabelStyle]}
-        pointerEvents="none"
-      >
-        <Text style={styles.labelText}>
-          {labelLower}–{labelUpper}
-        </Text>
+      <View style={styles.track} pointerEvents="none" />
+      {/* Fill — sibling of track so left/top are in container coords.
+          Uses the same teal gradient as WaveShapeSlider for visual parity. */}
+      <A.View style={[styles.fill, fillStyle]} pointerEvents="none">
+        <LinearGradient
+          colors={['#00A2B6', '#0788B0']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={StyleSheet.absoluteFill}
+        />
       </A.View>
 
       {/* Thumbs */}
@@ -392,17 +290,15 @@ const NativeRangeSlider: React.FC<RangeSliderProps> = ({
 
       {/* Static endpoint labels */}
       <View style={styles.endpointRow} pointerEvents="none">
-        <Text style={styles.endpointText}>{min} ft</Text>
-        <Text style={styles.endpointText}>{max} ft</Text>
+        <Text style={styles.endpointText}>{minLabel ?? `${min} ft`}</Text>
+        <Text style={styles.endpointText}>{maxLabel ?? `${max} ft`}</Text>
       </View>
     </View>
   );
 };
 
 // --------------------------------------------------------------------------
-// Web implementation — PanResponder so mouse drag works without RNGH web
-// quirks. No worklets; React state drives the thumb. Acceptable on web
-// because there's no Android-scroll-steal concern.
+// Web implementation — PanResponder
 // --------------------------------------------------------------------------
 const WebRangeSlider: React.FC<RangeSliderProps> = ({
   min,
@@ -411,13 +307,14 @@ const WebRangeSlider: React.FC<RangeSliderProps> = ({
   lower,
   upper,
   onChange,
+  minLabel,
+  maxLabel,
 }) => {
   const containerRef = useRef<View>(null);
   const layoutRef = useRef({ width: 0, pageX: 0 });
   const valuesRef = useRef({ lower, upper });
   valuesRef.current = { lower, upper };
   const activeRef = useRef<'lower' | 'upper' | null>(null);
-  const [active, setActive] = useState<'lower' | 'upper' | null>(null);
 
   const usable = () => Math.max(0, layoutRef.current.width - THUMB);
 
@@ -471,7 +368,6 @@ const WebRangeSlider: React.FC<RangeSliderProps> = ({
             const which: 'lower' | 'upper' =
               Math.abs(trackX - lp) <= Math.abs(trackX - up) ? 'lower' : 'upper';
             activeRef.current = which;
-            setActive(which);
             apply(e.nativeEvent.pageX);
           });
         },
@@ -480,11 +376,9 @@ const WebRangeSlider: React.FC<RangeSliderProps> = ({
         },
         onPanResponderRelease: () => {
           activeRef.current = null;
-          setActive(null);
         },
         onPanResponderTerminate: () => {
           activeRef.current = null;
-          setActive(null);
         },
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -499,9 +393,6 @@ const WebRangeSlider: React.FC<RangeSliderProps> = ({
 
   const lowerPx = valueToPx(lower);
   const upperPx = valueToPx(upper);
-  const span = upper - lower;
-  const merged = span <= MERGE_THRESHOLD;
-  const showLabels = active !== null;
 
   return (
     <View
@@ -510,49 +401,21 @@ const WebRangeSlider: React.FC<RangeSliderProps> = ({
       onLayout={onLayout}
       {...responder.panHandlers}
     >
-      <View style={styles.track} pointerEvents="none">
-        <View
-          style={[
-            styles.fill,
-            { left: lowerPx + THUMB / 2, width: Math.max(0, upperPx - lowerPx) },
-          ]}
+      <View style={styles.track} pointerEvents="none" />
+      <View
+        style={[
+          styles.fill,
+          { left: lowerPx + THUMB / 2, width: Math.max(0, upperPx - lowerPx) },
+        ]}
+        pointerEvents="none"
+      >
+        <LinearGradient
+          colors={['#00A2B6', '#0788B0']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={StyleSheet.absoluteFill}
         />
       </View>
-      {showLabels && !merged ? (
-        <>
-          <View
-            style={[
-              styles.label,
-              { left: lowerPx - 16 + THUMB / 2 },
-            ]}
-            pointerEvents="none"
-          >
-            <Text style={styles.labelText}>{lower}</Text>
-          </View>
-          <View
-            style={[
-              styles.label,
-              { left: upperPx - 16 + THUMB / 2 },
-            ]}
-            pointerEvents="none"
-          >
-            <Text style={styles.labelText}>{upper}</Text>
-          </View>
-        </>
-      ) : null}
-      {showLabels && merged ? (
-        <View
-          style={[
-            styles.labelMerged,
-            { left: (lowerPx + upperPx) / 2 - 22 + THUMB / 2 },
-          ]}
-          pointerEvents="none"
-        >
-          <Text style={styles.labelText}>
-            {lower}–{upper}
-          </Text>
-        </View>
-      ) : null}
       <View
         style={[styles.thumb, { transform: [{ translateX: lowerPx }] }]}
         pointerEvents="none"
@@ -562,16 +425,13 @@ const WebRangeSlider: React.FC<RangeSliderProps> = ({
         pointerEvents="none"
       />
       <View style={styles.endpointRow} pointerEvents="none">
-        <Text style={styles.endpointText}>{min} ft</Text>
-        <Text style={styles.endpointText}>{max} ft</Text>
+        <Text style={styles.endpointText}>{minLabel ?? `${min} ft`}</Text>
+        <Text style={styles.endpointText}>{maxLabel ?? `${max} ft`}</Text>
       </View>
     </View>
   );
 };
 
-// --------------------------------------------------------------------------
-// Public export — picks the right implementation for the platform.
-// --------------------------------------------------------------------------
 export const RangeSlider: React.FC<RangeSliderProps> = (props) => {
   if (Platform.OS === 'web' || !hasNativeGestures) {
     return <WebRangeSlider {...props} />;
@@ -581,16 +441,12 @@ export const RangeSlider: React.FC<RangeSliderProps> = (props) => {
 
 export default RangeSlider;
 
-// --------------------------------------------------------------------------
-// Styles — shared between native + web variants. The thumb / track / label
-// geometry is identical so they look the same on every platform.
-// --------------------------------------------------------------------------
 const styles = StyleSheet.create({
   container: {
     height: CONTAINER_H,
     position: 'relative',
     justifyContent: 'flex-start',
-    paddingBottom: 18, // room for endpoint labels under the track
+    paddingBottom: 18,
   },
   track: {
     position: 'absolute',
@@ -599,15 +455,17 @@ const styles = StyleSheet.create({
     right: THUMB / 2,
     height: TRACK_H,
     backgroundColor: C.track,
-    borderRadius: TRACK_H / 2,
+    borderRadius: 8,
   },
   fill: {
     position: 'absolute',
     top: TRACK_TOP,
     height: TRACK_H,
-    backgroundColor: C.brandTeal,
-    borderRadius: TRACK_H / 2,
+    borderRadius: 8,
+    overflow: 'hidden', // clip the gradient to the rounded bar
   },
+  // Identical to WaveShapeSlider's thumb so both bars feel like the same
+  // control rendered twice.
   thumb: {
     position: 'absolute',
     top: THUMB_TOP,
@@ -616,44 +474,11 @@ const styles = StyleSheet.create({
     height: THUMB,
     borderRadius: THUMB / 2,
     backgroundColor: '#FFFFFF',
-    borderWidth: 2,
-    borderColor: C.brandTeal,
-    shadowColor: '#000',
-    shadowOpacity: 0.18,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 3,
-  },
-  label: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    width: 32,
-    height: LABEL_H,
-    borderRadius: 8,
-    backgroundColor: C.inkDark,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 8,
-  },
-  labelMerged: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    width: 44,
-    height: LABEL_H,
-    borderRadius: 8,
-    backgroundColor: C.inkDark,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 8,
-  },
-  labelText: {
-    color: '#FFFFFF',
-    fontFamily: FONT_INTER,
-    fontSize: 12,
-    fontWeight: '700',
-    lineHeight: 16,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.22,
+    shadowRadius: 16,
+    elevation: 12,
   },
   endpointRow: {
     position: 'absolute',
