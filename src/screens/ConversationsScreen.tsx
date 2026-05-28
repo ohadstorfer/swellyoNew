@@ -430,7 +430,6 @@ export default function ConversationsScreen({
         conversation_id: 'welcome-conversation-fake-id',
         sender_id: 'swellyo-team',
         body: 'Welcome',
-        rendered_body: null,
         attachments: [],
         is_system: false,
         edited: false,
@@ -850,6 +849,8 @@ export default function ConversationsScreen({
     const isLastMessageImage = conv.last_message?.type === 'image' || !!conv.last_message?.image_metadata;
     const isLastMessageVideo = conv.last_message?.type === 'video' || !!(conv.last_message as any)?.video_metadata;
     const isLastMessageAudio = conv.last_message?.type === 'audio' || !!(conv.last_message as any)?.audio_metadata;
+    const isLastMessageCommitment = conv.last_message?.type === 'commitment_request';
+    const isLastMessageMine = conv.last_message?.sender_id === currentUserId;
 
     const lastMessageTime = conv.last_message ? formatTime(conv.last_message.created_at) : '';
     const unreadCount = conv.unread_count || 0;
@@ -941,6 +942,16 @@ export default function ConversationsScreen({
                   Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
                 ]} numberOfLines={1}>
                   Voice message
+                </Text>
+              </View>
+            ) : isLastMessageCommitment ? (
+              <View style={styles.imageMessagePreview}>
+                <Ionicons name="checkmark-circle-outline" size={14} color="#7B7B7B" style={styles.imageIcon} />
+                <Text style={[
+                  styles.lastMessage,
+                  Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
+                ]} numberOfLines={1}>
+                  {isLastMessageMine ? 'You requested to be Committed' : 'Requested to be Committed'}
                 </Text>
               </View>
             ) : (

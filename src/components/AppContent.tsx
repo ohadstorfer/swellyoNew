@@ -857,6 +857,10 @@ export const AppContent: React.FC = () => {
   const [viewingUserId, setViewingUserId] = useState<string | null>(null);
   const [profileFromSwellyShaper, setProfileFromSwellyShaper] = useState(false); // Track if profile was opened from Swelly Shaper
   const [profileFromTripPlanningChat, setProfileFromTripPlanningChat] = useState(false); // Track if profile was opened from trip planning chat
+  // True while a participant profile is open from inside a TripDetailScreen.
+  // Lets handleProfileBack keep showTrips=true so the trip detail re-renders
+  // (with pendingTripDetailId restoring the selected trip) on close.
+  const [profileFromTripDetail, setProfileFromTripDetail] = useState(false);
   const [profileFromOnboardingChat, setProfileFromOnboardingChat] = useState(false); // Track if profile was opened right after Swelly onboarding chat (special header)
   const [profileFromWelcomeOverlay, setProfileFromWelcomeOverlay] = useState(false); // Track if profile was opened from WelcomeToLineupOverlay
 
@@ -1041,6 +1045,18 @@ export const AppContent: React.FC = () => {
       setViewingUserId(null);
       setProfileFromTripPlanningChat(false); // Reset flag
       setShowTripPlanningChat(true); // Return to chat
+      return;
+    }
+
+    // If profile was opened from a participant card inside TripDetailScreen,
+    // close the profile and bring TripsScreen back. pendingTripDetailId is
+    // still set so TripsScreen's initialTripId restores the trip detail.
+    if (profileFromTripDetail) {
+      console.log('[AppContent] Returning to trip detail');
+      setShowProfile(false);
+      setViewingUserId(null);
+      setProfileFromTripDetail(false);
+      setShowTrips(true);
       return;
     }
 
@@ -1282,6 +1298,20 @@ export const AppContent: React.FC = () => {
     setShowTrips(true);
   }, []);
 
+  // Wrap handleViewUserProfile for taps coming from inside TripDetailScreen.
+  // The render cascade prioritises showTrips over showProfile, so we have to
+  // toggle showTrips off here — handleProfileBack flips it back on, and
+  // pendingTripDetailId restores the trip detail in TripsScreen on remount.
+  const handleViewUserProfileFromTrip = useCallback(
+    (userId: string, fromTripId: string) => {
+      setPendingTripDetailId(fromTripId);
+      setProfileFromTripDetail(true);
+      setShowTrips(false);
+      handleViewUserProfile(userId);
+    },
+    []
+  );
+
   const handleOpenSurftripDetail = useCallback((groupId: string) => {
     setSelectedConversation(null);
     setActiveSurftripDetailId(groupId);
@@ -1387,6 +1417,7 @@ export const AppContent: React.FC = () => {
       console.log('[AppContent] Closing profile screen...');
       setShowProfile(false);
       setViewingUserId(null);
+      setProfileFromTripDetail(false);
       console.log('[AppContent] Profile screen closed');
       
       // Note: We keep showTripPlanningChat true so back button works correctly
@@ -1660,6 +1691,7 @@ export const AppContent: React.FC = () => {
           }}
           initialTripId={pendingTripDetailId}
           onOpenGroupChat={handleOpenGroupChat}
+          onViewUserProfile={handleViewUserProfileFromTrip}
         />
       );
     } else if (showSettings) {

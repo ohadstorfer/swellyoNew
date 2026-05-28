@@ -832,14 +832,23 @@ export default function CreateTripFlowA({
     return state.durationDays ?? 0;
   }, [state.datesMode, state.durationDays, startDateObj, endDateObj]);
 
+  const tripTravelMonth = useCallback((): string | null => {
+    if (state.datesMode === 'exact' && startDateObj) {
+      const d = startDateObj;
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    }
+    return state.monthFrom || null;
+  }, [state.datesMode, startDateObj, state.monthFrom]);
+
   const estimateKey = useCallback(() => {
     return [
       state.destination,
       state.destinationGeo?.country ?? '',
       tripDurationDays(),
       state.accommodationKind ?? '',
+      tripTravelMonth() ?? '',
     ].join('|');
-  }, [state.destination, state.destinationGeo, state.accommodationKind, tripDurationDays]);
+  }, [state.destination, state.destinationGeo, state.accommodationKind, tripDurationDays, tripTravelMonth]);
 
   const maybeEstimateBudget = useCallback(async () => {
     if (editMode) return;
@@ -864,6 +873,7 @@ export default function CreateTripFlowA({
         formattedAddress: state.destinationGeo?.full ?? null,
         durationDays,
         accommodationType: state.accommodationKind ?? null,
+        travelMonth: tripTravelMonth(),
       });
       setBudgetEstimate(est);
       setLastEstimateKey(key);
@@ -881,6 +891,7 @@ export default function CreateTripFlowA({
     lastEstimateKey,
     budgetError,
     tripDurationDays,
+    tripTravelMonth,
     state.destination,
     state.destinationGeo,
     state.accommodationKind,
@@ -1199,8 +1210,7 @@ export default function CreateTripFlowA({
           accommodation_status: null,
           visibility: state.visibility,
 
-          packing_list: [],
-          group_packing_list: [],
+          group_gear: [],
         };
         const trip = await createGroupTrip(hostId, input);
 

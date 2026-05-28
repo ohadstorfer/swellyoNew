@@ -28,7 +28,6 @@ export interface ConversationMember {
   conversation_id: string;
   user_id: string;
   role: 'owner' | 'admin' | 'member';
-  adv_role?: 'adv_giver' | 'adv_seeker' | null; // Role in trip planning context
   joined_at: string;
   last_read_message_id?: string;
   last_read_at?: string;
@@ -97,7 +96,7 @@ export interface CommitmentMetadata {
   trip_title?: string | null;
   items: string[];             // e.g. ['flight_booked', 'insurance_sorted', 'something_else']
   note?: string | null;
-  status?: 'pending' | 'approved' | 'superseded'; // mirrors group_trip_commitment_requests.status
+  status?: 'pending' | 'approved' | 'declined' | 'superseded'; // mirrors group_trip_commitment_requests.status
 }
 
 // Snapshot of the message being replied to. Frozen at send time — edits to the
@@ -119,8 +118,7 @@ export interface Message {
   // Message type and content
   type?: MessageType;           // 'text' | 'image' (defaults to 'text' for backward compatibility)
   body?: string;                // Text content (for text messages or image captions)
-  rendered_body?: any;
-  
+
   // Image-specific fields (only populated for type='image')
   image_metadata?: ImageMetadata;
 
@@ -279,43 +277,39 @@ class MessagingService {
         return { conversations: [], hasMore: false }; // Return empty array, auth guard will redirect
       }
 
-      // Get conversations where user is a member with pagination
-      // Fetch limit+1 to determine if there are more conversations
-      // Note: Supabase range is inclusive-inclusive, so range(offset, offset+limit) returns limit+1 items
-      const fetchLimit = limit + 1; // Explicitly fetch one extra to detect hasMore
+      // Get ALL conversation IDs the user is a member of. We can't paginate on
+      // conversation_members directly because its natural sort (joined_at) does
+      // not reflect activity — a user who joined many group chats recently can
+      // push older but actively-used direct chats off page 1, hiding them in
+      // the UI. We page on conversations.updated_at instead.
       const { data: membershipData, error: membershipError } = await supabase
         .from('conversation_members')
         .select('conversation_id')
-        .eq('user_id', user.id)
-        .order('joined_at', { ascending: false })
-        .range(offset, offset + limit); // This returns limit+1 items (inclusive-inclusive)
+        .eq('user_id', user.id);
 
       if (membershipError) throw membershipError;
 
-      // Check if there are more conversations
-      // If we got exactly limit+1 items, there are more
-      // If we got fewer than limit+1, we've reached the end
-      // Edge case: If we got exactly limit items, there might be more (backend returned fewer)
-      // Conservative approach: If we got exactly limit items, assume there might be more
-      const receivedCount = membershipData?.length || 0;
-      const hasMore = receivedCount > limit || (receivedCount === limit && receivedCount > 0);
-      
-      // Take only the requested limit (remove the extra one we fetched if it exists)
-      const paginatedMembershipData = membershipData ? membershipData.slice(0, limit) : [];
-      const conversationIds = paginatedMembershipData.map(m => m.conversation_id);
+      const allMemberConversationIds = (membershipData || []).map(m => m.conversation_id);
 
-      if (conversationIds.length === 0) {
+      if (allMemberConversationIds.length === 0) {
         return { conversations: [], hasMore: false };
       }
 
-      // OPTIMIZATION 1: Get conversation details with specific columns
-      const { data: conversations, error: conversationsError } = await supabase
+      // OPTIMIZATION 1: Get conversation details ordered by recent activity,
+      // with pagination applied here (not on memberships).
+      const { data: pagedConversations, error: conversationsError } = await supabase
         .from('conversations')
         .select('id, title, is_direct, metadata, created_by, created_at, updated_at')
-        .in('id', conversationIds)
-        .order('updated_at', { ascending: false });
+        .in('id', allMemberConversationIds)
+        .order('updated_at', { ascending: false })
+        .range(offset, offset + limit); // inclusive-inclusive → up to limit+1
 
       if (conversationsError) throw conversationsError;
+
+      const receivedCount = pagedConversations?.length || 0;
+      const hasMore = receivedCount > limit;
+      const conversations = pagedConversations ? pagedConversations.slice(0, limit) : [];
+      const conversationIds = conversations.map(c => c.id);
 
       if (!conversations || conversations.length === 0) {
         return { conversations: [], hasMore: false };
@@ -549,7 +543,7 @@ class MessagingService {
       
       const { data: messages, error } = await supabase
         .from('messages')
-        .select('id, conversation_id, sender_id, body, rendered_body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata, audio_metadata, commitment_metadata, reply_to_message_id, reply_to_snapshot')
+        .select('id, conversation_id, sender_id, body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata, audio_metadata, commitment_metadata, reply_to_message_id, reply_to_snapshot')
         .eq('conversation_id', conversationId)
         // Note: We include deleted messages so they can be displayed with "deleted" placeholder
         .gt('updated_at', lastSyncDate)
@@ -626,7 +620,7 @@ class MessagingService {
 
       let query = supabase
         .from('messages')
-        .select('id, conversation_id, sender_id, body, rendered_body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata, audio_metadata, commitment_metadata, reply_to_message_id, reply_to_snapshot')
+        .select('id, conversation_id, sender_id, body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata, audio_metadata, commitment_metadata, reply_to_message_id, reply_to_snapshot')
         .eq('conversation_id', conversationId)
         // Note: We include deleted messages so they can be displayed with "deleted" placeholder
         .order('created_at', { ascending: useAscending })
@@ -1186,7 +1180,7 @@ class MessagingService {
   /**
    * Create a new direct conversation with another user
    * @param otherUserId - The user ID to create a conversation with
-   * @param fromTripPlanning - If true, sets adv_role: current user = adv_seeker, other user = adv_giver
+   * @param fromTripPlanning - If true, marks this as a Swelly-match conversation (used for the swelly_first_match_at analytics field).
    */
   async createDirectConversation(
     otherUserId: string, 
@@ -1266,7 +1260,6 @@ class MessagingService {
       }
 
       // Add both users as members
-      // If from trip planning: current user is adv_seeker, other user is adv_giver
       const { error: membersError } = await supabase
         .from('conversation_members')
         .insert([
@@ -1274,13 +1267,11 @@ class MessagingService {
             conversation_id: conversation.id,
             user_id: user.id,
             role: 'owner',
-            adv_role: fromTripPlanning ? 'adv_seeker' : null,
           },
           {
             conversation_id: conversation.id,
             user_id: otherUserId,
             role: 'member',
-            adv_role: fromTripPlanning ? 'adv_giver' : null,
           },
         ]);
 
@@ -1628,7 +1619,7 @@ class MessagingService {
             try {
               const { data: fullMessage, error } = await supabase
                 .from('messages')
-                .select('id, conversation_id, sender_id, body, rendered_body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata, audio_metadata, commitment_metadata, reply_to_message_id, reply_to_snapshot')
+                .select('id, conversation_id, sender_id, body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata, audio_metadata, commitment_metadata, reply_to_message_id, reply_to_snapshot')
                 .eq('id', newMessage.id)
                 .single();
               
@@ -1685,7 +1676,7 @@ class MessagingService {
           try {
             const { data: fullMessage, error } = await supabase
               .from('messages')
-              .select('id, conversation_id, sender_id, body, rendered_body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata, audio_metadata, commitment_metadata, reply_to_message_id, reply_to_snapshot')
+              .select('id, conversation_id, sender_id, body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata, audio_metadata, commitment_metadata, reply_to_message_id, reply_to_snapshot')
               .eq('id', updatedMessage.id)
               .single();
             
@@ -2457,7 +2448,7 @@ class MessagingService {
       const lastMessagesPromises = conversations.map(conv =>
         supabase
           .from('messages')
-          .select('id, conversation_id, sender_id, body, rendered_body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata, audio_metadata, commitment_metadata, reply_to_message_id, reply_to_snapshot')
+          .select('id, conversation_id, sender_id, body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata, audio_metadata, commitment_metadata, reply_to_message_id, reply_to_snapshot')
           .eq('conversation_id', conv.id)
           // Note: We include deleted messages so they can be displayed with "deleted" placeholder
           .order('created_at', { ascending: false })

@@ -439,6 +439,7 @@ export default function CreateTripFlowBC({
         target_surf_styles: state.targetSurfStyles,
         wave_size_min: state.waveSizeMin ? parseFloat(state.waveSizeMin) : null,
         wave_size_max: state.waveSizeMax ? parseFloat(state.waveSizeMax) : null,
+        wave_shapes: null,
 
         host_been_there: state.hostBeenThere,
         budget_min: state.budgetMin ? parseInt(state.budgetMin, 10) : null,
@@ -457,8 +458,7 @@ export default function CreateTripFlowBC({
         accommodation_status: null,
         visibility: 'public',
 
-        packing_list: [],
-        group_packing_list: [],
+        group_gear: [],
       };
 
       if (editMode && initialTrip) {

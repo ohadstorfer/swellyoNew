@@ -20,7 +20,7 @@ import {
   EnrichedParticipant,
   EnrichedJoinRequest,
   GroupTripJoinRequest,
-  PackingItem,
+  GroupGearItem,
   PersonalGearItem,
   AdminUpdate,
   EnrichedGearItem,
@@ -50,8 +50,8 @@ import {
   submitCommitment,
   type CommitmentItem,
   type CommitmentStatus,
-  setTripPackingList,
-  setMyPackingList,
+  setTripGroupGear,
+  setMyGroupGear,
   setMyPersonalGearList,
   listAdminUpdates,
   addAdminUpdate,
@@ -78,6 +78,8 @@ interface TripDetailScreenProps {
   onBack: () => void;
   onOpenGroupChat?: (params: { conversationId: string; title: string; heroImageUrl?: string | null; tripId?: string }) => void;
   onEditTrip?: (trip: GroupTrip) => void;
+  /** Tap on a participant opens their profile. Back from the profile returns here. */
+  onViewUserProfile?: (userId: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -194,7 +196,7 @@ const DangerRow: React.FC<{
 );
 
 // ---------------------------------------------------------------------------
-export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEditTrip }: TripDetailScreenProps) {
+export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEditTrip, onViewUserProfile }: TripDetailScreenProps) {
   const { user: contextUser } = useOnboarding();
   const currentUserId = contextUser?.id?.toString() ?? null;
 
@@ -217,17 +219,18 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     surfLevel: string | null;
   } | null>(null);
   const [editingPacking, setEditingPacking] = useState(false);
-  const [packingDraft, setPackingDraft] = useState('');
+  const [groupGearDraft, setGroupGearDraft] = useState('');
   const [savingPacking, setSavingPacking] = useState(false);
   // Member-private gear: each user adds/removes only their own; host items
-  // live in trip.packing_list and aren't editable from here.
+  // live in trip.group_gear and aren't editable from here.
   const [addingPersonalItem, setAddingPersonalItem] = useState(false);
   const [personalItemDraft, setPersonalItemDraft] = useState('');
   const [savingPersonalItem, setSavingPersonalItem] = useState(false);
   const [muted, setMuted] = useState(false);
 
-  // Group Gear — shared items with required quantities + request flow.
-  // Replaces the old (group_packing_list jsonb + group_trip_group_packing_claims) model.
+  // Shared gear — items with required quantities + request flow
+  // (group_trip_gear_items / _gear_claims / _gear_requests). Distinct from
+  // the host's group_gear checklist (which lives on group_trips.group_gear).
   const [gearItems, setGearItems] = useState<EnrichedGearItem[]>([]);
   const [gearRequests, setGearRequests] = useState<EnrichedGearRequest[]>([]); // host only
   const [gearItemSheetItem, setGearItemSheetItem] = useState<EnrichedGearItem | null>(null);
@@ -261,17 +264,17 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   const myCommitmentStatus: CommitmentStatus = meParticipant?.commitment_status ?? 'none';
   const myCommitmentItems = meParticipant?.commitment_items ?? [];
   const myCommitmentNote = meParticipant?.commitment_note ?? null;
-  const myPackingList = useMemo<PackingItem[]>(
-    () => participants.find(p => p.user_id === currentUserId)?.packing_list ?? [],
+  const myGroupGear = useMemo<GroupGearItem[]>(
+    () => participants.find(p => p.user_id === currentUserId)?.personal_gear_by_host ?? [],
     [participants, currentUserId]
   );
   const myPersonalGear = useMemo<PersonalGearItem[]>(
-    () => participants.find(p => p.user_id === currentUserId)?.personal_gear ?? [],
+    () => participants.find(p => p.user_id === currentUserId)?.personal_gear_by_me ?? [],
     [participants, currentUserId]
   );
-  const gearTotalCount = (trip?.packing_list?.length ?? 0) + myPersonalGear.length;
+  const gearTotalCount = (trip?.group_gear?.length ?? 0) + myPersonalGear.length;
   const gearDoneCount =
-    myPackingList.filter(it => it.done && (trip?.packing_list ?? []).includes(it.name)).length +
+    myGroupGear.filter(it => it.done && (trip?.group_gear ?? []).includes(it.name)).length +
     myPersonalGear.filter(it => it.done).length;
   const loadAll = useCallback(async () => {
     const [tripData, participantsData, updatesData, gearItemsData] = await Promise.all([
@@ -572,22 +575,22 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     }
   };
 
-  const handleTogglePackingItem = async (itemName: string) => {
+  const handleToggleGroupGearItem = async (itemName: string) => {
     if (!currentUserId) return;
-    const current = myPackingList;
-    const next: PackingItem[] = current.map(it =>
+    const current = myGroupGear;
+    const next: GroupGearItem[] = current.map(it =>
       it.name === itemName ? { ...it, done: !it.done } : it
     );
     // Optimistic
     setParticipants(prev =>
-      prev.map(p => (p.user_id === currentUserId ? { ...p, packing_list: next } : p))
+      prev.map(p => (p.user_id === currentUserId ? { ...p, personal_gear_by_host: next } : p))
     );
     try {
-      await setMyPackingList(tripId, currentUserId, next);
+      await setMyGroupGear(tripId, currentUserId, next);
     } catch (e: any) {
       // Revert
       setParticipants(prev =>
-        prev.map(p => (p.user_id === currentUserId ? { ...p, packing_list: current } : p))
+        prev.map(p => (p.user_id === currentUserId ? { ...p, personal_gear_by_host: current } : p))
       );
       Alert.alert('Could not update', e?.message || 'Please try again.');
     }
@@ -600,13 +603,13 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     if (!currentUserId) return;
     // Optimistic
     setParticipants(prev =>
-      prev.map(p => (p.user_id === currentUserId ? { ...p, personal_gear: next } : p))
+      prev.map(p => (p.user_id === currentUserId ? { ...p, personal_gear_by_me: next } : p))
     );
     try {
       await setMyPersonalGearList(tripId, currentUserId, next);
     } catch (e: any) {
       setParticipants(prev =>
-        prev.map(p => (p.user_id === currentUserId ? { ...p, personal_gear: previous } : p))
+        prev.map(p => (p.user_id === currentUserId ? { ...p, personal_gear_by_me: previous } : p))
       );
       Alert.alert('Could not update', e?.message || 'Please try again.');
     }
@@ -642,7 +645,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
       return;
     }
     // Reject duplicates against host list or my own list.
-    const hostNames = (trip?.packing_list ?? []).map(n => n.toLowerCase());
+    const hostNames = (trip?.group_gear ?? []).map(n => n.toLowerCase());
     const myNames = myPersonalGear.map(i => i.name.toLowerCase());
     if (hostNames.includes(name.toLowerCase()) || myNames.includes(name.toLowerCase())) {
       Alert.alert('Already on your list', `"${name}" is already in your gear.`);
@@ -654,7 +657,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     try {
       await setMyPersonalGearList(tripId, currentUserId, next);
       setParticipants(prev =>
-        prev.map(p => (p.user_id === currentUserId ? { ...p, personal_gear: next } : p))
+        prev.map(p => (p.user_id === currentUserId ? { ...p, personal_gear_by_me: next } : p))
       );
       handleCancelAddPersonalItem();
     } catch (e: any) {
@@ -666,24 +669,24 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
 
   const handleStartEditPacking = () => {
     if (!trip) return;
-    setPackingDraft((trip.packing_list ?? []).join('\n'));
+    setGroupGearDraft((trip.group_gear ?? []).join('\n'));
     setEditingPacking(true);
   };
 
   const handleCancelEditPacking = () => {
     setEditingPacking(false);
-    setPackingDraft('');
+    setGroupGearDraft('');
   };
 
   const handleSavePacking = async () => {
     if (!trip) return;
-    const names = packingDraft
+    const names = groupGearDraft
       .split('\n')
       .map(s => s.trim())
       .filter(Boolean);
     setSavingPacking(true);
     try {
-      await setTripPackingList(tripId, names);
+      await setTripGroupGear(tripId, names);
       // The DB trigger has now synced participant lists; refetch both.
       const [tripData, participantsData] = await Promise.all([
         getTripById(tripId),
@@ -692,7 +695,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
       if (tripData) setTrip(tripData);
       setParticipants(participantsData);
       setEditingPacking(false);
-      setPackingDraft('');
+      setGroupGearDraft('');
     } catch (e: any) {
       Alert.alert('Could not save list', e?.message || 'Please try again.');
     } finally {
@@ -1182,7 +1185,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
               ))
             )}
 
-            {(isApprovedMember || isHost) && (
+            {isApprovedMember && (
               <TouchableOpacity
                 style={styles.requestLinkBtn}
                 onPress={() => setRequestSheetVisible(true)}
@@ -1192,7 +1195,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
               </TouchableOpacity>
             )}
 
-            {isHost && gearRequests.length > 0 && (
+            {isHost && (
               <TouchableOpacity
                 style={styles.gearReqsBadge}
                 onPress={() => setRequestsSheetVisible(true)}
@@ -1200,7 +1203,9 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
               >
                 <Ionicons name="notifications-outline" size={16} color="#222B30" />
                 <Text style={styles.gearReqsBadgeText}>
-                  {gearRequests.length} pending {gearRequests.length === 1 ? 'request' : 'requests'}
+                  {gearRequests.length > 0
+                    ? `${gearRequests.length} pending ${gearRequests.length === 1 ? 'request' : 'requests'}`
+                    : 'Gear requests'}
                 </Text>
                 <Ionicons name="chevron-forward" size={16} color="#222B30" />
               </TouchableOpacity>
@@ -1209,7 +1214,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         )}
 
         {/* Personal packing list — per-user items with done state. */}
-        {((trip.packing_list && trip.packing_list.length > 0) || (isHost && !isCancelled)) && (
+        {((trip.group_gear && trip.group_gear.length > 0) || (isHost && !isCancelled)) && (
           <View style={styles.section}>
             <View style={styles.packingHeader}>
               <Text style={styles.sectionTitle}>Your gear</Text>
@@ -1231,8 +1236,8 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
                   <TextInput
                     style={styles.packingTextarea}
                     multiline
-                    value={packingDraft}
-                    onChangeText={setPackingDraft}
+                    value={groupGearDraft}
+                    onChangeText={setGroupGearDraft}
                     placeholder={'wax\nsunscreen\npassport\nboard bag'}
                     placeholderTextColor="#B0B0B0"
                     autoCapitalize="none"
@@ -1272,15 +1277,15 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
                   )}
 
                   {/* Host items — shown to all participants with the "Host suggestion" tag. */}
-                  {(trip.packing_list ?? []).map(name => {
-                    const myItem = myPackingList.find(it => it.name === name);
+                  {(trip.group_gear ?? []).map(name => {
+                    const myItem = myGroupGear.find(it => it.name === name);
                     const done = !!myItem?.done;
                     const canToggle = !!currentUserId && (isHost || isApprovedMember) && !isCancelled;
                     return (
                       <TouchableOpacity
                         key={`host-${name}`}
                         style={styles.packingRow}
-                        onPress={() => canToggle && handleTogglePackingItem(name)}
+                        onPress={() => canToggle && handleToggleGroupGearItem(name)}
                         disabled={!canToggle}
                         activeOpacity={canToggle ? 0.6 : 1}
                       >
@@ -1433,6 +1438,11 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
                 <ParticipantCard
                   participant={p}
                   isMe={p.user_id === currentUserId}
+                  onPress={
+                    onViewUserProfile && p.user_id !== currentUserId
+                      ? () => onViewUserProfile(p.user_id)
+                      : undefined
+                  }
                   onRemove={
                     isHost && !isCancelled && p.role !== 'host' && removingUserId !== p.user_id
                       ? handleRemoveParticipant

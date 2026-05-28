@@ -27,6 +27,7 @@ interface EstimateRequest {
   formatted_address?: string | null;
   duration_days: number;
   accommodation_type?: string | null;
+  travel_month?: string | null; // "YYYY-MM" — drives seasonality
 }
 
 interface Tier {
@@ -35,10 +36,25 @@ interface Tier {
   label?: string;
 }
 
-// Coerce a model-produced range into clean integers; throw on garbage.
+const MONTHS = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+
+// "2026-07" -> "July". Returns null on anything that isn't a valid YYYY-MM.
+function monthName(ym?: string | null): string | null {
+  if (!ym) return null;
+  const m = /^(\d{4})-(\d{2})$/.exec(String(ym).trim());
+  if (!m) return null;
+  return MONTHS[Number(m[2]) - 1] ?? null;
+}
+
+// Coerce a model-produced per-day range into finite non-negative numbers; throw
+// on garbage. Rounding is deferred until after the per-day -> whole-trip scaling
+// so the rounding error isn't multiplied by the trip length.
 function sanitizeTier(raw: any): Tier {
-  let min = Math.round(Number(raw?.min));
-  let max = Math.round(Number(raw?.max));
+  let min = Number(raw?.min);
+  let max = Number(raw?.max);
   if (!Number.isFinite(min) || !Number.isFinite(max) || min < 0 || max < 0) {
     throw new Error('Invalid range numbers');
   }
@@ -46,6 +62,24 @@ function sanitizeTier(raw: any): Tier {
   const tier: Tier = { min, max };
   if (typeof raw?.label === 'string' && raw.label.trim()) tier.label = String(raw.label).trim();
   return tier;
+}
+
+// Force the three tiers to strictly increase and not overlap (low.max <=
+// medium.min <= medium.max <= high.min ...). The model is told to do this but
+// doesn't always comply, which would otherwise surface as overlapping/jumbled
+// price cards in the UI. Operates on per-day values (monotonic under scaling).
+function enforceOrdering(low: Tier, medium: Tier, high: Tier): void {
+  medium.min = Math.max(medium.min, low.max);
+  medium.max = Math.max(medium.max, medium.min);
+  high.min = Math.max(high.min, medium.max);
+  high.max = Math.max(high.max, high.min);
+}
+
+// Scale a per-day tier to the whole trip and round to whole dollars.
+function scaleTier(t: Tier, days: number): Tier {
+  const out: Tier = { min: Math.round(t.min * days), max: Math.round(t.max * days) };
+  if (t.label) out.label = t.label;
+  return out;
 }
 
 serve(async (req: Request) => {
@@ -72,26 +106,29 @@ serve(async (req: Request) => {
   const place = body.formatted_address || body.destination;
   const country = body.country ? ` (${body.country})` : '';
   const accommodation = body.accommodation_type || 'unspecified';
+  const month = monthName(body.travel_month);
 
   const systemPrompt =
-    'You are a surf-travel budget estimator. Given a destination, trip length in ' +
-    'days, and accommodation type, estimate the TOTAL per-person cost in USD for ' +
-    'the WHOLE trip (accommodation + food + local transport + typical surf ' +
-    'activities; EXCLUDING international flights). Return three tiers: low ' +
+    'You are a surf-travel budget estimator. Given a destination, travel month, ' +
+    'and accommodation type, estimate the per-person, PER-DAY cost in USD ' +
+    '(accommodation + food + local transport + typical surf activities; ' +
+    'EXCLUDING international flights). Account for seasonality: peak/high season ' +
+    'costs more than off-season at that destination. Return three tiers: low ' +
     '(budget/backpacker), medium (comfortable mid-range), high (premium). Each ' +
-    'tier is a realistic min-max range in whole US dollars. Ranges must increase ' +
-    'low -> medium -> high and should not overlap. Labels must be short (<= 6 ' +
-    'words). Respond ONLY with a JSON object, no markdown, no comments.';
+    'tier is a realistic per-day min-max range in US dollars. Ranges MUST ' +
+    'increase low -> medium -> high and MUST NOT overlap. Labels must be short ' +
+    '(<= 6 words). Respond ONLY with a JSON object, no markdown, no comments.';
 
   const userPrompt =
     `Destination: ${place}${country}\n` +
+    (month ? `Travel month: ${month}\n` : '') +
     `Trip length: ${durationDays} days\n` +
     `Accommodation type: ${accommodation}\n\n` +
-    'Return JSON exactly in this schema:\n' +
-    '{"currency":"USD","ranges":{' +
-    '"low":{"min":<int>,"max":<int>,"label":"<short phrase>"},' +
-    '"medium":{"min":<int>,"max":<int>,"label":"<short phrase>"},' +
-    '"high":{"min":<int>,"max":<int>,"label":"<short phrase>"}}}';
+    'Return JSON exactly in this schema (PER-DAY per-person amounts, NOT trip totals):\n' +
+    '{"currency":"USD","per_day":{' +
+    '"low":{"min":<number>,"max":<number>,"label":"<short phrase>"},' +
+    '"medium":{"min":<number>,"max":<number>,"label":"<short phrase>"},' +
+    '"high":{"min":<number>,"max":<number>,"label":"<short phrase>"}}}';
 
   let content = '';
   try {
@@ -136,13 +173,22 @@ serve(async (req: Request) => {
 
   try {
     const parsed = JSON.parse(cleaned);
-    const r = parsed?.ranges ?? {};
+    // New schema is `per_day`; fall back to `ranges` for any stale response.
+    const r = parsed?.per_day ?? parsed?.ranges ?? {};
+    const low = sanitizeTier(r.low);
+    const medium = sanitizeTier(r.medium);
+    const high = sanitizeTier(r.high);
+
+    // Enforce increasing / non-overlapping on per-day values, then scale to the
+    // whole trip. Scaling is monotonic, so the ordering survives.
+    enforceOrdering(low, medium, high);
+
     const result = {
       currency: 'USD' as const,
       ranges: {
-        low: sanitizeTier(r.low),
-        medium: sanitizeTier(r.medium),
-        high: sanitizeTier(r.high),
+        low: scaleTier(low, durationDays),
+        medium: scaleTier(medium, durationDays),
+        high: scaleTier(high, durationDays),
       },
     };
     return json(result, 200);

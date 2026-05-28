@@ -66,6 +66,7 @@ import { CommitmentReviewBar } from '../components/trips/commitment/CommitmentRe
 import {
   listPendingCommitmentsToReviewFromUser,
   approveCommitment,
+  declineCommitment,
   type PendingCommitmentToReview,
 } from '../services/trips/groupTripsService';
 
@@ -1050,6 +1051,35 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     }
   };
 
+  // Bubble-level approve/decline, keyed by request_id from the message metadata.
+  // Optimistically patches the local message so the bubble's status flips
+  // immediately without waiting for realtime.
+  const patchCommitmentStatus = (requestId: string, status: 'approved' | 'declined') => {
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.type === 'commitment_request' && m.commitment_metadata?.request_id === requestId
+          ? {
+              ...m,
+              commitment_metadata: { ...m.commitment_metadata, status },
+            }
+          : m
+      )
+    );
+    setPendingCommitments((prev) => prev.filter((r) => r.id !== requestId));
+  };
+
+  const handleApproveCommitmentById = async (requestId: string) => {
+    if (!currentUserId) throw new Error('Not authenticated');
+    await approveCommitment(requestId, currentUserId);
+    patchCommitmentStatus(requestId, 'approved');
+  };
+
+  const handleDeclineCommitmentById = async (requestId: string) => {
+    if (!currentUserId) throw new Error('Not authenticated');
+    await declineCommitment(requestId, currentUserId);
+    patchCommitmentStatus(requestId, 'declined');
+  };
+
   // Prefetch avatar when component mounts or avatar URL changes
   useEffect(() => {
     if (otherUserAvatar) {
@@ -1440,7 +1470,6 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       conversation_id: tempConversationId,
       sender_id: currentUserId,
       body: messageText,
-      rendered_body: null,
       attachments: [],
       client_id: clientId,
       is_system: false,
@@ -3005,11 +3034,17 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       const isOwn = currentUserId ? message.sender_id === currentUserId : false;
       const senderName =
         message.sender_name || message.sender?.name || (isOwn ? 'You' : otherUserName);
+      // Host moderation: in a 1-1 DM, the non-sender of a commitment_request is
+      // the trip host. Show Approve/Reject only while the request is pending.
+      const requestId = message.commitment_metadata.request_id;
+      const canModerate = isDirect && !isOwn && !!requestId && !!currentUserId;
       return (
         <CommitmentMessageBubble
           metadata={message.commitment_metadata}
           senderName={senderName}
           isOwn={isOwn}
+          onApprove={canModerate ? () => handleApproveCommitmentById(requestId) : undefined}
+          onDecline={canModerate ? () => handleDeclineCommitmentById(requestId) : undefined}
         />
       );
     }
