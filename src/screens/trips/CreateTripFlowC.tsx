@@ -13,7 +13,6 @@ import {
   Switch,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import DateTimePicker from '@react-native-community/datetimepicker';
 import {
   SurfLevel,
   SurfStyle,
@@ -26,6 +25,7 @@ import {
 } from '../../services/trips/groupTripsService';
 import { uploadTripImage } from '../../services/storage/storageService';
 import { HomeBreakSearchSheet, HomeBreakSelection } from '../../components/HomeBreakSearchSheet';
+import { CalendarRangePicker } from '../../components/trips/CalendarRangePicker';
 
 // ---------------------------------------------------------------------------
 // Flow C — fully-planned trip (exact dates + fixed pricing + trip structure).
@@ -38,6 +38,9 @@ type WaveType = 'reef' | 'beach' | 'point';
 type Visibility = 'public' | 'friends' | 'private';
 type IncludedComponent = 'flights' | 'accommodation' | 'surf_spots' | 'meals' | 'activities';
 type PriceInclude = 'accommodation' | 'surf_guide' | 'transport' | 'flights' | 'meals';
+
+// Sized to fit a 27-char reference name ("Playa Colorado Get Barreled") with a tiny buffer.
+const TRIP_TITLE_MAX_LENGTH = 28;
 
 const TRIP_VIBES: { key: TripVibe; title: string; desc: string }[] = [
   { key: 'surf', title: 'Surf-focused', desc: 'Dawn patrol and sunset sessions' },
@@ -116,12 +119,12 @@ interface WizardState {
   startDate: Date | null;
   endDate: Date | null;
   tripVibe: TripVibe | null;
-  // Step 2 — surf setup
-  skillLevel: SurfLevel | null;
-  waveType: WaveType | null;
-  surfStyles: SurfStyle[];
   ageMin: string;
   ageMax: string;
+  // Step 2 — surf setup
+  skillLevels: SurfLevel[];
+  waveType: WaveType | null;
+  surfStyles: SurfStyle[];
   // Step 3 — trip structure
   included: Record<IncludedComponent, boolean>;
   // Step 4 — pricing
@@ -140,11 +143,11 @@ const INITIAL_STATE: WizardState = {
   startDate: null,
   endDate: null,
   tripVibe: null,
-  skillLevel: null,
-  waveType: null,
-  surfStyles: [],
   ageMin: '',
   ageMax: '',
+  skillLevels: [],
+  waveType: null,
+  surfStyles: [],
   included: { flights: false, accommodation: false, surf_spots: false, meals: false, activities: false },
   totalCost: '',
   costPerPerson: '',
@@ -173,8 +176,6 @@ const dayCount = (start: Date | null, end: Date | null): number => {
   const ms = startOfDay(end).getTime() - startOfDay(start).getTime();
   return ms < 0 ? 0 : Math.round(ms / 86400000);
 };
-const formatSingleDate = (d: Date | null): string =>
-  d ? d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
 const formatDateRange = (start: Date | null, end: Date | null): string => {
   if (!start) return '';
   const mo = (d: Date) => d.toLocaleString('en-US', { month: 'short' });
@@ -187,9 +188,9 @@ const formatDateRange = (start: Date | null, end: Date | null): string => {
 };
 
 const stateFromTrip = (trip: GroupTrip): WizardState => {
-  const firstLevel = (trip.target_surf_levels ?? []).find(l =>
+  const skillLevels = (trip.target_surf_levels ?? []).filter(l =>
     SKILL_LEVELS.some(s => s.key === l)
-  ) as SurfLevel | undefined;
+  ) as SurfLevel[];
   const inc = (k: IncludedComponent) => !!trip.included_components?.includes(k);
   const pi = (k: PriceInclude) => !!trip.price_includes?.includes(k);
   return {
@@ -199,14 +200,16 @@ const stateFromTrip = (trip: GroupTrip): WizardState => {
     destinationGeo: null, // locked in edit mode
     startDate: parseISODate(trip.start_date),
     endDate: parseISODate(trip.end_date),
-    tripVibe: (trip.trip_vibe as TripVibe) ?? null,
-    skillLevel: firstLevel ?? null,
+    tripVibe: null, // legacy field — trip_vibe column was dropped; preserved
+    // here only to keep the local wizard step UI working until Flow C is
+    // refactored to use trip_structure/trip_vibes too.
+    ageMin: trip.age_min != null ? String(trip.age_min) : '',
+    ageMax: trip.age_max != null ? String(trip.age_max) : '',
+    skillLevels,
     waveType: (trip.wave_type as WaveType) ?? null,
     surfStyles: (trip.target_surf_styles ?? []).filter(s =>
       SURF_STYLES.some(x => x.key === s)
     ) as SurfStyle[],
-    ageMin: trip.age_min != null ? String(trip.age_min) : '',
-    ageMax: trip.age_max != null ? String(trip.age_max) : '',
     included: {
       flights: inc('flights'),
       accommodation: inc('accommodation'),
@@ -244,7 +247,7 @@ const pickImage = async (): Promise<string | null> => {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       allowsEditing: true,
-      aspect: [16, 9],
+      aspect: [12, 5],
       quality: 0.85,
     });
     if (!result.canceled && result.assets?.[0]) {
@@ -272,7 +275,6 @@ export default function CreateTripFlowC({
   const [stepIdx, setStepIdx] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [showDestPicker, setShowDestPicker] = useState(false);
-  const [androidPicker, setAndroidPicker] = useState<null | 'start' | 'end'>(null);
 
   const step: StepKey = STEPS[stepIdx];
 
@@ -283,24 +285,11 @@ export default function CreateTripFlowC({
   const togglePrice = (k: PriceInclude) =>
     setState(s => ({ ...s, priceIncludes: { ...s.priceIncludes, [k]: !s.priceIncludes[k] } }));
 
-  const onChangeDate = (which: 'start' | 'end', d?: Date) => {
-    if (!d) return;
-    if (which === 'start') {
-      setState(s => {
-        const next: WizardState = { ...s, startDate: d };
-        if (s.endDate && startOfDay(s.endDate) < startOfDay(d)) next.endDate = null;
-        return next;
-      });
-    } else {
-      update('endDate', d);
-    }
-  };
-
   // Per-step validation — error message or null.
   const validateStep = (): string | null => {
     const s = state;
     switch (step) {
-      case 'basics':
+      case 'basics': {
         if (!s.title.trim()) return 'Please add a trip name.';
         if (!s.heroImageUri) return 'Please add a cover photo.';
         if (!editMode && !s.destination.trim()) return 'Please pick a destination.';
@@ -308,15 +297,16 @@ export default function CreateTripFlowC({
         if (startOfDay(s.endDate) < startOfDay(s.startDate))
           return 'End date must be on or after the start date.';
         if (!s.tripVibe) return 'Please pick a trip vibe.';
-        return null;
-      case 'surfSetup': {
-        if (!s.skillLevel) return 'Please pick a skill level.';
         const min = parseInt(s.ageMin, 10);
         const max = parseInt(s.ageMax, 10);
         if (Number.isNaN(min) || Number.isNaN(max)) return 'Please enter an age range.';
         if (min < 16 || max > 99) return 'Ages must be between 16 and 99.';
         if (max < min) return 'Max age must be ≥ min age.';
         if (max - min < AGE_WINDOW) return `Age range must span at least ${AGE_WINDOW} years.`;
+        return null;
+      }
+      case 'surfSetup': {
+        if (s.skillLevels.length === 0) return 'Please pick at least one skill level.';
         return null;
       }
       case 'tripStructure':
@@ -373,7 +363,9 @@ export default function CreateTripFlowC({
         heroUrl = heroRes.url;
       }
 
-      const skillLevel = state.skillLevel ?? 'all';
+      const skillLevels: SurfLevel[] = state.skillLevels.length
+        ? state.skillLevels
+        : ['all' as SurfLevel];
       const includedComponents = (Object.keys(state.included) as IncludedComponent[]).filter(
         k => state.included[k]
       );
@@ -395,9 +387,8 @@ export default function CreateTripFlowC({
           date_months: null,
           age_min: parseInt(state.ageMin, 10),
           age_max: parseInt(state.ageMax, 10),
-          target_surf_levels: [skillLevel],
+          target_surf_levels: skillLevels,
           target_surf_styles: state.surfStyles.length ? state.surfStyles : ['all'],
-          trip_vibe: state.tripVibe,
           wave_type: state.waveType,
           included_components: includedComponents.length ? includedComponents : null,
           total_cost: totalCost,
@@ -435,9 +426,9 @@ export default function CreateTripFlowC({
 
           age_min: parseInt(state.ageMin, 10),
           age_max: parseInt(state.ageMax, 10),
-          target_surf_levels: [skillLevel],
+          target_surf_levels: skillLevels,
           target_surf_styles: state.surfStyles.length ? state.surfStyles : ['all'],
-          wave_fat_to_barreling: null,
+          wave_shapes: null,
           wave_size_min: null,
           wave_size_max: null,
 
@@ -446,7 +437,8 @@ export default function CreateTripFlowC({
           budget_max: null,
           budget_currency: 'USD',
 
-          trip_vibe: state.tripVibe,
+          trip_structure: null,
+          trip_vibes: null,
           wave_type: state.waveType,
           included_components: includedComponents.length ? includedComponents : null,
           total_cost: totalCost,
@@ -549,32 +541,6 @@ export default function CreateTripFlowC({
     </View>
   );
 
-  const renderDateField = (which: 'start' | 'end') => {
-    const value = which === 'start' ? state.startDate : state.endDate;
-    const min = which === 'end' ? state.startDate ?? undefined : undefined;
-    if (Platform.OS === 'ios') {
-      return (
-        <View style={styles.dateField}>
-          <Text style={styles.dateFieldLabel}>{which === 'start' ? 'Start' : 'End'}</Text>
-          <DateTimePicker
-            value={value ?? new Date()}
-            mode="date"
-            display="compact"
-            minimumDate={min}
-            onChange={(_, d) => onChangeDate(which, d)}
-          />
-        </View>
-      );
-    }
-    return (
-      <TouchableOpacity style={styles.dateBox} onPress={() => setAndroidPicker(which)}>
-        <Text style={[styles.dateBoxText, !value && styles.dateBoxPlaceholder]}>
-          {value ? formatSingleDate(value) : which === 'start' ? 'Start date' : 'End date'}
-        </Text>
-      </TouchableOpacity>
-    );
-  };
-
   // --- step content --------------------------------------------------------
   const renderStep = () => {
     switch (step) {
@@ -588,6 +554,7 @@ export default function CreateTripFlowC({
               onChangeText={t => update('title', t)}
               placeholder="e.g. Uluwatu, Bali"
               placeholderTextColor="#B0B0B0"
+              maxLength={TRIP_TITLE_MAX_LENGTH}
             />
 
             <Text style={styles.label}>Cover photo</Text>
@@ -630,39 +597,71 @@ export default function CreateTripFlowC({
             )}
 
             <Text style={styles.label}>Dates</Text>
-            <View style={styles.row}>
-              <View style={{ flex: 1, marginRight: 8 }}>{renderDateField('start')}</View>
-              <View style={{ flex: 1 }}>{renderDateField('end')}</View>
-            </View>
-            {state.startDate && state.endDate && (
-              <Text style={styles.helper}>
-                {formatDateRange(state.startDate, state.endDate)} • {dayCount(state.startDate, state.endDate)} days
-              </Text>
-            )}
-            {Platform.OS === 'android' && androidPicker && (
-              <DateTimePicker
-                value={(androidPicker === 'start' ? state.startDate : state.endDate) ?? new Date()}
-                mode="date"
-                display="default"
-                minimumDate={androidPicker === 'end' ? state.startDate ?? undefined : undefined}
-                onChange={(_, d) => {
-                  const w = androidPicker;
-                  setAndroidPicker(null);
-                  onChangeDate(w, d);
-                }}
-              />
-            )}
+            <CalendarRangePicker
+              startDate={state.startDate}
+              endDate={state.endDate}
+              minDate={new Date()}
+              placeholder="Tap dates to set range"
+              onChange={({ startDate, endDate }) =>
+                setState(s => ({ ...s, startDate, endDate }))
+              }
+            />
 
             <Text style={styles.label}>Trip vibe</Text>
             {renderOptionCards(TRIP_VIBES, state.tripVibe, k => update('tripVibe', k))}
+
+            <Text style={styles.label}>Age range</Text>
+            <View style={styles.row}>
+              <TextInput
+                style={[styles.input, { flex: 1, marginRight: 8 }]}
+                value={state.ageMin}
+                onChangeText={t => update('ageMin', t.replace(/[^0-9]/g, ''))}
+                placeholder="Min"
+                placeholderTextColor="#B0B0B0"
+                keyboardType="number-pad"
+              />
+              <TextInput
+                style={[styles.input, { flex: 1 }]}
+                value={state.ageMax}
+                onChangeText={t => update('ageMax', t.replace(/[^0-9]/g, ''))}
+                placeholder="Max"
+                placeholderTextColor="#B0B0B0"
+                keyboardType="number-pad"
+              />
+            </View>
+            <Text style={styles.helper}>Ages 16–99. Must span at least {AGE_WINDOW} years.</Text>
           </View>
         );
 
       case 'surfSetup':
         return (
           <View>
-            <Text style={styles.label}>Skill level</Text>
-            {renderSegmented(SKILL_LEVELS, state.skillLevel, k => update('skillLevel', k))}
+            <View style={styles.labelRow}>
+              <Text style={styles.label}>Skill level</Text>
+              <Text style={styles.optionalTag}>Pick one or more</Text>
+            </View>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+              {SKILL_LEVELS.map(opt => {
+                const active = state.skillLevels.includes(opt.key);
+                return (
+                  <TouchableOpacity
+                    key={opt.key}
+                    style={[styles.chip, { marginBottom: 8 }, active && styles.chipActive]}
+                    onPress={() =>
+                      setState(s => ({
+                        ...s,
+                        skillLevels: active
+                          ? s.skillLevels.filter(x => x !== opt.key)
+                          : [...s.skillLevels, opt.key],
+                      }))
+                    }
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[styles.chipText, active && styles.chipTextActive]}>{opt.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
 
             <Text style={styles.label}>Wave type</Text>
             {renderOptionCards(WAVE_TYPES, state.waveType, k => update('waveType', k))}
@@ -692,27 +691,6 @@ export default function CreateTripFlowC({
                 );
               })}
             </View>
-
-            <Text style={styles.label}>Age range</Text>
-            <View style={styles.row}>
-              <TextInput
-                style={[styles.input, { flex: 1, marginRight: 8 }]}
-                value={state.ageMin}
-                onChangeText={t => update('ageMin', t.replace(/[^0-9]/g, ''))}
-                placeholder="Min"
-                placeholderTextColor="#B0B0B0"
-                keyboardType="number-pad"
-              />
-              <TextInput
-                style={[styles.input, { flex: 1 }]}
-                value={state.ageMax}
-                onChangeText={t => update('ageMax', t.replace(/[^0-9]/g, ''))}
-                placeholder="Max"
-                placeholderTextColor="#B0B0B0"
-                keyboardType="number-pad"
-              />
-            </View>
-            <Text style={styles.helper}>Ages 16–99. Must span at least {AGE_WINDOW} years.</Text>
           </View>
         );
 
@@ -794,9 +772,11 @@ export default function CreateTripFlowC({
         const dateText = state.startDate
           ? `${formatDateRange(state.startDate, state.endDate)} • ${dayCount(state.startDate, state.endDate)} days`
           : '';
-        const skill = SKILL_LEVELS.find(s => s.key === state.skillLevel)?.label;
+        const skillLabels = state.skillLevels
+          .map(k => SKILL_LEVELS.find(s => s.key === k)?.label)
+          .filter(Boolean) as string[];
         const wave = WAVE_TYPES.find(w => w.key === state.waveType)?.title;
-        const chips = [skill, wave].filter(Boolean) as string[];
+        const chips = [...skillLabels, wave].filter(Boolean) as string[];
         const priceText = state.costPerPerson.trim()
           ? `From $${parseInt(state.costPerPerson, 10).toLocaleString('en-US')} per person`
           : state.totalCost.trim()
@@ -954,19 +934,25 @@ const styles = StyleSheet.create({
 
   row: { flexDirection: 'row' },
 
-  // Date fields
+  // Date fields — stacked rows, label inline left, picker/value right.
+  dateStack: { marginTop: 10, gap: 8 },
   dateField: {
     borderWidth: 1,
     borderColor: '#E0E0E0',
     borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     backgroundColor: '#FFF',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    minHeight: 52,
   },
-  dateFieldLabel: { fontSize: 13, color: '#7B7B7B', fontWeight: '600' },
+  dateFieldLabel: { fontSize: 14, color: '#222B30', fontWeight: '600' },
+  dateFieldValue: { fontSize: 15, color: '#222B30', fontWeight: '500' },
+  dateFieldValuePlaceholder: { color: '#B0B0B0', fontWeight: '400' },
+  dateSummary: { fontSize: 13, color: '#0788B0', fontWeight: '600', marginTop: 8 },
+  // Legacy — kept in case referenced elsewhere
   dateBox: {
     borderWidth: 1,
     borderColor: '#E0E0E0',
@@ -1041,14 +1027,14 @@ const styles = StyleSheet.create({
   checkboxChecked: { backgroundColor: '#0788B0', borderColor: '#0788B0' },
   checkboxLabel: { fontSize: 15, color: '#222B30' },
 
-  heroPreview: { width: '100%', height: 180, borderRadius: 12, backgroundColor: '#F2F2F2' },
+  heroPreview: { width: '100%', aspectRatio: 12 / 5, borderRadius: 12, backgroundColor: '#F2F2F2' },
   heroPlaceholder: { alignItems: 'center', justifyContent: 'center' },
   heroPlaceholderText: { fontSize: 14, color: '#7B7B7B', marginTop: 6, fontWeight: '600' },
 
   // Preview card
   previewKicker: { fontSize: 12, fontWeight: '700', color: '#7B7B7B', letterSpacing: 1, marginBottom: 6 },
   previewCard: { borderWidth: 1, borderColor: '#E0E0E0', borderRadius: 14, padding: 12 },
-  previewImage: { width: '100%', height: 160, borderRadius: 10, backgroundColor: '#F2F2F2', marginBottom: 12 },
+  previewImage: { width: '100%', aspectRatio: 12 / 5, borderRadius: 10, backgroundColor: '#F2F2F2', marginBottom: 12 },
   previewTitle: { fontSize: 18, fontWeight: '700', color: '#222B30', marginBottom: 4 },
   previewLine: { fontSize: 14, color: '#555', marginBottom: 2 },
   previewPrice: { fontSize: 17, fontWeight: '700', color: '#222B30', marginTop: 10 },

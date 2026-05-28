@@ -1,0 +1,12 @@
+
+> swellyo@1.0.7 web
+> expo start --web
+
+env: load .env
+env: export EXPO_PUBLIC_GOOGLE_CLIENT_ID EXPO_PUBLIC_GOOGLE_CLIENT_SECRET EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID EXPO_PUBLIC_SUPABASE_URL EXPO_PUBLIC_SUPABASE_ANON_KEY EXPO_PUBLIC_POSTHOG_API_KEY EXPO_PUBLIC_POSTHOG_HOST EXPO_PUBLIC_MVP_MODE EXPO_PUBLIC_DEV_MODE EXPO_PUBLIC_LOCAL_MODE EXPO_PUBLIC_PEXELS_API_KEY EXPO_PUBLIC_GOOGLE_PLACES_API_KEY
+Starting project at C:\Users\User\Desktop\SwellyoDev\swellyoNew
+› Port 8081 is being used by another process
+Input is required, but 'npx expo' is in non-interactive mode.
+Required input:
+> Use port 8082 instead?
+› Skipping dev server

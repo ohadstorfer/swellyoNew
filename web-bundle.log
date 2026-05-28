@@ -1,0 +1,19 @@
+﻿
+> swellyo@1.0.7 web
+> expo start --web
+
+env: load .env
+env: export EXPO_PUBLIC_GOOGLE_CLIENT_ID EXPO_PUBLIC_GOOGLE_CLIENT_SECRET EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID EXPO_PUBLIC_SUPABASE_URL EXPO_PUBLIC_SUPABASE_ANON_KEY EXPO_PUBLIC_POSTHOG_API_KEY EXPO_PUBLIC_POSTHOG_HOST EXPO_PUBLIC_MVP_MODE EXPO_PUBLIC_DEV_MODE EXPO_PUBLIC_LOCAL_MODE EXPO_PUBLIC_PEXELS_API_KEY EXPO_PUBLIC_GOOGLE_PLACES_API_KEY
+Starting project at C:\Users\User\Desktop\SwellyoDev\swellyoNew
+Starting Metro Bundler
+Waiting on http://localhost:8081
+Logs for your project will appear below.
+Web src\screens\trips\CreateTripFlowA.tsx ░░░░░░░░░░░░░░░░  0.0% (0/1)
+| [baseline-browser-mapping] The data in this module is over two months old.  To ensure accurate Baseline data, please update: `npm i baseline-browser-mapping@latest -D`
+Web src\screens\trips\CreateTripFlowA.tsx ▓▓▓░░░░░░░░░░░░░ 20.6% (186/410)
+| [baseline-browser-mapping] The data in this module is over two months old.  To ensure accurate Baseline data, please update: `npm i baseline-browser-mapping@latest -D`
+| [baseline-browser-mapping] The data in this module is over two months old.  To ensure accurate Baseline data, please update: `npm i baseline-browser-mapping@latest -D`
+| [baseline-browser-mapping] The data in this module is over two months old.  To ensure accurate Baseline data, please update: `npm i baseline-browser-mapping@latest -D`
+| [baseline-browser-mapping] The data in this module is over two months old.  To ensure accurate Baseline data, please update: `npm i baseline-browser-mapping@latest -D`
+| [baseline-browser-mapping] The data in this module is over two months old.  To ensure accurate Baseline data, please update: `npm i baseline-browser-mapping@latest -D`
+Web Bundled 5598ms src\screens\trips\CreateTripFlowA.tsx (926 modules)

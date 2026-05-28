@@ -25,6 +25,8 @@ import {
   AdminUpdate,
   EnrichedGearItem,
   EnrichedGearRequest,
+  TRIP_STRUCTURE_OPTIONS,
+  TRIP_VIBE_OPTIONS,
   listGearItems,
   addGearItem,
   updateGearItem,
@@ -956,21 +958,47 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         {/* About */}
         <Section title="About this trip">
           <Text style={styles.body}>{trip.description}</Text>
+
+          {/* Multi-select tags — only rendered when at least one is present.
+              Replaces the legacy single-value `trip_vibe` row. Unknown slugs
+              are rendered as-is so a stale DB row doesn't crash the screen. */}
+          {trip.trip_structure && trip.trip_structure.length > 0 ? (
+            <View style={styles.tagsBlock}>
+              <Text style={styles.tagsLabel}>How it works</Text>
+              <View style={styles.tagChipRow}>
+                {trip.trip_structure.map(slug => {
+                  const label =
+                    TRIP_STRUCTURE_OPTIONS.find(o => o.slug === slug)?.label ?? slug;
+                  return (
+                    <View key={slug} style={styles.tagChip}>
+                      <Text style={styles.tagChipText}>{label}</Text>
+                    </View>
+                  );
+                })}
+              </View>
+            </View>
+          ) : null}
+          {trip.trip_vibes && trip.trip_vibes.length > 0 ? (
+            <View style={styles.tagsBlock}>
+              <Text style={styles.tagsLabel}>Vibe</Text>
+              <View style={styles.tagChipRow}>
+                {trip.trip_vibes.map(slug => {
+                  const label =
+                    TRIP_VIBE_OPTIONS.find(o => o.slug === slug)?.label ?? slug;
+                  return (
+                    <View key={slug} style={styles.tagChip}>
+                      <Text style={styles.tagChipText}>{label}</Text>
+                    </View>
+                  );
+                })}
+              </View>
+            </View>
+          ) : null}
         </Section>
 
         {/* Trip details */}
-        {(trip.trip_vibe || trip.surf_style || trip.visibility) && (
+        {(trip.surf_style || trip.visibility) && (
           <Section title="Trip details">
-            {!!trip.trip_vibe && (
-              <InfoRow
-                label="Vibe"
-                value={
-                  ({ surf: 'Surf-focused', chill: 'Chill', mixed: 'Mixed' } as Record<string, string>)[
-                    trip.trip_vibe
-                  ] ?? trip.trip_vibe
-                }
-              />
-            )}
             {!!trip.surf_style && <InfoRow label="Surf style" value={trip.surf_style} />}
             {!!trip.visibility && (
               <InfoRow
@@ -1096,7 +1124,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         {(trip.wave_type ||
           trip.wave_size_min != null ||
           trip.wave_size_max != null ||
-          trip.wave_fat_to_barreling != null) && (
+          (trip.wave_shapes && trip.wave_shapes.length > 0)) && (
           <Section title="Wave">
             {!!trip.wave_type && (
               <InfoRow
@@ -1111,8 +1139,13 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
             {trip.wave_size_min != null && trip.wave_size_max != null && (
               <InfoRow label="Size" value={`${trip.wave_size_min}–${trip.wave_size_max} ft`} />
             )}
-            {trip.wave_fat_to_barreling != null && (
-              <InfoRow label="Fat ↔ Barreling" value={`${trip.wave_fat_to_barreling}/10`} />
+            {trip.wave_shapes && trip.wave_shapes.length > 0 && (
+              <InfoRow
+                label="Shape"
+                value={trip.wave_shapes
+                  .map(s => ({ soft: 'Soft', wally: 'Wally', barrel: 'Barrel' } as Record<string, string>)[s] ?? s)
+                  .join(', ')}
+              />
             )}
           </Section>
         )}
@@ -1756,6 +1789,26 @@ const styles = StyleSheet.create({
   infoRow: { flexDirection: 'row', paddingVertical: 6 },
   infoLabel: { width: 110, fontSize: 13, color: '#7B7B7B' },
   infoValue: { flex: 1, fontSize: 13, color: '#222B30' },
+
+  // Tag chips (trip_structure / trip_vibes) — light pill, matches the existing
+  // detail-row density. Wraps across rows when many tags are selected.
+  tagsBlock: { marginTop: 12 },
+  tagsLabel: {
+    fontSize: 12,
+    color: '#7B7B7B',
+    marginBottom: 6,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  tagChipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  tagChip: {
+    backgroundColor: '#F2F2F2',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  tagChipText: { fontSize: 12, color: '#222B30', fontWeight: '500' },
 
   memberDivider: {
     height: StyleSheet.hairlineWidth,
