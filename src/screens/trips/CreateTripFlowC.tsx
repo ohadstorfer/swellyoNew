@@ -457,8 +457,7 @@ export default function CreateTripFlowC({
           accommodation_status: null,
           visibility: state.visibility,
 
-          packing_list: [],
-          group_packing_list: [],
+          group_gear: [],
         };
         const trip = await createGroupTrip(hostId, input);
 

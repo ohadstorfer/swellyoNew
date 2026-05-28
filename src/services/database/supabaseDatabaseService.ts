@@ -992,62 +992,6 @@ class SupabaseDatabaseService {
     }
   }
 
-  /**
-   * Save a surf trip plan to the surf_trip_plans table
-   */
-  async saveSurfTripPlan(tripPlanData: {
-    destinations?: string[];
-    timeInDays?: number;
-    travelType?: 'budget' | 'mid' | 'high' | 'premium';
-    travelBuddies?: 'solo' | '2' | 'crew';
-    lifestyleKeywords?: string[];
-    waveTypeKeywords?: string[];
-    summaryText?: string;
-  }): Promise<any> {
-    if (!isSupabaseConfigured()) {
-      throw new Error('Supabase is not configured. Please set up your Supabase credentials.');
-    }
-
-    try {
-      // Get the current authenticated user
-      const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
-      
-      if (authError || !authUser) {
-        throw new Error('User not authenticated. Please sign in first.');
-      }
-
-      const tripPlanToSave: any = {
-        created_by: authUser.id,
-        destinations: tripPlanData.destinations || null,
-        time_in_days: tripPlanData.timeInDays || null,
-        travel_type: tripPlanData.travelType || null,
-        travel_buddies: tripPlanData.travelBuddies || null,
-        lifestyle_keywords: tripPlanData.lifestyleKeywords || null,
-        wave_type_keywords: tripPlanData.waveTypeKeywords || null,
-        summary_text: tripPlanData.summaryText || null,
-      };
-
-      const { data, error } = await supabase
-        .from('surf_trip_plans')
-        .insert(tripPlanToSave)
-        .select()
-        .single();
-
-      if (error) {
-        throw error;
-      }
-
-      if (!data) {
-        throw new Error('Insert succeeded but no data returned');
-      }
-
-      console.log('Surf trip plan saved to Supabase:', data);
-      return data;
-    } catch (error: any) {
-      console.error('Error saving surf trip plan to Supabase:', error);
-      throw new Error(`Failed to save surf trip plan: ${error.message || String(error)}`);
-    }
-  }
 }
 
 export const supabaseDatabaseService = new SupabaseDatabaseService();

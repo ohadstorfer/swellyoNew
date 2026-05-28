@@ -47,16 +47,17 @@ export const CommitmentConfirmModal: React.FC<Props> = ({
     <Modal visible={visible} transparent animationType="fade" onRequestClose={handleCancel}>
       <Pressable style={styles.backdrop} onPress={handleCancel}>
         <Pressable style={styles.card} onPress={(e) => e.stopPropagation()}>
-          <Text style={styles.title}>Confirm {safeName}&rsquo;s commitment?</Text>
+          <Text style={styles.title}>Approve {safeName}&rsquo;s commitment?</Text>
           <Text style={styles.body}>
-            This will mark {safeName} as committed and visible to the group.
+            Before approving, check in with {safeName} and make sure they&rsquo;re genuinely
+            locked in for this trip. The rest of the group will plan around it.
           </Text>
 
           <View style={styles.warningBox}>
             <Ionicons name="alert-circle-outline" size={16} color="#7A5C00" />
             <Text style={styles.warningText}>
-              We recommend checking with {safeName} directly first — make sure they really are
-              committed. Others will rely on this.
+              Once approved, {safeName} appears as committed to everyone on the trip. Only
+              approve if you&rsquo;re confident.
             </Text>
           </View>
 

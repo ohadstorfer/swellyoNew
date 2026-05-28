@@ -461,8 +461,7 @@ export default function CreateTripFlowBC({
         accommodation_status: null,
         visibility: 'public',
 
-        packing_list: [],
-        group_packing_list: [],
+        group_gear: [],
       };
 
       if (editMode && initialTrip) {

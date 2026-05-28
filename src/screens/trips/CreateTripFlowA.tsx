@@ -414,12 +414,23 @@ export default function CreateTripFlowA({
       ? dayCount(state.startDate, state.endDate)
       : toDays(state.durationValue, state.durationUnit);
 
+  // Representative travel month ("YYYY-MM") for seasonality in the estimate.
+  // Exact dates → start month; months mode → the "from" month.
+  const tripTravelMonth = (): string | null => {
+    if (state.datesMode === 'exact' && state.startDate) {
+      const d = state.startDate;
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    }
+    return state.monthFrom || null;
+  };
+
   const estimateKey = () =>
     [
       state.destination,
       state.destinationGeo?.country ?? '',
       tripDurationDays(),
       state.accommodationKind ?? '',
+      tripTravelMonth() ?? '',
     ].join('|');
 
   // Fetch the GPT budget estimate (called when leaving the accommodation step,
@@ -446,6 +457,7 @@ export default function CreateTripFlowA({
         formattedAddress: state.destinationGeo?.full ?? null,
         durationDays,
         accommodationType: state.accommodationKind ?? null,
+        travelMonth: tripTravelMonth(),
       });
       setState(s => ({ ...s, budgetEstimate: est }));
       setLastEstimateKey(key);
@@ -664,8 +676,7 @@ export default function CreateTripFlowA({
           accommodation_status: null,
           visibility: state.visibility,
 
-          packing_list: [],
-          group_packing_list: [],
+          group_gear: [],
         };
         const trip = await createGroupTrip(hostId, input);
 
