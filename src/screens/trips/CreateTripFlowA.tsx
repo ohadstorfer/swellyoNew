@@ -49,6 +49,7 @@ import {
 } from '../../services/trips/groupTripsService';
 import { uploadTripImage } from '../../services/storage/storageService';
 import { HomeBreakSearchSheet, HomeBreakSelection } from '../../components/HomeBreakSearchSheet';
+import { InlineMapView } from '../../components/MapPickerModal';
 
 // Stream A — chrome + draft + validation + discard guard
 import { CreateTripWizardChrome } from '../../components/trips/CreateTripWizardChrome';
@@ -625,6 +626,129 @@ const rowStyles = StyleSheet.create({
     lineHeight: 16,
     fontWeight: '500',
     color: COLORS.errorText,
+  },
+});
+
+// -----------------------------------------------------------------------------
+// Destination map preview — shows the picked spot on a real map with a marker.
+// Same static-map pattern as HomeBreakViewSheet (WebView + Google Maps JS).
+// -----------------------------------------------------------------------------
+const DEST_MAP_HEIGHT = 160;
+
+function getDestinationMapHtml(apiKey: string, lat: number, lng: number, label: string): string {
+  const safeKey = apiKey.replace(/[<>"']/g, '');
+  const safeLabel = label.replace(/[<>"'\\]/g, '');
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    html, body { margin: 0; height: 100%; font-family: system-ui, sans-serif; }
+    #map { width: 100%; height: 100%; position: absolute; left: 0; top: 0; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <script>
+    (function() {
+      var API_KEY = '${safeKey}';
+      var center = { lat: ${lat}, lng: ${lng} };
+      function initMap() {
+        var map = new google.maps.Map(document.getElementById('map'), {
+          center: center,
+          zoom: 11,
+          mapTypeControl: false,
+          fullscreenControl: false,
+          streetViewControl: false,
+          zoomControl: false,
+          gestureHandling: 'none',
+          disableDefaultUI: true,
+        });
+        new google.maps.Marker({ position: center, map: map, title: '${safeLabel}' });
+      }
+      window.initMap = initMap;
+      var s = document.createElement('script');
+      s.src = 'https://maps.googleapis.com/maps/api/js?key=' + API_KEY + '&callback=initMap';
+      s.async = true; s.defer = true;
+      document.head.appendChild(s);
+    })();
+  </script>
+</body>
+</html>`;
+}
+
+interface DestinationMapPreviewProps {
+  geo: HomeBreakSelection;
+  /** Tap to re-open the destination picker. Omitted/disabled in edit mode. */
+  onPress?: () => void;
+  disabled?: boolean;
+}
+
+const DestinationMapPreview: React.FC<DestinationMapPreviewProps> = ({ geo, onPress, disabled }) => {
+  const apiKey = process.env.EXPO_PUBLIC_GOOGLE_PLACES_API_KEY;
+  const [width, setWidth] = useState(0);
+
+  if (!apiKey || typeof geo.lat !== 'number' || typeof geo.lng !== 'number') return null;
+
+  const html = getDestinationMapHtml(apiKey, geo.lat, geo.lng, geo.name || geo.short || '');
+
+  return (
+    <View
+      style={mapStyles.card}
+      onLayout={e => {
+        const w = Math.round(e.nativeEvent.layout.width);
+        setWidth(prev => (prev === w ? prev : w));
+      }}
+    >
+      {width > 0 ? (
+        <InlineMapView htmlContent={html} width={width} height={DEST_MAP_HEIGHT} />
+      ) : null}
+      {/* The WebView has gestureHandling:'none', but a transparent overlay
+          guarantees a tap re-opens the picker rather than hitting the map. */}
+      {!disabled && onPress ? (
+        <TouchableOpacity
+          style={StyleSheet.absoluteFill}
+          activeOpacity={0.85}
+          onPress={onPress}
+          accessibilityRole="button"
+          accessibilityLabel="Change destination"
+        >
+          <View style={mapStyles.changePill}>
+            <Ionicons name="pencil" size={12} color="#FFFFFF" />
+            <Text style={mapStyles.changePillText}>Change</Text>
+          </View>
+        </TouchableOpacity>
+      ) : null}
+    </View>
+  );
+};
+
+const mapStyles = StyleSheet.create({
+  card: {
+    marginTop: 8,
+    height: DEST_MAP_HEIGHT,
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: '#F0F0F0',
+  },
+  changePill: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+  },
+  changePillText: {
+    color: '#FFFFFF',
+    fontFamily: FONT_INTER,
+    fontSize: 12,
+    fontWeight: '600',
   },
 });
 
@@ -1445,6 +1569,16 @@ export default function CreateTripFlowA({
             error={errors.when ?? undefined}
           />
         </View>
+
+        {/* Map preview of the picked destination (real map + marker). */}
+        {state.destinationGeo ? (
+          <DestinationMapPreview
+            geo={state.destinationGeo}
+            disabled={editMode}
+            onPress={() => setOpenSheet('where')}
+          />
+        ) : null}
+
         {editMode ? (
           <Text style={localStyles.helperRowFootnote}>
             Destination can't be changed after a trip is created.
