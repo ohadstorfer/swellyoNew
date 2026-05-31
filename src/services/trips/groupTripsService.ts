@@ -71,27 +71,15 @@ export interface SurfSpot {
 
 export type TripStatus = 'active' | 'cancelled';
 
-export interface PackingItem {
+export interface GroupGearItem {
   name: string;
   done: boolean;
 }
 
-/** Member-private gear item. Independent of the host's packing_list. */
+/** Member-private gear item. Independent of the host's group_gear. */
 export interface PersonalGearItem {
   name: string;
   done: boolean;
-}
-
-export interface GroupPackingItem {
-  name: string;
-  single: boolean;
-}
-
-export interface GroupPackingClaim {
-  item_name: string;
-  user_id: string;
-  user_name: string | null;
-  user_profile_image_url: string | null;
 }
 
 export interface GroupTrip {
@@ -150,8 +138,7 @@ export interface GroupTrip {
   accommodation_status: string | null; // 'booked' | 'notyet'
   visibility: string | null; // 'public' | 'friends' | 'private'
 
-  packing_list: string[];
-  group_packing_list: GroupPackingItem[];
+  group_gear: string[];
 
   created_at: string;
   updated_at: string;
@@ -176,8 +163,8 @@ export interface GroupTripParticipant {
   commitment_requested_at: string | null;
   commitment_decided_at: string | null;
   commitment_decided_by: string | null;
-  packing_list: PackingItem[];
-  personal_gear: PersonalGearItem[];
+  personal_gear_by_host: GroupGearItem[];
+  personal_gear_by_me: PersonalGearItem[];
 }
 
 export type JoinRequestStatus = 'pending' | 'approved' | 'declined' | 'withdrawn';
@@ -229,8 +216,8 @@ export interface EnrichedParticipant extends ParticipantProfile {
   commitment_status: CommitmentStatus;
   commitment_items: string[];
   commitment_note: string | null;
-  packing_list: PackingItem[];
-  personal_gear: PersonalGearItem[];
+  personal_gear_by_host: GroupGearItem[];
+  personal_gear_by_me: PersonalGearItem[];
 }
 
 /** Row shape for group_trip_commitment_requests (audit log). */
@@ -238,9 +225,9 @@ export interface GroupTripCommitmentRequest {
   id: string;
   trip_id: string;
   user_id: string;
-  items: string[];
+  commitment_proofs: string[];
   note: string | null;
-  status: 'pending' | 'approved' | 'superseded';
+  status: 'pending' | 'approved' | 'declined' | 'superseded';
   message_id: string | null;
   decided_by: string | null;
   requested_at: string;
@@ -318,12 +305,25 @@ export interface TripDestinationGeo {
   country: string | null; // ISO-2
   lat: number | null;
   lng: number | null;
+  // Enriched async by the geocode-group-trip-destinations edge function.
+  admin_level_1?: string | null;
+  admin_level_2?: string | null;
+  types?: string[] | null;
+  geo_bucket_4?: string | null;
+  geo_bucket_5?: string | null;
+  geo_bucket_6?: string | null;
 }
 
 /**
  * Upsert the geocoded destination for a trip (1 row per trip). Called after
  * createGroupTrip with the place the host picked in the Google Places picker.
  * Best-effort at the call site — the trip still exists if this fails.
+ *
+ * After the upsert, fires the geocode-group-trip-destinations edge function in
+ * the background to fill in admin_level_1/2, place types, and geohash buckets
+ * (mirrors what geocode-user-destinations does for user_destinations). Enrich
+ * failure is logged but never propagated — the caller's flow must not depend
+ * on those fields being present immediately.
  */
 export async function setTripDestination(
   tripId: string,
@@ -337,6 +337,10 @@ export async function setTripDestination(
     console.error('[groupTripsService] setTripDestination error:', error);
     throw new Error(error.message);
   }
+
+  supabase.functions
+    .invoke('geocode-group-trip-destinations', { body: { trip_id: tripId } })
+    .catch((e) => console.warn('[groupTripsService] geocode enrich failed:', e));
 }
 
 // ---------------------------------------------------------------------------
@@ -357,6 +361,7 @@ export interface EstimateBudgetParams {
   formattedAddress?: string | null;
   durationDays: number;
   accommodationType?: string | null;
+  travelMonth?: string | null; // "YYYY-MM" — drives seasonality in the estimate
 }
 
 const isTier = (t: any): boolean =>
@@ -377,6 +382,7 @@ export async function estimateTripBudget(
       formatted_address: params.formattedAddress ?? null,
       duration_days: params.durationDays,
       accommodation_type: params.accommodationType ?? null,
+      travel_month: params.travelMonth ?? null,
     },
   });
 
@@ -395,7 +401,9 @@ export async function getTripDestination(
 ): Promise<TripDestinationGeo | null> {
   const { data, error } = await supabase
     .from('group_trip_destinations')
-    .select('place_id, name, short_label, formatted_address, locality, country, lat, lng')
+    .select(
+      'place_id, name, short_label, formatted_address, locality, country, lat, lng, admin_level_1, admin_level_2, types, geo_bucket_4, geo_bucket_5, geo_bucket_6'
+    )
     .eq('trip_id', tripId)
     .maybeSingle();
 
@@ -575,159 +583,53 @@ export async function updateGroupTrip(
 }
 
 /**
- * Host updates the trip's master packing list (item names, ordered).
+ * Host updates the trip's master group_gear list (item names, ordered).
  * A DB trigger then syncs each participant's per-user list, preserving done state
  * for items that still exist in the new list and removing items that don't.
  */
-export async function setTripPackingList(
+export async function setTripGroupGear(
   tripId: string,
   names: string[]
 ): Promise<void> {
   const cleaned = names.map(n => n.trim()).filter(Boolean);
   const { error } = await supabase
     .from('group_trips')
-    .update({ packing_list: cleaned })
+    .update({ group_gear: cleaned })
     .eq('id', tripId);
 
   if (error) {
-    console.error('[groupTripsService] setTripPackingList error:', error);
+    console.error('[groupTripsService] setTripGroupGear error:', error);
     throw new Error(error.message);
   }
 }
 
 /**
- * Host updates the trip's group packing list (the shared, claim-able items).
- * Each item has a `single` flag controlling whether only one user can claim it.
- * A DB trigger prunes claims for items removed from the master list.
+ * Participant replaces their own personal_gear_by_host jsonb. Used to toggle a
+ * single item's done state — the caller passes the full list with the toggled
+ * item. RLS allows update only when auth.uid() === user_id.
  */
-export async function setTripGroupPackingList(
-  tripId: string,
-  items: GroupPackingItem[]
-): Promise<void> {
-  const cleaned = items
-    .map(i => ({ name: i.name.trim(), single: !!i.single }))
-    .filter(i => i.name.length > 0);
-  const { error } = await supabase
-    .from('group_trips')
-    .update({ group_packing_list: cleaned })
-    .eq('id', tripId);
-
-  if (error) {
-    console.error('[groupTripsService] setTripGroupPackingList error:', error);
-    throw new Error(error.message);
-  }
-}
-
-/**
- * Lists all claims on a trip's group packing items, joined to surfers for the
- * claimer's name + profile_image_url. Two queries (no FK between
- * group_trip_group_packing_claims and surfers — both reference auth.users).
- */
-export async function listTripGroupPackingClaims(
-  tripId: string
-): Promise<GroupPackingClaim[]> {
-  const { data: rows, error } = await supabase
-    .from('group_trip_group_packing_claims')
-    .select('item_name, user_id, created_at')
-    .eq('trip_id', tripId)
-    .order('created_at', { ascending: true });
-
-  if (error) {
-    console.error('[groupTripsService] listTripGroupPackingClaims error:', error);
-    return [];
-  }
-  if (!rows || rows.length === 0) return [];
-
-  const userIds = Array.from(new Set(rows.map((r: any) => r.user_id)));
-  const { data: surfers } = await supabase
-    .from('surfers')
-    .select('user_id, name, profile_image_url')
-    .in('user_id', userIds);
-
-  const byId = new Map<string, { name: string | null; profile_image_url: string | null }>();
-  (surfers || []).forEach((s: any) => {
-    byId.set(s.user_id, {
-      name: s.name ?? null,
-      profile_image_url: s.profile_image_url ?? null,
-    });
-  });
-
-  return rows.map((r: any) => ({
-    item_name: r.item_name,
-    user_id: r.user_id,
-    user_name: byId.get(r.user_id)?.name ?? null,
-    user_profile_image_url: byId.get(r.user_id)?.profile_image_url ?? null,
-  }));
-}
-
-/**
- * Current user claims an item from the group packing list. The DB trigger
- * `enforce_group_packing_single_claim` rejects the insert if the item is
- * marked single and another claim already exists.
- */
-export async function claimGroupPackingItem(
+export async function setMyGroupGear(
   tripId: string,
   userId: string,
-  itemName: string
-): Promise<void> {
-  const { error } = await supabase
-    .from('group_trip_group_packing_claims')
-    .insert({ trip_id: tripId, user_id: userId, item_name: itemName });
-
-  if (error) {
-    console.error('[groupTripsService] claimGroupPackingItem error:', error);
-    throw new Error(error.message);
-  }
-}
-
-/**
- * Current user releases their claim on a group packing item.
- */
-export async function unclaimGroupPackingItem(
-  tripId: string,
-  userId: string,
-  itemName: string
-): Promise<void> {
-  const { error } = await supabase
-    .from('group_trip_group_packing_claims')
-    .delete()
-    .eq('trip_id', tripId)
-    .eq('user_id', userId)
-    .eq('item_name', itemName);
-
-  if (error) {
-    console.error('[groupTripsService] unclaimGroupPackingItem error:', error);
-    throw new Error(error.message);
-  }
-}
-
-/**
- * Participant replaces their own packing_list jsonb. Used to toggle a single
- * item's done state — the caller passes the full list with the toggled item.
- * RLS allows update only when auth.uid() === user_id.
- */
-export async function setMyPackingList(
-  tripId: string,
-  userId: string,
-  list: PackingItem[]
+  list: GroupGearItem[]
 ): Promise<void> {
   const { error } = await supabase
     .from('group_trip_participants')
-    .update({ packing_list: list })
+    .update({ personal_gear_by_host: list })
     .eq('trip_id', tripId)
     .eq('user_id', userId);
 
   if (error) {
-    console.error('[groupTripsService] setMyPackingList error:', error);
+    console.error('[groupTripsService] setMyGroupGear error:', error);
     throw new Error(error.message);
   }
 }
 
 /**
- * Member replaces their own personal_gear jsonb. Host-defined items live in
- * group_trips.packing_list and are NOT in this list — so members can never
- * delete a host suggestion via this call.
- * RLS allows update only when auth.uid() === user_id.
+ * Member replaces their own personal_gear_by_me jsonb. Host-defined items live
+ * in group_trips.group_gear (and fan out into personal_gear_by_host) and are
+ * NOT in this list — so members can never delete a host suggestion via this
+ * call. RLS allows update only when auth.uid() === user_id.
  */
 export async function setMyPersonalGearList(
   tripId: string,
@@ -740,7 +642,7 @@ export async function setMyPersonalGearList(
 
   const { error } = await supabase
     .from('group_trip_participants')
-    .update({ personal_gear: cleaned })
+    .update({ personal_gear_by_me: cleaned })
     .eq('trip_id', tripId)
     .eq('user_id', userId);
 
@@ -825,7 +727,7 @@ export async function submitCommitment(
     .insert({
       trip_id: tripId,
       user_id: userId,
-      items,
+      commitment_proofs: items,
       note: note ?? null,
       status: 'pending',
     })
@@ -897,7 +799,7 @@ export async function approveCommitment(
 ): Promise<void> {
   const reqRes = await supabase
     .from('group_trip_commitment_requests')
-    .select('id, trip_id, user_id, status, message_id, items, note')
+    .select('id, trip_id, user_id, status, message_id, commitment_proofs, note')
     .eq('id', requestId)
     .maybeSingle();
   if (reqRes.error || !reqRes.data) {
@@ -967,6 +869,87 @@ export async function approveCommitment(
 }
 
 /**
+ * Host declines a pending commitment request.
+ * Mirrors approveCommitment:
+ *  1. Mark the request row → 'declined' + decided_by/at.
+ *  2. Reset the participant's commitment_status back to 'none' so they can re-submit later.
+ *  3. Refresh the message bubble's metadata.status so any open chat reflects it.
+ *  4. Post a system banner into the DM.
+ *
+ * Idempotent: no-op if already declined.
+ */
+export async function declineCommitment(
+  requestId: string,
+  declinerUserId: string
+): Promise<void> {
+  const reqRes = await supabase
+    .from('group_trip_commitment_requests')
+    .select('id, trip_id, user_id, status, message_id')
+    .eq('id', requestId)
+    .maybeSingle();
+  if (reqRes.error || !reqRes.data) {
+    console.error('[groupTripsService] declineCommitment: lookup failed', reqRes.error);
+    throw new Error('Commitment request not found');
+  }
+  const req = reqRes.data as any;
+  if (req.status === 'declined') return;
+
+  const { error: updReqErr } = await supabase
+    .from('group_trip_commitment_requests')
+    .update({
+      status: 'declined',
+      decided_by: declinerUserId,
+      decided_at: new Date().toISOString(),
+    })
+    .eq('id', requestId);
+  if (updReqErr) {
+    console.error('[groupTripsService] declineCommitment: request update failed', updReqErr);
+    throw new Error(updReqErr.message);
+  }
+
+  const { error: partErr } = await supabase
+    .from('group_trip_participants')
+    .update({
+      commitment_status: 'none',
+      commitment_decided_at: new Date().toISOString(),
+      commitment_decided_by: declinerUserId,
+    })
+    .eq('trip_id', req.trip_id)
+    .eq('user_id', req.user_id);
+  if (partErr) {
+    console.warn('[groupTripsService] declineCommitment: participant update failed', partErr);
+  }
+
+  if (req.message_id) {
+    const { data: existingMsg } = await supabase
+      .from('messages')
+      .select('commitment_metadata')
+      .eq('id', req.message_id)
+      .maybeSingle();
+    const meta = ((existingMsg as any)?.commitment_metadata ?? {}) as Record<string, unknown>;
+    await supabase
+      .from('messages')
+      .update({
+        commitment_metadata: { ...meta, status: 'declined' },
+      })
+      .eq('id', req.message_id);
+  }
+
+  try {
+    const conv = await messagingService.createDirectConversation(req.user_id);
+    const { data: surfer } = await supabase
+      .from('surfers')
+      .select('name')
+      .eq('user_id', req.user_id)
+      .maybeSingle();
+    const name = ((surfer as any)?.name?.trim() as string | undefined) || 'They';
+    await messagingService.postSystemMessage(conv.id, `${name}'s commitment was declined`);
+  } catch (bannerErr) {
+    console.warn('[groupTripsService] declineCommitment: banner post failed', bannerErr);
+  }
+}
+
+/**
  * Host-side helper: list all pending commitment requests from a given user
  * across all trips the current viewer hosts. Used by the chat's "Review
  * commitment" sticky bar.
@@ -989,7 +972,7 @@ export async function listPendingCommitmentsToReviewFromUser(
 
   const { data: rows, error } = await supabase
     .from('group_trip_commitment_requests')
-    .select('id, trip_id, user_id, items, note, status, message_id, decided_by, requested_at, decided_at')
+    .select('id, trip_id, user_id, commitment_proofs, note, status, message_id, decided_by, requested_at, decided_at')
     .eq('user_id', requesterUserId)
     .eq('status', 'pending')
     .in('trip_id', tripIds)
@@ -1020,7 +1003,7 @@ export async function listPendingCommitmentsToReviewFromUser(
     id: r.id,
     trip_id: r.trip_id,
     user_id: r.user_id,
-    items: Array.isArray(r.items) ? (r.items as string[]) : [],
+    commitment_proofs: Array.isArray(r.commitment_proofs) ? (r.commitment_proofs as string[]) : [],
     note: r.note ?? null,
     status: 'pending' as const,
     message_id: r.message_id ?? null,
@@ -1202,7 +1185,7 @@ export async function getTripParticipants(
 ): Promise<EnrichedParticipant[]> {
   const { data: rows, error } = await supabase
     .from('group_trip_participants')
-    .select('role, joined_at, user_id, committed, commitment_status, commitment_items, commitment_note, packing_list, personal_gear')
+    .select('role, joined_at, user_id, committed, commitment_status, commitment_items, commitment_note, personal_gear_by_host, personal_gear_by_me')
     .eq('trip_id', tripId)
     .order('joined_at', { ascending: true });
 
@@ -1241,8 +1224,8 @@ export async function getTripParticipants(
       commitment_status: (row.commitment_status as CommitmentStatus) ?? 'none',
       commitment_items: Array.isArray(row.commitment_items) ? row.commitment_items as string[] : [],
       commitment_note: row.commitment_note ?? null,
-      packing_list: Array.isArray(row.packing_list) ? row.packing_list as PackingItem[] : [],
-      personal_gear: Array.isArray(row.personal_gear) ? row.personal_gear as PersonalGearItem[] : [],
+      personal_gear_by_host: Array.isArray(row.personal_gear_by_host) ? row.personal_gear_by_host as GroupGearItem[] : [],
+      personal_gear_by_me: Array.isArray(row.personal_gear_by_me) ? row.personal_gear_by_me as PersonalGearItem[] : [],
       name: profile?.name ?? null,
       age: profile?.age ?? null,
       surfboard_type: profile?.surfboard_type ?? null,

@@ -8,6 +8,8 @@ interface ParticipantCardProps {
   rightSlot?: React.ReactNode;
   onRemove?: (userId: string) => void;
   isMe?: boolean;
+  /** Tap on the avatar/info area opens the participant's profile. */
+  onPress?: (userId: string) => void;
 }
 
 const formatBoard = (board: string | null): string | null => {
@@ -25,6 +27,7 @@ export const ParticipantCard: React.FC<ParticipantCardProps> = ({
   rightSlot,
   onRemove,
   isMe,
+  onPress,
 }) => {
   const { user_id, name, age, profile_image_url, surfboard_type, surf_level_category, role, committed } =
     participant;
@@ -33,44 +36,60 @@ export const ParticipantCard: React.FC<ParticipantCardProps> = ({
   const level = formatLevel(surf_level_category);
   const detailLine = [age != null ? `${age} yo` : null, level, board].filter(Boolean).join(' · ');
 
+  const TappableArea: React.FC<{ children: React.ReactNode }> = ({ children }) =>
+    onPress ? (
+      <TouchableOpacity
+        style={styles.tappableArea}
+        onPress={() => onPress(user_id)}
+        activeOpacity={0.6}
+        accessibilityLabel={`Open ${name || 'participant'}'s profile`}
+      >
+        {children}
+      </TouchableOpacity>
+    ) : (
+      <View style={styles.tappableArea}>{children}</View>
+    );
+
   return (
     <View style={styles.row}>
-      <View style={styles.avatarWrap}>
-        {profile_image_url ? (
-          <Image source={{ uri: profile_image_url }} style={styles.avatar} />
-        ) : (
-          <View style={[styles.avatar, styles.avatarPlaceholder]}>
-            <Text style={styles.avatarInitial}>{(name || 'U').charAt(0).toUpperCase()}</Text>
-          </View>
-        )}
-        {committed && (
-          <View
-            style={styles.committedBadge}
-            accessibilityLabel={`${name || 'Participant'} is committed to this trip`}
-          >
-            <Ionicons name="checkmark" size={11} color="#FFFFFF" />
-          </View>
-        )}
-      </View>
-
-      <View style={styles.info}>
-        <View style={styles.nameRow}>
-          <Text style={styles.name} numberOfLines={1}>
-            {name || 'User'}
-            {isMe ? <Text style={styles.youTag}>  (You)</Text> : null}
-          </Text>
-          {role === 'host' && (
-            <View style={styles.adminPill}>
-              <Text style={styles.adminPillText}>Admin</Text>
+      <TappableArea>
+        <View style={styles.avatarWrap}>
+          {profile_image_url ? (
+            <Image source={{ uri: profile_image_url }} style={styles.avatar} />
+          ) : (
+            <View style={[styles.avatar, styles.avatarPlaceholder]}>
+              <Text style={styles.avatarInitial}>{(name || 'U').charAt(0).toUpperCase()}</Text>
+            </View>
+          )}
+          {committed && (
+            <View
+              style={styles.committedBadge}
+              accessibilityLabel={`${name || 'Participant'} is committed to this trip`}
+            >
+              <Ionicons name="checkmark" size={11} color="#FFFFFF" />
             </View>
           )}
         </View>
-        {!!detailLine && (
-          <Text style={styles.detail} numberOfLines={1}>
-            {detailLine}
-          </Text>
-        )}
-      </View>
+
+        <View style={styles.info}>
+          <View style={styles.nameRow}>
+            <Text style={styles.name} numberOfLines={1}>
+              {name || 'User'}
+              {isMe ? <Text style={styles.youTag}>  (You)</Text> : null}
+            </Text>
+            {role === 'host' && (
+              <View style={styles.adminPill}>
+                <Text style={styles.adminPillText}>Admin</Text>
+              </View>
+            )}
+          </View>
+          {!!detailLine && (
+            <Text style={styles.detail} numberOfLines={1}>
+              {detailLine}
+            </Text>
+          )}
+        </View>
+      </TappableArea>
 
       {rightSlot ? <View style={styles.right}>{rightSlot}</View> : null}
 
@@ -93,6 +112,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 10,
+  },
+  tappableArea: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    minWidth: 0,
   },
   avatarWrap: { position: 'relative', marginRight: 12 },
   avatar: {

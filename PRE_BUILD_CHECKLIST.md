@@ -107,6 +107,25 @@ Supabase migrations are NOT auto-applied. Files in `supabase/migrations/` are **
 
 If migrations aren't applied and the new bundle ships, every screen using the new column fails silently or crashes.
 
+### ⚠️ Trigger / function `search_path` — the silent signup killer
+
+Any `FUNCTION` used by a trigger — **especially anything that fires on `auth.users` or `public.users`** (the signup chain) — MUST either pin `set search_path = public` **or** schema-qualify every table (`public.surfers`, not `surfers`).
+
+Why: the signup path runs as role `supabase_auth_admin`, whose `search_path=auth` (not `public`). A function with no fixed `search_path` that names a table unqualified will resolve it in the wrong schema, throw `relation "X" does not exist`, and abort the whole `auth.users` insert → **every new signup fails with "Database error saving new user"** while existing users are unaffected (so it goes unnoticed for days). This happened 2026-05-18 → 2026-05-27 via the analytics-v2 `sync_surfer_admin_flag` trigger.
+
+- [ ] New trigger function? It has `set search_path = public` **and/or** fully-qualifies all tables.
+- [ ] Run this audit query — any row with `proconfig: null` that references tables unqualified is a landmine:
+  ```sql
+  select n.nspname, p.proname, p.prosecdef, p.proconfig
+  from pg_proc p
+  join pg_namespace n on n.oid = p.pronamespace
+  where n.nspname = 'public'
+    and exists (select 1 from pg_trigger t where t.tgfoid = p.oid)
+    and p.proconfig is null;
+  ```
+- [ ] After adding any `auth.users`/`public.users` trigger, test signup by reproducing under the real role's path:
+  `begin; set local search_path = auth; insert into public.users (id,email,created_at,updated_at) values (gen_random_uuid(),'t@t.co',now(),now()); rollback;` — must succeed.
+
 ---
 
 ## 4. Supabase Edge Functions

@@ -528,25 +528,6 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
           console.error('Error saving Swelly conversation results:', error);
         }
 
-        // Save surf trip plan to surf_trip_plans table if provided
-        if (response.data.surf_trip_plan) {
-          try {
-            console.log('Saving surf trip plan to database:', response.data.surf_trip_plan);
-            await supabaseDatabaseService.saveSurfTripPlan({
-              destinations: response.data.surf_trip_plan.destinations,
-              timeInDays: response.data.surf_trip_plan.time_in_days,
-              travelType: response.data.travel_type,
-              travelBuddies: response.data.travel_buddies,
-              lifestyleKeywords: response.data.lifestyle_keywords,
-              summaryText: response.data.surf_trip_plan.summary_text,
-            });
-            console.log('Surf trip plan saved successfully');
-          } catch (error) {
-            console.error('Error saving surf trip plan:', error);
-            // Don't block the UI if saving fails, but log the error
-          }
-        }
-        
         // Navigate to profile screen after a short delay (onboarding only)
         console.log('[OnboardingChatScreen] Chat finished, preparing to complete onboarding...', {
           onboardingStartTime: new Date(onboardingStartTime).toISOString(),

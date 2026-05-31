@@ -1,0 +1,22 @@
+-- Drop conversation_members.adv_role — written but never read in live code.
+--
+-- Background: this column tracked 'adv_giver' / 'adv_seeker' on direct
+-- conversations created from the trip-planning flow. messagingService still
+-- inserted values, but nothing in the app ever SELECTed the column or
+-- displayed it: ProfileImage had badge render logic, but no call site ever
+-- passed the `advRole` prop, so the badge never showed.
+--
+-- No live DB view, function, or RLS used it either (only old migration SQL
+-- referenced it for one-time backfill / analytics comments).
+--
+-- Removed alongside this migration:
+--   - messagingService.ts: `adv_role` field on ConversationMember interface,
+--     the two `adv_role:` insert lines in createDirectConversation, related
+--     comments/doc.
+--   - ProfileImage.tsx: `advRole` prop, conditional online-indicator position,
+--     entire badge render block, dead `advRoleBadge*` + `onlineIndicatorTopRight`
+--     styles, react-native-svg import (it was only used by the badge).
+--
+-- Applied 2026-05-28.
+
+alter table public.conversation_members drop column if exists adv_role;

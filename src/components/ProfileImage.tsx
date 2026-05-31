@@ -1,7 +1,6 @@
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { View, StyleSheet, Platform, ActivityIndicator } from 'react-native';
 import { Image } from 'expo-image';
-import Svg, { Path } from 'react-native-svg';
 import { Text } from './Text';
 import { Images } from '../assets/images';
 
@@ -14,7 +13,6 @@ interface ProfileImageProps {
   onError?: () => void;
   onLoad?: () => void;
   isOnline?: boolean;
-  advRole?: 'adv_giver' | 'adv_seeker' | null;
   showOnlineIndicator?: boolean;
 }
 
@@ -37,7 +35,6 @@ export const ProfileImage: React.FC<ProfileImageProps> = React.memo(({
   onError,
   onLoad,
   isOnline = false,
-  advRole = null,
   showOnlineIndicator = true,
 }) => {
   const [imageError, setImageError] = useState(false);
@@ -163,51 +160,16 @@ export const ProfileImage: React.FC<ProfileImageProps> = React.memo(({
         </View>
       )}
 
-      {/* Online status indicator - green dot */}
-      {/* Show in top-right if adv_role logo is present, otherwise bottom-right */}
+      {/* Online status indicator - green dot, bottom-right */}
       {isOnline && showOnlineIndicator && (
         <View style={[
           styles.onlineIndicator,
           { borderRadius: 5 },
-          advRole && (advRole === 'adv_giver' || advRole === 'adv_seeker') 
-            ? styles.onlineIndicatorTopRight 
-            : styles.onlineIndicatorBottomRight
+          styles.onlineIndicatorBottomRight,
         ]} />
       )}
 
       </View>
-      {/* adv_role logo indicator - positioned outside container to avoid clipping */}
-      {advRole && (advRole === 'adv_giver' || advRole === 'adv_seeker') && (
-        <View style={[
-          advRole === 'adv_giver' ? styles.advRoleBadgeGiveAdv : styles.advRoleBadgeGetAdv,
-          {
-            bottom: 2,
-            right: -2,
-          }
-        ]}>
-          {advRole === 'adv_giver' ? (
-            <Svg width={10} height={10} viewBox="0 0 24 24" fill="none">
-              <Path
-                d="M9 18L2 22V6L9 2M9 18L16 22M9 18V2M16 22L22 18V2L16 6M16 22V6M16 6L9 2"
-                stroke="#FFFFFF"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </Svg>
-          ) : (
-            <Svg width={10} height={10} viewBox="0 0 24 24" fill="none">
-              <Path
-                d="M14 12.4653C12.7665 13.1782 11.2337 13.1782 10.0001 12.4653M15.1716 14.8284C13.6095 13.2663 13.6095 10.7337 15.1716 9.17157C16.7337 7.60948 19.2663 7.60948 20.8284 9.17157C22.3905 10.7337 22.3905 13.2663 20.8284 14.8284C19.2663 16.3905 16.7337 16.3905 15.1716 14.8284ZM3.17157 14.8284C1.60948 13.2663 1.60948 10.7337 3.17157 9.17157C4.73366 7.60948 7.26633 7.60948 8.82843 9.17157C10.3905 10.7337 10.3905 13.2663 8.82843 14.8284C7.26634 16.3905 4.73367 16.3905 3.17157 14.8284Z"
-                stroke="#FFFFFF"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </Svg>
-          )}
-        </View>
-      )}
     </View>
   );
 }, (prevProps, nextProps) => {
@@ -218,7 +180,6 @@ export const ProfileImage: React.FC<ProfileImageProps> = React.memo(({
     prevProps.style === nextProps.style &&
     prevProps.showLoadingIndicator === nextProps.showLoadingIndicator &&
     prevProps.isOnline === nextProps.isOnline &&
-    prevProps.advRole === nextProps.advRole &&
     prevProps.showOnlineIndicator === nextProps.showOnlineIndicator
   );
 });
@@ -305,48 +266,6 @@ const styles = StyleSheet.create({
   onlineIndicatorBottomRight: {
     bottom: 2,
     right: 2,
-  },
-  onlineIndicatorTopRight: {
-    top: 2,
-    right: 2,
-  },
-  advRoleBadgeGetAdv: {
-    display: 'flex',
-    width: 18,
-    height: 18,
-    padding: 2,
-    justifyContent: 'center',
-    alignItems: 'center',
-    position: 'absolute',
-    borderRadius: 12,
-    borderWidth: 1,
-    ...(Platform.OS === 'web' ? {
-      borderColor: 'var(--Surface-black, #212121)',
-      backgroundColor: 'var(--Colors-Secondary-200, #05BCD3)',
-    } : {
-      borderColor: '#212121',
-      backgroundColor: '#05BCD3',
-    }),
-    zIndex: 10,
-  },
-  advRoleBadgeGiveAdv: {
-    display: 'flex',
-    width: 18,
-    height: 18,
-    padding: 2,
-    justifyContent: 'center',
-    alignItems: 'center',
-    position: 'absolute',
-    borderRadius: 12,
-    borderWidth: 1,
-    ...(Platform.OS === 'web' ? {
-      borderColor: 'var(--Surface-black, #212121)',
-      backgroundColor: 'var(--Colors-Signature-Gradient-Start-G-Start-1, #BCAC99)',
-    } : {
-      borderColor: '#212121',
-      backgroundColor: '#BCAC99',
-    }),
-    zIndex: 10,
   },
 });
 

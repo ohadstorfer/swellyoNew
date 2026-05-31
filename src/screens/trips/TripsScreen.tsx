@@ -67,6 +67,9 @@ interface TripsScreenProps {
   initialTripId?: string | null;
   /** Open the group chat linked to a trip. Lifted to AppContent so it can swap to the DM overlay. */
   onOpenGroupChat?: (params: { conversationId: string; title: string; heroImageUrl?: string | null; tripId?: string }) => void;
+  /** Tap on a participant inside a trip detail opens their profile. AppContent
+   *  records the current trip so the profile back returns here. */
+  onViewUserProfile?: (userId: string, fromTripId: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -329,7 +332,7 @@ const MyTripsView: React.FC<{
 // ---------------------------------------------------------------------------
 // Wrapper screen
 // ---------------------------------------------------------------------------
-export default function TripsScreen({ onBack, initialTripId, onOpenGroupChat }: TripsScreenProps) {
+export default function TripsScreen({ onBack, initialTripId, onOpenGroupChat, onViewUserProfile }: TripsScreenProps) {
   const insets = useSafeAreaInsets();
   const { user: contextUser } = useOnboarding();
   const currentUserId = contextUser?.id?.toString() ?? null;
@@ -414,6 +417,11 @@ export default function TripsScreen({ onBack, initialTripId, onOpenGroupChat }: 
         onBack={() => setSelectedTripId(null)}
         onOpenGroupChat={onOpenGroupChat}
         onEditTrip={setEditingTrip}
+        onViewUserProfile={
+          onViewUserProfile
+            ? (userId: string) => onViewUserProfile(userId, selectedTripId)
+            : undefined
+        }
       />
     );
   }

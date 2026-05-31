@@ -1390,7 +1390,6 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
       conversation_id: tempConversationId,
       sender_id: currentUserId,
       body: messageText,
-      rendered_body: null,
       attachments: [],
       client_id: clientId,
       is_system: false,
