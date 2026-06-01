@@ -38,11 +38,51 @@ const C = {
   borderField: '#E0E0E0',
   surfaceCard: '#FFFFFF',
   errorText: '#C0392B',
+  meterFill: '#9CB6C0',
+  meterEmpty: '#E0E0E0',
 };
 
 export interface TripTagPickerOption<TSlug extends string> {
   slug: TSlug;
   label: string;
+  /**
+   * Optional 1–4 surf-intensity level. When set, a 4-bar meter is rendered on
+   * the pill (filled bars = level) so a top→bottom list reads as a scale.
+   */
+  intensity?: number;
+}
+
+// Small 4-bar meter (left→right, rising height). Filled bars = `level`.
+function IntensityMeter({
+  level,
+  active,
+}: {
+  level: number;
+  active: boolean;
+}): React.ReactElement {
+  return (
+    <View style={styles.meter} accessibilityElementsHidden importantForAccessibility="no">
+      {[0, 1, 2, 3].map(i => {
+        const filled = i < level;
+        return (
+          <View
+            key={i}
+            style={[
+              styles.meterBar,
+              { height: 6 + i * 4 },
+              {
+                backgroundColor: filled
+                  ? active
+                    ? C.brandTeal
+                    : C.meterFill
+                  : C.meterEmpty,
+              },
+            ]}
+          />
+        );
+      })}
+    </View>
+  );
 }
 
 export interface TripTagPickerProps<TSlug extends string> {
@@ -54,6 +94,11 @@ export interface TripTagPickerProps<TSlug extends string> {
    * other side is silently dropped from the next array.
    */
   mutexPairs?: [TSlug, TSlug][];
+  /**
+   * Radio behavior — only one option at a time. Picking an option replaces the
+   * selection; tapping the selected option clears it. `mutexPairs` is ignored.
+   */
+  singleSelect?: boolean;
   /** Inline error rendered below the list. */
   error?: string;
   /** Optional wrapper style override. */
@@ -67,6 +112,7 @@ export function TripTagPicker<TSlug extends string>({
   selected,
   onChange,
   mutexPairs,
+  singleSelect,
   error,
   style,
   accessibilityLabel,
@@ -74,6 +120,10 @@ export function TripTagPicker<TSlug extends string>({
   const toggle = useCallback(
     (slug: TSlug) => {
       const isSelected = selected.includes(slug);
+      if (singleSelect) {
+        onChange(isSelected ? [] : [slug]);
+        return;
+      }
       if (isSelected) {
         onChange(selected.filter(s => s !== slug));
         return;
@@ -88,7 +138,7 @@ export function TripTagPicker<TSlug extends string>({
       next.push(slug);
       onChange(next);
     },
-    [selected, onChange, mutexPairs],
+    [selected, onChange, mutexPairs, singleSelect],
   );
 
   return (
@@ -124,6 +174,9 @@ export function TripTagPicker<TSlug extends string>({
               >
                 {opt.label}
               </Text>
+              {opt.intensity != null ? (
+                <IntensityMeter level={opt.intensity} active={isSelected} />
+              ) : null}
               {isSelected ? (
                 <Ionicons
                   name="checkmark-circle"
@@ -164,6 +217,17 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 20,
     fontWeight: '600',
+  },
+  meter: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 2,
+    marginLeft: 10,
+    height: 18,
+  },
+  meterBar: {
+    width: 3,
+    borderRadius: 1.5,
   },
   check: {
     marginLeft: 8,

@@ -16,7 +16,7 @@ async function sendRemovedNotification(
 ): Promise<void> {
   const { data: trip, error: tripError } = await supabase
     .from('group_trips')
-    .select('title, destination_country, destination_area')
+    .select('title, group_trip_destinations(short_label, name, country)')
     .eq('id', tripId)
     .single();
 
@@ -60,9 +60,14 @@ async function sendRemovedNotification(
     return;
   }
 
+  const dest = Array.isArray((trip as any).group_trip_destinations)
+    ? (trip as any).group_trip_destinations[0]
+    : (trip as any).group_trip_destinations;
   const tripLabel =
     trip.title ||
-    [trip.destination_area, trip.destination_country].filter(Boolean).join(', ') ||
+    dest?.short_label ||
+    dest?.name ||
+    dest?.country ||
     'a trip';
 
   const title = 'You were removed from a trip';

@@ -74,7 +74,7 @@ const formatRange = (r: BudgetTierRange): string => {
 const showAiInfo = (): void => {
   Alert.alert(
     'How this estimate works',
-    'Ranges come from destination, duration, and accommodation type. Tap "Adjust manually" to override.',
+    'Ranges come from destination, duration, and accommodation type.',
     [{ text: 'OK' }],
   );
 };

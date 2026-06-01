@@ -4,7 +4,6 @@ import { View, Text, StyleSheet, Platform } from 'react-native';
 import { TripTagPicker } from '../TripTagPicker';
 import {
   TRIP_VIBE_OPTIONS,
-  TRIP_VIBE_MUTEX,
   type TripVibeSlug,
 } from '../../../services/trips/groupTripsService';
 
@@ -26,11 +25,12 @@ export const VibeSheetContent: React.FC<VibeSheetContentProps> = ({
   return (
     <View style={styles.container}>
       <Text style={styles.header}>What's the energy of this trip?</Text>
+      <Text style={styles.scaleHint}>Most surf at the top → most chill at the bottom.</Text>
       <TripTagPicker<TripVibeSlug>
         options={TRIP_VIBE_OPTIONS}
         selected={selected}
         onChange={onChange}
-        mutexPairs={TRIP_VIBE_MUTEX}
+        singleSelect
         accessibilityLabel="Trip vibe"
       />
     </View>
@@ -47,6 +47,14 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     fontWeight: '400',
     color: C.textMuted,
+  },
+  scaleHint: {
+    fontFamily: FONT_INTER,
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '500',
+    color: '#9CB6C0',
+    marginTop: -4,
   },
 });
 

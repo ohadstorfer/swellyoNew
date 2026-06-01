@@ -191,12 +191,12 @@ const stateFromTrip = (trip: GroupTrip): WizardState => {
   const skillLevels = (trip.target_surf_levels ?? []).filter(l =>
     SKILL_LEVELS.some(s => s.key === l)
   ) as SurfLevel[];
-  const inc = (k: IncludedComponent) => !!trip.included_components?.includes(k);
+  const inc = (_k: IncludedComponent) => false; // included_components column dropped
   const pi = (k: PriceInclude) => !!trip.price_includes?.includes(k);
   return {
     title: trip.title ?? '',
     heroImageUri: trip.hero_image_url ?? null,
-    destination: trip.destination_area?.trim() || trip.destination_country?.trim() || '',
+    destination: trip.destination?.short_label || trip.destination?.name || '',
     destinationGeo: null, // locked in edit mode
     startDate: parseISODate(trip.start_date),
     endDate: parseISODate(trip.end_date),
@@ -206,7 +206,7 @@ const stateFromTrip = (trip: GroupTrip): WizardState => {
     ageMin: trip.age_min != null ? String(trip.age_min) : '',
     ageMax: trip.age_max != null ? String(trip.age_max) : '',
     skillLevels,
-    waveType: (trip.wave_type as WaveType) ?? null,
+    waveType: null, // wave_type column dropped
     surfStyles: (trip.target_surf_styles ?? []).filter(s =>
       SURF_STYLES.some(x => x.key === s)
     ) as SurfStyle[],
@@ -217,7 +217,7 @@ const stateFromTrip = (trip: GroupTrip): WizardState => {
       meals: inc('meals'),
       activities: inc('activities'),
     },
-    totalCost: trip.total_cost != null ? String(trip.total_cost) : '',
+    totalCost: '', // total_cost column dropped
     costPerPerson: trip.cost_per_person != null ? String(trip.cost_per_person) : '',
     priceIncludes: {
       accommodation: pi('accommodation'),
@@ -366,13 +366,9 @@ export default function CreateTripFlowC({
       const skillLevels: SurfLevel[] = state.skillLevels.length
         ? state.skillLevels
         : ['all' as SurfLevel];
-      const includedComponents = (Object.keys(state.included) as IncludedComponent[]).filter(
-        k => state.included[k]
-      );
       const priceIncludes = (Object.keys(state.priceIncludes) as PriceInclude[]).filter(
         k => state.priceIncludes[k]
       );
-      const totalCost = state.totalCost.trim() ? parseInt(state.totalCost, 10) : null;
       const perPerson = state.costPerPerson.trim() ? parseInt(state.costPerPerson, 10) : null;
       const startISO = state.startDate ? toISODate(state.startDate) : null;
       const endISO = state.endDate ? toISODate(state.endDate) : null;
@@ -385,17 +381,13 @@ export default function CreateTripFlowC({
           end_date: endISO,
           dates_set_in_stone: true,
           date_months: null,
-          age_min: parseInt(state.ageMin, 10),
-          age_max: parseInt(state.ageMax, 10),
+          age_min: state.ageMin ? parseInt(state.ageMin, 10) : null,
+          age_max: state.ageMax ? parseInt(state.ageMax, 10) : null,
           target_surf_levels: skillLevels,
           target_surf_styles: state.surfStyles.length ? state.surfStyles : ['all'],
-          wave_type: state.waveType,
-          included_components: includedComponents.length ? includedComponents : null,
-          total_cost: totalCost,
           cost_per_person: perPerson,
           price_includes: priceIncludes.length ? priceIncludes : null,
           budget_currency: 'USD',
-          surf_style: null,
           visibility: state.visibility,
         };
         await updateGroupTrip(initialTrip.id, editable);
@@ -411,21 +403,16 @@ export default function CreateTripFlowC({
           end_date: endISO,
           dates_set_in_stone: true,
           date_months: null,
-
-          destination_country: state.destination.trim() || null,
-          destination_area: null,
-          destination_spot: null,
+          duration_days: null, // exact-dates flow — derivable from start/end
+          max_participants: null, // Flow C has no participant cap UI
 
           accommodation_type: null,
           accommodation_name: null,
           accommodation_url: null,
           accommodation_image_url: null,
 
-          vibe: null,
-          surf_spots: null,
-
-          age_min: parseInt(state.ageMin, 10),
-          age_max: parseInt(state.ageMax, 10),
+          age_min: state.ageMin ? parseInt(state.ageMin, 10) : null,
+          age_max: state.ageMax ? parseInt(state.ageMax, 10) : null,
           target_surf_levels: skillLevels,
           target_surf_styles: state.surfStyles.length ? state.surfStyles : ['all'],
           wave_shapes: null,
@@ -436,17 +423,14 @@ export default function CreateTripFlowC({
           budget_min: null,
           budget_max: null,
           budget_currency: 'USD',
+          budget_tier: null, // Flow C uses fixed pricing, no tier
 
           trip_structure: null,
           trip_vibes: null,
-          wave_type: state.waveType,
-          included_components: includedComponents.length ? includedComponents : null,
-          total_cost: totalCost,
           cost_per_person: perPerson,
           price_includes: priceIncludes.length ? priceIncludes : null,
 
-          surf_style: null,
-          accommodation_status: null,
+          specific_stay_selected: null, // Flow C is a fixed package — no stay gate
           visibility: state.visibility,
 
           group_gear: [],

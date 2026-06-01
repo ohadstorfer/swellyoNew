@@ -28,6 +28,7 @@ import { JoinDecisionOverlay } from '../components/trips/joinRequest/JoinDecisio
 import {
   listUnseenJoinDecisions,
   markJoinDecisionSeen,
+  destinationLabel,
   type UnseenJoinDecision,
 } from '../services/trips/groupTripsService';
 import { supabase } from '../config/supabase';
@@ -118,6 +119,10 @@ export const AppContent: React.FC = () => {
   const [pendingInviteGroupId, setPendingInviteGroupId] = useState<string | null>(null);
   const [pendingInviteToken, setPendingInviteToken] = useState<string | null>(null);
   const inviteResolverRef = useRef(false);
+  // Group-trip invite link (tokenless): `?grouptrip=<tripId>`. Opens the trip
+  // detail, where the recipient can request to join.
+  const [pendingTripInviteId, setPendingTripInviteId] = useState<string | null>(null);
+  const tripInviteResolverRef = useRef(false);
 
   const parseInviteFromUrl = useCallback((url: string | null) => {
     if (!url) return;
@@ -127,8 +132,10 @@ export const AppContent: React.FC = () => {
       const params = new URLSearchParams(url.substring(q + 1));
       const sid = params.get('surftrip');
       const token = params.get('t');
+      const gtid = params.get('grouptrip');
       if (sid) setPendingInviteGroupId(sid);
       if (token) setPendingInviteToken(token);
+      if (gtid) setPendingTripInviteId(gtid);
     } catch (e) {
       console.warn('[AppContent] invite URL parse failed:', e);
     }
@@ -229,6 +236,45 @@ export const AppContent: React.FC = () => {
       }
     })();
   }, [pendingInviteToken, pendingInviteGroupId, user, isComplete, isDemoUser]);
+
+  // ----- Group-trip invite link (native only) -----
+  // Hydrate persisted pending group-trip invite (cold-boot through signup).
+  useEffect(() => {
+    let cancelled = false;
+    AsyncStorage.getItem('pendingGroupTripInvite')
+      .then(raw => {
+        if (cancelled || !raw) return;
+        if (!pendingTripInviteId) setPendingTripInviteId(raw);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []); // run once on mount
+
+  useEffect(() => {
+    if (!pendingTripInviteId) return;
+    AsyncStorage.setItem('pendingGroupTripInvite', pendingTripInviteId).catch(() => {});
+  }, [pendingTripInviteId]);
+
+  // Post-auth resolver: open the shared trip's detail once signed in + onboarded.
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    if (tripInviteResolverRef.current) return;
+    if (!pendingTripInviteId) return;
+    if (user === null) return;
+    if (!isComplete && !isDemoUser) return;
+
+    tripInviteResolverRef.current = true;
+    try {
+      setSelectedConversation(null);
+      setActiveSurftripDetailId(null);
+      setPendingTripDetailId(pendingTripInviteId);
+      setShowTrips(true);
+    } finally {
+      setPendingTripInviteId(null);
+      AsyncStorage.removeItem('pendingGroupTripInvite').catch(() => {});
+      tripInviteResolverRef.current = false;
+    }
+  }, [pendingTripInviteId, user, isComplete, isDemoUser]);
 
   // Validate session whenever a user is signed in (regardless of onboarding
   // completion). This unblocks mid-onboarding users who would otherwise be
@@ -952,7 +998,7 @@ export const AppContent: React.FC = () => {
 
           const { data: trip } = await supabase
             .from('group_trips')
-            .select('id, title, hero_image_url, destination_country, destination_area, start_date, end_date')
+            .select('id, title, hero_image_url, start_date, end_date, destination:group_trip_destinations(name, short_label, country)')
             .eq('id', tripId)
             .maybeSingle();
           if (!trip) return;
@@ -965,8 +1011,11 @@ export const AppContent: React.FC = () => {
               id: (trip as any).id,
               title: (trip as any).title ?? null,
               hero_image_url: (trip as any).hero_image_url ?? '',
-              destination_country: (trip as any).destination_country ?? null,
-              destination_area: (trip as any).destination_area ?? null,
+              destination_label: destinationLabel(
+                Array.isArray((trip as any).destination)
+                  ? (trip as any).destination[0]
+                  : (trip as any).destination,
+              ),
               start_date: (trip as any).start_date ?? null,
               end_date: (trip as any).end_date ?? null,
             },

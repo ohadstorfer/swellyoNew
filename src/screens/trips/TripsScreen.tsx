@@ -127,11 +127,11 @@ const formatTripDates = (trip: GroupTrip): string => {
   return 'Dates TBD';
 };
 
-const formatDestination = (trip: GroupTrip): string => {
-  const parts = [trip.destination_area, trip.destination_country].filter(Boolean);
-  if (parts.length === 0) return 'Destination TBD';
-  return parts.join(', ');
-};
+const formatDestination = (trip: GroupTrip): string =>
+  trip.destination?.short_label ||
+  trip.destination?.name ||
+  trip.destination?.country ||
+  'Destination TBD';
 
 type TripCardBadge = 'approved' | 'pending' | 'completed';
 

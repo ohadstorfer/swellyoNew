@@ -191,10 +191,6 @@
       "mcp__ide__*"
     ],
     "deny": [
-      "Edit(**/supabase/migrations/**)",
-      "Write(**/supabase/migrations/**)",
-      "Edit(supabase/migrations/**)",
-      "Write(supabase/migrations/**)",
       "mcp__supabase__apply_migration",
       "mcp__supabase__execute_sql",
       "Bash(supabase db push:*)",

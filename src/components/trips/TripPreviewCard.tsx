@@ -44,8 +44,6 @@ const BADGE_LABEL: Record<TripCardBadge, string> = {
 type TripCardData = Partial<GroupTrip> & {
   title?: string | null;
   hero_image_url?: string | null;
-  destination_country?: string | null;
-  destination_area?: string | null;
   start_date?: string | null;
   end_date?: string | null;
   dates_set_in_stone?: boolean | null;
@@ -77,13 +75,11 @@ export interface TripPreviewCardProps {
 
 // ---------- helpers (copied from TripsScreen.tsx, adapted for partial data)
 
-const formatDestination = (trip: TripCardData): string => {
-  const parts = [trip.destination_area, trip.destination_country].filter(
-    Boolean,
-  );
-  if (parts.length === 0) return 'Destination TBD';
-  return parts.join(', ');
-};
+const formatDestination = (trip: TripCardData): string =>
+  trip.destination?.short_label ||
+  trip.destination?.name ||
+  trip.destination?.country ||
+  'Destination TBD';
 
 const formatTripDates = (trip: TripCardData): string => {
   if (trip.start_date && trip.end_date) {

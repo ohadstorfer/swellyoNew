@@ -94,6 +94,11 @@ export interface CreateTripWizardChromeProps {
   primaryDisabled?: boolean;
   /** No-op: Figma design has no progress indicator. Kept for backwards-compat. */
   hideProgress?: boolean;
+  /** Hide the dark header band entirely (e.g. the full-bleed preview step). */
+  hideHeader?: boolean;
+  /** Remove the scroll content's horizontal + top padding so children can run
+   *  edge-to-edge (e.g. the preview step's full-bleed hero). */
+  flushContent?: boolean;
   children: React.ReactNode;
 }
 
@@ -108,6 +113,8 @@ export function CreateTripWizardChrome(props: CreateTripWizardChromeProps): Reac
     onClose,
     submitting = false,
     primaryDisabled = false,
+    hideHeader = false,
+    flushContent = false,
     children,
   } = props;
 
@@ -137,17 +144,17 @@ export function CreateTripWizardChrome(props: CreateTripWizardChromeProps): Reac
     }
   }, [stepIndex]);
 
-  // -------- Status bar style — white text on dark header --------
+  // -------- Status bar style — white text on dark header, dark on light bg --------
   useEffect(() => {
     if (Platform.OS === 'ios') {
-      StatusBar.setBarStyle('light-content', true);
+      StatusBar.setBarStyle(hideHeader ? 'dark-content' : 'light-content', true);
     }
     return () => {
       if (Platform.OS === 'ios') {
         StatusBar.setBarStyle('dark-content', true);
       }
     };
-  }, []);
+  }, [hideHeader]);
 
   const headerPaddingTop = Math.max(insets.top, 0) + HEADER_PADDING_TOP_BASE;
   const footerReservedHeight =
@@ -159,7 +166,8 @@ export function CreateTripWizardChrome(props: CreateTripWizardChromeProps): Reac
 
   return (
     <View style={styles.root}>
-      {/* ----- Header band ----- */}
+      {/* ----- Header band (hidden on full-bleed steps like preview) ----- */}
+      {hideHeader ? null : (
       <View style={[styles.header, { paddingTop: headerPaddingTop }]}>
         <View style={styles.headerRow}>
           <Text style={styles.stepTitle} numberOfLines={1}>
@@ -177,24 +185,16 @@ export function CreateTripWizardChrome(props: CreateTripWizardChromeProps): Reac
             <Ionicons name="close" size={24} color={tokens.white} />
           </TouchableOpacity>
         </View>
-        {/* Blue → sand gradient line at the bottom of the header. */}
-        <LinearGradient
-          colors={HEADER_GRADIENT_COLORS}
-          locations={HEADER_GRADIENT_LOCATIONS}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 0 }}
-          style={styles.headerGradientLine}
-          pointerEvents="none"
-        />
       </View>
+      )}
 
       {/* ----- Scrollable step content ----- */}
       <KeyboardAwareScrollView
         ref={scrollRef}
         style={styles.scroll}
         contentContainerStyle={{
-          paddingHorizontal: 16,
-          paddingTop: 20,
+          paddingHorizontal: flushContent ? 0 : 16,
+          paddingTop: flushContent ? 0 : hideHeader ? Math.max(insets.top, 0) + 8 : 20,
           paddingBottom: footerReservedHeight + 32,
         }}
         bottomOffset={footerReservedHeight + 16}

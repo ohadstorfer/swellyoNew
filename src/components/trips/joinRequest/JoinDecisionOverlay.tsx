@@ -39,11 +39,6 @@ function formatDateRange(startIso: string | null, endIso: string | null): string
   return `${startStr} - ${MONTHS[end.getMonth()]} ${end.getDate()}, ${end.getFullYear()}`;
 }
 
-function formatLocation(country: string | null, area: string | null): string | null {
-  const parts = [area, country].filter((s): s is string => !!s && s.trim().length > 0);
-  return parts.length > 0 ? parts.join(', ') : null;
-}
-
 export const JoinDecisionOverlay: React.FC<Props> = ({
   visible,
   decision,
@@ -53,7 +48,7 @@ export const JoinDecisionOverlay: React.FC<Props> = ({
   if (!decision) return null;
   const approved = decision.status === 'approved';
   const tripTitle = decision.trip.title?.trim() || 'this trip';
-  const location = formatLocation(decision.trip.destination_country, decision.trip.destination_area);
+  const location = decision.trip.destination_label;
   const dates = formatDateRange(decision.trip.start_date, decision.trip.end_date);
 
   return (

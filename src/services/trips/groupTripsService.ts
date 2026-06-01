@@ -20,11 +20,10 @@ export type TripStructureSlug =
   | 'group_all_day'
   | 'own_thing_day';
 export type TripVibeSlug =
-  | 'surf_focused'
   | 'improve_surf'
-  | 'vacation'
+  | 'surf_focused'
   | 'explore'
-  | 'slow_chill';
+  | 'vacation';
 
 export const TRIP_STRUCTURE_OPTIONS: { slug: TripStructureSlug; label: string }[] = [
   { slug: 'shared_decisions',    label: 'Shared decisions on activities and schedule' },
@@ -36,12 +35,13 @@ export const TRIP_STRUCTURE_OPTIONS: { slug: TripStructureSlug; label: string }[
   { slug: 'own_thing_day',       label: 'Do your own thing during the day' },
 ];
 
-export const TRIP_VIBE_OPTIONS: { slug: TripVibeSlug; label: string }[] = [
-  { slug: 'surf_focused', label: 'Surf-focused — wake up early, surf a lot' },
-  { slug: 'improve_surf', label: 'Improve your surfing — training camp' },
-  { slug: 'vacation',     label: 'Vacation style — chill, loose surf, lay-days' },
-  { slug: 'explore',      label: 'Surf + Explore' },
-  { slug: 'slow_chill',   label: 'Slow + chill' },
+// Single-select (radio). Order = display order, top→bottom = most→least surf.
+// `intensity` (1–4) drives the surf-intensity meter shown on each pill.
+export const TRIP_VIBE_OPTIONS: { slug: TripVibeSlug; label: string; intensity: number }[] = [
+  { slug: 'improve_surf', label: 'Improve your surfing — training camp',        intensity: 4 },
+  { slug: 'surf_focused', label: 'Surf-focused — wake up early, surf a lot',     intensity: 3 },
+  { slug: 'explore',      label: 'Surf + Explore',                               intensity: 2 },
+  { slug: 'vacation',     label: 'Vacation style — chill, loose surf, lay-days', intensity: 1 },
 ];
 
 export const TRIP_STRUCTURE_MUTEX: [TripStructureSlug, TripStructureSlug][] = [
@@ -50,24 +50,8 @@ export const TRIP_STRUCTURE_MUTEX: [TripStructureSlug, TripStructureSlug][] = [
   ['group_all_day', 'own_thing_day'],
 ];
 
-export const TRIP_VIBE_MUTEX: [TripVibeSlug, TripVibeSlug][] = [
-  ['surf_focused', 'slow_chill'],
-  ['improve_surf', 'slow_chill'],
-  ['improve_surf', 'vacation'],
-  ['surf_focused', 'vacation'],
-];
-
-export interface TripVibe {
-  morning?: string[];
-  afternoon?: string[];
-  evening?: string[];
-  night?: string[];
-}
-
-export interface SurfSpot {
-  name: string;
-  country?: string;
-}
+// Vibe is single-select now — no co-existing pairs to enforce.
+export const TRIP_VIBE_MUTEX: [TripVibeSlug, TripVibeSlug][] = [];
 
 export type TripStatus = 'active' | 'cancelled';
 
@@ -96,21 +80,21 @@ export interface GroupTrip {
   end_date: string | null;
   dates_set_in_stone: boolean | null;
   date_months: string[] | null;
+  duration_days: number | null; // trip length in days (only place it survives in months-mode)
+  max_participants: number | null; // host-set cap on total people (incl. host); null = no cap set
+  participant_count: number; // live count of joined people (incl. host). Trigger-maintained — read-only.
 
-  destination_country: string | null;
-  destination_area: string | null;
-  destination_spot: string[] | null;
+  /** Geocoded destination — source of truth, embedded from group_trip_destinations.
+   *  Null until the host picks a place (or for legacy trips with no row). */
+  destination: TripDestination | null;
 
   accommodation_type: string[] | null;
   accommodation_name: string | null;
   accommodation_url: string | null;
   accommodation_image_url: string | null;
 
-  vibe: TripVibe | null;
-  surf_spots: SurfSpot[] | null;
-
-  age_min: number;
-  age_max: number;
+  age_min: number | null;
+  age_max: number | null;
   target_surf_levels: SurfLevel[];
   target_surf_styles: SurfStyle[];
   wave_shapes: WaveShapeKind[] | null;
@@ -121,21 +105,21 @@ export interface GroupTrip {
   budget_min: number | null;
   budget_max: number | null;
   budget_currency: string | null;
+  budget_tier: string | null; // 'low' | 'medium' | 'high' — the tier the host picked
 
   // Multi-select tag columns (text[] with DB CHECK constraints). Replaces the
   // legacy single-value `trip_vibe` column dropped in the May 2026 migration.
   trip_structure: string[] | null;
   trip_vibes: string[] | null;
 
-  // Flow B columns (nullable). wave_type shared with Flow A.
-  wave_type: string | null; // 'reef' | 'beach' | 'point'
-  included_components: string[] | null; // flights|accommodation|surf_spots|meals|activities
-  total_cost: number | null;
+  // Flow C pricing (nullable).
   cost_per_person: number | null;
   price_includes: string[] | null; // accommodation|surf_guide|transport|flights|meals
 
-  surf_style: string | null;
-  accommodation_status: string | null; // 'booked' | 'notyet'
+  // Step-3 Yes/No gate: did the host select a specific stay, or none yet?
+  // (Renamed from accommodation_status — May 2026. See migration
+  // 20260531000001_rename_accommodation_status_to_specific_stay_selected.sql)
+  specific_stay_selected: boolean | null;
   visibility: string | null; // 'public' | 'friends' | 'private'
 
   group_gear: string[];
@@ -191,8 +175,7 @@ export interface UnseenJoinDecision {
     id: string;
     title: string | null;
     hero_image_url: string;
-    destination_country: string | null;
-    destination_area: string | null;
+    destination_label: string | null;
     start_date: string | null;
     end_date: string | null;
   };
@@ -248,7 +231,8 @@ export interface EnrichedJoinRequest extends GroupTripJoinRequest {
 
 export type CreateGroupTripInput = Omit<
   GroupTrip,
-  'id' | 'host_id' | 'created_at' | 'updated_at'
+  // participant_count is maintained by a DB trigger — never written by the client.
+  'id' | 'host_id' | 'created_at' | 'updated_at' | 'destination' | 'participant_count'
 >;
 
 /**
@@ -270,7 +254,9 @@ export async function createGroupTrip(
     throw new Error(error?.message || 'Failed to create trip');
   }
 
-  const trip = data as GroupTrip;
+  // Destination row is inserted separately by the caller (setTripDestination),
+  // so it isn't embedded here yet — normalize to null.
+  const trip = { ...(data as any), destination: null } as GroupTrip;
 
   // Best-effort: add host as participant. Do not fail the whole create if this errors.
   const { error: participantError } = await supabase
@@ -293,6 +279,41 @@ export async function createGroupTrip(
   }
 
   return trip;
+}
+
+/** Subset of group_trip_destinations embedded into GroupTrip for display.
+ *  This is the source of truth for a trip's location. */
+export interface TripDestination {
+  name: string | null;
+  short_label: string | null;
+  country: string | null; // ISO-2
+  admin_level_1: string | null;
+  lat: number | null;
+  lng: number | null;
+}
+
+// Embed string + helpers — pull the destination row alongside the trip so the
+// destinations table is the single source of truth for location.
+const TRIP_DEST_EMBED =
+  'destination:group_trip_destinations(name, short_label, country, admin_level_1, lat, lng)';
+
+function pickDestination(embedded: any): TripDestination | null {
+  if (!embedded) return null;
+  // PostgREST returns an object for the 1:1 embed (unique trip_id), but tolerate
+  // an array just in case the relationship is inferred as one-to-many.
+  return (Array.isArray(embedded) ? embedded[0] ?? null : embedded) as TripDestination | null;
+}
+
+function normalizeTrip(row: any): GroupTrip {
+  return { ...row, destination: pickDestination(row?.destination) } as GroupTrip;
+}
+
+/** Human-readable location label from a trip's destination. */
+export function destinationLabel(
+  d: { short_label?: string | null; name?: string | null; country?: string | null } | null | undefined
+): string | null {
+  if (!d) return null;
+  return d.short_label || d.name || d.country || null;
 }
 
 /** Precise geocode data for a trip's destination (lives in group_trip_destinations). */
@@ -341,6 +362,18 @@ export async function setTripDestination(
   supabase.functions
     .invoke('geocode-group-trip-destinations', { body: { trip_id: tripId } })
     .catch((e) => console.warn('[groupTripsService] geocode enrich failed:', e));
+}
+
+/**
+ * Build a shareable invite URL for a group trip. Tokenless on purpose — group
+ * trips use host-approved join requests, so the link just opens the trip's
+ * detail in the app where the recipient taps "Request to join". The static
+ * invite site (same one surftrips use) forwards `?grouptrip=` into the app via
+ * the swellyo:// scheme; AppContent's Linking listener opens the trip.
+ */
+export function getGroupTripInviteUrl(tripId: string): string {
+  const base = 'https://swellyo-invite.netlify.app';
+  return `${base}/?grouptrip=${encodeURIComponent(tripId)}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -417,7 +450,7 @@ export async function getTripDestination(
 export async function listExploreTrips(limit = 50, offset = 0): Promise<GroupTrip[]> {
   const { data, error } = await supabase
     .from('group_trips')
-    .select('*')
+    .select(`*, ${TRIP_DEST_EMBED}`)
     .eq('status', 'active')
     .order('created_at', { ascending: false })
     .range(offset, offset + limit - 1);
@@ -426,7 +459,7 @@ export async function listExploreTrips(limit = 50, offset = 0): Promise<GroupTri
     console.error('[groupTripsService] listExploreTrips error:', error);
     return [];
   }
-  return (data || []) as GroupTrip[];
+  return (data || []).map(normalizeTrip);
 }
 
 export type MyTripBucket = 'approved' | 'pending' | 'past';
@@ -473,11 +506,11 @@ export async function listMyTripsByBucket(userId: string): Promise<MyTripsBucket
   const [participantRes, pendingRes] = await Promise.all([
     supabase
       .from('group_trip_participants')
-      .select('trip_id, group_trips!inner(*)')
+      .select(`trip_id, group_trips!inner(*, ${TRIP_DEST_EMBED})`)
       .eq('user_id', userId),
     supabase
       .from('group_trip_join_requests')
-      .select('trip_id, group_trips!inner(*)')
+      .select(`trip_id, group_trips!inner(*, ${TRIP_DEST_EMBED})`)
       .eq('requester_id', userId)
       .eq('status', 'pending'),
   ]);
@@ -495,7 +528,7 @@ export async function listMyTripsByBucket(userId: string): Promise<MyTripsBucket
   const today = new Date();
 
   for (const row of (participantRes.data || []) as any[]) {
-    const trip = row.group_trips as GroupTrip | null;
+    const trip = row.group_trips ? normalizeTrip(row.group_trips) : null;
     if (!trip || seen.has(trip.id)) continue;
     seen.add(trip.id);
     if (trip.status === 'cancelled' || isTripPast(trip, today)) {
@@ -507,7 +540,7 @@ export async function listMyTripsByBucket(userId: string): Promise<MyTripsBucket
 
   const pending: GroupTrip[] = [];
   for (const row of (pendingRes.data || []) as any[]) {
-    const trip = row.group_trips as GroupTrip | null;
+    const trip = row.group_trips ? normalizeTrip(row.group_trips) : null;
     if (!trip) continue;
     // If somehow already a participant, the approved/past bucket wins.
     if (seen.has(trip.id)) continue;
@@ -557,12 +590,7 @@ export async function cancelTrip(tripId: string): Promise<void> {
  * Update an existing trip. Destination fields are intentionally excluded — the
  * destination is locked once the trip is created (per product requirement).
  */
-export type UpdateGroupTripInput = Partial<
-  Omit<
-    CreateGroupTripInput,
-    'destination_country' | 'destination_area' | 'destination_spot'
-  >
->;
+export type UpdateGroupTripInput = Partial<CreateGroupTripInput>;
 
 export async function updateGroupTrip(
   tripId: string,
@@ -1163,7 +1191,7 @@ const PARTICIPANT_PROFILE_FIELDS =
 export async function getTripById(tripId: string): Promise<GroupTrip | null> {
   const { data, error } = await supabase
     .from('group_trips')
-    .select('*')
+    .select(`*, ${TRIP_DEST_EMBED}`)
     .eq('id', tripId)
     .single();
 
@@ -1172,7 +1200,7 @@ export async function getTripById(tripId: string): Promise<GroupTrip | null> {
     console.error('[groupTripsService] getTripById error:', error);
     return null;
   }
-  return (data as GroupTrip) ?? null;
+  return data ? normalizeTrip(data) : null;
 }
 
 /**
@@ -1896,7 +1924,7 @@ export async function listUnseenJoinDecisions(
   const tripIds = Array.from(new Set(rows.map((r: any) => r.trip_id as string)));
   const { data: trips, error: tripsErr } = await supabase
     .from('group_trips')
-    .select('id, title, hero_image_url, destination_country, destination_area, start_date, end_date')
+    .select(`id, title, hero_image_url, start_date, end_date, ${TRIP_DEST_EMBED}`)
     .in('id', tripIds);
   if (tripsErr) {
     console.warn('[groupTripsService] listUnseenJoinDecisions trips error:', tripsErr);
@@ -1917,8 +1945,7 @@ export async function listUnseenJoinDecisions(
         id: trip.id,
         title: trip.title ?? null,
         hero_image_url: trip.hero_image_url ?? '',
-        destination_country: trip.destination_country ?? null,
-        destination_area: trip.destination_area ?? null,
+        destination_label: destinationLabel(pickDestination(trip.destination)),
         start_date: trip.start_date ?? null,
         end_date: trip.end_date ?? null,
       },

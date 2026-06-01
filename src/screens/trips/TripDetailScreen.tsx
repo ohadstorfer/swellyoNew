@@ -57,7 +57,10 @@ import {
   addAdminUpdate,
   updateAdminUpdate,
   deleteAdminUpdate,
+  type SurfStyle,
+  type WaveShapeKind,
 } from '../../services/trips/groupTripsService';
+import { TripDetailView, type TripDetailVM } from '../../components/trips/TripDetailView';
 import ParticipantCard from '../../components/trips/ParticipantCard';
 import PendingRequestCard from '../../components/trips/PendingRequestCard';
 import TripParticipantsBreakdown from '../../components/trips/TripParticipantsBreakdown';
@@ -106,10 +109,58 @@ const formatDates = (trip: GroupTrip): string => {
   return 'Dates TBD';
 };
 
-const formatDestination = (trip: GroupTrip): string => {
-  const parts = [trip.destination_area, trip.destination_country].filter(Boolean);
-  return parts.length > 0 ? parts.join(', ') : 'Destination TBD';
+const formatDestination = (trip: GroupTrip): string =>
+  trip.destination?.short_label ||
+  trip.destination?.name ||
+  trip.destination?.country ||
+  'Destination TBD';
+
+const WAVE_SHAPE_LABEL: Record<WaveShapeKind, string> = {
+  soft: 'Mellow',
+  wally: 'Standing',
+  barrel: 'Barrel',
 };
+
+const titleCase = (s: string): string =>
+  s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+
+// Build the shared TripDetailView model from a real trip + its participants.
+const buildTripDetailVM = (
+  trip: GroupTrip,
+  participantCount: number,
+): TripDetailVM => ({
+  heroImageUri: trip.hero_image_url || null,
+  title: trip.title,
+  destinationLabel:
+    trip.destination?.short_label ||
+    trip.destination?.name ||
+    trip.destination?.country ||
+    null,
+  startDateISO: trip.start_date,
+  endDateISO: trip.end_date,
+  dateMonths: trip.date_months,
+  durationDays: trip.duration_days,
+  skillLevels: trip.target_surf_levels ?? [],
+  ageMin: trip.age_min ?? null,
+  ageMax: trip.age_max ?? null,
+  participantCount: participantCount || trip.participant_count || 1,
+  maxParticipants: trip.max_participants,
+  description: trip.description ?? '',
+  vibeSlug: trip.trip_vibes?.[0] ?? null,
+  surfStyles: (trip.target_surf_styles ?? []) as SurfStyle[],
+  structureSlugs: trip.trip_structure ?? [],
+  waveSizeMin: trip.wave_size_min,
+  waveSizeMax: trip.wave_size_max,
+  waveShapeLabel: trip.wave_shapes?.length
+    ? WAVE_SHAPE_LABEL[trip.wave_shapes[0] as WaveShapeKind] ?? null
+    : null,
+  specificStaySelected: trip.specific_stay_selected,
+  accommodationKindLabel: trip.accommodation_type?.length
+    ? titleCase(String(trip.accommodation_type[0]))
+    : null,
+  accommodationName: trip.accommodation_name,
+  accommodationImageUri: trip.accommodation_image_url,
+});
 
 const formatRelativeTime = (iso: string): string => {
   const diff = Date.now() - new Date(iso).getTime();
@@ -893,54 +944,27 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           </View>
         )}
 
-        {/* Top card — hero, title, action row (WhatsApp-style group header) */}
-        <View style={styles.topCard}>
-          {trip.hero_image_url ? (
-            <Image source={{ uri: trip.hero_image_url }} style={styles.hero} />
-          ) : (
-            <View style={[styles.hero, styles.heroPlaceholder]}>
-              <Ionicons name="image-outline" size={40} color="#B0B0B0" />
-            </View>
+        {/* Rich trip-detail layout (shared with the create-trip preview). */}
+        <TripDetailView vm={buildTripDetailVM(trip, participants.length)} />
+
+        {/* Action row — Chat / Share / Mute */}
+        <View style={[styles.actionRow, { marginTop: 20, paddingHorizontal: 16 }]}>
+          {IS_LOCAL_MODE && (isHost || isApprovedMember) && (
+            <ActionButton
+              icon="chatbubbles"
+              label="Chat"
+              onPress={handleOpenGroupChat}
+              loading={openingChat}
+            />
           )}
-
-          <View style={styles.titleBlock}>
-            {!!trip.title && <Text style={styles.title}>{trip.title}</Text>}
-            <View style={styles.metaRow}>
-              <Ionicons name="people" size={14} color="#7B7B7B" />
-              <Text style={styles.metaText}>
-                {participants.length} {participants.length === 1 ? 'member' : 'members'}
-              </Text>
-              <Text style={styles.metaDot}>·</Text>
-              <Text style={styles.metaText} numberOfLines={1}>
-                {formatDestination(trip)}
-              </Text>
-            </View>
-            <Text style={styles.dates}>{formatDates(trip)}</Text>
-            {trip.host_been_there !== null && (
-              <Text style={styles.dates}>
-                {trip.host_been_there ? 'Host has been here before' : 'Host hasn’t been here yet'}
-              </Text>
-            )}
-          </View>
-
-          <View style={styles.actionRow}>
-            {IS_LOCAL_MODE && (isHost || isApprovedMember) && (
-              <ActionButton
-                icon="chatbubbles"
-                label="Chat"
-                onPress={handleOpenGroupChat}
-                loading={openingChat}
-              />
-            )}
-            <ActionButton icon="share-outline" label="Share" onPress={handleShare} />
-            {(isHost || isApprovedMember) && (
-              <ActionButton
-                icon={muted ? 'notifications-off' : 'notifications-outline'}
-                label={muted ? 'Muted' : 'Mute'}
-                onPress={handleToggleMute}
-              />
-            )}
-          </View>
+          <ActionButton icon="share-outline" label="Share" onPress={handleShare} />
+          {(isHost || isApprovedMember) && (
+            <ActionButton
+              icon={muted ? 'notifications-off' : 'notifications-outline'}
+              label={muted ? 'Muted' : 'Mute'}
+              onPress={handleToggleMute}
+            />
+          )}
         </View>
 
         {/* Pending requests (host only) */}
@@ -958,99 +982,17 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           </Section>
         )}
 
-        {/* About */}
-        <Section title="About this trip">
-          <Text style={styles.body}>{trip.description}</Text>
+        {/* About, Focus vibe, How it works, Accommodation, Who it's for and
+            Wave info are all rendered by TripDetailView above. */}
 
-          {/* Multi-select tags — only rendered when at least one is present.
-              Replaces the legacy single-value `trip_vibe` row. Unknown slugs
-              are rendered as-is so a stale DB row doesn't crash the screen. */}
-          {trip.trip_structure && trip.trip_structure.length > 0 ? (
-            <View style={styles.tagsBlock}>
-              <Text style={styles.tagsLabel}>How it works</Text>
-              <View style={styles.tagChipRow}>
-                {trip.trip_structure.map(slug => {
-                  const label =
-                    TRIP_STRUCTURE_OPTIONS.find(o => o.slug === slug)?.label ?? slug;
-                  return (
-                    <View key={slug} style={styles.tagChip}>
-                      <Text style={styles.tagChipText}>{label}</Text>
-                    </View>
-                  );
-                })}
-              </View>
-            </View>
-          ) : null}
-          {trip.trip_vibes && trip.trip_vibes.length > 0 ? (
-            <View style={styles.tagsBlock}>
-              <Text style={styles.tagsLabel}>Vibe</Text>
-              <View style={styles.tagChipRow}>
-                {trip.trip_vibes.map(slug => {
-                  const label =
-                    TRIP_VIBE_OPTIONS.find(o => o.slug === slug)?.label ?? slug;
-                  return (
-                    <View key={slug} style={styles.tagChip}>
-                      <Text style={styles.tagChipText}>{label}</Text>
-                    </View>
-                  );
-                })}
-              </View>
-            </View>
-          ) : null}
-        </Section>
-
-        {/* Trip details */}
-        {(trip.surf_style || trip.visibility) && (
-          <Section title="Trip details">
-            {!!trip.surf_style && <InfoRow label="Surf style" value={trip.surf_style} />}
-            {!!trip.visibility && (
-              <InfoRow
-                label="Visibility"
-                value={
-                  ({ public: 'Public', friends: 'Friends only', private: 'Private' } as Record<string, string>)[
-                    trip.visibility
-                  ] ?? trip.visibility
-                }
-              />
-            )}
-          </Section>
-        )}
-
-        {/* Accommodation */}
-        {(trip.accommodation_name || trip.accommodation_type || trip.accommodation_status) && (
-          <Section title="Accommodation">
-            {!!trip.accommodation_status && (
-              <InfoRow
-                label="Status"
-                value={trip.accommodation_status === 'booked' ? 'Booked' : 'Not booked yet'}
-              />
-            )}
-            {!!trip.accommodation_name && <InfoRow label="Name" value={trip.accommodation_name} />}
-            {!!trip.accommodation_type && (
-              <InfoRow
-                label="Type"
-                value={
-                  Array.isArray(trip.accommodation_type)
-                    ? trip.accommodation_type.join(', ')
-                    : String(trip.accommodation_type)
-                }
-              />
-            )}
-            {!!trip.accommodation_url && <InfoRow label="Link" value={trip.accommodation_url} />}
-          </Section>
-        )}
-
-        {/* Pricing (Flow B: fixed cost) or approximate budget (Flow A: range) */}
-        {trip.cost_per_person != null || trip.total_cost != null ? (
+        {/* Pricing (Flow C: fixed per-person cost) or approximate budget (Flow A: range) */}
+        {trip.cost_per_person != null ? (
           <Section title="Price">
             {trip.cost_per_person != null && (
               <InfoRow
                 label="Per person"
                 value={`From $${trip.cost_per_person} ${trip.budget_currency ?? 'USD'}`}
               />
-            )}
-            {trip.total_cost != null && (
-              <InfoRow label="Total" value={`$${trip.total_cost} ${trip.budget_currency ?? 'USD'}`} />
             )}
             {trip.price_includes && trip.price_includes.length > 0 && (
               <InfoRow
@@ -1077,81 +1019,6 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
             />
           </Section>
         ) : null}
-
-        {/* Vibe */}
-        {trip.vibe &&
-          ((trip.vibe.morning?.length ?? 0) +
-            (trip.vibe.afternoon?.length ?? 0) +
-            (trip.vibe.evening?.length ?? 0) +
-            (trip.vibe.night?.length ?? 0) >
-            0) && (
-            <Section title="Vibe">
-              {trip.vibe.morning?.length ? (
-                <InfoRow label="Morning" value={trip.vibe.morning.join(', ')} />
-              ) : null}
-              {trip.vibe.afternoon?.length ? (
-                <InfoRow label="Afternoon" value={trip.vibe.afternoon.join(', ')} />
-              ) : null}
-              {trip.vibe.evening?.length ? (
-                <InfoRow label="Evening" value={trip.vibe.evening.join(', ')} />
-              ) : null}
-              {trip.vibe.night?.length ? (
-                <InfoRow label="Night" value={trip.vibe.night.join(', ')} />
-              ) : null}
-            </Section>
-          )}
-
-        {/* Surf spots */}
-        {trip.surf_spots && trip.surf_spots.length > 0 && (
-          <Section title="Surf spots">
-            <Text style={styles.body}>
-              {trip.surf_spots
-                .map(s => (s.country ? `${s.name} (${s.country})` : s.name))
-                .join(', ')}
-            </Text>
-          </Section>
-        )}
-
-        {/* Who it's for */}
-        <Section title="Who it's for">
-          <InfoRow label="Ages" value={`${trip.age_min}–${trip.age_max} yrs`} />
-          {trip.target_surf_levels?.length > 0 && (
-            <InfoRow label="Levels" value={trip.target_surf_levels.join(', ')} />
-          )}
-          {trip.target_surf_styles?.length > 0 && (
-            <InfoRow label="Boards" value={trip.target_surf_styles.join(', ')} />
-          )}
-        </Section>
-
-        {/* Wave */}
-        {(trip.wave_type ||
-          trip.wave_size_min != null ||
-          trip.wave_size_max != null ||
-          (trip.wave_shapes && trip.wave_shapes.length > 0)) && (
-          <Section title="Wave">
-            {!!trip.wave_type && (
-              <InfoRow
-                label="Type"
-                value={
-                  ({ reef: 'Reef break', beach: 'Beach break', point: 'Point break' } as Record<string, string>)[
-                    trip.wave_type
-                  ] ?? trip.wave_type
-                }
-              />
-            )}
-            {trip.wave_size_min != null && trip.wave_size_max != null && (
-              <InfoRow label="Size" value={`${trip.wave_size_min}–${trip.wave_size_max} ft`} />
-            )}
-            {trip.wave_shapes && trip.wave_shapes.length > 0 && (
-              <InfoRow
-                label="Shape"
-                value={trip.wave_shapes
-                  .map(s => ({ soft: 'Soft', wally: 'Wally', barrel: 'Barrel' } as Record<string, string>)[s] ?? s)
-                  .join(', ')}
-              />
-            )}
-          </Section>
-        )}
 
         {/* Group Gear — shared items the host wants the group to bring. */}
         {(gearItems.length > 0 || isHost) && !isCancelled && (

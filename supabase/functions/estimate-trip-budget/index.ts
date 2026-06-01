@@ -64,14 +64,18 @@ function sanitizeTier(raw: any): Tier {
   return tier;
 }
 
-// Force the three tiers to strictly increase and not overlap (low.max <=
-// medium.min <= medium.max <= high.min ...). The model is told to do this but
-// doesn't always comply, which would otherwise surface as overlapping/jumbled
-// price cards in the UI. Operates on per-day values (monotonic under scaling).
+// Make the three tiers CONTIGUOUS — they share boundaries with no gaps:
+//   low  = [low.min, low.max]
+//   med  = [low.max, medium.max]   (starts exactly where low ends)
+//   high = [medium.max, high.max]  (starts exactly where medium ends)
+// We keep each tier's upper bound from the model and snap the next tier's lower
+// bound onto it, clamping so the sequence stays monotonically increasing.
+// Operates on per-day values (monotonic under scaling).
 function enforceOrdering(low: Tier, medium: Tier, high: Tier): void {
-  medium.min = Math.max(medium.min, low.max);
+  low.max = Math.max(low.max, low.min);
+  medium.min = low.max;
   medium.max = Math.max(medium.max, medium.min);
-  high.min = Math.max(high.min, medium.max);
+  high.min = medium.max;
   high.max = Math.max(high.max, high.min);
 }
 
@@ -115,8 +119,10 @@ serve(async (req: Request) => {
     'EXCLUDING international flights). Account for seasonality: peak/high season ' +
     'costs more than off-season at that destination. Return three tiers: low ' +
     '(budget/backpacker), medium (comfortable mid-range), high (premium). Each ' +
-    'tier is a realistic per-day min-max range in US dollars. Ranges MUST ' +
-    'increase low -> medium -> high and MUST NOT overlap. Labels must be short ' +
+    'tier is a realistic per-day min-max range in US dollars. The tiers MUST be ' +
+    'contiguous and share boundaries: low.max MUST equal medium.min, and ' +
+    'medium.max MUST equal high.min (the ranges connect end-to-end with no gaps). ' +
+    'Within each tier min MUST be strictly less than max. Labels must be short ' +
     '(<= 6 words). Respond ONLY with a JSON object, no markdown, no comments.';
 
   const userPrompt =

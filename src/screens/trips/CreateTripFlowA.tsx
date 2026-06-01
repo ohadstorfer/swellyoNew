@@ -75,6 +75,8 @@ import { SpecificStaySheetContent } from '../../components/trips/sheets/Specific
 
 // Existing dependencies still used (preview card)
 import { TripPreviewCard } from '../../components/trips/TripPreviewCard';
+import { TripDetailView, type TripDetailVM } from '../../components/trips/TripDetailView';
+import { TripPublishedScreen } from './TripPublishedScreen';
 import { BoardSelectionPreview } from '../../components/trips/BoardSelectionPreview';
 import { InfoCard } from '../../components/trips/InfoCard';
 import { Images } from '../../assets/images';
@@ -107,8 +109,8 @@ const DESCRIPTION_AMBER_THRESHOLD = 450;
 const WIZARD_STATE_VERSION = 3;
 
 // Step KEYS — flat 5-step list, no conditional.
-type StepKey = 'audience' | 'basics' | 'vibez' | 'budget' | 'preview';
-const STEPS: StepKey[] = ['audience', 'basics', 'vibez', 'budget', 'preview'];
+type StepKey = 'audience' | 'basics' | 'vibez' | 'budget' | 'preview' | 'release';
+const STEPS: StepKey[] = ['audience', 'basics', 'vibez', 'budget', 'preview', 'release'];
 
 // DB constraint: minimum age-range span per hosting style.
 const AGE_WINDOW_BY_STYLE: Record<HostingStyle, number> = { A: 4, B: 5, C: 2 };
@@ -122,7 +124,8 @@ const STEP_META: Record<StepKey, { title: string; subtitle: string }> = {
   basics: { title: 'Basic deets', subtitle: 'Where, when, what to call it.' },
   vibez: { title: 'Trip vibez', subtitle: 'How it runs, the feel, the stay.' },
   budget: { title: 'Budget', subtitle: 'Per person, in USD.' },
-  preview: { title: 'Almost there', subtitle: 'One last look before you publish.' },
+  preview: { title: 'Preview', subtitle: 'How your trip will look.' },
+  release: { title: 'Release trip', subtitle: 'Who can see it, then publish.' },
 };
 
 const SKILL_LEVEL_OPTIONS: { key: SurfLevel; label: string }[] = [
@@ -232,6 +235,9 @@ interface WizardState extends Record<string, unknown> {
   title: string;
   heroImageUri: string | null;
   description: string;
+  maxParticipants: string; // '' = no limit; otherwise a number as string
+
+
 
   // Step 3 — vibez
   tripStructure: TripStructureSlug[];
@@ -278,6 +284,7 @@ const INITIAL_STATE: WizardState = {
   title: '',
   heroImageUri: null,
   description: '',
+  maxParticipants: '',
   tripStructure: [],
   tripVibes: [],
   accommodationKind: null,
@@ -439,8 +446,8 @@ const stateFromTrip = (trip: GroupTrip): WizardState => {
       BOARD_TYPE_OPTIONS.some(b => b.key === s)
     ) as SurfStyle[],
     destination:
-      trip.destination_area?.trim() ||
-      trip.destination_country?.trim() ||
+      trip.destination?.short_label ||
+      trip.destination?.name ||
       '',
     destinationGeo: null,
     datesMode: trip.start_date ? 'exact' : 'months',
@@ -452,6 +459,7 @@ const stateFromTrip = (trip: GroupTrip): WizardState => {
     title: trip.title ?? '',
     heroImageUri: trip.hero_image_url ?? null,
     description: trip.description ?? '',
+    maxParticipants: trip.max_participants != null ? String(trip.max_participants) : '',
     tripStructure,
     tripVibes,
     accommodationKind: firstKind ?? null,
@@ -908,6 +916,13 @@ export default function CreateTripFlowA({
 
   // ---- Submit / budget UI state ------------------------------------------
   const [submitting, setSubmitting] = useState(false);
+  // Set after a successful publish (create only) → shows the Published / invite
+  // screen instead of closing immediately.
+  const [published, setPublished] = useState<{
+    id: string;
+    title: string | null;
+    hero: string | null;
+  } | null>(null);
   const [showResumeBanner, setShowResumeBanner] = useState(false);
 
   // Budget estimate (transient — not persisted)
@@ -1139,6 +1154,8 @@ export default function CreateTripFlowA({
       }
       case 'preview':
         return true;
+      case 'release':
+        return true;
     }
   }, [
     step,
@@ -1240,6 +1257,9 @@ export default function CreateTripFlowA({
         : (['all'] as SurfLevel[]);
       const budget = resolveBudget();
       const descriptionText = state.description.trim();
+      const maxParticipants = state.maxParticipants
+        ? parseInt(state.maxParticipants, 10)
+        : null;
       // DB still expects an array of wave shapes — wrap our single value.
       const waveShapesArray: WaveShapeKind[] | null = state.waveShape
         ? [state.waveShape]
@@ -1252,10 +1272,12 @@ export default function CreateTripFlowA({
           hero_image_url: heroUrl,
           start_date: startISO,
           end_date: endISO,
-          dates_set_in_stone: exactDates ? true : null,
+          dates_set_in_stone: exactDates,
           date_months: dateMonths.length ? dateMonths : null,
-          age_min: parseInt(state.ageMin, 10),
-          age_max: parseInt(state.ageMax, 10),
+          duration_days: state.durationDays,
+          max_participants: maxParticipants,
+          age_min: state.ageMin ? parseInt(state.ageMin, 10) : null,
+          age_max: state.ageMax ? parseInt(state.ageMax, 10) : null,
           target_surf_levels: skillLevels,
           accommodation_type: state.accommodationKind ? [state.accommodationKind] : null,
           accommodation_name: accommodationCommitted
@@ -1268,18 +1290,20 @@ export default function CreateTripFlowA({
           budget_min: budget.min,
           budget_max: budget.max,
           budget_currency: budget.currency,
+          budget_tier: state.manualBudget ? null : state.budgetTier,
           trip_structure: state.tripStructure.length ? state.tripStructure : null,
           trip_vibes: state.tripVibes.length ? state.tripVibes : null,
-          wave_type: null,
           wave_shapes: waveShapesArray,
           wave_size_min: state.waveSizeMin,
           wave_size_max: state.waveSizeMax,
           target_surf_styles: state.surfStyles.length ? state.surfStyles : ['all'],
-          surf_style: null,
-          accommodation_status: null,
+          // Whether the host picked a specific stay (the step-3 Yes/No gate).
+          // Guaranteed non-null by the time this saves (vibez-step validation).
+          specific_stay_selected: state.accommodationLocked,
           visibility: state.visibility,
         };
         await updateGroupTrip(initialTrip.id, editable);
+        onCreated();
       } else {
         const input: CreateGroupTripInput = {
           hosting_style: hostingStyle,
@@ -1290,12 +1314,10 @@ export default function CreateTripFlowA({
 
           start_date: startISO,
           end_date: endISO,
-          dates_set_in_stone: exactDates ? true : null,
+          dates_set_in_stone: exactDates,
           date_months: dateMonths.length ? dateMonths : null,
-
-          destination_country: state.destination.trim() || null,
-          destination_area: null,
-          destination_spot: null,
+          duration_days: state.durationDays,
+          max_participants: maxParticipants,
 
           accommodation_type: state.accommodationKind ? [state.accommodationKind] : null,
           accommodation_name: accommodationCommitted
@@ -1306,11 +1328,8 @@ export default function CreateTripFlowA({
             : null,
           accommodation_image_url: accommodationCommitted ? accommodationImageUrl : null,
 
-          vibe: null,
-          surf_spots: null,
-
-          age_min: parseInt(state.ageMin, 10),
-          age_max: parseInt(state.ageMax, 10),
+          age_min: state.ageMin ? parseInt(state.ageMin, 10) : null,
+          age_max: state.ageMax ? parseInt(state.ageMax, 10) : null,
           target_surf_levels: skillLevels,
           target_surf_styles: state.surfStyles.length ? state.surfStyles : ['all'],
           wave_shapes: waveShapesArray,
@@ -1321,17 +1340,16 @@ export default function CreateTripFlowA({
           budget_min: budget.min,
           budget_max: budget.max,
           budget_currency: budget.currency,
+          budget_tier: state.manualBudget ? null : state.budgetTier,
 
           trip_structure: state.tripStructure.length ? state.tripStructure : null,
           trip_vibes: state.tripVibes.length ? state.tripVibes : null,
-          wave_type: null,
-          included_components: null,
-          total_cost: null,
           cost_per_person: null,
           price_includes: null,
 
-          surf_style: null,
-          accommodation_status: null,
+          // Whether the host picked a specific stay (the step-3 Yes/No gate).
+          // Guaranteed non-null by the time this saves (vibez-step validation).
+          specific_stay_selected: state.accommodationLocked,
           visibility: state.visibility,
 
           group_gear: [],
@@ -1357,8 +1375,10 @@ export default function CreateTripFlowA({
         }
 
         await clearDraft();
+        // Show the Published / invite-friends screen. onCreated() fires when
+        // the host taps Done there.
+        setPublished({ id: trip.id, title: trip.title ?? state.title ?? null, hero: heroUrl });
       }
-      onCreated();
     } catch (e: any) {
       console.error('[CreateTripFlowA] submit error:', e);
       Alert.alert(
@@ -1386,7 +1406,7 @@ export default function CreateTripFlowA({
   // Primary / secondary button handlers
   // -----------------------------------------------------------------------
   const onPrimary = useCallback(() => {
-    if (step === 'preview') {
+    if (step === 'release') {
       void handleSubmit();
     } else {
       handleNext();
@@ -1403,7 +1423,8 @@ export default function CreateTripFlowA({
 
   // CTA label per step (per spec).
   const ctaLabel: string = useMemo(() => {
-    if (step === 'preview') return editMode ? 'Save changes' : 'Publish trip';
+    if (step === 'release') return editMode ? 'Save changes' : 'Publish';
+    if (step === 'preview') return 'Next';
     if (step === 'audience') return 'Next · basic deets';
     if (step === 'basics') return 'Next · trip vibez';
     if (step === 'vibez') return 'Next · budget';
@@ -1427,6 +1448,8 @@ export default function CreateTripFlowA({
         return renderBudgetStep();
       case 'preview':
         return renderPreviewStep();
+      case 'release':
+        return renderReleaseStep();
     }
   };
 
@@ -1617,6 +1640,39 @@ export default function CreateTripFlowA({
         {errors.title ? (
           <Text style={localStyles.errorText}>{errors.title}</Text>
         ) : null}
+
+        {/* Max participants (inline stepper) */}
+        <Text style={[localStyles.fieldLabel, localStyles.fieldTopGap]}>Max participants</Text>
+        <Text style={localStyles.helper}>Including you. Leave at "Any" for no limit.</Text>
+        <View style={localStyles.stepperRow}>
+          <TouchableOpacity
+            activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel="Decrease max participants"
+            onPress={() => {
+              const n = parseInt(state.maxParticipants || '0', 10);
+              update('maxParticipants', n <= 2 ? '' : String(n - 1));
+            }}
+            style={localStyles.stepperBtn}
+          >
+            <Ionicons name="remove" size={22} color={COLORS.brandTeal} />
+          </TouchableOpacity>
+          <Text style={localStyles.stepperValue}>
+            {state.maxParticipants ? state.maxParticipants : 'Any'}
+          </Text>
+          <TouchableOpacity
+            activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel="Increase max participants"
+            onPress={() => {
+              const n = parseInt(state.maxParticipants || '0', 10);
+              update('maxParticipants', String(n < 2 ? 2 : Math.min(n + 1, 50)));
+            }}
+            style={localStyles.stepperBtn}
+          >
+            <Ionicons name="add" size={22} color={COLORS.brandTeal} />
+          </TouchableOpacity>
+        </View>
 
         {/* Cover photo (inline) */}
         <Text style={[localStyles.fieldLabel, localStyles.fieldTopGap]}>Cover photo</Text>
@@ -1815,6 +1871,59 @@ export default function CreateTripFlowA({
         {errors.specificStay ? (
           <Text style={localStyles.errorText}>{errors.specificStay}</Text>
         ) : null}
+
+        {/* Yes → inline stay-details preview (tap to re-open the sheet). */}
+        {lockedAnswer === true ? (
+          (() => {
+            const hasInfo =
+              !!state.accommodationName.trim() ||
+              !!state.accommodationUrl.trim() ||
+              !!state.accommodationImageUri;
+            if (!hasInfo) {
+              return (
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  onPress={() => setOpenSheet('specificStay')}
+                  style={localStyles.addStayBtn}
+                >
+                  <Ionicons name="add-circle-outline" size={20} color={COLORS.brandTeal} />
+                  <Text style={localStyles.addStayBtnText}>Add stay details</Text>
+                </TouchableOpacity>
+              );
+            }
+            return (
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => setOpenSheet('specificStay')}
+                style={localStyles.stayCard}
+                accessibilityRole="button"
+                accessibilityLabel="Edit stay details"
+              >
+                <View style={localStyles.stayCardHeader}>
+                  <Text style={localStyles.stayCardName} numberOfLines={1}>
+                    {state.accommodationName.trim() || 'Your stay'}
+                  </Text>
+                  <Ionicons name="pencil" size={16} color={COLORS.textMuted} />
+                </View>
+                {state.accommodationImageUri ? (
+                  <Image
+                    source={{ uri: state.accommodationImageUri }}
+                    style={localStyles.stayPhoto}
+                    resizeMode="cover"
+                  />
+                ) : null}
+                {state.accommodationUrl.trim() ? (
+                  <View style={localStyles.stayUrlRow}>
+                    <Ionicons name="link-outline" size={14} color={COLORS.brandTealText} />
+                    <Text style={localStyles.stayUrl} numberOfLines={1}>
+                      {state.accommodationUrl.trim()}
+                    </Text>
+                  </View>
+                ) : null}
+              </TouchableOpacity>
+            );
+          })()
+        ) : null}
       </View>
     );
   };
@@ -1947,162 +2056,56 @@ export default function CreateTripFlowA({
           }}
           derivation={derivation}
           error={errors.budget ?? undefined}
-          onManualOverride={() => {
-            update('manualBudget', true);
-            if (state.budgetTier && budgetEstimate) {
-              const r = budgetEstimate.ranges[state.budgetTier];
-              if (!state.budgetManualMin) update('budgetManualMin', String(Math.round(r.min)));
-              if (!state.budgetManualMax) update('budgetManualMax', String(Math.round(r.max)));
-            }
-          }}
         />
       </View>
     );
   };
 
   // -----------------------------------------------------------------------
-  // STEP 5 — PREVIEW (unchanged behavior)
+  // STEP 5 — PREVIEW (rich trip-detail layout via shared TripDetailView)
   // -----------------------------------------------------------------------
   const renderPreviewStep = () => {
-    const synthesized: Partial<GroupTrip> = {
+    const previewVM: TripDetailVM = {
+      heroImageUri: state.heroImageUri,
       title: state.title || null,
+      destinationLabel: state.destination || null,
+      startDateISO: state.datesMode === 'exact' ? state.startDateISO : null,
+      endDateISO: state.datesMode === 'exact' ? state.endDateISO : null,
+      dateMonths:
+        state.datesMode === 'months'
+          ? expandMonthRange(state.monthFrom, state.monthTo)
+          : null,
+      durationDays: state.durationDays,
+      skillLevels: state.skillLevels,
+      ageMin: state.ageMin ? parseInt(state.ageMin, 10) : null,
+      ageMax: state.ageMax ? parseInt(state.ageMax, 10) : null,
+      participantCount: 1, // pre-publish: just the host
+      maxParticipants: state.maxParticipants ? parseInt(state.maxParticipants, 10) : null,
       description: state.description || '',
-      hero_image_url: isRemoteUrl(state.heroImageUri) ? (state.heroImageUri as string) : '',
-      destination_country: state.destination || null,
-      destination_area: null,
-      start_date: state.datesMode === 'exact' ? state.startDateISO : null,
-      end_date: state.datesMode === 'exact' ? state.endDateISO : null,
-      dates_set_in_stone: state.datesMode === 'exact' ? true : null,
-      date_months:
-        state.datesMode === 'months' ? expandMonthRange(state.monthFrom, state.monthTo) : null,
-      target_surf_levels: state.skillLevels.length
-        ? (state.skillLevels as SurfLevel[])
+      vibeSlug: state.tripVibes[0] ?? null,
+      surfStyles: state.surfStyles,
+      structureSlugs: state.tripStructure,
+      waveSizeMin: state.waveSizeMin,
+      waveSizeMax: state.waveSizeMax,
+      waveShapeLabel: state.waveShape ? WAVE_SHAPE_TITLE[state.waveShape] : null,
+      specificStaySelected: state.accommodationLocked,
+      accommodationKindLabel: state.accommodationKind
+        ? ACCOMMODATION_LABEL[state.accommodationKind]
         : null,
-      trip_structure: state.tripStructure.length ? state.tripStructure : null,
-      trip_vibes: state.tripVibes.length ? state.tripVibes : null,
-      age_min: state.ageMin ? parseInt(state.ageMin, 10) : undefined,
-      age_max: state.ageMax ? parseInt(state.ageMax, 10) : undefined,
-    } as Partial<GroupTrip>;
+      accommodationName: state.accommodationLocked ? state.accommodationName || null : null,
+      accommodationImageUri: state.accommodationLocked ? state.accommodationImageUri : null,
+    };
 
-    const b = resolveBudget();
-    const skillLabels = state.skillLevels
-      .map(k => SKILL_LEVEL_OPTIONS.find(s => s.key === k)?.label)
-      .filter(Boolean) as string[];
-    const vibeLabel = state.tripVibes.length
-      ? TRIP_VIBE_OPTIONS.find(v => v.slug === state.tripVibes[0])?.label ?? ''
-      : '';
+    return <TripDetailView vm={previewVM} />;
+  };
 
-    const tierLabel =
-      !state.manualBudget && state.budgetTier
-        ? state.budgetTier === 'low'
-          ? 'Budget'
-          : state.budgetTier === 'medium'
-            ? 'Mid-range'
-            : 'Premium'
-        : '';
-    const budgetSummary =
-      b.min != null && b.max != null
-        ? `${tierLabel ? tierLabel + ' · ' : ''}${formatRange({ min: b.min, max: b.max })} per person`
-        : null;
-
-    const summaryRows: { key: string; value: string; goto: StepKey }[] = [
-      {
-        key: 'Wave shape',
-        value: state.waveShape ? WAVE_SHAPE_TITLE[state.waveShape] : '—',
-        goto: 'audience',
-      },
-      {
-        key: 'Wave size',
-        value: (() => {
-          const minStr = state.waveSizeMin >= 12 ? '12+' : `${state.waveSizeMin}`;
-          const maxStr = state.waveSizeMax >= 12 ? '12+' : `${state.waveSizeMax}`;
-          return state.waveSizeMin === state.waveSizeMax
-            ? `${maxStr} ft`
-            : `${minStr}–${maxStr} ft`;
-        })(),
-        goto: 'audience',
-      },
-      {
-        key: 'Board types',
-        value:
-          state.surfStyles.length === 0
-            ? 'Any'
-            : state.surfStyles
-                .map(s => BOARD_TYPE_OPTIONS.find(o => o.key === s)?.label || s)
-                .join(', '),
-        goto: 'audience',
-      },
-      {
-        key: 'Accommodation',
-        value:
-          (state.accommodationKind ? ACCOMMODATION_LABEL[state.accommodationKind] : '—') +
-          (state.accommodationLocked && state.accommodationName
-            ? ` · ${state.accommodationName}`
-            : ''),
-        goto: 'vibez',
-      },
-      {
-        key: 'Age range',
-        value: formatAgeSummary(state.ageMin, state.ageMax),
-        goto: 'audience',
-      },
-    ];
-
+  // -----------------------------------------------------------------------
+  // STEP 6 — RELEASE (visibility picker; publish happens from here)
+  // -----------------------------------------------------------------------
+  const renderReleaseStep = () => {
     return (
       <View>
-        <TripPreviewCard
-          trip={synthesized}
-          heroImageOverride={
-            !isRemoteUrl(state.heroImageUri) ? state.heroImageUri ?? null : null
-          }
-        />
-
-        {budgetSummary || vibeLabel || skillLabels.length > 0 ? (
-          <View style={localStyles.previewExtraBlock}>
-            {budgetSummary ? (
-              <Text style={localStyles.previewBudget}>{budgetSummary}</Text>
-            ) : null}
-            {vibeLabel || skillLabels.length > 0 ? (
-              <View style={localStyles.previewChipRow}>
-                {vibeLabel ? (
-                  <View style={localStyles.previewChip}>
-                    <Text style={localStyles.previewChipText}>{vibeLabel}</Text>
-                  </View>
-                ) : null}
-                {skillLabels.map(l => (
-                  <View key={l} style={localStyles.previewChip}>
-                    <Text style={localStyles.previewChipText}>{l}</Text>
-                  </View>
-                ))}
-              </View>
-            ) : null}
-          </View>
-        ) : null}
-
-        <Text style={[localStyles.sectionTitle, { marginTop: 24 }]}>Trip details</Text>
-        <View style={localStyles.summaryGrid}>
-          {summaryRows.map((row, idx) => (
-            <TouchableOpacity
-              key={row.key}
-              activeOpacity={0.7}
-              onPress={() => setStep(row.goto)}
-              accessibilityRole="button"
-              accessibilityLabel={`Edit ${row.key}`}
-              style={[
-                localStyles.summaryGridCell,
-                // Right column on odd index → no right border
-                idx % 2 === 0 && localStyles.summaryGridCellLeft,
-              ]}
-            >
-              <Text style={localStyles.summaryKey}>{row.key}</Text>
-              <Text style={localStyles.summaryValue} numberOfLines={2}>
-                {row.value}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        <Text style={[localStyles.sectionTitle, { marginTop: 24 }]}>Who can see this trip</Text>
+        <Text style={localStyles.sectionTitle}>Who can see this trip</Text>
         <View style={localStyles.visibilityRow}>
           {VISIBILITIES.map(opt => {
             const active = state.visibility === opt.key;
@@ -2148,12 +2151,24 @@ export default function CreateTripFlowA({
   // -----------------------------------------------------------------------
   const closeSheet = () => setOpenSheet(null);
 
+  // Post-publish: show the Published / invite-friends screen until Done.
+  if (published) {
+    return (
+      <TripPublishedScreen
+        tripId={published.id}
+        tripTitle={published.title}
+        heroImageUri={published.hero}
+        onDone={onCreated}
+      />
+    );
+  }
+
   return (
     <View style={{ flex: 1 }}>
       <CreateTripWizardChrome
         stepIndex={stepIdx}
         stepCount={STEPS.length}
-        stepTitle={meta.title}
+        stepTitle={step === 'preview' ? state.title || 'Preview' : meta.title}
         stepSubtitle={subtitle}
         primaryLabel={ctaLabel}
         secondaryLabel={stepIdx === 0 ? 'Cancel' : 'Back'}
@@ -2161,6 +2176,7 @@ export default function CreateTripFlowA({
         onSecondary={onSecondary}
         submitting={submitting}
         hideProgress
+        flushContent={step === 'preview'}
       >
         {renderStep()}
       </CreateTripWizardChrome>
@@ -2724,6 +2740,94 @@ const localStyles = StyleSheet.create({
     lineHeight: 16,
     color: COLORS.textMuted,
     textAlign: 'center',
+  },
+
+  // Max-participants stepper.
+  stepperRow: {
+    marginTop: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 20,
+  },
+  stepperBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: COLORS.brandTeal,
+    backgroundColor: COLORS.brandTealTint,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepperValue: {
+    minWidth: 56,
+    textAlign: 'center',
+    fontFamily: FONT_MONTSERRAT,
+    fontSize: 20,
+    fontWeight: '700',
+    color: COLORS.inkBody,
+  },
+
+  // Yes → inline stay-details preview card (name, pic, url).
+  stayCard: {
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: COLORS.borderCard,
+    backgroundColor: COLORS.surfaceCard,
+    gap: 10,
+  },
+  stayCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  stayCardName: {
+    flex: 1,
+    fontFamily: FONT_MONTSERRAT,
+    fontSize: 15,
+    fontWeight: '700',
+    color: COLORS.inkBody,
+  },
+  stayPhoto: {
+    width: '100%',
+    height: 150,
+    borderRadius: 12,
+    backgroundColor: COLORS.surfaceMuted,
+  },
+  stayUrlRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  stayUrl: {
+    flex: 1,
+    fontFamily: FONT_INTER,
+    fontSize: 13,
+    lineHeight: 18,
+    color: COLORS.brandTealText,
+  },
+  addStayBtn: {
+    marginTop: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: COLORS.brandTeal,
+    backgroundColor: COLORS.brandTealTint,
+  },
+  addStayBtnText: {
+    fontFamily: FONT_MONTSERRAT,
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.brandTealText,
   },
 
   // Budget — center-stage container with breathing room above/below.
