@@ -97,6 +97,51 @@ const getEdgeFunctionUrl = (): string => {
   return `${supabaseUrl}/functions/v1/process-profile-video-s3`;
 };
 
+// ─── On-demand signing ───────────────────────────────────────────────────────
+
+/**
+ * Get a fresh short-lived presigned URL for a DM video, signed on-demand when
+ * the user opens it. DM videos are private (not public-readable), so we never
+ * persist a playable URL — we sign per playback instead. The Edge Function
+ * authorizes against conversation membership.
+ *
+ * @param storagePath The S3 key stored in video_metadata.storage_path
+ *                    (e.g. "uploads/dm/{convId}/{msgId}/video-{ts}.mp4")
+ * @returns a presigned URL, or null if not authorized / not ready / on error
+ */
+export async function signDmVideoUrl(storagePath: string): Promise<string | null> {
+  if (!storagePath || !isSupabaseConfigured()) return null;
+
+  try {
+    const functionUrl = getEdgeFunctionUrl();
+    const headers = await getAuthHeaders();
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return null;
+
+    const response = await fetch(functionUrl, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        action: 'sign-dm-video',
+        userId: user.id,
+        storagePath,
+      }),
+    });
+
+    if (!response.ok) {
+      console.warn('[videoUploadService] sign-dm-video failed:', await response.text());
+      return null;
+    }
+
+    const result = await response.json();
+    return result.ready && result.videoUrl ? result.videoUrl : null;
+  } catch (error) {
+    console.warn('[videoUploadService] sign-dm-video error:', error);
+    return null;
+  }
+}
+
 // ─── Video Processing ───────────────────────────────────────────────────────
 
 /**

@@ -366,6 +366,8 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
   const [fullscreenImageUrl, setFullscreenImageUrl] = useState<string | null>(null);
   const [fullscreenThumbnailUrl, setFullscreenThumbnailUrl] = useState<string | null>(null);
   const [fullscreenVideoUrl, setFullscreenVideoUrl] = useState<string | null>(null);
+  // Message id whose DM video is currently being signed on-demand (shows a spinner)
+  const [signingVideoId, setSigningVideoId] = useState<string | null>(null);
   const [imagePreviewVisible, setImagePreviewVisible] = useState(false);
   const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
   const selectedImageUriForUploadRef = useRef<string | null>(null);
@@ -3090,9 +3092,13 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
             // Video message
             (() => {
               const thumbnailUri = message.video_metadata?.thumbnail_url || message._localPreviewUri || '';
-              // Prefer the compressed URL when ready; otherwise play the original
-              // so the receiver can watch instantly while MediaConvert processes.
+              // DM videos are private — we never store a playable URL. The S3 key is
+              // stored in storage_path and signed on-demand at tap time. (playableUrl
+              // is kept only as a fallback for any legacy non-S3 message.)
+              const storagePath = message.video_metadata?.storage_path || '';
               const playableUrl = message.video_metadata?.video_url || message.video_metadata?.original_url || '';
+              const videoReady = !!(storagePath || playableUrl);
+              const isSigning = signingVideoId === message.id;
               const rawAspectRatio = message.video_metadata?.width && message.video_metadata?.height
                 ? message.video_metadata.width / message.video_metadata.height : 16 / 9;
               // Clamp portrait videos at 3:4 so the bubble doesn't dominate the screen.
@@ -3101,16 +3107,28 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
               const isUploading = message.upload_state === 'uploading';
               const isFailed = message.upload_state === 'failed';
 
+              const openVideo = async () => {
+                if (!videoReady || isUploading || isFailed || isSigning) return;
+                if (storagePath) {
+                  try {
+                    setSigningVideoId(message.id);
+                    const { signDmVideoUrl } = await import('../services/messaging/videoUploadService');
+                    const signedUrl = await signDmVideoUrl(storagePath);
+                    setFullscreenVideoUrl(signedUrl || playableUrl || null);
+                  } finally {
+                    setSigningVideoId(null);
+                  }
+                } else if (playableUrl) {
+                  setFullscreenVideoUrl(playableUrl);
+                }
+              };
+
               return (
                 <View style={styles.imageMessageWrapper}>
                   <TouchableOpacity
                     activeOpacity={0.9}
-                    onPress={() => {
-                      if (playableUrl) {
-                        setFullscreenVideoUrl(playableUrl);
-                      }
-                    }}
-                    disabled={!playableUrl || isUploading || isFailed}
+                    onPress={openVideo}
+                    disabled={!videoReady || isUploading || isFailed || isSigning}
                     style={styles.imageTouchable}
                   >
                     {thumbnailUri ? (
@@ -3126,7 +3144,11 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
                       <View style={[styles.messageImage, { aspectRatio: 16 / 9, backgroundColor: '#1a1a1a' }]} />
                     )}
                     {/* Play button overlay */}
-                    {playableUrl && !isUploading && !isFailed ? (
+                    {isSigning ? (
+                      <View style={styles.videoPlayOverlay}>
+                        <ActivityIndicator size="large" color="#FFFFFF" />
+                      </View>
+                    ) : videoReady && !isUploading && !isFailed ? (
                       <View style={styles.videoPlayOverlay}>
                         <Ionicons name="play-circle" size={48} color="rgba(255,255,255,0.9)" />
                       </View>
@@ -3862,6 +3884,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
             <View style={styles.inputWrapper}>
               <ChatTextInput
                 ref={chatInputRef}
+                testID="group-chat-input"
                 nativeID={composerNativeID}
                 value={inputText}
                 onChangeText={setInputText}

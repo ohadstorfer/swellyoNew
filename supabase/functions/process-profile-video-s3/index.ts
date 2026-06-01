@@ -305,6 +305,86 @@ serve(async (req) => {
       )
     }
 
+    // ─── Action: sign-dm-video ──────────────────────────────────────────────
+    // DM videos are PRIVATE (the `processed/dm/*` prefix is explicitly denied
+    // public read), so we never persist a playable URL. Instead the client asks
+    // for a fresh short-lived presigned URL each time it opens a DM video. The
+    // requester MUST be a member of the conversation the video belongs to.
+
+    if (action === 'sign-dm-video') {
+      const { storagePath } = body
+
+      if (!storagePath || typeof storagePath !== 'string') {
+        return new Response(
+          JSON.stringify({ success: false, error: 'Missing storagePath' }),
+          { status: 400, headers: corsHeaders }
+        )
+      }
+
+      // Keys look like:
+      //   uploads/dm/{conversationId}/{messageId}/video-{ts}.mp4           (original)
+      //   processed/dm/{conversationId}/{messageId}/video-{ts}_compressed.mp4 (processed)
+      const parts = storagePath.split('/')
+      if ((parts[0] !== 'uploads' && parts[0] !== 'processed') || parts[1] !== 'dm' || parts.length < 4) {
+        return new Response(
+          JSON.stringify({ success: false, error: 'Not a DM video path' }),
+          { status: 400, headers: corsHeaders }
+        )
+      }
+      const conversationId = parts[2]
+
+      // Authorize: the requester must be a member of this conversation.
+      const { data: membership } = await supabaseAdmin
+        .from('conversation_members')
+        .select('user_id')
+        .eq('conversation_id', conversationId)
+        .eq('user_id', user.id)
+        .maybeSingle()
+
+      if (!membership) {
+        return new Response(
+          JSON.stringify({ success: false, error: 'Not a conversation member' }),
+          { status: 403, headers: corsHeaders }
+        )
+      }
+
+      // Derive both candidate keys from whichever one we were given. The processed
+      // key shares the original's prefix + timestamp (see get-upload-url).
+      let processedKey: string
+      let originalKey: string
+      if (storagePath.startsWith('uploads/')) {
+        originalKey = storagePath
+        processedKey = storagePath.replace(/^uploads\//, 'processed/').replace(/\.mp4$/, '_compressed.mp4')
+      } else {
+        processedKey = storagePath
+        originalKey = storagePath.replace(/^processed\//, 'uploads/').replace(/_compressed\.mp4$/, '.mp4')
+      }
+
+      // Prefer the compressed version; fall back to the original while MediaConvert
+      // is still running. Short TTL — long enough for a viewing session, no longer.
+      const SIGN_TTL_SECONDS = 6 * 60 * 60
+      let keyToSign: string | null = null
+      if (await s3ObjectExists(processedKey)) {
+        keyToSign = processedKey
+      } else if (await s3ObjectExists(originalKey)) {
+        keyToSign = originalKey
+      }
+
+      if (!keyToSign) {
+        return new Response(
+          JSON.stringify({ success: true, ready: false, message: 'Video not available yet' }),
+          { status: 200, headers: corsHeaders }
+        )
+      }
+
+      const videoUrl = await generatePresignedUrl('GET', keyToSign, SIGN_TTL_SECONDS)
+
+      return new Response(
+        JSON.stringify({ success: true, ready: true, videoUrl }),
+        { status: 200, headers: corsHeaders }
+      )
+    }
+
     return new Response(
       JSON.stringify({ success: false, error: `Unknown action: ${action}` }),
       { status: 400, headers: corsHeaders }
