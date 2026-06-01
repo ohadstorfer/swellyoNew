@@ -236,6 +236,7 @@ export const HomeBreakSearchSheet: React.FC<HomeBreakSearchSheetProps> = ({
       return;
     }
     if (!apiKey) {
+      console.error('[Places autocomplete] EXPO_PUBLIC_GOOGLE_PLACES_API_KEY is not set');
       setError('Places API key missing');
       return;
     }
@@ -268,6 +269,8 @@ export const HomeBreakSearchSheet: React.FC<HomeBreakSearchSheetProps> = ({
         });
         if (!isMountedRef.current || seq < requestSeqRef.current) return;
         if (!res.ok) {
+          const bodyText = await res.text().catch(() => '');
+          console.error('[Places autocomplete] HTTP', res.status, bodyText);
           setSuggestions([]);
           setError('Search failed');
           return;
@@ -286,7 +289,8 @@ export const HomeBreakSearchSheet: React.FC<HomeBreakSearchSheetProps> = ({
           }
         }
         setSuggestions(list);
-      } catch {
+      } catch (e) {
+        console.error('[Places autocomplete] network error:', e);
         if (isMountedRef.current && seq === requestSeqRef.current) {
           setSuggestions([]);
           setError('Network error');

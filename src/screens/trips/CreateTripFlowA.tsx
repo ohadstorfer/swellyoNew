@@ -77,6 +77,33 @@ import { SpecificStaySheetContent } from '../../components/trips/sheets/Specific
 import { TripPreviewCard } from '../../components/trips/TripPreviewCard';
 import { TripDetailView, type TripDetailVM } from '../../components/trips/TripDetailView';
 import { TripPublishedScreen } from './TripPublishedScreen';
+import { TripTagPicker } from '../../components/trips/TripTagPicker';
+import {
+  DESTINATION_FAMILIARITY_OPTIONS,
+  STAY_FAMILIARITY_OPTIONS,
+  type DestinationFamiliarity,
+  type StayFamiliarity,
+} from '../../services/trips/groupTripsService';
+import { ProfileEditPanel } from '../../components/ProfileEditPanel/ProfileEditPanel';
+import {
+  type PriceInclusions,
+  MEALS_OPTIONS,
+  ACCOMMODATION_INCL_OPTIONS,
+  TRANSPORTATION_OPTIONS,
+  SURF_SESSIONS_OPTIONS,
+  SURF_EQUIPMENT_OPTIONS,
+  WELLNESS_OPTIONS,
+  CATEGORY_TITLE,
+  summarizeCategory,
+  normalizePriceInclusions,
+} from '../../services/trips/priceInclusions';
+import {
+  ActivitiesSheetContent,
+  SurfFilmSheetContent,
+  VideoAnalysisSheetContent,
+  CustomInclusionSheetContent,
+} from '../../components/trips/sheets/IncludesSheets';
+import { supabase } from '../../config/supabase';
 import { BoardSelectionPreview } from '../../components/trips/BoardSelectionPreview';
 import { InfoCard } from '../../components/trips/InfoCard';
 import { Images } from '../../assets/images';
@@ -105,12 +132,17 @@ const DESCRIPTION_AMBER_THRESHOLD = 450;
 
 // Bump this when WizardState shape changes incompatibly. The draft hook will
 // drop drafts whose stored `version` doesn't match. v2 → v3: waveShapes (array)
-// became waveShape (single value).
-const WIZARD_STATE_VERSION = 3;
+// became waveShape (single value). v3 → v4: Flow C fixed pricing
+// (costPerPerson + priceInclusions) added. v4 → v5: priceInclusions.custom
+// changed from a string to an array of {title, description}.
+const WIZARD_STATE_VERSION = 5;
 
-// Step KEYS — flat 5-step list, no conditional.
-type StepKey = 'audience' | 'basics' | 'vibez' | 'budget' | 'preview' | 'release';
-const STEPS: StepKey[] = ['audience', 'basics', 'vibez', 'budget', 'preview', 'release'];
+// Step KEYS — flat step list. Preview is the final step (publishes directly).
+type StepKey = 'audience' | 'basics' | 'vibez' | 'budget' | 'aboutYou' | 'preview';
+// Flow A/C step order. Flow B inserts 'aboutYou' before 'preview' (see `steps`
+// memo in the component) so the destination + stay names exist by the time the
+// leader describes their familiarity with them.
+const STEPS_BASE: StepKey[] = ['audience', 'basics', 'vibez', 'budget', 'preview'];
 
 // DB constraint: minimum age-range span per hosting style.
 const AGE_WINDOW_BY_STYLE: Record<HostingStyle, number> = { A: 4, B: 5, C: 2 };
@@ -124,8 +156,8 @@ const STEP_META: Record<StepKey, { title: string; subtitle: string }> = {
   basics: { title: 'Basic deets', subtitle: 'Where, when, what to call it.' },
   vibez: { title: 'Trip vibez', subtitle: 'How it runs, the feel, the stay.' },
   budget: { title: 'Budget', subtitle: 'Per person, in USD.' },
+  aboutYou: { title: 'About you', subtitle: 'Why you’re the one to lead this.' },
   preview: { title: 'Preview', subtitle: 'How your trip will look.' },
-  release: { title: 'Release trip', subtitle: 'Who can see it, then publish.' },
 };
 
 const SKILL_LEVEL_OPTIONS: { key: SurfLevel; label: string }[] = [
@@ -139,17 +171,6 @@ const BOARD_TYPE_OPTIONS: { key: SurfStyle; label: string }[] = [
   { key: 'midlength', label: 'Mid-length' },
   { key: 'softtop', label: 'Soft-top' },
   { key: 'longboard', label: 'Longboard' },
-];
-
-const VISIBILITIES: {
-  key: Visibility;
-  title: string;
-  desc: string;
-  icon: keyof typeof Ionicons.glyphMap;
-}[] = [
-  { key: 'public', title: 'Public', desc: 'Anyone can find it', icon: 'globe-outline' },
-  { key: 'friends', title: 'Friends', desc: 'Your connections', icon: 'people-outline' },
-  { key: 'private', title: 'Private', desc: 'Invite only', icon: 'lock-closed-outline' },
 ];
 
 const ACCOMMODATION_LABEL: Record<AccommodationKind, string> = {
@@ -191,7 +212,10 @@ type FieldKey =
   | 'accommodationKind'
   | 'accommodationGate'
   | 'specificStay'
-  | 'budget';
+  | 'budget'
+  | 'price'
+  | 'hostDestFamiliarity'
+  | 'hostStayFamiliarity';
 
 // Component-only sheet keys (NOT serialized in draft state).
 type SheetKey =
@@ -206,7 +230,20 @@ type SheetKey =
   | 'howWorks'
   | 'vibe'
   | 'stayType'
-  | 'specificStay';
+  | 'specificStay'
+  | 'destFamiliarity'
+  | 'stayFamiliarity'
+  // Flow C — "What's included" category sheets.
+  | 'incMeals'
+  | 'incAccommodation'
+  | 'incTransportation'
+  | 'incSurfSessions'
+  | 'incSurfEquipment'
+  | 'incSurfFilm'
+  | 'incVideoAnalysis'
+  | 'incActivities'
+  | 'incWellness'
+  | 'incCustom';
 
 // -----------------------------------------------------------------------------
 // Wizard state shape (serializable so it round-trips through AsyncStorage).
@@ -250,11 +287,20 @@ interface WizardState extends Record<string, unknown> {
   accommodationUrl: string;
   accommodationImageUri: string | null;
 
+  // Flow B — "About you" leader step.
+  hostDestFamiliarity: DestinationFamiliarity | null;
+  hostStayFamiliarity: StayFamiliarity | null;
+  hostLeadNote: string;
+
   // Step 4 — budget
   budgetTier: BudgetTier | null;
   manualBudget: boolean;
   budgetManualMin: string;
   budgetManualMax: string;
+
+  // Step 4 (Flow C only) — fixed pricing instead of the AI budget tiers.
+  costPerPerson: string;
+  priceInclusions: PriceInclusions;
 
   // Step 5 — preview
   visibility: Visibility;
@@ -292,10 +338,15 @@ const INITIAL_STATE: WizardState = {
   accommodationName: '',
   accommodationUrl: '',
   accommodationImageUri: null,
+  hostDestFamiliarity: null,
+  hostStayFamiliarity: null,
+  hostLeadNote: '',
   budgetTier: null,
   manualBudget: false,
   budgetManualMin: '',
   budgetManualMax: '',
+  costPerPerson: '',
+  priceInclusions: {},
   visibility: 'public',
 };
 
@@ -324,6 +375,20 @@ const COLORS = {
   errorBg: '#FDECEA',
   success: '#34C759',
   amber: '#E5A100',
+};
+
+const capitalizeFirst = (s: string): string =>
+  s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+
+// Age in whole years from a YYYY-MM-DD (or ISO) DOB string. Null on bad input.
+const ageFromDob = (dob: string): number | null => {
+  const d = new Date(dob);
+  if (isNaN(d.getTime())) return null;
+  const now = new Date();
+  let age = now.getFullYear() - d.getFullYear();
+  const m = now.getMonth() - d.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < d.getDate())) age--;
+  return age >= 0 && age < 120 ? age : null;
 };
 
 const startOfDay = (d: Date): Date => {
@@ -467,11 +532,16 @@ const stateFromTrip = (trip: GroupTrip): WizardState => {
     accommodationName: trip.accommodation_name ?? '',
     accommodationUrl: trip.accommodation_url ?? '',
     accommodationImageUri: trip.accommodation_image_url ?? null,
+    hostDestFamiliarity: trip.host_destination_familiarity ?? null,
+    hostStayFamiliarity: trip.host_stay_familiarity ?? null,
+    hostLeadNote: trip.host_lead_note ?? '',
     budgetTier: null,
     // Edit mode skips the estimate; preload manual.
     manualBudget: true,
     budgetManualMin: trip.budget_min != null ? String(trip.budget_min) : '',
     budgetManualMax: trip.budget_max != null ? String(trip.budget_max) : '',
+    costPerPerson: trip.cost_per_person != null ? String(trip.cost_per_person) : '',
+    priceInclusions: trip.price_inclusions ?? {},
     visibility: (trip.visibility as Visibility) ?? 'public',
   };
 };
@@ -886,6 +956,23 @@ export default function CreateTripFlowA({
   const editMode = !!initialTrip;
   const effectiveStyle: HostingStyle = initialTrip?.hosting_style ?? hostingStyle;
   const ageWindow = AGE_WINDOW_BY_STYLE[effectiveStyle];
+  // Flow B is the "leader" flow: it adds the 'aboutYou' step and requires a
+  // specific stay (no Yes/No gate).
+  const isLeaderFlow = effectiveStyle === 'B';
+  // Flow C is the "fully-planned" flow: exact dates only (no months toggle) and
+  // a fixed per-person price + rich "What's included" instead of the AI budget.
+  const isFixedFlow = effectiveStyle === 'C';
+  // B and C both lock in a specific stay — no Yes/No gate, the stay card is
+  // always shown and its details are required. Only A uses the gate.
+  const requiresSpecificStay = isLeaderFlow || isFixedFlow;
+
+  // Step order — Flow B inserts 'aboutYou' after 'budget' (dest + stay are known
+  // by then, so the familiarity fields can name them).
+  const steps = useMemo<StepKey[]>(() => {
+    if (!isLeaderFlow) return STEPS_BASE;
+    const idx = STEPS_BASE.indexOf('preview');
+    return [...STEPS_BASE.slice(0, idx), 'aboutYou', ...STEPS_BASE.slice(idx)];
+  }, [isLeaderFlow]);
 
   // ---- Wizard state (draft-backed) ----------------------------------------
   const initialState = useMemo<WizardState>(
@@ -905,7 +992,7 @@ export default function CreateTripFlowA({
 
   // ---- Step navigation ---------------------------------------------------
   const [step, setStep] = useState<StepKey>('audience');
-  const stepIdx = useMemo(() => Math.max(0, STEPS.indexOf(step)), [step]);
+  const stepIdx = useMemo(() => Math.max(0, steps.indexOf(step)), [step, steps]);
 
   // ---- Sheet management --------------------------------------------------
   const [openSheet, setOpenSheet] = useState<SheetKey | null>(null);
@@ -923,6 +1010,36 @@ export default function CreateTripFlowA({
     title: string | null;
     hero: string | null;
   } | null>(null);
+
+  // Flow B "About you" — the host's own surfer profile (for the embedded card)
+  // and the slide-up editor.
+  const [hostSurfer, setHostSurfer] = useState<any | null>(null);
+  const [editingProfile, setEditingProfile] = useState(false);
+  // Flow C — which "add your own" inclusion the bottom sheet is editing.
+  const [customEditIndex, setCustomEditIndex] = useState<number | null>(null);
+
+  const loadHostSurfer = useCallback(async () => {
+    if (!hostId) return;
+    const { data } = await supabase
+      .from('surfers')
+      .select('*')
+      .eq('user_id', hostId)
+      .maybeSingle();
+    if (data) setHostSurfer(data);
+  }, [hostId]);
+
+  useEffect(() => {
+    if (isLeaderFlow) void loadHostSurfer();
+  }, [isLeaderFlow, loadHostSurfer]);
+
+  // Flow C is exact-dates only — pin datesMode to 'exact' (covers initial mount
+  // and any restored draft that carried 'months').
+  useEffect(() => {
+    if (isFixedFlow && state.datesMode !== 'exact') {
+      setState(s => ({ ...s, datesMode: 'exact' }));
+    }
+  }, [isFixedFlow, state.datesMode, setState]);
+
   const [showResumeBanner, setShowResumeBanner] = useState(false);
 
   // Budget estimate (transient — not persisted)
@@ -1092,8 +1209,10 @@ export default function CreateTripFlowA({
         return ok;
       }
       case 'basics': {
-        if (!editMode && !state.destination.trim())
-          fail('destination', 'Pick a destination for your trip');
+        // TEMP: destination optional while Google Places is down (testing).
+        // Restore this once Places works again:
+        // if (!editMode && !state.destination.trim())
+        //   fail('destination', 'Pick a destination for your trip');
 
         if (state.datesMode === 'months') {
           if (!state.monthFrom) fail('when', 'Pick at least one month for your trip');
@@ -1119,21 +1238,32 @@ export default function CreateTripFlowA({
       }
       case 'vibez': {
         if (!state.accommodationKind) fail('accommodationKind', 'Pick an accommodation type');
-        if (state.accommodationLocked === null)
-          fail('accommodationGate', 'Choose yes or no');
-        if (state.accommodationLocked === true) {
+        const stayDetailsMissing =
+          !state.accommodationName.trim() ||
+          !state.accommodationUrl.trim() ||
+          !state.accommodationImageUri;
+        if (requiresSpecificStay) {
+          // Flow B & C always have a specific stay — details required, no gate.
+          if (stayDetailsMissing) fail('specificStay', 'Add the stay name, link, and a photo');
+        } else {
+          if (state.accommodationLocked === null)
+            fail('accommodationGate', 'Choose yes or no');
           // All three details required when the gate is Yes.
-          if (
-            !state.accommodationName.trim() ||
-            !state.accommodationUrl.trim() ||
-            !state.accommodationImageUri
-          ) {
+          if (state.accommodationLocked === true && stayDetailsMissing) {
             fail('specificStay', 'Add the stay name, link, and a photo');
           }
         }
         return ok;
       }
       case 'budget': {
+        if (isFixedFlow) {
+          // Flow C — a single fixed per-person price is required.
+          const price = state.costPerPerson ? parseInt(state.costPerPerson, 10) : null;
+          if (price == null || Number.isNaN(price) || price <= 0) {
+            fail('price', 'Enter a price per person');
+          }
+          return ok;
+        }
         const usingManual = state.manualBudget || !budgetEstimate;
         if (usingManual) {
           if (!state.budgetManualMin || !state.budgetManualMax) {
@@ -1152,9 +1282,14 @@ export default function CreateTripFlowA({
         }
         return ok;
       }
+      case 'aboutYou': {
+        if (!state.hostDestFamiliarity)
+          fail('hostDestFamiliarity', 'Pick how well you know the destination');
+        if (!state.hostStayFamiliarity)
+          fail('hostStayFamiliarity', 'Pick how well you know the stay');
+        return ok;
+      }
       case 'preview':
-        return true;
-      case 'release':
         return true;
     }
   }, [
@@ -1165,6 +1300,8 @@ export default function CreateTripFlowA({
     startDateObj,
     endDateObj,
     budgetEstimate,
+    isLeaderFlow,
+    isFixedFlow,
     clearErrors,
     setError,
   ]);
@@ -1182,20 +1319,20 @@ export default function CreateTripFlowA({
       setHasBeenTouched(true);
     }
 
-    const idx = STEPS.indexOf(step);
-    const next = STEPS[idx + 1];
+    const idx = steps.indexOf(step);
+    const next = steps[idx + 1];
     if (!next) return;
-    if (next === 'budget' && !editMode) {
+    if (next === 'budget' && !editMode && !isFixedFlow) {
       void maybeEstimateBudget();
     }
     setStep(next);
-  }, [validateStep, step, editMode, startSaving, maybeEstimateBudget]);
+  }, [validateStep, step, steps, editMode, isFixedFlow, startSaving, maybeEstimateBudget]);
 
   const handleBack = useCallback(() => {
-    const idx = STEPS.indexOf(step);
+    const idx = steps.indexOf(step);
     if (idx <= 0) return;
-    setStep(STEPS[idx - 1]);
-  }, [step]);
+    setStep(steps[idx - 1]);
+  }, [step, steps]);
 
   // Discard guard — only triggers if the user has interacted with the form.
   const { guardedCancel } = useDiscardConfirm({
@@ -1229,8 +1366,22 @@ export default function CreateTripFlowA({
         heroUrl = heroRes.url;
       }
 
-      // Accommodation photo upload (only when host locked in a stay).
-      const accommodationCommitted = state.accommodationLocked === true;
+      // Accommodation photo upload (only when host locked in a stay). Flow B & C
+      // always have a specific stay (no Yes/No gate), so it's always committed.
+      const accommodationCommitted = requiresSpecificStay || state.accommodationLocked === true;
+
+      // Flow B leader credibility fields (null for A/C).
+      const leaderFields = isLeaderFlow
+        ? {
+            host_destination_familiarity: state.hostDestFamiliarity,
+            host_stay_familiarity: state.hostStayFamiliarity,
+            host_lead_note: state.hostLeadNote.trim() || null,
+          }
+        : {
+            host_destination_familiarity: null,
+            host_stay_familiarity: null,
+            host_lead_note: null,
+          };
       let accommodationImageUrl: string | null = null;
       if (accommodationCommitted && state.accommodationImageUri) {
         if (isRemoteUrl(state.accommodationImageUri)) {
@@ -1255,7 +1406,15 @@ export default function CreateTripFlowA({
       const skillLevels: SurfLevel[] = state.skillLevels.length
         ? state.skillLevels
         : (['all'] as SurfLevel[]);
-      const budget = resolveBudget();
+      // Flow C uses a fixed per-person price + rich inclusions, no budget range.
+      const budget = isFixedFlow
+        ? { min: null, max: null, currency: 'USD' }
+        : resolveBudget();
+      const fixedPrice =
+        isFixedFlow && state.costPerPerson ? parseInt(state.costPerPerson, 10) : null;
+      const priceInclusions = isFixedFlow
+        ? normalizePriceInclusions(state.priceInclusions)
+        : null;
       const descriptionText = state.description.trim();
       const maxParticipants = state.maxParticipants
         ? parseInt(state.maxParticipants, 10)
@@ -1291,6 +1450,8 @@ export default function CreateTripFlowA({
           budget_max: budget.max,
           budget_currency: budget.currency,
           budget_tier: state.manualBudget ? null : state.budgetTier,
+          cost_per_person: fixedPrice,
+          price_inclusions: priceInclusions,
           trip_structure: state.tripStructure.length ? state.tripStructure : null,
           trip_vibes: state.tripVibes.length ? state.tripVibes : null,
           wave_shapes: waveShapesArray,
@@ -1299,8 +1460,10 @@ export default function CreateTripFlowA({
           target_surf_styles: state.surfStyles.length ? state.surfStyles : ['all'],
           // Whether the host picked a specific stay (the step-3 Yes/No gate).
           // Guaranteed non-null by the time this saves (vibez-step validation).
-          specific_stay_selected: state.accommodationLocked,
-          visibility: state.visibility,
+          specific_stay_selected: requiresSpecificStay ? true : state.accommodationLocked,
+          ...leaderFields,
+          // All trips are public — no visibility UI. Always write 'public'.
+          visibility: 'public',
         };
         await updateGroupTrip(initialTrip.id, editable);
         onCreated();
@@ -1336,7 +1499,6 @@ export default function CreateTripFlowA({
           wave_size_min: state.waveSizeMin,
           wave_size_max: state.waveSizeMax,
 
-          host_been_there: null,
           budget_min: budget.min,
           budget_max: budget.max,
           budget_currency: budget.currency,
@@ -1344,13 +1506,15 @@ export default function CreateTripFlowA({
 
           trip_structure: state.tripStructure.length ? state.tripStructure : null,
           trip_vibes: state.tripVibes.length ? state.tripVibes : null,
-          cost_per_person: null,
-          price_includes: null,
+          cost_per_person: fixedPrice,
+          price_inclusions: priceInclusions,
 
           // Whether the host picked a specific stay (the step-3 Yes/No gate).
           // Guaranteed non-null by the time this saves (vibez-step validation).
-          specific_stay_selected: state.accommodationLocked,
-          visibility: state.visibility,
+          specific_stay_selected: requiresSpecificStay ? true : state.accommodationLocked,
+          ...leaderFields,
+          // All trips are public — no visibility UI. Always write 'public'.
+          visibility: 'public',
 
           group_gear: [],
         };
@@ -1395,6 +1559,8 @@ export default function CreateTripFlowA({
     editMode,
     initialTrip,
     hostingStyle,
+    isLeaderFlow,
+    isFixedFlow,
     startDateObj,
     endDateObj,
     resolveBudget,
@@ -1406,7 +1572,8 @@ export default function CreateTripFlowA({
   // Primary / secondary button handlers
   // -----------------------------------------------------------------------
   const onPrimary = useCallback(() => {
-    if (step === 'release') {
+    if (step === 'preview') {
+      // Preview is the final step — publish straight into the share screen.
       void handleSubmit();
     } else {
       handleNext();
@@ -1423,18 +1590,26 @@ export default function CreateTripFlowA({
 
   // CTA label per step (per spec).
   const ctaLabel: string = useMemo(() => {
-    if (step === 'release') return editMode ? 'Save changes' : 'Publish';
-    if (step === 'preview') return 'Next';
+    if (step === 'preview') return editMode ? 'Save changes' : 'Publish';
     if (step === 'audience') return 'Next · basic deets';
     if (step === 'basics') return 'Next · trip vibez';
-    if (step === 'vibez') return 'Next · budget';
-    if (step === 'budget') return 'Next · preview';
+    if (step === 'vibez') return isFixedFlow ? 'Next · pricing' : 'Next · budget';
+    if (step === 'budget') return isLeaderFlow ? 'Next · about you' : 'Next · preview';
+    if (step === 'aboutYou') return 'Next · preview';
     return 'Next';
-  }, [step, editMode]);
+  }, [step, editMode, isLeaderFlow, isFixedFlow]);
 
   const meta = STEP_META[step];
+  const stepTitle =
+    step === 'budget' && isFixedFlow ? 'Pricing' : meta.title;
   const subtitle =
-    step === 'budget' && editMode ? 'Confirm the range for your trip.' : meta.subtitle;
+    step === 'budget'
+      ? isFixedFlow
+        ? 'A fixed price per person, in USD.'
+        : editMode
+          ? 'Confirm the range for your trip.'
+          : meta.subtitle
+      : meta.subtitle;
 
   const renderStep = () => {
     switch (step) {
@@ -1446,10 +1621,10 @@ export default function CreateTripFlowA({
         return renderVibezStep();
       case 'budget':
         return renderBudgetStep();
+      case 'aboutYou':
+        return renderAboutYouStep();
       case 'preview':
         return renderPreviewStep();
-      case 'release':
-        return renderReleaseStep();
     }
   };
 
@@ -1792,7 +1967,18 @@ export default function CreateTripFlowA({
           />
         </View>
 
-        {/* Specific-stay Yes/No gate — INLINE */}
+        {/* Specific-stay: B & C always have one (no gate); A uses the Yes/No gate. */}
+        {requiresSpecificStay ? (
+          <>
+            <Text style={[localStyles.fieldLabel, localStyles.groupTopGap]}>Your stay</Text>
+            <Text style={localStyles.helper}>
+              {isLeaderFlow
+                ? 'As the leader, add the place you’ll all stay at.'
+                : 'Add the place everyone will stay at.'}
+            </Text>
+          </>
+        ) : (
+          <>
         <Text style={[localStyles.fieldLabel, localStyles.groupTopGap]}>
           Did you decide on a specific stay?
         </Text>
@@ -1868,12 +2054,14 @@ export default function CreateTripFlowA({
         {errors.accommodationGate ? (
           <Text style={localStyles.errorText}>{errors.accommodationGate}</Text>
         ) : null}
+          </>
+        )}
         {errors.specificStay ? (
           <Text style={localStyles.errorText}>{errors.specificStay}</Text>
         ) : null}
 
-        {/* Yes → inline stay-details preview (tap to re-open the sheet). */}
-        {lockedAnswer === true ? (
+        {/* Stay details card — B & C always; A only when the gate is "Yes". */}
+        {requiresSpecificStay || lockedAnswer === true ? (
           (() => {
             const hasInfo =
               !!state.accommodationName.trim() ||
@@ -1929,9 +2117,132 @@ export default function CreateTripFlowA({
   };
 
   // -----------------------------------------------------------------------
+  // STEP 4 (Flow C) — PRICING (fixed per-person price + "What's included")
+  // -----------------------------------------------------------------------
+  const setInclusions = (patch: Partial<PriceInclusions>) => {
+    setState(s => ({ ...s, priceInclusions: { ...s.priceInclusions, ...patch } }));
+    if (!hasBeenTouched) setHasBeenTouched(true);
+  };
+
+  // Guard against legacy/garbage shapes (e.g. an old draft where custom was a
+  // string) so nothing ever crashes on `.map`.
+  const customList: PriceInclusions['custom'] = Array.isArray(state.priceInclusions.custom)
+    ? state.priceInclusions.custom
+    : [];
+
+  // Closing the "add your own" sheet — drop the item if it was left blank
+  // (an abandoned "+ Add" shouldn't leave an empty row behind).
+  const closeCustomSheet = () => {
+    setState(s => {
+      const list = Array.isArray(s.priceInclusions.custom) ? s.priceInclusions.custom : [];
+      const pruned = list.filter(c => c.title.trim() || c.description?.trim());
+      return { ...s, priceInclusions: { ...s.priceInclusions, custom: pruned } };
+    });
+    setCustomEditIndex(null);
+    setOpenSheet(null);
+  };
+
+  const renderPricingStep = () => {
+    const inc = state.priceInclusions;
+    const customItems = customList;
+    const rows: { key: keyof PriceInclusions; sheet: SheetKey }[] = [
+      { key: 'meals', sheet: 'incMeals' },
+      { key: 'accommodation', sheet: 'incAccommodation' },
+      { key: 'transportation', sheet: 'incTransportation' },
+      { key: 'surfSessions', sheet: 'incSurfSessions' },
+      { key: 'surfEquipment', sheet: 'incSurfEquipment' },
+      { key: 'surfFilm', sheet: 'incSurfFilm' },
+      { key: 'videoAnalysis', sheet: 'incVideoAnalysis' },
+      { key: 'activities', sheet: 'incActivities' },
+      { key: 'wellness', sheet: 'incWellness' },
+    ];
+
+    return (
+      <View>
+        <Text style={localStyles.fieldLabel}>Price per person · USD</Text>
+        <View style={localStyles.priceRow}>
+          <Text style={localStyles.priceDollar}>$</Text>
+          <TextInput
+            style={[
+              localStyles.input,
+              { flex: 1 },
+              !!errors.price && localStyles.inputError,
+            ]}
+            value={state.costPerPerson}
+            onChangeText={t => {
+              update('costPerPerson', t.replace(/[^0-9]/g, ''));
+              if (errors.price) setError('price', null);
+            }}
+            placeholder="1200"
+            placeholderTextColor={COLORS.textPlaceholder}
+            keyboardType="number-pad"
+            maxLength={6}
+          />
+        </View>
+        {errors.price ? <Text style={localStyles.errorText}>{errors.price}</Text> : null}
+
+        <Text style={[localStyles.sectionTitle, localStyles.groupTopGap]}>What's included</Text>
+        <Text style={localStyles.helper}>
+          Tap each to set what the price covers. Everything here is optional.
+        </Text>
+        <View style={[localStyles.summaryGroup, { marginTop: 12 }]}>
+          {rows.map((r, i) => (
+            <SummaryRow
+              key={r.key}
+              label={CATEGORY_TITLE[r.key]}
+              value={summarizeCategory(inc, r.key)}
+              placeholder="Not included"
+              onPress={() => setOpenSheet(r.sheet)}
+              noTopDivider={i === 0}
+            />
+          ))}
+        </View>
+
+        <Text style={[localStyles.fieldLabel, localStyles.fieldTopGap]}>Add your own</Text>
+        <Text style={localStyles.helper}>Anything else the price covers.</Text>
+        {customItems.length > 0 ? (
+          <View style={[localStyles.summaryGroup, { marginTop: 12 }]}>
+            {customItems.map((item, i) => (
+              <SummaryRow
+                key={i}
+                label={item.title.trim() || 'Untitled'}
+                value={item.description?.trim() || ''}
+                placeholder="Tap to edit"
+                onPress={() => {
+                  setCustomEditIndex(i);
+                  setOpenSheet('incCustom');
+                }}
+                noTopDivider={i === 0}
+              />
+            ))}
+          </View>
+        ) : null}
+        <TouchableOpacity
+          activeOpacity={0.85}
+          onPress={() => {
+            const next = [...customItems, { title: '', description: '' }];
+            setInclusions({ custom: next });
+            setCustomEditIndex(next.length - 1);
+            setOpenSheet('incCustom');
+          }}
+          style={[localStyles.addStayBtn, { marginTop: 12 }]}
+          accessibilityRole="button"
+          accessibilityLabel="Add your own inclusion"
+        >
+          <Ionicons name="add-circle-outline" size={20} color={COLORS.brandTeal} />
+          <Text style={localStyles.addStayBtnText}>
+            {customItems.length > 0 ? 'Add another' : 'Add your own'}
+          </Text>
+        </TouchableOpacity>
+      </View>
+    );
+  };
+
+  // -----------------------------------------------------------------------
   // STEP 4 — BUDGET
   // -----------------------------------------------------------------------
   const renderBudgetStep = () => {
+    if (isFixedFlow) return renderPricingStep();
     if (editMode || state.manualBudget || (!budgetEstimate && !budgetLoading)) {
       const showEstimateError = !editMode && !!budgetError && !state.manualBudget;
       return (
@@ -2062,6 +2373,115 @@ export default function CreateTripFlowA({
   };
 
   // -----------------------------------------------------------------------
+  // STEP (Flow B) — ABOUT YOU (the leader): embedded profile + trip expertise
+  // -----------------------------------------------------------------------
+  const renderAboutYouStep = () => {
+    const s = hostSurfer;
+    const age = s?.date_of_birth ? ageFromDob(s.date_of_birth) : null;
+    const levelLabel = s?.surf_level_category ? capitalizeFirst(String(s.surf_level_category)) : null;
+    const boardLabel = s?.surfboard_type
+      ? BOARD_TYPE_OPTIONS.find(o => o.key === s.surfboard_type)?.label ??
+        capitalizeFirst(String(s.surfboard_type))
+      : null;
+    const trips = typeof s?.travel_experience === 'number' ? s.travel_experience : null;
+    const destLabel = state.destination || 'the destination';
+    const stayLabel = state.accommodationName || 'your stay';
+    const destFamLabel = state.hostDestFamiliarity
+      ? DESTINATION_FAMILIARITY_OPTIONS.find(o => o.slug === state.hostDestFamiliarity)?.label ?? ''
+      : '';
+    const stayFamLabel = state.hostStayFamiliarity
+      ? STAY_FAMILIARITY_OPTIONS.find(o => o.slug === state.hostStayFamiliarity)?.label ?? ''
+      : '';
+    const metaBits = [
+      age != null ? `${age}${s?.country_from ? ` from ${s.country_from}` : ''}` : null,
+    ].filter(Boolean);
+    const statBits = [
+      levelLabel,
+      boardLabel,
+      trips != null ? `${trips} Surf Trips` : null,
+    ].filter(Boolean);
+
+    return (
+      <View>
+        {/* Embedded profile card */}
+        <View style={localStyles.leaderCard}>
+          {s?.profile_image_url ? (
+            <Image source={{ uri: s.profile_image_url }} style={localStyles.leaderAvatar} />
+          ) : (
+            <View style={[localStyles.leaderAvatar, localStyles.leaderAvatarEmpty]}>
+              <Ionicons name="person" size={24} color="#FFFFFF" />
+            </View>
+          )}
+          <View style={{ flex: 1 }}>
+            <Text style={localStyles.leaderName} numberOfLines={1}>
+              {s?.name || 'You'}
+              {metaBits.length ? (
+                <Text style={localStyles.leaderMeta}>{`  ·  ${metaBits.join(' · ')}`}</Text>
+              ) : null}
+            </Text>
+            {statBits.length ? (
+              <Text style={localStyles.leaderMeta}>{statBits.join('  ·  ')}</Text>
+            ) : null}
+            <TouchableOpacity
+              onPress={() => setEditingProfile(true)}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Text style={localStyles.leaderEditLink}>Edit profile</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        <Text style={[localStyles.sectionTitle, localStyles.groupTopGap]}>Trip expertise</Text>
+        <View style={localStyles.summaryGroup}>
+          <SummaryRow
+            label={`Familiarity with ${destLabel}`}
+            value={destFamLabel}
+            placeholder="Tap to choose"
+            onPress={() => {
+              setOpenSheet('destFamiliarity');
+              if (errors.hostDestFamiliarity) setError('hostDestFamiliarity', null);
+            }}
+            error={errors.hostDestFamiliarity ?? undefined}
+            noTopDivider
+          />
+          <SummaryRow
+            label={`Familiarity with ${stayLabel}`}
+            value={stayFamLabel}
+            placeholder="Tap to choose"
+            onPress={() => {
+              setOpenSheet('stayFamiliarity');
+              if (errors.hostStayFamiliarity) setError('hostStayFamiliarity', null);
+            }}
+            error={errors.hostStayFamiliarity ?? undefined}
+          />
+        </View>
+
+        <View style={[localStyles.labelRow, localStyles.fieldTopGap]}>
+          <Text style={localStyles.fieldLabel}>Why you’re the right person to lead</Text>
+          <Text
+            style={[
+              localStyles.counter,
+              { color: state.hostLeadNote.length >= 250 ? COLORS.errorText : COLORS.textMuted },
+            ]}
+          >
+            {state.hostLeadNote.length}/250
+          </Text>
+        </View>
+        <TextInput
+          style={[localStyles.input, localStyles.textarea]}
+          value={state.hostLeadNote}
+          onChangeText={t => update('hostLeadNote', t.slice(0, 250))}
+          placeholder="Mention anything that brings credibility to your experience here"
+          placeholderTextColor={COLORS.textPlaceholder}
+          multiline
+          maxLength={250}
+          textAlignVertical="top"
+        />
+      </View>
+    );
+  };
+
+  // -----------------------------------------------------------------------
   // STEP 5 — PREVIEW (rich trip-detail layout via shared TripDetailView)
   // -----------------------------------------------------------------------
   const renderPreviewStep = () => {
@@ -2088,59 +2508,51 @@ export default function CreateTripFlowA({
       waveSizeMin: state.waveSizeMin,
       waveSizeMax: state.waveSizeMax,
       waveShapeLabel: state.waveShape ? WAVE_SHAPE_TITLE[state.waveShape] : null,
-      specificStaySelected: state.accommodationLocked,
+      specificStaySelected: requiresSpecificStay ? true : state.accommodationLocked,
       accommodationKindLabel: state.accommodationKind
         ? ACCOMMODATION_LABEL[state.accommodationKind]
         : null,
-      accommodationName: state.accommodationLocked ? state.accommodationName || null : null,
-      accommodationImageUri: state.accommodationLocked ? state.accommodationImageUri : null,
+      accommodationName:
+        requiresSpecificStay || state.accommodationLocked
+          ? state.accommodationName || null
+          : null,
+      accommodationImageUri:
+        requiresSpecificStay || state.accommodationLocked ? state.accommodationImageUri : null,
+      costPerPerson:
+        isFixedFlow && state.costPerPerson ? parseInt(state.costPerPerson, 10) : null,
+      priceInclusions: isFixedFlow
+        ? normalizePriceInclusions(state.priceInclusions)
+        : null,
+      budgetMin: isFixedFlow ? null : resolveBudget().min,
+      budgetMax: isFixedFlow ? null : resolveBudget().max,
+      hostingStyle: effectiveStyle,
+      leader: isLeaderFlow
+        ? {
+            name: hostSurfer?.name ?? null,
+            avatarUrl: hostSurfer?.profile_image_url ?? null,
+            age: hostSurfer?.date_of_birth ? ageFromDob(hostSurfer.date_of_birth) : null,
+            countryFrom: hostSurfer?.country_from ?? null,
+            surfLevelLabel: hostSurfer?.surf_level_category
+              ? capitalizeFirst(String(hostSurfer.surf_level_category))
+              : null,
+            tripsCount:
+              typeof hostSurfer?.travel_experience === 'number'
+                ? hostSurfer.travel_experience
+                : null,
+            destinationFamiliarityLabel: state.hostDestFamiliarity
+              ? DESTINATION_FAMILIARITY_OPTIONS.find(o => o.slug === state.hostDestFamiliarity)
+                  ?.label ?? null
+              : null,
+            stayFamiliarityLabel: state.hostStayFamiliarity
+              ? STAY_FAMILIARITY_OPTIONS.find(o => o.slug === state.hostStayFamiliarity)?.label ??
+                null
+              : null,
+            leadNote: state.hostLeadNote.trim() || null,
+          }
+        : null,
     };
 
     return <TripDetailView vm={previewVM} />;
-  };
-
-  // -----------------------------------------------------------------------
-  // STEP 6 — RELEASE (visibility picker; publish happens from here)
-  // -----------------------------------------------------------------------
-  const renderReleaseStep = () => {
-    return (
-      <View>
-        <Text style={localStyles.sectionTitle}>Who can see this trip</Text>
-        <View style={localStyles.visibilityRow}>
-          {VISIBILITIES.map(opt => {
-            const active = state.visibility === opt.key;
-            return (
-              <TouchableOpacity
-                key={opt.key}
-                activeOpacity={0.85}
-                onPress={() => update('visibility', opt.key)}
-                accessibilityRole="button"
-                accessibilityState={{ selected: active }}
-                accessibilityLabel={`${opt.title}. ${opt.desc}`}
-                style={[localStyles.visibilityCard, active && localStyles.visibilityCardActive]}
-              >
-                <Ionicons
-                  name={opt.icon}
-                  size={22}
-                  color={active ? COLORS.brandTealText : COLORS.inkBody}
-                />
-                <Text
-                  style={[
-                    localStyles.visibilityTitle,
-                    active && localStyles.visibilityTitleActive,
-                  ]}
-                >
-                  {opt.title}
-                </Text>
-                <Text style={localStyles.visibilityDesc} numberOfLines={2}>
-                  {opt.desc}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-      </View>
-    );
   };
 
   // Suppress unused-variable warning while keeping the read for future use.
@@ -2167,8 +2579,8 @@ export default function CreateTripFlowA({
     <View style={{ flex: 1 }}>
       <CreateTripWizardChrome
         stepIndex={stepIdx}
-        stepCount={STEPS.length}
-        stepTitle={step === 'preview' ? state.title || 'Preview' : meta.title}
+        stepCount={steps.length}
+        stepTitle={step === 'preview' ? state.title || 'Preview' : stepTitle}
         stepSubtitle={subtitle}
         primaryLabel={ctaLabel}
         secondaryLabel={stepIdx === 0 ? 'Cancel' : 'Back'}
@@ -2326,6 +2738,7 @@ export default function CreateTripFlowA({
             update('durationDays', n);
             if (errors.when) setError('when', null);
           }}
+          lockCalendar={isFixedFlow}
         />
       </WizardBottomSheet>
 
@@ -2392,6 +2805,196 @@ export default function CreateTripFlowA({
           }}
         />
       </WizardBottomSheet>
+
+      {/* Flow B — familiarity pickers (single-select) */}
+      <WizardBottomSheet
+        visible={openSheet === 'destFamiliarity'}
+        title="How well do you know the destination?"
+        onClose={closeSheet}
+      >
+        <TripTagPicker<DestinationFamiliarity>
+          options={DESTINATION_FAMILIARITY_OPTIONS}
+          selected={state.hostDestFamiliarity ? [state.hostDestFamiliarity] : []}
+          singleSelect
+          onChange={next => {
+            update('hostDestFamiliarity', next[0] ?? null);
+            if (errors.hostDestFamiliarity) setError('hostDestFamiliarity', null);
+            if (!hasBeenTouched) setHasBeenTouched(true);
+            closeSheet();
+          }}
+          accessibilityLabel="Destination familiarity"
+        />
+      </WizardBottomSheet>
+
+      <WizardBottomSheet
+        visible={openSheet === 'stayFamiliarity'}
+        title="How well do you know the stay?"
+        onClose={closeSheet}
+      >
+        <TripTagPicker<StayFamiliarity>
+          options={STAY_FAMILIARITY_OPTIONS}
+          selected={state.hostStayFamiliarity ? [state.hostStayFamiliarity] : []}
+          singleSelect
+          onChange={next => {
+            update('hostStayFamiliarity', next[0] ?? null);
+            if (errors.hostStayFamiliarity) setError('hostStayFamiliarity', null);
+            if (!hasBeenTouched) setHasBeenTouched(true);
+            closeSheet();
+          }}
+          accessibilityLabel="Stay familiarity"
+        />
+      </WizardBottomSheet>
+
+      {/* Flow C — "What's included" category sheets */}
+      <WizardBottomSheet
+        visible={openSheet === 'incMeals'}
+        title="Meals"
+        onClose={closeSheet}
+      >
+        <TripTagPicker<string>
+          options={[...MEALS_OPTIONS]}
+          selected={state.priceInclusions.meals ?? []}
+          onChange={next => setInclusions({ meals: next })}
+          accessibilityLabel="Meals included"
+        />
+      </WizardBottomSheet>
+
+      <WizardBottomSheet
+        visible={openSheet === 'incAccommodation'}
+        title="Accommodation"
+        onClose={closeSheet}
+      >
+        <TripTagPicker<string>
+          options={[...ACCOMMODATION_INCL_OPTIONS]}
+          selected={state.priceInclusions.accommodation ?? []}
+          onChange={next => setInclusions({ accommodation: next })}
+          accessibilityLabel="Accommodation included"
+        />
+      </WizardBottomSheet>
+
+      <WizardBottomSheet
+        visible={openSheet === 'incTransportation'}
+        title="Transportation"
+        onClose={closeSheet}
+      >
+        <TripTagPicker<string>
+          options={[...TRANSPORTATION_OPTIONS]}
+          selected={state.priceInclusions.transportation ?? []}
+          onChange={next => setInclusions({ transportation: next })}
+          accessibilityLabel="Transportation included"
+        />
+      </WizardBottomSheet>
+
+      <WizardBottomSheet
+        visible={openSheet === 'incSurfSessions'}
+        title="Surf sessions"
+        onClose={closeSheet}
+      >
+        <TripTagPicker<string>
+          options={[...SURF_SESSIONS_OPTIONS]}
+          selected={state.priceInclusions.surfSessions ?? []}
+          onChange={next => setInclusions({ surfSessions: next })}
+          accessibilityLabel="Surf sessions included"
+        />
+      </WizardBottomSheet>
+
+      <WizardBottomSheet
+        visible={openSheet === 'incSurfEquipment'}
+        title="Surf equipment"
+        onClose={closeSheet}
+      >
+        <TripTagPicker<string>
+          options={[...SURF_EQUIPMENT_OPTIONS]}
+          selected={state.priceInclusions.surfEquipment ?? []}
+          onChange={next => setInclusions({ surfEquipment: next })}
+          accessibilityLabel="Surf equipment included"
+        />
+      </WizardBottomSheet>
+
+      <WizardBottomSheet
+        visible={openSheet === 'incSurfFilm'}
+        title="Surf film"
+        onClose={closeSheet}
+      >
+        <SurfFilmSheetContent
+          value={state.priceInclusions.surfFilm ?? {}}
+          onChange={next => setInclusions({ surfFilm: next })}
+        />
+      </WizardBottomSheet>
+
+      <WizardBottomSheet
+        visible={openSheet === 'incVideoAnalysis'}
+        title="Video analysis"
+        onClose={closeSheet}
+      >
+        <VideoAnalysisSheetContent
+          value={state.priceInclusions.videoAnalysis ?? {}}
+          onChange={next => setInclusions({ videoAnalysis: next })}
+        />
+      </WizardBottomSheet>
+
+      <WizardBottomSheet
+        visible={openSheet === 'incActivities'}
+        title="Activities & excursions"
+        onClose={closeSheet}
+      >
+        <ActivitiesSheetContent
+          value={state.priceInclusions.activities ?? []}
+          onChange={next => setInclusions({ activities: next })}
+        />
+      </WizardBottomSheet>
+
+      <WizardBottomSheet
+        visible={openSheet === 'incWellness'}
+        title="Wellness & recovery"
+        onClose={closeSheet}
+      >
+        <TripTagPicker<string>
+          options={[...WELLNESS_OPTIONS]}
+          selected={state.priceInclusions.wellness ?? []}
+          onChange={next => setInclusions({ wellness: next })}
+          accessibilityLabel="Wellness included"
+        />
+      </WizardBottomSheet>
+
+      <WizardBottomSheet
+        visible={openSheet === 'incCustom'}
+        title="Add your own"
+        onClose={closeCustomSheet}
+        extendBehindKeyboard
+      >
+        <CustomInclusionSheetContent
+          value={
+            customEditIndex != null
+              ? customList[customEditIndex] ?? { title: '', description: '' }
+              : { title: '', description: '' }
+          }
+          onChange={next => {
+            if (customEditIndex == null) return;
+            setInclusions({
+              custom: customList.map((c, j) => (j === customEditIndex ? next : c)),
+            });
+          }}
+          onRemove={() => {
+            if (customEditIndex == null) return;
+            setInclusions({ custom: customList.filter((_, j) => j !== customEditIndex) });
+            setCustomEditIndex(null);
+            setOpenSheet(null);
+          }}
+        />
+      </WizardBottomSheet>
+
+      {/* Flow B — edit-profile takeover (slides over the wizard). */}
+      {hostSurfer ? (
+        <ProfileEditPanel
+          visible={editingProfile}
+          onClose={() => {
+            setEditingProfile(false);
+            void loadHostSurfer();
+          }}
+          surfer={hostSurfer}
+        />
+      ) : null}
     </View>
   );
 }
@@ -2525,6 +3128,19 @@ const localStyles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+
+  // Flow C — fixed price input with a $ prefix.
+  priceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  priceDollar: {
+    fontFamily: FONT_MONTSERRAT,
+    fontSize: 22,
+    fontWeight: '800',
+    color: COLORS.inkBody,
   },
 
   // Trip title preview line
@@ -2767,6 +3383,48 @@ const localStyles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '700',
     color: COLORS.inkBody,
+  },
+
+  // Flow B "About you" — embedded profile card.
+  leaderCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    padding: 14,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: COLORS.borderCard,
+    backgroundColor: COLORS.surfaceCard,
+  },
+  leaderAvatar: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: COLORS.surfaceMuted,
+  },
+  leaderAvatarEmpty: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#9CB6C0',
+  },
+  leaderName: {
+    fontFamily: FONT_MONTSERRAT,
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.inkBody,
+  },
+  leaderMeta: {
+    fontFamily: FONT_INTER,
+    fontSize: 13,
+    fontWeight: '400',
+    color: COLORS.textMuted,
+  },
+  leaderEditLink: {
+    marginTop: 4,
+    fontFamily: FONT_INTER,
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.brandTeal,
   },
 
   // Yes → inline stay-details preview card (name, pic, url).

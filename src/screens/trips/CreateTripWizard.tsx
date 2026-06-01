@@ -1,7 +1,6 @@
 import React, { useEffect } from 'react';
 import { HostingStyle, GroupTrip } from '../../services/trips/groupTripsService';
 import CreateTripFlowA from './CreateTripFlowA';
-import CreateTripFlowC from './CreateTripFlowC';
 
 interface CreateTripWizardProps {
   hostId: string | null;
@@ -23,9 +22,10 @@ interface CreateTripWizardProps {
  * Pure router for trip creation. The hosting-style chooser used to live here but
  * was lifted into TripsScreen's Create tab — by the time this mounts, `hostingStyle`
  * is always known (either from the chooser or from initialTrip.hosting_style).
- *   - A → CreateTripFlowA (months/exact dates + AI budget)
- *   - B → CreateTripFlowA with hostingStyle='B' (same flow)
- *   - C → CreateTripFlowC (exact dates + fixed pricing + trip structure)
+ * All three styles share CreateTripFlowA, which branches internally:
+ *   - A → default flow (months/exact dates + AI budget)
+ *   - B → adds the "About you" leader step + required specific stay
+ *   - C → exact dates only + fixed per-person price + "What's included"
  */
 export default function CreateTripWizard({
   hostId,
@@ -46,24 +46,13 @@ export default function CreateTripWizard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (effectiveStyle === 'A' || effectiveStyle === 'B') {
-    return (
-      <CreateTripFlowA
-        hostId={hostId}
-        onCreated={onCreated}
-        onCancel={onCancel}
-        initialTrip={initialTrip}
-        hostingStyle={effectiveStyle}
-      />
-    );
-  }
-
   return (
-    <CreateTripFlowC
+    <CreateTripFlowA
       hostId={hostId}
       onCreated={onCreated}
       onCancel={onCancel}
       initialTrip={initialTrip}
+      hostingStyle={effectiveStyle}
     />
   );
 }

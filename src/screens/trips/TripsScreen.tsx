@@ -26,36 +26,33 @@ import {
 } from '../../services/trips/groupTripsService';
 import CreateTripWizard from './CreateTripWizard';
 import TripDetailScreen from './TripDetailScreen';
+import { Images } from '../../assets/images';
 
 // Hosting-style chooser content. Lifted out of CreateTripWizard so the chooser
 // can live inline on the Create tab and the wizard becomes a pure router.
 const HOSTING_STYLE_OPTIONS: {
   key: HostingStyle;
-  letter: string;
   title: string;
   desc: string;
-  icon: keyof typeof Ionicons.glyphMap;
+  image: number; // placeholder thumbnail (any local asset)
 }[] = [
   {
     key: 'A',
-    letter: 'A',
-    title: 'Start with a vibe',
-    desc: 'Loose plan, lots of room to riff. Crew shapes the rest together.',
-    icon: 'sparkles-outline',
+    title: 'Planned Together',
+    desc: 'Group votes on key decisions.\nYou approve what moves forward.',
+    image: Images.whoIsItFor.surfLevel,
   },
   {
     key: 'B',
-    letter: 'B',
-    title: 'Lead the call',
-    desc: 'You set the big stuff — dates, place. Crew weighs in on the rest.',
-    icon: 'compass-outline',
+    title: 'Hosted (you lead decisions)',
+    desc: 'You make the decisions.\nMembers join and support the plan.',
+    image: Images.whoIsItFor.theWave,
   },
   {
     key: 'C',
-    letter: 'C',
-    title: 'Plan the whole trip',
-    desc: "Everything locked in. Others just join the ride you've built.",
-    icon: 'checkmark-done-outline',
+    title: 'Trip Operator',
+    desc: 'Everything is already decided.\nJoin knowing exactly what to expect.',
+    image: Images.whoIsItFor.ageRange,
   },
 ];
 
@@ -453,9 +450,9 @@ export default function TripsScreen({ onBack, initialTripId, onOpenGroupChat, on
             contentContainerStyle={styles.chooserScroll}
             showsVerticalScrollIndicator={false}
           >
-            <Text style={styles.chooserHeading}>Start a trip</Text>
+            <Text style={styles.chooserHeading}>Create a surf trip</Text>
             <Text style={styles.chooserSubheading}>
-              Pick how much you want to plan up front — you can change the rest later.
+              Plan your next adventure and invite surfers to join you
             </Text>
             {HOSTING_STYLE_OPTIONS.map(opt => (
               <TouchableOpacity
@@ -466,20 +463,15 @@ export default function TripsScreen({ onBack, initialTripId, onOpenGroupChat, on
                 accessibilityRole="button"
                 accessibilityLabel={`${opt.title}. ${opt.desc}`}
               >
-                <View style={styles.chooserIconWrap}>
-                  <Ionicons name={opt.icon} size={26} color="#0788B0" />
-                </View>
+                <Image source={opt.image} style={styles.chooserThumb} resizeMode="cover" />
                 <View style={styles.chooserBody}>
-                  <View style={styles.chooserTitleRow}>
-                    <Text style={styles.chooserCardLetter}>{opt.letter}</Text>
-                    <Text style={styles.chooserCardTitle}>{opt.title}</Text>
-                  </View>
+                  <Text style={styles.chooserCardTitle}>{opt.title}</Text>
                   <Text style={styles.chooserCardDesc}>{opt.desc}</Text>
                 </View>
                 <Ionicons
                   name="chevron-forward"
                   size={20}
-                  color="#B0B0B0"
+                  color="#7B7B7B"
                   style={styles.chooserChevron}
                 />
               </TouchableOpacity>
@@ -622,79 +614,63 @@ const styles = StyleSheet.create({
     paddingBottom: 32,
   },
   chooserHeading: {
-    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat',
-    fontSize: 22,
-    lineHeight: 28,
-    fontWeight: '700',
-    color: '#222B30',
-    marginBottom: 6,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    fontSize: 30,
+    lineHeight: 39,
+    fontWeight: '600',
+    color: '#333333',
+    marginBottom: 12,
   },
   chooserSubheading: {
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     fontSize: 14,
-    lineHeight: 20,
+    lineHeight: 18,
     fontWeight: '400',
-    color: '#7B7B7B',
-    marginBottom: 20,
+    color: '#333333',
+    marginBottom: 28,
   },
   chooserCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    minHeight: 92,
+    gap: 16,
+    height: 94,
     backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#EEEEEE',
-    borderRadius: 16,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-    marginBottom: 12,
+    borderRadius: 20,
+    paddingLeft: 12,
+    paddingRight: 6,
+    paddingVertical: 12,
+    marginBottom: 16,
     shadowColor: '#596E7C',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    elevation: 2,
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 3,
   },
-  chooserIconWrap: {
-    width: 48,
-    height: 48,
-    borderRadius: 14,
-    backgroundColor: '#E6F4F8',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 14,
+  chooserThumb: {
+    width: 84,
+    height: 70,
+    borderRadius: 8,
+    backgroundColor: '#EEF2F4',
   },
   chooserBody: {
     flex: 1,
-  },
-  chooserTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    marginBottom: 4,
-  },
-  chooserCardLetter: {
-    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat',
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#0788B0',
-    letterSpacing: 1,
-    marginRight: 8,
+    gap: 4,
   },
   chooserCardTitle: {
-    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat',
-    fontSize: 16,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    fontSize: 18,
     lineHeight: 22,
     fontWeight: '700',
-    color: '#222B30',
-    flexShrink: 1,
+    color: '#333333',
   },
   chooserCardDesc: {
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
-    fontSize: 13,
+    fontSize: 12,
     lineHeight: 18,
-    color: '#7B7B7B',
+    color: '#333333',
   },
   chooserChevron: {
-    marginLeft: 8,
+    marginRight: 4,
   },
 
   modalRoot: { flex: 1, backgroundColor: '#FFFFFF' },

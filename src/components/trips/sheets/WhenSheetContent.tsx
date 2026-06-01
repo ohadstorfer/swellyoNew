@@ -53,6 +53,8 @@ export interface WhenSheetContentProps {
   onMonthsChange: (next: { monthFrom: string; monthTo: string }) => void;
   durationDays: number | null;
   onDurationChange: (days: number | null) => void;
+  /** Flow C — exact dates only. Hides the SPECIFIC/LOOSE toggle and forces calendar. */
+  lockCalendar?: boolean;
 }
 
 interface MonthEntry {
@@ -99,8 +101,11 @@ export const WhenSheetContent: React.FC<WhenSheetContentProps> = ({
   onMonthsChange,
   durationDays,
   onDurationChange,
+  lockCalendar,
 }) => {
   const months = useMemo(() => buildMonthsThisYearForward(), []);
+  // Flow C is calendar-only — collapse to the calendar regardless of `mode`.
+  const effectiveMode: DateMode = lockCalendar ? 'calendar' : mode;
   // Unit toggle for the duration field. The number the user typed stays as-is
   // when the unit flips; only the multiplier feeding `durationDays` changes.
   const [unit, setUnit] = useState<'days' | 'weeks'>('days');
@@ -181,7 +186,8 @@ export const WhenSheetContent: React.FC<WhenSheetContentProps> = ({
 
   return (
     <View style={styles.container}>
-      {/* Mode toggle */}
+      {/* Mode toggle — hidden in calendar-only (Flow C) mode. */}
+      {lockCalendar ? null : (
       <View style={styles.segment}>
         <TouchableOpacity
           activeOpacity={0.85}
@@ -222,8 +228,9 @@ export const WhenSheetContent: React.FC<WhenSheetContentProps> = ({
           </Text>
         </TouchableOpacity>
       </View>
+      )}
 
-      {mode === 'calendar' ? (
+      {effectiveMode === 'calendar' ? (
         <CalendarRangePicker
           startDate={startDate}
           endDate={endDate}

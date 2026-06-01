@@ -1,5 +1,6 @@
 import { supabase } from '../../config/supabase';
 import { messagingService } from '../messaging/messagingService';
+import type { PriceInclusions } from './priceInclusions';
 
 export type HostingStyle = 'A' | 'B' | 'C';
 export type SurfLevel = 'beginner' | 'intermediate' | 'advanced' | 'pro' | 'all';
@@ -53,6 +54,33 @@ export const TRIP_STRUCTURE_MUTEX: [TripStructureSlug, TripStructureSlug][] = [
 // Vibe is single-select now — no co-existing pairs to enforce.
 export const TRIP_VIBE_MUTEX: [TripVibeSlug, TripVibeSlug][] = [];
 
+// Flow B leader credibility — how well the leader knows the destination / stay.
+export type DestinationFamiliarity = 'never_been' | 'been_once' | 'been_multiple';
+export type StayFamiliarity =
+  | 'never_online'
+  | 'never_recs'
+  | 'stayed_once'
+  | 'stayed_multiple';
+
+export const DESTINATION_FAMILIARITY_OPTIONS: {
+  slug: DestinationFamiliarity;
+  label: string;
+}[] = [
+  { slug: 'never_been', label: 'Never been' },
+  { slug: 'been_once', label: 'Been there once' },
+  { slug: 'been_multiple', label: 'Been there multiple times' },
+];
+
+export const STAY_FAMILIARITY_OPTIONS: { slug: StayFamiliarity; label: string }[] = [
+  { slug: 'never_online', label: 'Never stayed, found it online' },
+  {
+    slug: 'never_recs',
+    label: 'Never stayed, got good recommendations from people I know that been there',
+  },
+  { slug: 'stayed_once', label: 'Stayed once, know the place' },
+  { slug: 'stayed_multiple', label: 'Stayed multiple times, know the place very well' },
+];
+
 export type TripStatus = 'active' | 'cancelled';
 
 export interface GroupGearItem {
@@ -101,7 +129,6 @@ export interface GroupTrip {
   wave_size_min: number | null;
   wave_size_max: number | null;
 
-  host_been_there: boolean | null;
   budget_min: number | null;
   budget_max: number | null;
   budget_currency: string | null;
@@ -114,12 +141,17 @@ export interface GroupTrip {
 
   // Flow C pricing (nullable).
   cost_per_person: number | null;
-  price_includes: string[] | null; // accommodation|surf_guide|transport|flights|meals
+  price_inclusions: PriceInclusions | null; // rich "What's included" — see priceInclusions.ts
 
   // Step-3 Yes/No gate: did the host select a specific stay, or none yet?
   // (Renamed from accommodation_status — May 2026. See migration
   // 20260531000001_rename_accommodation_status_to_specific_stay_selected.sql)
   specific_stay_selected: boolean | null;
+
+  // Flow B ("I'm the leader") credibility fields. Null for Flow A/C.
+  host_destination_familiarity: DestinationFamiliarity | null;
+  host_stay_familiarity: StayFamiliarity | null;
+  host_lead_note: string | null;
   visibility: string | null; // 'public' | 'friends' | 'private'
 
   group_gear: string[];

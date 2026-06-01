@@ -27,6 +27,8 @@ import {
   EnrichedGearRequest,
   TRIP_STRUCTURE_OPTIONS,
   TRIP_VIBE_OPTIONS,
+  DESTINATION_FAMILIARITY_OPTIONS,
+  STAY_FAMILIARITY_OPTIONS,
   listGearItems,
   addGearItem,
   updateGearItem,
@@ -128,6 +130,7 @@ const titleCase = (s: string): string =>
 const buildTripDetailVM = (
   trip: GroupTrip,
   participantCount: number,
+  host?: EnrichedParticipant | null,
 ): TripDetailVM => ({
   heroImageUri: trip.hero_image_url || null,
   title: trip.title,
@@ -160,6 +163,34 @@ const buildTripDetailVM = (
     : null,
   accommodationName: trip.accommodation_name,
   accommodationImageUri: trip.accommodation_image_url,
+  costPerPerson: trip.cost_per_person,
+  priceInclusions: trip.price_inclusions,
+  budgetMin: trip.budget_min,
+  budgetMax: trip.budget_max,
+  hostingStyle: trip.hosting_style,
+  leader:
+    trip.hosting_style === 'B'
+      ? {
+          name: host?.name ?? null,
+          avatarUrl: host?.profile_image_url ?? null,
+          age: host?.age ?? null,
+          countryFrom: null, // not in participant data; shown when available
+          surfLevelLabel: host?.surf_level_category
+            ? titleCase(host.surf_level_category)
+            : null,
+          tripsCount: null, // travel_experience not in participant data
+          destinationFamiliarityLabel: trip.host_destination_familiarity
+            ? DESTINATION_FAMILIARITY_OPTIONS.find(
+                o => o.slug === trip.host_destination_familiarity,
+              )?.label ?? null
+            : null,
+          stayFamiliarityLabel: trip.host_stay_familiarity
+            ? STAY_FAMILIARITY_OPTIONS.find(o => o.slug === trip.host_stay_familiarity)?.label ??
+              null
+            : null,
+          leadNote: trip.host_lead_note ?? null,
+        }
+      : null,
 });
 
 const formatRelativeTime = (iso: string): string => {
@@ -945,7 +976,18 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         )}
 
         {/* Rich trip-detail layout (shared with the create-trip preview). */}
-        <TripDetailView vm={buildTripDetailVM(trip, participants.length)} />
+        <TripDetailView
+          vm={buildTripDetailVM(
+            trip,
+            participants.length,
+            participants.find(p => p.role === 'host') ?? null,
+          )}
+          onLeaderPress={
+            onViewUserProfile && trip.host_id && trip.host_id !== currentUserId
+              ? () => onViewUserProfile(trip.host_id)
+              : undefined
+          }
+        />
 
         {/* Action row — Chat / Share / Mute */}
         <View style={[styles.actionRow, { marginTop: 20, paddingHorizontal: 16 }]}>
@@ -985,33 +1027,10 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         {/* About, Focus vibe, How it works, Accommodation, Who it's for and
             Wave info are all rendered by TripDetailView above. */}
 
-        {/* Pricing (Flow C: fixed per-person cost) or approximate budget (Flow A: range) */}
-        {trip.cost_per_person != null ? (
-          <Section title="Price">
-            {trip.cost_per_person != null && (
-              <InfoRow
-                label="Per person"
-                value={`From $${trip.cost_per_person} ${trip.budget_currency ?? 'USD'}`}
-              />
-            )}
-            {trip.price_includes && trip.price_includes.length > 0 && (
-              <InfoRow
-                label="Includes"
-                value={trip.price_includes
-                  .map(k =>
-                    ({
-                      accommodation: 'Accommodation',
-                      surf_guide: 'Surf guide',
-                      transport: 'Transport to surf spots',
-                      flights: 'Flights',
-                      meals: 'Meals',
-                    } as Record<string, string>)[k] ?? k
-                  )
-                  .join(', ')}
-              />
-            )}
-          </Section>
-        ) : (trip.budget_min != null || trip.budget_max != null) ? (
+        {/* Flow C price + "What's included" now render inside TripDetailView.
+            Here we only show Flow A's approximate budget range. */}
+        {trip.cost_per_person == null &&
+        (trip.budget_min != null || trip.budget_max != null) ? (
           <Section title="Approximate budget">
             <InfoRow
               label="Per person"
