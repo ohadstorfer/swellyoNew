@@ -99,6 +99,18 @@ async function generatePresignedUrl(
 }
 
 /**
+ * Build a permanent, plain (un-signed) public S3 URL for a key.
+ * Only valid for objects under a public-read prefix (see bucket policy).
+ * Used for PROFILE videos, which are public content shown on every profile —
+ * a presigned URL there would expire after 7 days and silently break playback.
+ */
+function publicS3Url(key: string): string {
+  const host = `${AWS_S3_BUCKET}.s3.${AWS_REGION}.amazonaws.com`
+  const encodedKey = key.split('/').map(encodeURIComponent).join('/')
+  return `https://${host}/${encodedKey}`
+}
+
+/**
  * Check if an object exists in S3 using a HEAD request with presigned URL
  */
 async function s3ObjectExists(key: string): Promise<boolean> {
@@ -254,14 +266,19 @@ serve(async (req) => {
         )
       }
 
-      // Generate a presigned GET URL (7 days)
-      const downloadUrl = await generatePresignedUrl('GET', processedKey, 7 * 24 * 3600)
-
       // Only update `surfers.profile_video_url` for SURF-LEVEL (profile) uploads.
       // DM video uploads share this Edge Function but store under `processed/dm/...`
       // — those are linked to a specific message row, not to the user's profile,
       // so writing them to `surfers` would overwrite the user's real surf video.
       const isDmVideo = processedKey.startsWith('processed/dm/')
+
+      // Profile videos are PUBLIC content (shown on every profile) and live under
+      // a public-read S3 prefix, so we persist a permanent plain URL that never
+      // expires. DM videos are PRIVATE 1:1 message content and must stay behind a
+      // short-lived presigned URL — they are NOT public-readable.
+      const downloadUrl = isDmVideo
+        ? await generatePresignedUrl('GET', processedKey, 7 * 24 * 3600)
+        : publicS3Url(processedKey)
 
       if (!isDmVideo) {
         const { error: updateError } = await supabaseAdmin
@@ -272,7 +289,7 @@ serve(async (req) => {
         if (updateError) {
           console.error('[process-profile-video-s3] DB update failed:', updateError)
         } else {
-          console.log(`[process-profile-video-s3] DB updated with processed URL for user ${userId}`)
+          console.log(`[process-profile-video-s3] DB updated with public URL for user ${userId}`)
         }
       } else {
         console.log(`[process-profile-video-s3] DM video processed — skipping surfers update for ${processedKey}`)
