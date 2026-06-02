@@ -49,6 +49,8 @@ import {
   approveJoinRequest,
   declineJoinRequest,
   cancelTrip,
+  completeTrip,
+  isTripPast,
   leaveTrip,
   removeParticipant,
   submitCommitment,
@@ -83,8 +85,6 @@ import { CommitmentSheet } from '../../components/trips/commitment/CommitmentShe
 import { RequestToJoinSheet } from '../../components/trips/joinRequest/RequestToJoinSheet';
 import { supabase } from '../../config/supabase';
 import { messagingService } from '../../services/messaging/messagingService';
-
-const IS_LOCAL_MODE = process.env.EXPO_PUBLIC_LOCAL_MODE === 'true';
 
 interface TripDetailScreenProps {
   tripId: string;
@@ -301,6 +301,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   const [openingChat, setOpeningChat] = useState(false);
   const [removingUserId, setRemovingUserId] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
+  const [completing, setCompleting] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const [commitSheetOpen, setCommitSheetOpen] = useState(false);
   const [joinSheetOpen, setJoinSheetOpen] = useState(false);
@@ -601,6 +602,32 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
               Alert.alert('Could not cancel', e?.message || 'Please try again.');
             } finally {
               setCancelling(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleCompleteTrip = () => {
+    Alert.alert(
+      'Mark trip as completed?',
+      "This closes the trip. Members keep the group chat and overview, but the plan is locked. You can't undo this.",
+      [
+        { text: 'Keep open', style: 'cancel' },
+        {
+          text: 'Mark completed',
+          style: 'destructive',
+          onPress: async () => {
+            setCompleting(true);
+            try {
+              await completeTrip(tripId);
+              setTrip(prev => (prev ? { ...prev, status: 'completed' } : prev));
+              setActiveTab('overview');
+            } catch (e: any) {
+              Alert.alert('Could not complete', e?.message || 'Please try again.');
+            } finally {
+              setCompleting(false);
             }
           },
         },
@@ -1054,10 +1081,34 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   }
 
   const isCancelled = trip.status === 'cancelled';
+  const isCompleted = trip.status === 'completed';
+  // A trip that has ended by date is treated like a completed one: the plan is
+  // locked, only the overview + group chat stay active. Explicit completion or
+  // cancellation lock it the same way.
+  const isLocked = isCancelled || isCompleted || isTripPast(trip);
 
-  // Tabs: only members (host + approved) get the Plan tab. Everyone else sees
-  // just the Overview, with no toggle at all.
-  const canSeePlan = isHost || isApprovedMember;
+  // Has the trip started yet? Gates "Mark as completed" — a host can close a
+  // trip that's underway, not an upcoming one.
+  const tripHasStarted = (() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (trip.start_date) {
+      const s = new Date(trip.start_date);
+      s.setHours(0, 0, 0, 0);
+      return s <= today;
+    }
+    if (trip.date_months && trip.date_months.length > 0) {
+      const earliest = [...trip.date_months].sort()[0];
+      const [y, m] = earliest.split('-').map(Number);
+      return new Date() >= new Date(y, m - 1, 1);
+    }
+    return true; // no dates set — let the host decide
+  })();
+
+  // Tabs: only members (host + approved) get the Plan tab, and only while the
+  // trip is live. Once locked (completed / ended / cancelled) the toggle is gone
+  // and everyone sees just the Overview.
+  const canSeePlan = (isHost || isApprovedMember) && !isLocked;
   const showPlan = canSeePlan && activeTab === 'plan';
   const showOverview = !showPlan; // overview-only extras (Share, budget, members)
 
@@ -1067,15 +1118,34 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         onBack={onBack}
         title={trip.title || 'Trip'}
         rightAction={
-          isHost && !isCancelled ? (
-            <TouchableOpacity
-              onPress={handleEdit}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              accessibilityLabel="Edit trip"
-            >
-              <Ionicons name="create-outline" size={24} color="#222B30" />
-            </TouchableOpacity>
-          ) : null
+          <View style={styles.headerActions}>
+            {/* Group chat — members only. Stays available even when the trip is
+                completed / ended (plan is locked, but chat lives on). */}
+            {(isHost || isApprovedMember) && !isCancelled ? (
+              <TouchableOpacity
+                onPress={handleOpenGroupChat}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                accessibilityLabel="Open group chat"
+                disabled={openingChat}
+              >
+                {openingChat ? (
+                  <ActivityIndicator size="small" color="#222B30" />
+                ) : (
+                  <Ionicons name="chatbubbles-outline" size={24} color="#222B30" />
+                )}
+              </TouchableOpacity>
+            ) : null}
+            {/* Edit — host only, while the trip is still live. */}
+            {isHost && !isLocked ? (
+              <TouchableOpacity
+                onPress={handleEdit}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                accessibilityLabel="Edit trip"
+              >
+                <Ionicons name="create-outline" size={24} color="#222B30" />
+              </TouchableOpacity>
+            ) : null}
+          </View>
         }
       />
 
@@ -1092,6 +1162,17 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           <View style={styles.cancelledBanner}>
             <Ionicons name="alert-circle-outline" size={18} color="#C0392B" />
             <Text style={styles.cancelledText}>This trip has been cancelled by the host.</Text>
+          </View>
+        )}
+
+        {!isCancelled && isLocked && (
+          <View style={styles.endedBanner}>
+            <Ionicons name="checkmark-done-outline" size={18} color="#445" />
+            <Text style={styles.endedText}>
+              {isCompleted
+                ? 'This trip has been completed. The chat stays open below.'
+                : 'This trip has ended. The chat stays open below.'}
+            </Text>
           </View>
         )}
 
@@ -1158,16 +1239,9 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         {/* Interactive / operational content — members only. */}
         {showPlan && (
         <>
-        {/* Action row — Chat / Mute (member actions) */}
+        {/* Action row — Share / Mute (member actions). Chat now lives in the
+            header (top-right) so it stays reachable when the plan is locked. */}
         <View style={[styles.actionRow, { marginTop: 20, paddingHorizontal: 16 }]}>
-          {IS_LOCAL_MODE && (
-            <ActionButton
-              icon="chatbubbles"
-              label="Chat"
-              onPress={handleOpenGroupChat}
-              loading={openingChat}
-            />
-          )}
           <ActionButton icon="share-outline" label="Share" onPress={handleShare} />
           <ActionButton
             icon={muted ? 'notifications-off' : 'notifications-outline'}
@@ -1455,6 +1529,18 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
                 loading={cancelling}
               />
             )}
+            {/* Mark completed — host only, once the trip is underway. Closes the
+                trip: it moves to "Past trips" and the plan locks (overview +
+                chat stay). Hidden for upcoming trips. */}
+            {isHost && tripHasStarted && (
+              <DangerRow
+                icon="checkmark-done-outline"
+                label="Mark trip as completed"
+                onPress={handleCompleteTrip}
+                loading={completing}
+                showDivider
+              />
+            )}
           </View>
         )}
         </>
@@ -1671,7 +1757,8 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginHorizontal: 8,
   },
-  headerRight: { width: 28, alignItems: 'flex-end' },
+  headerRight: { minWidth: 28, alignItems: 'flex-end' },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 18 },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFFFFF' },
   errorText: { color: '#7B7B7B' },
 
@@ -1843,6 +1930,18 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   cancelledText: { color: '#C0392B', fontSize: 13, fontWeight: '500', flex: 1 },
+  endedBanner: {
+    marginHorizontal: 16,
+    marginTop: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: '#EEF1F3',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  endedText: { color: '#445', fontSize: 13, fontWeight: '500', flex: 1 },
   manageBtnDisabled: { opacity: 0.6 },
 
   packingHeader: {

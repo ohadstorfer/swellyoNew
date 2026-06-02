@@ -81,7 +81,7 @@ export const STAY_FAMILIARITY_OPTIONS: { slug: StayFamiliarity; label: string }[
   { slug: 'stayed_multiple', label: 'Stayed multiple times, know the place very well' },
 ];
 
-export type TripStatus = 'active' | 'cancelled';
+export type TripStatus = 'active' | 'cancelled' | 'completed';
 
 export interface GroupGearItem {
   name: string;
@@ -505,7 +505,7 @@ export interface MyTripsBuckets {
 // Returns true if the trip should be considered past (end_date in the past,
 // or — when only flexible date_months are set — the latest month has fully
 // elapsed). Trips with no dates at all are treated as upcoming.
-function isTripPast(trip: GroupTrip, today: Date = new Date()): boolean {
+export function isTripPast(trip: GroupTrip, today: Date = new Date()): boolean {
   if (trip.end_date) {
     return new Date(trip.end_date) < startOfDay(today);
   }
@@ -529,7 +529,11 @@ function startOfDay(d: Date): Date {
  * Buckets the current user's trips into approved / pending / past.
  * - approved: user is a participant (host or member), trip is active and not past
  * - pending:  user has a pending join request, trip is still active
- * - past:     user is a participant and the trip has ended OR is cancelled
+ * - past:     user is a participant and the trip has ended OR is completed
+ *
+ * Cancelled trips are dropped entirely — they disappear from My Trips for both
+ * the host and participants (the row stays in the DB for history, reachable only
+ * via a direct link / notification).
  *
  * Two queries in parallel: participant trips and pending-request trips. Bucketing
  * by end_date / date_months / status happens in JS so we don't need a DB column.
@@ -563,7 +567,9 @@ export async function listMyTripsByBucket(userId: string): Promise<MyTripsBucket
     const trip = row.group_trips ? normalizeTrip(row.group_trips) : null;
     if (!trip || seen.has(trip.id)) continue;
     seen.add(trip.id);
-    if (trip.status === 'cancelled' || isTripPast(trip, today)) {
+    // Cancelled trips vanish from My Trips entirely.
+    if (trip.status === 'cancelled') continue;
+    if (trip.status === 'completed' || isTripPast(trip, today)) {
       past.push(trip);
     } else {
       approved.push(trip);
@@ -614,6 +620,22 @@ export async function cancelTrip(tripId: string): Promise<void> {
     .eq('id', tripId);
   if (error) {
     console.error('[groupTripsService] cancelTrip error:', error);
+    throw new Error(error.message);
+  }
+}
+
+/**
+ * Mark a trip as completed. Hides it from Explore and moves it to "Past trips"
+ * in My Trips. On the detail screen the plan is locked — only the overview and
+ * the group chat stay active. Existing participants keep access to both.
+ */
+export async function completeTrip(tripId: string): Promise<void> {
+  const { error } = await supabase
+    .from('group_trips')
+    .update({ status: 'completed' })
+    .eq('id', tripId);
+  if (error) {
+    console.error('[groupTripsService] completeTrip error:', error);
     throw new Error(error.message);
   }
 }
