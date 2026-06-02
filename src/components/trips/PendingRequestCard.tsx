@@ -8,6 +8,10 @@ interface PendingRequestCardProps {
   onApprove: (requestId: string) => void;
   onDecline: (requestId: string) => void;
   isProcessing?: boolean;
+  /** Hide the Decline button + relabel Approve — used for the "Declined" list,
+   *  where the only meaningful action is reversing the decision. */
+  hideDecline?: boolean;
+  approveLabel?: string;
 }
 
 export const PendingRequestCard: React.FC<PendingRequestCardProps> = ({
@@ -15,6 +19,8 @@ export const PendingRequestCard: React.FC<PendingRequestCardProps> = ({
   onApprove,
   onDecline,
   isProcessing,
+  hideDecline,
+  approveLabel = 'Approve',
 }) => {
   return (
     <View style={styles.wrap}>
@@ -25,19 +31,21 @@ export const PendingRequestCard: React.FC<PendingRequestCardProps> = ({
             <ActivityIndicator color="#0788B0" />
           ) : (
             <View style={styles.actions}>
-              <TouchableOpacity
-                style={[styles.btn, styles.declineBtn]}
-                onPress={() => onDecline(request.id)}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.declineText}>Decline</Text>
-              </TouchableOpacity>
+              {!hideDecline && (
+                <TouchableOpacity
+                  style={[styles.btn, styles.declineBtn]}
+                  onPress={() => onDecline(request.id)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.declineText}>Decline</Text>
+                </TouchableOpacity>
+              )}
               <TouchableOpacity
                 style={[styles.btn, styles.approveBtn]}
                 onPress={() => onApprove(request.id)}
                 activeOpacity={0.7}
               >
-                <Text style={styles.approveText}>Approve</Text>
+                <Text style={styles.approveText}>{approveLabel}</Text>
               </TouchableOpacity>
             </View>
           )

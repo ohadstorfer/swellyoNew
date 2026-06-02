@@ -1308,6 +1308,22 @@ export async function requestToJoinTrip(
   requesterId: string,
   note?: string
 ): Promise<GroupTripJoinRequest> {
+  // Clear any prior request row (e.g. a previous 'declined' or 'withdrawn' one)
+  // so the unique (trip_id, requester_id) constraint doesn't block a fresh
+  // request. The "host or requester can delete" RLS policy permits this. We
+  // intentionally re-INSERT rather than UPDATE back to 'pending' — the requester
+  // UPDATE policy is deliberately locked to status='withdrawn' to prevent
+  // self-approval, so a clean delete + pending insert is the supported path.
+  const { error: delError } = await supabase
+    .from('group_trip_join_requests')
+    .delete()
+    .eq('trip_id', tripId)
+    .eq('requester_id', requesterId);
+  if (delError) {
+    console.error('[groupTripsService] requestToJoinTrip clear error:', delError);
+    throw new Error(delError.message || 'Failed to request to join');
+  }
+
   const { data, error } = await supabase
     .from('group_trip_join_requests')
     .insert({
@@ -1412,6 +1428,60 @@ export async function listPendingRequests(
   }));
 }
 
+/**
+ * Declined requests for a trip with requester profile attached. Lets the host
+ * reverse a decision (re-approve someone they previously declined). Mirrors
+ * listPendingRequests but filters status='declined' and shows most-recent first.
+ */
+export async function listDeclinedRequests(
+  tripId: string
+): Promise<EnrichedJoinRequest[]> {
+  const { data: requests, error } = await supabase
+    .from('group_trip_join_requests')
+    .select('*')
+    .eq('trip_id', tripId)
+    .eq('status', 'declined')
+    .order('reviewed_at', { ascending: false });
+
+  if (error) {
+    console.error('[groupTripsService] listDeclinedRequests error:', error);
+    return [];
+  }
+  if (!requests || requests.length === 0) return [];
+
+  const requesterIds = requests.map((r: any) => r.requester_id);
+  const { data: surfers } = await supabase
+    .from('surfers')
+    .select(PARTICIPANT_PROFILE_FIELDS)
+    .in('user_id', requesterIds);
+
+  const byId = new Map<string, ParticipantProfile>();
+  (surfers || []).forEach((s: any) => {
+    byId.set(s.user_id, {
+      user_id: s.user_id,
+      name: s.name ?? null,
+      age: s.age ?? null,
+      surfboard_type: s.surfboard_type ?? null,
+      surf_level_category: s.surf_level_category ?? null,
+      profile_image_url: s.profile_image_url ?? null,
+      lifestyle_keywords: s.lifestyle_keywords ?? null,
+    });
+  });
+
+  return requests.map((r: any) => ({
+    ...(r as GroupTripJoinRequest),
+    requester: byId.get(r.requester_id) ?? {
+      user_id: r.requester_id,
+      name: null,
+      age: null,
+      surfboard_type: null,
+      surf_level_category: null,
+      profile_image_url: null,
+      lifestyle_keywords: null,
+    },
+  }));
+}
+
 export async function approveJoinRequest(requestId: string): Promise<void> {
   const { data: { user } } = await supabase.auth.getUser();
   const { data: updated, error } = await supabase
@@ -1466,6 +1536,7 @@ export interface GearItem {
   created_by: string;
   created_at: string;
   updated_at: string;
+  source_gear_request_id?: string | null;
 }
 
 export interface GearClaim {
@@ -1582,7 +1653,10 @@ export async function addGearItem(
   tripId: string,
   hostId: string,
   name: string,
-  neededQty: number
+  neededQty: number,
+  // When set, this item was created by approving a gear request. The DB uses it
+  // to skip notifying the requester twice (they already get gear_request_decided).
+  sourceGearRequestId?: string | null
 ): Promise<GearItem> {
   const trimmed = name.trim();
   if (!trimmed) throw new Error('Item name is required');
@@ -1590,7 +1664,13 @@ export async function addGearItem(
 
   const { data, error } = await supabase
     .from('group_trip_gear_items')
-    .insert({ trip_id: tripId, name: trimmed, needed_qty: neededQty, created_by: hostId })
+    .insert({
+      trip_id: tripId,
+      name: trimmed,
+      needed_qty: neededQty,
+      created_by: hostId,
+      source_gear_request_id: sourceGearRequestId ?? null,
+    })
     .select()
     .single();
 
@@ -1783,7 +1863,7 @@ export async function approveGearRequest(
     throw new Error('Request is no longer pending');
   }
 
-  const item = await addGearItem(req.trip_id, hostId, req.item_name, neededQty);
+  const item = await addGearItem(req.trip_id, hostId, req.item_name, neededQty, requestId);
 
   const { error: updateError } = await supabase
     .from('group_trip_gear_requests')

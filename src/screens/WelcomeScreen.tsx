@@ -872,6 +872,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
             {demoVisible && (
               <View style={{ flexDirection: 'row', gap: 8, width: '100%', marginBottom: 12 }}>
                 <TouchableOpacity
+                  testID="welcome-demo-button"
                   onPress={handleDemoChat}
                   disabled={isDemoLoading || isAppleLoading || isGoogleLoading}
                   style={[
@@ -886,6 +887,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
                   </RNText>
                 </TouchableOpacity>
                 <TouchableOpacity
+                  testID="welcome-skip-demo-button"
                   onPress={handleSkipDemo}
                   disabled={isSkipDemoLoading || isAppleLoading || isGoogleLoading}
                   style={[
@@ -907,6 +909,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
               {/* Apple Sign In Button — hidden on Android */}
               {Platform.OS !== 'android' && (
               <TouchableOpacity
+                testID="welcome-apple-button"
                 onPress={() => handleAppleSignIn()}
                 disabled={!agreedToTerms || isAppleLoading || isGoogleLoading || isAgeBlocked}
                 style={[welcomeStyles.appleButton, (!agreedToTerms || isAppleLoading || isGoogleLoading || isAgeBlocked) && styles.buttonDisabled]}
@@ -923,6 +926,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
 
               {/* Google Sign In Button */}
               <TouchableOpacity
+                testID="welcome-google-button"
                 onPress={() => handleGoogleSignIn()}
                 disabled={!agreedToTerms || isAppleLoading || isGoogleLoading || isAgeBlocked}
                 style={[welcomeStyles.googleButton, (!agreedToTerms || isAppleLoading || isGoogleLoading || isAgeBlocked) && styles.buttonDisabled]}
@@ -941,6 +945,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
             {showTermsCard && (
             <View style={welcomeStyles.termsCard}>
               <TouchableOpacity
+                testID="welcome-terms-checkbox"
                 style={welcomeStyles.checkboxRow}
                 onPress={handleToggleTerms}
                 activeOpacity={0.7}

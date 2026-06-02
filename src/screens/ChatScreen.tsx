@@ -938,6 +938,7 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
         <View style={styles.header}>
           <View style={styles.headerLeft}>
             <TouchableOpacity
+              testID="swelly-chat-back-button"
               style={styles.backButton}
               onPress={() => {
                 // Go back to onboarding step 4
@@ -1019,6 +1020,7 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
           <Reanimated.View style={[styles.inputWrapper, animatedComposerPadding]}>
             <ChatTextInput
               ref={chatInputRef}
+              testID="swelly-chat-input"
               value={inputText}
               onChangeText={setInputText}
               onSend={sendMessage}
@@ -1027,7 +1029,7 @@ export const OnboardingChatScreen: React.FC<OnboardingChatScreenProps> = ({
               maxLength={500}
               primaryColor="#B72DF2"
               leftAccessory={
-                <TouchableOpacity style={styles.attachButton}>
+                <TouchableOpacity testID="swelly-chat-attach-button" style={styles.attachButton}>
                   <Ionicons name="add" size={28} color="#222B30" />
                 </TouchableOpacity>
               }

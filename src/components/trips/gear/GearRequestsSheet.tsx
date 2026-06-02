@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -18,7 +18,7 @@ interface Props {
   requests: EnrichedGearRequest[];
   processingId: string | null;
   onClose: () => void;
-  onApprove: (request: EnrichedGearRequest) => void;
+  onApprove: (request: EnrichedGearRequest, neededQty: number) => void;
   onDecline: (request: EnrichedGearRequest) => void;
 }
 
@@ -30,6 +30,17 @@ export const GearRequestsSheet: React.FC<Props> = ({
   onApprove,
   onDecline,
 }) => {
+  // Per-request "how many needed" the host sets before approving. Defaults to 1.
+  const [qtys, setQtys] = useState<Record<string, number>>({});
+  const getQty = (id: string) => qtys[id] ?? 1;
+  const bumpQty = (id: string, delta: number) =>
+    setQtys(prev => ({ ...prev, [id]: Math.max(1, (prev[id] ?? 1) + delta) }));
+
+  // Reset the staged quantities whenever the sheet (re)opens.
+  useEffect(() => {
+    if (visible) setQtys({});
+  }, [visible]);
+
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose}>
@@ -47,6 +58,7 @@ export const GearRequestsSheet: React.FC<Props> = ({
             ) : (
               requests.map(r => {
                 const isProcessing = processingId === r.id;
+                const qty = getQty(r.id);
                 return (
                   <View key={r.id} style={styles.row}>
                     <View style={styles.requesterRow}>
@@ -59,6 +71,30 @@ export const GearRequestsSheet: React.FC<Props> = ({
                     </View>
                     <Text style={styles.itemName}>{r.item_name}</Text>
                     {r.note ? <Text style={styles.note}>"{r.note}"</Text> : null}
+
+                    <View style={styles.qtyRow}>
+                      <Text style={styles.qtyLabel}>How many needed?</Text>
+                      <View style={styles.counter}>
+                        <TouchableOpacity
+                          style={[styles.counterBtn, qty <= 1 && styles.counterBtnDisabled]}
+                          onPress={() => bumpQty(r.id, -1)}
+                          disabled={qty <= 1 || isProcessing}
+                          hitSlop={6}
+                        >
+                          <Text style={styles.counterBtnText}>−</Text>
+                        </TouchableOpacity>
+                        <Text style={styles.counterValue}>{qty}</Text>
+                        <TouchableOpacity
+                          style={styles.counterBtn}
+                          onPress={() => bumpQty(r.id, 1)}
+                          disabled={isProcessing}
+                          hitSlop={6}
+                        >
+                          <Text style={styles.counterBtnText}>+</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+
                     <View style={styles.actions}>
                       <TouchableOpacity
                         style={[styles.btn, styles.declineBtn, isProcessing && styles.btnDisabled]}
@@ -69,7 +105,7 @@ export const GearRequestsSheet: React.FC<Props> = ({
                       </TouchableOpacity>
                       <TouchableOpacity
                         style={[styles.btn, styles.approveBtn, isProcessing && styles.btnDisabled]}
-                        onPress={() => onApprove(r)}
+                        onPress={() => onApprove(r, qty)}
                         disabled={isProcessing}
                       >
                         {isProcessing ? (
@@ -133,6 +169,25 @@ const styles = StyleSheet.create({
   requesterName: { fontSize: 13, color: '#4A5565', fontWeight: '600' },
   itemName: { fontSize: 16, fontWeight: '700', color: '#222B30' },
   note: { fontSize: 13, color: '#4A5565', fontStyle: 'italic', marginTop: 4 },
+  qtyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 12,
+  },
+  qtyLabel: { fontSize: 13, fontWeight: '600', color: '#4A5565' },
+  counter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 10,
+    backgroundColor: '#FAFAFA',
+  },
+  counterBtn: { width: 40, height: 36, alignItems: 'center', justifyContent: 'center' },
+  counterBtnDisabled: { opacity: 0.3 },
+  counterBtnText: { fontSize: 22, fontWeight: '600', color: '#222B30' },
+  counterValue: { minWidth: 28, textAlign: 'center', fontSize: 16, fontWeight: '700', color: '#222B30' },
   actions: { flexDirection: 'row', gap: 10, marginTop: 12 },
   btn: { flex: 1, paddingVertical: 12, borderRadius: 8, alignItems: 'center' },
   btnDisabled: { opacity: 0.4 },
