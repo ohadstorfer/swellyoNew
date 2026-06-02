@@ -133,6 +133,21 @@ export const notificationsService = {
   },
 
   /**
+   * Mark a single notification handled (e.g. after its inline Approve/Decline
+   * action resolves). Durable record so the buttons don't reappear on reopen.
+   */
+  async markHandled(id: string): Promise<void> {
+    try {
+      await supabase
+        .from(TABLE)
+        .update({ handled_at: new Date().toISOString() })
+        .eq('id', id);
+    } catch {
+      /* ignore */
+    }
+  },
+
+  /**
    * Realtime: receive this user's notifications as they arrive (INSERT) and when
    * their read/handled state changes elsewhere (UPDATE). Filtered server-side by
    * recipient_id so a client only ever sees its own rows.

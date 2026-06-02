@@ -1363,6 +1363,59 @@ export async function getMyJoinRequest(
   return (data as GroupTripJoinRequest) ?? null;
 }
 
+/** A pending request seen from the host's side, with the trip title for the
+ *  Approve/Decline header on the requester's profile. */
+export interface IncomingJoinRequest {
+  requestId: string;
+  tripId: string;
+  tripTitle: string;
+}
+
+/**
+ * Host-side lookup for ProfileScreen: does `requesterId` have a PENDING join
+ * request to ANY trip owned by `hostId`? Returns the most recent one with the
+ * trip title, or null. Self-contained so the profile can detect the request
+ * regardless of how it was opened (notifications, trip detail, search, …).
+ *
+ * If the host owns several trips and this user requested more than one, we
+ * surface the most recent pending request only; acting on it affects just that
+ * request.
+ */
+export async function getIncomingJoinRequest(
+  hostId: string,
+  requesterId: string
+): Promise<IncomingJoinRequest | null> {
+  if (!hostId || !requesterId || hostId === requesterId) return null;
+
+  const { data, error } = await supabase
+    .from('group_trip_join_requests')
+    .select('id, trip_id, group_trips!inner(title, host_id)')
+    .eq('requester_id', requesterId)
+    .eq('status', 'pending')
+    .eq('group_trips.host_id', hostId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    console.error('[groupTripsService] getIncomingJoinRequest error:', error);
+    return null;
+  }
+  if (!data) return null;
+
+  // PostgREST returns the embedded to-one as an object, but supabase-js types
+  // it loosely — handle both shapes.
+  const trip = Array.isArray((data as any).group_trips)
+    ? (data as any).group_trips[0]
+    : (data as any).group_trips;
+
+  return {
+    requestId: (data as any).id,
+    tripId: (data as any).trip_id,
+    tripTitle: (trip?.title as string)?.trim() || 'your trip',
+  };
+}
+
 export async function withdrawJoinRequest(requestId: string): Promise<void> {
   const { error } = await supabase
     .from('group_trip_join_requests')

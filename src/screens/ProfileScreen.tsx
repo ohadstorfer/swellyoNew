@@ -53,6 +53,8 @@ import Reanimated, { useSharedValue, useAnimatedStyle, withTiming, runOnJS, Easi
 import { Gesture, GestureDetector, ScrollView as RNGHScrollView } from 'react-native-gesture-handler';
 import { ScrollView as RNScrollView } from 'react-native';
 import { LIFESTYLE_ICON_MAP } from '../utils/lifestyleIconMap';
+import { JoinRequestActionBar, JoinRequestActionState } from '../components/trips/JoinRequestActionBar';
+import { getIncomingJoinRequest, approveJoinRequest, declineJoinRequest, IncomingJoinRequest } from '../services/trips/groupTripsService';
 
 // Android: RNGH's ScrollView + GestureDetector composition completely blocks
 // vertical scroll (the inner native scroll never wins). Fall back to RN's
@@ -890,6 +892,10 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
   // in AppContent handles per-entry-point logic).
   const swipeTranslateX = useSharedValue(noTransition ? 0 : SWIPE_SCREEN_WIDTH);
   const swipeOpacity = useSharedValue(noTransition ? 1 : 0);
+
+  // ─── Incoming join request (host viewing a requester's profile) ─────────
+  const [incomingRequest, setIncomingRequest] = useState<IncomingJoinRequest | null>(null);
+  const [requestActionState, setRequestActionState] = useState<JoinRequestActionState>('idle');
   // Direction-gate state for the swipe-to-dismiss Pan. We capture the touch
   // start, then in onTouchesMove we decide instantly whether the motion is
   // vertical (→ fail, let ScrollView win) or rightward-horizontal (→ activate).
@@ -1016,6 +1022,67 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
 
   // Determine if we're viewing our own profile or another user's
   const isViewingOwnProfile = !userId;
+
+  // ─── Incoming join request detection + actions ──────────────────────────
+  // When the current user (a potential host) opens someone else's profile,
+  // check whether that person has a pending request to join one of the host's
+  // trips. If so, ProfileScreen renders the Approve/Decline header. Self-
+  // contained: works regardless of where the profile was opened from. Fails
+  // silently — a lookup error never blocks the profile.
+  useEffect(() => {
+    let cancelled = false;
+    if (isViewingOwnProfile || !userId) {
+      setIncomingRequest(null);
+      return;
+    }
+    // The host id (current logged-in user) isn't set on the other-user load
+    // path, so resolve it directly from auth. getIncomingJoinRequest guards the
+    // host === requester case and fails silently on error.
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      const hostId = user?.id;
+      if (!hostId || cancelled) return;
+      const req = await getIncomingJoinRequest(hostId, userId);
+      if (!cancelled) setIncomingRequest(req);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, isViewingOwnProfile]);
+
+  const handleApproveRequest = useCallback(async () => {
+    if (!incomingRequest || requestActionState !== 'idle') return;
+    setRequestActionState('approving');
+    try {
+      await approveJoinRequest(incomingRequest.requestId);
+      // Morph to the "Approved" pill; the bar then collapses itself and calls
+      // onDismissed. The profile stays open.
+      setRequestActionState('approved');
+    } catch (e) {
+      console.error('[ProfileScreen] approveJoinRequest failed:', e);
+      setRequestActionState('idle');
+      Alert.alert('Something went wrong', 'Could not approve the request. Please try again.');
+    }
+  }, [incomingRequest, requestActionState]);
+
+  const handleDeclineRequest = useCallback(async () => {
+    if (!incomingRequest || requestActionState !== 'idle') return;
+    setRequestActionState('declining');
+    try {
+      await declineJoinRequest(incomingRequest.requestId);
+      setRequestActionState('declined');
+    } catch (e) {
+      console.error('[ProfileScreen] declineJoinRequest failed:', e);
+      setRequestActionState('idle');
+      Alert.alert('Something went wrong', 'Could not decline the request. Please try again.');
+    }
+  }, [incomingRequest, requestActionState]);
+
+  // The bar finished collapsing after a decision — unmount it, keep the profile.
+  const handleRequestDismissed = useCallback(() => {
+    setIncomingRequest(null);
+    setRequestActionState('idle');
+  }, []);
 
   // Animation for upload spinner
   const uploadSpinnerAnim = useRef(new Animated.Value(0)).current;
@@ -2183,6 +2250,18 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
               )}
             </View>
           </TouchableOpacity>
+        )}
+
+        {/* Approve/Decline header — host viewing a pending requester's profile.
+            Solid bar pinned above the cover; pushes the cover down. */}
+        {incomingRequest && !isViewingOwnProfile && (
+          <JoinRequestActionBar
+            tripTitle={incomingRequest.tripTitle}
+            state={requestActionState}
+            onApprove={handleApproveRequest}
+            onDecline={handleDeclineRequest}
+            onDismissed={handleRequestDismissed}
+          />
         )}
 
         <MaybeGestureDetector gesture={nativeGesture}>
