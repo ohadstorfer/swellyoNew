@@ -25,6 +25,11 @@ import {
   listMyTripsByBucket,
 } from '../../services/trips/groupTripsService';
 import CreateTripWizard from './CreateTripWizard';
+import { WIZARD_STATE_VERSION } from './CreateTripFlowA';
+import {
+  peekTripWizardDraft,
+  clearTripWizardDraft,
+} from '../../hooks/useTripWizardDraft';
 import TripDetailScreen from './TripDetailScreen';
 import { Images } from '../../assets/images';
 
@@ -342,8 +347,54 @@ export default function TripsScreen({ onBack, initialTripId, onOpenGroupChat, on
   // tab. null = chooser visible; non-null = wizard open in the create modal.
   const [pendingStyle, setPendingStyle] = useState<HostingStyle | null>(null);
   const [wizardStarted, setWizardStarted] = useState(false);
+  // true when the wizard should load the saved draft (user tapped "Continue" on
+  // the resume prompt). Reset to false for a fresh start.
+  const [resumeDraft, setResumeDraft] = useState(false);
 
   const createModalVisible = pendingStyle !== null;
+
+  // Tapping a flow card: if there's a saved draft for THIS flow, ask whether to
+  // resume it before opening the wizard. A draft from a different flow is left
+  // untouched (it gets overwritten only once this flow first saves).
+  const openWizard = (key: HostingStyle, resume: boolean) => {
+    setResumeDraft(resume);
+    setPendingStyle(key);
+  };
+
+  const onPickStyle = async (key: HostingStyle) => {
+    const draft = await peekTripWizardDraft();
+    const hasResumableDraft =
+      !!draft && draft.version === WIZARD_STATE_VERSION && draft.hostingStyle === key;
+    if (!hasResumableDraft) {
+      openWizard(key, false);
+      return;
+    }
+    if (Platform.OS === 'web') {
+      // RN Alert ignores custom buttons on web — use the native confirm.
+      const cont = window.confirm(
+        'You have an unfinished trip. Continue where you left off?\n\n(Cancel to start fresh.)',
+      );
+      if (!cont) await clearTripWizardDraft();
+      openWizard(key, cont);
+      return;
+    }
+    Alert.alert(
+      'Continue your trip?',
+      'You have an unfinished trip. Pick up where you left off?',
+      [
+        {
+          text: 'Start fresh',
+          style: 'destructive',
+          onPress: async () => {
+            await clearTripWizardDraft();
+            openWizard(key, false);
+          },
+        },
+        { text: 'Continue', onPress: () => openWizard(key, true) },
+      ],
+      { cancelable: false },
+    );
+  };
 
   // Deep-link into a trip from a push tap: when initialTripId changes, open it.
   useEffect(() => {
@@ -360,12 +411,14 @@ export default function TripsScreen({ onBack, initialTripId, onOpenGroupChat, on
       closeCreateModal();
       return;
     }
+    // Android hardware-back / swipe path. The wizard autosaves as you go, so
+    // closing keeps the draft (restorable next time) — it never discards.
     Alert.alert(
-      'Discard trip?',
-      "You'll lose your progress on this trip.",
+      'Are you sure you want to exit?',
+      'Your progress will be saved — you can pick it back up next time.',
       [
-        { text: 'Keep editing', style: 'cancel' },
-        { text: 'Discard', style: 'destructive', onPress: closeCreateModal },
+        { text: 'No', style: 'cancel' },
+        { text: 'Yes, exit', onPress: closeCreateModal },
       ],
     );
   };
@@ -458,7 +511,7 @@ export default function TripsScreen({ onBack, initialTripId, onOpenGroupChat, on
               <TouchableOpacity
                 key={opt.key}
                 style={styles.chooserCard}
-                onPress={() => setPendingStyle(opt.key)}
+                onPress={() => void onPickStyle(opt.key)}
                 activeOpacity={0.85}
                 accessibilityRole="button"
                 accessibilityLabel={`${opt.title}. ${opt.desc}`}
@@ -494,8 +547,13 @@ export default function TripsScreen({ onBack, initialTripId, onOpenGroupChat, on
               hostId={currentUserId}
               hostingStyle={pendingStyle}
               onCreated={handleCreated}
-              onCancel={handleRequestCloseModal}
+              // The wizard runs its own discard confirm (the X / Cancel button)
+              // before calling onCancel — so here we just close. The Modal's
+              // onRequestClose still routes hardware-back / swipe through the
+              // confirming handler.
+              onCancel={closeCreateModal}
               onStartedChange={setWizardStarted}
+              resumeDraft={resumeDraft}
             />
           )}
         </View>

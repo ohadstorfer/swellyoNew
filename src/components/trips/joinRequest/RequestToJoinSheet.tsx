@@ -74,6 +74,10 @@ export const RequestToJoinSheet: React.FC<Props> = ({
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={close}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={styles.kavRoot}
+      >
       <Pressable style={styles.backdrop} onPress={close}>
         <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
           <View style={styles.header}>
@@ -84,11 +88,7 @@ export const RequestToJoinSheet: React.FC<Props> = ({
             <View style={styles.closeBtn} />
           </View>
 
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            style={styles.flex}
-            keyboardVerticalOffset={0}
-          >
+          <>
             <ScrollView
               contentContainerStyle={styles.body}
               keyboardShouldPersistTaps="handled"
@@ -142,9 +142,10 @@ export const RequestToJoinSheet: React.FC<Props> = ({
                 )}
               </TouchableOpacity>
             </View>
-          </KeyboardAvoidingView>
+          </>
         </Pressable>
       </Pressable>
+      </KeyboardAvoidingView>
     </Modal>
   );
 };
@@ -158,7 +159,7 @@ const styles = StyleSheet.create({
     maxHeight: SHEET_MAX_HEIGHT,
     width: '100%',
   },
-  flex: { flexShrink: 1 },
+  kavRoot: { flex: 1 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',

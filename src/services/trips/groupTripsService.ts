@@ -88,7 +88,7 @@ export interface GroupGearItem {
   done: boolean;
 }
 
-/** Member-private gear item. Independent of the host's group_gear. */
+/** Member-private gear item. Independent of the host's personal_gear_host_suggestion. */
 export interface PersonalGearItem {
   name: string;
   done: boolean;
@@ -154,7 +154,7 @@ export interface GroupTrip {
   host_lead_note: string | null;
   visibility: string | null; // 'public' | 'friends' | 'private'
 
-  group_gear: string[];
+  personal_gear_host_suggestion: string[];
 
   created_at: string;
   updated_at: string;
@@ -643,7 +643,7 @@ export async function updateGroupTrip(
 }
 
 /**
- * Host updates the trip's master group_gear list (item names, ordered).
+ * Host updates the trip's master personal_gear_host_suggestion list (item names, ordered).
  * A DB trigger then syncs each participant's per-user list, preserving done state
  * for items that still exist in the new list and removing items that don't.
  */
@@ -654,7 +654,7 @@ export async function setTripGroupGear(
   const cleaned = names.map(n => n.trim()).filter(Boolean);
   const { error } = await supabase
     .from('group_trips')
-    .update({ group_gear: cleaned })
+    .update({ personal_gear_host_suggestion: cleaned })
     .eq('id', tripId);
 
   if (error) {
@@ -687,7 +687,7 @@ export async function setMyGroupGear(
 
 /**
  * Member replaces their own personal_gear_by_me jsonb. Host-defined items live
- * in group_trips.group_gear (and fan out into personal_gear_by_host) and are
+ * in group_trips.personal_gear_host_suggestion (and fan out into personal_gear_by_host) and are
  * NOT in this list — so members can never delete a host suggestion via this
  * call. RLS allows update only when auth.uid() === user_id.
  */

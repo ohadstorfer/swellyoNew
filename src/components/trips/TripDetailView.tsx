@@ -397,12 +397,20 @@ export interface TripDetailViewProps {
   onSeeAllParticipants?: () => void;
   /** Optional — tap the leader card to open their full profile. */
   onLeaderPress?: () => void;
+  /** Rendered directly under the hero card — used by TripDetailScreen to inject
+   *  the Overview/Plan tab toggle as shared chrome above both tabs. */
+  afterHeroSlot?: React.ReactNode;
+  /** When true, render only the hero + afterHeroSlot and hide the read-only
+   *  overview body (used when the Plan tab is active). */
+  bodyHidden?: boolean;
 }
 
 export const TripDetailView: React.FC<TripDetailViewProps> = ({
   vm,
   onSeeAllParticipants,
   onLeaderPress,
+  afterHeroSlot,
+  bodyHidden,
 }) => {
   const [showIncludes, setShowIncludes] = useState(false);
   const dateRange = formatDateRange(vm);
@@ -495,6 +503,11 @@ export const TripDetailView: React.FC<TripDetailViewProps> = ({
         </View>
       </View>
 
+      {/* Shared chrome slot (Overview/Plan toggle) — sits between hero and body. */}
+      {afterHeroSlot ?? null}
+
+      {!bodyHidden && (
+      <>
       {/* ---- Overview cards — horizontal scroll, fixed order ---- */}
       <ScrollView
         horizontal
@@ -739,6 +752,9 @@ export const TripDetailView: React.FC<TripDetailViewProps> = ({
           )}
         </View>
       ) : null}
+
+      </>
+      )}
 
       {/* ---- "What's included" sheet (Flow C — opened from the Price card) ---- */}
       <WizardBottomSheet

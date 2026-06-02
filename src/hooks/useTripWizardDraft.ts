@@ -12,6 +12,38 @@ const SAVE_DEBOUNCE_MS = 300;
 export interface UseTripWizardDraftOptions {
   editMode?: boolean;
   tripId?: string | null;
+  /**
+   * When true, the wizard was opened via the "Continue your trip?" prompt — load
+   * the stored draft into state on mount and start persisting immediately. When
+   * false (the default), the stored draft is ignored and a fresh state is used;
+   * it only gets overwritten once startSaving() runs (first successful Next).
+   */
+  resume?: boolean;
+}
+
+/**
+ * Read the raw stored draft without mounting the hook. Returns the parsed object
+ * (whatever shape was written — caller inspects `version` / `hostingStyle`) or
+ * null when there's nothing valid to resume. Used by the chooser to decide
+ * whether to show the "Continue your trip?" prompt before opening the wizard.
+ */
+export async function peekTripWizardDraft(): Promise<Record<string, unknown> | null> {
+  try {
+    const raw = await AsyncStorage.getItem(TRIP_WIZARD_DRAFT_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+/** Remove the stored draft. Safe to call when none exists. */
+export async function clearTripWizardDraft(): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(TRIP_WIZARD_DRAFT_KEY);
+  } catch (e) {
+    console.warn('[useTripWizardDraft] clear failed:', e);
+  }
 }
 
 export interface UseTripWizardDraftApi<TState> {
@@ -20,6 +52,12 @@ export interface UseTripWizardDraftApi<TState> {
   hasRestoredDraft: boolean;
   clearDraft: () => Promise<void>;
   startSaving: () => void;
+  /**
+   * Force-write the current state to storage right now, bypassing the debounce.
+   * Needed on exit: the debounced write is cancelled when the screen unmounts,
+   * so the last edit would otherwise be lost.
+   */
+  saveNow: () => Promise<void>;
 }
 
 // Best-effort check that a parsed draft has at least the top-level keys of the
@@ -38,6 +76,7 @@ export function useTripWizardDraft<TState extends Record<string, unknown>>(
   options?: UseTripWizardDraftOptions,
 ): UseTripWizardDraftApi<TState> {
   const editMode = options?.editMode ?? false;
+  const resume = options?.resume ?? false;
 
   // We keep a ref-of-initial so callers can pass an object literal without
   // forcing this hook to react to its identity.
@@ -49,11 +88,18 @@ export function useTripWizardDraft<TState extends Record<string, unknown>>(
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
 
-  // On mount: in create mode try to restore the draft from AsyncStorage.
+  // Always holds the latest state so saveNow() can flush after unmount-time
+  // closures without going stale.
+  const stateRef = useRef<TState>(state);
+  stateRef.current = state;
+
+  // On mount: only when the wizard was opened via the resume prompt do we load
+  // the stored draft. Otherwise we start fresh (the chooser already decided, and
+  // a fresh start overwrites the old draft on the first save). Edit mode never
+  // touches the draft.
   useEffect(() => {
     mountedRef.current = true;
-    if (editMode) {
-      // Edit mode never reads the draft.
+    if (editMode || !resume) {
       return () => {
         mountedRef.current = false;
       };
@@ -76,6 +122,8 @@ export function useTripWizardDraft<TState extends Record<string, unknown>>(
         if (!looksLikeShape(parsed, initialRef.current)) return;
         setState(parsed as TState);
         setHasRestoredDraft(true);
+        // Resuming → keep persisting any further edits right away.
+        savingEnabledRef.current = true;
       } catch (e) {
         // AsyncStorage read failures should not break the wizard.
         console.warn('[useTripWizardDraft] read failed:', e);
@@ -124,5 +172,19 @@ export function useTripWizardDraft<TState extends Record<string, unknown>>(
     savingEnabledRef.current = true;
   }, []);
 
-  return { state, setState, hasRestoredDraft, clearDraft, startSaving };
+  const saveNow = useCallback(async () => {
+    if (editMode) return;
+    savingEnabledRef.current = true;
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
+    }
+    try {
+      await AsyncStorage.setItem(TRIP_WIZARD_DRAFT_KEY, JSON.stringify(stateRef.current));
+    } catch (e) {
+      console.warn('[useTripWizardDraft] saveNow failed:', e);
+    }
+  }, [editMode]);
+
+  return { state, setState, hasRestoredDraft, clearDraft, startSaving, saveNow };
 }

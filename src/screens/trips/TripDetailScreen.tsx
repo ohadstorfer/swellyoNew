@@ -10,6 +10,7 @@ import {
   Alert,
   Platform,
   TextInput,
+  KeyboardAvoidingView,
   Share,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -64,6 +65,12 @@ import {
   type WaveShapeKind,
 } from '../../services/trips/groupTripsService';
 import { TripDetailView, type TripDetailVM } from '../../components/trips/TripDetailView';
+import { TripTabToggle, type TripTab } from '../../components/trips/TripTabToggle';
+import { HostTag } from '../../components/trips/HostTag';
+import { AdminUpdateSheet } from '../../components/trips/updates/AdminUpdateSheet';
+import { AddPersonalGearSheet } from '../../components/trips/gear/AddPersonalGearSheet';
+import { EditSuggestedGearSheet } from '../../components/trips/gear/EditSuggestedGearSheet';
+import { PersonalGearSheet } from '../../components/trips/gear/PersonalGearSheet';
 import ParticipantCard from '../../components/trips/ParticipantCard';
 import PendingRequestCard from '../../components/trips/PendingRequestCard';
 import TripParticipantsBreakdown from '../../components/trips/TripParticipantsBreakdown';
@@ -306,21 +313,27 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   const [groupGearDraft, setGroupGearDraft] = useState('');
   const [savingPacking, setSavingPacking] = useState(false);
   // Member-private gear: each user adds/removes only their own; host items
-  // live in trip.group_gear and aren't editable from here.
+  // live in trip.personal_gear_host_suggestion and aren't editable from here.
   const [addingPersonalItem, setAddingPersonalItem] = useState(false);
   const [personalItemDraft, setPersonalItemDraft] = useState('');
   const [savingPersonalItem, setSavingPersonalItem] = useState(false);
   const [muted, setMuted] = useState(false);
+  // Overview = public read-only facts; Plan = interactive (members only).
+  const [activeTab, setActiveTab] = useState<TripTab>('overview');
 
   // Shared gear — items with required quantities + request flow
   // (group_trip_gear_items / _gear_claims / _gear_requests). Distinct from
-  // the host's group_gear checklist (which lives on group_trips.group_gear).
+  // the host's checklist (which lives on group_trips.personal_gear_host_suggestion).
   const [gearItems, setGearItems] = useState<EnrichedGearItem[]>([]);
   const [gearRequests, setGearRequests] = useState<EnrichedGearRequest[]>([]); // host only
   const [gearItemSheetItem, setGearItemSheetItem] = useState<EnrichedGearItem | null>(null);
   const [requestSheetVisible, setRequestSheetVisible] = useState(false);
   const [manageSheetVisible, setManageSheetVisible] = useState(false);
   const [requestsSheetVisible, setRequestsSheetVisible] = useState(false);
+  // New gear/update sheets (Plan tab redesign)
+  const [personalGearSheetOpen, setPersonalGearSheetOpen] = useState(false);
+  const [addPersonalSheetOpen, setAddPersonalSheetOpen] = useState(false);
+  const [editSuggestedSheetOpen, setEditSuggestedSheetOpen] = useState(false);
   const [processingGearRequestId, setProcessingGearRequestId] = useState<string | null>(null);
 
   // Admin updates — host-posted free-text lines, visible to all members.
@@ -356,10 +369,21 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     () => participants.find(p => p.user_id === currentUserId)?.personal_gear_by_me ?? [],
     [participants, currentUserId]
   );
-  const gearTotalCount = (trip?.group_gear?.length ?? 0) + myPersonalGear.length;
+  const gearTotalCount = (trip?.personal_gear_host_suggestion?.length ?? 0) + myPersonalGear.length;
   const gearDoneCount =
-    myGroupGear.filter(it => it.done && (trip?.group_gear ?? []).includes(it.name)).length +
+    myGroupGear.filter(it => it.done && (trip?.personal_gear_host_suggestion ?? []).includes(it.name)).length +
     myPersonalGear.filter(it => it.done).length;
+  // Combined rows (host-suggested + my own) for the "Your gear" summary preview.
+  const gearAllRows = [
+    ...(trip?.personal_gear_host_suggestion ?? []).map(name => ({
+      kind: 'host' as const,
+      name,
+      done: myGroupGear.find(it => it.name === name)?.done ?? false,
+    })),
+    ...myPersonalGear.map(it => ({ kind: 'mine' as const, name: it.name, done: it.done })),
+  ];
+  const gearPreview = gearAllRows.slice(0, 3);
+  const gearHiddenCount = Math.max(0, gearAllRows.length - gearPreview.length);
   const loadAll = useCallback(async () => {
     const [tripData, participantsData, updatesData, gearItemsData] = await Promise.all([
       getTripById(tripId),
@@ -743,7 +767,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
       return;
     }
     // Reject duplicates against host list or my own list.
-    const hostNames = (trip?.group_gear ?? []).map(n => n.toLowerCase());
+    const hostNames = (trip?.personal_gear_host_suggestion ?? []).map(n => n.toLowerCase());
     const myNames = myPersonalGear.map(i => i.name.toLowerCase());
     if (hostNames.includes(name.toLowerCase()) || myNames.includes(name.toLowerCase())) {
       Alert.alert('Already on your list', `"${name}" is already in your gear.`);
@@ -767,7 +791,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
 
   const handleStartEditPacking = () => {
     if (!trip) return;
-    setGroupGearDraft((trip.group_gear ?? []).join('\n'));
+    setGroupGearDraft((trip.personal_gear_host_suggestion ?? []).join('\n'));
     setEditingPacking(true);
   };
 
@@ -941,6 +965,72 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   };
 
   // -------------------------------------------------------------------------
+  // Sheet-driven handlers (Plan tab redesign — bottom sheets replace the old
+  // inline editors).
+  // -------------------------------------------------------------------------
+  const handleSubmitUpdateBody = async (body: string) => {
+    if (!currentUserId) return;
+    const text = body.trim();
+    if (!text) {
+      handleCancelUpdateDraft();
+      return;
+    }
+    setSavingUpdate(true);
+    try {
+      if (editingUpdateId) {
+        const updated = await updateAdminUpdate(editingUpdateId, text);
+        setAdminUpdates(prev => prev.map(u => (u.id === updated.id ? updated : u)));
+      } else {
+        const created = await addAdminUpdate(tripId, currentUserId, text);
+        setAdminUpdates(prev => [created, ...prev]);
+      }
+      handleCancelUpdateDraft();
+    } catch (e: any) {
+      Alert.alert('Could not save update', e?.message || 'Please try again.');
+    } finally {
+      setSavingUpdate(false);
+    }
+  };
+
+  // Host edits the suggested gear list — called with the full new array after
+  // each add/edit/delete. Persists then refetches so member copies stay in sync.
+  const handleSaveSuggestedGear = async (names: string[]) => {
+    if (!trip) return;
+    const cleaned = names.map(n => n.trim()).filter(Boolean);
+    try {
+      await setTripGroupGear(tripId, cleaned);
+      const [tripData, participantsData] = await Promise.all([
+        getTripById(tripId),
+        getTripParticipants(tripId),
+      ]);
+      if (tripData) setTrip(tripData);
+      setParticipants(participantsData);
+    } catch (e: any) {
+      Alert.alert('Could not save list', e?.message || 'Please try again.');
+    }
+  };
+
+  const handleAddPersonalSubmit = async (name: string) => {
+    if (!currentUserId) return;
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setSavingPersonalItem(true);
+    const current = myPersonalGear;
+    const next: PersonalGearItem[] = [...current, { name: trimmed, done: false }];
+    try {
+      await setMyPersonalGearList(tripId, currentUserId, next);
+      setParticipants(prev =>
+        prev.map(p => (p.user_id === currentUserId ? { ...p, personal_gear_by_me: next } : p))
+      );
+      setAddPersonalSheetOpen(false);
+    } catch (e: any) {
+      Alert.alert('Could not add', e?.message || 'Please try again.');
+    } finally {
+      setSavingPersonalItem(false);
+    }
+  };
+
+  // -------------------------------------------------------------------------
   if (loading) {
     return (
       <SafeAreaView style={styles.root} edges={['top']}>
@@ -965,6 +1055,12 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
 
   const isCancelled = trip.status === 'cancelled';
 
+  // Tabs: only members (host + approved) get the Plan tab. Everyone else sees
+  // just the Overview, with no toggle at all.
+  const canSeePlan = isHost || isApprovedMember;
+  const showPlan = canSeePlan && activeTab === 'plan';
+  const showOverview = !showPlan; // overview-only extras (Share, budget, members)
+
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
       <Header
@@ -983,7 +1079,15 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         }
       />
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <KeyboardAvoidingView
+        style={styles.keyboardAvoider}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
         {isCancelled && (
           <View style={styles.cancelledBanner}>
             <Ionicons name="alert-circle-outline" size={18} color="#C0392B" />
@@ -991,7 +1095,9 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           </View>
         )}
 
-        {/* Rich trip-detail layout (shared with the create-trip preview). */}
+        {/* Rich trip-detail layout (shared with the create-trip preview). The
+            Overview/Plan toggle is injected as shared chrome under the hero;
+            bodyHidden hides the read-only overview body when Plan is active. */}
         <TripDetailView
           vm={buildTripDetailVM(
             trip,
@@ -1003,11 +1109,58 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
               ? () => onViewUserProfile(trip.host_id)
               : undefined
           }
+          afterHeroSlot={
+            canSeePlan ? (
+              <TripTabToggle value={activeTab} onChange={setActiveTab} />
+            ) : null
+          }
+          bodyHidden={showPlan}
         />
 
-        {/* Action row — Chat / Share / Mute */}
+        {/* ============================ OVERVIEW ============================ */}
+        {/* Public, read-only extras that sit below the TripDetailView body:
+            Share (everyone), approximate budget, and the full members list. */}
+        {showOverview && (
+          <>
+            <View style={[styles.actionRow, { marginTop: 20, paddingHorizontal: 16 }]}>
+              <ActionButton icon="share-outline" label="Share" onPress={handleShare} />
+            </View>
+
+            <Section title={`${participants.length} ${participants.length === 1 ? 'Member' : 'Members'}`}>
+              {participants.length === 0 ? (
+                <Text style={styles.muted}>No participants yet.</Text>
+              ) : (
+                participants.map((p, idx) => (
+                  <View key={p.user_id}>
+                    <ParticipantCard
+                      participant={p}
+                      isMe={p.user_id === currentUserId}
+                      onPress={
+                        onViewUserProfile && p.user_id !== currentUserId
+                          ? () => onViewUserProfile(p.user_id)
+                          : undefined
+                      }
+                      onRemove={
+                        isHost && !isCancelled && p.role !== 'host' && removingUserId !== p.user_id
+                          ? handleRemoveParticipant
+                          : undefined
+                      }
+                    />
+                    {idx < participants.length - 1 && <View style={styles.memberDivider} />}
+                  </View>
+                ))
+              )}
+            </Section>
+          </>
+        )}
+
+        {/* ============================== PLAN ============================== */}
+        {/* Interactive / operational content — members only. */}
+        {showPlan && (
+        <>
+        {/* Action row — Chat / Mute (member actions) */}
         <View style={[styles.actionRow, { marginTop: 20, paddingHorizontal: 16 }]}>
-          {IS_LOCAL_MODE && (isHost || isApprovedMember) && (
+          {IS_LOCAL_MODE && (
             <ActionButton
               icon="chatbubbles"
               label="Chat"
@@ -1016,13 +1169,11 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
             />
           )}
           <ActionButton icon="share-outline" label="Share" onPress={handleShare} />
-          {(isHost || isApprovedMember) && (
-            <ActionButton
-              icon={muted ? 'notifications-off' : 'notifications-outline'}
-              label={muted ? 'Muted' : 'Mute'}
-              onPress={handleToggleMute}
-            />
-          )}
+          <ActionButton
+            icon={muted ? 'notifications-off' : 'notifications-outline'}
+            label={muted ? 'Muted' : 'Mute'}
+            onPress={handleToggleMute}
+          />
         </View>
 
         {/* Pending requests (host only) */}
@@ -1057,20 +1208,9 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           </Section>
         )}
 
-        {/* About, Focus vibe, How it works, Accommodation, Who it's for and
-            Wave info are all rendered by TripDetailView above. */}
-
-        {/* Flow C price + "What's included" now render inside TripDetailView.
-            Here we only show Flow A's approximate budget range. */}
-        {trip.cost_per_person == null &&
-        (trip.budget_min != null || trip.budget_max != null) ? (
-          <Section title="Approximate budget">
-            <InfoRow
-              label="Per person"
-              value={`${trip.budget_min ?? '?'}–${trip.budget_max ?? '?'} ${trip.budget_currency ?? 'USD'}`}
-            />
-          </Section>
-        ) : null}
+        {/* About, Focus vibe, How it works, Accommodation, Who it's for, Wave
+            info, approximate budget and the members list now live in the
+            Overview tab (above / read-only). Everything below is Plan-only. */}
 
         {/* Group Gear — shared items the host wants the group to bring. Shown to
             approved members even when empty so they can still request an item. */}
@@ -1140,177 +1280,73 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           <View style={styles.section}>
             <View style={styles.packingHeader}>
               <Text style={styles.sectionTitle}>Your gear</Text>
-              {isHost && !isCancelled && !editingPacking && (
+              {isHost && !isCancelled && (
                 <TouchableOpacity
-                  onPress={handleStartEditPacking}
-                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                  accessibilityLabel="Edit personal packing list"
+                  style={styles.editSuggestedBtn}
+                  onPress={() => setEditSuggestedSheetOpen(true)}
+                  activeOpacity={0.7}
+                  accessibilityLabel="Edit suggested gear"
                 >
-                  <Ionicons name="create-outline" size={18} color="#7B7B7B" />
+                  <Ionicons name="create-outline" size={15} color="#0788B0" />
+                  <Text style={styles.editSuggestedBtnText}>Edit suggested</Text>
+                  <HostTag />
                 </TouchableOpacity>
               )}
             </View>
 
-            {(
-              editingPacking ? (
+            {/* Compact summary — tap to open the full list (check / add). */}
+            <TouchableOpacity
+              style={styles.gearSummaryCard}
+              onPress={() => setPersonalGearSheetOpen(true)}
+              activeOpacity={0.7}
+            >
+              {gearTotalCount > 0 ? (
                 <>
-                  <Text style={styles.muted}>One item per line.</Text>
-                  <TextInput
-                    style={styles.packingTextarea}
-                    multiline
-                    value={groupGearDraft}
-                    onChangeText={setGroupGearDraft}
-                    placeholder={'wax\nsunscreen\npassport\nboard bag'}
-                    placeholderTextColor="#B0B0B0"
-                    autoCapitalize="none"
-                    editable={!savingPacking}
-                  />
-                  <View style={styles.packingActions}>
-                    <TouchableOpacity
-                      style={styles.packingCancel}
-                      onPress={handleCancelEditPacking}
-                      disabled={savingPacking}
-                    >
-                      <Text style={styles.packingCancelText}>Cancel</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.packingSave, savingPacking && styles.manageBtnDisabled]}
-                      onPress={handleSavePacking}
-                      disabled={savingPacking}
-                    >
-                      {savingPacking ? (
-                        <ActivityIndicator color="#FFFFFF" />
-                      ) : (
-                        <Text style={styles.packingSaveText}>Save</Text>
-                      )}
-                    </TouchableOpacity>
+                  <Text style={styles.gearSummaryCount}>
+                    {gearTotalCount} {gearTotalCount === 1 ? 'item' : 'items'} · {gearDoneCount} packed
+                  </Text>
+                  {gearPreview.map(row => (
+                    <View key={`${row.kind}-${row.name}`} style={styles.gearSummaryRow}>
+                      <Ionicons
+                        name={row.done ? 'checkbox' : 'square-outline'}
+                        size={18}
+                        color={row.done ? '#34C759' : '#B0B0B0'}
+                      />
+                      <Text
+                        style={[styles.gearSummaryItem, row.done && styles.gearSummaryItemDone]}
+                        numberOfLines={1}
+                      >
+                        {row.name}
+                      </Text>
+                      {row.kind === 'host' ? <HostTag /> : null}
+                    </View>
+                  ))}
+                  {gearHiddenCount > 0 ? (
+                    <Text style={styles.gearSummaryMore}>+{gearHiddenCount} more</Text>
+                  ) : null}
+                  <View style={styles.gearSummaryViewAllRow}>
+                    <Text style={styles.gearSummaryViewAll}>View all</Text>
+                    <Ionicons name="chevron-forward" size={14} color="#0788B0" />
                   </View>
                 </>
               ) : (
-                <>
-                  {gearTotalCount > 0 ? (
-                    <Text style={styles.muted}>
-                      {gearTotalCount} items · {gearDoneCount} done
-                    </Text>
-                  ) : (
-                    <Text style={styles.muted}>
-                      {isHost ? 'No items yet — tap the pencil to add suggestions.' : 'No items yet — tap "Add item" to start.'}
-                    </Text>
-                  )}
+                <Text style={styles.muted}>
+                  {isHost
+                    ? 'No gear yet — add suggestions for everyone or your own items.'
+                    : 'No gear yet — tap to start your list.'}
+                </Text>
+              )}
+            </TouchableOpacity>
 
-                  {/* Host items — shown to all participants with the "Host suggestion" tag. */}
-                  {(trip.group_gear ?? []).map(name => {
-                    const myItem = myGroupGear.find(it => it.name === name);
-                    const done = !!myItem?.done;
-                    const canToggle = !!currentUserId && (isHost || isApprovedMember) && !isCancelled;
-                    return (
-                      <TouchableOpacity
-                        key={`host-${name}`}
-                        style={styles.packingRow}
-                        onPress={() => canToggle && handleToggleGroupGearItem(name)}
-                        disabled={!canToggle}
-                        activeOpacity={canToggle ? 0.6 : 1}
-                      >
-                        <Ionicons
-                          name={done ? 'checkbox' : 'square-outline'}
-                          size={20}
-                          color={done ? '#34C759' : '#B0B0B0'}
-                        />
-                        <Text style={[styles.packingItemText, done && styles.packingItemTextDone]}>
-                          {name}
-                        </Text>
-                        <Text style={styles.hostSuggestionTag}>Host suggestion</Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-
-                  {/* Personal items — visible only to the user who added them. Trash icon to remove. */}
-                  {myPersonalGear.map(item => {
-                    const canToggle = !!currentUserId && (isHost || isApprovedMember) && !isCancelled;
-                    return (
-                      <View key={`mine-${item.name}`} style={styles.packingRow}>
-                        <TouchableOpacity
-                          style={styles.personalToggleHit}
-                          onPress={() => canToggle && handleTogglePersonalItem(item.name)}
-                          disabled={!canToggle}
-                          activeOpacity={canToggle ? 0.6 : 1}
-                        >
-                          <Ionicons
-                            name={item.done ? 'checkbox' : 'square-outline'}
-                            size={20}
-                            color={item.done ? '#34C759' : '#B0B0B0'}
-                          />
-                          <Text
-                            style={[styles.packingItemText, item.done && styles.packingItemTextDone]}
-                          >
-                            {item.name}
-                          </Text>
-                        </TouchableOpacity>
-                        {canToggle && (
-                          <TouchableOpacity
-                            onPress={() => handleRemovePersonalItem(item.name)}
-                            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                            accessibilityLabel={`Remove ${item.name}`}
-                          >
-                            <Ionicons name="trash-outline" size={18} color="#C0392B" />
-                          </TouchableOpacity>
-                        )}
-                      </View>
-                    );
-                  })}
-
-                  {/* Inline "+ Add item" editor for the current user. */}
-                  {(isHost || isApprovedMember) && !isCancelled && (
-                    addingPersonalItem ? (
-                      <View style={styles.personalAddEditor}>
-                        <TextInput
-                          style={styles.personalAddInput}
-                          value={personalItemDraft}
-                          onChangeText={setPersonalItemDraft}
-                          placeholder="e.g. passport, phone charger"
-                          placeholderTextColor="#9AA0A6"
-                          autoFocus
-                          editable={!savingPersonalItem}
-                          onSubmitEditing={handleSavePersonalItem}
-                          returnKeyType="done"
-                        />
-                        <View style={styles.personalAddActions}>
-                          <TouchableOpacity
-                            onPress={handleCancelAddPersonalItem}
-                            disabled={savingPersonalItem}
-                            style={styles.personalAddCancel}
-                          >
-                            <Text style={styles.personalAddCancelText}>Cancel</Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity
-                            onPress={handleSavePersonalItem}
-                            disabled={!personalItemDraft.trim() || savingPersonalItem}
-                            style={[
-                              styles.personalAddSave,
-                              (!personalItemDraft.trim() || savingPersonalItem) && styles.btnDisabled,
-                            ]}
-                          >
-                            {savingPersonalItem ? (
-                              <ActivityIndicator color="#FFFFFF" size="small" />
-                            ) : (
-                              <Text style={styles.personalAddSaveText}>Add</Text>
-                            )}
-                          </TouchableOpacity>
-                        </View>
-                      </View>
-                    ) : (
-                      <TouchableOpacity
-                        style={styles.personalAddBtn}
-                        onPress={handleStartAddPersonalItem}
-                        activeOpacity={0.7}
-                      >
-                        <Ionicons name="add" size={18} color="#0788B0" />
-                        <Text style={styles.personalAddBtnText}>Add item</Text>
-                      </TouchableOpacity>
-                    )
-                  )}
-                </>
-              )
+            {(isHost || isApprovedMember) && !isCancelled && (
+              <TouchableOpacity
+                style={styles.personalAddBtn}
+                onPress={() => setAddPersonalSheetOpen(true)}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="add" size={18} color="#0788B0" />
+                <Text style={styles.personalAddBtnText}>Add my item</Text>
+              </TouchableOpacity>
             )}
 
           </View>
@@ -1350,33 +1386,6 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           </View>
         )}
 
-        {/* Members (WhatsApp-style: count in title, rows separated by dividers) */}
-        <Section title={`${participants.length} ${participants.length === 1 ? 'Member' : 'Members'}`}>
-          {participants.length === 0 ? (
-            <Text style={styles.muted}>No participants yet.</Text>
-          ) : (
-            participants.map((p, idx) => (
-              <View key={p.user_id}>
-                <ParticipantCard
-                  participant={p}
-                  isMe={p.user_id === currentUserId}
-                  onPress={
-                    onViewUserProfile && p.user_id !== currentUserId
-                      ? () => onViewUserProfile(p.user_id)
-                      : undefined
-                  }
-                  onRemove={
-                    isHost && !isCancelled && p.role !== 'host' && removingUserId !== p.user_id
-                      ? handleRemoveParticipant
-                      : undefined
-                  }
-                />
-                {idx < participants.length - 1 && <View style={styles.memberDivider} />}
-              </View>
-            ))
-          )}
-        </Section>
-
         {/* Group breakdown — only when there's at least one member besides the host */}
         {hasNonHostMembers && (
           <Section title="Group breakdown">
@@ -1389,7 +1398,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           <Section
             title="Recent admin updates"
             headerRight={
-              isHost && !addingUpdate && !editingUpdateId ? (
+              isHost ? (
                 <TouchableOpacity
                   style={styles.addUpdateBtn}
                   onPress={handleStartAddUpdate}
@@ -1397,51 +1406,12 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
                 >
                   <Ionicons name="add" size={14} color="#222B30" />
                   <Text style={styles.addUpdateBtnText}>Add update</Text>
+                  <HostTag />
                 </TouchableOpacity>
               ) : null
             }
           >
-            {(addingUpdate || editingUpdateId) && (
-              <View style={styles.updateEditor}>
-                <TextInput
-                  style={styles.updateEditorInput}
-                  value={updateDraft}
-                  onChangeText={setUpdateDraft}
-                  placeholder="e.g. Updated accommodation"
-                  placeholderTextColor="#9AA0A6"
-                  multiline
-                  autoFocus
-                  editable={!savingUpdate}
-                />
-                <View style={styles.updateEditorActions}>
-                  <TouchableOpacity
-                    style={styles.updateEditorCancel}
-                    onPress={handleCancelUpdateDraft}
-                    disabled={savingUpdate}
-                  >
-                    <Text style={styles.updateEditorCancelText}>Cancel</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[
-                      styles.updateEditorSave,
-                      (!updateDraft.trim() || savingUpdate) && styles.updateEditorSaveDisabled,
-                    ]}
-                    onPress={handleSubmitUpdate}
-                    disabled={!updateDraft.trim() || savingUpdate}
-                  >
-                    {savingUpdate ? (
-                      <ActivityIndicator size="small" color="#FFFFFF" />
-                    ) : (
-                      <Text style={styles.updateEditorSaveText}>
-                        {editingUpdateId ? 'Save' : 'Post'}
-                      </Text>
-                    )}
-                  </TouchableOpacity>
-                </View>
-              </View>
-            )}
-
-            {adminUpdates.length === 0 && !addingUpdate && !editingUpdateId ? (
+            {adminUpdates.length === 0 ? (
               <Text style={styles.updatesEmpty}>No updates yet.</Text>
             ) : (
               adminUpdates.map(u => (
@@ -1487,9 +1457,12 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
             )}
           </View>
         )}
+        </>
+        )}
 
         <View style={{ height: 80 }} />
       </ScrollView>
+      </KeyboardAvoidingView>
 
       {/* Sticky CTA — only for the join flow (non-host, non-member, active trip) */}
       {!isHost && !isCancelled && !isApprovedMember && myRequest?.status !== 'approved' && (
@@ -1543,6 +1516,54 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         onClose={() => setJoinSheetOpen(false)}
         profile={myJoinProfile}
         onSubmit={handleSubmitJoinRequest}
+      />
+
+      {/* Admin update — host writes/edits an announcement. Driven by the same
+          addingUpdate / editingUpdateId state the list uses. */}
+      <AdminUpdateSheet
+        visible={addingUpdate || !!editingUpdateId}
+        mode={editingUpdateId ? 'edit' : 'add'}
+        initialBody={editingUpdateId ? (updateDraft ?? '') : ''}
+        saving={savingUpdate}
+        onClose={handleCancelUpdateDraft}
+        onSubmit={handleSubmitUpdateBody}
+      />
+
+      {/* Your gear — full personal list (check / remove), opens Add from here. */}
+      <PersonalGearSheet
+        visible={personalGearSheetOpen}
+        onClose={() => setPersonalGearSheetOpen(false)}
+        hostItems={trip.personal_gear_host_suggestion ?? []}
+        myHostState={myGroupGear}
+        myItems={myPersonalGear}
+        canEdit={(isHost || isApprovedMember) && !isCancelled}
+        onToggleHostItem={handleToggleGroupGearItem}
+        onTogglePersonalItem={handleTogglePersonalItem}
+        onRemovePersonalItem={handleRemovePersonalItem}
+        onAddPersonal={() => {
+          setPersonalGearSheetOpen(false);
+          setAddPersonalSheetOpen(true);
+        }}
+      />
+
+      {/* Add one item to my own personal list. */}
+      <AddPersonalGearSheet
+        visible={addPersonalSheetOpen}
+        onClose={() => setAddPersonalSheetOpen(false)}
+        existingNames={[
+          ...(trip.personal_gear_host_suggestion ?? []),
+          ...myPersonalGear.map(i => i.name),
+        ]}
+        saving={savingPersonalItem}
+        onSubmit={handleAddPersonalSubmit}
+      />
+
+      {/* Host edits the suggested gear list (everyone's checklist). */}
+      <EditSuggestedGearSheet
+        visible={editSuggestedSheetOpen}
+        onClose={() => setEditSuggestedSheetOpen(false)}
+        items={trip.personal_gear_host_suggestion ?? []}
+        onSave={handleSaveSuggestedGear}
       />
     </SafeAreaView>
   );
@@ -1654,6 +1675,7 @@ const styles = StyleSheet.create({
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFFFFF' },
   errorText: { color: '#7B7B7B' },
 
+  keyboardAvoider: { flex: 1 },
   scrollContent: { paddingBottom: 24 },
 
   // Top card — hero, title, action row (WhatsApp group header)
@@ -1828,6 +1850,62 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 10,
+  },
+  // "Edit suggested" host button (header of Your gear)
+  editSuggestedBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  editSuggestedBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#0788B0',
+  },
+  // Your gear — compact summary card (tap → full PersonalGearSheet)
+  gearSummaryCard: {
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    gap: 10,
+  },
+  gearSummaryCount: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#7B7B7B',
+  },
+  gearSummaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  gearSummaryItem: {
+    flex: 1,
+    fontSize: 15,
+    color: '#222B30',
+  },
+  gearSummaryItemDone: {
+    textDecorationLine: 'line-through',
+    color: '#9AA0A6',
+  },
+  gearSummaryMore: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#7B7B7B',
+    marginLeft: 28,
+  },
+  gearSummaryViewAllRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    marginTop: 2,
+  },
+  gearSummaryViewAll: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#0788B0',
   },
   packingToggleRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
   packingToggleChip: {

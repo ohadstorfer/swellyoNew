@@ -135,7 +135,9 @@ const DESCRIPTION_AMBER_THRESHOLD = 450;
 // became waveShape (single value). v3 → v4: Flow C fixed pricing
 // (costPerPerson + priceInclusions) added. v4 → v5: priceInclusions.custom
 // changed from a string to an array of {title, description}.
-const WIZARD_STATE_VERSION = 5;
+// v5 -> v6: hostingStyle (A/B/C) is now stored in the draft so the resume prompt
+// only offers to restore a draft into the same flow it was started in.
+export const WIZARD_STATE_VERSION = 6;
 
 // Step KEYS — flat step list. Preview is the final step (publishes directly).
 type StepKey = 'audience' | 'basics' | 'vibez' | 'budget' | 'aboutYou' | 'preview';
@@ -250,6 +252,9 @@ type SheetKey =
 // -----------------------------------------------------------------------------
 interface WizardState extends Record<string, unknown> {
   version: number;
+  // Which flow this draft belongs to (A/B/C). Used to gate the resume prompt so
+  // a draft started in one flow isn't restored into another.
+  hostingStyle: HostingStyle;
 
   // Step 1 — audience
   ageMin: string;
@@ -308,6 +313,8 @@ interface WizardState extends Record<string, unknown> {
 
 const INITIAL_STATE: WizardState = {
   version: WIZARD_STATE_VERSION,
+  // Overwritten with the real flow when the wizard mounts (see initialState memo).
+  hostingStyle: 'A',
   // Age has no default — host must enter.
   ageMin: '',
   ageMax: '',
@@ -500,6 +507,7 @@ const stateFromTrip = (trip: GroupTrip): WizardState => {
   ) as WaveShapeKind[];
   return {
     version: WIZARD_STATE_VERSION,
+    hostingStyle: trip.hosting_style ?? 'A',
     ageMin: trip.age_min != null ? String(trip.age_min) : '',
     ageMax: trip.age_max != null ? String(trip.age_max) : '',
     skillLevels,
@@ -944,6 +952,9 @@ export interface CreateTripFlowAProps {
   onCancel: () => void;
   initialTrip?: GroupTrip;
   hostingStyle?: HostingStyle;
+  /** When true, load the saved draft into state on mount (the chooser already
+   *  confirmed "Continue your trip?"). Ignored in edit mode. */
+  resumeDraft?: boolean;
 }
 
 export default function CreateTripFlowA({
@@ -952,6 +963,7 @@ export default function CreateTripFlowA({
   onCancel,
   initialTrip,
   hostingStyle = 'A',
+  resumeDraft = false,
 }: CreateTripFlowAProps): React.ReactElement {
   const editMode = !!initialTrip;
   const effectiveStyle: HostingStyle = initialTrip?.hosting_style ?? hostingStyle;
@@ -976,15 +988,19 @@ export default function CreateTripFlowA({
 
   // ---- Wizard state (draft-backed) ----------------------------------------
   const initialState = useMemo<WizardState>(
-    () => (initialTrip ? stateFromTrip(initialTrip) : INITIAL_STATE),
+    () =>
+      initialTrip
+        ? stateFromTrip(initialTrip)
+        : { ...INITIAL_STATE, hostingStyle: effectiveStyle },
     // initialTrip is stable for the wizard's lifetime; intentionally empty deps.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
-  const { state, setState, hasRestoredDraft, clearDraft, startSaving } =
+  const { state, setState, clearDraft, startSaving, saveNow } =
     useTripWizardDraft<WizardState>(initialState, {
       editMode,
       tripId: initialTrip?.id ?? null,
+      resume: resumeDraft,
     });
 
   // ---- Validation registry ------------------------------------------------
@@ -1040,28 +1056,11 @@ export default function CreateTripFlowA({
     }
   }, [isFixedFlow, state.datesMode, setState]);
 
-  const [showResumeBanner, setShowResumeBanner] = useState(false);
-
   // Budget estimate (transient — not persisted)
   const [budgetEstimate, setBudgetEstimate] = useState<BudgetEstimate | null>(null);
   const [budgetLoading, setBudgetLoading] = useState(false);
   const [budgetError, setBudgetError] = useState<string | null>(null);
   const [lastEstimateKey, setLastEstimateKey] = useState<string | null>(null);
-
-  // Show the resume banner whenever a draft restore is detected — but if the
-  // restored draft is from a stale schema version, drop it instead.
-  useEffect(() => {
-    if (!hasRestoredDraft) return;
-    const v = (state as WizardState).version;
-    if (v !== WIZARD_STATE_VERSION) {
-      void clearDraft();
-      setState(initialState);
-      setShowResumeBanner(false);
-      return;
-    }
-    setShowResumeBanner(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasRestoredDraft]);
 
   // -----------------------------------------------------------------------
   // Helpers tied to component scope
@@ -1069,9 +1068,14 @@ export default function CreateTripFlowA({
   const update = useCallback(
     <K extends keyof WizardState>(key: K, value: WizardState[K]) => {
       setState(prev => ({ ...prev, [key]: value }));
-      if (!hasBeenTouched) setHasBeenTouched(true);
+      if (!hasBeenTouched) {
+        setHasBeenTouched(true);
+        // Begin autosave the moment anything changes, so a crash / app-close
+        // before reaching "Next" still leaves a restorable draft.
+        if (!editMode) startSaving();
+      }
     },
-    [setState, hasBeenTouched],
+    [setState, hasBeenTouched, editMode, startSaving],
   );
 
   const startDateObj = useMemo(() => parseISODate(state.startDateISO), [state.startDateISO]);
@@ -1334,11 +1338,17 @@ export default function CreateTripFlowA({
     setStep(steps[idx - 1]);
   }, [step, steps]);
 
-  // Discard guard — only triggers if the user has interacted with the form.
+  // Exit guard — confirms before leaving, then SAVES the draft (never deletes).
+  // The draft is only cleared by publishing or by "Start fresh" in the resume
+  // prompt. In edit mode there's no draft, so we just close.
   const { guardedCancel } = useDiscardConfirm({
-    dirty: hasBeenTouched,
+    dirty: hasBeenTouched && !editMode,
+    title: 'Are you sure you want to exit?',
+    message: 'Your progress will be saved — you can pick it back up next time.',
+    discardLabel: 'Yes, exit',
+    keepEditingLabel: 'No',
     onDiscard: async () => {
-      await clearDraft();
+      if (!editMode && hasBeenTouched) await saveNow();
       onCancel();
     },
   });
@@ -1516,7 +1526,7 @@ export default function CreateTripFlowA({
           // All trips are public — no visibility UI. Always write 'public'.
           visibility: 'public',
 
-          group_gear: [],
+          personal_gear_host_suggestion: [],
         };
         const trip = await createGroupTrip(hostId, input);
 
@@ -1631,43 +1641,6 @@ export default function CreateTripFlowA({
   // -----------------------------------------------------------------------
   // STEP 1 — AUDIENCE (all rows open sheets)
   // -----------------------------------------------------------------------
-  const renderResumeBanner = () =>
-    showResumeBanner ? (
-      <View style={localStyles.resumeBanner}>
-        <View style={localStyles.resumeBannerIconWrap}>
-          <Ionicons name="bookmark-outline" size={18} color={COLORS.brandTeal} />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={localStyles.resumeBannerTitle}>Pick up where you left off?</Text>
-          <Text style={localStyles.resumeBannerBody}>Your unsaved draft was restored.</Text>
-        </View>
-        <TouchableOpacity
-          accessibilityRole="button"
-          accessibilityLabel="Start fresh"
-          onPress={async () => {
-            await clearDraft();
-            setState(INITIAL_STATE);
-            setShowResumeBanner(false);
-            setHasBeenTouched(false);
-            draftStartedRef.current = false;
-            clearErrors();
-          }}
-          style={localStyles.resumeBannerBtn}
-        >
-          <Text style={localStyles.resumeBannerBtnText}>Start fresh</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          accessibilityRole="button"
-          accessibilityLabel="Dismiss"
-          onPress={() => setShowResumeBanner(false)}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          style={{ marginLeft: 8 }}
-        >
-          <Ionicons name="close" size={20} color={COLORS.textMuted} />
-        </TouchableOpacity>
-      </View>
-    ) : null;
-
   const renderAudienceStep = () => {
     // The Wave card combines shape + size into a single value per the Figma:
     // "Wally, 4 - 8 ft".
@@ -1686,7 +1659,6 @@ export default function CreateTripFlowA({
 
     return (
       <View>
-        {renderResumeBanner()}
         <View style={localStyles.cardStack}>
           {/* Top row — two narrow side-by-side cards (Figma node 12216:25261). */}
           <View style={localStyles.topRow}>
@@ -2586,6 +2558,7 @@ export default function CreateTripFlowA({
         secondaryLabel={stepIdx === 0 ? 'Cancel' : 'Back'}
         onPrimary={onPrimary}
         onSecondary={onSecondary}
+        onClose={guardedCancel}
         submitting={submitting}
         hideProgress
         flushContent={step === 'preview'}

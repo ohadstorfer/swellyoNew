@@ -11,6 +11,8 @@ interface CreateTripWizardProps {
   onCancel: () => void;
   /** When provided, runs in edit mode — style is locked from the trip row. */
   initialTrip?: GroupTrip;
+  /** Load the saved draft on mount (chooser confirmed "Continue your trip?"). */
+  resumeDraft?: boolean;
   /** Fired with `true` on mount and `false` on unmount, so the parent can show
    *  a confirm-discard prompt while the wizard is open. The chooser used to gate
    *  this — now that the chooser lives in TripsScreen, the wizard is always
@@ -34,6 +36,7 @@ export default function CreateTripWizard({
   onCancel,
   initialTrip,
   onStartedChange,
+  resumeDraft,
 }: CreateTripWizardProps) {
   // Edit mode locks style to the trip row's hosting_style.
   const effectiveStyle: HostingStyle = initialTrip?.hosting_style ?? hostingStyle;
@@ -53,6 +56,7 @@ export default function CreateTripWizard({
       onCancel={onCancel}
       initialTrip={initialTrip}
       hostingStyle={effectiveStyle}
+      resumeDraft={resumeDraft}
     />
   );
 }

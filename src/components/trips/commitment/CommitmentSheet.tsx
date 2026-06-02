@@ -90,6 +90,13 @@ export const CommitmentSheet: React.FC<Props> = ({
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={close}>
+      {/* KAV wraps the whole bottom-anchored sheet so the ENTIRE sheet (incl. the
+          footer Submit button) rises above the keyboard, not just the body. */}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={styles.flex}
+        keyboardVerticalOffset={0}
+      >
       <Pressable style={styles.backdrop} onPress={close}>
         <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
           <View style={styles.header}>
@@ -100,11 +107,7 @@ export const CommitmentSheet: React.FC<Props> = ({
             <View style={styles.closeBtn} />
           </View>
 
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            style={styles.flex}
-            keyboardVerticalOffset={0}
-          >
+          <>
             <ScrollView
               contentContainerStyle={styles.body}
               keyboardShouldPersistTaps="handled"
@@ -174,9 +177,10 @@ export const CommitmentSheet: React.FC<Props> = ({
                 )}
               </TouchableOpacity>
             </View>
-          </KeyboardAvoidingView>
+          </>
         </Pressable>
       </Pressable>
+      </KeyboardAvoidingView>
     </Modal>
   );
 };
@@ -190,7 +194,7 @@ const styles = StyleSheet.create({
     maxHeight: SHEET_MAX_HEIGHT,
     width: '100%',
   },
-  flex: { flexShrink: 1 },
+  flex: { flex: 1 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
