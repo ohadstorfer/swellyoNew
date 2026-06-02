@@ -42,6 +42,7 @@ import { ProfileImage } from '../components/ProfileImage';
 import { ConversationListSkeleton } from '../components/skeletons';
 import { useConversationsStack } from '../navigation/ConversationsStack';
 import { useTutorial } from '../context/TutorialContext';
+import { NotificationCenter } from '../components/notifications/NotificationCenter';
 
 interface ConversationsScreenProps {
   onConversationPress?: (conversationId: string) => void;
@@ -863,6 +864,7 @@ export default function ConversationsScreen({
         collapsable={false}
       >
       <TouchableOpacity
+        testID={`conversation-row-${conv.id}`}
         style={styles.conversationItem}
         onPress={() => handleConversationPress(conv)}
         activeOpacity={0.2}
@@ -998,6 +1000,7 @@ export default function ConversationsScreen({
     return (
       <View collapsable={false}>
       <TouchableOpacity
+        testID="conversations-swelly-button"
         style={styles.swellyContainer}
         onPress={() => onSwellyPress?.()}
       >
@@ -1133,7 +1136,8 @@ export default function ConversationsScreen({
     <Container style={styles.container} {...(Platform.OS !== 'web' && { edges: ['top'] as const })}>
       {/* Header - Dark background */}
       <View style={styles.header}>
-        <TouchableOpacity 
+        <TouchableOpacity
+          testID="conversations-profile-button"
           style={styles.headerLeft}
           onPress={onProfilePress}
           activeOpacity={0.7}
@@ -1158,16 +1162,22 @@ export default function ConversationsScreen({
           </View>
         </TouchableOpacity>
 
-        <TouchableOpacity 
-          style={styles.headerButton}
-          onPress={() => {
-            console.log('Menu button pressed, showing menu');
-            setShowMenu(true);
-          }}
-        >
-          <ThreeDotsIcon />
-        </TouchableOpacity>
-        
+        <View style={styles.headerRight}>
+          {/* Notification center — bell + realtime overlay */}
+          <NotificationCenter userId={currentUserId} />
+
+          <TouchableOpacity
+            testID="conversations-menu-button"
+            style={styles.headerButton}
+            onPress={() => {
+              console.log('Menu button pressed, showing menu');
+              setShowMenu(true);
+            }}
+          >
+            <ThreeDotsIcon />
+          </TouchableOpacity>
+        </View>
+
         {/* Gradient border at bottom */}
         <LinearGradient
           colors={['#05BCD3', '#DBCDBC']}
@@ -1778,6 +1788,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#333333',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
   },
   filterContainer: {
     flexDirection: 'row',

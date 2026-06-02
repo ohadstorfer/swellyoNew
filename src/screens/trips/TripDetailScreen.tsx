@@ -42,6 +42,7 @@ import {
   getTripParticipants,
   getMyJoinRequest,
   listPendingRequests,
+  listDeclinedRequests,
   requestToJoinTrip,
   withdrawJoinRequest,
   approveJoinRequest,
@@ -286,6 +287,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   const [participants, setParticipants] = useState<EnrichedParticipant[]>([]);
   const [myRequest, setMyRequest] = useState<GroupTripJoinRequest | null>(null);
   const [pendingRequests, setPendingRequests] = useState<EnrichedJoinRequest[]>([]);
+  const [declinedRequests, setDeclinedRequests] = useState<EnrichedJoinRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [processingRequestId, setProcessingRequestId] = useState<string | null>(null);
@@ -373,17 +375,20 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     if (currentUserId && tripData) {
       const userIsHost = tripData.host_id === currentUserId;
       if (userIsHost) {
-        const [pending, gearReqs] = await Promise.all([
+        const [pending, declined, gearReqs] = await Promise.all([
           listPendingRequests(tripId),
+          listDeclinedRequests(tripId),
           listGearRequests(tripId, 'pending'),
         ]);
         setPendingRequests(pending);
+        setDeclinedRequests(declined);
         setGearRequests(gearReqs);
         setMyRequest(null);
       } else {
         const req = await getMyJoinRequest(tripId, currentUserId);
         setMyRequest(req);
         setPendingRequests([]);
+        setDeclinedRequests([]);
         setGearRequests([]);
       }
     }
@@ -467,8 +472,10 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     setProcessingRequestId(requestId);
     try {
       await approveJoinRequest(requestId);
-      // Optimistic: remove from pending and refetch participants
+      // Optimistic: remove from pending/declined and refetch participants. The
+      // same handler reverses a previously-declined request (declined → approved).
       setPendingRequests(prev => prev.filter(r => r.id !== requestId));
+      setDeclinedRequests(prev => prev.filter(r => r.id !== requestId));
       const updated = await getTripParticipants(tripId);
       setParticipants(updated);
     } catch (e: any) {
@@ -507,8 +514,17 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   const handleDecline = async (requestId: string) => {
     setProcessingRequestId(requestId);
     try {
+      const moved = pendingRequests.find(r => r.id === requestId);
       await declineJoinRequest(requestId);
+      // Move it out of pending and into the declined list so the host can still
+      // reverse the decision later.
       setPendingRequests(prev => prev.filter(r => r.id !== requestId));
+      if (moved) {
+        setDeclinedRequests(prev => [
+          { ...moved, status: 'declined' as const },
+          ...prev.filter(r => r.id !== requestId),
+        ]);
+      }
     } catch (e: any) {
       Alert.alert('Could not decline', e?.message || 'Please try again.');
     } finally {
@@ -827,10 +843,10 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     await refreshGear();
   };
 
-  const handleApproveGearRequest = async (request: EnrichedGearRequest) => {
+  const handleApproveGearRequest = async (request: EnrichedGearRequest, neededQty: number) => {
     setProcessingGearRequestId(request.id);
     try {
-      await approveGearRequest(request.id, 1);
+      await approveGearRequest(request.id, neededQty);
       await Promise.all([refreshGear(), refreshGearRequests()]);
     } catch (e: any) {
       Alert.alert('Could not approve', e?.message || 'Please try again.');
@@ -1024,6 +1040,23 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           </Section>
         )}
 
+        {/* Declined requests (host only) — lets the host reverse a decision. */}
+        {isHost && declinedRequests.length > 0 && (
+          <Section title={`Declined requests (${declinedRequests.length})`}>
+            {declinedRequests.map(r => (
+              <PendingRequestCard
+                key={r.id}
+                request={r}
+                onApprove={handleApprove}
+                onDecline={handleDecline}
+                isProcessing={processingRequestId === r.id}
+                hideDecline
+                approveLabel="Approve anyway"
+              />
+            ))}
+          </Section>
+        )}
+
         {/* About, Focus vibe, How it works, Accommodation, Who it's for and
             Wave info are all rendered by TripDetailView above. */}
 
@@ -1039,8 +1072,9 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           </Section>
         ) : null}
 
-        {/* Group Gear — shared items the host wants the group to bring. */}
-        {(gearItems.length > 0 || isHost) && !isCancelled && (
+        {/* Group Gear — shared items the host wants the group to bring. Shown to
+            approved members even when empty so they can still request an item. */}
+        {(gearItems.length > 0 || isHost || isApprovedMember) && !isCancelled && (
           <View style={styles.section}>
             <View style={styles.gearHeaderRow}>
               <View>
@@ -1099,8 +1133,10 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           </View>
         )}
 
-        {/* Personal packing list — per-user items with done state. */}
-        {((trip.group_gear && trip.group_gear.length > 0) || (isHost && !isCancelled)) && (
+        {/* Personal packing list — per-user items with done state. Always shown
+            to the host and approved members so they can add their own items even
+            when the host hasn't suggested any. */}
+        {(isHost || isApprovedMember) && !isCancelled && (
           <View style={styles.section}>
             <View style={styles.packingHeader}>
               <Text style={styles.sectionTitle}>Your gear</Text>
@@ -1556,9 +1592,23 @@ const CtaButton: React.FC<{
     );
   }
   if (myRequest?.status === 'declined') {
+    // Previously declined → let them try again. A fresh request replaces the
+    // old declined row (see requestToJoinTrip), so the host sees a new pending.
     return (
-      <View style={[styles.ctaBtn, styles.ctaDeclined]}>
-        <Text style={styles.ctaDeclinedText}>Request declined</Text>
+      <View style={styles.ctaDeclinedRow}>
+        <Text style={styles.ctaDeclinedNote}>Your last request was declined.</Text>
+        <TouchableOpacity
+          style={[styles.ctaBtn, styles.ctaPrimary]}
+          onPress={onRequest}
+          disabled={submitting}
+          activeOpacity={0.85}
+        >
+          {submitting ? (
+            <ActivityIndicator color="#FFFFFF" />
+          ) : (
+            <Text style={styles.ctaPrimaryText}>Request again</Text>
+          )}
+        </TouchableOpacity>
       </View>
     );
   }
@@ -1756,6 +1806,8 @@ const styles = StyleSheet.create({
   ctaWithdrawText: { color: '#555', fontWeight: '600', fontSize: 14 },
   ctaDeclined: { backgroundColor: '#F2F2F2' },
   ctaDeclinedText: { color: '#7B7B7B', fontWeight: '600', fontSize: 14 },
+  ctaDeclinedRow: { gap: 8 },
+  ctaDeclinedNote: { color: '#7B7B7B', fontSize: 12, textAlign: 'center' },
 
   cancelledBanner: {
     marginHorizontal: 16,

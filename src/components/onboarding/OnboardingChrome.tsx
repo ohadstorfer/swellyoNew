@@ -83,7 +83,7 @@ export const OnboardingHeader: React.FC<HeaderProps> = ({ stepKey }) => {
   return (
     <>
       <View style={[styles.header, isDesktop && styles.headerDesktop]}>
-        <TouchableOpacity onPress={callBack} style={styles.backButton}>
+        <TouchableOpacity testID="onboarding-back-button" onPress={callBack} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color="#222B30" />
         </TouchableOpacity>
 
@@ -139,6 +139,7 @@ export const OnboardingFooter: React.FC<FooterProps> = ({ isLoading }) => {
       ]}
     >
       <TouchableOpacity
+        testID="onboarding-next-button"
         onPress={callNext}
         activeOpacity={0.8}
         disabled={disabled}

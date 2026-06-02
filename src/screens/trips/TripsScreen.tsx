@@ -288,7 +288,7 @@ const MyTripsView: React.FC<{
       <View style={styles.emptyState}>
         <Ionicons name="airplane-outline" size={48} color="#B0B0B0" />
         <Text style={styles.emptyText}>You haven't joined or created any trips yet.</Text>
-        <TouchableOpacity style={styles.emptyCta} onPress={onGoCreate}>
+        <TouchableOpacity testID="trips-empty-create-button" style={styles.emptyCta} onPress={onGoCreate}>
           <Text style={styles.emptyCtaText}>Create your first trip</Text>
         </TouchableOpacity>
       </View>
@@ -426,7 +426,7 @@ export default function TripsScreen({ onBack, initialTripId, onOpenGroupChat, on
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
       <View style={[styles.header, { paddingTop: 8 }]}>
-        <TouchableOpacity onPress={onBack} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+        <TouchableOpacity testID="trips-back-button" onPress={onBack} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Ionicons name="chevron-back" size={28} color="#222B30" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Trips</Text>

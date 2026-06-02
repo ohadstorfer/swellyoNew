@@ -99,6 +99,18 @@ async function generatePresignedUrl(
 }
 
 /**
+ * Build a permanent, plain (un-signed) public S3 URL for a key.
+ * Only valid for objects under a public-read prefix (see bucket policy).
+ * Used for PROFILE videos, which are public content shown on every profile —
+ * a presigned URL there would expire after 7 days and silently break playback.
+ */
+function publicS3Url(key: string): string {
+  const host = `${AWS_S3_BUCKET}.s3.${AWS_REGION}.amazonaws.com`
+  const encodedKey = key.split('/').map(encodeURIComponent).join('/')
+  return `https://${host}/${encodedKey}`
+}
+
+/**
  * Check if an object exists in S3 using a HEAD request with presigned URL
  */
 async function s3ObjectExists(key: string): Promise<boolean> {
@@ -254,14 +266,19 @@ serve(async (req) => {
         )
       }
 
-      // Generate a presigned GET URL (7 days)
-      const downloadUrl = await generatePresignedUrl('GET', processedKey, 7 * 24 * 3600)
-
       // Only update `surfers.profile_video_url` for SURF-LEVEL (profile) uploads.
       // DM video uploads share this Edge Function but store under `processed/dm/...`
       // — those are linked to a specific message row, not to the user's profile,
       // so writing them to `surfers` would overwrite the user's real surf video.
       const isDmVideo = processedKey.startsWith('processed/dm/')
+
+      // Profile videos are PUBLIC content (shown on every profile) and live under
+      // a public-read S3 prefix, so we persist a permanent plain URL that never
+      // expires. DM videos are PRIVATE 1:1 message content and must stay behind a
+      // short-lived presigned URL — they are NOT public-readable.
+      const downloadUrl = isDmVideo
+        ? await generatePresignedUrl('GET', processedKey, 7 * 24 * 3600)
+        : publicS3Url(processedKey)
 
       if (!isDmVideo) {
         const { error: updateError } = await supabaseAdmin
@@ -272,7 +289,7 @@ serve(async (req) => {
         if (updateError) {
           console.error('[process-profile-video-s3] DB update failed:', updateError)
         } else {
-          console.log(`[process-profile-video-s3] DB updated with processed URL for user ${userId}`)
+          console.log(`[process-profile-video-s3] DB updated with public URL for user ${userId}`)
         }
       } else {
         console.log(`[process-profile-video-s3] DM video processed — skipping surfers update for ${processedKey}`)
@@ -284,6 +301,86 @@ serve(async (req) => {
           ready: true,
           videoUrl: downloadUrl,
         }),
+        { status: 200, headers: corsHeaders }
+      )
+    }
+
+    // ─── Action: sign-dm-video ──────────────────────────────────────────────
+    // DM videos are PRIVATE (the `processed/dm/*` prefix is explicitly denied
+    // public read), so we never persist a playable URL. Instead the client asks
+    // for a fresh short-lived presigned URL each time it opens a DM video. The
+    // requester MUST be a member of the conversation the video belongs to.
+
+    if (action === 'sign-dm-video') {
+      const { storagePath } = body
+
+      if (!storagePath || typeof storagePath !== 'string') {
+        return new Response(
+          JSON.stringify({ success: false, error: 'Missing storagePath' }),
+          { status: 400, headers: corsHeaders }
+        )
+      }
+
+      // Keys look like:
+      //   uploads/dm/{conversationId}/{messageId}/video-{ts}.mp4           (original)
+      //   processed/dm/{conversationId}/{messageId}/video-{ts}_compressed.mp4 (processed)
+      const parts = storagePath.split('/')
+      if ((parts[0] !== 'uploads' && parts[0] !== 'processed') || parts[1] !== 'dm' || parts.length < 4) {
+        return new Response(
+          JSON.stringify({ success: false, error: 'Not a DM video path' }),
+          { status: 400, headers: corsHeaders }
+        )
+      }
+      const conversationId = parts[2]
+
+      // Authorize: the requester must be a member of this conversation.
+      const { data: membership } = await supabaseAdmin
+        .from('conversation_members')
+        .select('user_id')
+        .eq('conversation_id', conversationId)
+        .eq('user_id', user.id)
+        .maybeSingle()
+
+      if (!membership) {
+        return new Response(
+          JSON.stringify({ success: false, error: 'Not a conversation member' }),
+          { status: 403, headers: corsHeaders }
+        )
+      }
+
+      // Derive both candidate keys from whichever one we were given. The processed
+      // key shares the original's prefix + timestamp (see get-upload-url).
+      let processedKey: string
+      let originalKey: string
+      if (storagePath.startsWith('uploads/')) {
+        originalKey = storagePath
+        processedKey = storagePath.replace(/^uploads\//, 'processed/').replace(/\.mp4$/, '_compressed.mp4')
+      } else {
+        processedKey = storagePath
+        originalKey = storagePath.replace(/^processed\//, 'uploads/').replace(/_compressed\.mp4$/, '.mp4')
+      }
+
+      // Prefer the compressed version; fall back to the original while MediaConvert
+      // is still running. Short TTL — long enough for a viewing session, no longer.
+      const SIGN_TTL_SECONDS = 6 * 60 * 60
+      let keyToSign: string | null = null
+      if (await s3ObjectExists(processedKey)) {
+        keyToSign = processedKey
+      } else if (await s3ObjectExists(originalKey)) {
+        keyToSign = originalKey
+      }
+
+      if (!keyToSign) {
+        return new Response(
+          JSON.stringify({ success: true, ready: false, message: 'Video not available yet' }),
+          { status: 200, headers: corsHeaders }
+        )
+      }
+
+      const videoUrl = await generatePresignedUrl('GET', keyToSign, SIGN_TTL_SECONDS)
+
+      return new Response(
+        JSON.stringify({ success: true, ready: true, videoUrl }),
         { status: 200, headers: corsHeaders }
       )
     }

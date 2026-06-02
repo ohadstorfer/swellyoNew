@@ -188,7 +188,18 @@
       "mcp__claude_ai_Gmail__*",
       "mcp__claude_ai_Google_Drive__*",
       "mcp__claude_ai_Google_Calendar__*",
-      "mcp__ide__*"
+      "mcp__ide__*",
+      "Bash(~/.maestro/bin/maestro:*)",
+      "Bash(maestro:*)",
+      "Bash(npx expo-mcp:*)",
+      "Bash(EXPO_UNSTABLE_MCP_SERVER=1 npx expo start:*)",
+      "Bash(xcrun simctl io:*)",
+      "Bash(xcrun simctl ui:*)",
+      "Bash(~/Library/Android/sdk/platform-tools/adb:*)",
+      "Bash(open -a Simulator)",
+      "mcp__maestro__*",
+      "mcp__expo__*",
+      "Bash(open *)"
     ],
     "deny": [
       "mcp__supabase__apply_migration",
@@ -200,5 +211,11 @@
       "Bash(npx supabase db:*)",
       "Bash(npx supabase migration:*)"
     ]
-  }
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "supabase",
+    "maestro",
+    "expo"
+  ]
 }
