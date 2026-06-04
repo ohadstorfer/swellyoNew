@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -6,16 +6,19 @@ import {
   TouchableOpacity,
   FlatList,
   Image,
-  ActivityIndicator,
   RefreshControl,
   Modal,
   Alert,
   ScrollView,
   Platform,
+  Dimensions,
+  Animated,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+const FONT_INTER = Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter';
+const FONT_MONTSERRAT = Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat';
 import { useOnboarding } from '../../context/OnboardingContext';
 import {
   GroupTrip,
@@ -27,6 +30,8 @@ import {
   listMyTripsByBucket,
 } from '../../services/trips/groupTripsService';
 import CreateTripWizard from './CreateTripWizard';
+import { MyTripsSkeleton, ExploreDeckSkeleton } from '../../components/skeletons';
+import { FadeInView } from '../../components/FadeInView';
 import { WIZARD_STATE_VERSION } from './CreateTripFlowA';
 import {
   peekTripWizardDraft,
@@ -49,19 +54,19 @@ const HOSTING_STYLE_OPTIONS: {
     key: 'A',
     title: 'Planned Together',
     desc: 'Group votes on key decisions.\nYou approve what moves forward.',
-    image: Images.whoIsItFor.surfLevel,
+    image: Images.createTrip.plannedTogether,
   },
   {
     key: 'B',
     title: 'Hosted (you lead decisions)',
     desc: 'You make the decisions.\nMembers join and support the plan.',
-    image: Images.whoIsItFor.theWave,
+    image: Images.createTrip.hosted,
   },
   {
     key: 'C',
     title: 'Trip Operator',
     desc: 'Everything is already decided.\nJoin knowing exactly what to expect.',
-    image: Images.whoIsItFor.ageRange,
+    image: Images.createTrip.tripOperator,
   },
 ];
 
@@ -239,7 +244,7 @@ const TripCard: React.FC<{
       {/* Status badge */}
       <View style={[styles.statusBadge, { backgroundColor: badge.bg }]}>
         <View style={styles.statusIcon}>
-          <Ionicons name={badge.icon} size={16} color="#0A0A0A" />
+          <Ionicons name={badge.icon} size={18} color="#0A0A0A" />
         </View>
         <View style={styles.statusTextRow}>
           <Text style={styles.statusLabel}>{badge.label}</Text>
@@ -294,20 +299,251 @@ const TripFilterBar: React.FC<{
 };
 
 // ---------------------------------------------------------------------------
+// Explore card (Figma 12506:16019) — richer than My Trips: trip-type pill,
+// price, dates, spots-left and occupancy instead of a personal status badge.
+// ---------------------------------------------------------------------------
+const TRIP_TYPE: Record<
+  HostingStyle,
+  { label: string; icon: keyof typeof Ionicons.glyphMap }
+> = {
+  A: { label: 'Planned Together', icon: 'people-outline' },
+  B: { label: 'Hosted', icon: 'star-outline' },
+  C: { label: 'Fixed Plan', icon: 'briefcase-outline' },
+};
+
+const formatTripPrice = (trip: GroupTrip): string | null => {
+  if (trip.cost_per_person != null) return `$${trip.cost_per_person}`;
+  if (trip.budget_min != null && trip.budget_max != null) {
+    return `$${trip.budget_min} - ${trip.budget_max}`;
+  }
+  return null;
+};
+
+const ExploreTripCard: React.FC<{
+  trip: GroupTrip;
+  meta?: TripCardMeta;
+  onPress?: () => void;
+}> = ({ trip, meta, onPress }) => {
+  const type = TRIP_TYPE[trip.hosting_style] ?? TRIP_TYPE.A;
+  const avatars = meta?.memberAvatars ?? [];
+  const count = meta?.totalCount ?? trip.participant_count ?? 0;
+  const max = trip.max_participants;
+  const spotsLeft = max != null ? Math.max(0, max - count) : null;
+  const occupancy = max != null ? `${count}/${max}` : `${count}`;
+  const price = formatTripPrice(trip);
+
+  const headline = trip.title || formatDestination(trip);
+  const location = formatDestination(trip);
+  const showLocation = !!trip.title && !!location && location !== headline;
+
+  return (
+    <TouchableOpacity
+      style={styles.exCard}
+      activeOpacity={onPress ? 0.9 : 1}
+      onPress={onPress}
+      disabled={!onPress}
+    >
+      {trip.hero_image_url ? (
+        <Image source={{ uri: trip.hero_image_url }} style={styles.cardImageBg} />
+      ) : (
+        <View style={[styles.cardImageBg, styles.cardImagePlaceholder]}>
+          <Ionicons name="image-outline" size={32} color="#B0B0B0" />
+        </View>
+      )}
+
+      {/* Host row (top-left) */}
+      <View style={styles.hostRow}>
+        {meta?.hostAvatar ? (
+          <Image source={{ uri: meta.hostAvatar }} style={styles.hostAvatar} />
+        ) : (
+          <View style={[styles.hostAvatar, styles.hostAvatarPlaceholder]}>
+            <Ionicons name="person" size={18} color="#FFFFFF" />
+          </View>
+        )}
+        {!!meta?.hostName && (
+          <Text style={styles.hostName} numberOfLines={1}>
+            {meta.hostName}
+          </Text>
+        )}
+      </View>
+
+      {/* Trip-type pill (top-right) */}
+      <View style={styles.tripTypePill}>
+        <Ionicons name={type.icon} size={14} color="#333333" />
+        <Text style={styles.tripTypeLabel}>{type.label}</Text>
+      </View>
+
+      <LinearGradient
+        colors={['transparent', 'rgba(0,0,0,0.6)']}
+        style={styles.exGradient}
+        pointerEvents="none"
+      />
+
+      <View style={styles.exBottom}>
+        <Text style={styles.cardTitle} numberOfLines={2}>
+          {headline}
+        </Text>
+        {showLocation && (
+          <Text style={styles.cardDesc} numberOfLines={1}>
+            {location}
+          </Text>
+        )}
+
+        <View style={styles.exInfoRow}>
+          <View style={styles.exInfoLeft}>
+            {!!price && <Text style={styles.exPrice}>{price}</Text>}
+            <Text style={styles.exDates}>{formatTripDates(trip)}</Text>
+          </View>
+
+          <View style={styles.exInfoRight}>
+            {spotsLeft != null && (
+              <Text style={styles.exSpots}>
+                {spotsLeft} spot{spotsLeft === 1 ? '' : 's'} left
+              </Text>
+            )}
+            {(avatars.length > 0 || count > 0) && (
+              <View style={styles.exCluster}>
+                {avatars.length > 0 ? (
+                  avatars.map((uri, i) => (
+                    <Image
+                      key={`${uri}-${i}`}
+                      source={{ uri }}
+                      style={[styles.clusterAvatar, i > 0 && styles.clusterAvatarOverlap]}
+                    />
+                  ))
+                ) : (
+                  <Ionicons name="people" size={16} color="#7B7B7B" style={{ marginLeft: 6 }} />
+                )}
+                <Text style={styles.clusterMore}>{occupancy}</Text>
+              </View>
+            )}
+          </View>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Explore card carousel (Figma 11966:32391).
+// A horizontal snap carousel: each card slides into the center, snaps there with
+// momentum, and is fully bidirectional. The first and last trips are hard bounds
+// (no looping). The centered card is full-size; neighbours peek, slightly smaller
+// and dimmer, driven by the scroll position. The card itself (ExploreTripCard) is
+// unchanged — only its placement + the animation.
+// ---------------------------------------------------------------------------
+const { width: DECK_SCREEN_W } = Dimensions.get('window');
+const DECK_CARD_W = Math.min(330, DECK_SCREEN_W - 64);
+const DECK_CARD_H = Math.round((DECK_CARD_W * 384) / 328); // card aspect ratio
+const DECK_ITEM_W = DECK_CARD_W; // per-card scroll step (no gap)
+const DECK_SIDE_PAD = Math.max(0, (DECK_SCREEN_W - DECK_CARD_W) / 2); // centers ends
+const DECK_SIDE_SCALE = 0.85; // neighbour cards shrink to this
+const DECK_SIDE_OPACITY = 0.6; // neighbour cards dim to this
+const DECK_SIDE_ROTATION = 4; // deg — neighbours tilt out, straightening into center (Figma rotate-4)
+
+const TripDeck: React.FC<{
+  trips: GroupTrip[];
+  meta: Map<string, TripCardMeta>;
+  onOpenTrip: (tripId: string) => void;
+}> = ({ trips, meta, onOpenTrip }) => {
+  const listRef = useRef<FlatList<GroupTrip>>(null);
+  // Drives the per-card scale/opacity interpolation.
+  const scrollX = useRef(new Animated.Value(0)).current;
+
+  // Reset to the first card if the deck contents change (e.g. after a reload).
+  useEffect(() => {
+    scrollX.setValue(0);
+    listRef.current?.scrollToOffset({ offset: 0, animated: false });
+  }, [trips, scrollX]);
+
+  const renderItem = useCallback(
+    ({ item, index }: { item: GroupTrip; index: number }) => {
+      const inputRange = [
+        (index - 1) * DECK_ITEM_W,
+        index * DECK_ITEM_W,
+        (index + 1) * DECK_ITEM_W,
+      ];
+      const scale = scrollX.interpolate({
+        inputRange,
+        outputRange: [DECK_SIDE_SCALE, 1, DECK_SIDE_SCALE],
+        extrapolate: 'clamp',
+      });
+      const opacity = scrollX.interpolate({
+        inputRange,
+        outputRange: [DECK_SIDE_OPACITY, 1, DECK_SIDE_OPACITY],
+        extrapolate: 'clamp',
+      });
+      // Tilt: a card to the right of center leans +Nº, to the left −Nº, and
+      // straightens to 0º exactly when centered — interpolated by scroll position.
+      const rotate = scrollX.interpolate({
+        inputRange,
+        outputRange: [`${DECK_SIDE_ROTATION}deg`, '0deg', `-${DECK_SIDE_ROTATION}deg`],
+        extrapolate: 'clamp',
+      });
+
+      return (
+        <View style={styles.deckSlot}>
+          <Animated.View style={[styles.deckCard, { transform: [{ scale }, { rotate }], opacity }]}>
+            <ExploreTripCard
+              trip={item}
+              meta={meta.get(item.id)}
+              onPress={() => onOpenTrip(item.id)}
+            />
+          </Animated.View>
+        </View>
+      );
+    },
+    [scrollX, meta, onOpenTrip],
+  );
+
+  return (
+    <View style={styles.deckRoot}>
+      <Animated.FlatList
+        ref={listRef}
+        data={trips}
+        keyExtractor={item => item.id}
+        renderItem={renderItem}
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        snapToInterval={DECK_ITEM_W}
+        snapToAlignment="start"
+        decelerationRate="fast"
+        disableIntervalMomentum
+        scrollEventThrottle={16}
+        getItemLayout={(_, index) => ({
+          length: DECK_ITEM_W,
+          offset: index * DECK_ITEM_W,
+          index,
+        })}
+        onScroll={e => {
+          scrollX.setValue(e.nativeEvent.contentOffset.x);
+        }}
+        contentContainerStyle={[styles.deckContent, { paddingHorizontal: DECK_SIDE_PAD }]}
+        {...(Platform.OS === 'web' && {
+          style: {
+            overflowX: 'auto' as any,
+            overflowY: 'hidden' as any,
+            WebkitOverflowScrolling: 'touch' as any,
+          } as any,
+        })}
+      />
+    </View>
+  );
+};
+
+// ---------------------------------------------------------------------------
 // Explore view
 // ---------------------------------------------------------------------------
 const ExploreTripsView: React.FC<{ onOpenTrip: (tripId: string) => void }> = ({ onOpenTrip }) => {
   const [trips, setTrips] = useState<GroupTrip[]>([]);
   const [meta, setMeta] = useState<Map<string, TripCardMeta>>(new Map());
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
     const data = await listExploreTrips();
     setTrips(data);
     setMeta(await getTripCardMeta(data));
     setLoading(false);
-    setRefreshing(false);
   }, []);
 
   useEffect(() => {
@@ -315,42 +551,25 @@ const ExploreTripsView: React.FC<{ onOpenTrip: (tripId: string) => void }> = ({ 
   }, [load]);
 
   if (loading) {
+    return <ExploreDeckSkeleton />;
+  }
+
+  if (trips.length === 0) {
     return (
-      <View style={styles.centered}>
-        <ActivityIndicator color="#0788B0" />
-      </View>
+      <FadeInView style={styles.emptyState}>
+        <Ionicons name="compass-outline" size={48} color="#B0B0B0" />
+        <Text style={styles.emptyText}>No group trips yet. Be the first to create one!</Text>
+      </FadeInView>
     );
   }
 
+  // Horizontal swipe-deck carousel (replaces the old vertical list). Pull-to-
+  // refresh no longer applies to a horizontal deck; the list still loads on mount.
+  // Fade the loaded deck in (replaces the skeleton).
   return (
-    <FlatList
-      data={trips}
-      keyExtractor={t => t.id}
-      renderItem={({ item }) => (
-        <TripCard
-          trip={item}
-          status={item.status === 'completed' ? 'completed' : 'upcoming'}
-          meta={meta.get(item.id)}
-          onPress={() => onOpenTrip(item.id)}
-        />
-      )}
-      contentContainerStyle={styles.listContent}
-      refreshControl={
-        <RefreshControl
-          refreshing={refreshing}
-          onRefresh={() => {
-            setRefreshing(true);
-            load();
-          }}
-        />
-      }
-      ListEmptyComponent={
-        <View style={styles.emptyState}>
-          <Ionicons name="compass-outline" size={48} color="#B0B0B0" />
-          <Text style={styles.emptyText}>No group trips yet. Be the first to create one!</Text>
-        </View>
-      }
-    />
+    <FadeInView style={styles.fillFlex}>
+      <TripDeck trips={trips} meta={meta} onOpenTrip={onOpenTrip} />
+    </FadeInView>
   );
 };
 
@@ -365,6 +584,12 @@ const BUCKET_STATUS: Record<'approved' | 'pending' | 'past', TripCardStatus> = {
   past: 'completed',
 };
 
+// Stagger only the first few cards on their first appearance — a short cascade
+// (Emil: 30–80ms between items). Cards beyond this, and any card scrolled back
+// into view, appear instantly so recycling never re-triggers the reveal.
+const STAGGER_COUNT = 4;
+const STAGGER_MS = 55;
+
 const MyTripsView: React.FC<{
   userId: string | null;
   onGoCreate: () => void;
@@ -375,6 +600,10 @@ const MyTripsView: React.FC<{
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState<TripFilter>('all');
+  // Flips true once the initial stagger window has elapsed, so scrolling /
+  // recycling never re-triggers the reveal. (A per-render mutation would
+  // misbehave under StrictMode's double render, so we use a post-load timer.)
+  const hasRevealedRef = useRef(false);
 
   const load = useCallback(async () => {
     if (!userId) {
@@ -392,6 +621,16 @@ const MyTripsView: React.FC<{
     load();
   }, [load]);
 
+  // Once the list has loaded, let the first-batch stagger play, then freeze the
+  // reveal so later scrolls don't re-animate the top cards.
+  useEffect(() => {
+    if (loading) return;
+    const t = setTimeout(() => {
+      hasRevealedRef.current = true;
+    }, STAGGER_COUNT * STAGGER_MS + 350);
+    return () => clearTimeout(t);
+  }, [loading]);
+
   // Flatten buckets into one tagged list, then filter by the active pill.
   const tagged: { trip: GroupTrip; status: TripCardStatus }[] = [
     ...buckets.approved.map(trip => ({ trip, status: BUCKET_STATUS.approved })),
@@ -406,22 +645,18 @@ const MyTripsView: React.FC<{
   const visible = filter === 'all' ? tagged : tagged.filter(x => x.status === filter);
 
   if (loading) {
-    return (
-      <View style={styles.centered}>
-        <ActivityIndicator color="#0788B0" />
-      </View>
-    );
+    return <MyTripsSkeleton />;
   }
 
   if (tagged.length === 0) {
     return (
-      <View style={styles.emptyState}>
+      <FadeInView style={styles.emptyState}>
         <Ionicons name="airplane-outline" size={48} color="#B0B0B0" />
         <Text style={styles.emptyText}>You haven't joined or created any trips yet.</Text>
         <TouchableOpacity testID="trips-empty-create-button" style={styles.emptyCta} onPress={onGoCreate}>
           <Text style={styles.emptyCtaText}>Create your first trip</Text>
         </TouchableOpacity>
-      </View>
+      </FadeInView>
     );
   }
 
@@ -430,16 +665,27 @@ const MyTripsView: React.FC<{
       data={visible}
       keyExtractor={x => x.trip.id}
       ListHeaderComponent={
-        <TripFilterBar active={filter} counts={counts} onChange={setFilter} />
+        <FadeInView>
+          <TripFilterBar active={filter} counts={counts} onChange={setFilter} />
+        </FadeInView>
       }
-      renderItem={({ item }) => (
-        <TripCard
-          trip={item.trip}
-          status={item.status}
-          meta={meta.get(item.trip.id)}
-          onPress={() => onOpenTrip(item.trip.id)}
-        />
-      )}
+      renderItem={({ item, index }) => {
+        const card = (
+          <TripCard
+            trip={item.trip}
+            status={item.status}
+            meta={meta.get(item.trip.id)}
+            onPress={() => onOpenTrip(item.trip.id)}
+          />
+        );
+        // Stagger only the first few cards during the initial reveal window;
+        // the rest (and anything scrolled in later) snap in instantly.
+        return !hasRevealedRef.current && index < STAGGER_COUNT ? (
+          <FadeInView delay={index * STAGGER_MS}>{card}</FadeInView>
+        ) : (
+          card
+        );
+      }}
       contentContainerStyle={styles.listContent}
       ListEmptyComponent={
         <View style={styles.filterEmpty}>
@@ -617,7 +863,7 @@ export default function TripsScreen({ onBack, initialTripId, onOpenGroupChat, on
             >
               <Ionicons name="chevron-back" size={26} color="#FFFFFF" />
             </TouchableOpacity>
-            <Logo size={36} iconOnly />
+            <Logo size={40} iconOnly />
             <Text style={styles.tripsHeaderTitle}>Trips</Text>
           </View>
           <NotificationCenter userId={currentUserId} />
@@ -637,37 +883,55 @@ export default function TripsScreen({ onBack, initialTripId, onOpenGroupChat, on
           />
         )}
         {activeTab === 'create' && (
-          <ScrollView
-            contentContainerStyle={styles.chooserScroll}
-            showsVerticalScrollIndicator={false}
-          >
-            <Text style={styles.chooserHeading}>Create a surf trip</Text>
-            <Text style={styles.chooserSubheading}>
-              Plan your next adventure and invite surfers to join you
-            </Text>
-            {HOSTING_STYLE_OPTIONS.map(opt => (
-              <TouchableOpacity
-                key={opt.key}
-                style={styles.chooserCard}
-                onPress={() => void onPickStyle(opt.key)}
-                activeOpacity={0.85}
-                accessibilityRole="button"
-                accessibilityLabel={`${opt.title}. ${opt.desc}`}
-              >
-                <Image source={opt.image} style={styles.chooserThumb} resizeMode="cover" />
-                <View style={styles.chooserBody}>
-                  <Text style={styles.chooserCardTitle}>{opt.title}</Text>
-                  <Text style={styles.chooserCardDesc}>{opt.desc}</Text>
-                </View>
-                <Ionicons
-                  name="chevron-forward"
-                  size={20}
-                  color="#7B7B7B"
-                  style={styles.chooserChevron}
-                />
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
+          <View style={styles.createRoot}>
+            {/* Full-bleed beach photo (Figma): spans the whole area with the
+                foreground (van + people) at the bottom, white fade over the top
+                so the cards read on white. */}
+            <View style={styles.createBgWrap} pointerEvents="none">
+              <Image
+                source={Images.createTrip.background}
+                style={StyleSheet.absoluteFill}
+                resizeMode="cover"
+              />
+              <LinearGradient
+                colors={['#FFFFFF', '#FFFFFF', 'rgba(255,255,255,0)']}
+                locations={[0, 0.58, 0.82]}
+                style={styles.createBgFade}
+              />
+            </View>
+
+            <ScrollView
+              contentContainerStyle={styles.chooserScroll}
+              showsVerticalScrollIndicator={false}
+            >
+              <Text style={styles.chooserHeading}>Create a surf trip</Text>
+              <Text style={styles.chooserSubheading}>
+                Plan your next adventure and invite surfers to join you
+              </Text>
+              {HOSTING_STYLE_OPTIONS.map(opt => (
+                <TouchableOpacity
+                  key={opt.key}
+                  style={styles.chooserCard}
+                  onPress={() => void onPickStyle(opt.key)}
+                  activeOpacity={0.85}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${opt.title}. ${opt.desc}`}
+                >
+                  <Image source={opt.image} style={styles.chooserThumb} resizeMode="cover" />
+                  <View style={styles.chooserBody}>
+                    <Text style={styles.chooserCardTitle}>{opt.title}</Text>
+                    <Text style={styles.chooserCardDesc}>{opt.desc}</Text>
+                  </View>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={24}
+                    color="#7B7B7B"
+                    style={styles.chooserChevron}
+                  />
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
         )}
       </View>
 
@@ -717,7 +981,7 @@ const styles = StyleSheet.create({
   // Dark header (Figma): logo + "Trips" + notification bell, underline tabs below.
   tripsHeader: {
     backgroundColor: '#212121',
-    paddingTop: 4,
+    paddingTop: 8,
   },
   headerTopRow: {
     flexDirection: 'row',
@@ -725,7 +989,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingLeft: 12,
     paddingRight: 8,
-    paddingVertical: 8,
+    paddingVertical: 10,
   },
   headerLeft: {
     flex: 1,
@@ -758,21 +1022,22 @@ const styles = StyleSheet.create({
     borderBottomWidth: 2,
     borderBottomColor: '#7B7B7B',
   },
-  tabLabel: { fontSize: 16, lineHeight: 22 },
-  tabLabelActive: { color: '#05BCD3', fontWeight: '600' },
-  tabLabelInactive: { color: '#FFFFFF', fontWeight: '500' },
+  tabLabel: { fontFamily: FONT_INTER, fontSize: 14, lineHeight: 18, fontWeight: '400' },
+  tabLabelActive: { color: '#05BCD3' },
+  tabLabelInactive: { color: '#FFFFFF' },
 
-  body: { flex: 1, backgroundColor: '#FFFFFF', paddingTop: 8 },
-  centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  body: { flex: 1, backgroundColor: '#FFFFFF', paddingTop: 16 },
 
   listContent: { paddingHorizontal: 16, paddingBottom: 24, flexGrow: 1 },
 
   // Filter pills (My Trips).
-  filterRow: { flexDirection: 'row', gap: 11, paddingBottom: 12 },
+  filterRow: { flexDirection: 'row', gap: 11, paddingBottom: 12, alignItems: 'center' },
   filterPill: {
+    minWidth: 42,
     borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 8,
+    alignItems: 'center',
     justifyContent: 'center',
   },
   filterPillActive: { backgroundColor: '#212121' },
@@ -781,7 +1046,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#EEEEEE',
   },
-  filterText: { fontSize: 14, lineHeight: 20 },
+  filterText: { fontFamily: FONT_INTER, fontSize: 10, lineHeight: 20, textAlign: 'center' },
   filterTextActive: { color: '#FFFFFF' },
   filterTextInactive: { color: '#333333' },
   filterEmpty: { alignItems: 'center', justifyContent: 'center', paddingVertical: 48 },
@@ -789,10 +1054,10 @@ const styles = StyleSheet.create({
   // Trip card (Figma): photo with overlaid host/title/avatars + status badge.
   card: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 28,
-    padding: 8,
+    borderRadius: 32,
+    padding: 10,
     marginBottom: 16,
-    gap: 10,
+    gap: 12,
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.09,
@@ -802,7 +1067,7 @@ const styles = StyleSheet.create({
   cardImageWrap: {
     width: '100%',
     aspectRatio: 328 / 246,
-    borderRadius: 20,
+    borderRadius: 24,
     overflow: 'hidden',
     backgroundColor: '#F2F2F2',
   },
@@ -850,21 +1115,27 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    paddingHorizontal: 16,
-    paddingBottom: 20,
-    paddingRight: 92, // leave room for the avatar cluster
+    height: 120,
+    justifyContent: 'flex-end',
+    paddingTop: 8,
+    paddingRight: 16,
+    paddingBottom: 24,
+    paddingLeft: 16,
+    gap: 10,
+    backgroundColor: 'rgba(0, 0, 0, 0.20)',
   },
   cardTitle: {
+    fontFamily: FONT_MONTSERRAT,
     color: '#FFFFFF',
     fontSize: 22,
-    lineHeight: 28,
+    lineHeight: 32,
     fontWeight: '700',
-    marginBottom: 2,
     textShadowColor: 'rgba(0,0,0,0.4)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 4,
   },
   cardDesc: {
+    fontFamily: FONT_INTER,
     color: '#FFFFFF',
     fontSize: 14,
     lineHeight: 18,
@@ -888,18 +1159,20 @@ const styles = StyleSheet.create({
     paddingRight: 8,
   },
   clusterAvatar: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: '#DDDDDD',
   },
-  clusterAvatarOverlap: { marginLeft: -12 },
+  clusterAvatarOverlap: { marginLeft: -16 },
   avatarClusterCount: { gap: 4, paddingLeft: 8 },
   clusterMore: {
     marginLeft: 6,
-    fontSize: 14,
+    fontFamily: FONT_MONTSERRAT,
+    fontSize: 16,
+    lineHeight: 20,
     color: '#7B7B7B',
-    fontWeight: '500',
+    fontWeight: '400',
   },
 
   statusBadge: {
@@ -908,12 +1181,12 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingHorizontal: 8,
     paddingVertical: 7,
-    borderRadius: 22,
+    borderRadius: 32,
   },
   statusIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
@@ -925,9 +1198,91 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingRight: 8,
   },
-  statusLabel: { color: '#0A0A0A', fontSize: 15 },
-  statusDate: { color: '#4A5565', fontSize: 14 },
+  statusLabel: { fontFamily: FONT_INTER, color: '#0A0A0A', fontSize: 12, lineHeight: 18 },
+  statusDate: { fontFamily: FONT_INTER, color: '#4A5565', fontSize: 12, lineHeight: 18 },
 
+  // Explore snap-carousel (Figma 11966:32391) — centered card, peeking neighbours.
+  deckRoot: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  deckContent: {
+    alignItems: 'center',
+  },
+  deckSlot: {
+    width: DECK_ITEM_W,
+    height: DECK_CARD_H,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  deckCard: {
+    width: DECK_CARD_W,
+    height: DECK_CARD_H,
+  },
+
+  // Explore card — single full-bleed image with overlaid info (Figma 12506:16019).
+  exCard: {
+    width: '100%',
+    aspectRatio: 328 / 384,
+    borderRadius: 24,
+    overflow: 'hidden',
+    marginBottom: 16,
+    backgroundColor: '#F2F2F2',
+  },
+  tripTypePill: {
+    position: 'absolute',
+    top: 16,
+    right: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  tripTypeLabel: { color: '#333333', fontSize: 13, fontWeight: '500' },
+  exGradient: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 220,
+  },
+  exBottom: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingTop: 8,
+    paddingRight: 16,
+    paddingBottom: 24,
+    paddingLeft: 16,
+    gap: 10,
+    backgroundColor: 'rgba(0, 0, 0, 0.20)',
+  },
+  exInfoRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  exInfoLeft: { gap: 4, flexShrink: 1 },
+  exPrice: { color: '#FFFFFF', fontSize: 20, fontWeight: '600' },
+  exDates: { color: '#FFFFFF', fontSize: 16 },
+  exInfoRight: { alignItems: 'flex-end', gap: 8 },
+  exSpots: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
+  exCluster: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F7F7F7',
+    borderRadius: 56,
+    paddingVertical: 2,
+    paddingLeft: 2,
+    paddingRight: 8,
+  },
+
+  fillFlex: { flex: 1 },
   emptyState: { alignItems: 'center', justifyContent: 'center', paddingVertical: 64 },
   emptyText: { fontSize: 14, color: '#7B7B7B', marginTop: 12, textAlign: 'center' },
   emptyCta: {
@@ -940,6 +1295,17 @@ const styles = StyleSheet.create({
   emptyCtaText: { color: '#FFFFFF', fontWeight: '600' },
 
   // Inline hosting-style chooser (moved out of CreateTripWizard).
+  createRoot: { flex: 1 },
+  createBgWrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+  },
+  createBgFade: {
+    ...StyleSheet.absoluteFillObject,
+  },
   chooserScroll: {
     paddingHorizontal: 16,
     paddingTop: 8,
@@ -951,7 +1317,7 @@ const styles = StyleSheet.create({
     lineHeight: 39,
     fontWeight: '600',
     color: '#333333',
-    marginBottom: 12,
+    marginBottom: 16,
   },
   chooserSubheading: {
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
@@ -959,13 +1325,13 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     fontWeight: '400',
     color: '#333333',
-    marginBottom: 28,
+    marginBottom: 32,
   },
   chooserCard: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 16,
-    height: 94,
+    minHeight: 94,
     backgroundColor: '#FFFFFF',
     borderRadius: 20,
     paddingLeft: 12,
@@ -999,6 +1365,7 @@ const styles = StyleSheet.create({
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     fontSize: 12,
     lineHeight: 18,
+    fontWeight: '400',
     color: '#333333',
   },
   chooserChevron: {

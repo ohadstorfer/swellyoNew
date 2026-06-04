@@ -40,6 +40,7 @@ import {
   approveGearRequest,
   declineGearRequest,
   getTripById,
+  updateGroupTrip,
   getTripParticipants,
   getMyJoinRequest,
   listPendingRequests,
@@ -66,8 +67,10 @@ import {
   type SurfStyle,
   type WaveShapeKind,
 } from '../../services/trips/groupTripsService';
-import { type TripDetailVM } from '../../components/trips/TripDetailView';
+import { type TripDetailVM, BOARD_SHORT } from '../../components/trips/TripDetailView';
 import { TripDetailViewRedesigned } from '../../components/trips/TripDetailViewRedesigned';
+import { EditTextSheet, EditCoverSheet } from '../../components/trips/TripEditSheets';
+import { uploadTripImage } from '../../services/storage/storageService';
 import { TripTabToggle, type TripTab } from '../../components/trips/TripTabToggle';
 import { HostTag } from '../../components/trips/HostTag';
 import { AdminUpdateSheet } from '../../components/trips/updates/AdminUpdateSheet';
@@ -132,7 +135,7 @@ const formatDestination = (trip: GroupTrip): string =>
 const WAVE_SHAPE_LABEL: Record<WaveShapeKind, string> = {
   soft: 'Mellow',
   wally: 'Standing',
-  barrel: 'Barrel',
+  barrel: 'Barreling',
 };
 
 const titleCase = (s: string): string =>
@@ -325,6 +328,8 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   const [muted, setMuted] = useState(false);
   // Overview = public read-only facts; Plan = interactive (members only).
   const [activeTab, setActiveTab] = useState<TripTab>('overview');
+  // Host-only inline edit sheets (Figma admin view): cover / about-host / description.
+  const [editSheet, setEditSheet] = useState<'cover' | 'about' | 'description' | null>(null);
 
   // Shared gear — items with required quantities + request flow
   // (group_trip_gear_items / _gear_claims / _gear_requests). Distinct from
@@ -668,6 +673,30 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   const handleEdit = () => {
     if (!trip || !onEditTrip) return;
     onEditTrip(trip);
+  };
+
+  // ---- Host-only inline edits (Figma admin view). Each persists one field via
+  // updateGroupTrip and merges it locally (updateGroupTrip returns only the base
+  // row, so we keep the existing joined `destination`/host data on `trip`).
+  const handleSaveCover = async (localUri: string) => {
+    if (!trip || !currentUserId) return;
+    const res = await uploadTripImage(localUri, currentUserId, 'hero');
+    if (!res.success || !res.url) throw new Error(res.error || 'Failed to upload cover');
+    await updateGroupTrip(trip.id, { hero_image_url: res.url });
+    setTrip(prev => (prev ? { ...prev, hero_image_url: res.url! } : prev));
+  };
+
+  const handleSaveAboutHost = async (text: string) => {
+    if (!trip) return;
+    const next = text || null;
+    await updateGroupTrip(trip.id, { host_lead_note: next });
+    setTrip(prev => (prev ? { ...prev, host_lead_note: next } : prev));
+  };
+
+  const handleSaveDescription = async (text: string) => {
+    if (!trip) return;
+    await updateGroupTrip(trip.id, { description: text });
+    setTrip(prev => (prev ? { ...prev, description: text } : prev));
   };
 
   const handleShare = async () => {
@@ -1199,6 +1228,18 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
             participants.length,
             participants.find(p => p.role === 'host') ?? null,
           )}
+          participants={participants.map(p => ({
+            id: p.user_id,
+            avatarUrl: p.profile_image_url ?? null,
+            name: p.name ?? null,
+          }))}
+          onParticipantPress={
+            onViewUserProfile
+              ? userId => {
+                  if (userId !== currentUserId) onViewUserProfile(userId);
+                }
+              : undefined
+          }
           onLeaderPress={
             onViewUserProfile && trip.host_id && trip.host_id !== currentUserId
               ? () => onViewUserProfile(trip.host_id)
@@ -1210,43 +1251,42 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
             ) : null
           }
           bodyHidden={showPlan}
+          // Host edit affordances (Figma admin view) — only while the trip is
+          // still live (locked trips are read-only, mirroring the header pencil).
+          isHost={isHost && !isLocked}
+          aboutHost={(() => {
+            const hostP = participants.find(p => p.role === 'host') ?? null;
+            return {
+              name: hostP?.name ?? null,
+              avatarUrl: hostP?.profile_image_url ?? null,
+              bio: trip.host_lead_note ?? null,
+              // Profile detail badges — surfaced in the "About <host>" block for
+              // Trip Operator trips (mirror the create-trip "About you" stats).
+              age: hostP?.age ?? null,
+              countryFrom: hostP?.country_from ?? null,
+              surfLevelLabel: hostP?.surf_level_category
+                ? titleCase(String(hostP.surf_level_category))
+                : null,
+              boardLabel: hostP?.surfboard_type
+                ? BOARD_SHORT[hostP.surfboard_type as keyof typeof BOARD_SHORT] ??
+                  titleCase(String(hostP.surfboard_type))
+                : null,
+              surfTrips:
+                typeof hostP?.travel_experience === 'number' ? hostP.travel_experience : null,
+            };
+          })()}
+          onEditCover={() => setEditSheet('cover')}
+          onEditAboutHost={() => setEditSheet('about')}
+          onEditDescription={() => setEditSheet('description')}
         />
 
         {/* ============================ OVERVIEW ============================ */}
-        {/* Public, read-only extras that sit below the TripDetailView body:
-            Share (everyone), approximate budget, and the full members list. */}
+        {/* Public, read-only extra below the TripDetailView body. The members
+            list lives in the Participants section now (tappable avatars). */}
         {showOverview && (
-          <>
-            <View style={[styles.actionRow, { marginTop: 20, paddingHorizontal: 16 }]}>
-              <ActionButton icon="share-outline" label="Share" onPress={handleShare} />
-            </View>
-
-            <Section title={`${participants.length} ${participants.length === 1 ? 'Member' : 'Members'}`}>
-              {participants.length === 0 ? (
-                <Text style={styles.muted}>No participants yet.</Text>
-              ) : (
-                participants.map((p, idx) => (
-                  <View key={p.user_id}>
-                    <ParticipantCard
-                      participant={p}
-                      isMe={p.user_id === currentUserId}
-                      onPress={
-                        onViewUserProfile && p.user_id !== currentUserId
-                          ? () => onViewUserProfile(p.user_id)
-                          : undefined
-                      }
-                      onRemove={
-                        isHost && !isCancelled && p.role !== 'host' && removingUserId !== p.user_id
-                          ? handleRemoveParticipant
-                          : undefined
-                      }
-                    />
-                    {idx < participants.length - 1 && <View style={styles.memberDivider} />}
-                  </View>
-                ))
-              )}
-            </Section>
-          </>
+          <View style={[styles.actionRow, { marginTop: 20, paddingHorizontal: 16 }]}>
+            <ActionButton icon="share-outline" label="Share" onPress={handleShare} />
+          </View>
         )}
 
         {/* ============================== PLAN ============================== */}
@@ -1686,6 +1726,37 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         onClose={() => setEditSuggestedSheetOpen(false)}
         items={trip.personal_gear_host_suggestion ?? []}
         onSave={handleSaveSuggestedGear}
+      />
+
+      {/* Host-only inline edit sheets (Figma admin view). */}
+      <EditCoverSheet
+        visible={editSheet === 'cover'}
+        currentUri={trip.hero_image_url ?? null}
+        onClose={() => setEditSheet(null)}
+        onSave={handleSaveCover}
+      />
+      <EditTextSheet
+        visible={editSheet === 'about'}
+        title="About you"
+        subtitle="Why you’re the right person to lead this."
+        label="Why you’re the right person to lead"
+        initialValue={trip.host_lead_note ?? ''}
+        placeholder="Mention anything that brings credibility to your experience here"
+        maxLength={250}
+        onClose={() => setEditSheet(null)}
+        onSave={handleSaveAboutHost}
+      />
+      <EditTextSheet
+        visible={editSheet === 'description'}
+        title="About this trip"
+        subtitle="What surfers should know about this trip."
+        label="Trip description"
+        initialValue={trip.description ?? ''}
+        placeholder="Describe the surf, the vibe, the plan…"
+        maxLength={1000}
+        rows={8}
+        onClose={() => setEditSheet(null)}
+        onSave={handleSaveDescription}
       />
     </SafeAreaView>
   );

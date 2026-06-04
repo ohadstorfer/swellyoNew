@@ -62,4 +62,12 @@ export const Images = {
     wally: require('./wave-shapes/wally.png'),
     barrel: require('./wave-shapes/barrel.png'),
   },
+  // Create-trip hosting-style chooser (Figma node 12268-32962): card thumbnails
+  // per hosting style + the faded beach footer behind the cards.
+  createTrip: {
+    plannedTogether: require('./create-trip/planned-together.png'),
+    hosted: require('./create-trip/hosted.png'),
+    tripOperator: require('./create-trip/trip-operator.png'),
+    background: require('./create-trip/create-trip-bg.png'),
+  },
 };

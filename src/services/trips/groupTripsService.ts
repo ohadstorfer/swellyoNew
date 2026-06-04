@@ -218,6 +218,10 @@ export interface ParticipantProfile {
   user_id: string;
   name: string | null;
   age: number | null;
+  // Profile extras — used by the "About <host>" detail badges. Optional so the
+  // other (lighter) profile mappers don't have to populate them.
+  country_from?: string | null;
+  travel_experience?: number | null;
   surfboard_type: string | null;
   surf_level_category: string | null;
   profile_image_url: string | null;
@@ -1316,7 +1320,7 @@ export async function removeParticipant(
 // ---------------------------------------------------------------------------
 
 const PARTICIPANT_PROFILE_FIELDS =
-  'user_id, name, age, surfboard_type, surf_level_category, profile_image_url, lifestyle_keywords';
+  'user_id, name, age, country_from, travel_experience, surfboard_type, surf_level_category, profile_image_url, lifestyle_keywords';
 
 export async function getTripById(tripId: string): Promise<GroupTrip | null> {
   const { data, error } = await supabase
@@ -1365,6 +1369,8 @@ export async function getTripParticipants(
       user_id: s.user_id,
       name: s.name ?? null,
       age: s.age ?? null,
+      country_from: s.country_from ?? null,
+      travel_experience: typeof s.travel_experience === 'number' ? s.travel_experience : null,
       surfboard_type: s.surfboard_type ?? null,
       surf_level_category: s.surf_level_category ?? null,
       profile_image_url: s.profile_image_url ?? null,
@@ -1386,6 +1392,8 @@ export async function getTripParticipants(
       personal_gear_by_me: Array.isArray(row.personal_gear_by_me) ? row.personal_gear_by_me as PersonalGearItem[] : [],
       name: profile?.name ?? null,
       age: profile?.age ?? null,
+      country_from: profile?.country_from ?? null,
+      travel_experience: profile?.travel_experience ?? null,
       surfboard_type: profile?.surfboard_type ?? null,
       surf_level_category: profile?.surf_level_category ?? null,
       profile_image_url: profile?.profile_image_url ?? null,
