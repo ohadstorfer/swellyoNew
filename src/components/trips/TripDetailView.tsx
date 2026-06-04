@@ -33,7 +33,7 @@ import { WizardBottomSheet } from './WizardBottomSheet';
 import { Images } from '../../assets/images';
 
 // Upright (standing) board PNGs for the Surf style section.
-const BOARD_IMAGE: Partial<Record<SurfStyle, ReturnType<typeof require>>> = {
+export const BOARD_IMAGE: Partial<Record<SurfStyle, ReturnType<typeof require>>> = {
   shortboard: Images.boards.shortboard,
   midlength: Images.boards.midlength,
   softtop: Images.boards.softtop,
@@ -139,7 +139,7 @@ const SKILL_LABEL: Record<string, string> = {
 const SKILL_ORDER = ['beginner', 'intermediate', 'advanced', 'pro'];
 
 /** "Intermediate+" — lowest selected level, with "+" if higher ones are also on. */
-function formatSkillLevel(levels: string[]): string {
+export function formatSkillLevel(levels: string[]): string {
   const real = levels.filter(l => l !== 'all' && SKILL_LABEL[l]);
   if (real.length === 0) return 'All levels';
   const sorted = [...real].sort((a, b) => SKILL_ORDER.indexOf(a) - SKILL_ORDER.indexOf(b));
@@ -148,21 +148,21 @@ function formatSkillLevel(levels: string[]): string {
   return `${SKILL_LABEL[lowest]}${hasHigher ? '+' : ''}`;
 }
 
-function formatAge(min: number | null, max: number | null): string {
+export function formatAge(min: number | null, max: number | null): string {
   if (min == null && max == null) return 'Any';
   if (min != null && max != null) return `${min}–${max}`;
   return String(min ?? max);
 }
 
 // "Trip type" overview card — friendly label per hosting style.
-const TRIP_TYPE_LABEL: Record<HostingStyle, string> = {
+export const TRIP_TYPE_LABEL: Record<HostingStyle, string> = {
   A: 'Planned together',
   B: 'Leader-led',
   C: 'Fully planned',
 };
 
 /** "1500–2000$" / "1500$+" / "up to 2000$" from a min/max range. */
-function formatBudgetRange(min: number | null, max: number | null): string | null {
+export function formatBudgetRange(min: number | null, max: number | null): string | null {
   if (min == null && max == null) return null;
   if (min != null && max != null) return `${min}–${max}$`;
   if (min != null) return `${min}$+`;
@@ -175,7 +175,7 @@ const MONTH_SHORT = [
 ];
 
 /** "Jun 15–22, 2026 · 7 days" (exact) or "Aug – Sep 2026" (months). */
-function formatDateRange(vm: TripDetailVM): string {
+export function formatDateRange(vm: TripDetailVM): string {
   if (vm.startDateISO) {
     const [y, m, d] = vm.startDateISO.split('-').map(Number);
     const startLabel = `${MONTH_SHORT[m - 1]} ${d}`;
@@ -207,7 +207,7 @@ function formatDateRange(vm: TripDetailVM): string {
 }
 
 /** Live-countdown target in the device's local timezone (midnight). */
-function computeCountdownTarget(vm: TripDetailVM): Date | null {
+export function computeCountdownTarget(vm: TripDetailVM): Date | null {
   if (vm.startDateISO) {
     const [y, m, d] = vm.startDateISO.split('-').map(Number);
     return new Date(y, m - 1, d, 0, 0, 0, 0);
@@ -221,7 +221,7 @@ function computeCountdownTarget(vm: TripDetailVM): Date | null {
 }
 
 // "How this trip works" — icon + title + description per structure slug.
-const STRUCTURE_DISPLAY: Record<
+export const STRUCTURE_DISPLAY: Record<
   string,
   { icon: keyof typeof Ionicons.glyphMap; title: string; desc: string }
 > = {
@@ -794,7 +794,7 @@ export const TripDetailView: React.FC<TripDetailViewProps> = ({
   );
 };
 
-const BOARD_SHORT: Partial<Record<SurfStyle, string>> = {
+export const BOARD_SHORT: Partial<Record<SurfStyle, string>> = {
   shortboard: 'Short',
   midlength: 'Mid',
   softtop: 'Soft-top',

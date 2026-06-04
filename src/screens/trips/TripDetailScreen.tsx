@@ -66,7 +66,8 @@ import {
   type SurfStyle,
   type WaveShapeKind,
 } from '../../services/trips/groupTripsService';
-import { TripDetailView, type TripDetailVM } from '../../components/trips/TripDetailView';
+import { type TripDetailVM } from '../../components/trips/TripDetailView';
+import { TripDetailViewRedesigned } from '../../components/trips/TripDetailViewRedesigned';
 import { TripTabToggle, type TripTab } from '../../components/trips/TripTabToggle';
 import { HostTag } from '../../components/trips/HostTag';
 import { AdminUpdateSheet } from '../../components/trips/updates/AdminUpdateSheet';
@@ -93,6 +94,9 @@ interface TripDetailScreenProps {
   onEditTrip?: (trip: GroupTrip) => void;
   /** Tap on a participant opens their profile. Back from the profile returns here. */
   onViewUserProfile?: (userId: string) => void;
+  /** Optional — wires the header notification bell (Figma). Bell is hidden when
+   *  not provided, since a non-functional bell is worse than none. */
+  onOpenNotifications?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -286,7 +290,7 @@ const DangerRow: React.FC<{
 );
 
 // ---------------------------------------------------------------------------
-export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEditTrip, onViewUserProfile }: TripDetailScreenProps) {
+export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEditTrip, onViewUserProfile, onOpenNotifications }: TripDetailScreenProps) {
   const { user: contextUser } = useOnboarding();
   const currentUserId = contextUser?.id?.toString() ?? null;
 
@@ -1129,9 +1133,9 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
                 disabled={openingChat}
               >
                 {openingChat ? (
-                  <ActivityIndicator size="small" color="#222B30" />
+                  <ActivityIndicator size="small" color="#FFFFFF" />
                 ) : (
-                  <Ionicons name="chatbubbles-outline" size={24} color="#222B30" />
+                  <Ionicons name="chatbubble-outline" size={24} color="#FFFFFF" />
                 )}
               </TouchableOpacity>
             ) : null}
@@ -1142,7 +1146,17 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
                 hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                 accessibilityLabel="Edit trip"
               >
-                <Ionicons name="create-outline" size={24} color="#222B30" />
+                <Ionicons name="create-outline" size={24} color="#FFFFFF" />
+              </TouchableOpacity>
+            ) : null}
+            {/* Notification bell (Figma) — only when the navigator wires it. */}
+            {onOpenNotifications ? (
+              <TouchableOpacity
+                onPress={onOpenNotifications}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                accessibilityLabel="Open notifications"
+              >
+                <Ionicons name="notifications-outline" size={24} color="#FFFFFF" />
               </TouchableOpacity>
             ) : null}
           </View>
@@ -1179,7 +1193,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         {/* Rich trip-detail layout (shared with the create-trip preview). The
             Overview/Plan toggle is injected as shared chrome under the hero;
             bodyHidden hides the read-only overview body when Plan is active. */}
-        <TripDetailView
+        <TripDetailViewRedesigned
           vm={buildTripDetailVM(
             trip,
             participants.length,
@@ -1562,6 +1576,28 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         </View>
       )}
 
+      {/* Sticky CTA — members get quick access to the group chat (Figma
+          "Trip Chat", accent). Mirrors the chat icon in the header. */}
+      {(isHost || isApprovedMember) && !isCancelled && (
+        <View style={styles.cta}>
+          <TouchableOpacity
+            style={[styles.ctaBtn, styles.ctaChat]}
+            onPress={handleOpenGroupChat}
+            disabled={openingChat}
+            activeOpacity={0.85}
+          >
+            {openingChat ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <>
+                <Ionicons name="chatbubble-outline" size={18} color="#FFFFFF" />
+                <Text style={styles.ctaPrimaryText}>Trip Chat</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        </View>
+      )}
+
       {/* Gear bottom sheets */}
       <GearItemSheet
         visible={!!gearItemSheetItem}
@@ -1663,7 +1699,7 @@ const Header: React.FC<{ onBack: () => void; title?: string; rightAction?: React
 }) => (
   <View style={styles.header}>
     <TouchableOpacity onPress={onBack} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-      <Ionicons name="chevron-back" size={28} color="#222B30" />
+      <Ionicons name="chevron-back" size={28} color="#FFFFFF" />
     </TouchableOpacity>
     <Text style={styles.headerTitle} numberOfLines={1}>{title || 'Trip'}</Text>
     <View style={styles.headerRight}>{rightAction}</View>
@@ -1738,7 +1774,9 @@ const CtaButton: React.FC<{
 
 // ---------------------------------------------------------------------------
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#F0F2F5' },
+  // Dark top chrome (Figma 12557-3316). Root paints the status-bar inset dark;
+  // the scroll area below paints itself light (#FAFAFA).
+  root: { flex: 1, backgroundColor: '#212121' },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1746,23 +1784,24 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 8,
     paddingBottom: 12,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#212121',
   },
   backBtn: { padding: 4 },
   headerTitle: {
     fontSize: 18,
-    fontWeight: '600',
-    color: '#222B30',
+    fontWeight: '700',
+    color: '#FFFFFF',
     flex: 1,
-    textAlign: 'center',
-    marginHorizontal: 8,
+    textAlign: 'left',
+    marginLeft: 8,
+    ...(Platform.OS === 'web' ? { fontFamily: 'Montserrat, sans-serif' } : { fontFamily: 'Montserrat' }),
   },
   headerRight: { minWidth: 28, alignItems: 'flex-end' },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: 18 },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFFFFF' },
   errorText: { color: '#7B7B7B' },
 
-  keyboardAvoider: { flex: 1 },
+  keyboardAvoider: { flex: 1, backgroundColor: '#FAFAFA' },
   scrollContent: { paddingBottom: 24 },
 
   // Top card — hero, title, action row (WhatsApp group header)
@@ -1892,22 +1931,26 @@ const styles = StyleSheet.create({
 
   // Sticky CTA (join flow only)
   cta: {
-    paddingHorizontal: 16,
+    paddingHorizontal: 24,
     paddingVertical: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#EEE',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#FAFAFA',
   },
   ctaBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 14,
+    height: 56,
     borderRadius: 12,
     gap: 6,
   },
-  ctaPrimary: { backgroundColor: '#0788B0' },
-  ctaPrimaryText: { color: '#FFFFFF', fontWeight: '700', fontSize: 15 },
+  ctaPrimary: { backgroundColor: '#212121' },
+  ctaChat: { backgroundColor: '#05BCD3' },
+  ctaPrimaryText: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+    fontSize: 16,
+    ...(Platform.OS === 'web' ? { fontFamily: 'Montserrat, sans-serif' } : { fontFamily: 'Montserrat' }),
+  },
   ctaPendingRow: { flexDirection: 'row', gap: 10 },
   ctaPending: { backgroundColor: '#F2F2F2' },
   ctaPendingText: { color: '#555', fontWeight: '600', fontSize: 14, marginLeft: 6 },

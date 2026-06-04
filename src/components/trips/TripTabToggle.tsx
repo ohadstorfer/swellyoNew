@@ -1,11 +1,12 @@
-// Overview / Plan segmented toggle — shared chrome on the trip detail screen.
-// Active segment is a solid dark fill (Figma node 11274/11275). Only shown to
-// members (host + approved); non-members never see it.
+// Overview / Plan tabs — shared chrome on the trip detail screen. Underline
+// style (Figma node 12557-4992): the active tab is bold with an accent
+// underline, the inactive tab is regular with a hairline underline. Only shown
+// to members (host + approved); non-members never see it.
 
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
 
-const FONT_MONTSERRAT = Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat';
+const FONT_INTER = Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter';
 
 export type TripTab = 'overview' | 'plan';
 
@@ -41,32 +42,34 @@ export const TripTabToggle: React.FC<Props> = ({ value, onChange }) => (
 );
 
 const styles = StyleSheet.create({
+  // Bleeds edge-to-edge out of the detail view's 16px gutter, like a tab bar.
   container: {
     flexDirection: 'row',
-    marginTop: 16,
-    borderWidth: 1,
-    borderColor: '#222B30',
-    borderRadius: 10,
-    overflow: 'hidden',
+    marginTop: 12,
+    marginHorizontal: -16,
+    backgroundColor: '#FFFFFF',
   },
   segment: {
     flex: 1,
-    paddingVertical: 13,
+    paddingVertical: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#EEEEEE',
   },
   segmentActive: {
-    backgroundColor: '#222B30',
+    borderBottomWidth: 3,
+    borderBottomColor: '#05BCD3',
   },
   label: {
-    fontFamily: FONT_MONTSERRAT,
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#222B30',
+    fontFamily: FONT_INTER,
+    fontSize: 14,
+    fontWeight: '400',
+    color: '#333333',
   },
   labelActive: {
-    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '700',
   },
 });
 
