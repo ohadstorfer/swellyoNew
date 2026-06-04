@@ -16,13 +16,18 @@ import {
   PanResponder,
   Platform,
   StyleSheet,
+  Text,
   View,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { WaveShapeKind } from '../../services/trips/groupTripsService';
 
+const FONT_INTER = Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter';
 const THUMB = 36;
 const TRACK_H = 6;
+// Value pill wrap width — wide enough to fit the longest shape name
+// ("Standing") on one line; the chip auto-sizes and centers within it.
+const BUBBLE_W = 96;
 
 const SHAPES: WaveShapeKind[] = ['soft', 'wally', 'barrel'];
 
@@ -55,6 +60,11 @@ if (Platform.OS !== 'web') {
 export interface WaveShapeSliderProps {
   value: WaveShapeKind | null;
   onChange: (next: WaveShapeKind) => void;
+  /** Pill shown above the thumb (e.g. the current shape name). */
+  bubbleLabel?: string;
+  /** End-of-track labels (e.g. "Soft" / "Hollow"). */
+  minLabel?: string;
+  maxLabel?: string;
 }
 
 // Default thumb position when the slider mounts with a given shape — sits
@@ -81,6 +91,9 @@ const pxToShapeIndex = (px: number, usable: number) => {
 const NativeWaveShapeSlider: React.FC<WaveShapeSliderProps> = ({
   value,
   onChange,
+  bubbleLabel,
+  minLabel,
+  maxLabel,
 }) => {
   const [trackWidth, setTrackWidth] = useState(0);
   const usable = Math.max(0, trackWidth);
@@ -141,6 +154,9 @@ const NativeWaveShapeSlider: React.FC<WaveShapeSliderProps> = ({
   const thumbStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: thumbSV.value - THUMB / 2 }],
   }));
+  const bubbleStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: thumbSV.value - BUBBLE_W / 2 }],
+  }));
   const fillStyle = useAnimatedStyle(() => ({
     width: thumbSV.value,
   }));
@@ -157,22 +173,39 @@ const NativeWaveShapeSlider: React.FC<WaveShapeSliderProps> = ({
   const A = ReanimatedAnimated;
 
   return (
-    <GestureDetectorComp gesture={gesture}>
-      <View style={styles.sliderWrapper} onLayout={onTrackLayout}>
-        <View style={styles.trackBackground} pointerEvents="none" />
-        <View style={styles.trackFillContainer} pointerEvents="none">
-          <A.View style={[styles.trackFill, fillStyle]}>
-            <LinearGradient
-              colors={['#00A2B6', '#0788B0']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={StyleSheet.absoluteFill}
-            />
-          </A.View>
+    <View style={styles.outer}>
+      <GestureDetectorComp gesture={gesture}>
+        <View style={styles.sliderWrapper} onLayout={onTrackLayout}>
+          <View style={styles.trackBackground} pointerEvents="none" />
+          <View style={styles.trackFillContainer} pointerEvents="none">
+            <A.View style={[styles.trackFill, fillStyle]}>
+              <LinearGradient
+                colors={['#00A2B6', '#0788B0']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={StyleSheet.absoluteFill}
+              />
+            </A.View>
+          </View>
+          <A.View pointerEvents="none" style={[styles.thumb, thumbStyle]} />
+          {bubbleLabel ? (
+            <A.View pointerEvents="none" style={[styles.bubbleWrap, bubbleStyle]}>
+              <View style={styles.bubble}>
+                <Text style={styles.bubbleText} numberOfLines={1}>
+                  {bubbleLabel}
+                </Text>
+              </View>
+            </A.View>
+          ) : null}
         </View>
-        <A.View pointerEvents="none" style={[styles.thumb, thumbStyle]} />
-      </View>
-    </GestureDetectorComp>
+      </GestureDetectorComp>
+      {minLabel || maxLabel ? (
+        <View style={styles.endpointRow} pointerEvents="none">
+          <Text style={styles.endpointText}>{minLabel ?? ''}</Text>
+          <Text style={styles.endpointText}>{maxLabel ?? ''}</Text>
+        </View>
+      ) : null}
+    </View>
   );
 };
 
@@ -182,6 +215,9 @@ const NativeWaveShapeSlider: React.FC<WaveShapeSliderProps> = ({
 const WebWaveShapeSlider: React.FC<WaveShapeSliderProps> = ({
   value,
   onChange,
+  bubbleLabel,
+  minLabel,
+  maxLabel,
 }) => {
   const containerRef = useRef<View>(null);
   const layoutRef = useRef({ width: 0, pageX: 0 });
@@ -253,30 +289,50 @@ const WebWaveShapeSlider: React.FC<WaveShapeSliderProps> = ({
   const fillWidth = thumbPx;
 
   return (
-    <View
-      ref={containerRef}
-      style={styles.sliderWrapper}
-      onLayout={onLayout}
-      {...responder.panHandlers}
-    >
-      <View style={styles.trackBackground} pointerEvents="none" />
-      <View style={styles.trackFillContainer} pointerEvents="none">
-        <View style={[styles.trackFill, { width: fillWidth }]}>
-          <LinearGradient
-            colors={['#00A2B6', '#0788B0']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={StyleSheet.absoluteFill}
-          />
-        </View>
-      </View>
+    <View style={styles.outer}>
       <View
-        style={[
-          styles.thumb,
-          { transform: [{ translateX: thumbPx - THUMB / 2 }] },
-        ]}
-        pointerEvents="none"
-      />
+        ref={containerRef}
+        style={styles.sliderWrapper}
+        onLayout={onLayout}
+        {...responder.panHandlers}
+      >
+        <View style={styles.trackBackground} pointerEvents="none" />
+        <View style={styles.trackFillContainer} pointerEvents="none">
+          <View style={[styles.trackFill, { width: fillWidth }]}>
+            <LinearGradient
+              colors={['#00A2B6', '#0788B0']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={StyleSheet.absoluteFill}
+            />
+          </View>
+        </View>
+        <View
+          style={[
+            styles.thumb,
+            { transform: [{ translateX: thumbPx - THUMB / 2 }] },
+          ]}
+          pointerEvents="none"
+        />
+        {bubbleLabel ? (
+          <View
+            style={[styles.bubbleWrap, { transform: [{ translateX: thumbPx - BUBBLE_W / 2 }] }]}
+            pointerEvents="none"
+          >
+            <View style={styles.bubble}>
+              <Text style={styles.bubbleText} numberOfLines={1}>
+                {bubbleLabel}
+              </Text>
+            </View>
+          </View>
+        ) : null}
+      </View>
+      {minLabel || maxLabel ? (
+        <View style={styles.endpointRow} pointerEvents="none">
+          <Text style={styles.endpointText}>{minLabel ?? ''}</Text>
+          <Text style={styles.endpointText}>{maxLabel ?? ''}</Text>
+        </View>
+      ) : null}
     </View>
   );
 };
@@ -294,11 +350,54 @@ export const WaveShapeSlider: React.FC<WaveShapeSliderProps> = (props) => {
 export default WaveShapeSlider;
 
 const styles = StyleSheet.create({
+  outer: {
+    width: '100%',
+  },
   sliderWrapper: {
     width: '100%',
     height: THUMB,
     position: 'relative',
     justifyContent: 'center',
+  },
+  // Value pill above the thumb. The wrap is THUMB-wide and centered on the
+  // thumb; the chip auto-sizes within it.
+  bubbleWrap: {
+    position: 'absolute',
+    top: -30,
+    left: 0,
+    width: BUBBLE_W,
+    alignItems: 'center',
+  },
+  bubble: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  bubbleText: {
+    fontFamily: FONT_INTER,
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '700',
+    color: '#333333',
+    textAlign: 'center',
+  },
+  endpointRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 2,
+    marginTop: 8,
+  },
+  endpointText: {
+    fontFamily: FONT_INTER,
+    fontSize: 14,
+    lineHeight: 20,
+    color: '#000000',
   },
   trackBackground: {
     position: 'absolute',

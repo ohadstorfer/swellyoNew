@@ -99,6 +99,11 @@ export interface CreateTripWizardChromeProps {
   /** Remove the scroll content's horizontal + top padding so children can run
    *  edge-to-edge (e.g. the preview step's full-bleed hero). */
   flushContent?: boolean;
+  /** Optional handle to the inner scroll view, so step content can scroll a
+   *  focused input into view (e.g. tapping the Trip name field). */
+  scrollViewRef?:
+    | React.MutableRefObject<ScrollView | null>
+    | ((node: ScrollView | null) => void);
   children: React.ReactNode;
 }
 
@@ -115,6 +120,7 @@ export function CreateTripWizardChrome(props: CreateTripWizardChromeProps): Reac
     primaryDisabled = false,
     hideHeader = false,
     flushContent = false,
+    scrollViewRef,
     children,
   } = props;
 
@@ -137,6 +143,13 @@ export function CreateTripWizardChrome(props: CreateTripWizardChromeProps): Reac
 
   // -------- Scroll-to-top on step change --------
   const scrollRef = useRef<ScrollView | null>(null);
+  // Keeps the internal ref (used for scroll-to-top) and any caller-provided
+  // ref pointing at the same scroll node.
+  const setScrollRef = (node: ScrollView | null) => {
+    scrollRef.current = node;
+    if (typeof scrollViewRef === 'function') scrollViewRef(node);
+    else if (scrollViewRef) scrollViewRef.current = node;
+  };
   useEffect(() => {
     const node = scrollRef.current;
     if (node && typeof node.scrollTo === 'function') {
@@ -162,7 +175,6 @@ export function CreateTripWizardChrome(props: CreateTripWizardChromeProps): Reac
 
   const secondaryDisabled = submitting;
   const primaryButtonDisabled = submitting || primaryDisabled;
-  const handleClose = onClose ?? onSecondary;
 
   return (
     <View style={styles.root}>
@@ -170,15 +182,26 @@ export function CreateTripWizardChrome(props: CreateTripWizardChromeProps): Reac
       {hideHeader ? null : (
       <View style={[styles.header, { paddingTop: headerPaddingTop }]}>
         <View style={styles.headerRow}>
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="Back"
+            activeOpacity={0.7}
+            onPress={onSecondary}
+            disabled={secondaryDisabled}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            style={styles.backArrowBtn}
+          >
+            <Ionicons name="chevron-back" size={28} color={tokens.white} />
+          </TouchableOpacity>
           <Text style={styles.stepTitle} numberOfLines={1}>
             {stepTitle}
           </Text>
-          <View style={styles.headerSpacer} />
           <TouchableOpacity
             accessibilityRole="button"
             accessibilityLabel="Close"
             activeOpacity={0.7}
-            onPress={handleClose}
+            onPress={onClose ?? onSecondary}
+            disabled={secondaryDisabled}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             style={styles.closeBtn}
           >
@@ -190,7 +213,7 @@ export function CreateTripWizardChrome(props: CreateTripWizardChromeProps): Reac
 
       {/* ----- Scrollable step content ----- */}
       <KeyboardAwareScrollView
-        ref={scrollRef}
+        ref={setScrollRef}
         style={styles.scroll}
         contentContainerStyle={{
           paddingHorizontal: flushContent ? 0 : 16,
@@ -239,16 +262,6 @@ export function CreateTripWizardChrome(props: CreateTripWizardChromeProps): Reac
         >
           <TouchableOpacity
             accessibilityRole="button"
-            accessibilityState={{ disabled: secondaryDisabled }}
-            activeOpacity={0.7}
-            onPress={onSecondary}
-            disabled={secondaryDisabled}
-            style={[styles.backButton, secondaryDisabled && styles.buttonDisabled]}
-          >
-            <Text style={styles.backLabel}>{secondaryLabel}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            accessibilityRole="button"
             accessibilityState={{ disabled: primaryButtonDisabled }}
             activeOpacity={0.85}
             onPress={onPrimary}
@@ -294,19 +307,24 @@ const styles = StyleSheet.create({
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: HEADER_TITLE_ROW_GAP,
+    gap: 8,
   },
   stepTitle: {
+    flex: 1,
     fontSize: HEADER_TITLE_FONT,
     lineHeight: HEADER_TITLE_LINE,
     fontWeight: '700',
     color: tokens.white,
     fontFamily: fonts.inter,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
   },
-  headerSpacer: {
-    flex: 1,
+  // Back arrow sits to the LEFT of the title (Figma). Negative left margin
+  // pulls the optical edge of the chevron flush with the header's 16pt inset.
+  backArrowBtn: {
+    width: 32,
+    height: 32,
+    marginLeft: -4,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   closeBtn: {
     width: 44,

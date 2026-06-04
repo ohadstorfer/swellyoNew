@@ -19,6 +19,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert,
   Image,
+  ImageSourcePropType,
   Platform,
   StyleSheet,
   Text,
@@ -105,8 +106,8 @@ import {
   CustomInclusionSheetContent,
 } from '../../components/trips/sheets/IncludesSheets';
 import { supabase } from '../../config/supabase';
-import { BoardSelectionPreview } from '../../components/trips/BoardSelectionPreview';
-import { InfoCard } from '../../components/trips/InfoCard';
+import { AudienceCard, type AudienceCardStatus } from '../../components/trips/AudienceCard';
+import { WizardInfoOverlay } from '../../components/trips/WizardInfoOverlay';
 import { Images } from '../../assets/images';
 import { WaveSheetContent } from '../../components/trips/sheets/WaveSheetContent';
 
@@ -175,6 +176,28 @@ const BOARD_TYPE_OPTIONS: { key: SurfStyle; label: string }[] = [
   { key: 'softtop', label: 'Soft-top' },
   { key: 'longboard', label: 'Longboard' },
 ];
+
+// Compact board labels for the audience-step chips (Figma uses "Short", not
+// "Shortboard"). Falls back to the full label for the rest.
+const SHORT_BOARD_LABEL: Record<SurfStyle, string> = {
+  shortboard: 'Short',
+  midlength: 'Mid-length',
+  softtop: 'Soft-top',
+  longboard: 'Longboard',
+  all: 'All',
+};
+
+// Audience step — the four cards fill strictly in this order. A card unlocks
+// only once the one above it has been set (its sheet opened + closed).
+type AudienceCardKey = 'levels' | 'boards' | 'wave' | 'age';
+const AUDIENCE_ORDER: AudienceCardKey[] = ['levels', 'boards', 'wave', 'age'];
+
+// One-time nudge shown the first time the host opens the Surf level card. The
+// goal: stop strong surfers from just picking their own level — these choices
+// describe the crew they want to travel with, not themselves.
+const AUDIENCE_INTRO_TITLE = 'Pick for the crew, not yourself';
+const AUDIENCE_INTRO_MESSAGE =
+  'These choices decide who can join your trip — not how good you are.\n\nEven if you charge hard, locking it to your own level can leave you traveling solo. Who do you actually want to surf with?';
 
 const ACCOMMODATION_LABEL: Record<AccommodationKind, string> = {
   villa: 'Villa',
@@ -717,6 +740,150 @@ const rowStyles = StyleSheet.create({
 });
 
 // -----------------------------------------------------------------------------
+// Deets row — a standalone tappable card (Where? / When?). Same "floating card"
+// language as the AudienceCard on the "Who is it for" step: white surface,
+// 20px radius, Box Shadow 01, with a gray icon box on the left.
+// -----------------------------------------------------------------------------
+interface DeetsRowProps {
+  icon: ImageSourcePropType;
+  label: string;
+  value?: string | null;
+  placeholder?: string;
+  onPress: () => void;
+  error?: string;
+  disabled?: boolean;
+}
+
+const DeetsRow: React.FC<DeetsRowProps> = ({
+  icon,
+  label,
+  value,
+  placeholder = 'Tap to set',
+  onPress,
+  error,
+  disabled,
+}) => {
+  const hasValue = !!(value && value.trim().length > 0);
+  const [pressed, setPressed] = useState(false);
+  return (
+    <View>
+      <TouchableOpacity
+        activeOpacity={1}
+        disabled={disabled}
+        onPress={onPress}
+        onPressIn={() => !disabled && setPressed(true)}
+        onPressOut={() => setPressed(false)}
+        accessibilityRole="button"
+        accessibilityLabel={`${label}: ${hasValue ? value : placeholder}`}
+        style={[
+          deetsStyles.card,
+          pressed && deetsStyles.cardPressed,
+          !!error && deetsStyles.cardError,
+          disabled && deetsStyles.cardDisabled,
+        ]}
+      >
+        <View style={deetsStyles.iconBox}>
+          <Image source={icon} style={deetsStyles.iconImage} resizeMode="contain" />
+        </View>
+        <Text style={deetsStyles.label}>{label}</Text>
+        <View style={deetsStyles.valueWrap}>
+          <Text
+            style={hasValue ? deetsStyles.value : deetsStyles.placeholder}
+            numberOfLines={1}
+          >
+            {hasValue ? value : placeholder}
+          </Text>
+          <Ionicons
+            name="chevron-forward"
+            size={20}
+            color={disabled ? COLORS.textPlaceholder : COLORS.textMuted}
+            style={{ marginLeft: 6 }}
+          />
+        </View>
+      </TouchableOpacity>
+      {error ? <Text style={deetsStyles.error}>{error}</Text> : null}
+    </View>
+  );
+};
+
+const deetsStyles = StyleSheet.create({
+  card: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    minHeight: 64,
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    backgroundColor: COLORS.surfaceCard,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: COLORS.borderHairline,
+  },
+  cardPressed: {
+    backgroundColor: '#F8FAFB',
+  },
+  cardError: {
+    borderWidth: 1,
+    borderColor: COLORS.errorBorder,
+  },
+  cardDisabled: {
+    opacity: 0.6,
+  },
+  iconBox: {
+    width: 46,
+    height: 46,
+    borderRadius: 8,
+    backgroundColor: '#F7F7F7',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  iconImage: {
+    width: 22,
+    height: 22,
+  },
+  label: {
+    fontFamily: FONT_INTER,
+    fontSize: 16,
+    lineHeight: 20,
+    fontWeight: '700',
+    color: COLORS.inkBody,
+    flexShrink: 0,
+  },
+  valueWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  value: {
+    flex: 1,
+    textAlign: 'right',
+    fontFamily: FONT_INTER,
+    fontSize: 14,
+    fontWeight: '400',
+    color: COLORS.inkBody,
+  },
+  // "Tap to set" hint uses the Figma accent cyan.
+  placeholder: {
+    flex: 1,
+    textAlign: 'right',
+    fontFamily: FONT_INTER,
+    fontSize: 14,
+    fontWeight: '400',
+    color: '#05BCD3',
+  },
+  error: {
+    marginTop: 6,
+    marginLeft: 4,
+    fontFamily: FONT_INTER,
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '500',
+    color: COLORS.errorText,
+  },
+});
+
+// -----------------------------------------------------------------------------
 // Destination map preview — shows the picked spot on a real map with a marker.
 // Same static-map pattern as HomeBreakViewSheet (WebView + Google Maps JS).
 // -----------------------------------------------------------------------------
@@ -815,7 +982,7 @@ const mapStyles = StyleSheet.create({
   card: {
     marginTop: 8,
     height: DEST_MAP_HEIGHT,
-    borderRadius: 12,
+    borderRadius: 20,
     overflow: 'hidden',
     backgroundColor: '#F0F0F0',
   },
@@ -842,35 +1009,6 @@ const mapStyles = StyleSheet.create({
 // -----------------------------------------------------------------------------
 // Summary value formatters
 // -----------------------------------------------------------------------------
-const formatLevelsSummary = (levels: SurfLevel[]): string => {
-  if (levels.length === 0) return '';
-  // Real selectable levels are beginner / intermediate / advanced (3).
-  // When all 3 are selected → collapse to "Any" for a clean value display.
-  const realLevels = levels.filter(l => l !== 'all' && l !== 'pro');
-  if (realLevels.length >= 3) return 'Any';
-  // Stack level names vertically (one per line).
-  return realLevels
-    .map(k => SKILL_LEVEL_OPTIONS.find(o => o.key === k)?.label ?? k)
-    .join('\n');
-};
-
-const formatWaveSizeSummary = (min: number, max: number): string => {
-  if (min === max) return `${min} ft`;
-  return `${min} – ${max} ft`;
-};
-
-const formatStyleSummary = (styles: SurfStyle[]): string => {
-  if (styles.length === 0) return '';
-  // Real selectable types are shortboard / midlength / softtop / longboard (4).
-  // When the host picks all 4 → collapse to "All" for a clean value display.
-  const realStyles = styles.filter(s => s !== 'all');
-  if (realStyles.length >= 4) return 'All';
-  // Stack board names vertically (one per line) — per Eyal's spec.
-  return realStyles
-    .map(k => BOARD_TYPE_OPTIONS.find(o => o.key === k)?.label ?? k)
-    .join('\n');
-};
-
 const formatAgeSummary = (min: string, max: string): string => {
   if (min && max) return `${min} - ${max}`;
   if (min) return `${min}+`;
@@ -879,6 +1017,35 @@ const formatAgeSummary = (min: string, max: string): string => {
   // number) instead of as the italic "tap to set" hint.
   return 'Any';
 };
+
+// -----------------------------------------------------------------------------
+// Audience-card chip helpers — each returns one pill per selection (collapsing
+// "everything selected" to a single Any/All pill).
+// -----------------------------------------------------------------------------
+const levelChips = (levels: SurfLevel[]): string[] => {
+  const real = levels.filter(l => l !== 'all' && l !== 'pro');
+  if (real.length === 0 || real.length >= 3) return ['Any'];
+  return real.map(k => SKILL_LEVEL_OPTIONS.find(o => o.key === k)?.label ?? k);
+};
+
+const styleChips = (styles: SurfStyle[]): string[] => {
+  const real = styles.filter(s => s !== 'all');
+  if (real.length === 0 || real.length >= 4) return ['All'];
+  return real.map(k => SHORT_BOARD_LABEL[k]);
+};
+
+const waveChips = (state: WizardState): string[] => {
+  const chips: string[] = [];
+  if (state.waveShape) chips.push(WAVE_SHAPE_TITLE[state.waveShape]);
+  const minStr = state.waveSizeMin >= 12 ? '12+' : `${state.waveSizeMin}`;
+  const maxStr = state.waveSizeMax >= 12 ? '12+' : `${state.waveSizeMax}`;
+  chips.push(
+    state.waveSizeMin === state.waveSizeMax ? `${maxStr} ft` : `${minStr} – ${maxStr} ft`,
+  );
+  return chips;
+};
+
+const ageChips = (min: string, max: string): string[] => [formatAgeSummary(min, max)];
 
 const formatWhenSummary = (state: WizardState): string => {
   if (state.datesMode === 'exact') {
@@ -1013,6 +1180,38 @@ export default function CreateTripFlowA({
 
   // ---- Sheet management --------------------------------------------------
   const [openSheet, setOpenSheet] = useState<SheetKey | null>(null);
+
+  // ---- Audience strict-sequential progress -------------------------------
+  // A card is "done" once its sheet has been opened + closed. Edit mode and
+  // resumed drafts treat every card as already done (show their chips), so the
+  // guided gating only applies to a fresh trip.
+  const [audienceDone, setAudienceDone] = useState<Set<AudienceCardKey>>(
+    () => (editMode || resumeDraft ? new Set(AUDIENCE_ORDER) : new Set()),
+  );
+  const markAudienceDone = useCallback((key: AudienceCardKey) => {
+    setAudienceDone(prev => (prev.has(key) ? prev : new Set(prev).add(key)));
+  }, []);
+
+  // First tap on the Surf level card pops a one-time "this is about the group"
+  // reminder before the sheet opens. Skipped in edit/resume (already past intro).
+  const [showAudienceIntro, setShowAudienceIntro] = useState(false);
+  const audienceIntroSeenRef = useRef(editMode || resumeDraft);
+
+  // Opening the Surf level card: show the intro on the very first tap, then open
+  // the levels sheet once it's dismissed. Every later tap opens the sheet directly.
+  const handleSurfLevelPress = useCallback(() => {
+    if (!audienceIntroSeenRef.current) {
+      setShowAudienceIntro(true);
+      return;
+    }
+    setOpenSheet('levels');
+  }, []);
+
+  const dismissAudienceIntro = useCallback(() => {
+    audienceIntroSeenRef.current = true;
+    setShowAudienceIntro(false);
+    setOpenSheet('levels');
+  }, []);
 
   // ---- Dirty tracking (drives discard-confirm prompt) ---------------------
   const [hasBeenTouched, setHasBeenTouched] = useState(false);
@@ -1601,14 +1800,10 @@ export default function CreateTripFlowA({
 
   // CTA label per step (per spec).
   const ctaLabel: string = useMemo(() => {
+    // Preview is the final action; every other step is just "Next".
     if (step === 'preview') return editMode ? 'Save changes' : 'Publish';
-    if (step === 'audience') return 'Next · basic deets';
-    if (step === 'basics') return 'Next · trip vibez';
-    if (step === 'vibez') return isFixedFlow ? 'Next · pricing' : 'Next · budget';
-    if (step === 'budget') return isLeaderFlow ? 'Next · about you' : 'Next · preview';
-    if (step === 'aboutYou') return 'Next · preview';
     return 'Next';
-  }, [step, editMode, isLeaderFlow, isFixedFlow]);
+  }, [step, editMode]);
 
   const meta = STEP_META[step];
   const stepTitle =
@@ -1643,67 +1838,49 @@ export default function CreateTripFlowA({
   // STEP 1 — AUDIENCE (all rows open sheets)
   // -----------------------------------------------------------------------
   const renderAudienceStep = () => {
-    // The Wave card combines shape + size into a single value per the Figma:
-    // "Wally, 4 - 8 ft".
-    const waveValue = (() => {
-      const shape = state.waveShape ? WAVE_SHAPE_TITLE[state.waveShape] : '';
-      const minStr = state.waveSizeMin >= 12 ? '12+' : `${state.waveSizeMin}`;
-      const maxStr = state.waveSizeMax >= 12 ? '12+' : `${state.waveSizeMax}`;
-      const size =
-        state.waveSizeMin === state.waveSizeMax
-          ? `${maxStr} ft`
-          : `${minStr} - ${maxStr} ft`;
-      if (!shape) return size;
-      return `${shape}, ${size}`;
-    })();
-    const waveError = errors.waveShape ?? undefined;
+    // First card not yet done is the "active" one; everything below it is
+    // locked. -1 means all four are done (every card shows its chips).
+    const activeIdx = AUDIENCE_ORDER.findIndex(k => !audienceDone.has(k));
+    const statusFor = (key: AudienceCardKey): AudienceCardStatus => {
+      if (audienceDone.has(key) || activeIdx === -1) return 'completed';
+      return AUDIENCE_ORDER.indexOf(key) === activeIdx ? 'active' : 'locked';
+    };
 
     return (
-      <View>
-        <View style={localStyles.cardStack}>
-          {/* Top row — two narrow side-by-side cards (Figma node 12216:25261). */}
-          <View style={localStyles.topRow}>
-            <InfoCard
-              title="Surf Level"
-              variant="photo-top"
-              value={formatLevelsSummary(state.skillLevels)}
-              image={Images.whoIsItFor.surfLevel}
-              imageZoom={1.4}
-              onPress={() => setOpenSheet('levels')}
-            />
-            <InfoCard
-              title="Board Style"
-              variant="photo-bottom"
-              value={formatStyleSummary(state.surfStyles)}
-              imageContent={
-                <BoardSelectionPreview
-                  selected={state.surfStyles}
-                  height={272}
-                  embedded
-                />
-              }
-              onPress={() => setOpenSheet('style')}
-            />
-          </View>
-
-          {/* Bottom — full-width horizontal cards. */}
-          <InfoCard
-            title="The Wave"
-            value={waveValue}
-            image={Images.whoIsItFor.theWave}
-            onPress={() => setOpenSheet('wave')}
-          />
-          {waveError ? (
-            <Text style={localStyles.cardError}>{waveError}</Text>
-          ) : null}
-          <InfoCard
-            title="Age Range"
-            value={formatAgeSummary(state.ageMin, state.ageMax)}
-            image={Images.whoIsItFor.ageRange}
-            imageZoom={1.4}
-            onPress={() => setOpenSheet('age')}
-          />
-        </View>
+      <View style={localStyles.audienceStack}>
+        <AudienceCard
+          title="Surf level"
+          description="Select the level of surfing your trip will be built for."
+          chips={levelChips(state.skillLevels)}
+          image={Images.whoIsItFor.surfLevel}
+          status={statusFor('levels')}
+          onPress={handleSurfLevelPress}
+        />
+        <AudienceCard
+          title="Board Types"
+          description="Select the range of boards your group will be riding."
+          chips={styleChips(state.surfStyles)}
+          image={Images.whoIsItFor.boardTypes}
+          status={statusFor('boards')}
+          onPress={() => setOpenSheet('style')}
+        />
+        <AudienceCard
+          title="The Wave"
+          description="What type of waves are you looking to surf on this trip?"
+          chips={waveChips(state)}
+          image={Images.whoIsItFor.theWave}
+          status={statusFor('wave')}
+          onPress={() => setOpenSheet('wave')}
+        />
+        <AudienceCard
+          title="Age Range"
+          description="Select the age range of travelers your trip is built for."
+          chips={ageChips(state.ageMin, state.ageMax)}
+          image={Images.whoIsItFor.ageRange}
+          imageZoom={1.4}
+          status={statusFor('age')}
+          onPress={() => setOpenSheet('age')}
+        />
       </View>
     );
   };
@@ -1730,41 +1907,63 @@ export default function CreateTripFlowA({
 
     return (
       <View>
-        {/* Where + When grouped */}
-        <View style={localStyles.summaryGroup}>
-          <SummaryRow
-            label="Where?"
-            value={state.destination}
-            placeholder={editMode ? 'Locked' : 'Tap to set'}
-            onPress={() => {
-              if (!editMode) setOpenSheet('where');
-            }}
-            error={errors.destination ?? undefined}
-            disabled={editMode}
-            noTopDivider
-          />
-          <SummaryRow
-            label="When?"
-            value={formatWhenSummary(state)}
-            onPress={() => setOpenSheet('when')}
-            error={errors.when ?? undefined}
-          />
-        </View>
+        {/* Where — its own card, with a map directly beneath it. */}
+        <DeetsRow
+          icon={Images.tripDeets.location}
+          label="Where?"
+          value={state.destination}
+          placeholder={editMode ? 'Locked' : 'Tap to set'}
+          onPress={() => {
+            if (!editMode) setOpenSheet('where');
+          }}
+          error={errors.destination ?? undefined}
+          disabled={editMode}
+        />
 
-        {/* Map preview of the picked destination (real map + marker). */}
+        {/* Before a destination is set: a gray map placeholder with a pin.
+            Once picked, it becomes the real map with a marker. */}
         {state.destinationGeo ? (
           <DestinationMapPreview
             geo={state.destinationGeo}
             disabled={editMode}
             onPress={() => setOpenSheet('where')}
           />
-        ) : null}
+        ) : (
+          <TouchableOpacity
+            activeOpacity={0.85}
+            disabled={editMode}
+            onPress={() => {
+              if (!editMode) setOpenSheet('where');
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Set destination"
+            style={localStyles.mapPlaceholder}
+          >
+            <View style={localStyles.mapPlaceholderPin}>
+              <Ionicons name="location" size={26} color={COLORS.brandTeal} />
+            </View>
+            <Text style={localStyles.mapPlaceholderText}>
+              Tap to drop your destination pin
+            </Text>
+          </TouchableOpacity>
+        )}
 
         {editMode ? (
           <Text style={localStyles.helperRowFootnote}>
             Destination can't be changed after a trip is created.
           </Text>
         ) : null}
+
+        {/* When — separate card below the map. */}
+        <View style={localStyles.whenGap}>
+          <DeetsRow
+            icon={Images.tripDeets.dates}
+            label="When?"
+            value={formatWhenSummary(state)}
+            onPress={() => setOpenSheet('when')}
+            error={errors.when ?? undefined}
+          />
+        </View>
 
         {/* Trip name (inline) */}
         <View style={[localStyles.labelRow, localStyles.groupTopGap]}>
@@ -1773,20 +1972,68 @@ export default function CreateTripFlowA({
             {titleLen} / {TRIP_TITLE_MAX_LENGTH}
           </Text>
         </View>
-        <TextInput
-          style={[localStyles.input, !!errors.title && localStyles.inputError]}
-          value={state.title}
-          onChangeText={t => {
-            update('title', t);
-            if (errors.title) setError('title', null);
-          }}
-          placeholder="Bali and Barrels"
-          placeholderTextColor={COLORS.textPlaceholder}
-          maxLength={TRIP_TITLE_MAX_LENGTH}
-          returnKeyType="done"
-        />
+        <View style={[localStyles.inputWrap, !!errors.title && localStyles.inputError]}>
+          <Image
+            source={Images.tripDeets.pencil}
+            style={localStyles.inputPencil}
+            resizeMode="contain"
+          />
+          <TextInput
+            style={localStyles.inputField}
+            value={state.title}
+            onChangeText={t => {
+              update('title', t);
+              if (errors.title) setError('title', null);
+            }}
+            placeholder="Bali and Barrels"
+            placeholderTextColor={COLORS.textPlaceholder}
+            maxLength={TRIP_TITLE_MAX_LENGTH}
+            returnKeyType="done"
+          />
+        </View>
         {errors.title ? (
           <Text style={localStyles.errorText}>{errors.title}</Text>
+        ) : null}
+
+        {/* Description — sits between Trip name and Max participants */}
+        <View style={[localStyles.labelRow, localStyles.fieldTopGap]}>
+          <Text style={localStyles.fieldLabel}>Description</Text>
+          <Text style={[localStyles.counter, { color: descCounterColor }]}>
+            {descLen} / {DESCRIPTION_MAX_LENGTH}
+          </Text>
+        </View>
+        <View
+          style={[
+            localStyles.inputWrap,
+            localStyles.inputWrapTextarea,
+            !!errors.description && localStyles.inputError,
+          ]}
+        >
+          <Image
+            source={Images.tripDeets.pencil}
+            style={localStyles.inputPencil}
+            resizeMode="contain"
+          />
+          <TextInput
+            style={[localStyles.inputField, localStyles.inputFieldTextarea]}
+            value={state.description}
+            onChangeText={t => {
+              const next =
+                t.length > DESCRIPTION_MAX_LENGTH ? t.slice(0, DESCRIPTION_MAX_LENGTH) : t;
+              update('description', next);
+              if (errors.description) setError('description', null);
+            }}
+            placeholder="Tell people what makes this trip special — the surf, the crew, the place."
+            placeholderTextColor={COLORS.textPlaceholder}
+            multiline
+            numberOfLines={6}
+            textAlignVertical="top"
+            maxLength={DESCRIPTION_MAX_LENGTH}
+          />
+        </View>
+        <Text style={localStyles.helper}>Required · up to 500 characters.</Text>
+        {errors.description ? (
+          <Text style={localStyles.errorText}>{errors.description}</Text>
         ) : null}
 
         {/* Max participants (inline stepper) */}
@@ -1803,11 +2050,18 @@ export default function CreateTripFlowA({
             }}
             style={localStyles.stepperBtn}
           >
-            <Ionicons name="remove" size={22} color={COLORS.brandTeal} />
+            <Ionicons name="remove" size={24} color={COLORS.inkBody} />
           </TouchableOpacity>
-          <Text style={localStyles.stepperValue}>
-            {state.maxParticipants ? state.maxParticipants : 'Any'}
-          </Text>
+          <View style={localStyles.stepperValueBox}>
+            <Text
+              style={[
+                localStyles.stepperValue,
+                !state.maxParticipants && localStyles.stepperValueAny,
+              ]}
+            >
+              {state.maxParticipants ? state.maxParticipants : 'Any'}
+            </Text>
+          </View>
           <TouchableOpacity
             activeOpacity={0.85}
             accessibilityRole="button"
@@ -1818,15 +2072,13 @@ export default function CreateTripFlowA({
             }}
             style={localStyles.stepperBtn}
           >
-            <Ionicons name="add" size={22} color={COLORS.brandTeal} />
+            <Ionicons name="add" size={24} color={COLORS.inkBody} />
           </TouchableOpacity>
         </View>
 
         {/* Cover photo (inline) */}
         <Text style={[localStyles.fieldLabel, localStyles.fieldTopGap]}>Cover photo</Text>
-        <Text style={localStyles.helper}>
-          Landscape looks best — we'll crop to 12:5.
-        </Text>
+        <Text style={[localStyles.helper, localStyles.coverHelper]}>Landscape looks best</Text>
         <TouchableOpacity
           activeOpacity={0.85}
           accessibilityRole="button"
@@ -1865,48 +2117,16 @@ export default function CreateTripFlowA({
             </>
           ) : (
             <View style={localStyles.photoEmptyInner}>
-              <View style={localStyles.photoIconCircle}>
-                <Ionicons name="camera-outline" size={26} color={COLORS.brandTeal} />
-              </View>
+              <Image
+                source={Images.tripDeets.coverPhoto}
+                style={localStyles.photoEmptyIcon}
+                resizeMode="contain"
+              />
               <Text style={localStyles.photoEmptyText}>Tap to add cover photo</Text>
-              <Text style={localStyles.photoEmptyHint}>Long-press to remove later</Text>
             </View>
           )}
         </TouchableOpacity>
         {errors.heroImage ? <Text style={localStyles.errorText}>{errors.heroImage}</Text> : null}
-
-        {/* Description (inline) */}
-        <View style={[localStyles.labelRow, localStyles.fieldTopGap]}>
-          <Text style={localStyles.fieldLabel}>Description</Text>
-          <Text style={[localStyles.counter, { color: descCounterColor }]}>
-            {descLen} / {DESCRIPTION_MAX_LENGTH}
-          </Text>
-        </View>
-        <TextInput
-          style={[
-            localStyles.input,
-            localStyles.textarea,
-            !!errors.description && localStyles.inputError,
-          ]}
-          value={state.description}
-          onChangeText={t => {
-            const next = t.length > DESCRIPTION_MAX_LENGTH
-              ? t.slice(0, DESCRIPTION_MAX_LENGTH)
-              : t;
-            update('description', next);
-            if (errors.description) setError('description', null);
-          }}
-          placeholder="Tell people what makes this trip special — the surf, the crew, the place."
-          placeholderTextColor={COLORS.textPlaceholder}
-          multiline
-          numberOfLines={6}
-          textAlignVertical="top"
-          maxLength={DESCRIPTION_MAX_LENGTH}
-        />
-        <Text style={localStyles.helper}>Required · up to 500 characters.</Text>
-        {errors.description ? (
-          <Text style={localStyles.errorText}>{errors.description}</Text>
-        ) : null}
       </View>
     );
   };
@@ -2523,7 +2743,29 @@ export default function CreateTripFlowA({
   // -----------------------------------------------------------------------
   // Render
   // -----------------------------------------------------------------------
-  const closeSheet = () => setOpenSheet(null);
+  const closeSheet = () => {
+    // Closing an audience sheet marks its card done, which unlocks the next
+    // card in the strict-sequential audience flow.
+    if (openSheet === 'levels') markAudienceDone('levels');
+    else if (openSheet === 'style') markAudienceDone('boards');
+    else if (openSheet === 'wave') markAudienceDone('wave');
+    else if (openSheet === 'age') markAudienceDone('age');
+    setOpenSheet(null);
+  };
+
+  // "Select" footer for the audience sheets (Figma node 12656:4247). Confirms +
+  // closes — which also marks the card done via closeSheet.
+  const sheetSelectFooter = (
+    <TouchableOpacity
+      onPress={closeSheet}
+      activeOpacity={0.85}
+      style={localStyles.sheetSelectBtn}
+      accessibilityRole="button"
+      accessibilityLabel="Select"
+    >
+      <Text style={localStyles.sheetSelectBtnText}>Select</Text>
+    </TouchableOpacity>
+  );
 
   // Post-publish: show the Published / invite-friends screen until Done.
   if (published) {
@@ -2556,15 +2798,25 @@ export default function CreateTripFlowA({
         {renderStep()}
       </CreateTripWizardChrome>
 
+      {/* One-time "this is about the group" reminder (first Surf level tap). */}
+      <WizardInfoOverlay
+        visible={showAudienceIntro}
+        title={AUDIENCE_INTRO_TITLE}
+        message={AUDIENCE_INTRO_MESSAGE}
+        onDismiss={dismissAudienceIntro}
+      />
+
       {/* ------- Sheets ------- */}
 
       {/* Step 1 sheets */}
       <WizardBottomSheet
         visible={openSheet === 'levels'}
-        title="Surf level"
+        title="Surf Level"
         subtitle="You can select more than one"
         largeTitle
+        titleAlign="left"
         hideHeaderDivider
+        footer={sheetSelectFooter}
         onClose={closeSheet}
       >
         <LevelsSheetContent
@@ -2582,8 +2834,9 @@ export default function CreateTripFlowA({
         title="The Wave"
         subtitle="Pick the shape and size"
         largeTitle
+        titleAlign="left"
         hideHeaderDivider
-        heightMode="full"
+        footer={sheetSelectFooter}
         onClose={closeSheet}
       >
         <WaveSheetContent
@@ -2603,10 +2856,12 @@ export default function CreateTripFlowA({
 
       <WizardBottomSheet
         visible={openSheet === 'style'}
-        title="Board style"
+        title="Boards we will ride."
         subtitle="You can select more than one"
         largeTitle
+        titleAlign="left"
         hideHeaderDivider
+        footer={sheetSelectFooter}
         onClose={closeSheet}
       >
         <StyleSheetContent
@@ -2975,6 +3230,11 @@ const localStyles = StyleSheet.create({
     gap: 20,
     marginHorizontal: 12,
   },
+  // Audience step — full-width cards stacked vertically (Figma 12650:4011).
+  audienceStack: {
+    gap: 16,
+    marginHorizontal: 4,
+  },
   // Step 1 top row — Surf Level + Board Style side-by-side. Gap matches the
   // cardStack vertical gap so the rhythm reads as a clean grid.
   topRow: {
@@ -3005,6 +3265,22 @@ const localStyles = StyleSheet.create({
     color: '#FFFFFF',
     letterSpacing: 0.3,
   },
+  // Audience-sheet "Select" footer button — Figma node 12656:4247.
+  sheetSelectBtn: {
+    backgroundColor: '#212121',
+    height: 62,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginHorizontal: 28,
+  },
+  sheetSelectBtnText: {
+    fontFamily: FONT_MONTSERRAT,
+    fontSize: 16,
+    lineHeight: 24,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
   // Common
   labelRow: {
     flexDirection: 'row',
@@ -3014,9 +3290,9 @@ const localStyles = StyleSheet.create({
   },
   fieldLabel: {
     fontFamily: FONT_INTER,
-    fontSize: 14,
+    fontSize: 16,
     lineHeight: 20,
-    fontWeight: '600',
+    fontWeight: '700',
     color: COLORS.inkBody,
     marginBottom: 8,
   },
@@ -3069,16 +3345,83 @@ const localStyles = StyleSheet.create({
     fontWeight: '500',
     color: COLORS.errorText,
   },
+  // Gap between the Where map and the separate When card.
+  whenGap: {
+    marginTop: 16,
+  },
+  // Gray "map" placeholder shown under Where before a destination is picked.
+  mapPlaceholder: {
+    marginTop: 8,
+    height: DEST_MAP_HEIGHT,
+    borderRadius: 20,
+    backgroundColor: '#EDEFF1',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  mapPlaceholderPin: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: COLORS.surfaceCard,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#596E7C',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  mapPlaceholderText: {
+    fontFamily: FONT_INTER,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '500',
+    color: COLORS.textMuted,
+  },
   input: {
     height: 56,
     borderWidth: 1,
-    borderColor: COLORS.borderField,
+    borderColor: COLORS.borderHairline,
     borderRadius: 12,
     paddingHorizontal: 16,
     fontFamily: FONT_INTER,
     fontSize: 16,
     color: COLORS.inkBody,
     backgroundColor: COLORS.surfaceCard,
+  },
+  // Bordered field with a leading pencil icon (Trip name + Description),
+  // matching the Figma data-entry inputs.
+  inputWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    height: 56,
+    borderWidth: 1,
+    borderColor: COLORS.borderHairline,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    backgroundColor: COLORS.surfaceCard,
+  },
+  inputWrapTextarea: {
+    height: 150,
+    alignItems: 'flex-start',
+    paddingVertical: 16,
+  },
+  inputPencil: {
+    width: 22,
+    height: 22,
+  },
+  inputField: {
+    flex: 1,
+    fontFamily: FONT_INTER,
+    fontSize: 16,
+    color: COLORS.inkBody,
+    padding: 0,
+  },
+  inputFieldTextarea: {
+    height: 118,
+    textAlignVertical: 'top',
   },
   textarea: {
     height: 140,
@@ -3175,10 +3518,10 @@ const localStyles = StyleSheet.create({
     alignItems: 'center',
   },
   photoZoneEmpty: {
-    borderWidth: 2,
+    borderWidth: 1.5,
     borderStyle: 'dashed',
     borderColor: COLORS.borderField,
-    backgroundColor: '#FAFAFA',
+    backgroundColor: COLORS.surfaceCard,
   },
   photoZoneError: {
     borderColor: COLORS.errorBorder,
@@ -3191,30 +3534,25 @@ const localStyles = StyleSheet.create({
   photoEmptyInner: {
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 8,
     paddingHorizontal: 16,
   },
-  photoIconCircle: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: COLORS.brandTealTint,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 8,
+  photoEmptyIcon: {
+    width: 40,
+    height: 36,
+  },
+  // Cover-photo subtitle: tucked closer to the title, with breathing room
+  // before the dashed drop zone.
+  coverHelper: {
+    marginTop: -4,
+    marginBottom: 14,
   },
   photoEmptyText: {
     fontFamily: FONT_INTER,
     fontSize: 14,
-    lineHeight: 20,
-    fontWeight: '600',
-    color: COLORS.brandTeal,
-  },
-  photoEmptyHint: {
-    marginTop: 2,
-    fontFamily: FONT_INTER,
-    fontSize: 12,
-    lineHeight: 16,
-    color: COLORS.textMuted,
+    lineHeight: 18,
+    fontWeight: '400',
+    color: '#05BCD3',
   },
   photoChangePill: {
     flexDirection: 'row',
@@ -3321,31 +3659,48 @@ const localStyles = StyleSheet.create({
     textAlign: 'center',
   },
 
-  // Max-participants stepper.
+  // Max-participants stepper — three bordered white boxes (− | value | +),
+  // matching the Figma "Trip Details" design. The value bubble is narrower
+  // and taller than the round +/- buttons.
   stepperRow: {
-    marginTop: 10,
+    marginTop: 12,
     flexDirection: 'row',
     alignItems: 'center',
     alignSelf: 'flex-start',
-    gap: 20,
+    gap: 14,
   },
   stepperBtn: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 54,
+    height: 54,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: COLORS.brandTeal,
-    backgroundColor: COLORS.brandTealTint,
+    borderColor: COLORS.borderHairline,
+    backgroundColor: COLORS.surfaceCard,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepperValueBox: {
+    width: 104,
+    height: 64,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: COLORS.borderHairline,
+    backgroundColor: COLORS.surfaceCard,
     alignItems: 'center',
     justifyContent: 'center',
   },
   stepperValue: {
-    minWidth: 56,
     textAlign: 'center',
     fontFamily: FONT_MONTSERRAT,
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '700',
     color: COLORS.inkBody,
+  },
+  // "Any" (no limit) reads in the Figma accent cyan, same as "Tap to set".
+  stepperValueAny: {
+    fontFamily: FONT_INTER,
+    fontWeight: '400',
+    color: '#05BCD3',
   },
 
   // Flow B "About you" — embedded profile card.
