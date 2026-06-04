@@ -1,2 +1,5 @@
 screenshots/*.png
 screenshots/*.jpg
+
+# Maestro debug run output (screenshots, logs, xctest runners) — regenerable.
+_debug*/
