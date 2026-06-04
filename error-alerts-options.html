@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Error Alerts — Your Options</title>
+<style>
+  :root {
+    --bg: #f4f8fb;
+    --card: #ffffff;
+    --ink: #0f2733;
+    --muted: #5c7180;
+    --line: #e2ebf0;
+    --blue: #1f8fd6;
+    --blue-soft: #e8f4fc;
+    --green: #18a673;
+    --green-soft: #e6f6ef;
+    --amber: #e8a33d;
+    --amber-soft: #fdf3e3;
+    --red: #d8635f;
+    --shadow: 0 6px 22px rgba(15,39,51,0.07);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.5;
+    padding: 40px 20px 80px;
+  }
+  .wrap { max-width: 920px; margin: 0 auto; }
+
+  header { text-align: center; margin-bottom: 36px; }
+  header .eyebrow {
+    text-transform: uppercase; letter-spacing: 2px; font-size: 12px;
+    color: var(--blue); font-weight: 700; margin-bottom: 8px;
+  }
+  header h1 { font-size: 30px; margin-bottom: 8px; }
+  header p { color: var(--muted); font-size: 16px; }
+
+  .section-title {
+    font-size: 13px; text-transform: uppercase; letter-spacing: 1.5px;
+    color: var(--muted); font-weight: 700; margin: 34px 0 14px;
+  }
+
+  /* The big question */
+  .verdict {
+    background: linear-gradient(135deg, #1f8fd6, #15709e);
+    color: #fff; border-radius: 18px; padding: 26px 28px;
+    box-shadow: var(--shadow); margin-bottom: 8px;
+  }
+  .verdict h2 { font-size: 20px; margin-bottom: 12px; }
+  .verdict ul { list-style: none; }
+  .verdict li { padding-left: 26px; position: relative; margin-bottom: 8px; font-size: 15px; }
+  .verdict li::before {
+    content: "✓"; position: absolute; left: 0; top: 0;
+    font-weight: 700; color: #bde6ff;
+  }
+
+  /* cards */
+  .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 680px) { .cards { grid-template-columns: 1fr; } }
+
+  .card {
+    background: var(--card); border-radius: 16px; padding: 22px;
+    box-shadow: var(--shadow); border: 1px solid var(--line);
+    display: flex; flex-direction: column;
+  }
+  .card.best { border: 2px solid var(--green); }
+  .card h3 { font-size: 18px; display: flex; align-items: center; gap: 8px; }
+  .tag {
+    display: inline-block; font-size: 11px; font-weight: 700;
+    padding: 3px 9px; border-radius: 999px; letter-spacing: .4px;
+  }
+  .tag.best { background: var(--green-soft); color: var(--green); }
+  .tag.skip { background: #fbe9e9; color: var(--red); }
+  .tag.extra { background: var(--blue-soft); color: var(--blue); }
+  .tag.later { background: var(--amber-soft); color: var(--amber); }
+
+  .price { font-size: 14px; color: var(--muted); margin: 4px 0 14px; font-weight: 600; }
+  .price b { color: var(--ink); }
+
+  .card ul { list-style: none; margin-top: auto; }
+  .card li { padding-left: 22px; position: relative; margin-bottom: 7px; font-size: 14px; color: #2a3f4b; }
+  .pro::before  { content: "✔"; color: var(--green); position: absolute; left: 0; }
+  .con::before  { content: "✕"; color: var(--red);   position: absolute; left: 0; }
+  .neu::before  { content: "•"; color: var(--muted); position: absolute; left: 0; }
+
+  /* comparison table */
+  table { width: 100%; border-collapse: collapse; background: var(--card);
+    border-radius: 14px; overflow: hidden; box-shadow: var(--shadow); font-size: 14px; }
+  th, td { text-align: left; padding: 13px 16px; border-bottom: 1px solid var(--line); }
+  th { background: #f0f6fa; font-size: 12px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); }
+  tr:last-child td { border-bottom: none; }
+  td.yes { color: var(--green); font-weight: 700; }
+  td.no  { color: var(--red);   font-weight: 700; }
+  .rowname { font-weight: 700; }
+
+  /* alert channel pick */
+  .pick {
+    background: var(--green-soft); border: 1px solid #bfe8d6;
+    border-radius: 14px; padding: 18px 22px;
+  }
+  .pick h3 { font-size: 16px; margin-bottom: 8px; color: var(--green); }
+  .pick ul { list-style: none; }
+  .pick li { padding-left: 24px; position: relative; margin-bottom: 6px; font-size: 14px; }
+  .pick li::before { content: "📲"; position: absolute; left: 0; }
+  .pick li.mail::before { content: "✉️"; }
+
+  footer { text-align: center; color: var(--muted); font-size: 13px; margin-top: 40px; }
+  .cost-line {
+    text-align:center; margin-top: 22px; font-size: 16px; font-weight: 700;
+  }
+  .cost-line span { color: var(--green); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="eyebrow">Swellyo · Developer Error Alerts</div>
+    <h1>How should we get alerted when a user hits an error?</h1>
+    <p>Plain-English comparison so you can pick. Nothing is built yet.</p>
+  </header>
+
+  <!-- VERDICT -->
+  <div class="verdict">
+    <h2>👉 My recommendation</h2>
+    <ul>
+      <li>Use <b>Sentry</b> as the main tool (web + iOS + Android + Edge Functions).</li>
+      <li>Turn on <b>PostHog error tracking</b> too — it's free and already installed.</li>
+      <li><b>Don't build a custom system.</b> It looks cheap but breaks fast (see below).</li>
+      <li>Alerts go to your <b>phone (push) + email</b> — your pick.</li>
+    </ul>
+  </div>
+  <div class="cost-line">Total cost: <span>$26/month</span> · Setup: about half a day</div>
+
+  <!-- OPTIONS -->
+  <div class="section-title">The 4 options</div>
+  <div class="cards">
+
+    <div class="card best">
+      <h3>Sentry <span class="tag best">RECOMMENDED</span></h3>
+      <div class="price"><b>$26/mo</b> (Team plan)</div>
+      <ul>
+        <li class="pro">Catches web, mobile & native crashes</li>
+        <li class="pro">Readable error reports (real file + line)</li>
+        <li class="pro">Groups repeats — no spam</li>
+        <li class="pro">Push + email + Slack alerts</li>
+        <li class="con">Costs money for good alerts</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h3>PostHog <span class="tag extra">ADD-ON (FREE)</span></h3>
+      <div class="price"><b>$0</b> — already installed</div>
+      <ul>
+        <li class="pro">Free up to 100k errors/month</li>
+        <li class="pro">Shows what the user did before the error</li>
+        <li class="pro">~2 lines of code to switch on</li>
+        <li class="con">Misses true native crashes</li>
+        <li class="con">Known mobile bug — backup only</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h3>Build it ourselves <span class="tag skip">SKIP</span></h3>
+      <div class="price"><b>$0</b> but costs time + headaches</div>
+      <ul>
+        <li class="con">Error reports are unreadable (minified)</li>
+        <li class="con">One bug = 1000s of messages</li>
+        <li class="con">Can't catch native crashes</li>
+        <li class="neu">Only ok for a quick "site is down" ping</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h3>Supabase Log Drains <span class="tag later">LATER</span></h3>
+      <div class="price"><b>+$60/mo</b> add-on</div>
+      <ul>
+        <li class="pro">Sends DB / server errors into Sentry</li>
+        <li class="con">Pricey + bills per event</li>
+        <li class="neu">Not needed now</li>
+        <li class="neu">Instrumenting functions directly is free</li>
+      </ul>
+    </div>
+
+  </div>
+
+  <!-- TABLE -->
+  <div class="section-title">Quick comparison</div>
+  <table>
+    <thead>
+      <tr>
+        <th>What matters</th>
+        <th>Sentry</th>
+        <th>PostHog</th>
+        <th>Custom</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td class="rowname">Catches web errors</td><td class="yes">Yes</td><td class="yes">Yes</td><td class="yes">Yes</td></tr>
+      <tr><td class="rowname">Catches native crashes</td><td class="yes">Yes</td><td class="no">No</td><td class="no">No</td></tr>
+      <tr><td class="rowname">Readable reports</td><td class="yes">Yes</td><td class="yes">Yes</td><td class="no">No</td></tr>
+      <tr><td class="rowname">Stops alert spam</td><td class="yes">Yes</td><td class="yes">Yes</td><td class="no">No</td></tr>
+      <tr><td class="rowname">Push + email alerts</td><td class="yes">Yes</td><td class="yes">Yes</td><td class="no">Build it</td></tr>
+      <tr><td class="rowname">Monthly cost</td><td>$26</td><td class="yes">Free</td><td class="yes">Free*</td></tr>
+      <tr><td class="rowname">Setup effort</td><td>Low</td><td>Tiny</td><td class="no">High</td></tr>
+    </tbody>
+  </table>
+
+  <!-- ALERT CHANNEL -->
+  <div class="section-title">Your alert choice</div>
+  <div class="pick">
+    <h3>How you'll be notified</h3>
+    <ul>
+      <li><b>Push to phone</b> — Sentry app pings you the second a new error happens. Most immediate for a small team.</li>
+      <li class="mail"><b>Email</b> — a written record you can read later or forward.</li>
+    </ul>
+  </div>
+
+  <footer>
+    Made for Swellyo · Build-vs-buy research, June 2026 · No code changed yet
+  </footer>
+
+</div>
+</body>
+</html>

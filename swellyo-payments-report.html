@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Swellyo Payments — Cheat Sheet</title>
+<style>
+  :root {
+    --bg: #fafaf7;
+    --ink: #1a1a1a;
+    --soft: #555;
+    --muted: #888;
+    --accent: #0066cc;
+    --green: #047857;
+    --green-soft: #d1fae5;
+    --amber: #b45309;
+    --amber-soft: #fef3c7;
+    --red: #b91c1c;
+    --red-soft: #fee2e2;
+    --gray-soft: #f3f3f0;
+    --border: #e5e3dc;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.5;
+    margin: 0;
+    padding: 32px 20px 60px;
+  }
+  .container { max-width: 720px; margin: 0 auto; }
+  h1 {
+    font-size: 1.6rem;
+    margin: 0 0 4px;
+    letter-spacing: -0.01em;
+  }
+  .sub { color: var(--muted); font-size: 0.9rem; margin-bottom: 28px; }
+  h2 {
+    font-size: 1.05rem;
+    margin: 28px 0 10px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--border);
+    letter-spacing: 0.01em;
+  }
+  ul { margin: 0 0 8px; padding-left: 18px; }
+  li { margin-bottom: 4px; font-size: 0.93rem; }
+  .svc { font-weight: 600; }
+  .what { color: var(--soft); }
+  code {
+    background: var(--gray-soft);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-family: "Menlo", monospace;
+    font-size: 0.85em;
+  }
+  .tag {
+    display: inline-block;
+    font-size: 0.68rem;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 3px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-left: 2px;
+  }
+  .do { background: var(--green-soft); color: var(--green); }
+  .skip { background: var(--gray-soft); color: var(--muted); }
+  .later { background: var(--amber-soft); color: var(--amber); }
+  .block { background: var(--red-soft); color: var(--red); }
+  .nope { background: var(--red-soft); color: var(--red); }
+
+  .box {
+    border-left: 3px solid var(--ink);
+    background: var(--gray-soft);
+    padding: 12px 14px;
+    border-radius: 4px;
+    margin: 12px 0 18px;
+    font-size: 0.92rem;
+  }
+  .box.bad { border-color: var(--red); background: var(--red-soft); }
+  .box.good { border-color: var(--green); background: var(--green-soft); }
+
+  .stats {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin: 14px 0 0;
+  }
+  .stat {
+    flex: 1;
+    min-width: 130px;
+    background: #fff;
+    border: 1px solid var(--border);
+    padding: 10px 12px;
+    border-radius: 6px;
+  }
+  .stat-label { font-size: 0.7rem; text-transform: uppercase; color: var(--muted); letter-spacing: 0.04em; }
+  .stat-value { font-size: 1.1rem; font-weight: 700; margin-top: 2px; }
+  .legend { margin-top: 28px; font-size: 0.8rem; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>Swellyo Payments — Cheat Sheet</h1>
+<div class="sub">Stripe Connect · US + Israel · Delaware LLC · pre-launch</div>
+
+<!-- TL;DR -->
+<div class="box">
+  <strong>The plan:</strong> Stripe Connect Express. 12% host commission. Swellyo pays Stripe fees. Cards + ACH at launch. Add Splitit later for Israel.<br>
+  <strong>Bottom line @ $50k/mo:</strong> Stripe costs ~$1,615 · Swellyo nets ~$4,325.
+</div>
+
+<!-- Services -->
+<h2>🔧 Services to use</h2>
+<ul>
+  <li><span class="svc">Stripe Connect Express</span> <span class="tag do">use</span> <span class="what">— payment system for marketplaces. Stripe holds money, pays hosts.</span></li>
+  <li><span class="svc">Stripe Radar</span> <span class="tag do">use</span> <span class="what">— fraud detection. $0.07/transaction. Cuts chargebacks ~17%.</span></li>
+  <li><span class="svc">3DS2</span> <span class="tag do">use</span> <span class="what">— 2-factor at checkout. Moves fraud loss to the bank, not you.</span></li>
+  <li><span class="svc">ACH Direct Debit</span> <span class="tag do">use</span> <span class="what">— US bank transfer. $5 max fee vs $58 card. Save ~$53/trip.</span></li>
+  <li><span class="svc">Stripe Financial Connections</span> <span class="tag do">use</span> <span class="what">— verifies US bank before ACH charge. Kills failure rate.</span></li>
+  <li><span class="svc">Apple Pay / Google Pay / Link</span> <span class="tag do">use</span> <span class="what">— faster checkout. Same fees, free to turn on.</span></li>
+  <li><span class="svc">Mercury Treasury</span> <span class="tag do">use</span> <span class="what">— business bank with 4.5% interest on idle money. Sweep weekly.</span></li>
+  <li><span class="svc">Stripe Atlas</span> <span class="tag do">use</span> <span class="what">— $500 service that incorporates your Delaware LLC.</span></li>
+  <li><span class="svc">Tax1099.com</span> <span class="tag do">use</span> <span class="what">— files 1042-S tax forms for foreign hosts. ~$500/year.</span></li>
+  <li><span class="svc">Splitit</span> <span class="tag later">later</span> <span class="what">— lets Israelis pay in monthly installments on existing card. Works with Stripe.</span></li>
+  <li><span class="svc">Wise (for host payouts)</span> <span class="tag nope">don't</span> <span class="what">— routing host money via your bank = money transmitter law trouble.</span></li>
+  <li><span class="svc">Stripe Connect Standard</span> <span class="tag nope">don't</span> <span class="what">— removes your control of when hosts get paid. Bad for travel.</span></li>
+  <li><span class="svc">Bit / PayBox / native Tashlumim</span> <span class="tag skip">skip</span> <span class="what">— need an Israeli company to access these.</span></li>
+</ul>
+
+<!-- Israel specific -->
+<h2>🇮🇱 Israel — key facts</h2>
+<ul>
+  <li><strong>Tashlumim</strong> = Israeli installment payments. Cultural default for anything over $270. <em>Not available via Stripe.</em></li>
+  <li>Israeli cards on Stripe cost +1.5% extra (cross-border fee). Unavoidable.</li>
+  <li>Always charge in <strong>USD</strong>, never ILS — avoids extra 1% FX fee.</li>
+  <li>Israeli hosts: open their own Stripe account, get paid in ILS or USD.</li>
+  <li>If Israel grows big → register Israeli entity + use Tranzila (Israeli payment processor) to unlock Bit + Tashlumim.</li>
+</ul>
+
+<!-- Money split -->
+<h2>💸 Fee split — $1,500 trip example</h2>
+<ul>
+  <li>Traveler pays <code>$1,500</code></li>
+  <li>Stripe takes <code>$43.80</code> (Swellyo absorbs)</li>
+  <li>Host gets <code>$1,320</code> (88%)</li>
+  <li>Swellyo gross <code>$180</code> → net <code>$136</code> after Stripe</li>
+  <li>If ACH: Stripe takes only <code>$5</code> → Swellyo net <code>$175</code></li>
+</ul>
+
+<!-- Week 1 -->
+<h2>📋 Week 1 — must do <span class="tag block">blockers</span></h2>
+<ul>
+  <li>Incorporate Delaware LLC via Stripe Atlas ($500)</li>
+  <li>Open Stripe Connect Express account</li>
+  <li>Turn on W-9 / W-8BEN collection (tax forms hosts must fill)</li>
+  <li>Hire lawyer for Terms of Service + Host Agreement + Privacy Policy ($1.5–3.5k)</li>
+  <li>Sign DPAs with Supabase, Stripe, PostHog (one click each — required by GDPR)</li>
+  <li>Fill PCI SAQ-A form (15 min self-survey, required for taking cards)</li>
+</ul>
+
+<!-- Week 2 -->
+<h2>⚡ Week 2 — turn on quick wins</h2>
+<ul>
+  <li>Stripe Radar ON</li>
+  <li>3DS2 ON</li>
+  <li>ACH Direct Debit + Financial Connections</li>
+  <li>Apple Pay / Google Pay / Link</li>
+  <li>Set <code>debit_negative_balances: true</code> on every host (Stripe pulls from host's bank if chargeback)</li>
+  <li>Add $50–100 non-refundable booking deposit</li>
+  <li>Charge everything in USD only</li>
+  <li>Open Mercury account, sweep idle balance weekly</li>
+</ul>
+
+<!-- Before IL hosts -->
+<h2>🇮🇱 Before first Israeli host <span class="tag block">blocker</span></h2>
+<ul>
+  <li>Confirm W-8BEN is enforced (Israel host gets 0% withholding via US-Israel treaty)</li>
+  <li>Without W-8BEN → you legally owe IRS 30% of every payout</li>
+  <li>Set up 1042-S filing with Tax1099.com or a CPA</li>
+</ul>
+
+<!-- Money safety -->
+<h2>🚨 Never do</h2>
+<ul>
+  <li>Never route host money through Swellyo's bank account — triggers money transmitter laws</li>
+  <li>Never offer free instant payouts — costs 1%</li>
+  <li>Never frame listings as "accommodation + surf package" — triggers lodging tax in 30 states. Frame as "surf experience" instead.</li>
+</ul>
+
+<!-- Skip -->
+<h2>⏸ Skip for now</h2>
+<ul>
+  <li>Israeli VAT registration <span class="what">— law not yet enforced</span></li>
+  <li>EU representative <span class="what">— Stripe handles PSD2/SCA automatically</span></li>
+  <li>CCPA (California) <span class="what">— below threshold</span></li>
+  <li>Chargeflow / Justt <span class="what">— too small to justify</span></li>
+  <li>Money Transmitter License <span class="what">— Stripe's license covers you</span></li>
+</ul>
+
+<!-- Revisit at scale -->
+<h2>📈 Revisit at $100k+/mo</h2>
+<ul>
+  <li>Negotiate custom Stripe rate (opens at ~$80k/mo)</li>
+  <li>Splitit for Israeli installments</li>
+  <li>Israeli entity if IL &gt; 30% revenue</li>
+  <li>Move to Stripe v2 Accounts API</li>
+</ul>
+
+<!-- Stats -->
+<h2>💰 At $50k/mo GMV</h2>
+<div class="stats">
+  <div class="stat"><div class="stat-label">GMV</div><div class="stat-value">$50,000</div></div>
+  <div class="stat"><div class="stat-label">Stripe cost</div><div class="stat-value">$1,615</div></div>
+  <div class="stat"><div class="stat-label">Swellyo gross</div><div class="stat-value">$5,940</div></div>
+  <div class="stat"><div class="stat-label">Swellyo net</div><div class="stat-value">$4,325</div></div>
+</div>
+
+<div class="legend">
+  <span class="tag do">use</span> turn on now ·
+  <span class="tag later">later</span> after launch ·
+  <span class="tag skip">skip</span> not needed ·
+  <span class="tag block">blocker</span> must do before launch ·
+  <span class="tag nope">don't</span> avoid
+</div>
+
+</div>
+</body>
+</html>

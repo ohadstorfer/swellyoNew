@@ -1,0 +1,184 @@
+appId: com.swellyo.app
+name: visual-verify carousel + slider patterns
+tags:
+  - visual-verify
+---
+- launchApp:
+    clearState: false
+    stopApp: true
+
+- runFlow:
+    when:
+      visible:
+        text: "http://localhost:8081"
+    commands:
+      - tapOn:
+          text: "http://localhost:8081"
+- runFlow:
+    when:
+      visible:
+        text: "This is the developer menu.*"
+    commands:
+      - tapOn:
+          text: "Continue"
+- runFlow:
+    when:
+      visible:
+        text: "Dismiss.*"
+    commands:
+      - tapOn:
+          text: "Dismiss.*"
+
+- extendedWaitUntil:
+    visible: "Next|Skip|The Lineup|Sure you want to skip"
+    timeout: 120000
+
+- runFlow:
+    when:
+      visible: "Sure you want to skip"
+    commands:
+      - tapOn: "Go back"
+      - waitForAnimationToEnd:
+          timeout: 1500
+
+# Walk back to carousel ("What is your style?")
+- runFlow:
+    when:
+      visible:
+        id: "onboarding-back-button"
+    commands:
+      - tapOn:
+          id: "onboarding-back-button"
+      - waitForAnimationToEnd:
+          timeout: 1500
+- runFlow:
+    when:
+      visible:
+        id: "onboarding-back-button"
+    commands:
+      - tapOn:
+          id: "onboarding-back-button"
+      - waitForAnimationToEnd:
+          timeout: 1500
+- runFlow:
+    when:
+      visible:
+        id: "onboarding-back-button"
+    commands:
+      - tapOn:
+          id: "onboarding-back-button"
+      - waitForAnimationToEnd:
+          timeout: 1500
+- runFlow:
+    when:
+      visible:
+        id: "onboarding-back-button"
+    commands:
+      - tapOn:
+          id: "onboarding-back-button"
+      - waitForAnimationToEnd:
+          timeout: 1500
+
+# === BOARD CAROUSEL pattern (4 cards) — use regex with trailing .* ===
+- runFlow:
+    when:
+      visible: "What is your style.*"
+    commands:
+      - takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_185427/board-carousel/card-1
+      - swipe:
+          direction: LEFT
+          duration: 600
+      - waitForAnimationToEnd:
+          timeout: 1500
+      - takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_185427/board-carousel/card-2
+      - swipe:
+          direction: LEFT
+          duration: 600
+      - waitForAnimationToEnd:
+          timeout: 1500
+      - takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_185427/board-carousel/card-3
+      - swipe:
+          direction: LEFT
+          duration: 600
+      - waitForAnimationToEnd:
+          timeout: 1500
+      - takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_185427/board-carousel/card-4
+
+# === Advance forward to slider screen ("Travel Deets 2/3" — surf trips slider) ===
+# Step 2 → 3 (video selector) → 4 (video upload) → Travel Deets
+- runFlow:
+    when:
+      visible:
+        id: "onboarding-next-button"
+    commands:
+      - tapOn:
+          id: "onboarding-next-button"
+      - waitForAnimationToEnd:
+          timeout: 2000
+- runFlow:
+    when:
+      visible:
+        id: "onboarding-next-button"
+    commands:
+      - tapOn:
+          id: "onboarding-next-button"
+      - waitForAnimationToEnd:
+          timeout: 2000
+# Step 4 ("Show Us Your Style" video upload) → tap Skip (video upload is the one exception)
+- runFlow:
+    when:
+      visible: "Skip"
+    commands:
+      - tapOn: "Skip"
+      - waitForAnimationToEnd:
+          timeout: 2000
+# Should now be on Travel Deets slider
+- takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_185427/02-landed-after-forward
+
+# === SLIDER pattern (5 positions) ===
+# Slider for "travel experience" (number of trips). At ~73% vertical on iPhone 17 Pro.
+# Use percentage coordinates for device-independence.
+- runFlow:
+    when:
+      visible: "How many surf trips.*"
+    commands:
+      # 0% — drag thumb to leftmost
+      - swipe:
+          start: "50%, 73%"
+          end: "5%, 73%"
+          duration: 600
+      - waitForAnimationToEnd:
+          timeout: 1000
+      - takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_185427/travel-slider/0pct
+      # 25%
+      - swipe:
+          start: "5%, 73%"
+          end: "27%, 73%"
+          duration: 600
+      - waitForAnimationToEnd:
+          timeout: 1000
+      - takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_185427/travel-slider/25pct
+      # 50%
+      - swipe:
+          start: "27%, 73%"
+          end: "50%, 73%"
+          duration: 600
+      - waitForAnimationToEnd:
+          timeout: 1000
+      - takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_185427/travel-slider/50pct
+      # 75%
+      - swipe:
+          start: "50%, 73%"
+          end: "73%, 73%"
+          duration: 600
+      - waitForAnimationToEnd:
+          timeout: 1000
+      - takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_185427/travel-slider/75pct
+      # 100%
+      - swipe:
+          start: "73%, 73%"
+          end: "95%, 73%"
+          duration: 600
+      - waitForAnimationToEnd:
+          timeout: 1000
+      - takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_185427/travel-slider/100pct

@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WeTravel Fee Analysis — $1,500 Trip</title>
+<style>
+  :root {
+    --bg: #fafaf7;
+    --surface: #ffffff;
+    --ink: #1a1a1a;
+    --soft: #555;
+    --muted: #888;
+    --accent: #0066cc;
+    --accent-soft: #e7f0fb;
+    --green: #047857;
+    --green-soft: #d1fae5;
+    --amber: #b45309;
+    --amber-soft: #fef3c7;
+    --red: #b91c1c;
+    --red-soft: #fee2e2;
+    --gray-soft: #f3f3f0;
+    --border: #e5e3dc;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.55;
+    margin: 0;
+    padding: 0;
+    -webkit-font-smoothing: antialiased;
+  }
+  .container {
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 40px 22px 70px;
+  }
+  header.hero {
+    margin-bottom: 36px;
+    padding-bottom: 24px;
+    border-bottom: 1px solid var(--border);
+  }
+  .eyebrow {
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 0.72rem;
+    color: var(--muted);
+    font-weight: 600;
+    margin-bottom: 10px;
+  }
+  h1 {
+    font-size: 1.9rem;
+    font-weight: 700;
+    margin: 0 0 8px;
+    letter-spacing: -0.02em;
+    line-height: 1.15;
+  }
+  .subtitle {
+    color: var(--soft);
+    font-size: 0.98rem;
+  }
+  h2 {
+    font-size: 1.25rem;
+    font-weight: 700;
+    margin: 44px 0 14px;
+    letter-spacing: -0.01em;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+  }
+  h3 {
+    font-size: 1rem;
+    font-weight: 600;
+    margin: 22px 0 8px;
+  }
+  p { margin: 0 0 12px; font-size: 0.95rem; }
+  ul, ol { margin: 0 0 14px; padding-left: 22px; }
+  li { margin-bottom: 4px; font-size: 0.93rem; }
+  strong { font-weight: 600; }
+  em { font-style: italic; color: var(--soft); }
+  code {
+    background: var(--gray-soft);
+    border: 1px solid var(--border);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-family: "Menlo", monospace;
+    font-size: 0.85em;
+  }
+
+  /* Callouts */
+  .callout {
+    border-left: 3px solid var(--accent);
+    background: var(--accent-soft);
+    padding: 14px 16px;
+    border-radius: 5px;
+    margin: 14px 0;
+    font-size: 0.92rem;
+  }
+  .callout.warn { border-color: var(--amber); background: var(--amber-soft); }
+  .callout.bad { border-color: var(--red); background: var(--red-soft); }
+  .callout.good { border-color: var(--green); background: var(--green-soft); }
+  .callout-title {
+    font-weight: 700;
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 6px;
+  }
+
+  /* Confidence tags inline */
+  .conf {
+    display: inline-block;
+    font-size: 0.68rem;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 3px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    vertical-align: middle;
+    margin-left: 4px;
+  }
+  .conf.verified { background: var(--green-soft); color: var(--green); }
+  .conf.estimate { background: var(--amber-soft); color: var(--amber); }
+  .conf.unclear { background: var(--gray-soft); color: var(--muted); }
+
+  /* Tables */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 14px 0;
+    background: var(--surface);
+    border-radius: 6px;
+    overflow: hidden;
+    box-shadow: 0 1px 0 var(--border);
+    font-size: 0.88rem;
+  }
+  th, td {
+    text-align: left;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  th {
+    background: var(--gray-soft);
+    font-weight: 600;
+    font-size: 0.76rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--soft);
+  }
+  tr:last-child td { border-bottom: none; }
+  td.num { font-variant-numeric: tabular-nums; }
+
+  .sources {
+    font-size: 0.82rem;
+    color: var(--muted);
+    margin-top: 32px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+  }
+  .sources a { color: var(--muted); text-decoration: underline; text-decoration-color: var(--border); }
+  .sources a:hover { color: var(--accent); }
+
+  @media (max-width: 640px) {
+    .container { padding: 28px 14px 50px; }
+    h1 { font-size: 1.5rem; }
+    h2 { font-size: 1.1rem; }
+    table { font-size: 0.8rem; }
+    th, td { padding: 8px 10px; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+<header class="hero">
+  <div class="eyebrow">Competitor analysis · WeTravel · 2026</div>
+  <h1>WeTravel — what travelers and operators actually pay</h1>
+  <p class="subtitle">Money flow for a $1,500 trip. US + Israeli scenarios on both sides. Every claim flagged as verified, estimate, or unclear.</p>
+</header>
+
+<!-- Confidence legend -->
+<div class="callout">
+  <div class="callout-title">How to read this</div>
+  <p style="margin-bottom: 0;">
+    <span class="conf verified">verified</span> from WeTravel's own docs ·
+    <span class="conf estimate">estimate</span> calculated from industry norms or user reports ·
+    <span class="conf unclear">unclear</span> WeTravel publishes inconsistent or no number
+  </p>
+</div>
+
+<!-- Plans -->
+<h2>📋 Plans <span class="conf verified">verified</span></h2>
+<ul>
+  <li><strong>Free plan:</strong> $0/month. Same transaction fees as Pro.</li>
+  <li><strong>Pro plan:</strong> $79/month. Adds custom branding, eSignatures, auto-billing, CRM integrations, lead capture. 30-day money-back.</li>
+  <li><strong>Pro does NOT reduce transaction fees</strong> — it's features-only. There is no volume tier that lowers processing fees.</li>
+</ul>
+
+<!-- Published transaction fees -->
+<h2>💳 Published transaction fees <span class="conf verified">verified</span></h2>
+<table>
+  <thead>
+    <tr><th>Payment method</th><th>Fee</th><th>Notes</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Credit card (Visa / Mastercard, US)</td><td class="num">2.9%</td><td>Operator can absorb or pass to traveler</td></tr>
+    <tr><td>Credit card (AMEX or non-US card)</td><td class="num">3.9%</td><td>Same pass-through option</td></tr>
+    <tr><td>ACH / US bank debit (eCheck)</td><td class="num">1.0%</td><td>5–7 day settlement</td></tr>
+    <tr><td>SEPA (EU), PAD (CA), iDeal (NL), PayTo (AU)</td><td class="num">1.0%</td><td>Same tier as ACH</td></tr>
+    <tr><td>Wire transfer in (traveler paying via wire)</td><td class="num">$25 flat</td><td>USD or EUR</td></tr>
+    <tr><td>Minimum fee</td><td class="num">$1.50</td><td>Applied if % is lower</td></tr>
+  </tbody>
+</table>
+
+<div class="callout warn">
+  <div class="callout-title">"0% booking fee" claim — what it actually means</div>
+  <p style="margin-bottom: 0;">WeTravel has <strong>no separate marketplace commission</strong>. The "0%" or "1%" headline refers to ACH being WeTravel's pitched method. Card transactions always cost 2.9% or 3.9% — that fee can be passed to the traveler or absorbed by the operator, but it's never zero.</p>
+</div>
+
+<!-- Payout fees -->
+<h2>🏦 Payout fees <span class="conf verified">verified</span></h2>
+<ul>
+  <li><strong>Local bank payout (US, EU, AU):</strong> Free, 1–3 business days.</li>
+  <li><strong>Instant payout (US, debit card on file required):</strong> 1.5% of payout amount.</li>
+  <li><strong>International wire payout:</strong> WeTravel's docs cite $15, $25, and $30 across different pages. <span class="conf unclear">unclear</span> — real number not consistently published.</li>
+  <li><strong>FX conversion within WeTravel wallet:</strong> Claimed "free" but the daily rate used is internal and not disclosed. User reports describe spread of <strong>~1–2%</strong> vs bank rates. <span class="conf estimate">estimate</span></li>
+</ul>
+
+<!-- Currency support -->
+<h2>🌍 Currency support <span class="conf verified">verified</span></h2>
+<ul>
+  <li><strong>Trips can be priced in:</strong> 36 currencies.</li>
+  <li><strong>Operator payout wallet supports 20 currencies:</strong> USD, EUR, GBP, AED, AUD, BRL, CAD, CHF, CZK, DKK, HKD, HUF, JPY, MXN, NOK, NZD, PLN, SEK, SGD, TRY.</li>
+  <li><strong>ILS (Israeli Shekel) is NOT supported</strong> as a payout currency. Israeli operators must receive USD or EUR and wire to Israel themselves.</li>
+  <li>Payments received in unsupported currencies auto-convert to USD at WeTravel's "daily rate" (spread undisclosed).</li>
+</ul>
+
+<!-- 5 scenarios -->
+<h2>💸 Where $1,500 actually goes — 5 scenarios</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>Scenario</th>
+      <th>Traveler pays</th>
+      <th>Fee taken</th>
+      <th>Operator nets</th>
+      <th>Confidence</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>A.</strong> US traveler → US operator, card<br><em>operator passes fee</em></td>
+      <td class="num">$1,543.50</td>
+      <td class="num">$43.50 (2.9%)</td>
+      <td class="num">$1,500.00</td>
+      <td><span class="conf verified">verified</span></td>
+    </tr>
+    <tr>
+      <td><strong>B.</strong> US traveler → US operator, card<br><em>operator absorbs fee</em></td>
+      <td class="num">$1,500.00</td>
+      <td class="num">$43.50 (2.9%)</td>
+      <td class="num">$1,456.50</td>
+      <td><span class="conf verified">verified</span></td>
+    </tr>
+    <tr>
+      <td><strong>C.</strong> US traveler → US operator, ACH<br><em>operator absorbs fee</em></td>
+      <td class="num">$1,500.00</td>
+      <td class="num">$15.00 (1%)</td>
+      <td class="num">$1,485.00</td>
+      <td><span class="conf verified">verified</span></td>
+    </tr>
+    <tr>
+      <td><strong>D.</strong> Israeli traveler → US operator, card<br><em>operator passes fee</em></td>
+      <td class="num">$1,558.50<br>+ ~$25 Israeli bank FX</td>
+      <td class="num">$58.50 (3.9%)</td>
+      <td class="num">$1,500.00</td>
+      <td><span class="conf estimate">est. on FX</span></td>
+    </tr>
+    <tr>
+      <td><strong>E.</strong> US traveler → Israeli operator, card<br><em>operator absorbs fee, wire payout</em></td>
+      <td class="num">$1,500.00</td>
+      <td class="num">$43.50 card<br>+ $15–$30 wire<br>+ ~1.5% FX</td>
+      <td class="num"><strong>~$1,420</strong></td>
+      <td><span class="conf estimate">est. on wire + FX</span></td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="callout">
+  <div class="callout-title">Key takeaways from the table</div>
+  <ul style="margin-bottom: 0;">
+    <li>The card processing fee (2.9% or 3.9%) is the only fee WeTravel takes from the operator. There is no separate marketplace commission.</li>
+    <li>Whether the traveler or the operator sees the fee depends entirely on a setting the operator picks during trip creation.</li>
+    <li>Israeli operator paid via international wire loses an estimated <strong>~$80 of $1,500</strong> (~5.3%) to card fee + wire + FX spread.</li>
+    <li>Israeli travelers always hit the 3.9% AMEX/international tier plus their bank's USD→ILS conversion markup.</li>
+  </ul>
+</div>
+
+<!-- Refund / chargeback -->
+<h2>↩️ Refunds & chargebacks <span class="conf verified">verified</span></h2>
+<ul>
+  <li><strong>Card processing fee is NOT refunded on cancellations.</strong> The 2.9% / 3.9% stays with WeTravel + the card network and is deducted from the operator's balance.</li>
+  <li><strong>ACH refunds:</strong> free — the 1% is refunded.</li>
+  <li><strong>Default refund policy:</strong> non-refundable. Cancellation terms are 100% operator-defined.</li>
+  <li><strong>Chargeback fee:</strong> no published flat fee (Stripe charges $15; WeTravel's number is undisclosed). <span class="conf unclear">unclear</span></li>
+  <li><strong>Chargeback liability:</strong> operator bears the full disputed amount + "administrative fees" per the help center.</li>
+  <li>WeTravel does not fight disputes on the operator's behalf.</li>
+</ul>
+
+<!-- Account freeze -->
+<h2>🚨 Account freeze risk <span class="conf verified">verified via reviews</span></h2>
+<p>Multiple operator complaints across Trustpilot, Capterra, and PissedConsumer document the same pattern: WeTravel can freeze an operator's entire balance for "compliance review" with no advance notice, no SLA, and no phone support.</p>
+<ul>
+  <li>One operator: <em>"Trips in progress, payments due to hotels and guides, and WeTravel held ALL funds during a 'compliance review' that lasted weeks with no explanation."</em></li>
+  <li>Another: <em>"Frozen after 8 months, ~€50,000 in client money, zero contact from the company."</em></li>
+  <li>Another reported filing an FTC complaint after WeTravel blocked transactions mid-trip (October 2024).</li>
+</ul>
+
+<!-- Payout timing -->
+<h2>⏱ Payout timing <span class="conf verified">verified</span></h2>
+<ul>
+  <li><strong>Default:</strong> WeTravel pays out 1–3 business days after each payment clears. They do NOT hold deposits until trip departure by default.</li>
+  <li>Operators CAN set up deposit + balance payment plans (e.g., $500 now, $1,000 due 60 days pre-trip). Each scheduled payment is collected from the traveler at its trigger date and paid out to the operator within 1–3 days.</li>
+  <li>This means the popular claim that "WeTravel holds your money for months" is <strong>only true for compliance freezes</strong>, not by design.</li>
+</ul>
+
+<!-- Israeli specific -->
+<h2>🇮🇱 Israeli traveler / operator specifics</h2>
+<h3>Israeli traveler paying</h3>
+<ul>
+  <li>Card hit at 3.9% (international tier) <span class="conf verified">verified</span></li>
+  <li>USD→ILS conversion handled by the Israeli card issuer, not WeTravel — typically 1.5–3% markup on top. <span class="conf estimate">estimate</span></li>
+  <li>WeTravel does NOT pass installment metadata to Israeli card networks. Native Tashlumim is unavailable. <span class="conf verified">verified</span></li>
+  <li>WeTravel's own payment-plan feature is just deferred billing — not interest-free installments and not the same as Israeli card-network Tashlumim.</li>
+</ul>
+<h3>Israeli operator receiving</h3>
+<ul>
+  <li>ILS payout: not supported. Operator receives USD or EUR. <span class="conf verified">verified</span></li>
+  <li>Israel is NOT on WeTravel's blocked-country list — Israeli operators can onboard. <span class="conf verified">verified</span></li>
+  <li>Every payout to an Israeli bank is an international wire ($15–$30, inconsistently documented). <span class="conf unclear">unclear amount</span></li>
+  <li>FX spread on USD→ILS conversion estimated at 1–2% based on user reports. <span class="conf estimate">estimate</span></li>
+  <li>WeTravel does not withhold tax on operator payouts — that's the operator's responsibility. <span class="conf verified">verified</span></li>
+</ul>
+
+<!-- Other small print -->
+<h2>🔍 Other small print <span class="conf verified">verified</span></h2>
+<ul>
+  <li><strong>No built-in tip/gratuity prompt at checkout.</strong> Operators can add upsells (gear rental, transfers, lessons) as add-ons.</li>
+  <li><strong>Insurance at checkout:</strong> WeTravel partners with Trawick International and Pattern Insurance. Travelers opt in during booking.</li>
+  <li><strong>Growth Capital:</strong> a referral product (launched Nov 2022) where operators can borrow against future bookings via a 3rd-party lender.</li>
+  <li><strong>WeTravel Expense Card:</strong> a corporate card for operators with FX markups and international transaction fees (specific numbers not published).</li>
+</ul>
+
+<!-- What's unclear -->
+<h2>❓ What WeTravel does not clearly publish</h2>
+<ul>
+  <li>Exact international wire payout fee ($15, $25, and $30 all appear in different help center pages)</li>
+  <li>FX spread on currency conversion (claimed "free" but rate is internal)</li>
+  <li>Flat chargeback fee amount</li>
+  <li>Default for "pass fee to traveler" on new operator accounts</li>
+  <li>Whether ACH booking confirmation is held until settlement (5–7 days) or confirmed immediately</li>
+  <li>Whether Israeli traveler checkout displays totals in ILS or USD before charge</li>
+</ul>
+
+<div class="sources">
+  <strong>Sources:</strong>
+  <a href="https://help.wetravel.com/en/articles/434422-pricing">Pricing help center</a> ·
+  <a href="https://product.wetravel.com/pricing">Subscription plans</a> ·
+  <a href="https://help.wetravel.com/en/articles/1217663-can-i-pass-on-fees-to-participants">Pass-through fees</a> ·
+  <a href="https://help.wetravel.com/en/articles/1217697-are-there-fees-for-refunds">Refund fees</a> ·
+  <a href="https://help.wetravel.com/en/articles/1687811-how-does-wetravel-handle-disputes">Disputes</a> ·
+  <a href="https://help.wetravel.com/en/articles/9039078-convert-currencies-within-wetravel">Currency conversion</a> ·
+  <a href="https://help.wetravel.com/en/articles/6049882-how-to-payout-usd-funds-instantly">Instant payouts</a> ·
+  <a href="http://help.wetravel.com/en/articles/419852-how-do-i-make-a-payout-to-an-international-account">International wire payout</a> ·
+  <a href="https://help.wetravel.com/en/articles/8694062-how-does-multi-currency-checkout-work-on-wetravel">Multi-currency checkout</a> ·
+  <a href="https://www.trustpilot.com/review/wetravel.com">Trustpilot reviews</a> ·
+  <a href="https://wetravel.pissedconsumer.com/review.html">PissedConsumer reviews</a> ·
+  <a href="https://www.capterra.com/p/163474/WeTravel/reviews/">Capterra reviews</a>
+</div>
+
+</div>
+</body>
+</html>

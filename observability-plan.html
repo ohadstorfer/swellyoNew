@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Swellyo — Observability Plan</title>
+<style>
+  :root {
+    --bg: #f4f8fb;
+    --card: #ffffff;
+    --ink: #0f2733;
+    --muted: #5c7180;
+    --line: #e2ebf0;
+    --blue: #1f8fd6;
+    --blue-soft: #e8f4fc;
+    --green: #18a673;
+    --green-soft: #e6f6ef;
+    --amber: #e8a33d;
+    --amber-soft: #fdf3e3;
+    --red: #d8635f;
+    --red-soft: #fbe9e9;
+    --shadow: 0 6px 22px rgba(15,39,51,0.07);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.5;
+    padding: 40px 20px 80px;
+  }
+  .wrap { max-width: 920px; margin: 0 auto; }
+
+  header { text-align: center; margin-bottom: 36px; }
+  header .eyebrow {
+    text-transform: uppercase; letter-spacing: 2px; font-size: 12px;
+    color: var(--blue); font-weight: 700; margin-bottom: 8px;
+  }
+  header h1 { font-size: 30px; margin-bottom: 8px; }
+  header p { color: var(--muted); font-size: 16px; }
+
+  .section-title {
+    font-size: 13px; text-transform: uppercase; letter-spacing: 1.5px;
+    color: var(--muted); font-weight: 700; margin: 38px 0 14px;
+  }
+  .section-title small { text-transform: none; letter-spacing: 0; font-weight: 500; color: var(--muted); }
+
+  /* The big question / verdict */
+  .verdict {
+    background: linear-gradient(135deg, #1f8fd6, #15709e);
+    color: #fff; border-radius: 18px; padding: 26px 28px;
+    box-shadow: var(--shadow); margin-bottom: 8px;
+  }
+  .verdict h2 { font-size: 20px; margin-bottom: 12px; }
+  .verdict ul { list-style: none; }
+  .verdict li { padding-left: 26px; position: relative; margin-bottom: 8px; font-size: 15px; }
+  .verdict li::before {
+    content: "✓"; position: absolute; left: 0; top: 0;
+    font-weight: 700; color: #bde6ff;
+  }
+  .cost-line { text-align:center; margin-top: 22px; font-size: 16px; font-weight: 700; }
+  .cost-line span { color: var(--green); }
+
+  /* generic info panel */
+  .panel {
+    background: var(--card); border-radius: 16px; padding: 22px;
+    box-shadow: var(--shadow); border: 1px solid var(--line); margin-bottom: 8px;
+  }
+  .panel p { color: #2a3f4b; font-size: 14px; }
+  .note {
+    background: var(--blue-soft); border-radius: 12px; padding: 12px 16px;
+    font-size: 13px; color: #1c5b7e; margin-top: 14px;
+  }
+  .note b { color: var(--ink); }
+
+  /* cards */
+  .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 680px) { .cards { grid-template-columns: 1fr; } }
+
+  .card {
+    background: var(--card); border-radius: 16px; padding: 22px;
+    box-shadow: var(--shadow); border: 1px solid var(--line);
+    display: flex; flex-direction: column;
+  }
+  .card.best { border: 2px solid var(--green); }
+  .card h3 { font-size: 18px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .tag {
+    display: inline-block; font-size: 11px; font-weight: 700;
+    padding: 3px 9px; border-radius: 999px; letter-spacing: .4px;
+  }
+  .tag.best { background: var(--green-soft); color: var(--green); }
+  .tag.skip { background: var(--red-soft); color: var(--red); }
+  .tag.extra { background: var(--blue-soft); color: var(--blue); }
+  .tag.later { background: var(--amber-soft); color: var(--amber); }
+
+  .price { font-size: 14px; color: var(--muted); margin: 4px 0 14px; font-weight: 600; }
+  .price b { color: var(--ink); }
+
+  .card ul { list-style: none; margin-top: auto; }
+  .card li { padding-left: 22px; position: relative; margin-bottom: 7px; font-size: 14px; color: #2a3f4b; }
+  .pro::before  { content: "✔"; color: var(--green); position: absolute; left: 0; }
+  .con::before  { content: "✕"; color: var(--red);   position: absolute; left: 0; }
+  .neu::before  { content: "•"; color: var(--muted); position: absolute; left: 0; }
+
+  /* tables */
+  table { width: 100%; border-collapse: collapse; background: var(--card);
+    border-radius: 14px; overflow: hidden; box-shadow: var(--shadow); font-size: 14px; }
+  th, td { text-align: left; padding: 12px 15px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { background: #f0f6fa; font-size: 12px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); }
+  tr:last-child td { border-bottom: none; }
+  td.yes { color: var(--green); font-weight: 700; }
+  td.no  { color: var(--red);   font-weight: 700; }
+  .rowname { font-weight: 700; }
+  .price-cell { font-weight: 700; color: var(--blue); }
+  code { background: #eef4f8; border-radius: 5px; padding: 1px 6px; font-size: 12.5px; color: #1c5b7e; }
+
+  /* severity pills */
+  .sev { display:inline-block; font-size: 11px; font-weight: 700; border-radius: 999px; padding: 2px 9px; color:#fff; }
+  .sev.p0 { background: var(--red); }
+  .sev.p1 { background: var(--amber); }
+  .sev.p2 { background: var(--green); }
+  .legend { margin: 4px 0 12px; font-size: 13px; color: var(--muted); }
+  .legend span { margin-right: 16px; }
+
+  /* pick / highlight box */
+  .pick {
+    background: var(--green-soft); border: 1px solid #bfe8d6;
+    border-radius: 14px; padding: 18px 22px;
+  }
+  .pick h3 { font-size: 16px; margin-bottom: 8px; color: var(--green); }
+  .pick ul { list-style: none; }
+  .pick li { padding-left: 24px; position: relative; margin-bottom: 6px; font-size: 14px; }
+  .pick li::before { content: "✉️"; position: absolute; left: 0; }
+  .pick li.dash::before { content: "📊"; }
+  .pick li.rule::before { content: "🔔"; }
+
+  /* rollout steps */
+  .steps { list-style: none; counter-reset: step; }
+  .steps li {
+    background: var(--card); border: 1px solid var(--line); box-shadow: var(--shadow);
+    border-radius: 14px; padding: 14px 18px 14px 56px; position: relative; margin-bottom: 10px; font-size: 14px;
+  }
+  .steps li::before {
+    counter-increment: step; content: counter(step);
+    position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
+    width: 28px; height: 28px; border-radius: 50%; background: var(--blue); color: #fff;
+    display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px;
+  }
+  .steps b { color: var(--ink); }
+
+  footer { text-align: center; color: var(--muted); font-size: 13px; margin-top: 44px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="eyebrow">Swellyo · Observability</div>
+    <h1>Periodic checks + crash tracking — the plan</h1>
+    <p>Scheduled tests that run on a timer + real-user crash reports, so we get alerted the second something breaks. Mobile-first · budget ~$0–30/mo. Nothing is built yet.</p>
+  </header>
+
+  <!-- VERDICT -->
+  <div class="verdict">
+    <h2>👉 My recommendation</h2>
+    <ul>
+      <li><b>Sentry</b> (free) — catches real crashes & errors from real phones. Our #1 gap today.</li>
+      <li><b>DIY backend checks</b> (free) — a scheduled function pings our critical Edge Functions + OpenAI + Google + S3, and shows health in our admin dashboard.</li>
+      <li><b>Better Stack</b> (free) — an outside watchdog, in case our own backend (and our checker) is down.</li>
+      <li><b>Maestro</b> (free, already installed) — run UI flows locally before each release. Cloud is $250/mo → skip.</li>
+    </ul>
+  </div>
+  <div class="cost-line">Total cost: <span>$0/month</span> · Optional Sentry upgrade for Slack = $26/mo later</div>
+
+  <!-- TWO KINDS -->
+  <div class="section-title">1 · Two kinds of monitoring <small>(we need both)</small></div>
+  <table>
+    <thead>
+      <tr><th>Type</th><th>What it is</th><th>Catches</th><th>Misses</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="rowname">Passive error tracking</td>
+        <td>SDK in the app reports real crashes & errors from real users.</td>
+        <td class="yes">Crashes, white screens, broken buttons</td>
+        <td class="no">Backend down at 3am with no users online</td>
+      </tr>
+      <tr>
+        <td class="rowname">Synthetic checks</td>
+        <td>A robot hits our key endpoints on a timer and checks the answer is right.</td>
+        <td class="yes">Backend / OpenAI / Maps / S3 down, 24/7</td>
+        <td class="no">Client-only UI bugs on a real screen</td>
+      </tr>
+    </tbody>
+  </table>
+  <div class="note"><b>Plain "is it up?" pings are not enough</b> — login can return "200 OK" and still be broken. We check the <i>answer</i>, not just the status code.</div>
+
+  <!-- CRITICAL PATHS -->
+  <div class="section-title">2 · Critical paths — what must not break</div>
+  <div class="legend">
+    <span><span class="sev p0">P0</span> app unusable</span>
+    <span><span class="sev p1">P1</span> major feature down</span>
+    <span><span class="sev p2">P2</span> degraded / silent</span>
+  </div>
+  <table>
+    <thead>
+      <tr><th>Path</th><th>Depends on</th><th>How we watch it</th><th>Sev</th></tr>
+    </thead>
+    <tbody>
+      <tr><td class="rowname">Sign in (Google / Apple)</td><td>Supabase Auth, Google, Apple</td><td>Synthetic auth probe + Sentry</td><td><span class="sev p0">P0</span></td></tr>
+      <tr><td class="rowname">Signup DB trigger</td><td>Supabase DB trigger</td><td>Watch auth error logs (broke before)</td><td><span class="sev p0">P0</span></td></tr>
+      <tr><td class="rowname">App boot / session restore</td><td>Supabase Auth + DB</td><td>Synthetic latency probe (&lt;2s)</td><td><span class="sev p0">P0</span></td></tr>
+      <tr><td class="rowname">Swelly AI chat</td><td><code>swelly-chat-demo</code>, OpenAI</td><td>Synthetic: POST "ping", assert reply</td><td><span class="sev p1">P1</span></td></tr>
+      <tr><td class="rowname">Matching</td><td><code>swelly-trip-planning</code>, OpenAI, DB</td><td>Synthetic POST + Sentry</td><td><span class="sev p1">P1</span></td></tr>
+      <tr><td class="rowname">Messaging (DMs)</td><td>Supabase Realtime, DB</td><td>Insert+read probe + Sentry</td><td><span class="sev p1">P1</span></td></tr>
+      <tr><td class="rowname">Push notifications</td><td>DB webhook, Expo Push API</td><td>Synthetic send + receipts</td><td><span class="sev p1">P1</span></td></tr>
+      <tr><td class="rowname">Profile video upload</td><td><code>process-profile-video-s3</code>, AWS S3</td><td>Synthetic presign-URL probe</td><td><span class="sev p1">P1</span></td></tr>
+      <tr><td class="rowname">Maps / place picker</td><td>Google Places + Geocoding keys</td><td>Synthetic key-health check</td><td><span class="sev p1">P1</span></td></tr>
+      <tr><td class="rowname">Onboarding step saves</td><td>Supabase DB</td><td>PostHog funnel + write check</td><td><span class="sev p1">P1</span></td></tr>
+      <tr><td class="rowname">Group trips (budget, joins)</td><td>Edge fns, OpenAI, Expo Push</td><td>Synthetic POST + Sentry</td><td><span class="sev p2">P2</span></td></tr>
+      <tr><td class="rowname">DM media (video/image)</td><td>S3, Supabase Storage</td><td>Sentry on upload errors</td><td><span class="sev p2">P2</span></td></tr>
+    </tbody>
+  </table>
+  <div class="note"><b>Watch these live Edge Functions first:</b> <code>swelly-chat-demo</code>, <code>swelly-trip-planning</code>, <code>send-push-notification</code>, <code>process-profile-video-s3</code>, <code>geocode-user-destinations</code>. Ignore any <code>-copy</code> function (experimental).</div>
+
+  <!-- TOOLS: LAYER A -->
+  <div class="section-title">3 · Tools — Layer A: crash / error tracking</div>
+  <div class="cards">
+
+    <div class="card best">
+      <h3>Sentry <span class="tag best">RECOMMENDED</span></h3>
+      <div class="price"><b>Free</b> (5k errors/mo) → $26/mo</div>
+      <ul>
+        <li class="pro">Real crashes from real phones — our #1 gap</li>
+        <li class="pro">Readable reports (real file + line)</li>
+        <li class="pro">Auto source maps on EAS builds</li>
+        <li class="con">After each OTA we must upload source maps</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h3>Firebase Crashlytics <span class="tag extra">ALT</span></h3>
+      <div class="price"><b>Free forever</b>, unlimited</div>
+      <ul>
+        <li class="pro">Truly free, no event cap</li>
+        <li class="pro">Great native crash symbolication</li>
+        <li class="con">Misses JS-layer errors</li>
+        <li class="con">Heavier setup, needs dev build</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h3>Bugsnag <span class="tag later">PRICEY</span></h3>
+      <div class="price"><b>Free</b> (7.5k) → $59/mo</div>
+      <ul>
+        <li class="pro">Nice "stability score"</li>
+        <li class="con">Big jump to paid tier</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h3>PostHog (we have it) <span class="tag skip">NOT YET</span></h3>
+      <div class="price"><b>Free</b> 100k errors/mo</div>
+      <ul>
+        <li class="pro">Already installed, generous free tier</li>
+        <li class="con">RN crash capture is broken (bug, Mar 2026)</li>
+        <li class="neu">Revisit once the bug is fixed</li>
+      </ul>
+    </div>
+
+  </div>
+
+  <!-- TOOLS: LAYER B -->
+  <div class="section-title">3 · Tools — Layer B: backend synthetic checks</div>
+  <div class="cards">
+
+    <div class="card best">
+      <h3>DIY (pg_cron + Edge Fn) <span class="tag best">RECOMMENDED</span></h3>
+      <div class="price"><b>$0</b> · ~1–2 days build</div>
+      <ul>
+        <li class="pro">Tests our real authenticated logic</li>
+        <li class="pro">Checks OpenAI / Google / S3 keys</li>
+        <li class="pro">Results live in our own dashboard</li>
+        <li class="con">Dies if Supabase is down → need Layer C</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h3>Checkly <span class="tag extra">BUY ALT</span></h3>
+      <div class="price"><b>Free</b> 10k runs/mo → $24/mo</div>
+      <ul>
+        <li class="pro">Best hosted scripted checks</li>
+        <li class="pro">Half-day setup, multi-region</li>
+        <li class="con">Alerts live in their dashboard, not ours</li>
+      </ul>
+    </div>
+
+  </div>
+
+  <!-- TOOLS: LAYER C & D -->
+  <div class="section-title">3 · Tools — Layer C: outside watchdog · Layer D: mobile UI</div>
+  <div class="cards">
+
+    <div class="card best">
+      <h3>Better Stack <span class="tag best">WATCHDOG</span></h3>
+      <div class="price"><b>Free</b> (10 monitors, 30s)</div>
+      <ul>
+        <li class="pro">Fastest free check interval</li>
+        <li class="pro">Email + Slack + free status page</li>
+        <li class="pro">Alerts us even if our backend is down</li>
+        <li class="neu">Simple pings only (that's fine here)</li>
+      </ul>
+    </div>
+
+    <div class="card best">
+      <h3>Maestro — local <span class="tag best">UI TESTS</span></h3>
+      <div class="price"><b>$0</b> · already installed</div>
+      <ul>
+        <li class="pro">Run flows before each release for free</li>
+        <li class="con">Cloud scheduling = $250/mo → skip</li>
+        <li class="neu">Revisit cloud if we add CI + funding</li>
+      </ul>
+    </div>
+
+  </div>
+  <div class="note"><b>Optional, later:</b> Supabase exposes a free Prometheus metrics endpoint → pipe to <b>Grafana Cloud</b> (free) for DB/infra alerts. ~1–2h setup.</div>
+
+  <!-- BUILD VS BUY -->
+  <div class="section-title">4 · The one real decision: build vs buy the backend checks</div>
+  <table>
+    <thead>
+      <tr><th>What matters</th><th>DIY (our pick)</th><th>Buy Checkly</th></tr>
+    </thead>
+    <tbody>
+      <tr><td class="rowname">Cost</td><td class="yes">$0</td><td>Free → $24/mo</td></tr>
+      <tr><td class="rowname">Setup effort</td><td>~1–2 days</td><td class="yes">~half day</td></tr>
+      <tr><td class="rowname">Tests our real logic</td><td class="yes">Yes, fully</td><td class="yes">Yes</td></tr>
+      <tr><td class="rowname">Results in our dashboard</td><td class="yes">Yes</td><td class="no">No</td></tr>
+      <tr><td class="rowname">Survives Supabase outage</td><td class="no">No → need watchdog</td><td class="yes">Yes</td></tr>
+      <tr><td class="rowname">Maintenance</td><td>On us</td><td class="yes">Managed</td></tr>
+    </tbody>
+  </table>
+  <div class="note"><b>Why DIY:</b> it's free, you want alerts inside your own admin dashboard, and you're fine with dev time. Better Stack (Layer C) removes the only real downside.</div>
+
+  <!-- ALERTS -->
+  <div class="section-title">5 · Where alerts go</div>
+  <div class="pick">
+    <h3>How you'll be notified</h3>
+    <ul>
+      <li><b>Email</b> — Sentry, Better Stack & DIY checks all email on failure. Zero setup.</li>
+      <li class="dash"><b>Admin / analytics dashboard</b> — DIY checks write to a <code>monitoring_runs</code> table; a "System health" panel shows green/red per path + last failure.</li>
+      <li class="rule"><b>Rule</b> — only alert after 2 failures in a row for the same check, to avoid noise from one-off blips.</li>
+    </ul>
+  </div>
+
+  <!-- ROLLOUT -->
+  <div class="section-title">6 · Suggested rollout</div>
+  <ul class="steps">
+    <li><b>Sentry (½ day)</b> — install Expo SDK, ship in next build. Instant value: see real crashes.</li>
+    <li><b>Better Stack (1h)</b> — add monitors on Supabase + key Edge Function URLs. Instant outside watchdog.</li>
+    <li><b>DIY checks (1–2 days)</b> — <code>health-monitor</code> Edge Fn + pg_cron every 5 min + <code>monitoring_runs</code> table + email alerts (Resend).</li>
+    <li><b>Dashboard panel (½ day)</b> — surface health inside the admin / analytics dashboard.</li>
+    <li><b>Maestro habit</b> — run UI flows before each release. <i>Optional later:</i> Grafana infra metrics.</li>
+  </ul>
+
+  <!-- COST -->
+  <div class="section-title">7 · Cost summary</div>
+  <table>
+    <thead>
+      <tr><th>Layer</th><th>Tool</th><th>Cost now</th><th>If we scale</th></tr>
+    </thead>
+    <tbody>
+      <tr><td class="rowname">Crash tracking</td><td>Sentry</td><td class="yes">$0</td><td class="price-cell">$26/mo</td></tr>
+      <tr><td class="rowname">Backend checks</td><td>DIY</td><td class="yes">$0</td><td>$0 (or Checkly $24/mo)</td></tr>
+      <tr><td class="rowname">Watchdog</td><td>Better Stack</td><td class="yes">$0</td><td class="price-cell">$25/mo</td></tr>
+      <tr><td class="rowname">Email alerts</td><td>Resend</td><td class="yes">$0</td><td>$0 (3k/mo free)</td></tr>
+      <tr><td class="rowname">Mobile UI</td><td>Maestro local</td><td class="yes">$0</td><td>$250/mo (cloud — skip)</td></tr>
+      <tr><td class="rowname">Total</td><td></td><td class="price-cell">$0 / mo</td><td class="price-cell">~$26/mo when needed</td></tr>
+    </tbody>
+  </table>
+
+  <footer>
+    Made for Swellyo · Observability research, June 2026 · Pricing & free tiers verified · Critical paths mapped from the live code · No code changed yet
+  </footer>
+
+</div>
+</body>
+</html>

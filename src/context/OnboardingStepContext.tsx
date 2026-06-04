@@ -58,7 +58,9 @@ interface OnboardingStepContextValue {
   callNext: () => void | Promise<void>;
   /** Invoked by the chrome's Back button. */
   callBack: () => void;
-  /** Internal: register/update the active step's descriptor. Returns an owner token. */
+  /** Internal: claim chrome ownership for a step (called once per mount). */
+  __claim: (token: number) => void;
+  /** Internal: register/update the active step's descriptor (no-op unless owner). */
   __register: (token: number, d: StepChromeDescriptor) => void;
   /** Internal: release a registration (no-op unless still the owner). */
   __release: (token: number) => void;
@@ -77,8 +79,19 @@ export const OnboardingStepProvider: React.FC<{ children: React.ReactNode }> = (
   });
   const ownerRef = useRef<number>(-1);
 
-  const __register = useCallback((token: number, d: StepChromeDescriptor) => {
+  // Claim chrome ownership. Called once per mount; the most recently mounted step
+  // (the incoming one during a slide) becomes the owner.
+  const __claim = useCallback((token: number) => {
     ownerRef.current = token;
+  }, []);
+
+  const __register = useCallback((token: number, d: StepChromeDescriptor) => {
+    // Only the current owner drives the chrome. During a slide TWO steps are mounted
+    // and both re-render continuously; without this gate the outgoing and incoming
+    // descriptors fight over `view` every render (their canProceed/label differ),
+    // flipping it back and forth → "Maximum update depth exceeded". Non-owner calls
+    // are ignored until the outgoing step unmounts.
+    if (ownerRef.current !== token) return;
     handlersRef.current = { onNext: d.onNext, onBack: d.onBack };
     setView((prev) => {
       // Avoid redundant state updates that would re-render the chrome.
@@ -111,8 +124,8 @@ export const OnboardingStepProvider: React.FC<{ children: React.ReactNode }> = (
   const callBack = useCallback(() => handlersRef.current.onBack(), []);
 
   const value = useMemo<OnboardingStepContextValue>(
-    () => ({ view, callNext, callBack, __register, __release }),
-    [view, callNext, callBack, __register, __release],
+    () => ({ view, callNext, callBack, __claim, __register, __release }),
+    [view, callNext, callBack, __claim, __register, __release],
   );
 
   return (
@@ -146,22 +159,28 @@ export function useRegisterOnboardingStep(descriptor: StepChromeDescriptor): voi
   if (tokenRef.current === 0) {
     tokenRef.current = ++__tokenSeq;
   }
-  const { __register, __release } = ctx;
+  const { __claim, __register, __release } = ctx;
 
   // Store the latest descriptor in a ref (handlers close over current state).
   const descriptorRef = useRef(descriptor);
   descriptorRef.current = descriptor;
 
-  // Register after commit (never during render, to avoid cross-component setState).
-  // Runs every render so handlers stay fresh; setView is equality-guarded.
-  useEffect(() => {
-    __register(tokenRef.current, descriptorRef.current);
-  });
-
-  // Release only on unmount; no-op if the incoming screen already took ownership.
+  // Claim ownership ONCE on mount — the incoming step takes over from the outgoing
+  // one that's still animating out. Push an initial descriptor, release on unmount.
+  // Claiming here (not on every render) is what stops the two co-mounted steps from
+  // fighting over the chrome during a slide ("Maximum update depth exceeded").
   useEffect(() => {
     const token = tokenRef.current;
+    __claim(token);
+    __register(token, descriptorRef.current);
     return () => __release(token);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Keep the OWNER's handlers + button state fresh on every render. __register is
+  // owner-gated and equality-guarded, so for the non-owning (outgoing) step this is
+  // a no-op and can't thrash.
+  useEffect(() => {
+    __register(tokenRef.current, descriptorRef.current);
+  });
 }

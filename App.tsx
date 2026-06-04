@@ -14,9 +14,48 @@ import { registerLogoutHandlers } from './src/utils/registerLogoutHandlers';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import Constants from 'expo-constants';
+import * as Sentry from '@sentry/react-native';
 
-// KeyboardProvider requires native code — skip in Expo Go
+// Sentry's native modules (mobile replay, native crash) aren't available in Expo Go.
 const isExpoGo = Constants.appOwnership === 'expo';
+
+Sentry.init({
+  dsn: 'https://d30db011c45bc9d24085d007b27321ee@o4511498427170816.ingest.us.sentry.io/4511498431365120',
+
+  // Don't send dev errors to Sentry (saves free-tier quota, keeps the dashboard to real
+  // users). Flip EXPO_PUBLIC_SENTRY_DEBUG=true to force reporting on the simulator/Expo Go
+  // when you actually want to test Sentry there.
+  enabled: !__DEV__ || process.env.EXPO_PUBLIC_SENTRY_DEBUG === 'true',
+
+  // Don't attach IP/cookies/PII by default (privacy / GDPR). Set true if you need richer context.
+  sendDefaultPii: false,
+
+  // Enable Logs
+  enableLogs: true,
+
+  // Record a replay only when an error happens — no blanket session recording (cost/data).
+  replaysSessionSampleRate: 0,
+  replaysOnErrorSampleRate: 1,
+
+  // Known-harmless noise — never actionable. Drop before it counts against quota.
+  // Add app-specific noise here only once real Sentry data shows a clear, harmless pattern.
+  ignoreErrors: [
+    /ResizeObserver loop (limit exceeded|completed with undelivered notifications)/,
+    // In Expo Go, native modules (ExpoUpdates, etc.) are absent, so libraries throw
+    // "Cannot find native module 'X'". This never happens in real builds — pure Expo Go
+    // noise. Filtered ONLY in Expo Go so a truly-missing native module in a production
+    // build still surfaces.
+    ...(isExpoGo ? [/Cannot find native module/] : []),
+  ],
+
+  // mobileReplayIntegration is a native module — skip in Expo Go and on web (no-op there).
+  integrations: isExpoGo || Platform.OS === 'web' ? [] : [Sentry.mobileReplayIntegration()],
+
+  // uncomment the line below to enable Spotlight (https://spotlightjs.com)
+  // spotlight: __DEV__,
+});
+
+// KeyboardProvider requires native code — skip in Expo Go (isExpoGo defined above)
 const MaybeKeyboardProvider = isExpoGo
   ? ({ children }: { children: React.ReactNode }) => <>{children}</>
   : require('react-native-keyboard-controller').KeyboardProvider;
@@ -31,13 +70,24 @@ if (I18nManager.isRTL) {
   I18nManager.forceRTL(false);
 }
 
-export default function App() {
+export default Sentry.wrap(function App() {
   const [isNavigationReady, setIsNavigationReady] = useState(false);
 
   useEffect(() => {
     // Initialize PostHog analytics (instance-based for tracking)
     analyticsService.initialize();
     registerLogoutHandlers();
+  }, []);
+
+  // 🧪 TEMP — Sentry smoke test. REMOVE after verifying. Runs only when
+  // EXPO_PUBLIC_SENTRY_DEBUG=true, so it can never fire in normal dev or prod.
+  useEffect(() => {
+    if (process.env.EXPO_PUBLIC_SENTRY_DEBUG !== 'true') return;
+    const t = setTimeout(() => {
+      console.log('[SentryTest] sending test event to Sentry…');
+      Sentry.captureException(new Error(`Sentry smoke test — ${Platform.OS} @ ${new Date().toISOString()}`));
+    }, 3000);
+    return () => clearTimeout(t);
   }, []);
 
   const handleNavigationReady = () => {
@@ -106,4 +156,4 @@ export default function App() {
     </MaybeKeyboardProvider>
     </GestureHandlerRootView>
   );
-}
+});

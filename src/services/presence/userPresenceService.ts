@@ -239,7 +239,7 @@ class UserPresenceService {
     // not a channel-level one, and retrying every 30s just spams logs.
     // AppState 'active' will reset the counter and trigger a fresh attempt.
     if (this.recoveryAttempts >= MAX_RECOVERY_ATTEMPTS) {
-      console.error(
+      console.warn(
         `[UserPresenceService] Presence channel ${reason} — giving up after ${this.recoveryAttempts} attempts. ` +
         `Likely a WebSocket-level issue (stale JWT / network / realtime socket dead). ` +
         `Will retry when app returns to foreground.`

@@ -1,0 +1,5 @@
+flows:
+  - smoke.yaml
+  - visual-baseline.yaml
+executionOrder:
+  continueOnFailure: true

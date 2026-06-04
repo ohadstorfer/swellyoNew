@@ -1,0 +1,19 @@
+appId: com.swellyo.app
+name: Visual baseline — capture key screens for review
+tags:
+  - visual
+---
+- launchApp:
+    clearState: false
+    stopApp: true
+- extendedWaitUntil:
+    visible: "Log In with Google"
+    timeout: 90000
+- takeScreenshot: .maestro/screenshots/baseline-01-welcome
+# Stop here for unauthenticated baseline.
+# Add post-auth flows below once a test account is set up.
+# Example pattern (commented until testIDs/test account exist):
+# - tapOn:
+#     id: "welcome-google-button"
+# - waitForAnimationToEnd
+# - takeScreenshot: screenshots/baseline-02-post-auth

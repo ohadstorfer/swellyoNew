@@ -1,0 +1,74 @@
+appId: com.swellyo.app
+name: visual-verify onboarding chunk 2 — continue from video upload
+tags:
+  - visual-verify
+---
+# Already running, just attach
+- launchApp:
+    clearState: false
+    stopApp: false
+
+# step-d: video upload screen (already there). Capture + tap Skip.
+- takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_112504/step-d/baseline
+- tapOn: "Skip"
+- waitForAnimationToEnd:
+    timeout: 4000
+
+- takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_112504/step-e/baseline
+- runFlow:
+    when:
+      visible: "Next"
+    commands:
+      - tapOn: "Next"
+      - waitForAnimationToEnd:
+          timeout: 4000
+- runFlow:
+    when:
+      visible: "Skip"
+    commands:
+      - tapOn: "Skip"
+      - waitForAnimationToEnd:
+          timeout: 4000
+
+- takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_112504/step-f/baseline
+- runFlow:
+    when:
+      visible: "Next"
+    commands:
+      - tapOn: "Next"
+      - waitForAnimationToEnd:
+          timeout: 4000
+- runFlow:
+    when:
+      visible: "Skip"
+    commands:
+      - tapOn: "Skip"
+      - waitForAnimationToEnd:
+          timeout: 4000
+
+- takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_112504/step-g/baseline
+- runFlow:
+    when:
+      visible: "Next"
+    commands:
+      - tapOn: "Next"
+      - waitForAnimationToEnd:
+          timeout: 4000
+- runFlow:
+    when:
+      visible: "Skip"
+    commands:
+      - tapOn: "Skip"
+      - waitForAnimationToEnd:
+          timeout: 4000
+
+- takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_112504/step-h/baseline
+- runFlow:
+    when:
+      visible: "Next"
+    commands:
+      - tapOn: "Next"
+      - waitForAnimationToEnd:
+          timeout: 4000
+
+- takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_112504/step-i/baseline

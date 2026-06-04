@@ -1,0 +1,80 @@
+appId: com.swellyo.app
+name: visual-verify carousel + slider from Welcome
+tags:
+  - visual-verify
+---
+- launchApp:
+    clearState: false
+    stopApp: false
+
+# === Welcome → Demo → OnboardingWelcome ===
+- runFlow:
+    when:
+      visible:
+        id: "welcome-google-button"
+    commands:
+      - takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_185427/03-welcome
+      - tapOn:
+          id: "welcome-demo-button"
+      - extendedWaitUntil:
+          visible:
+            id: "onboarding-next-button"
+          timeout: 60000
+
+# === OnboardingWelcome: pick 2 cards (smart input pattern) ===
+- runFlow:
+    when:
+      visible: "Pick at least two.*"
+    commands:
+      - takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_185427/04-onboarding-welcome-empty
+      - tapOn: "Connect with Like.*"
+      - waitForAnimationToEnd:
+          timeout: 800
+      - tapOn: "Meet Potential.*"
+      - waitForAnimationToEnd:
+          timeout: 800
+      - takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_185427/04-onboarding-welcome-filled
+      - tapOn:
+          id: "onboarding-next-button"
+      - waitForAnimationToEnd:
+          timeout: 2500
+
+- takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_185427/05-after-pick
+
+# === Step 1 (probably basic profile screen) — capture + try Next ===
+- runFlow:
+    when:
+      visible:
+        id: "onboarding-next-button"
+    commands:
+      - tapOn:
+          id: "onboarding-next-button"
+      - waitForAnimationToEnd:
+          timeout: 2500
+
+- takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_185427/06-step-after-1
+
+# === BOARD CAROUSEL ===
+- runFlow:
+    when:
+      visible: "What is your style.*"
+    commands:
+      - takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_185427/board-carousel/card-1
+      - swipe:
+          direction: LEFT
+          duration: 600
+      - waitForAnimationToEnd:
+          timeout: 1500
+      - takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_185427/board-carousel/card-2
+      - swipe:
+          direction: LEFT
+          duration: 600
+      - waitForAnimationToEnd:
+          timeout: 1500
+      - takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_185427/board-carousel/card-3
+      - swipe:
+          direction: LEFT
+          duration: 600
+      - waitForAnimationToEnd:
+          timeout: 1500
+      - takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_185427/board-carousel/card-4

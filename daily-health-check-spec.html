@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Daily Health Check — Spec</title>
+<style>
+  :root{
+    --bg:#f7fbff;
+    --card:#ffffff;
+    --ink:#15303d;
+    --muted:#5f7686;
+    --line:#e6eef4;
+    --blue:#2aa0e6;
+    --blue-deep:#1577b8;
+    --blue-soft:#e9f5fd;
+    --green:#1bb37e;
+    --green-soft:#e7f8f1;
+    --amber:#eaa53a;
+    --amber-soft:#fdf4e3;
+    --violet:#8a6bdc;
+    --violet-soft:#f0ecfb;
+    --red:#e0655f;
+    --red-soft:#fcebea;
+    --shadow:0 8px 26px rgba(20,60,80,.08);
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    background:
+      radial-gradient(1200px 500px at 80% -10%, #e3f3ff 0%, rgba(227,243,255,0) 60%),
+      radial-gradient(900px 400px at -5% 0%, #e9fbf3 0%, rgba(233,251,243,0) 55%),
+      var(--bg);
+    color:var(--ink);
+    line-height:1.55;
+    padding:48px 20px 90px;
+  }
+  .wrap{max-width:960px;margin:0 auto;}
+
+  header{text-align:center;margin-bottom:14px;}
+  .eyebrow{
+    text-transform:uppercase;letter-spacing:2.5px;font-size:12px;
+    color:var(--blue-deep);font-weight:800;margin-bottom:10px;
+  }
+  header h1{font-size:34px;letter-spacing:-.5px;margin-bottom:10px;}
+  header .sub{color:var(--muted);font-size:17px;max-width:620px;margin:0 auto;}
+  .meta{
+    display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:16px;
+  }
+  .chip{
+    font-size:12px;font-weight:700;padding:5px 12px;border-radius:999px;
+    background:var(--card);border:1px solid var(--line);color:var(--muted);
+    box-shadow:var(--shadow);
+  }
+  .chip b{color:var(--ink);}
+
+  .card{
+    background:var(--card);border:1px solid var(--line);border-radius:20px;
+    padding:26px 28px;box-shadow:var(--shadow);margin-top:20px;
+  }
+  .card h2{
+    font-size:13px;text-transform:uppercase;letter-spacing:1.5px;color:var(--blue-deep);
+    font-weight:800;margin-bottom:14px;display:flex;align-items:center;gap:9px;
+  }
+  .card h2 .dot{width:9px;height:9px;border-radius:3px;background:var(--blue);}
+  .card p{color:#33505f;margin-bottom:12px;font-size:15px;}
+  .card p:last-child{margin-bottom:0;}
+  .lead{font-size:16px;}
+  strong{color:var(--ink);}
+
+  /* goal highlight */
+  .goal{
+    background:linear-gradient(135deg,#2aa0e6,#1577b8);color:#fff;border:none;
+  }
+  .goal h2{color:#cdeeff;}
+  .goal h2 .dot{background:#bfe7ff;}
+  .goal p{color:#eaf6ff;}
+  .goal .vs{
+    margin-top:14px;background:rgba(255,255,255,.14);border-radius:12px;
+    padding:12px 16px;font-size:14px;
+  }
+
+  table{width:100%;border-collapse:collapse;font-size:14px;margin-top:6px;}
+  th,td{text-align:left;padding:11px 14px;border-bottom:1px solid var(--line);vertical-align:top;}
+  th{
+    font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);
+    background:#f3f9fd;
+  }
+  tr:last-child td{border-bottom:none;}
+  td.num{color:var(--blue-deep);font-weight:800;width:34px;}
+  .block{font-weight:700;color:var(--ink);}
+  code{
+    background:#eef4f8;border:1px solid var(--line);border-radius:6px;
+    padding:1px 6px;font-size:13px;color:var(--blue-deep);
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+
+  /* architecture diagram */
+  .diagram{
+    display:flex;align-items:stretch;gap:14px;flex-wrap:wrap;justify-content:center;
+    margin:6px 0 4px;
+  }
+  .node{
+    flex:1;min-width:200px;border-radius:16px;padding:16px 18px;border:2px solid;
+    display:flex;flex-direction:column;gap:4px;
+  }
+  .node .t{font-weight:800;font-size:15px;}
+  .node .d{font-size:13px;color:var(--muted);}
+  .node.ext{background:var(--green-soft);border-color:#bfead9;}
+  .node.fn{background:var(--blue-soft);border-color:#bfe4f8;}
+  .node.dep{background:var(--violet-soft);border-color:#ddd2f5;}
+  .arrow{display:flex;align-items:center;justify-content:center;font-size:24px;color:var(--blue);font-weight:800;}
+  @media(max-width:720px){.arrow{transform:rotate(90deg);}}
+
+  /* phase pills */
+  .pill{
+    display:inline-block;font-size:11px;font-weight:800;letter-spacing:.4px;
+    padding:4px 11px;border-radius:999px;margin-left:8px;vertical-align:middle;
+  }
+  .pill.now{background:var(--green-soft);color:var(--green);}
+  .pill.later{background:var(--amber-soft);color:var(--amber);}
+  .pill.weekly{background:var(--violet-soft);color:var(--violet);}
+
+  .callout{
+    border-radius:14px;padding:14px 18px;font-size:14px;margin-top:14px;
+    display:flex;gap:11px;align-items:flex-start;
+  }
+  .callout .ic{font-size:18px;line-height:1.3;}
+  .callout.warn{background:var(--amber-soft);border:1px solid #f3dcb0;color:#7a5512;}
+  .callout.note{background:var(--blue-soft);border:1px solid #c4e6fa;color:#155f8c;}
+  .callout.good{background:var(--green-soft);border:1px solid #bfead9;color:#136e4f;}
+
+  ul.clean{list-style:none;margin-top:6px;}
+  ul.clean li{position:relative;padding-left:24px;margin-bottom:8px;font-size:14.5px;color:#33505f;}
+  ul.clean li::before{content:"✓";position:absolute;left:0;color:var(--green);font-weight:800;}
+  ul.skip li::before{content:"✕";color:var(--red);}
+  ul.steps{counter-reset:s;list-style:none;}
+  ul.steps li{position:relative;padding-left:34px;margin-bottom:10px;font-size:14.5px;color:#33505f;}
+  ul.steps li::before{
+    counter-increment:s;content:counter(s);position:absolute;left:0;top:0;
+    width:22px;height:22px;border-radius:50%;background:var(--blue);color:#fff;
+    font-size:12px;font-weight:800;display:flex;align-items:center;justify-content:center;
+  }
+
+  .twocol{display:grid;grid-template-columns:1fr 1fr;gap:20px;}
+  @media(max-width:720px){.twocol{grid-template-columns:1fr;}}
+
+  footer{text-align:center;color:var(--muted);font-size:13px;margin-top:34px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="eyebrow">Swellyo · Design Spec</div>
+    <h1>Daily Deep Health Check 🩺</h1>
+    <p class="sub">Check every core piece of the app on a schedule — <b>before</b> a real user hits something broken.</p>
+    <div class="meta">
+      <span class="chip">📅 <b>2026-06-03</b></span>
+      <span class="chip">👤 <b>Ohad</b> + Claude</span>
+      <span class="chip">📊 for <b>~500</b> weekly users</span>
+      <span class="chip">🟡 <b>Draft</b> for review</span>
+    </div>
+  </header>
+
+  <!-- GOAL -->
+  <div class="card goal">
+    <h2><span class="dot"></span>The goal</h2>
+    <p class="lead">Catch outages proactively. This is the <strong>“is the system alive?”</strong> layer.</p>
+    <div class="vs">
+      <b>Health Check</b> = acts on its own, every day. &nbsp;·&nbsp; <b>Sentry</b> = reacts when a real user hits an error. Two different jobs, working side by side.
+    </div>
+  </div>
+
+  <!-- STRATEGY -->
+  <div class="card">
+    <h2><span class="dot"></span>Strategy — test building blocks, not paths</h2>
+    <p>The 12 user paths share only <strong>~9 building blocks</strong>. We test each block <strong>once</strong> instead of 12 overlapping tests. If a block is down, we instantly know which paths it takes with it.</p>
+    <table>
+      <thead><tr><th>#</th><th>Building block</th><th>Covers these paths</th></tr></thead>
+      <tbody>
+        <tr><td class="num">1</td><td class="block">Supabase DB</td><td>signup · boot · matching · onboarding · push</td></tr>
+        <tr><td class="num">2</td><td class="block">Supabase Auth</td><td>sign in · boot</td></tr>
+        <tr><td class="num">3</td><td class="block">Edge function platform</td><td>swelly chat · matching · group trips · video</td></tr>
+        <tr><td class="num">4</td><td class="block">OpenAI</td><td>swelly chat · matching · group trips</td></tr>
+        <tr><td class="num">5</td><td class="block">AWS S3</td><td>profile video · DM media</td></tr>
+        <tr><td class="num">6</td><td class="block">Supabase Storage</td><td>DM media</td></tr>
+        <tr><td class="num">7</td><td class="block">Supabase Realtime</td><td>DMs</td></tr>
+        <tr><td class="num">8</td><td class="block">Google Places / Geocoding</td><td>maps picker</td></tr>
+        <tr><td class="num">9</td><td class="block">Expo Push API</td><td>DMs · push · group trips</td></tr>
+      </tbody>
+    </table>
+    <div class="callout note"><span class="ic">ℹ️</span><div>Google / Apple <b>interactive sign-in</b> can’t be tested headlessly. We check that Supabase Auth is up (block&nbsp;2); the OAuth handshake is out of scope.</div></div>
+  </div>
+
+  <!-- ARCHITECTURE -->
+  <div class="card">
+    <h2><span class="dot"></span>How it’s wired</h2>
+    <div class="diagram">
+      <div class="node ext">
+        <span class="t">🤖 UptimeRobot</span>
+        <span class="d">Lives <b>outside</b> Supabase. Schedules the run, and sends you <b>email + phone push</b> on failure.</span>
+      </div>
+      <div class="arrow">→</div>
+      <div class="node fn">
+        <span class="t">⚙️ <code>health-check</code> edge fn</span>
+        <span class="d">The brain. Runs all checks in parallel, returns a JSON report + HTTP 200 (ok) or 503 (fail).</span>
+      </div>
+      <div class="arrow">→</div>
+      <div class="node dep">
+        <span class="t">🧱 The building blocks</span>
+        <span class="d">DB · Auth · OpenAI · S3 · Storage · Realtime · Google · Expo</span>
+      </div>
+    </div>
+    <div class="callout good"><span class="ic">✅</span><div><b>Why UptimeRobot owns the schedule:</b> it’s outside Supabase, so if <i>all</i> of Supabase goes down (the function too), it still notices “no healthy reply” and alerts you. An internal cron can’t warn you that its own platform is dead.</div></div>
+    <div class="callout warn"><span class="ic">⚠️</span><div><b>Deviation to bless:</b> you said “Supabase cron.” The spec uses UptimeRobot as the scheduler instead (more robust + free push/email), and keeps pg_cron as <i>optional Phase 2</i>. Flip it if you prefer.</div></div>
+  </div>
+
+  <!-- FUNCTION DETAILS -->
+  <div class="card">
+    <h2><span class="dot"></span>The <code>health-check</code> function</h2>
+    <div class="twocol">
+      <div>
+        <p><strong>Returns</strong></p>
+        <ul class="clean">
+          <li>JSON report with per-check results + timings</li>
+          <li>HTTP <b>200</b> when all critical checks pass</li>
+          <li>HTTP <b>503</b> when any critical check fails</li>
+          <li>UptimeRobot alerts on: not 200, or body missing <code>"ok":true</code></li>
+        </ul>
+      </div>
+      <div>
+        <p><strong>Security</strong></p>
+        <ul class="clean">
+          <li>Needs a secret token (<code>x-healthcheck-token</code>)</li>
+          <li>Stored as an edge-function secret</li>
+          <li>No token → <code>401</code></li>
+          <li>Blocks abuse + fake “healthy” responses</li>
+        </ul>
+      </div>
+    </div>
+    <p style="margin-top:16px"><strong>The permanent test user</strong> — one pre-made <code>demo-healthcheck@swellyo.test</code> (the <code>demo*</code> email auto-flags it as a demo user):</p>
+    <ul class="clean">
+      <li><code>is_demo_user = true</code> → invisible to matching &amp; analytics</li>
+      <li><code>finished_onboarding = true</code> → <b>stops the hourly abandonment-reminder push</b> from targeting it</li>
+      <li><b>No push token</b> → no push can physically fire</li>
+      <li>Daily checks <b>read/write this existing user</b> — they never create or delete users (that’s fragile)</li>
+    </ul>
+  </div>
+
+  <!-- CHECKS PHASE 1 -->
+  <div class="card">
+    <h2><span class="dot"></span>Checks — Phase 1 <span class="pill now">BUILD NOW</span></h2>
+    <p>The “can’t be down” core.</p>
+    <table>
+      <thead><tr><th>Check</th><th>How</th><th>Passes if…</th></tr></thead>
+      <tbody>
+        <tr><td><code>supabase_db</code></td><td>Read the test user’s row + tiny write to a log row</td><td>row returned + write ok &lt; 2s</td></tr>
+        <tr><td><code>supabase_auth</code></td><td>Auth admin API: fetch the test user by id</td><td>user returned</td></tr>
+        <tr><td><code>edge_platform</code></td><td>The function running at all proves it’s up</td><td>covered</td></tr>
+        <tr><td><code>openai</code></td><td>Call <code>swelly-chat-demo</code> with a tiny fixed prompt</td><td>non-empty reply &lt; 8s</td></tr>
+        <tr><td><code>aws_s3</code></td><td>PUT a tiny object then DELETE it</td><td>200 on both</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- CHECKS PHASE 2 -->
+  <div class="card">
+    <h2><span class="dot"></span>Checks — Phase 2 <span class="pill later">ADD LATER</span></h2>
+    <table>
+      <thead><tr><th>Check</th><th>How</th><th>Passes if…</th></tr></thead>
+      <tbody>
+        <tr><td><code>supabase_storage</code></td><td>Upload + delete a tiny file</td><td>both succeed</td></tr>
+        <tr><td><code>realtime</code></td><td>Subscribe to a channel</td><td><code>SUBSCRIBED</code> &lt; 5s</td></tr>
+        <tr><td><code>google_geocode</code></td><td>Geocode a fixed address (“Tel Aviv”)</td><td>≥1 result + key valid</td></tr>
+        <tr><td><code>expo_push</code></td><td>Reachability only — <b>never a real push</b></td><td>API responds</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- SIGNUP TEST -->
+  <div class="card">
+    <h2><span class="dot"></span>Signup-creation test <span class="pill weekly">WEEKLY · not daily</span></h2>
+    <p>Verifies the user-creation path using <strong>Option 3 — create directly as demo</strong>:</p>
+    <ul class="steps">
+      <li>Create auth user <code>demo-signup-test-&lt;ts&gt;@swellyo.test</code></li>
+      <li>Insert <code>users</code> + <code>surfers</code> rows: demo = true, onboarding done, no push token</li>
+      <li>Assert: surfer row exists, demo auto-flagged, age computed by the trigger</li>
+      <li>Delete via <code>auth.admin.deleteUser</code> (cascades clean up)</li>
+    </ul>
+    <div class="callout warn"><span class="ic">⚠️</span><div><b>Honest gap:</b> real signup builds the profile rows from <i>client</i> code, not an <code>auth.users</code> trigger. So this verifies “auth creation + surfer triggers fire,” not the exact client flow. Runs weekly because create/delete is the fragile part.</div></div>
+  </div>
+
+  <!-- TWO COL: error handling + out of scope -->
+  <div class="twocol">
+    <div class="card">
+      <h2><span class="dot"></span>Error handling</h2>
+      <ul class="clean">
+        <li>Each check has its own try/catch + timeout</li>
+        <li>One failing check never aborts the others</li>
+        <li>Critical vs non-critical: only critical fails flip to 503</li>
+        <li>So a flaky Google quota blip won’t page you at 3am</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h2><span class="dot"></span>Out of scope <span style="color:var(--muted);font-weight:600;text-transform:none;letter-spacing:0;">(YAGNI)</span></h2>
+      <ul class="clean skip">
+        <li>Full Google / Apple OAuth flow</li>
+        <li>Real push delivery to a device</li>
+        <li>pg_cron internal scheduling (maybe Phase 2)</li>
+        <li>A custom dashboard</li>
+        <li>Paid Sentry Log Drains</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- SUCCESS -->
+  <div class="card">
+    <h2><span class="dot"></span>Done when…</h2>
+    <ul class="clean">
+      <li>The <code>health-check</code> function returns the JSON report + correct status</li>
+      <li>The permanent demo health-check user exists, flagged + onboarding-complete</li>
+      <li>UptimeRobot pings it and alerts via <b>email + phone push</b> on failure</li>
+      <li>Phase 1 checks pass on production — and a deliberately broken key produces a 503 + alert</li>
+    </ul>
+  </div>
+
+  <footer>Swellyo · Daily Deep Health Check · Draft spec, 2026-06-03 · No code written yet</footer>
+
+</div>
+</body>
+</html>

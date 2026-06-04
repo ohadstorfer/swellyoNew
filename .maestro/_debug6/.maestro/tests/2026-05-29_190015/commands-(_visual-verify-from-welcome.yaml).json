@@ -1,0 +1,548 @@
+[ {
+  "command" : {
+    "applyConfigurationCommand" : {
+      "config" : {
+        "appId" : "com.swellyo.app",
+        "name" : "visual-verify carousel + slider from Welcome",
+        "tags" : [ "visual-verify" ]
+      },
+      "optional" : false
+    }
+  },
+  "metadata" : {
+    "status" : "COMPLETED",
+    "timestamp" : 1780092023278,
+    "duration" : 1,
+    "sequenceNumber" : 1,
+    "evaluatedCommand" : {
+      "applyConfigurationCommand" : {
+        "config" : {
+          "appId" : "com.swellyo.app",
+          "name" : "visual-verify carousel + slider from Welcome",
+          "tags" : [ "visual-verify" ]
+        },
+        "optional" : false
+      }
+    }
+  }
+}, {
+  "command" : {
+    "assertConditionCommand" : {
+      "condition" : {
+        "visible" : {
+          "idRegex" : "welcome-google-button",
+          "optional" : false
+        }
+      },
+      "timeout" : "30000",
+      "optional" : false
+    }
+  },
+  "metadata" : {
+    "status" : "COMPLETED",
+    "timestamp" : 1780092023718,
+    "duration" : 189,
+    "sequenceNumber" : 3,
+    "evaluatedCommand" : {
+      "assertConditionCommand" : {
+        "condition" : {
+          "visible" : {
+            "idRegex" : "welcome-google-button",
+            "optional" : false
+          }
+        },
+        "timeout" : "30000",
+        "optional" : false
+      }
+    }
+  }
+}, {
+  "command" : {
+    "takeScreenshotCommand" : {
+      "path" : ".maestro/screenshots/visual-verify-2026-05-29_185427/03-welcome",
+      "optional" : false
+    }
+  },
+  "metadata" : {
+    "status" : "COMPLETED",
+    "timestamp" : 1780092023907,
+    "duration" : 120,
+    "sequenceNumber" : 4,
+    "evaluatedCommand" : {
+      "takeScreenshotCommand" : {
+        "path" : ".maestro/screenshots/visual-verify-2026-05-29_185427/03-welcome",
+        "optional" : false
+      }
+    }
+  }
+}, {
+  "command" : {
+    "assertConditionCommand" : {
+      "condition" : {
+        "visible" : {
+          "idRegex" : "onboarding-next-button",
+          "optional" : false
+        }
+      },
+      "timeout" : "60000",
+      "optional" : false
+    }
+  },
+  "metadata" : {
+    "status" : "COMPLETED",
+    "timestamp" : 1780092032144,
+    "duration" : 92,
+    "sequenceNumber" : 6,
+    "evaluatedCommand" : {
+      "assertConditionCommand" : {
+        "condition" : {
+          "visible" : {
+            "idRegex" : "onboarding-next-button",
+            "optional" : false
+          }
+        },
+        "timeout" : "60000",
+        "optional" : false
+      }
+    }
+  }
+}, {
+  "command" : {
+    "launchAppCommand" : {
+      "appId" : "com.swellyo.app",
+      "clearState" : false,
+      "stopApp" : false,
+      "optional" : false
+    }
+  },
+  "metadata" : {
+    "status" : "COMPLETED",
+    "timestamp" : 1780092023279,
+    "duration" : 438,
+    "sequenceNumber" : 2,
+    "evaluatedCommand" : {
+      "launchAppCommand" : {
+        "appId" : "com.swellyo.app",
+        "clearState" : false,
+        "stopApp" : false,
+        "optional" : false
+      }
+    }
+  }
+}, {
+  "command" : {
+    "takeScreenshotCommand" : {
+      "path" : ".maestro/screenshots/visual-verify-2026-05-29_185427/05-step1",
+      "optional" : false
+    }
+  },
+  "metadata" : {
+    "status" : "COMPLETED",
+    "timestamp" : 1780092033705,
+    "duration" : 114,
+    "sequenceNumber" : 10,
+    "evaluatedCommand" : {
+      "takeScreenshotCommand" : {
+        "path" : ".maestro/screenshots/visual-verify-2026-05-29_185427/05-step1",
+        "optional" : false
+      }
+    }
+  }
+}, {
+  "command" : {
+    "waitForAnimationToEndCommand" : {
+      "timeout" : "2500",
+      "optional" : false
+    }
+  },
+  "metadata" : {
+    "status" : "COMPLETED",
+    "timestamp" : 1780092033262,
+    "duration" : 442,
+    "sequenceNumber" : 9,
+    "evaluatedCommand" : {
+      "waitForAnimationToEndCommand" : {
+        "timeout" : "2500",
+        "optional" : false
+      }
+    }
+  }
+}, {
+  "command" : {
+    "runFlowCommand" : {
+      "commands" : [ {
+        "takeScreenshotCommand" : {
+          "path" : ".maestro/screenshots/visual-verify-2026-05-29_185427/board-carousel/card-1",
+          "optional" : false
+        }
+      }, {
+        "swipeCommand" : {
+          "direction" : "LEFT",
+          "duration" : 600,
+          "optional" : false
+        }
+      }, {
+        "waitForAnimationToEndCommand" : {
+          "timeout" : "1500",
+          "optional" : false
+        }
+      }, {
+        "takeScreenshotCommand" : {
+          "path" : ".maestro/screenshots/visual-verify-2026-05-29_185427/board-carousel/card-2",
+          "optional" : false
+        }
+      }, {
+        "swipeCommand" : {
+          "direction" : "LEFT",
+          "duration" : 600,
+          "optional" : false
+        }
+      }, {
+        "waitForAnimationToEndCommand" : {
+          "timeout" : "1500",
+          "optional" : false
+        }
+      }, {
+        "takeScreenshotCommand" : {
+          "path" : ".maestro/screenshots/visual-verify-2026-05-29_185427/board-carousel/card-3",
+          "optional" : false
+        }
+      }, {
+        "swipeCommand" : {
+          "direction" : "LEFT",
+          "duration" : 600,
+          "optional" : false
+        }
+      }, {
+        "waitForAnimationToEndCommand" : {
+          "timeout" : "1500",
+          "optional" : false
+        }
+      }, {
+        "takeScreenshotCommand" : {
+          "path" : ".maestro/screenshots/visual-verify-2026-05-29_185427/board-carousel/card-4",
+          "optional" : false
+        }
+      } ],
+      "condition" : {
+        "visible" : {
+          "textRegex" : "What is your style.*",
+          "optional" : false
+        }
+      },
+      "optional" : false
+    }
+  },
+  "metadata" : {
+    "status" : "SKIPPED",
+    "timestamp" : 1780092035422,
+    "sequenceNumber" : 15,
+    "evaluatedCommand" : {
+      "runFlowCommand" : {
+        "commands" : [ {
+          "takeScreenshotCommand" : {
+            "path" : ".maestro/screenshots/visual-verify-2026-05-29_185427/board-carousel/card-1",
+            "optional" : false
+          }
+        }, {
+          "swipeCommand" : {
+            "direction" : "LEFT",
+            "duration" : 600,
+            "optional" : false
+          }
+        }, {
+          "waitForAnimationToEndCommand" : {
+            "timeout" : "1500",
+            "optional" : false
+          }
+        }, {
+          "takeScreenshotCommand" : {
+            "path" : ".maestro/screenshots/visual-verify-2026-05-29_185427/board-carousel/card-2",
+            "optional" : false
+          }
+        }, {
+          "swipeCommand" : {
+            "direction" : "LEFT",
+            "duration" : 600,
+            "optional" : false
+          }
+        }, {
+          "waitForAnimationToEndCommand" : {
+            "timeout" : "1500",
+            "optional" : false
+          }
+        }, {
+          "takeScreenshotCommand" : {
+            "path" : ".maestro/screenshots/visual-verify-2026-05-29_185427/board-carousel/card-3",
+            "optional" : false
+          }
+        }, {
+          "swipeCommand" : {
+            "direction" : "LEFT",
+            "duration" : 600,
+            "optional" : false
+          }
+        }, {
+          "waitForAnimationToEndCommand" : {
+            "timeout" : "1500",
+            "optional" : false
+          }
+        }, {
+          "takeScreenshotCommand" : {
+            "path" : ".maestro/screenshots/visual-verify-2026-05-29_185427/board-carousel/card-4",
+            "optional" : false
+          }
+        } ],
+        "condition" : {
+          "visible" : {
+            "textRegex" : "What is your style.*",
+            "optional" : false
+          }
+        },
+        "optional" : false
+      }
+    }
+  }
+}, {
+  "command" : {
+    "runFlowCommand" : {
+      "commands" : [ {
+        "tapOnElement" : {
+          "selector" : {
+            "idRegex" : "onboarding-next-button",
+            "optional" : false
+          },
+          "retryIfNoChange" : false,
+          "waitUntilVisible" : false,
+          "longPress" : false,
+          "optional" : false
+        }
+      }, {
+        "waitForAnimationToEndCommand" : {
+          "timeout" : "2500",
+          "optional" : false
+        }
+      } ],
+      "condition" : {
+        "visible" : {
+          "idRegex" : "onboarding-next-button",
+          "optional" : false
+        }
+      },
+      "optional" : false
+    }
+  },
+  "metadata" : {
+    "status" : "COMPLETED",
+    "timestamp" : 1780092033819,
+    "duration" : 1491,
+    "sequenceNumber" : 11,
+    "evaluatedCommand" : {
+      "runFlowCommand" : {
+        "commands" : [ {
+          "tapOnElement" : {
+            "selector" : {
+              "idRegex" : "onboarding-next-button",
+              "optional" : false
+            },
+            "retryIfNoChange" : false,
+            "waitUntilVisible" : false,
+            "longPress" : false,
+            "optional" : false
+          }
+        }, {
+          "waitForAnimationToEndCommand" : {
+            "timeout" : "2500",
+            "optional" : false
+          }
+        } ],
+        "condition" : {
+          "visible" : {
+            "idRegex" : "onboarding-next-button",
+            "optional" : false
+          }
+        },
+        "optional" : false
+      }
+    }
+  }
+}, {
+  "command" : {
+    "tapOnElement" : {
+      "selector" : {
+        "idRegex" : "onboarding-next-button",
+        "optional" : false
+      },
+      "retryIfNoChange" : false,
+      "waitUntilVisible" : false,
+      "longPress" : false,
+      "optional" : false
+    }
+  },
+  "metadata" : {
+    "status" : "COMPLETED",
+    "timestamp" : 1780092033908,
+    "duration" : 952,
+    "sequenceNumber" : 12,
+    "evaluatedCommand" : {
+      "tapOnElement" : {
+        "selector" : {
+          "idRegex" : "onboarding-next-button",
+          "optional" : false
+        },
+        "retryIfNoChange" : false,
+        "waitUntilVisible" : false,
+        "longPress" : false,
+        "optional" : false
+      }
+    }
+  }
+}, {
+  "command" : {
+    "tapOnElement" : {
+      "selector" : {
+        "idRegex" : "onboarding-next-button",
+        "optional" : false
+      },
+      "retryIfNoChange" : false,
+      "waitUntilVisible" : false,
+      "longPress" : false,
+      "optional" : false
+    }
+  },
+  "metadata" : {
+    "status" : "COMPLETED",
+    "timestamp" : 1780092032329,
+    "duration" : 933,
+    "sequenceNumber" : 8,
+    "evaluatedCommand" : {
+      "tapOnElement" : {
+        "selector" : {
+          "idRegex" : "onboarding-next-button",
+          "optional" : false
+        },
+        "retryIfNoChange" : false,
+        "waitUntilVisible" : false,
+        "longPress" : false,
+        "optional" : false
+      }
+    }
+  }
+}, {
+  "command" : {
+    "tapOnElement" : {
+      "selector" : {
+        "idRegex" : "welcome-demo-button",
+        "optional" : false
+      },
+      "retryIfNoChange" : false,
+      "waitUntilVisible" : false,
+      "longPress" : false,
+      "optional" : false
+    }
+  },
+  "metadata" : {
+    "status" : "COMPLETED",
+    "timestamp" : 1780092024028,
+    "duration" : 8116,
+    "sequenceNumber" : 5,
+    "evaluatedCommand" : {
+      "tapOnElement" : {
+        "selector" : {
+          "idRegex" : "welcome-demo-button",
+          "optional" : false
+        },
+        "retryIfNoChange" : false,
+        "waitUntilVisible" : false,
+        "longPress" : false,
+        "optional" : false
+      }
+    }
+  }
+}, {
+  "command" : {
+    "waitForAnimationToEndCommand" : {
+      "timeout" : "2500",
+      "optional" : false
+    }
+  },
+  "metadata" : {
+    "status" : "COMPLETED",
+    "timestamp" : 1780092034861,
+    "duration" : 449,
+    "sequenceNumber" : 13,
+    "evaluatedCommand" : {
+      "waitForAnimationToEndCommand" : {
+        "timeout" : "2500",
+        "optional" : false
+      }
+    }
+  }
+}, {
+  "command" : {
+    "defineVariablesCommand" : {
+      "env" : {
+        "MAESTRO_FILENAME" : "_visual-verify-from-welcome",
+        "MAESTRO_DEVICE_UDID" : "DB15A451-C7B1-4971-A474-52C5B5A64536",
+        "MAESTRO_SHARD_ID" : "1",
+        "MAESTRO_SHARD_INDEX" : "0"
+      },
+      "optional" : false
+    }
+  },
+  "metadata" : {
+    "status" : "COMPLETED",
+    "timestamp" : 1780092023274,
+    "duration" : 3,
+    "sequenceNumber" : 0,
+    "evaluatedCommand" : {
+      "defineVariablesCommand" : {
+        "env" : {
+          "MAESTRO_FILENAME" : "_visual-verify-from-welcome",
+          "MAESTRO_DEVICE_UDID" : "DB15A451-C7B1-4971-A474-52C5B5A64536",
+          "MAESTRO_SHARD_ID" : "1",
+          "MAESTRO_SHARD_INDEX" : "0"
+        },
+        "optional" : false
+      }
+    }
+  }
+}, {
+  "command" : {
+    "takeScreenshotCommand" : {
+      "path" : ".maestro/screenshots/visual-verify-2026-05-29_185427/06-step2-or-prev",
+      "optional" : false
+    }
+  },
+  "metadata" : {
+    "status" : "COMPLETED",
+    "timestamp" : 1780092035310,
+    "duration" : 112,
+    "sequenceNumber" : 14,
+    "evaluatedCommand" : {
+      "takeScreenshotCommand" : {
+        "path" : ".maestro/screenshots/visual-verify-2026-05-29_185427/06-step2-or-prev",
+        "optional" : false
+      }
+    }
+  }
+}, {
+  "command" : {
+    "takeScreenshotCommand" : {
+      "path" : ".maestro/screenshots/visual-verify-2026-05-29_185427/04-onboarding-welcome",
+      "optional" : false
+    }
+  },
+  "metadata" : {
+    "status" : "COMPLETED",
+    "timestamp" : 1780092032236,
+    "duration" : 93,
+    "sequenceNumber" : 7,
+    "evaluatedCommand" : {
+      "takeScreenshotCommand" : {
+        "path" : ".maestro/screenshots/visual-verify-2026-05-29_185427/04-onboarding-welcome",
+        "optional" : false
+      }
+    }
+  }
+} ]

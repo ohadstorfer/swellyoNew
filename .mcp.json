@@ -1,0 +1,25 @@
+{
+  "mcpServers": {
+    "supabase": {
+      "type": "http",
+      "url": "https://mcp.supabase.com/mcp?project_ref=rfdhtvcmagsbxqntnepv&features=database,docs,debugging&read_only=false"
+    },
+    "maestro": {
+      "type": "stdio",
+      "command": "/Users/ohadstorfer/.maestro/bin/maestro",
+      "args": ["mcp", "--no-viewer", "--working-dir", "/Users/ohadstorfer/swellyoNative"]
+    },
+    "expo": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "expo-mcp",
+        "--root",
+        "/Users/ohadstorfer/swellyoNative",
+        "--dev-server-url",
+        "http://localhost:8081"
+      ]
+    }
+  }
+}

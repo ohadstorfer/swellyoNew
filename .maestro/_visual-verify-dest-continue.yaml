@@ -1,0 +1,79 @@
+appId: com.swellyo.app
+name: visual-verify Add Destination — clean retry
+tags:
+  - visual-verify
+---
+- launchApp:
+    clearState: false
+    stopApp: false
+
+# Sheet should already be open (Add Destination visible)
+- extendedWaitUntil:
+    visible: "Select country.*"
+    timeout: 10000
+
+- takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_185427/add-destination/02b-sheet-clean
+
+# Open country search modal
+- tapOn: "Select country.*"
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Type the country
+- tapOn: "Search countries.*"
+- inputText: "Indonesia"
+- waitForAnimationToEnd:
+    timeout: 1500
+- hideKeyboard
+- waitForAnimationToEnd:
+    timeout: 800
+- takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_185427/add-destination/05c-country-results-clean
+
+# Dismiss iOS edit menu if present, then tap the row
+- runFlow:
+    when:
+      visible: "Paste"
+    commands:
+      - tapOn:
+          point: "50%, 12%"
+      - waitForAnimationToEnd:
+          timeout: 500
+
+# Tap the 2nd occurrence of Indonesia (input is index 0, row is index 1)
+- tapOn:
+    text: "Indonesia"
+    index: 1
+- waitForAnimationToEnd:
+    timeout: 2500
+- takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_185427/add-destination/06-country-selected-final
+
+# === Places search ===
+- tapOn: "City.*"
+- waitForAnimationToEnd:
+    timeout: 1000
+- inputText: "Bali"
+- waitForAnimationToEnd:
+    timeout: 2500
+- takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_185427/add-destination/07-place-typed
+- hideKeyboard
+- waitForAnimationToEnd:
+    timeout: 800
+- takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_185427/add-destination/08-place-suggestions
+
+# Tap first Bali suggestion
+- tapOn:
+    text: "Bali"
+    index: 1
+- waitForAnimationToEnd:
+    timeout: 1500
+- takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_185427/add-destination/09-place-selected
+
+- runFlow:
+    when:
+      visible: "Save"
+    commands:
+      - tapOn: "Save"
+      - waitForAnimationToEnd:
+          timeout: 2000
+
+- takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_185427/add-destination/10-destination-added

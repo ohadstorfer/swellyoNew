@@ -785,6 +785,9 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
   // for peer actions on convs the user isn't actively viewing. Reconciled below
   // in a useEffect that adds/removes subscriptions as `conversations` changes.
   const listSubsRef = useRef<Map<string, () => void>>(new Map());
+  // Sorted-id key of the current consolidated list subscription, so we only rebuild
+  // the batch channel when the conversation SET actually changes (not on every render).
+  const listBatchKeyRef = useRef<string>('');
 
   // Track active enrichment operations per conversation to prevent race conditions
   const activeEnrichments = useRef<Map<string, Promise<Conversation | null>>>(new Map());
@@ -806,6 +809,7 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
       try { unsub(); } catch (e) { console.warn('[MessagingProvider] list unsub failed on logout:', e); }
     });
     listSubsRef.current.clear();
+    listBatchKeyRef.current = ''; // force a rebuild for the next signed-in user
     dispatch({ type: 'REPLACE_ALL', payload: { conversations: [] } });
     // Clear persistent caches so next user doesn't see old user's data
     clearConversationListCache().catch((err) => console.error('[MessagingProvider] Error clearing conversation list cache on logout:', err));
@@ -1187,57 +1191,58 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
     }
   }, [conversations]);
 
-  // Reconcile per-conversation list subscriptions with the current list state.
-  // For every conv in state we run a filtered messages channel that dispatches
-  // NEW_MESSAGE / MESSAGE_UPDATED / MESSAGE_DELETED to the reducer. Handlers are
-  // intentionally thin — they don't retrigger enrichment (the conv is already
-  // enriched by virtue of being in state) and rely on the reducer's existing
-  // dedup via lastProcessedMessageIds + last_message.id comparison.
+  // Reconcile the consolidated list subscription with the current list state.
+  // Instead of one filtered Realtime channel per conversation (which put ~3×N
+  // postgres_changes bindings on a single websocket and destabilized the socket
+  // past ~50 convs → cascading CHANNEL_ERROR), we run ONE batched subscription
+  // using a `conversation_id=in.(...)` filter, rebuilt only when the id SET changes.
+  // Handlers stay thin and rely on the reducer's existing dedup (lastProcessedMessageIds
+  // + last_message.id comparison); conversationId now comes from the changed row.
   useEffect(() => {
     if (!user) return;
 
-    const convIdsInState = new Set(conversations.map((c) => c.id));
+    const ids = conversations.map((c) => c.id);
+    const key = [...ids].sort().join(',');
+    if (key === listBatchKeyRef.current) return; // set unchanged → keep current channels
 
-    // Drop subscriptions for conversations that left state (pagination eviction, logout, etc.).
-    listSubsRef.current.forEach((unsub, convId) => {
-      if (!convIdsInState.has(convId)) {
-        try { unsub(); } catch (e) { console.warn('[MessagingProvider] list unsub failed:', e); }
-        listSubsRef.current.delete(convId);
-      }
+    // Tear down the previous batch before rebuilding (unique topic per rebuild avoids
+    // a same-topic remove/re-add race inside the service).
+    const prev = listSubsRef.current.get('__batch__');
+    if (prev) {
+      try { prev(); } catch (e) { console.warn('[MessagingProvider] list batch unsub failed:', e); }
+      listSubsRef.current.delete('__batch__');
+    }
+    listBatchKeyRef.current = key;
+
+    if (ids.length === 0) return;
+
+    const unsub = messagingService.subscribeToConversationListUpdatesBatch(ids, {
+      onNewMessage: (conversationId, message) => {
+        const me = currentUserIdRef.current;
+        if (!me) return;
+        if (isMessageProcessed(message.id)) return;
+        markMessageProcessed(message.id);
+
+        // Unread increment only when someone else sent it AND we aren't looking at this conv.
+        const isFromOtherUser = message.sender_id !== me;
+        const isConvOpen = currentConversationIdRef.current === conversationId;
+        if (isFromOtherUser && !isConvOpen) {
+          dispatch({ type: 'INCREMENT_UNREAD', payload: { conversationId } });
+        }
+
+        dispatch({ type: 'NEW_MESSAGE', payload: { conversationId, message } });
+      },
+      onMessageUpdated: (conversationId, message) => {
+        if (!currentUserIdRef.current) return;
+        dispatch({ type: 'MESSAGE_UPDATED', payload: { conversationId, message } });
+      },
+      onMessageDeleted: (conversationId, messageId) => {
+        if (!currentUserIdRef.current) return;
+        dispatch({ type: 'MESSAGE_DELETED', payload: { conversationId, messageId } });
+      },
     });
 
-    // Subscribe to any conversation we don't already cover.
-    convIdsInState.forEach((convId) => {
-      if (listSubsRef.current.has(convId)) return;
-
-      const unsub = messagingService.subscribeToConversationListUpdates(convId, {
-        onNewMessage: (conversationId, message) => {
-          const me = currentUserIdRef.current;
-          if (!me) return;
-          if (isMessageProcessed(message.id)) return;
-          markMessageProcessed(message.id);
-
-          // Unread increment only when someone else sent it AND we aren't looking at this conv.
-          const isFromOtherUser = message.sender_id !== me;
-          const isConvOpen = currentConversationIdRef.current === conversationId;
-          if (isFromOtherUser && !isConvOpen) {
-            dispatch({ type: 'INCREMENT_UNREAD', payload: { conversationId } });
-          }
-
-          dispatch({ type: 'NEW_MESSAGE', payload: { conversationId, message } });
-        },
-        onMessageUpdated: (conversationId, message) => {
-          if (!currentUserIdRef.current) return;
-          dispatch({ type: 'MESSAGE_UPDATED', payload: { conversationId, message } });
-        },
-        onMessageDeleted: (conversationId, messageId) => {
-          if (!currentUserIdRef.current) return;
-          dispatch({ type: 'MESSAGE_DELETED', payload: { conversationId, messageId } });
-        },
-      });
-
-      listSubsRef.current.set(convId, unsub);
-    });
+    listSubsRef.current.set('__batch__', unsub);
   }, [conversations, user, isMessageProcessed, markMessageProcessed]);
 
   // Set up subscription
@@ -1646,6 +1651,7 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
         try { unsub(); } catch (e) { console.warn('[MessagingProvider] list unsub failed on unmount:', e); }
       });
       listSubsRef.current.clear();
+      listBatchKeyRef.current = ''; // force a rebuild if the provider remounts
       // Stop tracking presence when component unmounts (user logs out)
       userPresenceService.stopTrackingCurrentUser().catch(error => {
         console.error('[MessagingProvider] Error stopping presence tracking:', error);

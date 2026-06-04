@@ -1,0 +1,68 @@
+appId: com.swellyo.app
+name: visual-verify onboarding — sweep current step onwards
+tags:
+  - visual-verify
+---
+# Just launch (no clearState — keep demo user session)
+- launchApp:
+    clearState: false
+    stopApp: true
+- runFlow:
+    when:
+      visible:
+        text: "http://localhost:8081"
+    commands:
+      - tapOn:
+          text: "http://localhost:8081"
+- runFlow:
+    when:
+      visible:
+        text: "This is the developer menu.*"
+    commands:
+      - tapOn:
+          text: "Continue"
+- runFlow:
+    when:
+      visible:
+        text: "Dismiss.*"
+    commands:
+      - tapOn:
+          text: "Dismiss.*"
+# Wait for any onboarding screen — gate by the "Next" button (universal onboarding chrome)
+- extendedWaitUntil:
+    visible: "Next"
+    timeout: 120000
+
+# === current step: full screen baseline ===
+- takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_112504/step-a/baseline
+
+# === advance to next step ===
+- tapOn: "Next"
+- waitForAnimationToEnd:
+    timeout: 4000
+- takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_112504/step-b/baseline
+
+- tapOn: "Next"
+- waitForAnimationToEnd:
+    timeout: 4000
+- takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_112504/step-c/baseline
+
+- tapOn: "Next"
+- waitForAnimationToEnd:
+    timeout: 4000
+- takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_112504/step-d/baseline
+
+- tapOn: "Next"
+- waitForAnimationToEnd:
+    timeout: 4000
+- takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_112504/step-e/baseline
+
+- tapOn: "Next"
+- waitForAnimationToEnd:
+    timeout: 4000
+- takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_112504/step-f/baseline
+
+- tapOn: "Next"
+- waitForAnimationToEnd:
+    timeout: 4000
+- takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_112504/step-g/baseline

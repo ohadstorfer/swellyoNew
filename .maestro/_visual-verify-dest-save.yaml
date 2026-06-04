@@ -1,0 +1,13 @@
+appId: com.swellyo.app
+name: visual-verify Add Destination — save
+tags:
+  - visual-verify
+---
+- launchApp:
+    clearState: false
+    stopApp: false
+- takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_185427/add-destination/09-place-selected
+- tapOn: "Save"
+- waitForAnimationToEnd:
+    timeout: 2500
+- takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_185427/add-destination/10-destination-added

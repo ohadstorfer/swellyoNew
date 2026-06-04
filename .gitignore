@@ -51,3 +51,11 @@ fcm-service-account.json
 !android/app/google-services.json
 # EAS local credentials — never commit
 credentials.json
+
+.env.local
+
+# Sentry — contains the auth token in plaintext, never commit
+sentry.properties
+android/sentry.properties
+ios/sentry.properties
+.sentryclirc

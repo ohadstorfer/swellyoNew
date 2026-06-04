@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WeTravel — the standard fees</title>
+<style>
+  :root {
+    --bg: #fafaf7;
+    --ink: #1a1a1a;
+    --soft: #555;
+    --muted: #888;
+    --border: #e5e3dc;
+    --green: #047857;
+    --amber: #b45309;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    margin: 0;
+    padding: 60px 20px;
+    display: flex;
+    justify-content: center;
+    min-height: 100vh;
+  }
+  .container { max-width: 580px; width: 100%; }
+  h1 {
+    font-size: 1.4rem;
+    margin: 0 0 4px;
+    letter-spacing: -0.01em;
+  }
+  .sub {
+    color: var(--muted);
+    font-size: 0.85rem;
+    margin-bottom: 28px;
+  }
+  .card {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 22px 24px;
+    margin-bottom: 14px;
+  }
+  .label {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    font-weight: 600;
+    margin-bottom: 10px;
+  }
+  .line {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 0;
+    font-size: 0.96rem;
+    border-bottom: 1px dashed var(--border);
+  }
+  .line:last-child { border-bottom: none; }
+  .what { color: var(--soft); }
+  .fee { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .note {
+    color: var(--muted);
+    font-size: 0.82rem;
+    margin-top: 18px;
+    line-height: 1.5;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <h1>WeTravel — the standard</h1>
+  <div class="sub">What travelers and operators are used to paying.</div>
+
+  <div class="card">
+    <div class="label">Traveler pays</div>
+    <div class="line"><span class="what">Credit card (US)</span><span class="fee">+ 2.9%</span></div>
+    <div class="line"><span class="what">Credit card (AMEX or non-US)</span><span class="fee">+ 3.9%</span></div>
+    <div class="line"><span class="what">Bank transfer / ACH</span><span class="fee">$0</span></div>
+  </div>
+
+  <div class="card">
+    <div class="label">Operator pays</div>
+    <div class="line"><span class="what">Credit card (US)</span><span class="fee">2.9%</span></div>
+    <div class="line"><span class="what">Credit card (AMEX or non-US)</span><span class="fee">3.9%</span></div>
+    <div class="line"><span class="what">Bank transfer / ACH</span><span class="fee">1%</span></div>
+    <div class="line"><span class="what">International wire payout</span><span class="fee">$15–$30</span></div>
+  </div>
+
+  <div class="note">
+    Each card fee is paid by <em>either</em> the traveler <em>or</em> the operator — not both. The operator picks during trip setup. No separate marketplace commission.
+  </div>
+
+</div>
+</body>
+</html>

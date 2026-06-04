@@ -1,0 +1,32 @@
+appId: com.swellyo.app
+name: visual-verify Add Destination — finish
+tags:
+  - visual-verify
+---
+- launchApp:
+    clearState: false
+    stopApp: false
+
+# Dismiss keyboard by tapping the "Add Destination" title (non-interactive)
+- tapOn:
+    point: "20%, 30%"
+- waitForAnimationToEnd:
+    timeout: 800
+- takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_185427/add-destination/08-place-suggestions
+
+# Tap first Bali suggestion — "Bali, Indonesia"
+- tapOn:
+    text: "Bali, Indonesia"
+- waitForAnimationToEnd:
+    timeout: 1500
+- takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_185427/add-destination/09-place-selected
+
+- runFlow:
+    when:
+      visible: "Save"
+    commands:
+      - tapOn: "Save"
+      - waitForAnimationToEnd:
+          timeout: 2000
+
+- takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_185427/add-destination/10-destination-added

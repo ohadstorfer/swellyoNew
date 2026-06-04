@@ -1,0 +1,29 @@
+appId: com.swellyo.app
+name: Swellyo smoke — app boots into Lineup, menu opens
+tags:
+  - smoke
+---
+- launchApp:
+    clearState: false
+    stopApp: true
+# Dev builds show a LogBox overlay on console.error. Maestro `text:` matchers
+# are full-string regex with IGNORE_CASE — anchor with .* to catch
+# "Dismiss\n(ESC)" or similar.
+- runFlow:
+    when:
+      visible:
+        text: "Dismiss.*"
+    commands:
+      - tapOn:
+          text: "Dismiss.*"
+# Gate on a testID — more reliable than visible text. First cold bundle on
+# the sim can take ~60–90s; subsequent runs hit Metro's warm cache and are
+# fast.
+- extendedWaitUntil:
+    visible:
+      id: "conversations-profile-button"
+    timeout: 90000
+- takeScreenshot: .maestro/screenshots/01-lineup-home
+- tapOn:
+    id: "conversations-menu-button"
+- takeScreenshot: .maestro/screenshots/02-lineup-menu-open

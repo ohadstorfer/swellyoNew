@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Israel vs. Argentina — Tax Residency Decision</title>
+<style>
+  :root{
+    --ink:#1c2733; --muted:#5d6b7a; --line:#e3e8ee; --bg:#f5f7fa;
+    --il:#1e63c4; --il-bg:#eaf1fc; --ar:#3fa372; --ar-bg:#e9f6ef;
+    --good:#1f8a4c; --bad:#c0392b; --warn:#b9770e; --warn-bg:#fdf4e3;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.55;padding:32px 16px;}
+  .wrap{max-width:860px;margin:0 auto;}
+  header{text-align:center;margin-bottom:28px;}
+  h1{font-size:26px;margin:0 0 6px;}
+  .sub{color:var(--muted);font-size:15px;max-width:620px;margin:0 auto;}
+  .card{background:#fff;border:1px solid var(--line);border-radius:14px;
+    padding:22px 24px;margin-bottom:20px;box-shadow:0 1px 3px rgba(20,40,60,.04);}
+  h2{font-size:19px;margin:0 0 14px;display:flex;align-items:center;gap:9px;}
+  .flag{font-size:22px;}
+  h3{font-size:15px;margin:18px 0 8px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;}
+  ul{margin:6px 0;padding-left:20px;}
+  li{margin:5px 0;}
+  .tag{display:inline-block;font-size:12px;font-weight:600;padding:2px 9px;border-radius:20px;}
+  .t-il{background:var(--il-bg);color:var(--il);}
+  .t-ar{background:var(--ar-bg);color:var(--ar);}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:8px;}
+  @media(max-width:640px){.grid{grid-template-columns:1fr;}}
+  .pro,.con{border-radius:10px;padding:12px 14px;font-size:14px;}
+  .pro{background:#edf8f1;border:1px solid #cfeeda;}
+  .con{background:#fdeeec;border:1px solid #f4d3cd;}
+  .pro b{color:var(--good);} .con b{color:var(--bad);}
+  .pro ul,.con ul{padding-left:18px;margin:6px 0 0;}
+  .keyrow{display:flex;gap:10px;align-items:flex-start;padding:9px 0;border-bottom:1px solid var(--line);}
+  .keyrow:last-child{border-bottom:none;}
+  .keyrow .k{flex:0 0 150px;font-weight:600;font-size:14px;}
+  .keyrow .v{font-size:14px;color:var(--ink);}
+  .warn{background:var(--warn-bg);border:1px solid #f0dcaf;border-radius:12px;
+    padding:16px 18px;margin-bottom:20px;}
+  .warn b{color:var(--warn);}
+  .scenario{border-left:4px solid var(--line);padding:4px 0 4px 16px;margin:16px 0;}
+  .scenario.a{border-color:var(--il);} .scenario.b{border-color:var(--ar);} .scenario.c{border-color:#8a6fc4;}
+  .scenario h4{margin:0 0 4px;font-size:15px;}
+  .scenario p{margin:4px 0;font-size:14px;color:var(--ink);}
+  .verdict{font-size:13px;font-weight:600;}
+  .disclaimer{font-size:12.5px;color:var(--muted);background:#eef1f5;
+    border-radius:10px;padding:14px 16px;margin-top:8px;}
+  .steps{counter-reset:s;list-style:none;padding-left:0;}
+  .steps li{counter-increment:s;position:relative;padding-left:34px;margin:10px 0;font-size:14px;}
+  .steps li::before{content:counter(s);position:absolute;left:0;top:-1px;
+    width:24px;height:24px;border-radius:50%;background:var(--ink);color:#fff;
+    font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center;}
+  footer{text-align:center;color:var(--muted);font-size:12px;margin-top:10px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>Should I cancel my Israeli tax residency and/or get an Argentine DNI?</h1>
+    <p class="sub">A plain-English breakdown of the rules, the risks, and the pros &amp; cons —
+    for someone who is an Israeli citizen spending ~80–90% of the year outside Israel, mostly in Argentina.</p>
+  </header>
+
+  <!-- BIG WARNING -->
+  <div class="warn">
+    <b>⚠️ The single most important fact:</b> Israel and Argentina have
+    <b>no double-taxation treaty</b>. Normally a treaty has a "tie-breaker" that decides which
+    country gets to tax you. With no treaty, if <i>both</i> countries decide you are their resident,
+    you can be taxed <b>twice</b> on the same income, with limited relief. Any plan must make sure
+    you are clearly a resident of <b>one</b> country, not stuck between the two.
+  </div>
+
+  <!-- HOW EACH COUNTRY DECIDES -->
+  <div class="card">
+    <h2><span class="flag">🇮🇱</span> How Israel decides if you still owe tax</h2>
+    <div class="keyrow"><div class="k">The test</div><div class="v">Your <b>"center of life"</b> — where your family, money, social ties and home really are. Day-counting is a starting point, not the whole story.</div></div>
+    <div class="keyrow"><div class="k">Day presumptions</div><div class="v">Presumed resident if 183+ days in Israel in a year, <i>or</i> 30+ days this year and 425+ days over 3 years. (A 2025 draft law would make these harder to argue against.)</div></div>
+    <div class="keyrow"><div class="k">If resident</div><div class="v">Taxed on <b>worldwide income</b>.</div></div>
+    <div class="keyrow"><div class="k">If non-resident</div><div class="v">Taxed <b>only on Israeli-source income</b>.</div></div>
+    <div class="keyrow"><div class="k">Leaving is not automatic</div><div class="v">Even at 80–90% abroad, Israel does not "release" you on its own. You must prove your center of life has truly moved out — and trigger the exit tax below.</div></div>
+    <div class="keyrow"><div class="k">Exit tax 🔑</div><div class="v">On the day you stop being a resident, Israel treats all your worldwide assets as <b>sold</b> and taxes the gains (roughly <b>25%–50%</b>). You can usually defer payment until you actually sell, but the bill is locked in.</div></div>
+    <div class="keyrow"><div class="k">Coming back later</div><div class="v">If you ever return after 10+ years abroad, you can get generous "returning resident" tax breaks — worth protecting.</div></div>
+  </div>
+
+  <div class="card">
+    <h2><span class="flag">🇦🇷</span> How Argentina decides if you owe tax</h2>
+    <div class="keyrow"><div class="k">DNI ≠ tax 🔑</div><div class="v">A <b>DNI is migration paperwork, not a tax status.</b> You can hold a DNI and <i>not</i> be a tax resident — these are two separate systems.</div></div>
+    <div class="keyrow"><div class="k">When you become a tax resident</div><div class="v">When you get <b>permanent residence</b>, OR after <b>12 months</b> of legal residence (short trips out, ≤90 days, don't reset the clock).</div></div>
+    <div class="keyrow"><div class="k">If tax resident</div><div class="v">Taxed on <b>worldwide income</b> (progressive, up to 35%) <b>plus a wealth tax</b> (Bienes Personales) on your worldwide assets — though there's a tax-free minimum and rates are dropping toward 0.25% by 2027.</div></div>
+    <div class="keyrow"><div class="k">If not tax resident</div><div class="v">Taxed only on Argentine-source income.</div></div>
+    <div class="keyrow"><div class="k">Practical reality</div><div class="v">High inflation and historic currency controls make Argentine tax residency operationally messy compared to Israel.</div></div>
+  </div>
+
+  <!-- DECISION A: cancel Israeli residency -->
+  <div class="card">
+    <h2>Decision 1 — Cancel Israeli tax residency <span class="tag t-il">Israel</span></h2>
+    <div class="grid">
+      <div class="pro">
+        <b>✓ Pros</b>
+        <ul>
+          <li>Future worldwide income (incl. business / crypto / investments) no longer taxed by Israel.</li>
+          <li>Matches reality — you're already mostly abroad.</li>
+          <li>Stops the "am I still a resident?" uncertainty piling up each year.</li>
+        </ul>
+      </div>
+      <div class="con">
+        <b>✗ Cons</b>
+        <ul>
+          <li><b>Exit tax now:</b> deemed sale of all assets, gains taxed 25–50%.</li>
+          <li>Must genuinely cut ties (home, bank, family base) — half-measures fail and you stay taxable.</li>
+          <li>You need a <b>new</b> clear tax home, or you're a resident of nowhere — auditable and risky with no treaty.</li>
+          <li>Lose easy access to local benefits; returning-resident perks only after 10 yrs out.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- DECISION B: get DNI / become Argentine resident -->
+  <div class="card">
+    <h2>Decision 2 — Get an Argentine DNI / become tax resident there <span class="tag t-ar">Argentina</span></h2>
+    <div class="grid">
+      <div class="pro">
+        <b>✓ Pros</b>
+        <ul>
+          <li>Legal stability where you actually live — no more visa/tourist juggling.</li>
+          <li>A DNI alone does <b>not</b> trigger tax residency, so you can get the document without immediate tax cost.</li>
+          <li>Gives you a clear "other country" to point to when leaving Israel.</li>
+        </ul>
+      </div>
+      <div class="con">
+        <b>✗ Cons</b>
+        <ul>
+          <li>If you cross into Argentine <b>tax</b> residency: worldwide income tax up to 35%.</li>
+          <li><b>Wealth tax</b> on your worldwide assets — Israel has no equivalent annual wealth tax.</li>
+          <li>Inflation + currency controls = real-world friction.</li>
+          <li>No treaty: a bad overlap year could mean double tax.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- SCENARIOS -->
+  <div class="card">
+    <h2>🧭 Three realistic paths</h2>
+
+    <div class="scenario a">
+      <h4>Path A — Stay an Israeli resident, do nothing</h4>
+      <p>Keep paying Israeli tax on worldwide income. No exit tax, no Argentine wealth tax. Simple, but you keep paying Israel even though you barely live there.</p>
+      <p class="verdict">Best if your assets/gains are large (exit tax would hurt) or you plan to move back.</p>
+    </div>
+
+    <div class="scenario b">
+      <h4>Path B — Become a clean Argentine tax resident, cut Israel</h4>
+      <p>One clear home: Argentina. Pay exit tax to Israel once, then live under Argentine rules. Watch the wealth tax and inflation.</p>
+      <p class="verdict">Best if you're committed to Argentina long-term and your asset gains are modest (low exit tax).</p>
+    </div>
+
+    <div class="scenario c">
+      <h4>Path C — Get the DNI, but don't trigger Argentine tax residency, while exiting Israel</h4>
+      <p>Tempting "low-tax" route, but with no treaty it can leave you a <b>resident of nowhere</b> — the riskiest spot if either country audits you.</p>
+      <p class="verdict">Only viable with a professional structuring it carefully. Don't freelance this one.</p>
+    </div>
+  </div>
+
+  <!-- WHAT TO DO NEXT -->
+  <div class="card">
+    <h2>✅ Sensible next steps</h2>
+    <ol class="steps">
+      <li><b>Estimate your exit tax first.</b> List your assets and unrealized gains — this single number decides whether leaving Israel is cheap or expensive <i>right now</i>.</li>
+      <li><b>Decide your "one home".</b> Pick Israel or Argentina as your clear tax residence. Avoid being in-between.</li>
+      <li><b>Separate the two questions.</b> Getting a DNI (migration) can be done now and is low-risk; changing tax residency is the heavy, irreversible move.</li>
+      <li><b>Get one cross-border advisor</b> who knows <i>both</i> Israeli and Argentine rules — because there's no treaty, you can't rely on a tie-breaker to fix mistakes.</li>
+    </ol>
+  </div>
+
+  <div class="disclaimer">
+    <b>Not legal or tax advice.</b> This is a plain-language summary of general rules (as of 2025–2026) to help you prepare for a conversation with a professional. Tax residency depends on your exact facts, and Israel's 2025 reform draft may change the day-count rules. Confirm everything with a qualified Israeli + Argentine tax advisor before acting.
+  </div>
+
+  <footer>Prepared as a personal decision aid · 2026</footer>
+
+</div>
+</body>
+</html>

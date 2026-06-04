@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Health Check — What We Test</title>
+<style>
+  :root{
+    --bg:#f6fbff; --card:#fff; --ink:#13303d; --muted:#5e7686; --line:#e6eef4;
+    --green:#1bb37e; --green-soft:#e7f8f1;
+    --amber:#e6a23c;
+    --blue:#2aa0e6; --blue-deep:#1577b8; --blue-soft:#e9f5fd;
+    --shadow:0 8px 26px rgba(20,60,80,.08);
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    background:
+      radial-gradient(1100px 480px at 82% -8%, #e3f3ff 0%, rgba(227,243,255,0) 60%),
+      radial-gradient(820px 380px at -5% 0%, #e9fbf3 0%, rgba(233,251,243,0) 55%),
+      var(--bg);
+    color:var(--ink); line-height:1.5; padding:46px 20px 80px;
+  }
+  .wrap{max-width:760px;margin:0 auto;}
+  header{text-align:center;margin-bottom:6px;}
+  .eyebrow{text-transform:uppercase;letter-spacing:2.4px;font-size:12px;color:var(--blue-deep);font-weight:800;margin-bottom:9px;}
+  h1{font-size:31px;letter-spacing:-.4px;margin-bottom:8px;}
+  header p{color:var(--muted);font-size:16px;}
+  .status{
+    display:inline-block;margin-top:14px;font-size:13px;font-weight:700;
+    background:var(--green-soft);color:var(--green);padding:6px 14px;border-radius:999px;border:1px solid #bfead9;
+  }
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:14px 24px;box-shadow:var(--shadow);margin-top:20px;}
+  .row{display:flex;align-items:flex-start;gap:11px;padding:11px 0;border-bottom:1px solid var(--line);}
+  .row:last-child{border-bottom:none;}
+  .row .tick{color:var(--green);font-weight:800;font-size:15px;flex-shrink:0;margin-top:1px;}
+  .row .name{font-weight:700;width:150px;flex-shrink:0;}
+  .row .desc{color:#41606e;font-size:14px;}
+  @media(max-width:560px){
+    .row{flex-wrap:wrap;}
+    .row .name{width:auto;}
+    .row .desc{flex-basis:100%;padding-left:26px;}
+  }
+
+  .alert{
+    background:var(--blue-soft);border:1px solid #c4e6fa;border-radius:14px;
+    padding:13px 18px;margin-top:18px;font-size:14px;color:#155f8c;
+    display:flex;gap:10px;align-items:flex-start;
+  }
+  .alert .ic{font-size:17px;}
+
+  .notcard{background:#fff;border:1px dashed #d7c39a;border-radius:18px;padding:18px 24px;margin-top:18px;}
+  .notcard h3{color:var(--amber);font-size:13px;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;}
+  .notcard ul{list-style:none;}
+  .notcard li{position:relative;padding-left:22px;margin-bottom:8px;font-size:14px;color:#6b5526;}
+  .notcard li::before{content:"–";position:absolute;left:4px;color:var(--amber);font-weight:800;}
+
+  footer{text-align:center;color:var(--muted);font-size:12.5px;margin-top:28px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="eyebrow">Swellyo · Daily Health Check</div>
+    <h1>What we actually test 🩺</h1>
+    <p>Runs on a schedule. If something stays broken, we get an email.</p>
+    <div class="status">● Live on production · 10 checks · all green</div>
+  </header>
+
+  <div class="card">
+    <div class="row"><span class="tick">✓</span><span class="name">Database</span><span class="desc">write a row, read it back, delete it — plus read a real app table</span></div>
+    <div class="row"><span class="tick">✓</span><span class="name">Auth</span><span class="desc">login service is healthy &amp; Google sign-in is enabled</span></div>
+    <div class="row"><span class="tick">✓</span><span class="name">OpenAI</span><span class="desc">our real models (gpt-5.2 + mini) are available</span></div>
+    <div class="row"><span class="tick">✓</span><span class="name">AWS S3</span><span class="desc">upload + read back — and an old file is still there (not deleted over time)</span></div>
+    <div class="row"><span class="tick">✓</span><span class="name">Storage</span><span class="desc">upload, read via signed URL, delete — and the real media buckets exist</span></div>
+    <div class="row"><span class="tick">✓</span><span class="name">Realtime</span><span class="desc">send a live message and confirm it actually arrives (DMs)</span></div>
+    <div class="row"><span class="tick">✓</span><span class="name">Google Maps</span><span class="desc">the real place-picker search returns results</span></div>
+    <div class="row"><span class="tick">✓</span><span class="name">Expo Push</span><span class="desc">push service reachable &amp; not auth-broken (no real push sent)</span></div>
+    <div class="row"><span class="tick">✓</span><span class="name">Edge functions</span><span class="desc">the 9 core functions (swelly-chat, matching, video…) actually run &amp; respond</span></div>
+    <div class="row"><span class="tick">✓</span><span class="name">Matching</span><span class="desc">the matching function still runs without errors</span></div>
+  </div>
+
+  <div class="alert">
+    <span class="ic">📧</span>
+    <div>If a check fails <b>twice in a row</b>, an email goes to <b>ohad.storfer@gmail.com</b>, <b>app@swellyo.com</b> and <b>eyal@swellyo.com</b> listing exactly what broke. (Two-in-a-row avoids false alarms from brief blips.)</div>
+  </div>
+
+  <div class="notcard">
+    <h3>Not covered yet</h3>
+    <ul>
+      <li><b>Google / Apple sign-in handshake</b> — the full interactive login flow (can't be tested automatically)</li>
+      <li><b>Signup</b> — creating a real new user (planned: a separate weekly test)</li>
+      <li><b>Push landing on a real phone</b> — FCM/APNs delivery to a device (can't test without spamming users)</li>
+    </ul>
+  </div>
+
+  <footer>Swellyo · Health-check coverage · 2026-06-03</footer>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,90 @@
+appId: com.swellyo.app
+name: visual-verify Add Destination flow
+tags:
+  - visual-verify
+---
+- launchApp:
+    clearState: false
+    stopApp: false
+
+# Dismiss any leftover skip-confirm modal
+- runFlow:
+    when:
+      visible: "Sure you want to skip"
+    commands:
+      - tapOn: "Go back"
+      - waitForAnimationToEnd:
+          timeout: 1500
+
+# Open Add Destination sheet ONLY if not already open
+- runFlow:
+    when:
+      notVisible: "Select country / state"
+    commands:
+      - extendedWaitUntil:
+          visible: "Add Destination"
+          timeout: 15000
+      - takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_185427/add-destination/01-baseline
+      - tapOn: "Add Destination"
+      - waitForAnimationToEnd:
+          timeout: 2500
+
+# Sheet now open — capture baseline of the sheet
+- takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_185427/add-destination/02-sheet-open
+
+# === Tap "Select country / state" → CountrySearchModal ===
+- tapOn: "Select country.*"
+- waitForAnimationToEnd:
+    timeout: 2000
+- takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_185427/add-destination/03-country-modal-open
+
+# === Type the country ===
+- tapOn: "Search countries.*"
+- inputText: "Indonesia"
+- waitForAnimationToEnd:
+    timeout: 1500
+- takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_185427/add-destination/04-country-typed
+
+# Hide keyboard so the results aren't covered, then pick first match
+- hideKeyboard
+- waitForAnimationToEnd:
+    timeout: 500
+- takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_185427/add-destination/05-country-results
+- tapOn:
+    text: "Indonesia.*"
+    index: 0
+- waitForAnimationToEnd:
+    timeout: 2000
+- takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_185427/add-destination/06-country-selected
+
+# === Places search ===
+- tapOn: "City.*"
+- waitForAnimationToEnd:
+    timeout: 1000
+- inputText: "Bali"
+- waitForAnimationToEnd:
+    timeout: 2500
+- takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_185427/add-destination/07-place-typed
+- hideKeyboard
+- waitForAnimationToEnd:
+    timeout: 500
+- takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_185427/add-destination/08-place-suggestions
+
+# Tap first place result — Google Places returns rows like "Bali, Indonesia"
+- tapOn:
+    text: "Bali.*"
+    index: 0
+- waitForAnimationToEnd:
+    timeout: 1500
+- takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_185427/add-destination/09-place-selected
+
+# === Save the destination ===
+- runFlow:
+    when:
+      visible: "Save"
+    commands:
+      - tapOn: "Save"
+      - waitForAnimationToEnd:
+          timeout: 2000
+
+- takeScreenshot: .maestro/screenshots/visual-verify-2026-05-29_185427/add-destination/10-destination-added

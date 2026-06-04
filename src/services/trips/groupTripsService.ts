@@ -600,6 +600,82 @@ export async function listMyTripsByBucket(userId: string): Promise<MyTripsBucket
   return { approved, pending, past };
 }
 
+/** Social-proof data the redesigned trip card needs but the list rows don't
+ *  carry: the host's name + avatar and a few participant avatars for the
+ *  overlapping cluster. `totalCount` mirrors participant_count (incl. host). */
+export interface TripCardMeta {
+  hostName: string | null;
+  hostAvatar: string | null;
+  memberAvatars: string[]; // up to 4 avatars for the cluster (host first)
+  totalCount: number;
+}
+
+/**
+ * Batched card metadata for a list of trips — at most two queries regardless of
+ * how many trips are passed (participants of all trips, then surfers for every
+ * host ∪ participant). Returns a Map keyed by trip id.
+ *
+ * Degrades gracefully: if RLS hides the participants of trips the viewer isn't
+ * in (Explore), `memberAvatars` just comes back empty while the host avatar
+ * still resolves from the public `surfers` table, and `totalCount` falls back to
+ * the trip's own participant_count.
+ */
+export async function getTripCardMeta(
+  trips: GroupTrip[]
+): Promise<Map<string, TripCardMeta>> {
+  const out = new Map<string, TripCardMeta>();
+  if (trips.length === 0) return out;
+
+  const tripIds = trips.map(t => t.id);
+
+  // 1. Participant rows for every trip (oldest first so the host — joined at
+  //    create time — naturally leads, reinforced by the role check below).
+  const { data: partRows } = await supabase
+    .from('group_trip_participants')
+    .select('trip_id, user_id, role, joined_at')
+    .in('trip_id', tripIds)
+    .order('joined_at', { ascending: true });
+
+  const partsByTrip = new Map<string, string[]>();
+  (partRows || []).forEach((r: any) => {
+    const arr = partsByTrip.get(r.trip_id) ?? [];
+    if (r.role === 'host') arr.unshift(r.user_id);
+    else arr.push(r.user_id);
+    partsByTrip.set(r.trip_id, arr);
+  });
+
+  // 2. Resolve name + avatar for every user we touched (hosts ∪ participants).
+  const userIds = new Set<string>();
+  trips.forEach(t => userIds.add(t.host_id));
+  (partRows || []).forEach((r: any) => userIds.add(r.user_id));
+
+  const { data: surfers } = await supabase
+    .from('surfers')
+    .select('user_id, name, profile_image_url')
+    .in('user_id', Array.from(userIds));
+
+  const profById = new Map<string, { name: string | null; avatar: string | null }>();
+  (surfers || []).forEach((s: any) =>
+    profById.set(s.user_id, { name: s.name ?? null, avatar: s.profile_image_url ?? null })
+  );
+
+  for (const trip of trips) {
+    const host = profById.get(trip.host_id);
+    const memberIds = partsByTrip.get(trip.id) ?? [trip.host_id];
+    const memberAvatars = memberIds
+      .map(id => profById.get(id)?.avatar)
+      .filter((a): a is string => !!a)
+      .slice(0, 4);
+    out.set(trip.id, {
+      hostName: host?.name ?? null,
+      hostAvatar: host?.avatar ?? null,
+      memberAvatars,
+      totalCount: trip.participant_count ?? memberIds.length,
+    });
+  }
+  return out;
+}
+
 export async function deleteGroupTrip(tripId: string): Promise<boolean> {
   const { error } = await supabase.from('group_trips').delete().eq('id', tripId);
   if (error) {

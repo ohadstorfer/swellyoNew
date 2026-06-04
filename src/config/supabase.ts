@@ -68,10 +68,21 @@ if (SUPABASE_URL && SUPABASE_ANON_KEY && validateUrl(SUPABASE_URL)) {
     if (__DEV__ && supabaseClient) {
       const rt: any = (supabaseClient as any).realtime;
       try {
+        // Endpoint + token presence at boot — confirms WHERE the socket dials and
+        // whether it has an auth token. A wss:// URL that never OPENs points at the
+        // network/proxy blocking WebSocket upgrades (REST over https still works).
+        console.log('[Realtime] endpoint:', rt?.endPoint ?? rt?.endpointURL?.() ?? 'unknown');
+        console.log('[Realtime] hasAccessToken:', !!(rt?.accessTokenValue ?? rt?.accessToken));
         rt?.onOpen?.(() => console.log('[Realtime] socket OPEN'));
-        rt?.onClose?.(() => console.log('[Realtime] socket CLOSED'));
+        // Close event carries code + reason — the single most useful datum:
+        //   1006 = abnormal (network/proxy blocked the upgrade, never connected)
+        //   1000 = normal close (often server-side auth/JWT rejection)
+        //   4xxx = Supabase app-level (e.g. token/limit)
+        rt?.onClose?.((e: any) =>
+          console.log('[Realtime] socket CLOSED', { code: e?.code, reason: e?.reason || '(none)' })
+        );
         rt?.onError?.((err: any) =>
-          console.log('[Realtime] socket ERROR', err?.message ?? err)
+          console.log('[Realtime] socket ERROR', err?.message ?? String(err))
         );
       } catch (_) {
         // diagnostic only

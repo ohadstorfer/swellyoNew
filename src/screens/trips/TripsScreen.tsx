@@ -5,7 +5,6 @@ import {
   StyleSheet,
   TouchableOpacity,
   FlatList,
-  SectionList,
   Image,
   ActivityIndicator,
   RefreshControl,
@@ -16,11 +15,14 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useOnboarding } from '../../context/OnboardingContext';
 import {
   GroupTrip,
   HostingStyle,
   MyTripsBuckets,
+  TripCardMeta,
+  getTripCardMeta,
   listExploreTrips,
   listMyTripsByBucket,
 } from '../../services/trips/groupTripsService';
@@ -32,6 +34,8 @@ import {
 } from '../../hooks/useTripWizardDraft';
 import TripDetailScreen from './TripDetailScreen';
 import { Images } from '../../assets/images';
+import { Logo } from '../../components/Logo';
+import { NotificationCenter } from '../../components/notifications/NotificationCenter';
 
 // Hosting-style chooser content. Lifted out of CreateTripWizard so the chooser
 // can live inline on the Create tab and the wizard becomes a pure router.
@@ -75,29 +79,31 @@ interface TripsScreenProps {
 }
 
 // ---------------------------------------------------------------------------
-// Segmented tab bar
+// Header tabs (underline style, sit inside the dark header — per Figma)
 // ---------------------------------------------------------------------------
-const TripsSegmentBar: React.FC<{
+const TripsHeaderTabs: React.FC<{
   active: TripsTab;
   onChange: (tab: TripsTab) => void;
 }> = ({ active, onChange }) => {
   const tabs: { key: TripsTab; label: string }[] = [
-    { key: 'my', label: 'MY TRIPS' },
-    { key: 'explore', label: 'EXPLORE' },
-    { key: 'create', label: 'CREATE' },
+    { key: 'my', label: 'My Trips' },
+    { key: 'explore', label: 'Explore' },
+    { key: 'create', label: 'Create' },
   ];
   return (
-    <View style={styles.segmentBar}>
+    <View style={styles.tabsRow}>
       {tabs.map(t => {
         const isActive = active === t.key;
         return (
           <TouchableOpacity
             key={t.key}
-            style={[styles.segmentBtn, isActive && styles.segmentBtnActive]}
+            style={[styles.tabBtn, isActive ? styles.tabBtnActive : styles.tabBtnInactive]}
             onPress={() => onChange(t.key)}
             activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityState={{ selected: isActive }}
           >
-            <Text style={[styles.segmentLabel, isActive && styles.segmentLabelActive]}>
+            <Text style={[styles.tabLabel, isActive ? styles.tabLabelActive : styles.tabLabelInactive]}>
               {t.label}
             </Text>
           </TouchableOpacity>
@@ -135,70 +141,171 @@ const formatDestination = (trip: GroupTrip): string =>
   trip.destination?.country ||
   'Destination TBD';
 
-type TripCardBadge = 'approved' | 'pending' | 'completed';
+// Status drives the colored badge under the card image (mirrors the Figma
+// Upcoming / Requested / Completed variants).
+type TripCardStatus = 'upcoming' | 'requested' | 'completed';
 
-const BADGE_LABEL: Record<TripCardBadge, string> = {
-  approved: 'Approved',
-  pending: 'Pending',
-  completed: 'Completed',
+const STATUS_BADGE: Record<
+  TripCardStatus,
+  { bg: string; icon: keyof typeof Ionicons.glyphMap; label: string }
+> = {
+  upcoming: { bg: '#84EBB4', icon: 'briefcase-outline', label: 'Upcoming' },
+  requested: { bg: '#FFB443', icon: 'chatbox-ellipses-outline', label: 'Requested' },
+  completed: { bg: '#F7F7F7', icon: 'checkmark-circle-outline', label: 'Completed' },
 };
 
 const TripCard: React.FC<{
   trip: GroupTrip;
+  status: TripCardStatus;
+  meta?: TripCardMeta;
   onPress?: () => void;
-  badge?: TripCardBadge;
-}> = ({ trip, onPress, badge }) => (
-  <TouchableOpacity
-    style={[styles.card, badge === 'completed' && styles.cardPast]}
-    activeOpacity={onPress ? 0.85 : 1}
-    onPress={onPress}
-    disabled={!onPress}
-  >
-    {trip.hero_image_url ? (
-      <Image source={{ uri: trip.hero_image_url }} style={styles.cardImage} />
-    ) : (
-      <View style={[styles.cardImage, styles.cardImagePlaceholder]}>
-        <Ionicons name="image-outline" size={32} color="#B0B0B0" />
-      </View>
-    )}
-    <View style={styles.cardBody}>
-      {badge && (
-        <View style={[styles.badge, badge === 'completed' && styles.badgeCompleted]}>
-          <Text style={[styles.badgeText, badge === 'completed' && styles.badgeTextCompleted]}>
-            {BADGE_LABEL[badge]}
-          </Text>
-        </View>
-      )}
-      {!!trip.title && <Text style={styles.cardTitle}>{trip.title}</Text>}
-      <Text style={styles.cardDest}>{formatDestination(trip)}</Text>
-      <Text style={styles.cardDates}>{formatTripDates(trip)}</Text>
-      <View style={styles.tagRow}>
-        <View style={styles.tag}>
-          <Text style={styles.tagText}>
-            {trip.age_min}–{trip.age_max} yrs
-          </Text>
-        </View>
-        {trip.target_surf_levels.slice(0, 2).map(l => (
-          <View key={l} style={styles.tag}>
-            <Text style={styles.tagText}>{l}</Text>
+}> = ({ trip, status, meta, onPress }) => {
+  const badge = STATUS_BADGE[status];
+  const avatars = meta?.memberAvatars ?? [];
+  const total = meta?.totalCount ?? trip.participant_count ?? 0;
+  const overflow = total - avatars.length;
+
+  return (
+    <TouchableOpacity
+      style={styles.card}
+      activeOpacity={onPress ? 0.9 : 1}
+      onPress={onPress}
+      disabled={!onPress}
+    >
+      <View style={styles.cardImageWrap}>
+        {trip.hero_image_url ? (
+          <Image source={{ uri: trip.hero_image_url }} style={styles.cardImageBg} />
+        ) : (
+          <View style={[styles.cardImageBg, styles.cardImagePlaceholder]}>
+            <Ionicons name="image-outline" size={32} color="#B0B0B0" />
           </View>
-        ))}
+        )}
+
+        {/* Host row (top-left) */}
+        <View style={styles.hostRow}>
+          {meta?.hostAvatar ? (
+            <Image source={{ uri: meta.hostAvatar }} style={styles.hostAvatar} />
+          ) : (
+            <View style={[styles.hostAvatar, styles.hostAvatarPlaceholder]}>
+              <Ionicons name="person" size={18} color="#FFFFFF" />
+            </View>
+          )}
+          {!!meta?.hostName && (
+            <Text style={styles.hostName} numberOfLines={1}>
+              {meta.hostName}
+            </Text>
+          )}
+        </View>
+
+        {/* Bottom darkening so the title/description stay legible on any photo */}
+        <LinearGradient
+          colors={['transparent', 'rgba(0,0,0,0.55)']}
+          style={styles.cardGradient}
+          pointerEvents="none"
+        />
+
+        <View style={styles.cardTextBlock}>
+          <Text style={styles.cardTitle} numberOfLines={1}>
+            {formatDestination(trip)}
+          </Text>
+          {!!trip.description && (
+            <Text style={styles.cardDesc} numberOfLines={2}>
+              {trip.description}
+            </Text>
+          )}
+        </View>
+
+        {/* Participant cluster (bottom-right). Falls back to an icon + count when
+            no avatars are available (e.g. Explore trips the viewer isn't in). */}
+        {avatars.length > 0 ? (
+          <View style={styles.avatarCluster}>
+            {avatars.map((uri, i) => (
+              <Image
+                key={`${uri}-${i}`}
+                source={{ uri }}
+                style={[styles.clusterAvatar, i > 0 && styles.clusterAvatarOverlap]}
+              />
+            ))}
+            {overflow > 0 && <Text style={styles.clusterMore}>+{overflow}</Text>}
+          </View>
+        ) : total > 0 ? (
+          <View style={[styles.avatarCluster, styles.avatarClusterCount]}>
+            <Ionicons name="people" size={16} color="#7B7B7B" />
+            <Text style={styles.clusterMore}>{total}</Text>
+          </View>
+        ) : null}
       </View>
-    </View>
-  </TouchableOpacity>
-);
+
+      {/* Status badge */}
+      <View style={[styles.statusBadge, { backgroundColor: badge.bg }]}>
+        <View style={styles.statusIcon}>
+          <Ionicons name={badge.icon} size={16} color="#0A0A0A" />
+        </View>
+        <View style={styles.statusTextRow}>
+          <Text style={styles.statusLabel}>{badge.label}</Text>
+          <Text style={styles.statusDate}>{formatTripDates(trip)}</Text>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Filter pills (My Trips) — All / Upcoming (n) / Requested (n) / Completed (n)
+// ---------------------------------------------------------------------------
+type TripFilter = 'all' | 'upcoming' | 'requested' | 'completed';
+
+const TripFilterBar: React.FC<{
+  active: TripFilter;
+  counts: { upcoming: number; requested: number; completed: number };
+  onChange: (f: TripFilter) => void;
+}> = ({ active, counts, onChange }) => {
+  const items: { key: TripFilter; label: string }[] = [
+    { key: 'all', label: 'All' },
+    { key: 'upcoming', label: `Upcoming (${counts.upcoming})` },
+    { key: 'requested', label: `Requested (${counts.requested})` },
+    { key: 'completed', label: `Completed (${counts.completed})` },
+  ];
+  return (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={styles.filterRow}
+    >
+      {items.map(it => {
+        const isActive = active === it.key;
+        return (
+          <TouchableOpacity
+            key={it.key}
+            style={[styles.filterPill, isActive ? styles.filterPillActive : styles.filterPillInactive]}
+            onPress={() => onChange(it.key)}
+            activeOpacity={0.8}
+            accessibilityRole="button"
+            accessibilityState={{ selected: isActive }}
+          >
+            <Text style={[styles.filterText, isActive ? styles.filterTextActive : styles.filterTextInactive]}>
+              {it.label}
+            </Text>
+          </TouchableOpacity>
+        );
+      })}
+    </ScrollView>
+  );
+};
 
 // ---------------------------------------------------------------------------
 // Explore view
 // ---------------------------------------------------------------------------
 const ExploreTripsView: React.FC<{ onOpenTrip: (tripId: string) => void }> = ({ onOpenTrip }) => {
   const [trips, setTrips] = useState<GroupTrip[]>([]);
+  const [meta, setMeta] = useState<Map<string, TripCardMeta>>(new Map());
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
     const data = await listExploreTrips();
     setTrips(data);
+    setMeta(await getTripCardMeta(data));
     setLoading(false);
     setRefreshing(false);
   }, []);
@@ -219,7 +326,14 @@ const ExploreTripsView: React.FC<{ onOpenTrip: (tripId: string) => void }> = ({ 
     <FlatList
       data={trips}
       keyExtractor={t => t.id}
-      renderItem={({ item }) => <TripCard trip={item} onPress={() => onOpenTrip(item.id)} />}
+      renderItem={({ item }) => (
+        <TripCard
+          trip={item}
+          status={item.status === 'completed' ? 'completed' : 'upcoming'}
+          meta={meta.get(item.id)}
+          onPress={() => onOpenTrip(item.id)}
+        />
+      )}
       contentContainerStyle={styles.listContent}
       refreshControl={
         <RefreshControl
@@ -243,11 +357,13 @@ const ExploreTripsView: React.FC<{ onOpenTrip: (tripId: string) => void }> = ({ 
 // ---------------------------------------------------------------------------
 // My Trips view
 // ---------------------------------------------------------------------------
-interface TripSection {
-  title: string;
-  badge: TripCardBadge;
-  data: GroupTrip[];
-}
+// Bucket → card status: approved trips are upcoming, pending join requests are
+// "requested", past trips are completed.
+const BUCKET_STATUS: Record<'approved' | 'pending' | 'past', TripCardStatus> = {
+  approved: 'upcoming',
+  pending: 'requested',
+  past: 'completed',
+};
 
 const MyTripsView: React.FC<{
   userId: string | null;
@@ -255,8 +371,10 @@ const MyTripsView: React.FC<{
   onOpenTrip: (tripId: string) => void;
 }> = ({ userId, onGoCreate, onOpenTrip }) => {
   const [buckets, setBuckets] = useState<MyTripsBuckets>({ approved: [], pending: [], past: [] });
+  const [meta, setMeta] = useState<Map<string, TripCardMeta>>(new Map());
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [filter, setFilter] = useState<TripFilter>('all');
 
   const load = useCallback(async () => {
     if (!userId) {
@@ -265,6 +383,7 @@ const MyTripsView: React.FC<{
     }
     const data = await listMyTripsByBucket(userId);
     setBuckets(data);
+    setMeta(await getTripCardMeta([...data.approved, ...data.pending, ...data.past]));
     setLoading(false);
     setRefreshing(false);
   }, [userId]);
@@ -273,12 +392,18 @@ const MyTripsView: React.FC<{
     load();
   }, [load]);
 
-  const allSections: TripSection[] = [
-    { title: 'APPROVED', badge: 'approved', data: buckets.approved },
-    { title: 'PENDING APPROVAL', badge: 'pending', data: buckets.pending },
-    { title: 'PAST TRIPS', badge: 'completed', data: buckets.past },
+  // Flatten buckets into one tagged list, then filter by the active pill.
+  const tagged: { trip: GroupTrip; status: TripCardStatus }[] = [
+    ...buckets.approved.map(trip => ({ trip, status: BUCKET_STATUS.approved })),
+    ...buckets.pending.map(trip => ({ trip, status: BUCKET_STATUS.pending })),
+    ...buckets.past.map(trip => ({ trip, status: BUCKET_STATUS.past })),
   ];
-  const sections = allSections.filter(s => s.data.length > 0);
+  const counts = {
+    upcoming: buckets.approved.length,
+    requested: buckets.pending.length,
+    completed: buckets.past.length,
+  };
+  const visible = filter === 'all' ? tagged : tagged.filter(x => x.status === filter);
 
   if (loading) {
     return (
@@ -288,7 +413,7 @@ const MyTripsView: React.FC<{
     );
   }
 
-  if (sections.length === 0) {
+  if (tagged.length === 0) {
     return (
       <View style={styles.emptyState}>
         <Ionicons name="airplane-outline" size={48} color="#B0B0B0" />
@@ -301,23 +426,26 @@ const MyTripsView: React.FC<{
   }
 
   return (
-    <SectionList
-      sections={sections}
-      keyExtractor={t => t.id}
-      renderItem={({ item, section }) => (
+    <FlatList
+      data={visible}
+      keyExtractor={x => x.trip.id}
+      ListHeaderComponent={
+        <TripFilterBar active={filter} counts={counts} onChange={setFilter} />
+      }
+      renderItem={({ item }) => (
         <TripCard
-          trip={item}
-          badge={(section as TripSection).badge}
-          onPress={() => onOpenTrip(item.id)}
+          trip={item.trip}
+          status={item.status}
+          meta={meta.get(item.trip.id)}
+          onPress={() => onOpenTrip(item.trip.id)}
         />
       )}
-      renderSectionHeader={({ section }) => (
-        <Text style={styles.sectionHeader}>
-          {(section as TripSection).title} ({(section as TripSection).data.length})
-        </Text>
-      )}
       contentContainerStyle={styles.listContent}
-      stickySectionHeadersEnabled={false}
+      ListEmptyComponent={
+        <View style={styles.filterEmpty}>
+          <Text style={styles.emptyText}>Nothing here yet.</Text>
+        </View>
+      }
       refreshControl={
         <RefreshControl
           refreshing={refreshing}
@@ -478,15 +606,25 @@ export default function TripsScreen({ onBack, initialTripId, onOpenGroupChat, on
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
-      <View style={[styles.header, { paddingTop: 8 }]}>
-        <TouchableOpacity testID="trips-back-button" onPress={onBack} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-          <Ionicons name="chevron-back" size={28} color="#222B30" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Trips</Text>
-        <View style={{ width: 28 }} />
-      </View>
+      <View style={styles.tripsHeader}>
+        <View style={styles.headerTopRow}>
+          <View style={styles.headerLeft}>
+            <TouchableOpacity
+              testID="trips-back-button"
+              onPress={onBack}
+              style={styles.backBtn}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Ionicons name="chevron-back" size={26} color="#FFFFFF" />
+            </TouchableOpacity>
+            <Logo size={36} iconOnly />
+            <Text style={styles.tripsHeaderTitle}>Trips</Text>
+          </View>
+          <NotificationCenter userId={currentUserId} />
+        </View>
 
-      <TripsSegmentBar active={activeTab} onChange={setActiveTab} />
+        <TripsHeaderTabs active={activeTab} onChange={setActiveTab} />
+      </View>
 
       <View style={styles.body}>
         {activeTab === 'explore' && <ExploreTripsView onOpenTrip={setSelectedTripId} />}
@@ -563,7 +701,9 @@ export default function TripsScreen({ onBack, initialTripId, onOpenGroupChat, on
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#FFFFFF' },
+  root: { flex: 1, backgroundColor: '#212121' },
+
+  // White header reused only by the "Edit trip" sub-screen.
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -574,85 +714,219 @@ const styles = StyleSheet.create({
   backBtn: { padding: 4 },
   headerTitle: { fontSize: 18, fontWeight: '600', color: '#222B30' },
 
-  segmentBar: {
+  // Dark header (Figma): logo + "Trips" + notification bell, underline tabs below.
+  tripsHeader: {
+    backgroundColor: '#212121',
+    paddingTop: 4,
+  },
+  headerTopRow: {
     flexDirection: 'row',
-    marginHorizontal: 16,
-    borderRadius: 10,
-    backgroundColor: '#F2F2F2',
-    padding: 4,
-  },
-  segmentBtn: {
-    flex: 1,
-    paddingVertical: 10,
     alignItems: 'center',
-    borderRadius: 8,
+    justifyContent: 'space-between',
+    paddingLeft: 12,
+    paddingRight: 8,
+    paddingVertical: 8,
   },
-  segmentBtnActive: {
-    backgroundColor: '#FFFFFF',
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
+  headerLeft: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
-  segmentLabel: { fontSize: 12, fontWeight: '600', color: '#7B7B7B', letterSpacing: 0.5 },
-  segmentLabelActive: { color: '#222B30' },
+  tripsHeaderTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
 
-  body: { flex: 1, marginTop: 12 },
+  tabsRow: {
+    flexDirection: 'row',
+    paddingTop: 4,
+  },
+  tabBtn: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+  },
+  tabBtnActive: {
+    borderBottomWidth: 3,
+    borderBottomColor: '#05BCD3',
+  },
+  tabBtnInactive: {
+    borderBottomWidth: 2,
+    borderBottomColor: '#7B7B7B',
+  },
+  tabLabel: { fontSize: 16, lineHeight: 22 },
+  tabLabelActive: { color: '#05BCD3', fontWeight: '600' },
+  tabLabelInactive: { color: '#FFFFFF', fontWeight: '500' },
+
+  body: { flex: 1, backgroundColor: '#FFFFFF', paddingTop: 8 },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 
   listContent: { paddingHorizontal: 16, paddingBottom: 24, flexGrow: 1 },
 
-  sectionHeader: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#4A5565',
-    letterSpacing: 0.5,
-    marginTop: 16,
-    marginBottom: 8,
+  // Filter pills (My Trips).
+  filterRow: { flexDirection: 'row', gap: 11, paddingBottom: 12 },
+  filterPill: {
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    justifyContent: 'center',
   },
+  filterPillActive: { backgroundColor: '#212121' },
+  filterPillInactive: {
+    backgroundColor: '#F7F7F7',
+    borderWidth: 1,
+    borderColor: '#EEEEEE',
+  },
+  filterText: { fontSize: 14, lineHeight: 20 },
+  filterTextActive: { color: '#FFFFFF' },
+  filterTextInactive: { color: '#333333' },
+  filterEmpty: { alignItems: 'center', justifyContent: 'center', paddingVertical: 48 },
 
+  // Trip card (Figma): photo with overlaid host/title/avatars + status badge.
   card: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 14,
-    marginBottom: 14,
+    borderRadius: 28,
+    padding: 8,
+    marginBottom: 16,
+    gap: 10,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.09,
+    shadowRadius: 12,
+    elevation: 3,
+  },
+  cardImageWrap: {
+    width: '100%',
+    aspectRatio: 328 / 246,
+    borderRadius: 20,
     overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: '#EEE',
-  },
-  cardPast: { opacity: 0.6 },
-  badge: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#0A0A0A',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 4,
-    marginBottom: 8,
-  },
-  badgeCompleted: { backgroundColor: '#D1D5DC' },
-  badgeText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    letterSpacing: 0.2,
-  },
-  badgeTextCompleted: { color: '#0A0A0A' },
-  cardImage: { width: '100%', height: 160, backgroundColor: '#F2F2F2' },
-  cardImagePlaceholder: { alignItems: 'center', justifyContent: 'center' },
-  cardBody: { padding: 12 },
-  cardTitle: { fontSize: 16, fontWeight: '600', color: '#222B30', marginBottom: 4 },
-  cardDest: { fontSize: 14, color: '#555', marginBottom: 2 },
-  cardDates: { fontSize: 13, color: '#7B7B7B', marginBottom: 8 },
-  tagRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  tag: {
     backgroundColor: '#F2F2F2',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-    marginRight: 6,
-    marginBottom: 4,
   },
-  tagText: { fontSize: 11, color: '#555', fontWeight: '500' },
+  cardImageBg: { ...StyleSheet.absoluteFillObject, width: '100%', height: '100%' },
+  cardImagePlaceholder: { alignItems: 'center', justifyContent: 'center' },
+
+  hostRow: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    padding: 16,
+  },
+  hostAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#FFFFFF',
+    backgroundColor: '#3A3A3A',
+  },
+  hostAvatarPlaceholder: { alignItems: 'center', justifyContent: 'center' },
+  hostName: {
+    flex: 1,
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '500',
+    textShadowColor: 'rgba(0,0,0,0.4)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+  },
+
+  cardGradient: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 130,
+  },
+  cardTextBlock: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 16,
+    paddingBottom: 20,
+    paddingRight: 92, // leave room for the avatar cluster
+  },
+  cardTitle: {
+    color: '#FFFFFF',
+    fontSize: 22,
+    lineHeight: 28,
+    fontWeight: '700',
+    marginBottom: 2,
+    textShadowColor: 'rgba(0,0,0,0.4)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
+  },
+  cardDesc: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    lineHeight: 18,
+    textShadowColor: 'rgba(0,0,0,0.4)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+  },
+
+  avatarCluster: {
+    position: 'absolute',
+    right: 12,
+    bottom: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F7F7F7',
+    borderWidth: 1,
+    borderColor: '#CFCFCF',
+    borderRadius: 56,
+    paddingVertical: 2,
+    paddingLeft: 2,
+    paddingRight: 8,
+  },
+  clusterAvatar: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#DDDDDD',
+  },
+  clusterAvatarOverlap: { marginLeft: -12 },
+  avatarClusterCount: { gap: 4, paddingLeft: 8 },
+  clusterMore: {
+    marginLeft: 6,
+    fontSize: 14,
+    color: '#7B7B7B',
+    fontWeight: '500',
+  },
+
+  statusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 7,
+    borderRadius: 22,
+  },
+  statusIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  statusTextRow: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingRight: 8,
+  },
+  statusLabel: { color: '#0A0A0A', fontSize: 15 },
+  statusDate: { color: '#4A5565', fontSize: 14 },
 
   emptyState: { alignItems: 'center', justifyContent: 'center', paddingVertical: 64 },
   emptyText: { fontSize: 14, color: '#7B7B7B', marginTop: 12, textAlign: 'center' },

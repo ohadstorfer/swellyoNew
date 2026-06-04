@@ -50,9 +50,11 @@ const NativeVectorText: React.FC = () => (
 interface LogoProps {
   size?: number;
   iconWrapperStyle?: ViewStyle | ViewStyle[] | any; // any to support Animated styles
+  /** Render only the round icon, without the "SWELLYO" wordmark below it. */
+  iconOnly?: boolean;
 }
 
-export const Logo: React.FC<LogoProps> = ({ size = 112, iconWrapperStyle }) => {
+export const Logo: React.FC<LogoProps> = ({ size = 112, iconWrapperStyle, iconOnly = false }) => {
   const [logoError, setLogoError] = React.useState(false);
   const [vectorError, setVectorError] = React.useState(false);
 
@@ -89,21 +91,23 @@ export const Logo: React.FC<LogoProps> = ({ size = 112, iconWrapperStyle }) => {
       </IconContainer>
 
       {/* Vector image below the logo - "SWELLYO" text */}
-      <View style={styles.vectorContainer}>
-        {isNative ? (
-          <NativeVectorText />
-        ) : !vectorError ? (
-          <Image
-            source={{ uri: vectorUrl }}
-            style={styles.vectorImage}
-            resizeMode="contain"
-            onError={(error) => {
-              console.warn('Failed to load vector image:', error);
-              setVectorError(true);
-            }}
-          />
-        ) : null}
-      </View>
+      {!iconOnly && (
+        <View style={styles.vectorContainer}>
+          {isNative ? (
+            <NativeVectorText />
+          ) : !vectorError ? (
+            <Image
+              source={{ uri: vectorUrl }}
+              style={styles.vectorImage}
+              resizeMode="contain"
+              onError={(error) => {
+                console.warn('Failed to load vector image:', error);
+                setVectorError(true);
+              }}
+            />
+          ) : null}
+        </View>
+      )}
     </View>
   );
 };

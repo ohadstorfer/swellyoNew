@@ -229,6 +229,30 @@ class MessagingService {
   // for every conv in state, bypassing the RLS quirk of the unfiltered
   // conversations_list channel. Keyed by conversationId.
   private listSubscriptions = new Map<string, () => void>();
+  // Consolidated "list updates" channels (see subscribeToConversationListUpdatesBatch).
+  // Replaces the old one-channel-per-conversation approach, which put ~3×N
+  // postgres_changes bindings on a single websocket and destabilized the socket
+  // past ~50 conversations (cascading CHANNEL_ERROR).
+  private listBatchChannels: ReturnType<typeof supabase.channel>[] = [];
+  private listBatchSeq = 0;
+  // Log a realtime channel error only ONCE per down-episode (cleared on SUBSCRIBED),
+  // so a dead websocket can't spam the console with identical CHANNEL_ERROR lines.
+  private realtimeErrorLogged = new Set<string>();
+
+  /**
+   * Log a realtime CHANNEL_ERROR/TIMED_OUT once per down-episode. The first failure
+   * for a given key warns; repeats are suppressed until clearRealtimeError(key) runs
+   * (on SUBSCRIBED). Keeps the signal, kills the redbox storm when the socket is dead.
+   */
+  private logRealtimeErrorOnce(key: string, message: string): void {
+    if (this.realtimeErrorLogged.has(key)) return;
+    this.realtimeErrorLogged.add(key);
+    console.warn(message);
+  }
+
+  private clearRealtimeError(key: string): void {
+    this.realtimeErrorLogged.delete(key);
+  }
 
   /**
    * Get or create the Realtime channel for a conversation. Creates and stores the channel only if it
@@ -1803,8 +1827,17 @@ class MessagingService {
         'broadcast',
         { event: 'typing' },
         (payload) => {
-          const { userId, isTyping } = payload.payload as { userId: string; isTyping: boolean };
-          
+          const { userId, isTyping: rawIsTyping } = (payload.payload ?? {}) as {
+            userId?: string;
+            isTyping?: boolean;
+          };
+          // Ignore broadcasts without a userId (e.g. empty/system payloads) — destructuring
+          // an undefined payload here would throw synchronously and surface as CHANNEL_ERROR.
+          if (!userId) {
+            return;
+          }
+          const isTyping = rawIsTyping === true;
+
           // Track typing state
           const conversationTypingState = this.typingState.get(conversationId);
           if (conversationTypingState) {
@@ -1837,12 +1870,29 @@ class MessagingService {
           }
         }
       )
-      .subscribe((status) => {
+      .subscribe((status, err) => {
+        const errKey = `dm:${conversationId}`;
         if (status === 'SUBSCRIBED') {
+          this.clearRealtimeError(errKey);
           console.log(`Subscribed to messages for conversation ${conversationId}`);
         } else if (status === 'CHANNEL_ERROR') {
-          console.error(`Error subscribing to messages for conversation ${conversationId}`);
+          // Logged once per down-episode (warn, not error → no redbox storm). The 2nd
+          // arg `err` carries Supabase's reason; channelState distinguishes a per-channel
+          // failure from a dead socket. When the whole socket is down, every channel
+          // hits this — so we suppress repeats until SUBSCRIBED.
+          this.logRealtimeErrorOnce(
+            errKey,
+            `[MessagingService] DM channel ${conversationId} CHANNEL_ERROR: ` +
+              `${err?.message ?? '(no error message)'} | channelState=${channel.state} ` +
+              `(suppressing repeats until reconnect)`
+          );
           this.activeChannels.delete(conversationId);
+        } else if (status === 'TIMED_OUT' || status === 'CLOSED') {
+          this.logRealtimeErrorOnce(
+            errKey,
+            `[MessagingService] DM channel ${conversationId} ${status}: ` +
+              `${err?.message ?? '(no error message)'} | channelState=${channel.state}`
+          );
         }
         normalizedCallbacks.onSubscriptionStatus?.(status as RealtimeSubscriptionStatus);
       });
@@ -2011,6 +2061,109 @@ class MessagingService {
     };
     this.listSubscriptions.set(conversationId, unsubscribe);
     return unsubscribe;
+  }
+
+  /**
+   * Batched variant of subscribeToConversationListUpdates.
+   *
+   * Instead of one Realtime channel per conversation (≈3×N postgres_changes
+   * bindings on a single websocket — which destabilizes the socket past ~50
+   * conversations and cascades CHANNEL_ERROR across every channel, the failure
+   * mode documented on subscribeToConversations), this opens a SMALL number of
+   * channels using a `conversation_id=in.(...)` filter.
+   *
+   * - Supabase caps the `in` filter at 100 values, so ids are chunked at
+   *   LIST_BATCH_MAX (<100).
+   * - Each rebuild uses a unique topic (listBatchSeq) so tearing down the previous
+   *   channel can't race a same-topic re-subscribe (binding-mismatch CHANNEL_ERROR).
+   * - conversationId is derived from the changed row (not a closure), so handlers
+   *   stay correct across every conversation a channel covers.
+   *
+   * Still a filtered subscription, so it keeps the reliable-delivery property that
+   * the unfiltered conversations channel lacks (see subscribeToConversations notes).
+   */
+  subscribeToConversationListUpdatesBatch(
+    conversationIds: string[],
+    callbacks: {
+      onNewMessage?: (conversationId: string, message: Message) => void;
+      onMessageUpdated?: (conversationId: string, message: Message) => void;
+      onMessageDeleted?: (conversationId: string, messageId: string) => void;
+    }
+  ): () => void {
+    if (!isSupabaseConfigured()) {
+      return () => {};
+    }
+
+    // Tear down any previous batch channels before rebuilding.
+    this.teardownListBatchChannels();
+
+    const LIST_BATCH_MAX = 90; // Supabase hard-caps the `in` filter at 100 values; stay under it.
+    const uniqueIds = Array.from(new Set(conversationIds)).filter(Boolean);
+
+    for (let i = 0; i < uniqueIds.length; i += LIST_BATCH_MAX) {
+      const chunk = uniqueIds.slice(i, i + LIST_BATCH_MAX);
+      const inFilter = `conversation_id=in.(${chunk.join(',')})`;
+      const topic = `list:messages:batch:${++this.listBatchSeq}`;
+
+      const channel = supabase
+        .channel(topic)
+        .on(
+          'postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'messages', filter: inFilter },
+          (payload) => {
+            const message = payload.new as Message;
+            if (!message?.id || !message.conversation_id || !message.created_at) return;
+            callbacks.onNewMessage?.(message.conversation_id, message);
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'messages', filter: inFilter },
+          (payload) => {
+            const message = payload.new as Message;
+            if (!message?.id || !message.conversation_id) return;
+            callbacks.onMessageUpdated?.(message.conversation_id, message);
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: 'DELETE', schema: 'public', table: 'messages', filter: inFilter },
+          (payload) => {
+            // DELETE payloads only carry replica-identity columns. The current
+            // per-conv code already filters DELETE by conversation_id, so it is
+            // available here; guard anyway and skip if absent (no regression — the
+            // DM screen path handles deletes with its own conversationId).
+            const old = payload.old as { id?: string; conversation_id?: string } | undefined;
+            if (!old?.id || !old.conversation_id) return;
+            callbacks.onMessageDeleted?.(old.conversation_id, old.id);
+          }
+        )
+        .subscribe((status) => {
+          if (__DEV__ && status !== 'SUBSCRIBED') {
+            console.log(`[MessagingService] ${topic} status: ${status}`);
+          }
+        });
+
+      this.listBatchChannels.push(channel);
+    }
+
+    const unsubscribe = () => {
+      this.teardownListBatchChannels();
+      this.listSubscriptions.delete('__list_batch__');
+    };
+    this.listSubscriptions.set('__list_batch__', unsubscribe);
+    return unsubscribe;
+  }
+
+  private teardownListBatchChannels(): void {
+    this.listBatchChannels.forEach((channel) => {
+      try {
+        supabase.removeChannel(channel);
+      } catch (e) {
+        console.warn('[MessagingService] Error removing list batch channel:', e);
+      }
+    });
+    this.listBatchChannels = [];
   }
 
   /**
@@ -2316,8 +2469,8 @@ class MessagingService {
         }
       )
       .subscribe((status) => {
-        console.log('[MessagingService] 📡 Subscription status changed:', status);
         if (status === 'SUBSCRIBED') {
+          this.clearRealtimeError('conversations_list');
           console.log('[MessagingService] ✅ Successfully subscribed to conversations_list channel');
           // Just connected/reconnected - trigger sync
           // This callback fires on initial connection and on reconnect
@@ -2326,12 +2479,16 @@ class MessagingService {
           if (typeof callbacks === 'function') {
             callbacks();
           }
-        } else if (status === 'CHANNEL_ERROR') {
-          console.error('[MessagingService] ❌ Channel subscription error - check Realtime configuration');
-        } else if (status === 'TIMED_OUT') {
-          console.error('[MessagingService] ❌ Channel subscription timed out');
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          // Logged once per down-episode (warn, not error). When the realtime socket
+          // is down, this fires on every retry — suppress repeats until reconnect.
+          this.logRealtimeErrorOnce(
+            'conversations_list',
+            `[MessagingService] conversations_list ${status} — realtime socket likely down ` +
+              `(suppressing repeats until reconnect)`
+          );
         } else if (status === 'CLOSED') {
-          console.warn('[MessagingService] ⚠️ Channel subscription closed');
+          this.logRealtimeErrorOnce('conversations_list', '[MessagingService] conversations_list channel CLOSED');
         }
       });
 

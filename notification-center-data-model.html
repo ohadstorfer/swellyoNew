@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Notification Center — Data Model</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --card: #171a21;
+    --line: #262b35;
+    --text: #e6e8ec;
+    --muted: #9aa3b2;
+    --accent: #4f9dff;
+    --green: #43c181;
+    --amber: #f0b54a;
+    --purple: #b58cff;
+    --mono: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 40px 20px; background: var(--bg); color: var(--text);
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif; line-height: 1.5;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+  h1 { font-size: 26px; margin: 0 0 6px; }
+  h2 { font-size: 18px; margin: 40px 0 12px; border-left: 3px solid var(--accent); padding-left: 10px; }
+  .sub { color: var(--muted); margin: 0 0 8px; font-size: 14px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; margin: 14px 0; }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  tr:last-child td { border-bottom: none; }
+  code { font-family: var(--mono); font-size: 12.5px; background: #21262f; padding: 1px 6px; border-radius: 5px; color: #cdd6e3; }
+  .pk { color: var(--amber); }
+  .fk { color: var(--accent); }
+  .tag { display: inline-block; font-size: 11px; padding: 2px 7px; border-radius: 99px; font-weight: 600; }
+  .t-user { background: rgba(79,157,255,.15); color: var(--accent); }
+  .t-admin { background: rgba(181,140,255,.15); color: var(--purple); }
+  .t-both { background: rgba(67,193,129,.15); color: var(--green); }
+  .yes { color: var(--green); font-weight: 600; }
+  .no { color: var(--muted); }
+  .note { color: var(--muted); font-size: 13px; }
+  .grill li { margin: 10px 0; }
+  .grill b { color: var(--amber); }
+  .pill { font-family: var(--mono); font-size: 12px; color: var(--green); }
+  .warn { border-color: #5a3a3a; background: #1f1718; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Notification Center — Data Model</h1>
+  <p class="sub">Group-trip notifications. Designed to plug into your existing <code>group_trip_*</code> tables.</p>
+
+  <!-- ───────────────── CORE DECISION ───────────────── -->
+  <h2>Shape: one row per recipient</h2>
+  <div class="card">
+    <p class="note">
+      One <code>notifications</code> row = one thing one person sees. We <b>fan out</b> on write
+      (e.g. an admin update to 8 participants = 8 rows). Trips are small, so this is simpler than an
+      event+recipients join and gives per-user read state for free.
+    </p>
+    <p class="note">
+      The real decision (approved/denied) still lives on the source row via <code>entity_type</code> + <code>entity_id</code>.
+      But each notification also has its own <code>handled_at</code> flag to mark the <b>card</b> done/dismissed —
+      this works even for alerts that have no underlying request row. The notification carries a <b>frozen render
+      snapshot</b> in <code>data</code> (names/qty/title) so the feed reads with no joins and old notices stay true
+      even after names change.
+    </p>
+  </div>
+
+  <!-- ───────────────── MAIN TABLE ───────────────── -->
+  <h2>Table: <code>notifications</code></h2>
+  <div class="card">
+  <table>
+    <thead><tr><th>Column</th><th>Type</th><th>What it is</th></tr></thead>
+    <tbody>
+      <tr><td><code class="pk">id</code></td><td>uuid PK</td><td>Notification id.</td></tr>
+      <tr><td><code class="fk">recipient_id</code></td><td>uuid → users.id</td><td>Who sees this row.</td></tr>
+      <tr><td><code class="fk">trip_id</code></td><td>uuid → group_trips.id</td><td>Trip context (nullable for future non-trip notifs).</td></tr>
+      <tr><td><code>type</code></td><td>notification_type (enum)</td><td>What happened. Drives icon + text + actions. See table below.</td></tr>
+      <tr><td><code>audience</code></td><td>text · user / admin</td><td>Which inbox tab. Same event can produce both (gear claim).</td></tr>
+      <tr><td><code class="fk">actor_id</code></td><td>uuid → users.id (null)</td><td>Who triggered it (Johnny, Michael, the admin). Null = system.</td></tr>
+      <tr><td><code>entity_type</code></td><td>text (null)</td><td>Source row kind: <code>join_request</code>, <code>gear_request</code>, <code>commitment_request</code>, <code>gear_claim</code>, <code>admin_update</code>, <code>gear_item</code>, <code>participant</code>.</td></tr>
+      <tr><td><code>entity_id</code></td><td>uuid (null)</td><td>Id in that table. Deep link + live status lookup for actionable cards.</td></tr>
+      <tr><td><code>data</code></td><td>jsonb</td><td>Render snapshot, e.g. <code>{actor_name, trip_title, gear_name, qty, decision}</code>. No joins needed to draw the row.</td></tr>
+      <tr><td><code>read_at</code></td><td>timestamptz (null)</td><td>Null = unread. Sole source for the badge count.</td></tr>
+      <tr><td><code>handled_at</code></td><td>timestamptz (null)</td><td>Card marked done/dismissed. Lets actionable cards resolve even with no source row.</td></tr>
+      <tr><td><code>created_at</code></td><td>timestamptz</td><td><code>default now()</code>. Sort key.</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="note">Index: partial index on <code>(recipient_id, created_at desc) WHERE read_at IS NULL</code> for the feed + badge. <b>No</b> <code>group_key</code> — flat feed for the MVP, add collapsing later only if needed.</p>
+
+  <!-- ───────────────── ENUM / TYPES ───────────────── -->
+  <h2>Enum: <code>notification_type</code></h2>
+  <p class="sub">One row per requirement you listed. <span class="tag t-user">user</span> <span class="tag t-admin">admin</span> <span class="tag t-both">both</span></p>
+  <div class="card">
+  <table>
+    <thead><tr><th>type</th><th>Audience</th><th>Recipient</th><th>Fired by (source row)</th><th>Action on card</th></tr></thead>
+    <tbody>
+      <tr><td><code>member_joined</code></td><td><span class="tag t-user">user</span></td><td>All participants</td><td>insert <code>group_trip_participants</code></td><td class="no">tap → trip</td></tr>
+      <tr><td><code>member_committed</code></td><td><span class="tag t-user">user</span></td><td>All participants</td><td><code>participants.commitment_status → committed</code></td><td class="no">tap → trip</td></tr>
+      <tr><td><code>gear_claimed</code></td><td><span class="tag t-both">both</span></td><td>Participants + admin</td><td>insert <code>group_trip_gear_claims</code></td><td class="no">tap → gear</td></tr>
+      <tr><td><code>admin_update_posted</code></td><td><span class="tag t-user">user</span></td><td>All participants</td><td>insert <code>group_trip_admin_updates</code></td><td class="no">tap → update</td></tr>
+      <tr><td><code>group_gear_updated</code></td><td><span class="tag t-user">user</span></td><td>All participants</td><td>change <code>group_trip_gear_items</code> / <code>group_trips.group_gear</code></td><td class="no">tap → gear list</td></tr>
+      <tr><td><code>personal_gear_updated</code></td><td><span class="tag t-user">user</span></td><td>The one participant</td><td>change <code>participants.personal_gear_by_host</code></td><td class="no">tap → my gear</td></tr>
+      <tr><td><code>gear_request_decided</code></td><td><span class="tag t-user">user</span></td><td>The requester</td><td><code>gear_requests.status → approved/declined</code></td><td class="no">tap → gear</td></tr>
+      <tr><td><code>commitment_decided</code></td><td><span class="tag t-user">user</span></td><td>The requester</td><td><code>commitment_requests.status → approved/declined</code></td><td class="no">tap → trip</td></tr>
+      <tr><td><code>join_request_decided</code></td><td><span class="tag t-user">user</span></td><td>The requester</td><td><code>join_requests.status → approved/declined</code></td><td class="no">tap → trip</td></tr>
+      <tr><td><code>join_request_received</code></td><td><span class="tag t-admin">admin</span></td><td>Host / admins</td><td>insert <code>group_trip_join_requests</code></td><td class="yes">Approve · Deny · View profile</td></tr>
+      <tr><td><code>gear_request_received</code></td><td><span class="tag t-admin">admin</span></td><td>Host / admins</td><td>insert <code>group_trip_gear_requests</code></td><td class="yes">View · Set qty · Approve · Deny</td></tr>
+      <tr><td><code>commitment_request_received</code></td><td><span class="tag t-admin">admin</span></td><td>Host / admins</td><td>insert <code>group_trip_commitment_requests</code></td><td class="yes">Open chat</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="note">Actionable cards (<span class="yes">green</span>) render their buttons against the live <code>entity</code> status — so a request already handled in another screen shows as resolved, no stale buttons.</p>
+
+  <!-- ───────────────── WHO WRITES ROWS ───────────────── -->
+  <h2>Who creates the rows</h2>
+  <div class="card">
+    <p class="note">
+      <b>Postgres triggers</b> on the source tables (insert / status-change) fan out the rows.
+      No client logic, fires no matter where the action came from (app, admin panel, SQL).
+      The trigger reads names once and freezes them into <code>data</code>.
+    </p>
+    <p class="note">
+      For <b>admin</b> notifications the trigger recipients = <code>group_trips.host_id</code> <b>plus</b> every
+      <code>group_trip_participants</code> row with <code>role = 'admin'</code>. The fan-out already loops trip people,
+      so including co-admins is one extra line — and no admin misses an alert.
+    </p>
+    <p class="note">
+      Push notifications (planned) hook off the same trigger / a tiny after-insert step later — the table is the queue.
+    </p>
+  </div>
+
+  <!-- ───────────────── LOCKED DECISIONS ───────────────── -->
+  <h2>✅ Locked decisions <span class="note" style="font-weight:400">(9 agent debates → judged)</span></h2>
+  <div class="card grill">
+  <table>
+    <thead><tr><th>#</th><th>Decision</th><th>Why (plain English)</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td><b>Fan-out</b>: one row per person</td><td>Trips are tiny, so one row per person is easy and needs less code.</td></tr>
+      <tr><td>2</td><td>Add <code>handled_at</code> on the notification</td><td>Many alerts have no other row to check, so one done-flag per alert keeps it simple.</td></tr>
+      <tr><td>3</td><td><b>Postgres triggers</b> make the rows</td><td>The app writes data in many places, so the database makes the note every time and none get lost.</td></tr>
+      <tr><td>4</td><td>Freeze a <b>snapshot</b> in <code>data</code></td><td>A notice is a record of what happened; if a name changes later the old notice still stays true.</td></tr>
+      <tr><td>5</td><td>Keep <code>audience</code> column, show <b>one feed</b> for now</td><td>One small saved label per row lets the database answer “what’s mine as host?” without messy client code.</td></tr>
+      <tr><td>6</td><td>Per-row <code>read_at</code> only</td><td>Each item already needs <code>read_at</code>, so use that for the badge too — no second number to sync.</td></tr>
+      <tr><td>7</td><td><b>Flat rows</b>, no <code>group_key</code></td><td>Trips are tiny, so save one row each; add “3 joined” grouping later only if needed.</td></tr>
+      <tr><td>8</td><td>Admin alerts → <b>host (+ co-admins hook)</b></td><td>Group trips only have host/member roles today — so this is host-only. The role='admin' hook is ready if co-admins are ever added.</td></tr>
+      <tr><td>9</td><td><b>Keep forever</b>, no cleanup</td><td>The app is tiny, so old rows cost almost nothing; deleting them now is work for no gain.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <!-- ───────────────── BUILD STATUS ───────────────── -->
+  <h2>🛠️ Built &amp; tested</h2>
+  <div class="card">
+    <p class="note">Migration <code>20260601010000_notification_center.sql</code> + test <code>supabase/tests/notifications_test.sql</code>. Not yet applied — you apply migrations.</p>
+    <table>
+      <thead><tr><th>Fix</th><th>What changed</th></tr></thead>
+      <tbody>
+        <tr><td>Double-notify on gear approval</td><td>New column <code>group_trip_gear_items.source_gear_request_id</code>; when an item is born from an approved request, <code>group_gear_updated</code> skips the requester (they get <code>gear_request_decided</code>).</td></tr>
+        <tr><td>Claim bumps</td><td><code>gear_claimed</code> now fires on first claim <em>and</em> quantity change (skips no-op updates).</td></tr>
+        <tr><td>Gear-list noise</td><td><code>group_gear_updated</code> only fires on real <code>name</code>/<code>needed_qty</code> changes, not <code>updated_at</code>-only touches.</td></tr>
+        <tr><td>Join decision</td><td>Added <code>join_request_decided</code> so the requester is told approved/declined (no double <code>member_joined</code> on approval).</td></tr>
+        <tr><td>Strings</td><td>Decision triggers match real DB values: <code>approved</code> / <code>declined</code> (ignore <code>withdrawn</code>, <code>superseded</code>).</td></tr>
+      </tbody>
+    </table>
+    <p class="note">Verified against real Postgres 17.5 (PGlite): migration applies clean, <b>18 trigger scenarios pass</b> (incl. edge cases), negative control confirms the harness catches failures.</p>
+  </div>
+
+  <div class="card warn">
+    <p class="note">⚠️ Unrelated security flag (from schema scan, not this feature): <code>public.attachments</code> and
+    <code>public.matching_users</code> have <b>RLS disabled</b> — fully exposed to the anon key. Worth fixing separately.</p>
+  </div>
+
+</div>
+</body>
+</html>
