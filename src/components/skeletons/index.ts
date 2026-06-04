@@ -12,4 +12,10 @@ export {
 export { HeaderSkeleton } from './HeaderSkeleton';
 export { ProfileSkeleton } from './ProfileSkeleton';
 export { MessageSkeleton, MessageListSkeleton } from './MessageSkeleton';
+export {
+  TripCardSkeleton,
+  MyTripsSkeleton,
+  ExploreDeckSkeleton,
+  BudgetCardsSkeleton,
+} from './TripSkeletons';
 

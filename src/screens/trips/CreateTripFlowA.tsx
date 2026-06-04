@@ -17,7 +17,6 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   Alert,
   Image,
   Platform,
@@ -48,6 +47,8 @@ import {
   BudgetEstimate,
 } from '../../services/trips/groupTripsService';
 import { uploadTripImage } from '../../services/storage/storageService';
+import { BudgetCardsSkeleton } from '../../components/skeletons';
+import { FadeInView } from '../../components/FadeInView';
 import { HomeBreakSearchSheet, HomeBreakSelection } from '../../components/HomeBreakSearchSheet';
 import { InlineMapView } from '../../components/MapPickerModal';
 
@@ -2308,18 +2309,7 @@ export default function CreateTripFlowA({
     }
 
     if (budgetLoading || !budgetEstimate) {
-      return (
-        <View>
-          <View style={localStyles.skeletonRow}>
-            <View style={localStyles.skeletonCard} />
-            <View style={localStyles.skeletonCard} />
-            <View style={localStyles.skeletonCard} />
-          </View>
-          <View style={localStyles.spinnerRow}>
-            <ActivityIndicator color={COLORS.brandTeal} />
-          </View>
-        </View>
-      );
+      return <BudgetCardsSkeleton />;
     }
 
     const days = tripDurationDays();
@@ -2329,7 +2319,7 @@ export default function CreateTripFlowA({
     }${accKind ? `, ${accKind.toLowerCase()}` : ''}.`;
 
     return (
-      <View style={localStyles.budgetWrap}>
+      <FadeInView style={localStyles.budgetWrap}>
         <BudgetTierCardsBig
           ranges={budgetEstimate.ranges}
           selected={state.budgetTier}
@@ -2340,7 +2330,7 @@ export default function CreateTripFlowA({
           derivation={derivation}
           error={errors.budget ?? undefined}
         />
-      </View>
+      </FadeInView>
     );
   };
 
@@ -3482,21 +3472,6 @@ const localStyles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
     color: COLORS.errorText,
-  },
-  skeletonRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 16,
-  },
-  skeletonCard: {
-    flex: 1,
-    height: 120,
-    borderRadius: 16,
-    backgroundColor: COLORS.surfaceMuted,
-  },
-  spinnerRow: {
-    marginTop: 16,
-    alignItems: 'center',
   },
   retryBtn: {
     marginTop: 16,

@@ -32,6 +32,22 @@ import { Ionicons } from '@expo/vector-icons';
 import { TRIP_VIBE_OPTIONS } from '../../services/trips/groupTripsService';
 import { priceInclusionSections } from '../../services/trips/priceInclusions';
 import { WizardBottomSheet } from './WizardBottomSheet';
+import { TripIcon, type TripIconName } from './tripIcons';
+
+// Trip Overview icon color (Figma "Untitled UI" ink).
+const ICON_INK = '#222B30';
+
+// "How this trip works" rows — map each structure slug to a Figma icon so the
+// whole section uses the same icon set (Figma node 12557-5173).
+const STRUCTURE_ICON: Record<string, TripIconName> = {
+  shared_decisions: 'bar-chart-square-01',
+  structured_schedule: 'calendar-date',
+  loose_schedule: 'sun-setting-03',
+  book_own_stay: 'passport',
+  book_together: 'home-03',
+  group_all_day: 'users-02',
+  own_thing_day: 'map-01',
+};
 import {
   type TripDetailViewProps,
   BOARD_IMAGE,
@@ -42,6 +58,7 @@ import {
   formatBudgetRange,
   formatDateRange,
   formatSkillLevel,
+  formatSkillRange,
   computeCountdownTarget,
 } from './TripDetailView';
 
@@ -153,62 +170,64 @@ const SectionTitle: React.FC<{ title: string; right?: React.ReactNode }> = ({ ti
   </View>
 );
 
+// Small "Edit" pill (Figma admin view) — white surface, hairline border, a
+// pencil glyph + label. Shown only to the host.
+const EditPill: React.FC<{ label: string; onPress?: () => void }> = ({ label, onPress }) => (
+  <TouchableOpacity
+    style={styles.editPill}
+    onPress={onPress}
+    activeOpacity={0.7}
+    accessibilityRole="button"
+    accessibilityLabel={label}
+  >
+    <Ionicons name="create-outline" size={14} color={C.ink} />
+    <Text style={styles.editPillText}>{label}</Text>
+  </TouchableOpacity>
+);
+
 // Icon-box + label + value cell, used by "Who it's for" and "Wave information".
 const IconCell: React.FC<{
-  icon: keyof typeof Ionicons.glyphMap;
+  icon: TripIconName;
   label: string;
   value: string;
 }> = ({ icon, label, value }) => (
   <View style={styles.iconCell}>
     <View style={styles.iconCellBox}>
-      <Ionicons name={icon} size={18} color={C.brandTeal} />
+      <TripIcon name={icon} size={18} color={ICON_INK} />
     </View>
     <View style={styles.iconCellText}>
       <Text style={styles.iconCellLabel} numberOfLines={1}>
         {label}
       </Text>
-      <Text style={styles.iconCellValue} numberOfLines={1}>
+      <Text style={styles.iconCellValue} numberOfLines={2}>
         {value}
       </Text>
     </View>
   </View>
 );
 
-// Placeholder participant avatars (real pics wired later — VM only has a count).
-const AvatarStack: React.FC<{ count: number }> = ({ count }) => {
-  const shown = Math.min(Math.max(count, 0), 6);
-  const extra = count - shown;
-  if (shown === 0) return <Text style={styles.mutedSmall}>No one yet</Text>;
-  return (
-    <View style={styles.avatarRow}>
-      {Array.from({ length: shown }).map((_, i) => (
-        <View key={i} style={[styles.avatar, i > 0 && styles.avatarOverlap]}>
-          <Ionicons name="person" size={22} color="#FFFFFF" />
-        </View>
-      ))}
-      {extra > 0 ? (
-        <View style={[styles.avatar, styles.avatarOverlap, styles.avatarExtra]}>
-          <Text style={styles.avatarExtraText}>+{extra}</Text>
-        </View>
-      ) : null}
-    </View>
-  );
-};
-
 // ---------------------------------------------------------------------------
 export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
   vm,
-  onSeeAllParticipants,
+  participants = [],
+  onParticipantPress,
   onLeaderPress,
   afterHeroSlot,
   bodyHidden,
+  isHost = false,
+  aboutHost = null,
+  onEditCover,
+  onEditAboutHost,
+  onEditDescription,
 }) => {
   const [showIncludes, setShowIncludes] = useState(false);
   const [aboutExpanded, setAboutExpanded] = useState(false);
+  const [aboutHostExpanded, setAboutHostExpanded] = useState(false);
 
   const dateRange = formatDateRange(vm);
   const countdownTarget = computeCountdownTarget(vm);
-  const skillLabel = formatSkillLevel(vm.skillLevels);
+  const skillLabel = formatSkillLevel(vm.skillLevels); // compact "Beginner+" for the chip
+  const skillRange = formatSkillRange(vm.skillLevels); // "Beginner – Intermediate" for the cell
   const ageLabel = formatAge(vm.ageMin, vm.ageMax);
   const participantsLabel = vm.maxParticipants
     ? `${vm.participantCount}/${vm.maxParticipants} going`
@@ -219,6 +238,10 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
     : null;
 
   const surfStyles = vm.surfStyles.filter(s => s !== 'all');
+  // Pill font scales with how much room the boards illustration leaves: with all
+  // 4 boards it eats ~half the row, so drop to 10px to keep the pills in 2 lines.
+  // 3 or fewer boards → narrower illustration → 14px still fits in 2 lines.
+  const surfPillFontSize = surfStyles.length >= 4 ? 10 : 14;
   const structures = vm.structureSlugs.filter(s => STRUCTURE_DISPLAY[s]);
 
   const waveSizeLabel =
@@ -240,16 +263,23 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
   const budgetLabel = formatBudgetRange(vm.budgetMin ?? null, vm.budgetMax ?? null);
   const tripTypeLabel = vm.hostingStyle ? TRIP_TYPE_LABEL[vm.hostingStyle] : null;
   const chips: {
-    icon: keyof typeof Ionicons.glyphMap;
+    icon: TripIconName;
     label: string;
     value: string;
     highlight?: boolean;
     footer?: string;
     onPress?: () => void;
   }[] = [];
+  // "Trip Operator" trips (hosting_style 'C') are fully-planned: they're always
+  // presented as a fixed "Price" that taps into the "What's included" sheet —
+  // even when only a budget range was captured instead of a fixed cost.
+  const isOperator = vm.hostingStyle === 'C';
+  // "Planned Together" trips (hosting_style 'A') are group-led — there is no
+  // single organizer to spotlight, so the leader's "About" self-intro is hidden.
+  const isPlannedTogether = vm.hostingStyle === 'A';
   if (vm.costPerPerson != null) {
     chips.push({
-      icon: 'cash-outline',
+      icon: 'currency-dollar-circle',
       label: 'Price',
       value: `${vm.costPerPerson}$`,
       highlight: true,
@@ -257,20 +287,40 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
       onPress: includeSections.length > 0 ? () => setShowIncludes(true) : undefined,
     });
   } else if (budgetLabel) {
-    chips.push({ icon: 'cash-outline', label: 'Budget', value: budgetLabel });
+    chips.push({
+      icon: 'currency-dollar-circle',
+      label: isOperator ? 'Price' : 'Budget',
+      value: budgetLabel,
+      highlight: isOperator || undefined,
+      footer: isOperator && includeSections.length > 0 ? 'See what’s included' : undefined,
+      onPress:
+        isOperator && includeSections.length > 0 ? () => setShowIncludes(true) : undefined,
+    });
   }
-  chips.push({ icon: 'ribbon-outline', label: 'Level', value: skillLabel });
-  chips.push({ icon: 'calendar-outline', label: 'Age range', value: ageLabel });
-  chips.push({ icon: 'people-outline', label: 'Participants', value: participantsLabel });
-  if (tripTypeLabel) chips.push({ icon: 'flag-outline', label: 'Trip type', value: tripTypeLabel });
-  if (vibeLabel) chips.push({ icon: 'sparkles-outline', label: 'Focus vibe', value: vibeLabel });
-  if (waveSizeLabel) chips.push({ icon: 'resize-outline', label: 'Wave size', value: waveSizeLabel });
+  chips.push({ icon: 'bar-chart-10', label: 'Level', value: skillLabel });
+  chips.push({ icon: 'calendar', label: 'Age range', value: ageLabel });
+  chips.push({ icon: 'users-02', label: 'Participants', value: participantsLabel });
+  if (tripTypeLabel) chips.push({ icon: 'marker-pin-05', label: 'Trip type', value: tripTypeLabel });
+  if (vibeLabel) chips.push({ icon: 'sun-setting-03', label: 'Focus vibe', value: vibeLabel });
+  if (waveSizeLabel) chips.push({ icon: 'ruler', label: 'Wave size', value: waveSizeLabel });
   if (vm.waveShapeLabel)
-    chips.push({ icon: 'water-outline', label: 'Wave type', value: vm.waveShapeLabel });
+    chips.push({ icon: 'waves', label: 'Wave shape', value: vm.waveShapeLabel });
 
   // "Who it's for" / "Wave information" only render when they have real data.
   const showWhoFor = vm.ageMin != null || vm.ageMax != null || vm.skillLevels.length > 0;
   const showWaveInfo = !!waveSizeLabel || !!vm.waveShapeLabel;
+
+  // Trip Operator (Flow C): host profile detail badges shown in "About <host>",
+  // mirroring the create-trip "About you" stats (age, origin, level, board, trips).
+  const hostBadges: string[] = isOperator && aboutHost
+    ? ([
+        aboutHost.age != null ? `${aboutHost.age} yrs` : null,
+        aboutHost.countryFrom,
+        aboutHost.surfLevelLabel,
+        aboutHost.boardLabel,
+        aboutHost.surfTrips != null ? `${aboutHost.surfTrips} Surf Trips` : null,
+      ].filter(Boolean) as string[])
+    : [];
 
   return (
     <View style={styles.root}>
@@ -283,6 +333,11 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
             <Ionicons name="image-outline" size={40} color="#B0B0B0" />
           </View>
         )}
+        {isHost ? (
+          <View style={styles.editCoverPill}>
+            <EditPill label="Edit cover" onPress={onEditCover} />
+          </View>
+        ) : null}
         <View style={styles.heroCard}>
           <Text style={styles.heroDate}>{dateRange}</Text>
           <Text style={styles.heroTitle} numberOfLines={2}>
@@ -307,24 +362,14 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
             {chips.map((c, i) => {
               const inner = (
                 <>
-                  <View style={[styles.chipIconBox, c.highlight && styles.chipIconBoxHi]}>
-                    <Ionicons
-                      name={c.icon}
-                      size={18}
-                      color={c.highlight ? '#FFFFFF' : C.brandTeal}
-                    />
+                  <View style={styles.chipIconBox}>
+                    <TripIcon name={c.icon} size={18} color={ICON_INK} />
                   </View>
                   <View style={styles.chipText}>
-                    <Text
-                      style={[styles.chipLabel, c.highlight && styles.chipLabelHi]}
-                      numberOfLines={1}
-                    >
+                    <Text style={styles.chipLabel} numberOfLines={1}>
                       {c.label}
                     </Text>
-                    <Text
-                      style={[styles.chipValue, c.highlight && styles.chipValueHi]}
-                      numberOfLines={1}
-                    >
+                    <Text style={styles.chipValue} numberOfLines={1}>
                       {c.value}
                     </Text>
                     {c.footer ? (
@@ -332,13 +377,13 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
                         <Text style={styles.chipFooter} numberOfLines={1}>
                           {c.footer}
                         </Text>
-                        <Ionicons name="chevron-forward" size={11} color="#FFFFFF" />
+                        <Ionicons name="chevron-forward" size={11} color={C.brandTeal} />
                       </View>
                     ) : null}
                   </View>
                 </>
               );
-              const cardStyle = [styles.chip, c.highlight && styles.chipHi];
+              const cardStyle = c.highlight ? [styles.chip, styles.chipHighlight] : styles.chip;
               return c.onPress ? (
                 <TouchableOpacity
                   key={`${c.label}-${i}`}
@@ -358,22 +403,89 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
             })}
           </ScrollView>
 
-          {/* ---- About ---- */}
-          {vm.description ? (
+          {/* ---- About <host> (organizer self-intro) — host_lead_note. Shown
+                  when the host wrote one, or always to the host so they can add
+                  one via "Edit Profile". ---- */}
+          {!isPlannedTogether && aboutHost && (aboutHost.bio || isHost || hostBadges.length > 0) ? (
             <View style={styles.section}>
-              <SectionTitle title="About this trip" />
-              <Text style={styles.body} numberOfLines={aboutExpanded ? undefined : 4}>
-                {vm.description}
-              </Text>
-              {vm.description.length > 140 ? (
-                <TouchableOpacity
-                  onPress={() => setAboutExpanded(v => !v)}
-                  activeOpacity={0.7}
-                  accessibilityRole="button"
-                >
-                  <Text style={styles.seeMore}>{aboutExpanded ? 'See less' : 'See More'}</Text>
-                </TouchableOpacity>
+              <View style={styles.aboutHostHeader}>
+                {aboutHost.avatarUrl ? (
+                  <Image source={{ uri: aboutHost.avatarUrl }} style={styles.aboutHostAvatar} />
+                ) : (
+                  <View style={[styles.aboutHostAvatar, styles.aboutHostAvatarEmpty]}>
+                    <Ionicons name="person" size={22} color="#FFFFFF" />
+                  </View>
+                )}
+                <Text style={styles.aboutHostName} numberOfLines={1}>
+                  {aboutHost.name ? `About ${aboutHost.name}` : 'About the organizer'}
+                </Text>
+                {isHost ? <EditPill label="Edit Profile" onPress={onEditAboutHost} /> : null}
+              </View>
+              {hostBadges.length > 0 ? (
+                <View style={styles.hostBadgeRow}>
+                  {hostBadges.map((b, i) => (
+                    <View key={`${b}-${i}`} style={styles.hostBadge}>
+                      <Text style={styles.hostBadgeText} numberOfLines={1}>
+                        {b}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
               ) : null}
+              {aboutHost.bio ? (
+                <>
+                  <Text style={styles.body} numberOfLines={aboutHostExpanded ? undefined : 4}>
+                    {aboutHost.bio}
+                  </Text>
+                  {aboutHost.bio.length > 140 ? (
+                    <TouchableOpacity
+                      onPress={() => setAboutHostExpanded(v => !v)}
+                      activeOpacity={0.7}
+                      accessibilityRole="button"
+                    >
+                      <Text style={styles.seeMore}>
+                        {aboutHostExpanded ? 'See less' : 'See More'}
+                      </Text>
+                    </TouchableOpacity>
+                  ) : null}
+                </>
+              ) : (
+                <Text style={styles.bodyPlaceholder}>
+                  Tell surfers who you are and why you’re leading this trip.
+                </Text>
+              )}
+            </View>
+          ) : null}
+
+          {/* ---- About this trip ---- */}
+          {vm.description || isHost ? (
+            <View style={styles.section}>
+              <SectionTitle
+                title="About this trip"
+                right={
+                  isHost ? <EditPill label="Edit" onPress={onEditDescription} /> : undefined
+                }
+              />
+              {vm.description ? (
+                <>
+                  <Text style={styles.body} numberOfLines={aboutExpanded ? undefined : 4}>
+                    {vm.description}
+                  </Text>
+                  {vm.description.length > 140 ? (
+                    <TouchableOpacity
+                      onPress={() => setAboutExpanded(v => !v)}
+                      activeOpacity={0.7}
+                      accessibilityRole="button"
+                    >
+                      <Text style={styles.seeMore}>{aboutExpanded ? 'See less' : 'See More'}</Text>
+                    </TouchableOpacity>
+                  ) : null}
+                </>
+              ) : (
+                <Text style={styles.bodyPlaceholder}>
+                  Add a description so surfers know what this trip is about.
+                </Text>
+              )}
             </View>
           ) : null}
 
@@ -385,7 +497,9 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
                 <View style={styles.surfPills}>
                   {surfStyles.map(s => (
                     <View key={s} style={styles.surfPill}>
-                      <Text style={styles.surfPillText}>{BOARD_SHORT[s] ?? s}</Text>
+                      <Text style={[styles.surfPillText, { fontSize: surfPillFontSize }]}>
+                        {BOARD_SHORT[s] ?? s}
+                      </Text>
                     </View>
                   ))}
                 </View>
@@ -406,12 +520,12 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
           {structures.length > 0 ? (
             <View style={styles.section}>
               <SectionTitle title="How this trip works" />
-              <View style={{ gap: 18, marginTop: 4 }}>
+              <View style={{ gap: 24, marginTop: 4 }}>
                 {structures.map(slug => {
                   const d = STRUCTURE_DISPLAY[slug];
                   return (
                     <View key={slug} style={styles.howRow}>
-                      <Ionicons name={d.icon} size={22} color={C.brandTeal} />
+                      <TripIcon name={STRUCTURE_ICON[slug] ?? 'map-01'} size={24} color={ICON_INK} />
                       <View style={{ flex: 1 }}>
                         <Text style={styles.howTitle}>{d.title}</Text>
                         <Text style={styles.howDesc}>{d.desc}</Text>
@@ -485,7 +599,9 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
                       <Text style={styles.leaderCredText}>{vm.leader.stayFamiliarityLabel}</Text>
                     </View>
                   ) : null}
-                  {vm.leader.leadNote ? (
+                  {/* When the "About <host>" block above already shows this note
+                      (same host_lead_note), skip it here to avoid duplication. */}
+                  {vm.leader.leadNote && !aboutHost?.bio ? (
                     <Text style={styles.leaderNote}>“{vm.leader.leadNote}”</Text>
                   ) : null}
                 </View>
@@ -493,21 +609,45 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
             </View>
           ) : null}
 
-          {/* ---- Participants ---- */}
+          {/* ---- Participants — tappable avatars, scroll right for more ---- */}
           <View style={styles.section}>
-            <SectionTitle
-              title="Participants"
-              right={
-                onSeeAllParticipants ? (
-                  <TouchableOpacity onPress={onSeeAllParticipants} activeOpacity={0.7}>
-                    <Text style={styles.seeAll}>See all</Text>
+            <View style={styles.sectionTitleRow}>
+              <View style={styles.participantsTitle}>
+                <Text style={styles.sectionTitle}>Participants</Text>
+                {vm.participantCount > 0 ? (
+                  <Text style={styles.participantsCount}>{vm.participantCount}</Text>
+                ) : null}
+              </View>
+            </View>
+            {participants.length > 0 ? (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.avatarScroll}
+                contentContainerStyle={styles.avatarScrollContent}
+              >
+                {participants.map(p => (
+                  <TouchableOpacity
+                    key={p.id}
+                    activeOpacity={0.8}
+                    onPress={onParticipantPress ? () => onParticipantPress(p.id) : undefined}
+                    disabled={!onParticipantPress}
+                    accessibilityRole="button"
+                    accessibilityLabel={p.name ? `Open ${p.name}'s profile` : 'Open profile'}
+                  >
+                    {p.avatarUrl ? (
+                      <Image source={{ uri: p.avatarUrl }} style={styles.avatar} />
+                    ) : (
+                      <View style={[styles.avatar, styles.avatarPlaceholder]}>
+                        <Ionicons name="person" size={24} color="#FFFFFF" />
+                      </View>
+                    )}
                   </TouchableOpacity>
-                ) : (
-                  <Text style={styles.seeAll}>See all</Text>
-                )
-              }
-            />
-            <AvatarStack count={vm.participantCount} />
+                ))}
+              </ScrollView>
+            ) : (
+              <Text style={styles.mutedSmall}>No one yet</Text>
+            )}
           </View>
 
           {/* ---- Who it's for ---- */}
@@ -515,8 +655,8 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
             <View style={styles.section}>
               <SectionTitle title="Who it's for" />
               <View style={styles.cellRow}>
-                <IconCell icon="calendar-outline" label="Age range" value={ageLabel} />
-                <IconCell icon="ribbon-outline" label="Surf level" value={skillLabel} />
+                <IconCell icon="calendar-date" label="Age range" value={ageLabel} />
+                <IconCell icon="bar-chart-10" label="Surf level" value={skillRange} />
               </View>
             </View>
           ) : null}
@@ -526,10 +666,10 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
             <View style={styles.section}>
               <SectionTitle title="Wave information" />
               <View style={styles.cellRow}>
-                <IconCell icon="resize-outline" label="Wave size" value={waveSizeLabel ?? '—'} />
+                <IconCell icon="ruler" label="Wave size" value={waveSizeLabel ?? '—'} />
                 <IconCell
-                  icon="water-outline"
-                  label="Wave type"
+                  icon="waves"
+                  label="Wave shape"
                   value={vm.waveShapeLabel ?? '—'}
                 />
               </View>
@@ -555,7 +695,7 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
                   )}
                   <View style={styles.stayPill}>
                     <View style={styles.stayPillIcon}>
-                      <Ionicons name="home-outline" size={18} color={C.brandTeal} />
+                      <TripIcon name="home-03" size={18} color={ICON_INK} />
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.stayName} numberOfLines={1}>
@@ -572,12 +712,12 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
               ) : (
                 <View style={styles.cellRow}>
                   <IconCell
-                    icon="home-outline"
+                    icon="home-03"
                     label="Type"
                     value={vm.accommodationKindLabel ?? '—'}
                   />
                   <IconCell
-                    icon="bed-outline"
+                    icon="passport"
                     label="Specific stay"
                     value={
                       vm.specificStaySelected == null
@@ -731,8 +871,8 @@ const styles = StyleSheet.create({
   },
   chip: {
     width: CHIP_WIDTH,
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
     gap: 8,
     borderWidth: 1,
     borderColor: C.border,
@@ -740,8 +880,7 @@ const styles = StyleSheet.create({
     padding: 8,
     backgroundColor: C.surface,
   },
-  chipHi: {
-    backgroundColor: C.brandTeal,
+  chipHighlight: {
     borderColor: C.brandTeal,
   },
   chipIconBox: {
@@ -752,30 +891,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  chipIconBoxHi: {
-    backgroundColor: 'rgba(255,255,255,0.18)',
-  },
   chipText: {
-    flex: 1,
+    width: '100%',
   },
   chipLabel: {
     fontFamily: FONT_INTER,
-    fontSize: 10,
+    fontSize: 14,
+    lineHeight: 20,
     fontWeight: '400',
     color: C.textFaint,
   },
-  chipLabelHi: {
-    color: 'rgba(255,255,255,0.85)',
-  },
   chipValue: {
-    marginTop: 1,
     fontFamily: FONT_INTER,
-    fontSize: 15,
+    fontSize: 16,
+    lineHeight: 18,
     fontWeight: '700',
     color: C.ink,
-  },
-  chipValueHi: {
-    color: '#FFFFFF',
   },
   chipFooterRow: {
     flexDirection: 'row',
@@ -787,7 +918,7 @@ const styles = StyleSheet.create({
     fontFamily: FONT_INTER,
     fontSize: 10,
     fontWeight: '600',
-    color: '#FFFFFF',
+    color: C.brandTeal,
   },
 
   // Sections — separated by a hairline top border like the Figma rows.
@@ -812,9 +943,92 @@ const styles = StyleSheet.create({
   },
   body: {
     fontFamily: FONT_INTER,
-    fontSize: 13,
-    lineHeight: 19,
+    fontSize: 14,
+    lineHeight: 20,
     color: C.textMuted,
+  },
+  bodyPlaceholder: {
+    fontFamily: FONT_INTER,
+    fontSize: 14,
+    lineHeight: 20,
+    fontStyle: 'italic',
+    color: C.textFaint,
+  },
+
+  // Admin (host) edit affordances — Figma "admin view".
+  editPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: C.surface,
+    borderWidth: 1,
+    borderColor: '#CFCFCF',
+    borderRadius: 9,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+  },
+  editPillText: {
+    fontFamily: FONT_INTER,
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '400',
+    color: C.ink,
+  },
+  // Floating "Edit cover" pill, top-right over the hero image.
+  editCoverPill: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    zIndex: 2,
+  },
+  // "About <host>" header — avatar + name + Edit Profile pill.
+  aboutHostHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 12,
+  },
+  aboutHostAvatar: {
+    width: 53,
+    height: 53,
+    borderRadius: 27,
+    borderWidth: 1,
+    borderColor: C.surface,
+    backgroundColor: C.avatarBg,
+  },
+  aboutHostAvatarEmpty: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  aboutHostName: {
+    flex: 1,
+    fontFamily: FONT_INTER,
+    fontSize: 20,
+    lineHeight: 24,
+    fontWeight: '700',
+    color: C.ink,
+  },
+  // Host profile detail badges (Trip Operator) — soft pill tags under the bio.
+  hostBadgeRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 14,
+  },
+  hostBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.surfaceMuted,
+  },
+  hostBadgeText: {
+    fontFamily: FONT_INTER,
+    fontSize: 13,
+    lineHeight: 16,
+    fontWeight: '600',
+    color: C.inkBody,
   },
   seeMore: {
     marginTop: 8,
@@ -835,7 +1049,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 12,
+    gap: 16,
     borderWidth: 1,
     borderColor: C.border,
     borderRadius: 20,
@@ -859,15 +1073,20 @@ const styles = StyleSheet.create({
   },
   surfPillText: {
     fontFamily: FONT_INTER,
-    fontSize: 10,
+    // Base 14px. Overridden to 10px when there are 4 boards (see surfPillFontSize)
+    // — with 4, the boards illustration takes ~half the row so 14px wraps to 3
+    // lines; fewer boards leave room to keep 14px in 2 lines.
+    fontSize: 14,
+    lineHeight: 20,
     fontWeight: '400',
     color: C.ink,
+    textAlign: 'center',
   },
   boardsRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    gap: 14,
-    height: 72,
+    gap: 16,
+    height: 70,
   },
   boardImg: {
     width: 22,
@@ -877,7 +1096,7 @@ const styles = StyleSheet.create({
   // How it works
   howRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: 8,
   },
   howTitle: {
@@ -889,8 +1108,8 @@ const styles = StyleSheet.create({
   howDesc: {
     marginTop: 1,
     fontFamily: FONT_INTER,
-    fontSize: 11,
-    lineHeight: 15,
+    fontSize: 14,
+    lineHeight: 20,
     color: C.textHowDesc,
   },
 
@@ -909,9 +1128,7 @@ const styles = StyleSheet.create({
     width: 38,
     height: 38,
     borderRadius: 8,
-    backgroundColor: C.surface,
-    borderWidth: 1,
-    borderColor: C.border,
+    backgroundColor: C.surfaceMuted,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -920,7 +1137,8 @@ const styles = StyleSheet.create({
   },
   iconCellLabel: {
     fontFamily: FONT_INTER,
-    fontSize: 10,
+    fontSize: 14,
+    lineHeight: 20,
     fontWeight: '400',
     color: C.textMuted,
   },
@@ -933,25 +1151,47 @@ const styles = StyleSheet.create({
   },
 
   // Participants
+  participantsTitle: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 8,
+  },
+  participantsCount: {
+    fontFamily: FONT_INTER,
+    fontSize: 14,
+    fontWeight: '400',
+    color: C.textMuted,
+  },
   avatarRow: {
     flexDirection: 'row',
     alignItems: 'center',
   },
+  // Tappable avatar row — bleeds edge-to-edge so it scrolls to the screen edge.
+  avatarScroll: {
+    marginHorizontal: -16,
+  },
+  avatarScrollContent: {
+    paddingHorizontal: 16,
+    gap: 8,
+    alignItems: 'center',
+  },
   avatar: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     backgroundColor: C.avatarBg,
+  },
+  avatarGap: {
+    marginLeft: 8,
+  },
+  avatarPlaceholder: {
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: C.surface,
-  },
-  avatarOverlap: {
-    marginLeft: -12,
   },
   avatarExtra: {
     backgroundColor: C.brandTeal,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   avatarExtraText: {
     fontFamily: FONT_MONTSERRAT,
@@ -1011,8 +1251,8 @@ const styles = StyleSheet.create({
   stayMeta: {
     marginTop: 2,
     fontFamily: FONT_INTER,
-    fontSize: 10,
-    lineHeight: 14,
+    fontSize: 13,
+    lineHeight: 18,
     color: C.textHowDesc,
   },
 

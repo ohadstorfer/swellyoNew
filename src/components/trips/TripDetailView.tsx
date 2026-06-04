@@ -148,6 +148,16 @@ export function formatSkillLevel(levels: string[]): string {
   return `${SKILL_LABEL[lowest]}${hasHigher ? '+' : ''}`;
 }
 
+/** "Beginner – Intermediate" — lowest–highest range (or a single label). */
+export function formatSkillRange(levels: string[]): string {
+  const real = levels.filter(l => l !== 'all' && SKILL_LABEL[l]);
+  if (real.length === 0) return 'All levels';
+  const sorted = [...real].sort((a, b) => SKILL_ORDER.indexOf(a) - SKILL_ORDER.indexOf(b));
+  const lowest = SKILL_LABEL[sorted[0]];
+  const highest = SKILL_LABEL[sorted[sorted.length - 1]];
+  return lowest === highest ? lowest : `${lowest} – ${highest}`;
+}
+
 export function formatAge(min: number | null, max: number | null): string {
   if (min == null && max == null) return 'Any';
   if (min != null && max != null) return `${min}–${max}`;
@@ -228,7 +238,7 @@ export const STRUCTURE_DISPLAY: Record<
   shared_decisions: {
     icon: 'people-outline',
     title: 'Shared decisions',
-    desc: 'Everyone votes on activities and the schedule',
+    desc: 'Everyone votes on key choices',
   },
   structured_schedule: {
     icon: 'calendar-outline',
@@ -242,8 +252,8 @@ export const STRUCTURE_DISPLAY: Record<
   },
   book_own_stay: {
     icon: 'bed-outline',
-    title: 'Book your own stay',
-    desc: 'Accommodation booked individually',
+    title: 'Book your own travel',
+    desc: 'Flights and accommodation booked individually',
   },
   book_together: {
     icon: 'home-outline',
@@ -393,6 +403,14 @@ const ParticipantsRow: React.FC<{ count: number }> = ({ count }) => {
 // ---------------------------------------------------------------------------
 export interface TripDetailViewProps {
   vm: TripDetailVM;
+  /** Real participant avatar URLs (host first), for the Participants row.
+   *  Falls back to placeholder circles when empty. */
+  participantAvatars?: string[];
+  /** Real participants (host first) for the tappable, horizontally-scrolling
+   *  avatar row. Tapping an avatar opens that user's profile. */
+  participants?: { id: string; avatarUrl: string | null; name: string | null }[];
+  /** Open a participant's profile (tap on their avatar). */
+  onParticipantPress?: (userId: string) => void;
   /** Optional handler for the Participants "See all" link. */
   onSeeAllParticipants?: () => void;
   /** Optional — tap the leader card to open their full profile. */
@@ -403,6 +421,33 @@ export interface TripDetailViewProps {
   /** When true, render only the hero + afterHeroSlot and hide the read-only
    *  overview body (used when the Plan tab is active). */
   bodyHidden?: boolean;
+
+  // ---- Admin (host) edit affordances — only used by TripDetailViewRedesigned.
+  /** When true, the viewer is the trip host: inline "Edit" pills are shown on the
+   *  cover, the about-host block and the trip description (Figma admin view). */
+  isHost?: boolean;
+  /** Host self-introduction block ("About <name>") shown above "About this trip".
+   *  bio is the host's `host_lead_note`. Rendered when present, or always for the
+   *  host (so they can add one via Edit Profile). */
+  aboutHost?: {
+    name: string | null;
+    avatarUrl: string | null;
+    bio: string | null;
+    /** Profile detail badges (Trip Operator view) — mirror the host stats shown
+     *  in the create-trip "About you" card. All optional; each badge is skipped
+     *  when its value is missing. */
+    age?: number | null;
+    countryFrom?: string | null;
+    surfLevelLabel?: string | null;
+    boardLabel?: string | null;
+    surfTrips?: number | null;
+  } | null;
+  /** Host taps "Edit cover" → open the cover-image edit sheet. */
+  onEditCover?: () => void;
+  /** Host taps "Edit Profile" → open the about-host (host_lead_note) edit sheet. */
+  onEditAboutHost?: () => void;
+  /** Host taps "Edit" on "About this trip" → open the description edit sheet. */
+  onEditDescription?: () => void;
 }
 
 export const TripDetailView: React.FC<TripDetailViewProps> = ({
@@ -795,10 +840,10 @@ export const TripDetailView: React.FC<TripDetailViewProps> = ({
 };
 
 export const BOARD_SHORT: Partial<Record<SurfStyle, string>> = {
-  shortboard: 'Short',
-  midlength: 'Mid',
-  softtop: 'Soft-top',
-  longboard: 'Long',
+  shortboard: 'Shortboard',
+  midlength: 'Mid - Length',
+  softtop: 'Soft - Top',
+  longboard: 'Longboard',
 };
 
 export default TripDetailView;
