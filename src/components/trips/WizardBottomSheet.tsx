@@ -50,6 +50,8 @@ export interface WizardBottomSheetProps {
   hideHeaderDivider?: boolean;
   /** When true, the title renders bigger (24 instead of 18). */
   largeTitle?: boolean;
+  /** Header text alignment. Default 'center'. */
+  titleAlign?: 'center' | 'left';
   /**
    * When true, the sheet stretches behind the keyboard instead of shrinking
    * + shifting above it. The sheet's white surface fills the bottom of the
@@ -84,8 +86,10 @@ export const WizardBottomSheet: React.FC<WizardBottomSheetProps> = ({
   subtitle,
   hideHeaderDivider = false,
   largeTitle = false,
+  titleAlign = 'center',
   extendBehindKeyboard = false,
 }) => {
+  const leftAlign = titleAlign === 'left';
   const insets = useSafeAreaInsets();
   const [mounted, setMounted] = useState(visible);
 
@@ -270,15 +274,22 @@ export const WizardBottomSheet: React.FC<WizardBottomSheetProps> = ({
                 subtitle ? styles.headerWithSubtitle : null,
               ]}
             >
-              <View style={styles.headerTitleBlock}>
+              <View style={[styles.headerTitleBlock, leftAlign && styles.headerTitleBlockLeft]}>
                 <Text
-                  style={[styles.title, largeTitle && styles.titleLarge]}
+                  style={[
+                    styles.title,
+                    largeTitle && styles.titleLarge,
+                    leftAlign && styles.titleLeft,
+                  ]}
                   numberOfLines={1}
                 >
                   {title}
                 </Text>
                 {subtitle ? (
-                  <Text style={styles.subtitle} numberOfLines={1}>
+                  <Text
+                    style={[styles.subtitle, leftAlign && styles.subtitleLeft]}
+                    numberOfLines={1}
+                  >
                     {subtitle}
                   </Text>
                 ) : null}
@@ -376,6 +387,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 8,
   },
+  headerTitleBlockLeft: {
+    alignItems: 'flex-start',
+    paddingHorizontal: 0,
+  },
   title: {
     fontFamily: FONT_MONTSERRAT,
     fontSize: 18,
@@ -388,14 +403,20 @@ const styles = StyleSheet.create({
     fontSize: 24,
     lineHeight: 28,
   },
+  titleLeft: {
+    textAlign: 'left',
+  },
   subtitle: {
     marginTop: 4,
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
-    fontSize: 13,
-    lineHeight: 18,
+    fontSize: 15,
+    lineHeight: 20,
     fontWeight: '400',
     color: '#7B7B7B',
     textAlign: 'center',
+  },
+  subtitleLeft: {
+    textAlign: 'left',
   },
   closeBtn: {
     width: 32,
@@ -414,22 +435,14 @@ const styles = StyleSheet.create({
     paddingBottom: 32,
   },
   contentInnerWithFooter: {
-    // Sheets with a footer (e.g. "Set" button) get extra breathing room
-    // beneath the last item so it doesn't visually touch the footer divider.
-    paddingBottom: 24,
+    // Small gap beneath the last item so the footer button sits close to the
+    // cards above without touching them.
+    paddingBottom: 8,
   },
   footer: {
     paddingHorizontal: 16,
     paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: C.divider,
     backgroundColor: C.surface,
-    // Subtle top shadow so the footer feels elevated above the scroll edge.
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
-    elevation: 4,
   },
 });
 

@@ -219,6 +219,9 @@ export const HomeBreakSearchSheet: React.FC<HomeBreakSearchSheetProps> = ({
         Animated.timing(overlayAnim, { toValue: 1, duration: 250, useNativeDriver: true }),
         Animated.spring(sheetAnim, { toValue: 1, tension: 65, friction: 11, useNativeDriver: true }),
       ]).start();
+      // Pop the keyboard so the user can start typing immediately. Delayed so
+      // the modal has presented and the input is mounted before we focus.
+      setTimeout(() => searchInputRef.current?.focus(), 250);
     } else if (mounted) {
       Animated.parallel([
         Animated.timing(overlayAnim, { toValue: 0, duration: 200, useNativeDriver: true }),

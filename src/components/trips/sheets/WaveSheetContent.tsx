@@ -1,34 +1,32 @@
-// WaveSheetContent — combined wave shape + wave size in a single sheet.
-// Matches Figma node 12255:1809 — illustration centered up top, "Shape name"
-// + "Wave Shape" labels below the illustration, then the shape slider, then
-// "X – Y ft" + "Wave Size" labels, then the range slider.
+// WaveSheetContent — wave shape + size in a single sheet.
+// Matches Figma node 12492:12259 — a wave illustration up top that crossfades
+// between the three shapes as the Shape slider moves, then two bordered cards
+// ("Shape" / "Size"), each with a leading icon chip, title + subtitle, and a
+// slider that shows the current value in a pill above the thumb.
 
 import React, { useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Image, Platform, Animated, Easing } from 'react-native';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import type { WaveShapeKind } from '../../../services/trips/groupTripsService';
 import { WaveShapeSlider } from '../WaveShapeSlider';
 import { RangeSlider } from '../RangeSlider';
 import { Images } from '../../../assets/images';
 
 const FONT_INTER = Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter';
-const FONT_MONTSERRAT =
-  Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat';
 
 const C = {
-  inkDark: '#333333',
+  ink: '#333333',
   textMuted: '#7B7B7B',
+  border: '#EEEEEE',
+  iconBg: '#F7F7F7',
+  surface: '#FFFFFF',
 };
 
 const WAVE_SIZE_MIN = 1;
 const WAVE_SIZE_MAX = 12;
 
-// Format a single endpoint of the size range. The top of the scale (12)
-// is shown as "12+" because picking the max really means "12 ft or
-// bigger" — we don't track sizes above that.
 const formatFt = (n: number): string =>
   n >= WAVE_SIZE_MAX ? `${WAVE_SIZE_MAX}+ ft` : `${n} ft`;
-const formatFtBare = (n: number): string =>
-  n >= WAVE_SIZE_MAX ? `${WAVE_SIZE_MAX}+` : `${n}`;
 
 const SHAPES: readonly WaveShapeKind[] = ['soft', 'wally', 'barrel'] as const;
 
@@ -44,26 +42,15 @@ const SHAPE_IMAGE: Record<WaveShapeKind, any> = {
   barrel: Images.waveShapes.barrel,
 };
 
-// Per-shape visual scale for the illustration. Mellow + Standing PNGs
-// have white space baked in around the wave drawing, so they need to be
-// scaled UP more than the barrel (which is tightly cropped) to read at
-// a comparable visible size.
+// Per-shape illustration scale — the mellow/standing PNGs carry extra
+// whitespace, so they're scaled up to read at a comparable visible size.
 const SHAPE_SCALE: Record<WaveShapeKind, number> = {
-  soft: 1.6,
-  wally: 1.55,
-  barrel: 1.55,
+  soft: 1.4,
+  wally: 1.35,
+  barrel: 1.35,
 };
 
-// Per-shape vertical nudge — negative shifts the image UP. Mellow's PNG
-// has a tall whitespace strip above the wave drawing; nudging it up
-// brings the drawing visually closer to "The Wave" header.
-const SHAPE_TRANSLATE_Y: Record<WaveShapeKind, number> = {
-  soft: -22,
-  wally: 0,
-  barrel: 0,
-};
-
-const CROSSFADE_DURATION_MS = 700;
+const CROSSFADE_DURATION_MS = 500;
 
 export interface WaveSheetContentProps {
   shape: WaveShapeKind | null;
@@ -81,14 +68,11 @@ export const WaveSheetContent: React.FC<WaveSheetContentProps> = ({
   onSizeChange,
 }) => {
   const activeShape: WaveShapeKind = shape ?? 'soft';
-  const sizeLabel =
-    sizeMin === sizeMax
-      ? formatFt(sizeMin)
-      : `${formatFtBare(sizeMin)} – ${formatFt(sizeMax)}`;
+  const lower = Math.max(WAVE_SIZE_MIN, Math.min(WAVE_SIZE_MAX, sizeMin));
+  const upper = Math.max(WAVE_SIZE_MIN, Math.min(WAVE_SIZE_MAX, sizeMax));
 
-  // One opacity value per shape. All three Image layers are mounted at the
-  // same time and stacked; opacity drives the crossfade so we never get a
-  // hard swap as the user crosses a threshold on the shape slider.
+  // One opacity per shape — all three images are mounted and crossfaded so the
+  // illustration dissolves between shapes as the slider crosses a threshold.
   const opacities = useRef(
     SHAPES.map(s => new Animated.Value(s === activeShape ? 1 : 0)),
   ).current;
@@ -98,8 +82,6 @@ export const WaveSheetContent: React.FC<WaveSheetContentProps> = ({
       Animated.timing(opacities[i], {
         toValue: s === activeShape ? 1 : 0,
         duration: CROSSFADE_DURATION_MS,
-        // Ease-in-out cubic — slow start, slow end, smooth middle. Reads
-        // as a gentle dissolve rather than a linear ramp.
         easing: Easing.inOut(Easing.cubic),
         useNativeDriver: true,
       }).start();
@@ -108,8 +90,7 @@ export const WaveSheetContent: React.FC<WaveSheetContentProps> = ({
 
   return (
     <View style={styles.container}>
-      {/* Wave illustration — all three images mounted; opacity crossfades
-          between them as the active shape changes. */}
+      {/* Wave illustration — crossfades with the active shape */}
       <View style={styles.illustrationWrap}>
         {SHAPES.map((s, i) => (
           <Animated.View
@@ -119,52 +100,60 @@ export const WaveSheetContent: React.FC<WaveSheetContentProps> = ({
           >
             <Image
               source={SHAPE_IMAGE[s]}
-              style={[
-                styles.illustration,
-                {
-                  transform: [
-                    { translateY: SHAPE_TRANSLATE_Y[s] },
-                    { scale: SHAPE_SCALE[s] },
-                  ],
-                },
-              ]}
+              style={[styles.illustration, { transform: [{ scale: SHAPE_SCALE[s] }] }]}
               resizeMode="contain"
             />
           </Animated.View>
         ))}
       </View>
 
-      {/* Shape name + "Wave Shape" sublabel */}
-      <View style={styles.labelBlock}>
-        <Text style={styles.primaryLabel}>{SHAPE_LABEL[activeShape]}</Text>
-        <Text style={styles.subLabel}>Wave Shape</Text>
+      {/* Shape card */}
+      <View style={styles.card}>
+        <View style={styles.cardHeader}>
+          <View style={styles.iconBox}>
+            <MaterialCommunityIcons name="waves" size={18} color={C.ink} />
+          </View>
+          <View style={styles.headerText}>
+            <Text style={styles.cardTitle}>Shape</Text>
+            <Text style={styles.cardSubtitle}>How powerful the wave breaks</Text>
+          </View>
+        </View>
+        <View style={styles.sliderArea}>
+          <WaveShapeSlider
+            value={shape}
+            onChange={onShapeChange}
+            bubbleLabel={SHAPE_LABEL[activeShape]}
+            minLabel="Mellow"
+            maxLabel="Barreling"
+          />
+        </View>
       </View>
 
-      {/* Shape slider */}
-      <View style={styles.sliderWrap}>
-        <WaveShapeSlider value={shape} onChange={onShapeChange} />
-      </View>
-
-      {/* Size value + "Wave Size" sublabel */}
-      <View style={[styles.labelBlock, styles.sizeLabelBlock]}>
-        <Text style={styles.primaryLabelLarge}>{sizeLabel}</Text>
-        <Text style={styles.subLabel}>Wave Size</Text>
-      </View>
-
-      {/* Range slider */}
-      <View style={styles.rangeWrap}>
-        <RangeSlider
-          min={WAVE_SIZE_MIN}
-          max={WAVE_SIZE_MAX}
-          step={1}
-          lower={Math.max(WAVE_SIZE_MIN, Math.min(WAVE_SIZE_MAX, sizeMin))}
-          upper={Math.max(WAVE_SIZE_MIN, Math.min(WAVE_SIZE_MAX, sizeMax))}
-          minLabel={`${WAVE_SIZE_MIN} ft`}
-          maxLabel={`${WAVE_SIZE_MAX}+ ft`}
-          onChange={({ lower, upper }) =>
-            onSizeChange({ min: lower, max: upper })
-          }
-        />
+      {/* Size card */}
+      <View style={styles.card}>
+        <View style={styles.cardHeader}>
+          <View style={styles.iconBox}>
+            <MaterialCommunityIcons name="ruler" size={18} color={C.ink} />
+          </View>
+          <View style={styles.headerText}>
+            <Text style={styles.cardTitle}>Size</Text>
+            <Text style={styles.cardSubtitle}>Average wave height</Text>
+          </View>
+        </View>
+        <View style={styles.sliderArea}>
+          <RangeSlider
+            min={WAVE_SIZE_MIN}
+            max={WAVE_SIZE_MAX}
+            step={1}
+            lower={lower}
+            upper={upper}
+            minLabel={`${WAVE_SIZE_MIN} ft`}
+            maxLabel={`${WAVE_SIZE_MAX}+ ft`}
+            bubbleFormat={formatFt}
+            maxSpan={6}
+            onChange={({ lower: lo, upper: up }) => onSizeChange({ min: lo, max: up })}
+          />
+        </View>
       </View>
     </View>
   );
@@ -173,24 +162,16 @@ export const WaveSheetContent: React.FC<WaveSheetContentProps> = ({
 const styles = StyleSheet.create({
   container: {
     alignItems: 'stretch',
+    gap: 16,
   },
-  // overflow:'visible' lets the per-shape scale transform extend beyond
-  // the wrap if needed.
   illustrationWrap: {
     width: '100%',
-    height: 220,
-    overflow: 'visible',
-    marginBottom: 40,
+    height: 175,
+    marginBottom: 8,
     position: 'relative',
   },
-  // Each shape's image fills the wrap. They're stacked absolutely so the
-  // crossfade is a pure opacity blend with zero layout shift.
   illustrationLayer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+    ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -198,46 +179,48 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
-  labelBlock: {
+  card: {
+    backgroundColor: C.surface,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 20,
+    padding: 8,
+    gap: 8,
+    marginHorizontal: 8,
+  },
+  cardHeader: {
+    flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    marginBottom: 20,
+    gap: 8,
   },
-  sizeLabelBlock: {
-    marginTop: 120,
+  iconBox: {
+    backgroundColor: C.iconBg,
+    borderRadius: 8,
+    padding: 10,
   },
-  primaryLabel: {
-    fontFamily: FONT_MONTSERRAT,
-    fontSize: 18,
-    lineHeight: 24,
-    fontWeight: '700',
-    color: C.inkDark,
-    textAlign: 'center',
+  headerText: {
+    flex: 1,
   },
-  primaryLabelLarge: {
-    fontFamily: FONT_MONTSERRAT,
-    fontSize: 24,
-    lineHeight: 28,
-    fontWeight: '700',
-    color: C.inkDark,
-    textAlign: 'center',
-  },
-  subLabel: {
+  cardTitle: {
     fontFamily: FONT_INTER,
     fontSize: 16,
-    lineHeight: 24,
+    lineHeight: 18,
+    fontWeight: '700',
+    color: C.ink,
+  },
+  cardSubtitle: {
+    fontFamily: FONT_INTER,
+    fontSize: 14,
+    lineHeight: 20,
     fontWeight: '400',
     color: C.textMuted,
-    textAlign: 'center',
   },
-  // 24pt side inset so neither slider hugs the edge of the sheet.
-  sliderWrap: {
-    alignSelf: 'stretch',
-    paddingHorizontal: 24,
-  },
-  rangeWrap: {
-    alignSelf: 'stretch',
-    paddingHorizontal: 24,
+  // Top padding leaves room for the value pill that floats above the thumb,
+  // plus extra breathing room between that pill and the card's title row.
+  sliderArea: {
+    paddingTop: 44,
+    paddingHorizontal: 8,
+    paddingBottom: 4,
   },
 });
 

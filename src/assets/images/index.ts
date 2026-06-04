@@ -44,8 +44,9 @@ export const Images = {
     premium: require('./budget/premium_budget.png'),
   },
   whoIsItFor: {
-    surfLevel: require('./who-is-it-for/surf-level.jpg'),
-    theWave: require('./who-is-it-for/the-wave.jpg'),
+    surfLevel: require('./who-is-it-for/surf-level.png'),
+    boardTypes: require('./who-is-it-for/board-types.png'),
+    theWave: require('./who-is-it-for/the-wave.png'),
     ageRange: require('./who-is-it-for/age-range.jpg'),
   },
   // Board renders — tightly cropped (no padding/shadow), correct proportional
@@ -57,9 +58,30 @@ export const Images = {
     softtop: require('./boards/softtop.png'),
     longboard: require('./boards/longboard.png'),
   },
+  // Tightly-cropped "even" board renders for the Board Style sheet cards
+  // (no surrounding whitespace — sit directly on the card, no grey box).
+  boardsEven: {
+    softtop: require('./boards-even/soft.png'),
+    shortboard: require('./boards-even/short.png'),
+    midlength: require('./boards-even/midlength.png'),
+    longboard: require('./boards-even/longboard.png'),
+  },
   waveShapes: {
     mellow: require('./wave-shapes/mellow.png'),
     wally: require('./wave-shapes/wally.png'),
     barrel: require('./wave-shapes/barrel.png'),
+  },
+  // Surf-level photos for the Levels bottom-sheet option cards.
+  levels: {
+    beginner: require('./levels/beginner.png'),
+    intermediate: require('./levels/intermediate.jpg'),
+    advanced: require('./levels/advanced.jpg'),
+  },
+  // Trip Details (Create-Trip "basics" step) row icons — Where? / When?.
+  tripDeets: {
+    location: require('../icons/location-icon.png'),
+    dates: require('../icons/dates-icon.png'),
+    pencil: require('../icons/pencil-icon.png'),
+    coverPhoto: require('../icons/cover-photo-icon.png'),
   },
 };

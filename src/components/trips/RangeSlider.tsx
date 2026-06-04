@@ -32,6 +32,10 @@ export interface RangeSliderProps {
   minLabel?: string;
   /** Custom text for the right endpoint label. Defaults to `${max} ft`. */
   maxLabel?: string;
+  /** When provided, formats a value into a pill shown above each thumb. */
+  bubbleFormat?: (value: number) => string;
+  /** Maximum allowed span between the two thumbs (in value units). */
+  maxSpan?: number;
 }
 
 const FONT_INTER =
@@ -45,6 +49,8 @@ const C = {
 // Geometry matches WaveShapeSlider exactly so the two bars read as a pair.
 const THUMB = 36;
 const TRACK_H = 6;
+// Value pill wrap width — wide enough for "12+ ft"; chip centers within it.
+const BUBBLE_W = 64;
 const CONTAINER_H = THUMB + 8 + 18; // thumb + small gap + endpoint label row
 const TRACK_TOP = (THUMB - TRACK_H) / 2;
 const THUMB_TOP = 0;
@@ -95,6 +101,8 @@ const NativeRangeSlider: React.FC<RangeSliderProps> = ({
   onChange,
   minLabel,
   maxLabel,
+  bubbleFormat,
+  maxSpan,
 }) => {
   const [trackWidth, setTrackWidth] = useState(0);
 
@@ -106,6 +114,10 @@ const NativeRangeSlider: React.FC<RangeSliderProps> = ({
   const draggingUpper = useSharedValue(0);
 
   const usable = Math.max(0, trackWidth - THUMB);
+  // Max thumb-to-thumb distance in px (Infinity-equivalent = full track when
+  // no maxSpan is set, so the clamps below become no-ops).
+  const maxSpanPx =
+    maxSpan != null && max > min ? (maxSpan / (max - min)) * usable : usable;
 
   const valueToPx = (v: number) => {
     const range = max - min;
@@ -152,9 +164,11 @@ const NativeRangeSlider: React.FC<RangeSliderProps> = ({
       })
       .onUpdate((e: { translationX: number }) => {
         'worklet';
-        // Smooth movement — no snap during drag. Clamp only.
+        // Smooth movement — no snap during drag. Clamp to [0, upper] and keep
+        // the gap within maxSpanPx (push the lower thumb no further left than
+        // maxSpanPx behind the upper thumb).
         lowerSV.value = Math.min(
-          Math.max(lowerStartSV.value + e.translationX, 0),
+          Math.max(lowerStartSV.value + e.translationX, Math.max(0, upperSV.value - maxSpanPx)),
           upperSV.value,
         );
       })
@@ -174,7 +188,7 @@ const NativeRangeSlider: React.FC<RangeSliderProps> = ({
         draggingLower.value = 0;
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [usable, min, max, step]);
+  }, [usable, min, max, step, maxSpanPx]);
 
   const upperGesture = useMemo(() => {
     if (!hasNativeGestures) return null;
@@ -188,9 +202,10 @@ const NativeRangeSlider: React.FC<RangeSliderProps> = ({
       })
       .onUpdate((e: { translationX: number }) => {
         'worklet';
+        // Clamp to [lower, usable] and keep the gap within maxSpanPx.
         upperSV.value = Math.min(
           Math.max(upperStartSV.value + e.translationX, lowerSV.value),
-          usable,
+          Math.min(usable, lowerSV.value + maxSpanPx),
         );
       })
       .onEnd(() => {
@@ -209,13 +224,21 @@ const NativeRangeSlider: React.FC<RangeSliderProps> = ({
         draggingUpper.value = 0;
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [usable, min, max, step]);
+  }, [usable, min, max, step, maxSpanPx]);
 
   const lowerThumbStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: lowerSV.value }],
   }));
   const upperThumbStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: upperSV.value }],
+  }));
+  // Bubble wraps are THUMB-wide and share the thumb's translateX, so the
+  // centered chip sits centered over each thumb.
+  const lowerBubbleStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: lowerSV.value + THUMB / 2 - BUBBLE_W / 2 }],
+  }));
+  const upperBubbleStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: upperSV.value + THUMB / 2 - BUBBLE_W / 2 }],
   }));
   // Fill is a sibling of the track (NOT a child) so its left/top are in
   // container coords — matching where the track itself is positioned.
@@ -288,6 +311,22 @@ const NativeRangeSlider: React.FC<RangeSliderProps> = ({
         <A.View style={[styles.thumb, upperThumbStyle]} />
       </GestureDetectorComp>
 
+      {/* Value pills above each thumb */}
+      {bubbleFormat ? (
+        <>
+          <A.View pointerEvents="none" style={[styles.bubbleWrap, lowerBubbleStyle]}>
+            <View style={styles.bubble}>
+              <Text style={styles.bubbleText}>{bubbleFormat(lower)}</Text>
+            </View>
+          </A.View>
+          <A.View pointerEvents="none" style={[styles.bubbleWrap, upperBubbleStyle]}>
+            <View style={styles.bubble}>
+              <Text style={styles.bubbleText}>{bubbleFormat(upper)}</Text>
+            </View>
+          </A.View>
+        </>
+      ) : null}
+
       {/* Static endpoint labels */}
       <View style={styles.endpointRow} pointerEvents="none">
         <Text style={styles.endpointText}>{minLabel ?? `${min} ft`}</Text>
@@ -309,6 +348,8 @@ const WebRangeSlider: React.FC<RangeSliderProps> = ({
   onChange,
   minLabel,
   maxLabel,
+  bubbleFormat,
+  maxSpan,
 }) => {
   const containerRef = useRef<View>(null);
   const layoutRef = useRef({ width: 0, pageX: 0 });
@@ -345,10 +386,12 @@ const WebRangeSlider: React.FC<RangeSliderProps> = ({
     const v = pxToValue(trackX);
     const cur = valuesRef.current;
     if (activeRef.current === 'lower') {
-      const next = Math.min(v, cur.upper);
+      let next = Math.min(v, cur.upper);
+      if (maxSpan != null) next = Math.max(next, cur.upper - maxSpan);
       if (next !== cur.lower) onChange({ lower: next, upper: cur.upper });
     } else if (activeRef.current === 'upper') {
-      const next = Math.max(v, cur.lower);
+      let next = Math.max(v, cur.lower);
+      if (maxSpan != null) next = Math.min(next, cur.lower + maxSpan);
       if (next !== cur.upper) onChange({ lower: cur.lower, upper: next });
     }
   };
@@ -424,6 +467,32 @@ const WebRangeSlider: React.FC<RangeSliderProps> = ({
         style={[styles.thumb, { transform: [{ translateX: upperPx }] }]}
         pointerEvents="none"
       />
+      {bubbleFormat ? (
+        <>
+          <View
+            style={[
+              styles.bubbleWrap,
+              { transform: [{ translateX: lowerPx + THUMB / 2 - BUBBLE_W / 2 }] },
+            ]}
+            pointerEvents="none"
+          >
+            <View style={styles.bubble}>
+              <Text style={styles.bubbleText}>{bubbleFormat(lower)}</Text>
+            </View>
+          </View>
+          <View
+            style={[
+              styles.bubbleWrap,
+              { transform: [{ translateX: upperPx + THUMB / 2 - BUBBLE_W / 2 }] },
+            ]}
+            pointerEvents="none"
+          >
+            <View style={styles.bubble}>
+              <Text style={styles.bubbleText}>{bubbleFormat(upper)}</Text>
+            </View>
+          </View>
+        </>
+      ) : null}
       <View style={styles.endpointRow} pointerEvents="none">
         <Text style={styles.endpointText}>{minLabel ?? `${min} ft`}</Text>
         <Text style={styles.endpointText}>{maxLabel ?? `${max} ft`}</Text>
@@ -479,6 +548,34 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.22,
     shadowRadius: 16,
     elevation: 12,
+  },
+  // Value pill above each thumb — wrap is THUMB-wide and shares the thumb's
+  // translateX so the centered chip sits centered over the thumb.
+  bubbleWrap: {
+    position: 'absolute',
+    top: -30,
+    left: 0,
+    width: BUBBLE_W,
+    alignItems: 'center',
+  },
+  bubble: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  bubbleText: {
+    fontFamily: FONT_INTER,
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '700',
+    color: '#333333',
+    textAlign: 'center',
   },
   endpointRow: {
     position: 'absolute',
