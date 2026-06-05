@@ -112,12 +112,15 @@ const CountdownBoxes: React.FC<{ target: Date | null }> = ({ target }) => {
 
   if (!target) return null;
   const diffMs = Math.max(0, target.getTime() - now);
-  const totalDays = Math.floor(diffMs / MS_DAY);
+  // "Under a month" = less than one calendar month away (not a fixed 31 days).
+  // At/over a month we lead with Months (no seconds); under it we lead with Days
+  // and reveal Seconds (Figma node 12557-3316).
+  const underOneMonth = target.getTime() < addMonths(new Date(now), 1).getTime();
 
   let blocks: { value: string; label: string }[];
 
-  if (totalDays >= 31) {
-    // ≥ 31 days out → Months / Days / Hours / Minutes (no seconds).
+  if (!underOneMonth) {
+    // ≥ 1 month out → Months / Days / Hours / Minutes (no seconds).
     const nowDate = new Date(now);
     let months = 0;
     while (addMonths(nowDate, months + 1).getTime() <= target.getTime()) months++;
@@ -134,7 +137,7 @@ const CountdownBoxes: React.FC<{ target: Date | null }> = ({ target }) => {
       { value: pad2(minutes), label: 'Minutes' },
     ];
   } else {
-    // < 31 days out → Days / Hours / Minutes / Seconds.
+    // < 1 month out → Days / Hours / Minutes / Seconds.
     const totalSec = Math.floor(diffMs / 1000);
     const days = Math.floor(totalSec / 86400);
     const hours = Math.floor((totalSec % 86400) / 3600);
@@ -219,6 +222,8 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
   onEditCover,
   onEditAboutHost,
   onEditDescription,
+  onEditDates,
+  onEditAccommodation,
 }) => {
   const [showIncludes, setShowIncludes] = useState(false);
   const [aboutExpanded, setAboutExpanded] = useState(false);
@@ -310,6 +315,17 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
   const showWhoFor = vm.ageMin != null || vm.ageMax != null || vm.skillLevels.length > 0;
   const showWaveInfo = !!waveSizeLabel || !!vm.waveShapeLabel;
 
+  // Host (admin) "Set" affordances for loosely-planned trips. Trip Operator (C)
+  // always ships with exact dates + a specific stay, so it's excluded — A/B can
+  // start with only a month range and/or no specific stay, and the host fills
+  // those in from here (mirrors the "if no exact value yet, show an Edit button"
+  // pattern of cover/about/description).
+  const isLooseFlow = vm.hostingStyle === 'A' || vm.hostingStyle === 'B';
+  const hasExactDates = !!vm.startDateISO;
+  const hasSpecificStay = !!(vm.specificStaySelected && vm.accommodationName);
+  const canEditDates = isHost && isLooseFlow && !hasExactDates && !!onEditDates;
+  const canEditStay = isHost && isLooseFlow && !hasSpecificStay && !!onEditAccommodation;
+
   // Trip Operator (Flow C): host profile detail badges shown in "About <host>",
   // mirroring the create-trip "About you" stats (age, origin, level, board, trips).
   const hostBadges: string[] = isOperator && aboutHost
@@ -339,7 +355,10 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
           </View>
         ) : null}
         <View style={styles.heroCard}>
-          <Text style={styles.heroDate}>{dateRange}</Text>
+          <View style={styles.heroDateRow}>
+            <Text style={styles.heroDate}>{dateRange}</Text>
+            {canEditDates ? <EditPill label="Set dates" onPress={onEditDates} /> : null}
+          </View>
           <Text style={styles.heroTitle} numberOfLines={2}>
             {vm.title || vm.destinationLabel || 'Your trip'}
           </Text>
@@ -677,9 +696,19 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
           ) : null}
 
           {/* ---- Accommodation ---- */}
-          {showAccommodation ? (
+          {showAccommodation || canEditStay ? (
             <View style={styles.section}>
-              <SectionTitle title="Accommodation" />
+              <SectionTitle
+                title="Accommodation"
+                right={
+                  canEditStay ? (
+                    <EditPill
+                      label={vm.accommodationKindLabel ? 'Add stay' : 'Set stay'}
+                      onPress={onEditAccommodation}
+                    />
+                  ) : undefined
+                }
+              />
               {vm.specificStaySelected && vm.accommodationName ? (
                 <View style={styles.stayCard}>
                   {vm.accommodationImageUri ? (
@@ -808,6 +837,12 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     elevation: 4,
     alignItems: 'center',
+  },
+  heroDateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
   },
   heroDate: {
     fontFamily: FONT_INTER,

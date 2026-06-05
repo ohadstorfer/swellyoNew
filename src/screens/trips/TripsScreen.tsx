@@ -25,10 +25,9 @@ import {
   HostingStyle,
   MyTripsBuckets,
   TripCardMeta,
-  getTripCardMeta,
-  listExploreTrips,
-  listMyTripsByBucket,
 } from '../../services/trips/groupTripsService';
+import { useQueryClient } from '@tanstack/react-query';
+import { useExploreTrips, useMyTrips, tripsKeys } from '../../hooks/trips/useTripQueries';
 import CreateTripWizard from './CreateTripWizard';
 import { MyTripsSkeleton, ExploreDeckSkeleton } from '../../components/skeletons';
 import { FadeInView } from '../../components/FadeInView';
@@ -41,6 +40,16 @@ import TripDetailScreen from './TripDetailScreen';
 import { Images } from '../../assets/images';
 import { Logo } from '../../components/Logo';
 import { NotificationCenter } from '../../components/notifications/NotificationCenter';
+import Reanimated, {
+  Easing,
+  Extrapolation,
+  interpolate,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withTiming,
+  type SharedValue,
+} from 'react-native-reanimated';
 
 // Hosting-style chooser content. Lifted out of CreateTripWizard so the chooser
 // can live inline on the Create tab and the wizard becomes a pure router.
@@ -534,23 +543,20 @@ const TripDeck: React.FC<{
 // ---------------------------------------------------------------------------
 // Explore view
 // ---------------------------------------------------------------------------
+// Stable empty fallbacks so a loading/disabled query doesn't hand a fresh
+// reference to children every render (avoids needless re-renders).
+const EMPTY_META: Map<string, TripCardMeta> = new Map();
+const EMPTY_BUCKETS: MyTripsBuckets = { approved: [], pending: [], past: [] };
+
 const ExploreTripsView: React.FC<{ onOpenTrip: (tripId: string) => void }> = ({ onOpenTrip }) => {
-  const [trips, setTrips] = useState<GroupTrip[]>([]);
-  const [meta, setMeta] = useState<Map<string, TripCardMeta>>(new Map());
-  const [loading, setLoading] = useState(true);
+  // Cached + stale-while-revalidate. The data survives tab switches and
+  // leaving/re-entering Trips, so re-entry is instant (no skeleton) and only
+  // revalidates silently in the background when stale.
+  const { data, isLoading } = useExploreTrips();
+  const trips = data?.trips ?? [];
+  const meta = data?.meta ?? EMPTY_META;
 
-  const load = useCallback(async () => {
-    const data = await listExploreTrips();
-    setTrips(data);
-    setMeta(await getTripCardMeta(data));
-    setLoading(false);
-  }, []);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  if (loading) {
+  if (isLoading) {
     return <ExploreDeckSkeleton />;
   }
 
@@ -595,41 +601,26 @@ const MyTripsView: React.FC<{
   onGoCreate: () => void;
   onOpenTrip: (tripId: string) => void;
 }> = ({ userId, onGoCreate, onOpenTrip }) => {
-  const [buckets, setBuckets] = useState<MyTripsBuckets>({ approved: [], pending: [], past: [] });
-  const [meta, setMeta] = useState<Map<string, TripCardMeta>>(new Map());
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+  // Cached + stale-while-revalidate (see useExploreTrips). Re-entry is instant;
+  // pull-to-refresh and post-create/edit invalidation drive background updates.
+  const { data, isLoading, isFetching, refetch } = useMyTrips(userId);
+  const buckets = data?.buckets ?? EMPTY_BUCKETS;
+  const meta = data?.meta ?? EMPTY_META;
   const [filter, setFilter] = useState<TripFilter>('all');
   // Flips true once the initial stagger window has elapsed, so scrolling /
   // recycling never re-triggers the reveal. (A per-render mutation would
   // misbehave under StrictMode's double render, so we use a post-load timer.)
   const hasRevealedRef = useRef(false);
 
-  const load = useCallback(async () => {
-    if (!userId) {
-      setLoading(false);
-      return;
-    }
-    const data = await listMyTripsByBucket(userId);
-    setBuckets(data);
-    setMeta(await getTripCardMeta([...data.approved, ...data.pending, ...data.past]));
-    setLoading(false);
-    setRefreshing(false);
-  }, [userId]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
   // Once the list has loaded, let the first-batch stagger play, then freeze the
   // reveal so later scrolls don't re-animate the top cards.
   useEffect(() => {
-    if (loading) return;
+    if (isLoading) return;
     const t = setTimeout(() => {
       hasRevealedRef.current = true;
     }, STAGGER_COUNT * STAGGER_MS + 350);
     return () => clearTimeout(t);
-  }, [loading]);
+  }, [isLoading]);
 
   // Flatten buckets into one tagged list, then filter by the active pill.
   const tagged: { trip: GroupTrip; status: TripCardStatus }[] = [
@@ -644,7 +635,7 @@ const MyTripsView: React.FC<{
   };
   const visible = filter === 'all' ? tagged : tagged.filter(x => x.status === filter);
 
-  if (loading) {
+  if (isLoading) {
     return <MyTripsSkeleton />;
   }
 
@@ -694,15 +685,44 @@ const MyTripsView: React.FC<{
       }
       refreshControl={
         <RefreshControl
-          refreshing={refreshing}
+          refreshing={isFetching && !isLoading}
           onRefresh={() => {
-            setRefreshing(true);
-            load();
+            refetch();
           }}
         />
       }
     />
   );
+};
+
+// ---------------------------------------------------------------------------
+// Tab pager — slide + cross-fade between the three tabs
+// ---------------------------------------------------------------------------
+// Visual order MUST match the header bar (My Trips · Explore · Create) so the
+// slide direction matches where the user taps. All three panes stay mounted
+// (preserves scroll + react-query state); we only translate the row and
+// cross-fade each pane as it crosses the viewport.
+const TAB_ORDER: TripsTab[] = ['my', 'explore', 'create'];
+const SLIDE_DURATION = 300; // occasional action → snappy (stays at/under ~300ms)
+const SLIDE_EASING = Easing.out(Easing.cubic); // strong ease-out (matches onboarding)
+
+const TabPane: React.FC<{
+  index: number;
+  width: number;
+  tx: SharedValue<number>;
+  reduceMotion: boolean;
+  children: React.ReactNode;
+}> = ({ index, width, tx, reduceMotion, children }) => {
+  const style = useAnimatedStyle(() => {
+    if (reduceMotion || width === 0) return { opacity: 1 };
+    // offset === 0 when this pane is centered in the viewport; ±width when fully
+    // off-screen on either side. Fade out as it leaves, fade in as it arrives.
+    const offset = tx.value + index * width;
+    return {
+      opacity: interpolate(offset, [-width, 0, width], [0, 1, 0], Extrapolation.CLAMP),
+    };
+  });
+  return <Reanimated.View style={[styles.fillFlex, style]}>{children}</Reanimated.View>;
 };
 
 // ---------------------------------------------------------------------------
@@ -713,8 +733,53 @@ export default function TripsScreen({ onBack, initialTripId, onOpenGroupChat, on
   const { user: contextUser } = useOnboarding();
   const currentUserId = contextUser?.id?.toString() ?? null;
 
+  const queryClient = useQueryClient();
+  const reduceMotion = useReducedMotion();
   const [activeTab, setActiveTab] = useState<TripsTab>('explore');
-  const [myTripsVersion, setMyTripsVersion] = useState(0); // bump to refresh after create
+  // Tabs are lazily mounted on first visit, then kept mounted (translated
+  // off-screen in the pager row) so switching back is instant and scroll
+  // position + react-query state are preserved.
+  const [visited, setVisited] = useState<Record<TripsTab, boolean>>({
+    explore: true,
+    my: false,
+    create: false,
+  });
+
+  // --- Tab pager animation -------------------------------------------------
+  const activeIndex = TAB_ORDER.indexOf(activeTab);
+  const [bodyW, setBodyW] = useState(Dimensions.get('window').width);
+  // Start positioned on the initial tab so there's no slide on first open.
+  const tx = useSharedValue(-TAB_ORDER.indexOf('explore') * Dimensions.get('window').width);
+  const rowStyle = useAnimatedStyle(() => ({ transform: [{ translateX: tx.value }] }));
+  const firstSlide = useRef(true);
+
+  // Switch tabs: mark visited synchronously (so the incoming pane has content as
+  // it slides in — no empty-cell flash) and set the active tab.
+  const goToTab = useCallback((tab: TripsTab) => {
+    setVisited(prev => (prev[tab] ? prev : { ...prev, [tab]: true }));
+    setActiveTab(tab);
+  }, []);
+
+  // Slide the row when the active tab changes (skip the very first run so the
+  // screen opens already positioned, not sliding in).
+  useEffect(() => {
+    if (firstSlide.current) {
+      firstSlide.current = false;
+      tx.value = -activeIndex * bodyW;
+      return;
+    }
+    tx.value = withTiming(-activeIndex * bodyW, {
+      duration: reduceMotion ? 0 : SLIDE_DURATION,
+      easing: SLIDE_EASING,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeIndex]);
+
+  // Snap (no slide) when the viewport width changes — first measure / rotation.
+  useEffect(() => {
+    tx.value = -activeIndex * bodyW;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bodyW]);
   const [selectedTripId, setSelectedTripId] = useState<string | null>(initialTripId ?? null);
   const [editingTrip, setEditingTrip] = useState<GroupTrip | null>(null);
   // Which hosting style the user picked from the inline chooser on the Create
@@ -798,13 +863,17 @@ export default function TripsScreen({ onBack, initialTripId, onOpenGroupChat, on
   };
 
   const handleCreated = () => {
-    setMyTripsVersion(v => v + 1);
+    // A new trip affects both the user's list and the public deck. Invalidate
+    // (partial key → all users) so the kept-mounted MyTripsView refetches in
+    // the background instead of being force-remounted.
+    queryClient.invalidateQueries({ queryKey: ['trips', 'my'] });
+    queryClient.invalidateQueries({ queryKey: tripsKeys.explore });
     closeCreateModal();
-    setActiveTab('my');
+    goToTab('my');
   };
 
   const handleSavedEdit = () => {
-    setMyTripsVersion(v => v + 1);
+    queryClient.invalidateQueries({ queryKey: ['trips', 'my'] });
     setEditingTrip(null);
     // Stay on detail screen so the host sees the updated trip immediately.
   };
@@ -869,70 +938,86 @@ export default function TripsScreen({ onBack, initialTripId, onOpenGroupChat, on
           <NotificationCenter userId={currentUserId} />
         </View>
 
-        <TripsHeaderTabs active={activeTab} onChange={setActiveTab} />
+        <TripsHeaderTabs active={activeTab} onChange={goToTab} />
       </View>
 
-      <View style={styles.body}>
-        {activeTab === 'explore' && <ExploreTripsView onOpenTrip={setSelectedTripId} />}
-        {activeTab === 'my' && (
-          <MyTripsView
-            key={myTripsVersion}
-            userId={currentUserId}
-            onGoCreate={() => setActiveTab('create')}
-            onOpenTrip={setSelectedTripId}
-          />
-        )}
-        {activeTab === 'create' && (
-          <View style={styles.createRoot}>
-            {/* Full-bleed beach photo (Figma): spans the whole area with the
-                foreground (van + people) at the bottom, white fade over the top
-                so the cards read on white. */}
-            <View style={styles.createBgWrap} pointerEvents="none">
-              <Image
-                source={Images.createTrip.background}
-                style={StyleSheet.absoluteFill}
-                resizeMode="cover"
+      <View
+        style={styles.body}
+        onLayout={e => setBodyW(e.nativeEvent.layout.width)}
+      >
+        <Reanimated.View style={[styles.pagerRow, { width: bodyW * TAB_ORDER.length }, rowStyle]}>
+          {/* index 0 — My Trips */}
+          <TabPane index={0} width={bodyW} tx={tx} reduceMotion={reduceMotion}>
+            {visited.my ? (
+              <MyTripsView
+                userId={currentUserId}
+                onGoCreate={() => goToTab('create')}
+                onOpenTrip={setSelectedTripId}
               />
-              <LinearGradient
-                colors={['#FFFFFF', '#FFFFFF', 'rgba(255,255,255,0)']}
-                locations={[0, 0.58, 0.82]}
-                style={styles.createBgFade}
-              />
-            </View>
+            ) : null}
+          </TabPane>
 
-            <ScrollView
-              contentContainerStyle={styles.chooserScroll}
-              showsVerticalScrollIndicator={false}
-            >
-              <Text style={styles.chooserHeading}>Create a surf trip</Text>
-              <Text style={styles.chooserSubheading}>
-                Plan your next adventure and invite surfers to join you
-              </Text>
-              {HOSTING_STYLE_OPTIONS.map(opt => (
-                <TouchableOpacity
-                  key={opt.key}
-                  style={styles.chooserCard}
-                  onPress={() => void onPickStyle(opt.key)}
-                  activeOpacity={0.85}
-                  accessibilityRole="button"
-                  accessibilityLabel={`${opt.title}. ${opt.desc}`}
-                >
-                  <Image source={opt.image} style={styles.chooserThumb} resizeMode="cover" />
-                  <View style={styles.chooserBody}>
-                    <Text style={styles.chooserCardTitle}>{opt.title}</Text>
-                    <Text style={styles.chooserCardDesc}>{opt.desc}</Text>
-                  </View>
-                  <Ionicons
-                    name="chevron-forward"
-                    size={24}
-                    color="#7B7B7B"
-                    style={styles.chooserChevron}
+          {/* index 1 — Explore */}
+          <TabPane index={1} width={bodyW} tx={tx} reduceMotion={reduceMotion}>
+            <Text style={styles.exploreTitle}>Discover the world with Swellyo</Text>
+            {visited.explore ? <ExploreTripsView onOpenTrip={setSelectedTripId} /> : null}
+          </TabPane>
+
+          {/* index 2 — Create */}
+          <TabPane index={2} width={bodyW} tx={tx} reduceMotion={reduceMotion}>
+            {visited.create ? (
+              <View style={styles.createRoot}>
+                {/* Full-bleed beach photo (Figma): spans the whole area with the
+                    foreground (van + people) at the bottom, white fade over the top
+                    so the cards read on white. */}
+                <View style={styles.createBgWrap} pointerEvents="none">
+                  <Image
+                    source={Images.createTrip.background}
+                    style={StyleSheet.absoluteFill}
+                    resizeMode="cover"
                   />
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-        )}
+                  <LinearGradient
+                    colors={['#FFFFFF', '#FFFFFF', 'rgba(255,255,255,0)']}
+                    locations={[0, 0.58, 0.82]}
+                    style={styles.createBgFade}
+                  />
+                </View>
+
+                <ScrollView
+                  contentContainerStyle={styles.chooserScroll}
+                  showsVerticalScrollIndicator={false}
+                >
+                  <Text style={styles.chooserHeading}>Create a surf trip</Text>
+                  <Text style={styles.chooserSubheading}>
+                    Plan your next adventure and invite surfers to join you
+                  </Text>
+                  {HOSTING_STYLE_OPTIONS.map(opt => (
+                    <TouchableOpacity
+                      key={opt.key}
+                      style={styles.chooserCard}
+                      onPress={() => void onPickStyle(opt.key)}
+                      activeOpacity={0.85}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${opt.title}. ${opt.desc}`}
+                    >
+                      <Image source={opt.image} style={styles.chooserThumb} resizeMode="cover" />
+                      <View style={styles.chooserBody}>
+                        <Text style={styles.chooserCardTitle}>{opt.title}</Text>
+                        <Text style={styles.chooserCardDesc}>{opt.desc}</Text>
+                      </View>
+                      <Ionicons
+                        name="chevron-forward"
+                        size={24}
+                        color="#7B7B7B"
+                        style={styles.chooserChevron}
+                      />
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            ) : null}
+          </TabPane>
+        </Reanimated.View>
       </View>
 
       <Modal
@@ -1026,7 +1111,21 @@ const styles = StyleSheet.create({
   tabLabelActive: { color: '#05BCD3' },
   tabLabelInactive: { color: '#FFFFFF' },
 
-  body: { flex: 1, backgroundColor: '#FFFFFF', paddingTop: 16 },
+  body: { flex: 1, backgroundColor: '#FFFFFF', paddingTop: 16, overflow: 'hidden' },
+  // Horizontal pager row: three full-width panes laid side by side; translateX
+  // slides between them. Width is set inline once the viewport is measured.
+  pagerRow: { flex: 1, flexDirection: 'row' },
+
+  // Explore section title (Figma — Montserrat 24/600, 140% line-height).
+  exploreTitle: {
+    fontFamily: FONT_MONTSERRAT,
+    fontSize: 24,
+    fontWeight: '600',
+    lineHeight: 33.6,
+    color: '#333',
+    paddingHorizontal: 16,
+    marginBottom: 16,
+  },
 
   listContent: { paddingHorizontal: 16, paddingBottom: 24, flexGrow: 1 },
 
@@ -1139,6 +1238,10 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14,
     lineHeight: 18,
+    // Reserve room for the bottom-right participant cluster so the description
+    // truncates a touch earlier instead of running behind the badge. The title
+    // sits above the cluster, so only the description needs the inset.
+    marginRight: 72,
     textShadowColor: 'rgba(0,0,0,0.4)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 3,

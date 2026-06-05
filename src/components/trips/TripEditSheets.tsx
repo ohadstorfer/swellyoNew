@@ -22,6 +22,33 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { WizardBottomSheet } from './WizardBottomSheet';
+import { WhenSheetContent } from './sheets/WhenSheetContent';
+import { StayTypeSheetContent, type AccommodationKind } from './sheets/StayTypeSheetContent';
+import { SpecificStaySheetContent } from './sheets/SpecificStaySheetContent';
+
+// Compact date helpers (mirror CreateTripFlowA — kept inline to avoid importing
+// from the wizard screen).
+const toISODate = (d: Date): string =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const parseISODate = (s: string | null): Date | null => {
+  if (!s) return null;
+  const d = new Date(`${s}T00:00:00`);
+  return isNaN(d.getTime()) ? null : d;
+};
+const expandMonthRange = (from: string, to: string, cap = 6): string[] => {
+  if (!from) return to ? [to] : [];
+  if (!to || to === from) return [from];
+  const [fy, fm] = from.split('-').map(Number);
+  const [ty, tm] = to.split('-').map(Number);
+  let start = fy * 12 + (fm - 1);
+  let end = ty * 12 + (tm - 1);
+  if (end < start) [start, end] = [end, start];
+  const out: string[] = [];
+  for (let i = start; i <= end && out.length < cap; i++) {
+    out.push(`${Math.floor(i / 12)}-${String((i % 12) + 1).padStart(2, '0')}`);
+  }
+  return out;
+};
 
 const FONT_INTER = Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter';
 const FONT_MONTSERRAT = Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat';
@@ -255,6 +282,202 @@ export const EditCoverSheet: React.FC<EditCoverSheetProps> = ({
           </Text>
         </View>
       </TouchableOpacity>
+    </WizardBottomSheet>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// EditDatesSheet — set/adjust the trip dates (reuses the create-flow picker:
+// Calendar/Months toggle + duration). Shown to the host on A/B trips that don't
+// have exact dates yet.
+// ---------------------------------------------------------------------------
+export interface DatesInitial {
+  datesMode: 'months' | 'exact';
+  startDateISO: string | null;
+  endDateISO: string | null;
+  monthFrom: string;
+  monthTo: string;
+  durationDays: number | null;
+}
+
+/** The trip-field patch produced by the dates sheet. */
+export interface DatesPatch {
+  start_date: string | null;
+  end_date: string | null;
+  dates_set_in_stone: boolean;
+  date_months: string[] | null;
+  duration_days: number | null;
+}
+
+export interface EditDatesSheetProps {
+  visible: boolean;
+  initial: DatesInitial;
+  lockCalendar?: boolean;
+  onClose: () => void;
+  onSave: (patch: DatesPatch) => void | Promise<void>;
+}
+
+export const EditDatesSheet: React.FC<EditDatesSheetProps> = ({
+  visible,
+  initial,
+  lockCalendar,
+  onClose,
+  onSave,
+}) => {
+  const [mode, setMode] = useState<'months' | 'exact'>(initial.datesMode);
+  const [startDate, setStartDate] = useState<Date | null>(parseISODate(initial.startDateISO));
+  const [endDate, setEndDate] = useState<Date | null>(parseISODate(initial.endDateISO));
+  const [monthFrom, setMonthFrom] = useState(initial.monthFrom);
+  const [monthTo, setMonthTo] = useState(initial.monthTo);
+  const [durationDays, setDurationDays] = useState<number | null>(initial.durationDays);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (visible) {
+      setMode(initial.datesMode);
+      setStartDate(parseISODate(initial.startDateISO));
+      setEndDate(parseISODate(initial.endDateISO));
+      setMonthFrom(initial.monthFrom);
+      setMonthTo(initial.monthTo);
+      setDurationDays(initial.durationDays);
+    }
+  }, [visible, initial]);
+
+  const exactMode = lockCalendar ? true : mode === 'exact';
+  const valid = exactMode ? !!startDate : !!monthFrom && (durationDays ?? 0) >= 1;
+
+  const handleSave = async () => {
+    if (!valid) return;
+    const exactDates = exactMode;
+    const dateMonths = exactDates ? [] : expandMonthRange(monthFrom, monthTo);
+    const patch: DatesPatch = {
+      start_date: exactDates && startDate ? toISODate(startDate) : null,
+      end_date: exactDates && endDate ? toISODate(endDate) : null,
+      dates_set_in_stone: exactDates,
+      date_months: dateMonths.length ? dateMonths : null,
+      duration_days: durationDays,
+    };
+    setSaving(true);
+    try {
+      await onSave(patch);
+      onClose();
+    } catch {
+      // parent surfaces its own error; keep open to retry
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <WizardBottomSheet
+      visible={visible}
+      title="Trip dates"
+      subtitle="When does this trip happen?"
+      onClose={onClose}
+      heightMode="full"
+      footer={<SaveButton onPress={handleSave} loading={saving} disabled={!valid} label="Set dates" />}
+    >
+      <WhenSheetContent
+        mode={exactMode ? 'calendar' : 'months'}
+        onModeChange={m => setMode(m === 'calendar' ? 'exact' : 'months')}
+        startDate={startDate}
+        endDate={endDate}
+        onCalendarChange={({ startDate: s, endDate: e }) => {
+          setStartDate(s);
+          setEndDate(e);
+        }}
+        monthFrom={monthFrom}
+        monthTo={monthTo}
+        onMonthsChange={({ monthFrom: mf, monthTo: mt }) => {
+          setMonthFrom(mf);
+          setMonthTo(mt);
+        }}
+        durationDays={durationDays}
+        onDurationChange={setDurationDays}
+        lockCalendar={lockCalendar}
+      />
+    </WizardBottomSheet>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// EditAccommodationSheet — set the stay type + specific stay (name / link /
+// photo). Shown to the host on A/B trips that don't have a specific stay yet.
+// ---------------------------------------------------------------------------
+export interface AccommodationInitial {
+  kind: AccommodationKind | null;
+  name: string;
+  url: string;
+  photoUri: string | null;
+}
+
+export interface EditAccommodationSheetProps {
+  visible: boolean;
+  initial: AccommodationInitial;
+  onClose: () => void;
+  /** Receives the chosen values. photoUri may be a freshly-picked LOCAL uri (the
+   *  parent uploads it) or the existing remote url (left as-is). */
+  onSave: (next: AccommodationInitial) => void | Promise<void>;
+}
+
+export const EditAccommodationSheet: React.FC<EditAccommodationSheetProps> = ({
+  visible,
+  initial,
+  onClose,
+  onSave,
+}) => {
+  const [kind, setKind] = useState<AccommodationKind | null>(initial.kind);
+  const [name, setName] = useState(initial.name);
+  const [url, setUrl] = useState(initial.url);
+  const [photoUri, setPhotoUri] = useState<string | null>(initial.photoUri);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (visible) {
+      setKind(initial.kind);
+      setName(initial.name);
+      setUrl(initial.url);
+      setPhotoUri(initial.photoUri);
+    }
+  }, [visible, initial]);
+
+  const valid = !!kind && name.trim().length > 0;
+
+  const handleSave = async () => {
+    if (!valid) return;
+    setSaving(true);
+    try {
+      await onSave({ kind, name: name.trim(), url: url.trim(), photoUri });
+      onClose();
+    } catch {
+      // parent surfaces its own error; keep open to retry
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <WizardBottomSheet
+      visible={visible}
+      title="Accommodation"
+      subtitle="Pick the stay type and add the specific place."
+      onClose={onClose}
+      heightMode="full"
+      extendBehindKeyboard
+      footer={<SaveButton onPress={handleSave} loading={saving} disabled={!valid} />}
+    >
+      <StayTypeSheetContent selected={kind} onChange={setKind} />
+      <View style={{ height: 20 }} />
+      <SpecificStaySheetContent
+        name={name}
+        url={url}
+        photoUri={photoUri}
+        onChange={next => {
+          setName(next.name);
+          setUrl(next.url);
+          setPhotoUri(next.photoUri);
+        }}
+      />
     </WizardBottomSheet>
   );
 };

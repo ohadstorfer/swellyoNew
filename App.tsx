@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Platform, I18nManager } from 'react-native';
+import { Platform, I18nManager, AppState } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { PostHogProvider, PostHogSurveyProvider } from 'posthog-react-native';
 import { NavigationContainer } from '@react-navigation/native';
@@ -13,6 +13,8 @@ import { PostHogErrorBoundary } from './src/components/PostHogErrorBoundary';
 import { registerLogoutHandlers } from './src/utils/registerLogoutHandlers';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { QueryClientProvider, focusManager } from '@tanstack/react-query';
+import { queryClient } from './src/lib/queryClient';
 import Constants from 'expo-constants';
 import * as Sentry from '@sentry/react-native';
 
@@ -79,6 +81,16 @@ export default Sentry.wrap(function App() {
     registerLogoutHandlers();
   }, []);
 
+  // react-query has no "window focus" in RN, so wire its focusManager to
+  // AppState — queries can revalidate when the app returns from background.
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    const sub = AppState.addEventListener('change', status => {
+      focusManager.setFocused(status === 'active');
+    });
+    return () => sub.remove();
+  }, []);
+
   // 🧪 TEMP — Sentry smoke test. REMOVE after verifying. Runs only when
   // EXPO_PUBLIC_SENTRY_DEBUG=true, so it can never fire in normal dev or prod.
   useEffect(() => {
@@ -100,6 +112,7 @@ export default Sentry.wrap(function App() {
     <SafeAreaProvider>
     <NavigationContainer independent={true} onReady={handleNavigationReady}>
       <PostHogErrorBoundary>
+        <QueryClientProvider client={queryClient}>
         {isNavigationReady ? (
           <PostHogProvider
             apiKey={POSTHOG_API_KEY}
@@ -150,6 +163,7 @@ export default Sentry.wrap(function App() {
             </UserProfileProvider>
           </OnboardingProvider>
         )}
+        </QueryClientProvider>
       </PostHogErrorBoundary>
     </NavigationContainer>
     </SafeAreaProvider>

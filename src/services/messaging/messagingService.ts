@@ -1,9 +1,27 @@
 import { supabase, isSupabaseConfigured } from '../../config/supabase';
+import { getRealtimeMode, conversationTopic, userInboxTopic } from './realtimeMode';
 
 /**
  * Messaging Service
  * Handles all conversation and messaging operations with Supabase
  */
+
+// --- Realtime-migration (broadcast) types ---
+// `op` is the DB op for message events ('INSERT'|'UPDATE'|'DELETE') or 'member_added'
+// for the new-conversation event (conversation_members INSERT). message_id is absent
+// for member_added — the handler only needs conversation_id either way.
+export type InboxEvent = { conversation_id: string; message_id?: string; op: string };
+export type InboxIntent = { kind: 'touch'; conversationId: string; messageId?: string };
+
+/**
+ * Pure mapper: converts a raw user-inbox broadcast payload into an intent the
+ * provider can act on, or null if the payload is malformed. No side effects.
+ * Only conversation_id is required (message_id is absent for new-conversation events).
+ */
+export function inboxEventToIntent(e: InboxEvent): InboxIntent | null {
+  if (!e || !e.conversation_id) return null;
+  return { kind: 'touch', conversationId: e.conversation_id, messageId: e.message_id };
+}
 
 // Conversation interface
 export interface Conversation {
@@ -262,7 +280,13 @@ class MessagingService {
   private getOrCreateConversationChannel(conversationId: string) {
     let channel = this.activeChannels.get(conversationId);
     if (channel) return channel;
-    channel = supabase.channel(`messages:${conversationId}`);
+    // In legacy mode the channel is created exactly as before (public).
+    // In shadow/broadcast modes it must be a private channel so the DB
+    // trigger's broadcasts (sent to a private topic) can be received.
+    channel =
+      getRealtimeMode() !== 'legacy'
+        ? supabase.channel(conversationTopic(conversationId), { config: { private: true } })
+        : supabase.channel(`messages:${conversationId}`);
     this.activeChannels.set(conversationId, channel);
     return channel;
   }
@@ -1578,6 +1602,229 @@ class MessagingService {
     return getMuteUntilFromMember(data as Pick<ConversationMember, 'preferences'>);
   }
 
+  // --- Shadow-mode parity tracker (VERIFICATION ONLY; active only in 'shadow').
+  // Records whether each NEW message arrived via postgres_changes ('pg') and/or
+  // broadcast ('bc'), proving the broadcast transport reaches parity before we
+  // ever cut over. Pure observation: it only counts + logs, never touches UI
+  // state, callbacks, or message flow. A no-op in 'legacy' and 'broadcast'. ---
+  private _shadowSeen = new Map<string, { first: 'pg' | 'bc'; t: number }>();
+  private _shadowStats = { both: 0, pgOnly: 0, bcOnly: 0, bcFirst: 0 };
+  private _shadowLastLog = 0;
+
+  private recordShadowNewMessage(messageId: string, source: 'pg' | 'bc'): void {
+    if (getRealtimeMode() !== 'shadow' || !messageId) return;
+    const now = Date.now();
+    const existing = this._shadowSeen.get(messageId);
+    if (!existing) {
+      this._shadowSeen.set(messageId, { first: source, t: now });
+    } else if (existing.first !== source) {
+      // Both transports delivered this message.
+      this._shadowStats.both++;
+      if (existing.first === 'bc') this._shadowStats.bcFirst++;
+      this._shadowSeen.delete(messageId);
+    }
+    // Sweep entries older than 10s — only one transport ever delivered them.
+    for (const [id, rec] of this._shadowSeen) {
+      if (now - rec.t < 10000) continue;
+      if (rec.first === 'pg') this._shadowStats.pgOnly++;
+      else this._shadowStats.bcOnly++;
+      this._shadowSeen.delete(id);
+    }
+    // Rolling summary at most every 30s.
+    if (now - this._shadowLastLog > 30000) {
+      this._shadowLastLog = now;
+      const s = this._shadowStats;
+      const total = s.both + s.pgOnly + s.bcOnly;
+      const bcFirstPct = s.both ? Math.round((s.bcFirst / s.both) * 100) : 0;
+      console.log(
+        `[Realtime shadow parity] both=${s.both} pgOnly=${s.pgOnly} bcOnly=${s.bcOnly} ` +
+        `bcFirst=${bcFirstPct}% (n=${total}) — cutover gate: bcOnly→0 and both≈total`
+      );
+    }
+  }
+
+  /**
+   * Shared INSERT logic: optionally refetch the full row (when the realtime
+   * payload is missing the type/client_id columns), enrich with sender info,
+   * then fire onNewMessage. Used by BOTH the postgres_changes INSERT handler
+   * and the broadcast new_message handler so they produce identical results.
+   */
+  private async handleIncomingInsert(
+    rawMessage: Message,
+    callbacks: MessageSubscriptionCallbacks
+  ): Promise<void> {
+    let newMessage = rawMessage;
+
+    // CRITICAL: Check if payload is missing the type field or client_id key.
+    // Supabase Realtime payloads should include all columns, but we verify to ensure data integrity.
+    // image_metadata can be null for image messages (during upload), so we only check the type field.
+    // client_id is checked with `in` (not `== null`) because legacy rows pre-outbox have
+    // client_id=null — the key is present with null value. We only refetch when the key is
+    // absent entirely (symptom of a publication that pre-dates the column).
+    const needsFullFetch =
+      newMessage.type === undefined ||
+      !('client_id' in newMessage);
+
+    if (needsFullFetch) {
+      // Fetch full message from database to ensure all fields are present
+      try {
+        const { data: fullMessage, error } = await supabase
+          .from('messages')
+          .select('id, conversation_id, sender_id, body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata, audio_metadata, commitment_metadata, reply_to_message_id, reply_to_snapshot')
+          .eq('id', newMessage.id)
+          .single();
+
+        if (!error && fullMessage) {
+          newMessage = fullMessage as Message;
+          console.log('[MessagingService] Fetched full message for INSERT:', { id: newMessage.id, type: newMessage.type, hasImageMetadata: !!newMessage.image_metadata });
+        } else {
+          console.warn('[MessagingService] Failed to fetch full message for INSERT, using payload:', error);
+        }
+      } catch (error) {
+        console.error('[MessagingService] Error fetching full message for INSERT:', error);
+        // Continue with payload as fallback
+      }
+    }
+
+    // Enrich message with sender info if needed
+    if (!newMessage.sender_name || !newMessage.sender_avatar) {
+      try {
+        const { data: surferData } = await supabase
+          .from('surfers')
+          .select('name, profile_image_url')
+          .eq('user_id', newMessage.sender_id)
+          .maybeSingle();
+
+        if (surferData) {
+          newMessage.sender_name = surferData.name;
+          newMessage.sender_avatar = surferData.profile_image_url;
+        }
+      } catch (error) {
+        console.error('Error enriching message with sender info:', error);
+      }
+    }
+
+    if (callbacks.onNewMessage) {
+      callbacks.onNewMessage(newMessage);
+    }
+  }
+
+  /**
+   * Shared UPDATE logic: always refetch the full row (UPDATE events are critical
+   * for image_metadata populated after upload), enrich with sender info, then
+   * fire onMessageUpdated. Used by BOTH the postgres_changes UPDATE handler and
+   * the broadcast update_message handler so they produce identical results.
+   */
+  private async handleIncomingUpdate(
+    rawMessage: Message,
+    callbacks: MessageSubscriptionCallbacks
+  ): Promise<void> {
+    let updatedMessage = rawMessage;
+
+    // CRITICAL: Always fetch full message for UPDATE events to ensure we have the latest image_metadata
+    // UPDATE events are critical for image messages (when image_metadata is populated after upload)
+    // This ensures cache always has complete data
+    try {
+      const { data: fullMessage, error } = await supabase
+        .from('messages')
+        .select('id, conversation_id, sender_id, body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata, audio_metadata, commitment_metadata, reply_to_message_id, reply_to_snapshot')
+        .eq('id', updatedMessage.id)
+        .single();
+
+      if (!error && fullMessage) {
+        updatedMessage = fullMessage as Message;
+        console.log('[MessagingService] Fetched full message for UPDATE:', { id: updatedMessage.id, type: updatedMessage.type, hasImageMetadata: !!updatedMessage.image_metadata });
+      } else {
+        console.warn('[MessagingService] Failed to fetch full message for UPDATE, using payload:', error);
+      }
+    } catch (error) {
+      console.error('[MessagingService] Error fetching full message for UPDATE:', error);
+      // Continue with payload as fallback
+    }
+
+    // Enrich message with sender info if needed
+    if (!updatedMessage.sender_name || !updatedMessage.sender_avatar) {
+      try {
+        const { data: surferData } = await supabase
+          .from('surfers')
+          .select('name, profile_image_url')
+          .eq('user_id', updatedMessage.sender_id)
+          .maybeSingle();
+
+        if (surferData) {
+          updatedMessage.sender_name = surferData.name;
+          updatedMessage.sender_avatar = surferData.profile_image_url;
+        }
+      } catch (error) {
+        console.error('Error enriching updated message with sender info:', error);
+      }
+    }
+
+    if (callbacks.onMessageUpdated) {
+      callbacks.onMessageUpdated(updatedMessage);
+    }
+  }
+
+  /**
+   * Shared DELETE logic: fire onMessageDeleted with the message id. Used by BOTH
+   * the postgres_changes DELETE handler and the broadcast delete_message handler.
+   */
+  private handleIncomingDelete(
+    messageId: string,
+    callbacks: MessageSubscriptionCallbacks
+  ): void {
+    if (callbacks.onMessageDeleted) {
+      callbacks.onMessageDeleted(messageId);
+    }
+  }
+
+  /**
+   * Route a broadcast message payload ({ op, message }) from the DB trigger to
+   * the same INSERT/UPDATE/DELETE helpers used by the postgres_changes path.
+   * Only active in shadow/broadcast modes (broadcast listeners aren't registered
+   * in legacy mode).
+   */
+  private handleBroadcastMessage(
+    payload: { op?: 'INSERT' | 'UPDATE' | 'DELETE'; message?: Message } | undefined,
+    callbacks: MessageSubscriptionCallbacks
+  ): void {
+    const op = payload?.op;
+    const message = payload?.message;
+    if (!op || !message) return;
+
+    if (op === 'INSERT') {
+      this.recordShadowNewMessage(message.id, 'bc');
+      void this.handleIncomingInsert(message, callbacks);
+    } else if (op === 'UPDATE') {
+      void this.handleIncomingUpdate(message, callbacks);
+    } else if (op === 'DELETE') {
+      this.handleIncomingDelete(message.id, callbacks);
+    }
+  }
+
+  /**
+   * Subscribe to a user's inbox topic (private broadcast). The DB trigger emits
+   * one `inbox_change` event per conversation the user belongs to whenever a
+   * message changes. Maps each event to an intent via the pure mapper. This is a
+   * standalone subscription (not wired into the provider here — see Task 8).
+   */
+  subscribeToUserInbox(userId: string, onInbox: (intent: InboxIntent) => void): () => void {
+    const channel = supabase
+      .channel(userInboxTopic(userId), { config: { private: true } })
+      .on('broadcast', { event: 'inbox_change' }, ({ payload }) => {
+        const intent = inboxEventToIntent(payload as InboxEvent);
+        if (intent) onInbox(intent);
+      })
+      .subscribe((status) => {
+        if (status === 'CHANNEL_ERROR') {
+          console.warn('[MessagingService] user-inbox channel CHANNEL_ERROR for', userId);
+        }
+      });
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }
+
   /**
    * Subscribe to messages in a conversation with unified subscription
    * Handles INSERT, UPDATE, DELETE events and typing indicators in a single channel
@@ -1611,149 +1858,77 @@ class MessagingService {
     // Single channel per conversation: get or create (stored immediately so startTyping/stopTyping use same instance)
     const channel = this.getOrCreateConversationChannel(conversationId);
 
+    const realtimeMode = getRealtimeMode();
+
+    // Message bindings (INSERT/UPDATE/DELETE on `messages`).
+    // - legacy & shadow: register postgres_changes (authoritative).
+    // - broadcast: skip postgres_changes; the broadcast listeners below carry messages.
+    // The handler bodies delegate to shared helpers so the broadcast path produces
+    // byte-for-byte identical enriched messages and fires the same callbacks.
+    if (realtimeMode !== 'broadcast') {
+      channel
+        // Handle new messages (INSERT)
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'messages',
+            filter: `conversation_id=eq.${conversationId}`,
+          },
+          async (payload) => {
+            const newMessage = payload.new as Message;
+
+            if (__DEV__) {
+              console.log('[MessagingService] INSERT payload keys:', Object.keys(payload.new ?? {}));
+            }
+
+            this.recordShadowNewMessage(newMessage.id, 'pg');
+            await this.handleIncomingInsert(newMessage, normalizedCallbacks);
+          }
+        )
+        // Handle message updates (UPDATE) - for edited messages
+        .on(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'messages',
+            filter: `conversation_id=eq.${conversationId}`,
+          },
+          async (payload) => {
+            const updatedMessage = payload.new as Message;
+            await this.handleIncomingUpdate(updatedMessage, normalizedCallbacks);
+          }
+        )
+        // Handle message deletions (DELETE)
+        .on(
+          'postgres_changes',
+          {
+            event: 'DELETE',
+            schema: 'public',
+            table: 'messages',
+            filter: `conversation_id=eq.${conversationId}`,
+          },
+          (payload) => {
+            const deletedMessageId = payload.old.id as string;
+            this.handleIncomingDelete(deletedMessageId, normalizedCallbacks);
+          }
+        );
+    }
+
+    // Broadcast message bindings — the DB trigger emits new_message / update_message
+    // / delete_message on the private conversation topic. Registered only in
+    // shadow (alongside postgres_changes; provider-level dedup collapses the dup)
+    // and broadcast (sole source). NOT registered in legacy mode.
+    if (realtimeMode !== 'legacy') {
+      channel
+        .on('broadcast', { event: 'new_message' }, ({ payload }) => this.handleBroadcastMessage(payload, normalizedCallbacks))
+        .on('broadcast', { event: 'update_message' }, ({ payload }) => this.handleBroadcastMessage(payload, normalizedCallbacks))
+        .on('broadcast', { event: 'delete_message' }, ({ payload }) => this.handleBroadcastMessage(payload, normalizedCallbacks));
+    }
+
     channel
-      // Handle new messages (INSERT)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'messages',
-          filter: `conversation_id=eq.${conversationId}`,
-        },
-        async (payload) => {
-          let newMessage = payload.new as Message;
-
-          if (__DEV__) {
-            console.log('[MessagingService] INSERT payload keys:', Object.keys(payload.new ?? {}));
-          }
-
-          // CRITICAL: Check if payload is missing the type field or client_id key.
-          // Supabase Realtime payloads should include all columns, but we verify to ensure data integrity.
-          // image_metadata can be null for image messages (during upload), so we only check the type field.
-          // client_id is checked with `in` (not `== null`) because legacy rows pre-outbox have
-          // client_id=null — the key is present with null value. We only refetch when the key is
-          // absent entirely (symptom of a publication that pre-dates the column).
-          const needsFullFetch =
-            newMessage.type === undefined ||
-            !('client_id' in newMessage);
-          
-          if (needsFullFetch) {
-            // Fetch full message from database to ensure all fields are present
-            try {
-              const { data: fullMessage, error } = await supabase
-                .from('messages')
-                .select('id, conversation_id, sender_id, body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata, audio_metadata, commitment_metadata, reply_to_message_id, reply_to_snapshot')
-                .eq('id', newMessage.id)
-                .single();
-              
-              if (!error && fullMessage) {
-                newMessage = fullMessage as Message;
-                console.log('[MessagingService] Fetched full message for INSERT:', { id: newMessage.id, type: newMessage.type, hasImageMetadata: !!newMessage.image_metadata });
-              } else {
-                console.warn('[MessagingService] Failed to fetch full message for INSERT, using payload:', error);
-              }
-            } catch (error) {
-              console.error('[MessagingService] Error fetching full message for INSERT:', error);
-              // Continue with payload as fallback
-            }
-          }
-          
-          // Enrich message with sender info if needed
-          if (!newMessage.sender_name || !newMessage.sender_avatar) {
-            try {
-              const { data: surferData } = await supabase
-                .from('surfers')
-                .select('name, profile_image_url')
-                .eq('user_id', newMessage.sender_id)
-                .maybeSingle();
-              
-              if (surferData) {
-                newMessage.sender_name = surferData.name;
-                newMessage.sender_avatar = surferData.profile_image_url;
-              }
-            } catch (error) {
-              console.error('Error enriching message with sender info:', error);
-            }
-          }
-          
-          if (normalizedCallbacks.onNewMessage) {
-            normalizedCallbacks.onNewMessage(newMessage);
-          }
-        }
-      )
-      // Handle message updates (UPDATE) - for edited messages
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'messages',
-          filter: `conversation_id=eq.${conversationId}`,
-        },
-        async (payload) => {
-          let updatedMessage = payload.new as Message;
-          
-          // CRITICAL: Always fetch full message for UPDATE events to ensure we have the latest image_metadata
-          // UPDATE events are critical for image messages (when image_metadata is populated after upload)
-          // This ensures cache always has complete data
-          try {
-            const { data: fullMessage, error } = await supabase
-              .from('messages')
-              .select('id, conversation_id, sender_id, body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata, audio_metadata, commitment_metadata, reply_to_message_id, reply_to_snapshot')
-              .eq('id', updatedMessage.id)
-              .single();
-            
-            if (!error && fullMessage) {
-              updatedMessage = fullMessage as Message;
-              console.log('[MessagingService] Fetched full message for UPDATE:', { id: updatedMessage.id, type: updatedMessage.type, hasImageMetadata: !!updatedMessage.image_metadata });
-            } else {
-              console.warn('[MessagingService] Failed to fetch full message for UPDATE, using payload:', error);
-            }
-          } catch (error) {
-            console.error('[MessagingService] Error fetching full message for UPDATE:', error);
-            // Continue with payload as fallback
-          }
-          
-          // Enrich message with sender info if needed
-          if (!updatedMessage.sender_name || !updatedMessage.sender_avatar) {
-            try {
-              const { data: surferData } = await supabase
-                .from('surfers')
-                .select('name, profile_image_url')
-                .eq('user_id', updatedMessage.sender_id)
-                .maybeSingle();
-              
-              if (surferData) {
-                updatedMessage.sender_name = surferData.name;
-                updatedMessage.sender_avatar = surferData.profile_image_url;
-              }
-            } catch (error) {
-              console.error('Error enriching updated message with sender info:', error);
-            }
-          }
-          
-          if (normalizedCallbacks.onMessageUpdated) {
-            normalizedCallbacks.onMessageUpdated(updatedMessage);
-          }
-        }
-      )
-      // Handle message deletions (DELETE)
-      .on(
-        'postgres_changes',
-        {
-          event: 'DELETE',
-          schema: 'public',
-          table: 'messages',
-          filter: `conversation_id=eq.${conversationId}`,
-        },
-        (payload) => {
-          const deletedMessageId = payload.old.id as string;
-          if (normalizedCallbacks.onMessageDeleted) {
-            normalizedCallbacks.onMessageDeleted(deletedMessageId);
-          }
-        }
-      )
       // Handle conversation_members.UPDATE — covers two distinct cases:
       //   1) last_read_at changes (read receipts), fires onReadReceiptUpdate
       //   2) role changes (promote / demote), fires onRoleChanged
@@ -2557,7 +2732,7 @@ class MessagingService {
   /**
    * Get conversations updated since a timestamp (for reconnect sync)
    */
-  async getConversationsUpdatedSince(lastSync: number): Promise<Conversation[]> {
+  async getConversationsUpdatedSince(lastSync: number, restrictToConversationIds?: string[]): Promise<Conversation[]> {
     if (!isSupabaseConfigured()) {
       throw new Error('Supabase is not configured');
     }
@@ -2585,12 +2760,22 @@ class MessagingService {
         return [];
       }
 
-      // Get conversations updated since lastSync
-      const { data: conversations, error: conversationsError } = await supabase
+      // Get conversations. Two modes:
+      //   - watermark (default): updated_at > lastSync — used by reconnect catch-up.
+      //   - restrictToConversationIds: fetch these EXACT conversations, bypassing the
+      //     watermark. Used by the broadcast user-inbox path, where the event already
+      //     names the conversation and the updated_at>lastSync compare races against
+      //     the locally-tracked lastSync and wrongly returns nothing.
+      let convQuery = supabase
         .from('conversations')
         .select('id, title, is_direct, metadata, created_by, created_at, updated_at')
-        .in('id', conversationIds)
-        .gt('updated_at', lastSyncDate)
+        .in('id', conversationIds);
+      if (restrictToConversationIds && restrictToConversationIds.length > 0) {
+        convQuery = convQuery.in('id', restrictToConversationIds);
+      } else {
+        convQuery = convQuery.gt('updated_at', lastSyncDate);
+      }
+      const { data: conversations, error: conversationsError } = await convQuery
         .order('updated_at', { ascending: false });
 
       if (conversationsError) throw conversationsError;
