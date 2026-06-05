@@ -18,9 +18,9 @@ const FONT_MONTSERRAT =
   Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat';
 
 const C = {
-  brandTeal: '#0788B0',
+  brandTeal: '#05BCD3',
   brandTealTint: '#E6F4F8',
-  brandTealText: '#066b8c',
+  brandTealText: '#05BCD3',
   inkBody: '#222B30',
   textMuted: '#7B7B7B',
   borderField: '#CFCFCF',
@@ -186,7 +186,7 @@ export const WhenSheetContent: React.FC<WhenSheetContentProps> = ({
 
   return (
     <View style={styles.container}>
-      {/* Mode toggle — hidden in calendar-only (Flow C) mode. */}
+      {/* Mode toggle — two selectable cards (hidden in calendar-only Flow C). */}
       {lockCalendar ? null : (
       <View style={styles.segment}>
         <TouchableOpacity
@@ -194,38 +194,22 @@ export const WhenSheetContent: React.FC<WhenSheetContentProps> = ({
           onPress={() => onModeChange('calendar')}
           accessibilityRole="button"
           accessibilityState={{ selected: mode === 'calendar' }}
-          style={[
-            styles.segmentBtn,
-            mode === 'calendar' && styles.segmentBtnActive,
-          ]}
+          style={[styles.segCard, mode === 'calendar' && styles.segCardActive]}
         >
-          <Text
-            style={[
-              styles.segmentLabel,
-              mode === 'calendar' && styles.segmentLabelActive,
-            ]}
-          >
-            SPECIFIC
-          </Text>
+          <Ionicons name="calendar-outline" size={22} color={C.inkBody} />
+          <Text style={styles.segTitle}>Specific</Text>
+          <Text style={styles.segSub}>Exact dates</Text>
         </TouchableOpacity>
         <TouchableOpacity
           activeOpacity={0.85}
           onPress={() => onModeChange('months')}
           accessibilityRole="button"
           accessibilityState={{ selected: mode === 'months' }}
-          style={[
-            styles.segmentBtn,
-            mode === 'months' && styles.segmentBtnActive,
-          ]}
+          style={[styles.segCard, mode === 'months' && styles.segCardActive]}
         >
-          <Text
-            style={[
-              styles.segmentLabel,
-              mode === 'months' && styles.segmentLabelActive,
-            ]}
-          >
-            LOOSE
-          </Text>
+          <Ionicons name="calendar-clear-outline" size={22} color={C.inkBody} />
+          <Text style={styles.segTitle}>Loose</Text>
+          <Text style={styles.segSub}>Flexible months</Text>
         </TouchableOpacity>
       </View>
       )}
@@ -311,7 +295,7 @@ export const WhenSheetContent: React.FC<WhenSheetContentProps> = ({
                 <Ionicons
                   name="swap-horizontal"
                   size={14}
-                  color={C.brandTeal}
+                  color={C.textMuted}
                 />
               </TouchableOpacity>
             </View>
@@ -346,61 +330,59 @@ const styles = StyleSheet.create({
   },
   segment: {
     flexDirection: 'row',
-    backgroundColor: C.segmentBg,
-    borderRadius: 10,
-    padding: 4,
+    gap: 10,
   },
-  segmentBtn: {
+  // Selectable card — same teal-tint highlight as the month cubes / option cards.
+  segCard: {
     flex: 1,
-    paddingVertical: 10,
-    borderRadius: 8,
     alignItems: 'center',
-    justifyContent: 'center',
+    paddingVertical: 14,
+    gap: 4,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#EEEEEE',
+    backgroundColor: C.surfaceCard,
   },
-  segmentBtnActive: {
-    backgroundColor: '#FFFFFF',
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
+  // Selected = blue border only (no fill, no icon/text recolor), slightly thicker.
+  segCardActive: {
+    borderColor: C.brandTeal,
+    borderWidth: 2,
   },
-  segmentLabel: {
+  segTitle: {
+    fontFamily: FONT_INTER,
+    fontSize: 15,
+    fontWeight: '700',
+    color: C.inkBody,
+  },
+  segSub: {
     fontFamily: FONT_INTER,
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: '400',
     color: C.textMuted,
-    letterSpacing: 0.5,
-  },
-  segmentLabelActive: {
-    color: C.inkBody,
   },
 
   monthsBlock: {
     gap: 20,
   },
+  // Even 4-column grid: each cube takes 23% of the width and space-between
+  // distributes the remaining ~8% evenly across the 3 gaps.
   monthsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'flex-start',
-    rowGap: 8,
-    columnGap: 8,
+    justifyContent: 'space-between',
+    rowGap: 10,
   },
-  // Month cube: snappy rounded square pill — 64x44 (slightly wider than tall
-  // reads better at 4-col density and gives more room for "Jan '27"-style
-  // labels).
+  // Month cube: snappy rounded square pill, 4 per row, comfortable tap height.
   monthCube: {
-    minWidth: 64,
-    flexGrow: 1,
-    flexBasis: '22%',
-    height: 44,
+    width: '23%',
+    height: 46,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: C.borderDivider,
     backgroundColor: C.surfaceCard,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 8,
+    paddingHorizontal: 4,
   },
   monthCubeMid: {
     backgroundColor: C.brandTealTint,
@@ -459,21 +441,24 @@ const styles = StyleSheet.create({
     padding: 0,
     minHeight: 32,
   },
-  // Pill-shaped unit toggle so the tap target reads as a button, not just text.
+  // Neutral white pill with a hairline border — matches the other buttons in
+  // the flow (no teal fill).
   unitPill: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
     borderRadius: 10,
-    backgroundColor: C.brandTealTint,
+    borderWidth: 1,
+    borderColor: '#EEEEEE',
+    backgroundColor: C.surfaceCard,
   },
   unitPillText: {
     fontFamily: FONT_INTER,
     fontSize: 14,
     fontWeight: '700',
-    color: C.brandTealText,
+    color: C.inkBody,
   },
 
   accessoryBar: {

@@ -2,14 +2,16 @@
 // Header + footer match Figma node 12201:6996 exactly (dark header, cyan
 // bottom-border, gradient fade above floating Back/Next buttons).
 
-import React, { useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Keyboard,
   Platform,
   ScrollView,
   StatusBar,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -19,15 +21,11 @@ import Animated, {
   SlideInRight,
   SlideOutLeft,
   SlideOutRight,
-  useAnimatedStyle,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import {
-  KeyboardAwareScrollView,
-  useReanimatedKeyboardAnimation,
-} from 'react-native-keyboard-controller';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 
 // -----------------------------------------------------------------------------
 // Tokens from Figma node 12201:6996.
@@ -104,6 +102,16 @@ export interface CreateTripWizardChromeProps {
   scrollViewRef?:
     | React.MutableRefObject<ScrollView | null>
     | ((node: ScrollView | null) => void);
+  /** Step content sets this to the currently-focused TextInput so the chrome
+   *  can scroll it clear of the keyboard. */
+  focusedInputRef?: React.MutableRefObject<TextInput | null>;
+  /** When true, the keyboard-avoidance scroll is suppressed — e.g. while a
+   *  bottom sheet is open, so its keyboard doesn't scroll the page behind it. */
+  suppressKeyboardScroll?: boolean;
+  /** The chrome assigns a function here that scrolls the currently-focused
+   *  input clear of the keyboard. Inputs call it in onFocus so it also works
+   *  when the keyboard is already open (switching between fields). */
+  keyboardScrollRef?: React.MutableRefObject<(() => void) | null>;
   children: React.ReactNode;
 }
 
@@ -121,11 +129,13 @@ export function CreateTripWizardChrome(props: CreateTripWizardChromeProps): Reac
     hideHeader = false,
     flushContent = false,
     scrollViewRef,
+    focusedInputRef,
+    suppressKeyboardScroll = false,
+    keyboardScrollRef,
     children,
   } = props;
 
   const insets = useSafeAreaInsets();
-  const { height: keyboardHeight } = useReanimatedKeyboardAnimation();
 
   // -------- Slide direction tracking --------
   const prevStepIndexRef = useRef(stepIndex);
@@ -136,13 +146,11 @@ export function CreateTripWizardChrome(props: CreateTripWizardChromeProps): Reac
   }
   const goingForward = directionRef.current === 'forward';
 
-  // -------- Footer keyboard-tracking --------
-  const footerStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: keyboardHeight.value }],
-  }));
-
   // -------- Scroll-to-top on step change --------
   const scrollRef = useRef<ScrollView | null>(null);
+  // Live scroll offset, tracked so the keyboard handler can scroll *relative*
+  // to the current position.
+  const scrollYRef = useRef(0);
   // Keeps the internal ref (used for scroll-to-top) and any caller-provided
   // ref pointing at the same scroll node.
   const setScrollRef = (node: ScrollView | null) => {
@@ -172,6 +180,83 @@ export function CreateTripWizardChrome(props: CreateTripWizardChromeProps): Reac
   const headerPaddingTop = Math.max(insets.top, 0) + HEADER_PADDING_TOP_BASE;
   const footerReservedHeight =
     FOOTER_BUTTON_HEIGHT + FOOTER_BOTTOM_OFFSET + Math.max(insets.bottom - 8, 0);
+
+  // -------- Guaranteed keyboard avoidance (core-RN, works on iOS + Android) --
+  // To be 100% certain a focused input is never hidden behind the keyboard, we
+  // re-check on every keyboard show and scroll the focused input up by exactly
+  // the amount it's obscured. Uses measureInWindow (safe on the new
+  // architecture) — NOT measureLayout/findNodeHandle.
+  // Extra bottom padding added while the keyboard is open, so the last fields
+  // have somewhere to scroll *into*. Without this, scrollTo gets clamped and
+  // the bottom-most input can never clear the keyboard.
+  const [kbSpace, setKbSpace] = useState(0);
+  // Live mirror of suppressKeyboardScroll so the keyboard listener (set up once)
+  // always sees the current value.
+  const suppressRef = useRef(suppressKeyboardScroll);
+  suppressRef.current = suppressKeyboardScroll;
+  // Last known keyboard top (screenY) + whether it's currently open. Tracked so
+  // we can also scroll when focus moves between fields while the keyboard stays
+  // up (no keyboardWillShow fires in that case).
+  const kbTopRef = useRef(0);
+  const kbVisibleRef = useRef(false);
+
+  const scrollFocusedIntoView = useCallback(() => {
+    // Skip while a sheet is open, or before we know where the keyboard is.
+    if (suppressRef.current || !kbVisibleRef.current) return;
+    const scroll = scrollRef.current as any;
+    const focused =
+      focusedInputRef?.current ?? (TextInput.State.currentlyFocusedInput?.() as any);
+    if (!scroll || !focused || typeof focused.measureInWindow !== 'function') return;
+    focused.measureInWindow((_x: number, y: number, _w: number, h: number) => {
+      // The footer no longer floats above the keyboard, so the input only
+      // needs to clear the keyboard top plus a comfortable gap.
+      const GAP = 24;
+      const visibleBottom = kbTopRef.current - GAP;
+      const inputBottom = y + h;
+      if (inputBottom > visibleBottom) {
+        const delta = inputBottom - visibleBottom;
+        scroll.scrollTo({ y: Math.max(scrollYRef.current + delta, 0), animated: true });
+      }
+    });
+  }, [focusedInputRef]);
+
+  // Expose the scroller so inputs can call it from onFocus (covers the
+  // keyboard-already-open case).
+  useEffect(() => {
+    if (keyboardScrollRef) keyboardScrollRef.current = scrollFocusedIntoView;
+    return () => {
+      if (keyboardScrollRef) keyboardScrollRef.current = null;
+    };
+  }, [keyboardScrollRef, scrollFocusedIntoView]);
+
+  useEffect(() => {
+    const onShow = (e: { endCoordinates: { screenY: number; height: number } }) => {
+      kbVisibleRef.current = true;
+      kbTopRef.current = e.endCoordinates.screenY;
+      if (suppressRef.current) return;
+      // 1) Make room below the content, 2) on the next frame (after the new
+      // padding lands) scroll the focused input above the keyboard.
+      setKbSpace(e.endCoordinates.height);
+      requestAnimationFrame(() => requestAnimationFrame(() => scrollFocusedIntoView()));
+    };
+    const onHide = () => {
+      kbVisibleRef.current = false;
+      setKbSpace(0);
+    };
+
+    const showSub = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+      onShow,
+    );
+    const hideSub = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
+      onHide,
+    );
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, [scrollFocusedIntoView]);
 
   const secondaryDisabled = submitting;
   const primaryButtonDisabled = submitting || primaryDisabled;
@@ -216,13 +301,18 @@ export function CreateTripWizardChrome(props: CreateTripWizardChromeProps): Reac
         ref={setScrollRef}
         style={styles.scroll}
         contentContainerStyle={{
+          flexGrow: 1,
           paddingHorizontal: flushContent ? 0 : 16,
           paddingTop: flushContent ? 0 : hideHeader ? Math.max(insets.top, 0) + 8 : 20,
-          paddingBottom: footerReservedHeight + 32,
+          paddingBottom: footerReservedHeight + 32 + kbSpace,
         }}
-        bottomOffset={footerReservedHeight + 16}
+        bottomOffset={24}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
+        scrollEventThrottle={16}
+        onScroll={e => {
+          scrollYRef.current = e.nativeEvent.contentOffset.y;
+        }}
       >
         <Animated.View
           key={stepIndex}
@@ -237,9 +327,11 @@ export function CreateTripWizardChrome(props: CreateTripWizardChromeProps): Reac
         </Animated.View>
       </KeyboardAwareScrollView>
 
-      {/* ----- Footer (gradient fade overlay + floating buttons) ----- */}
+      {/* ----- Footer (gradient fade overlay + buttons) -----
+          Intentionally does NOT track the keyboard: when the keyboard is open
+          it stays at the bottom and the keyboard covers it. */}
       <Animated.View
-        style={[styles.footerWrap, footerStyle]}
+        style={styles.footerWrap}
         pointerEvents="box-none"
       >
         {/* Gradient fade behind buttons. Slightly stronger than Figma's literal
