@@ -69,7 +69,14 @@ import {
 } from '../../services/trips/groupTripsService';
 import { type TripDetailVM, BOARD_SHORT } from '../../components/trips/TripDetailView';
 import { TripDetailViewRedesigned } from '../../components/trips/TripDetailViewRedesigned';
-import { EditTextSheet, EditCoverSheet } from '../../components/trips/TripEditSheets';
+import {
+  EditTextSheet,
+  EditCoverSheet,
+  EditDatesSheet,
+  EditAccommodationSheet,
+  type DatesPatch,
+  type AccommodationInitial,
+} from '../../components/trips/TripEditSheets';
 import { uploadTripImage } from '../../services/storage/storageService';
 import { TripTabToggle, type TripTab } from '../../components/trips/TripTabToggle';
 import { HostTag } from '../../components/trips/HostTag';
@@ -328,8 +335,10 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   const [muted, setMuted] = useState(false);
   // Overview = public read-only facts; Plan = interactive (members only).
   const [activeTab, setActiveTab] = useState<TripTab>('overview');
-  // Host-only inline edit sheets (Figma admin view): cover / about-host / description.
-  const [editSheet, setEditSheet] = useState<'cover' | 'about' | 'description' | null>(null);
+  // Host-only inline edit sheets (Figma admin view): cover / about-host / description / dates / accommodation.
+  const [editSheet, setEditSheet] = useState<
+    'cover' | 'about' | 'description' | 'dates' | 'accommodation' | null
+  >(null);
 
   // Shared gear — items with required quantities + request flow
   // (group_trip_gear_items / _gear_claims / _gear_requests). Distinct from
@@ -697,6 +706,33 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     if (!trip) return;
     await updateGroupTrip(trip.id, { description: text });
     setTrip(prev => (prev ? { ...prev, description: text } : prev));
+  };
+
+  const handleSaveDates = async (patch: DatesPatch) => {
+    if (!trip) return;
+    await updateGroupTrip(trip.id, patch);
+    setTrip(prev => (prev ? { ...prev, ...patch } : prev));
+  };
+
+  const handleSaveAccommodation = async (next: AccommodationInitial) => {
+    if (!trip || !currentUserId) return;
+    // A freshly-picked photo is a local file URI — upload it first. An existing
+    // remote URL is left untouched.
+    let imageUrl = next.photoUri;
+    if (next.photoUri && !/^https?:\/\//.test(next.photoUri)) {
+      const res = await uploadTripImage(next.photoUri, currentUserId, 'accommodation');
+      if (!res.success || !res.url) throw new Error(res.error || 'Failed to upload stay photo');
+      imageUrl = res.url;
+    }
+    const patch = {
+      accommodation_type: next.kind ? [next.kind] : null,
+      accommodation_name: next.name || null,
+      accommodation_url: next.url || null,
+      accommodation_image_url: imageUrl,
+      specific_stay_selected: true,
+    };
+    await updateGroupTrip(trip.id, patch);
+    setTrip(prev => (prev ? { ...prev, ...patch } : prev));
   };
 
   const handleShare = async () => {
@@ -1278,6 +1314,8 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           onEditCover={() => setEditSheet('cover')}
           onEditAboutHost={() => setEditSheet('about')}
           onEditDescription={() => setEditSheet('description')}
+          onEditDates={() => setEditSheet('dates')}
+          onEditAccommodation={() => setEditSheet('accommodation')}
         />
 
         {/* ============================ OVERVIEW ============================ */}
@@ -1757,6 +1795,33 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         rows={8}
         onClose={() => setEditSheet(null)}
         onSave={handleSaveDescription}
+      />
+      <EditDatesSheet
+        visible={editSheet === 'dates'}
+        initial={(() => {
+          const months = [...(trip.date_months ?? [])].sort();
+          return {
+            datesMode: trip.start_date ? ('exact' as const) : ('months' as const),
+            startDateISO: trip.start_date ?? null,
+            endDateISO: trip.end_date ?? null,
+            monthFrom: months[0] ?? '',
+            monthTo: months[months.length - 1] ?? '',
+            durationDays: trip.duration_days ?? null,
+          };
+        })()}
+        onClose={() => setEditSheet(null)}
+        onSave={handleSaveDates}
+      />
+      <EditAccommodationSheet
+        visible={editSheet === 'accommodation'}
+        initial={{
+          kind: (trip.accommodation_type?.[0] ?? null) as AccommodationInitial['kind'],
+          name: trip.accommodation_name ?? '',
+          url: trip.accommodation_url ?? '',
+          photoUri: trip.accommodation_image_url ?? null,
+        }}
+        onClose={() => setEditSheet(null)}
+        onSave={handleSaveAccommodation}
       />
     </SafeAreaView>
   );

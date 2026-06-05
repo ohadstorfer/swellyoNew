@@ -298,12 +298,15 @@ const CountdownTimer: React.FC<{ target: Date | null }> = ({ target }) => {
 
   if (!target) return null;
   const diffMs = Math.max(0, target.getTime() - now);
-  const totalDays = Math.floor(diffMs / MS_DAY);
+  // "Under a month" = less than one calendar month away (not a fixed 31 days).
+  // At/over a month we lead with Months (no seconds); under it we lead with Days
+  // and reveal Seconds (per Figma).
+  const underOneMonth = target.getTime() < addMonths(new Date(now), 1).getTime();
 
   let blocks: { value: string; label: string }[];
 
-  if (totalDays >= 31) {
-    // ≥ 31 days out → Months / Days / Hours / Minutes (no seconds).
+  if (!underOneMonth) {
+    // ≥ 1 month out → Months / Days / Hours / Minutes (no seconds).
     const nowDate = new Date(now);
     let months = 0;
     while (addMonths(nowDate, months + 1).getTime() <= target.getTime()) months++;
@@ -320,7 +323,7 @@ const CountdownTimer: React.FC<{ target: Date | null }> = ({ target }) => {
       { value: String(minutes), label: minutes === 1 ? 'Minute' : 'Minutes' },
     ];
   } else {
-    // < 31 days out → Days / Hours / Minutes / Seconds.
+    // < 1 month out → Days / Hours / Minutes / Seconds.
     const totalSec = Math.floor(diffMs / 1000);
     const days = Math.floor(totalSec / 86400);
     const hours = Math.floor((totalSec % 86400) / 3600);
@@ -448,6 +451,10 @@ export interface TripDetailViewProps {
   onEditAboutHost?: () => void;
   /** Host taps "Edit" on "About this trip" → open the description edit sheet. */
   onEditDescription?: () => void;
+  /** Host taps "Set dates" → open the dates edit sheet (A/B trips without exact dates). */
+  onEditDates?: () => void;
+  /** Host taps "Add stay" → open the accommodation edit sheet (A/B trips without a specific stay). */
+  onEditAccommodation?: () => void;
 }
 
 export const TripDetailView: React.FC<TripDetailViewProps> = ({

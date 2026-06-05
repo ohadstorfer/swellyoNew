@@ -7,6 +7,7 @@ import {
   MessageReaction,
   messagingService,
 } from '../services/messaging/messagingService';
+import { reactionsTopic } from '../services/messaging/realtimeMode';
 
 type SetMessages = React.Dispatch<React.SetStateAction<Message[]>>;
 
@@ -15,10 +16,11 @@ type SetMessages = React.Dispatch<React.SetStateAction<Message[]>>;
  * `message_reactions` changes, and exposes optimistic setters.
  *
  * Designed to be dropped into DirectMessageScreen / DirectGroupChat which both
- * own a local `messages: Message[]` state. Subscribes globally to the table —
- * Supabase RLS already restricts each client to reactions on messages in
- * conversations the user is a member of, so an extra filter here would be
- * redundant. We still skip events whose message_id isn't in the current chat.
+ * own a local `messages: Message[]` state.
+ *
+ * Realtime reaction changes arrive on a private per-conversation Broadcast topic
+ * (reactions:{conversationId}), fed by the broadcast_reaction_change DB trigger.
+ * See docs/superpowers/specs/2026-06-04-reactions-broadcast-migration.md
  */
 export function useMessageReactions(
   conversationId: string | undefined,
@@ -91,26 +93,24 @@ export function useMessageReactions(
     hydratedConvRef.current = null;
   }, [conversationId]);
 
-  // Realtime subscription on message_reactions for any change relevant to the
-  // current message list. Re-fetch the affected message's reactions on each
-  // event — simpler and more correct than diffing payloads.
+  // Realtime subscription for reaction changes relevant to the current message
+  // list. The broadcast_reaction_change DB trigger emits `reaction_changed` on a
+  // private per-conversation topic; we refetch the affected message's reactions
+  // on each event (idempotent, simpler than diffing payloads).
   useEffect(() => {
     if (!conversationId) return;
+
     const channel = supabase
-      .channel(`message-reactions-${conversationId}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'message_reactions' },
-        (payload: any) => {
-          const messageId: string | undefined =
-            payload?.new?.message_id ?? payload?.old?.message_id;
-          if (!messageId) return;
-          if (!messageIdsRef.current.has(messageId)) return;
-          refreshOne(messageId).catch(err =>
-            console.warn('[useMessageReactions] refreshOne failed', err),
-          );
-        },
-      )
+      .channel(reactionsTopic(conversationId), { config: { private: true } })
+      .on('broadcast', { event: 'reaction_changed' }, ({ payload }: any) => {
+        const messageId = payload?.message_id as string | undefined;
+        if (!messageId) return;
+        // Topic is per-conversation, but only a window of messages is loaded.
+        if (!messageIdsRef.current.has(messageId)) return;
+        refreshOne(messageId).catch(err =>
+          console.warn('[useMessageReactions] refreshOne failed', err),
+        );
+      })
       .subscribe();
 
     return () => {

@@ -21,6 +21,7 @@ import {
 } from '../services/messaging/conversationListCache';
 import { chatHistoryCache } from '../services/messaging/chatHistoryCache';
 import { messageOutbox } from '../services/messaging/messageOutbox';
+import { getRealtimeMode } from '../services/messaging/realtimeMode';
 import { supabase } from '../config/supabase';
 import { avatarCacheService } from '../services/media/avatarCacheService';
 import { userPresenceService } from '../services/presence/userPresenceService';
@@ -1081,6 +1082,34 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  // 'broadcast'-mode replacement for the postgres_changes list batch + new-convos
+  // subscription. A user-inbox broadcast event means "something changed in one of
+  // your conversations" (new/edited/deleted message, or a brand-new conversation).
+  // We reconcile the same way reconnect does — getConversationsUpdatedSince +
+  // SYNC_FROM_SERVER + authoritative unread recount — which covers both existing
+  // and brand-new conversations. Unlike handleReconnect this has no skip-guard
+  // (a broadcast means there IS something new). Bursts are debounced by the caller.
+  const handleInboxChange = useCallback(async (conversationIds: string[]) => {
+    if (conversationIds.length === 0) return;
+    try {
+      // Fetch the EXACT conversations the inbox broadcast named — no updated_at
+      // watermark (it races against the locally-tracked lastSync and returns 0).
+      const updated = await messagingService.getConversationsUpdatedSince(0, conversationIds);
+      if (updated.length > 0) {
+        dispatch({ type: 'SYNC_FROM_SERVER', payload: { conversations: updated } });
+        for (const conv of updated) {
+          const unreadCount = await messagingService.getUnreadCount(conv.id);
+          dispatch({
+            type: 'SET_UNREAD_COUNT',
+            payload: { conversationId: conv.id, count: unreadCount },
+          });
+        }
+      }
+    } catch (error) {
+      console.error('[MessagingProvider] Error syncing on inbox change:', error);
+    }
+  }, []);
+
   // Keep conversationsRef in sync with conversations state
   useEffect(() => {
     conversationsRef.current = conversations;
@@ -1200,6 +1229,10 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
   // + last_message.id comparison); conversationId now comes from the changed row.
   useEffect(() => {
     if (!user) return;
+    // In 'broadcast' mode the conversation-list updates ride the user-inbox
+    // broadcast (see the inbox effect below) instead of this postgres_changes
+    // batch. 'legacy' and 'shadow' keep this path exactly as before.
+    if (getRealtimeMode() === 'broadcast') return;
 
     const ids = conversations.map((c) => c.id);
     const key = [...ids].sort().join(',');
@@ -1245,6 +1278,39 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
     listSubsRef.current.set('__batch__', unsub);
   }, [conversations, user, isMessageProcessed, markMessageProcessed]);
 
+  // 'broadcast' mode only: subscribe to the per-user inbox topic, which the DB
+  // trigger fans out to on every message change in any of the user's chats. This
+  // replaces the postgres_changes list batch + new-convos subscription (both gated
+  // off above in broadcast mode). Open chats are still handled by the per-conv
+  // broadcast in subscribeToMessages; this drives list/unread for non-open chats
+  // and surfaces brand-new conversations. Inert in 'legacy' and 'shadow'.
+  useEffect(() => {
+    if (getRealtimeMode() !== 'broadcast') return;
+    let unsub: (() => void) | null = null;
+    let debounce: ReturnType<typeof setTimeout> | null = null;
+    const pendingConvIds = new Set<string>();
+
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!user) return;
+      unsub = messagingService.subscribeToUserInbox(user.id, (intent) => {
+        // Collect the affected conversation ids and coalesce bursts (e.g. a group
+        // message fans out one event per member-side change) into a single sync.
+        pendingConvIds.add(intent.conversationId);
+        if (debounce) clearTimeout(debounce);
+        debounce = setTimeout(() => {
+          const ids = Array.from(pendingConvIds);
+          pendingConvIds.clear();
+          handleInboxChange(ids);
+        }, 400);
+      });
+    });
+
+    return () => {
+      if (debounce) clearTimeout(debounce);
+      if (unsub) unsub();
+    };
+  }, [handleInboxChange]);
+
   // Set up subscription
   useEffect(() => {
     // Get current user ID
@@ -1262,10 +1328,15 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
         // our user id). Triggers a focused sync so the new conversation
         // lands in state; the per-conv reconciler then subscribes its
         // filtered list:messages channel for subsequent message events.
-        newConvUnsub = messagingService.subscribeToNewConversations(
-          user.id,
-          handleNewConversation
-        );
+        // 'broadcast' mode discovers new conversations + list updates via the
+        // user-inbox broadcast (handleInboxChange) instead of this postgres_changes
+        // path. 'legacy' and 'shadow' keep it.
+        if (getRealtimeMode() !== 'broadcast') {
+          newConvUnsub = messagingService.subscribeToNewConversations(
+            user.id,
+            handleNewConversation
+          );
+        }
       }
     });
 

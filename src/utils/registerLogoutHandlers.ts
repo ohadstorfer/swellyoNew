@@ -18,6 +18,7 @@ import { swellyShaperService } from '../services/swelly/swellyShaperService';
 import { messagingService } from '../services/messaging/messagingService';
 import { blockingService } from '../services/blocking/blockingService';
 import { pushNotificationService } from '../services/notifications/pushNotificationService';
+import { queryClient } from '../lib/queryClient';
 
 let registered = false;
 
@@ -59,6 +60,9 @@ export function registerLogoutHandlers(): void {
 
   // Push notification token
   logoutRegistry.register(() => pushNotificationService.clearToken());
+
+  // react-query cache (trips, etc.) — so User B never sees User A's cached data
+  logoutRegistry.register(() => queryClient.clear());
 
   // Web-only: clear localStorage user data
   if (Platform.OS === 'web') {
