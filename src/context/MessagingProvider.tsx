@@ -25,6 +25,7 @@ import { getRealtimeMode } from '../services/messaging/realtimeMode';
 import { supabase } from '../config/supabase';
 import { avatarCacheService } from '../services/media/avatarCacheService';
 import { userPresenceService } from '../services/presence/userPresenceService';
+import { startSessionKeepalive } from '../lib/realtimeConnection';
 import { resetForLogout as imageUploadResetForLogout } from '../services/messaging/imageUploadService';
 import { useOnboarding } from './OnboardingContext';
 
@@ -1322,6 +1323,10 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
         userPresenceService.trackCurrentUser().catch(error => {
           console.error('[MessagingProvider] Error initializing presence tracking:', error);
         });
+
+        // Keep the realtime socket alive for the whole session so channel churn
+        // (e.g. user-inbox teardown) can't strand it. See lib/realtimeConnection.
+        startSessionKeepalive();
 
         // Subscribe to new-conversation discovery. Fires when another user
         // starts a DM with us (INSERT on conversation_members filtered by

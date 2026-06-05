@@ -96,6 +96,16 @@ import { CommitmentSheet } from '../../components/trips/commitment/CommitmentShe
 import { RequestToJoinSheet } from '../../components/trips/joinRequest/RequestToJoinSheet';
 import { supabase } from '../../config/supabase';
 import { messagingService } from '../../services/messaging/messagingService';
+import { useQueryClient } from '@tanstack/react-query';
+import { tripsKeys } from '../../hooks/trips/useTripQueries';
+import {
+  useTripCore,
+  useTripAdminUpdates,
+  useTripGear,
+  useTripRequests,
+  useTripGearRequests,
+} from '../../hooks/trips/useTripDetail';
+import { TripDetailSkeleton } from '../../components/skeletons';
 
 interface TripDetailScreenProps {
   tripId: string;
@@ -304,12 +314,31 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   const { user: contextUser } = useOnboarding();
   const currentUserId = contextUser?.id?.toString() ?? null;
 
-  const [trip, setTrip] = useState<GroupTrip | null>(null);
-  const [participants, setParticipants] = useState<EnrichedParticipant[]>([]);
-  const [myRequest, setMyRequest] = useState<GroupTripJoinRequest | null>(null);
-  const [pendingRequests, setPendingRequests] = useState<EnrichedJoinRequest[]>([]);
-  const [declinedRequests, setDeclinedRequests] = useState<EnrichedJoinRequest[]>([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
+
+  // Data from react-query cache (survives screen unmount → instant reopen).
+  const coreQuery = useTripCore(tripId, currentUserId);
+  const trip = coreQuery.data?.trip ?? null;
+  const participants = coreQuery.data?.participants ?? [];
+  const myRequest = coreQuery.data?.myRequest ?? null;
+
+  // isHostDerived must be derived before any hook that depends on it so hook
+  // call order stays stable across renders (no conditional hooks).
+  const isHostDerived = !!trip && !!currentUserId && trip.host_id === currentUserId;
+
+  const updatesQuery = useTripAdminUpdates(tripId);
+  const adminUpdates = updatesQuery.data ?? [];
+
+  const gearQuery = useTripGear(tripId, currentUserId);
+  const gearItems = gearQuery.data ?? [];
+
+  const requestsQuery = useTripRequests(tripId, isHostDerived);
+  const pendingRequests = requestsQuery.data?.pending ?? [];
+  const declinedRequests = requestsQuery.data?.declined ?? [];
+
+  const gearRequestsQuery = useTripGearRequests(tripId, isHostDerived);
+  const gearRequests = gearRequestsQuery.data ?? [];
+
   const [submitting, setSubmitting] = useState(false);
   const [processingRequestId, setProcessingRequestId] = useState<string | null>(null);
   const [openingChat, setOpeningChat] = useState(false);
@@ -343,8 +372,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   // Shared gear — items with required quantities + request flow
   // (group_trip_gear_items / _gear_claims / _gear_requests). Distinct from
   // the host's checklist (which lives on group_trips.personal_gear_host_suggestion).
-  const [gearItems, setGearItems] = useState<EnrichedGearItem[]>([]);
-  const [gearRequests, setGearRequests] = useState<EnrichedGearRequest[]>([]); // host only
+  // gearItems + gearRequests now come from react-query (declared above).
   const [gearItemSheetItem, setGearItemSheetItem] = useState<EnrichedGearItem | null>(null);
   const [requestSheetVisible, setRequestSheetVisible] = useState(false);
   const [manageSheetVisible, setManageSheetVisible] = useState(false);
@@ -356,13 +384,13 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   const [processingGearRequestId, setProcessingGearRequestId] = useState<string | null>(null);
 
   // Admin updates — host-posted free-text lines, visible to all members.
-  const [adminUpdates, setAdminUpdates] = useState<AdminUpdate[]>([]);
+  // adminUpdates now comes from react-query (declared above).
   const [addingUpdate, setAddingUpdate] = useState(false);
   const [updateDraft, setUpdateDraft] = useState('');
   const [editingUpdateId, setEditingUpdateId] = useState<string | null>(null);
   const [savingUpdate, setSavingUpdate] = useState(false);
 
-  const isHost = !!trip && !!currentUserId && trip.host_id === currentUserId;
+  const isHost = isHostDerived;
   const isApprovedMember = useMemo(
     () =>
       !!currentUserId &&
@@ -403,55 +431,8 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   ];
   const gearPreview = gearAllRows.slice(0, 3);
   const gearHiddenCount = Math.max(0, gearAllRows.length - gearPreview.length);
-  const loadAll = useCallback(async () => {
-    const [tripData, participantsData, updatesData, gearItemsData] = await Promise.all([
-      getTripById(tripId),
-      getTripParticipants(tripId),
-      listAdminUpdates(tripId),
-      listGearItems(tripId, currentUserId),
-    ]);
-    setTrip(tripData);
-    setParticipants(participantsData);
-    setAdminUpdates(updatesData);
-    setGearItems(gearItemsData);
-
-    if (currentUserId && tripData) {
-      const userIsHost = tripData.host_id === currentUserId;
-      if (userIsHost) {
-        const [pending, declined, gearReqs] = await Promise.all([
-          listPendingRequests(tripId),
-          listDeclinedRequests(tripId),
-          listGearRequests(tripId, 'pending'),
-        ]);
-        setPendingRequests(pending);
-        setDeclinedRequests(declined);
-        setGearRequests(gearReqs);
-        setMyRequest(null);
-      } else {
-        const req = await getMyJoinRequest(tripId, currentUserId);
-        setMyRequest(req);
-        setPendingRequests([]);
-        setDeclinedRequests([]);
-        setGearRequests([]);
-      }
-    }
-    setLoading(false);
-  }, [tripId, currentUserId]);
-
-  const refreshGear = useCallback(async () => {
-    const items = await listGearItems(tripId, currentUserId);
-    setGearItems(items);
-  }, [tripId, currentUserId]);
-
-  const refreshGearRequests = useCallback(async () => {
-    if (!isHost) return;
-    const reqs = await listGearRequests(tripId, 'pending');
-    setGearRequests(reqs);
-  }, [tripId, isHost]);
-
-  useEffect(() => {
-    loadAll();
-  }, [loadAll]);
+  // Data is now managed by react-query hooks above.
+  // refreshGear / refreshGearRequests replaced by queryClient.invalidateQueries.
 
   // Lazy-fetch the user's own profile preview the first time it could be shown
   // in the join sheet. Skipped for host/approved-member; cached after first load.
@@ -489,7 +470,10 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     setSubmitting(true);
     try {
       const newReq = await requestToJoinTrip(tripId, currentUserId, note || undefined);
-      setMyRequest(newReq);
+      queryClient.setQueryData<import('../../hooks/trips/useTripDetail').TripCoreData>(
+        tripsKeys.detail(tripId),
+        prev => (prev ? { ...prev, myRequest: newReq } : prev)
+      );
     } catch (e: any) {
       Alert.alert('Could not send request', e?.message || 'Please try again.');
       throw e;
@@ -503,7 +487,13 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     setSubmitting(true);
     try {
       await withdrawJoinRequest(myRequest.id);
-      setMyRequest({ ...myRequest, status: 'withdrawn' });
+      queryClient.setQueryData<import('../../hooks/trips/useTripDetail').TripCoreData>(
+        tripsKeys.detail(tripId),
+        prev =>
+          prev && prev.myRequest
+            ? { ...prev, myRequest: { ...prev.myRequest, status: 'withdrawn' } }
+            : prev
+      );
     } catch (e: any) {
       Alert.alert('Could not withdraw', e?.message || 'Please try again.');
     } finally {
@@ -515,12 +505,9 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     setProcessingRequestId(requestId);
     try {
       await approveJoinRequest(requestId);
-      // Optimistic: remove from pending/declined and refetch participants. The
-      // same handler reverses a previously-declined request (declined → approved).
-      setPendingRequests(prev => prev.filter(r => r.id !== requestId));
-      setDeclinedRequests(prev => prev.filter(r => r.id !== requestId));
-      const updated = await getTripParticipants(tripId);
-      setParticipants(updated);
+      queryClient.invalidateQueries({ queryKey: tripsKeys.detail(tripId) });
+      queryClient.invalidateQueries({ queryKey: tripsKeys.detailRequests(tripId) });
+      queryClient.invalidateQueries({ queryKey: ['trips', 'my'] });
     } catch (e: any) {
       Alert.alert('Could not approve', e?.message || 'Please try again.');
     } finally {
@@ -559,15 +546,18 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     try {
       const moved = pendingRequests.find(r => r.id === requestId);
       await declineJoinRequest(requestId);
-      // Move it out of pending and into the declined list so the host can still
-      // reverse the decision later.
-      setPendingRequests(prev => prev.filter(r => r.id !== requestId));
-      if (moved) {
-        setDeclinedRequests(prev => [
-          { ...moved, status: 'declined' as const },
-          ...prev.filter(r => r.id !== requestId),
-        ]);
-      }
+      queryClient.setQueryData<import('../../hooks/trips/useTripDetail').TripRequestsData>(
+        tripsKeys.detailRequests(tripId),
+        prev => {
+          if (!prev) return prev;
+          return {
+            pending: prev.pending.filter(r => r.id !== requestId),
+            declined: moved
+              ? [{ ...moved, status: 'declined' as const }, ...prev.declined.filter(r => r.id !== requestId)]
+              : prev.declined,
+          };
+        }
+      );
     } catch (e: any) {
       Alert.alert('Could not decline', e?.message || 'Please try again.');
     } finally {
@@ -590,7 +580,11 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
             setRemovingUserId(userId);
             try {
               await removeParticipant(tripId, userId);
-              setParticipants(prev => prev.filter(p => p.user_id !== userId));
+              queryClient.setQueryData<import('../../hooks/trips/useTripDetail').TripCoreData>(
+                tripsKeys.detail(tripId),
+                prev =>
+                  prev ? { ...prev, participants: prev.participants.filter(p => p.user_id !== userId) } : prev
+              );
             } catch (e: any) {
               Alert.alert('Could not remove', e?.message || 'Please try again.');
             } finally {
@@ -615,7 +609,12 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
             setCancelling(true);
             try {
               await cancelTrip(tripId);
-              setTrip(prev => (prev ? { ...prev, status: 'cancelled' } : prev));
+              queryClient.setQueryData<import('../../hooks/trips/useTripDetail').TripCoreData>(
+                tripsKeys.detail(tripId),
+                prev => (prev ? { ...prev, trip: { ...prev.trip, status: 'cancelled' } } : prev)
+              );
+              queryClient.invalidateQueries({ queryKey: ['trips', 'my'] });
+              queryClient.invalidateQueries({ queryKey: tripsKeys.explore });
             } catch (e: any) {
               Alert.alert('Could not cancel', e?.message || 'Please try again.');
             } finally {
@@ -640,7 +639,11 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
             setCompleting(true);
             try {
               await completeTrip(tripId);
-              setTrip(prev => (prev ? { ...prev, status: 'completed' } : prev));
+              queryClient.setQueryData<import('../../hooks/trips/useTripDetail').TripCoreData>(
+                tripsKeys.detail(tripId),
+                prev => (prev ? { ...prev, trip: { ...prev.trip, status: 'completed' } } : prev)
+              );
+              queryClient.invalidateQueries({ queryKey: ['trips', 'my'] });
               setActiveTab('overview');
             } catch (e: any) {
               Alert.alert('Could not complete', e?.message || 'Please try again.');
@@ -667,7 +670,12 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
             setLeaving(true);
             try {
               await leaveTrip(tripId, currentUserId);
-              setParticipants(prev => prev.filter(p => p.user_id !== currentUserId));
+              queryClient.setQueryData<import('../../hooks/trips/useTripDetail').TripCoreData>(
+                tripsKeys.detail(tripId),
+                prev =>
+                  prev ? { ...prev, participants: prev.participants.filter(p => p.user_id !== currentUserId) } : prev
+              );
+              queryClient.invalidateQueries({ queryKey: ['trips', 'my'] });
             } catch (e: any) {
               Alert.alert('Could not leave', e?.message || 'Please try again.');
             } finally {
@@ -687,37 +695,43 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   // ---- Host-only inline edits (Figma admin view). Each persists one field via
   // updateGroupTrip and merges it locally (updateGroupTrip returns only the base
   // row, so we keep the existing joined `destination`/host data on `trip`).
+  const patchTripCache = (patch: Partial<GroupTrip>) => {
+    queryClient.setQueryData<import('../../hooks/trips/useTripDetail').TripCoreData>(
+      tripsKeys.detail(tripId),
+      prev => (prev ? { ...prev, trip: { ...prev.trip, ...patch } } : prev)
+    );
+    queryClient.invalidateQueries({ queryKey: ['trips', 'my'] });
+  };
+
   const handleSaveCover = async (localUri: string) => {
     if (!trip || !currentUserId) return;
     const res = await uploadTripImage(localUri, currentUserId, 'hero');
     if (!res.success || !res.url) throw new Error(res.error || 'Failed to upload cover');
     await updateGroupTrip(trip.id, { hero_image_url: res.url });
-    setTrip(prev => (prev ? { ...prev, hero_image_url: res.url! } : prev));
+    patchTripCache({ hero_image_url: res.url });
   };
 
   const handleSaveAboutHost = async (text: string) => {
     if (!trip) return;
     const next = text || null;
     await updateGroupTrip(trip.id, { host_lead_note: next });
-    setTrip(prev => (prev ? { ...prev, host_lead_note: next } : prev));
+    patchTripCache({ host_lead_note: next });
   };
 
   const handleSaveDescription = async (text: string) => {
     if (!trip) return;
     await updateGroupTrip(trip.id, { description: text });
-    setTrip(prev => (prev ? { ...prev, description: text } : prev));
+    patchTripCache({ description: text });
   };
 
   const handleSaveDates = async (patch: DatesPatch) => {
     if (!trip) return;
     await updateGroupTrip(trip.id, patch);
-    setTrip(prev => (prev ? { ...prev, ...patch } : prev));
+    patchTripCache(patch);
   };
 
   const handleSaveAccommodation = async (next: AccommodationInitial) => {
     if (!trip || !currentUserId) return;
-    // A freshly-picked photo is a local file URI — upload it first. An existing
-    // remote URL is left untouched.
     let imageUrl = next.photoUri;
     if (next.photoUri && !/^https?:\/\//.test(next.photoUri)) {
       const res = await uploadTripImage(next.photoUri, currentUserId, 'accommodation');
@@ -732,7 +746,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
       specific_stay_selected: true,
     };
     await updateGroupTrip(trip.id, patch);
-    setTrip(prev => (prev ? { ...prev, ...patch } : prev));
+    patchTripCache(patch);
   };
 
   const handleShare = async () => {
@@ -752,42 +766,32 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     setCommitSheetOpen(true);
   };
 
+  const patchParticipantsCache = (updater: (p: EnrichedParticipant) => EnrichedParticipant) => {
+    queryClient.setQueryData<import('../../hooks/trips/useTripDetail').TripCoreData>(
+      tripsKeys.detail(tripId),
+      prev =>
+        prev ? { ...prev, participants: prev.participants.map(p => p.user_id === currentUserId ? updater(p) : p) } : prev
+    );
+  };
+
   const handleSubmitCommitment = async (items: CommitmentItem[], note: string) => {
     if (!currentUserId) return;
-    // Optimistic: flip the local participant to pending so the button updates
-    // immediately. If the request fails we restore the prior status.
-    const prior = {
-      status: myCommitmentStatus,
-      items: myCommitmentItems,
-      note: myCommitmentNote,
-    };
-    setParticipants(prev =>
-      prev.map(p =>
-        p.user_id === currentUserId
-          ? {
-              ...p,
-              commitment_status: 'pending',
-              commitment_items: items,
-              commitment_note: note || null,
-            }
-          : p
-      )
-    );
+    const prior = { status: myCommitmentStatus, items: myCommitmentItems, note: myCommitmentNote };
+    patchParticipantsCache(p => ({
+      ...p,
+      commitment_status: 'pending',
+      commitment_items: items,
+      commitment_note: note || null,
+    }));
     try {
       await submitCommitment(tripId, currentUserId, items, note || null);
     } catch (e: any) {
-      setParticipants(prev =>
-        prev.map(p =>
-          p.user_id === currentUserId
-            ? {
-                ...p,
-                commitment_status: prior.status,
-                commitment_items: prior.items,
-                commitment_note: prior.note,
-              }
-            : p
-        )
-      );
+      patchParticipantsCache(p => ({
+        ...p,
+        commitment_status: prior.status,
+        commitment_items: prior.items,
+        commitment_note: prior.note,
+      }));
       Alert.alert('Could not submit', e?.message || 'Please try again.');
       throw e;
     }
@@ -799,17 +803,11 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     const next: GroupGearItem[] = current.map(it =>
       it.name === itemName ? { ...it, done: !it.done } : it
     );
-    // Optimistic
-    setParticipants(prev =>
-      prev.map(p => (p.user_id === currentUserId ? { ...p, personal_gear_by_host: next } : p))
-    );
+    patchParticipantsCache(p => ({ ...p, personal_gear_by_host: next }));
     try {
       await setMyGroupGear(tripId, currentUserId, next);
     } catch (e: any) {
-      // Revert
-      setParticipants(prev =>
-        prev.map(p => (p.user_id === currentUserId ? { ...p, personal_gear_by_host: current } : p))
-      );
+      patchParticipantsCache(p => ({ ...p, personal_gear_by_host: current }));
       Alert.alert('Could not update', e?.message || 'Please try again.');
     }
   };
@@ -819,16 +817,11 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   // -------------------------------------------------------------------------
   const persistPersonalGear = async (next: PersonalGearItem[], previous: PersonalGearItem[]) => {
     if (!currentUserId) return;
-    // Optimistic
-    setParticipants(prev =>
-      prev.map(p => (p.user_id === currentUserId ? { ...p, personal_gear_by_me: next } : p))
-    );
+    patchParticipantsCache(p => ({ ...p, personal_gear_by_me: next }));
     try {
       await setMyPersonalGearList(tripId, currentUserId, next);
     } catch (e: any) {
-      setParticipants(prev =>
-        prev.map(p => (p.user_id === currentUserId ? { ...p, personal_gear_by_me: previous } : p))
-      );
+      patchParticipantsCache(p => ({ ...p, personal_gear_by_me: previous }));
       Alert.alert('Could not update', e?.message || 'Please try again.');
     }
   };
@@ -874,9 +867,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     const next: PersonalGearItem[] = [...current, { name, done: false }];
     try {
       await setMyPersonalGearList(tripId, currentUserId, next);
-      setParticipants(prev =>
-        prev.map(p => (p.user_id === currentUserId ? { ...p, personal_gear_by_me: next } : p))
-      );
+      patchParticipantsCache(p => ({ ...p, personal_gear_by_me: next }));
       handleCancelAddPersonalItem();
     } catch (e: any) {
       Alert.alert('Could not add', e?.message || 'Please try again.');
@@ -905,13 +896,8 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     setSavingPacking(true);
     try {
       await setTripGroupGear(tripId, names);
-      // The DB trigger has now synced participant lists; refetch both.
-      const [tripData, participantsData] = await Promise.all([
-        getTripById(tripId),
-        getTripParticipants(tripId),
-      ]);
-      if (tripData) setTrip(tripData);
-      setParticipants(participantsData);
+      // Trigger refetches for both trip (personal_gear_host_suggestion) and participants.
+      queryClient.invalidateQueries({ queryKey: tripsKeys.detail(tripId) });
       setEditingPacking(false);
       setGroupGearDraft('');
     } catch (e: any) {
@@ -928,7 +914,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     if (!currentUserId) return;
     try {
       await setMyGearClaim(itemId, currentUserId, quantity);
-      await refreshGear();
+      queryClient.invalidateQueries({ queryKey: tripsKeys.detailGear(tripId) });
     } catch (e: any) {
       Alert.alert('Could not update', e?.message || 'Please try again.');
     }
@@ -955,19 +941,20 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     } else {
       await addGearItem(tripId, currentUserId, patch.name, patch.needed_qty);
     }
-    await refreshGear();
+    queryClient.invalidateQueries({ queryKey: tripsKeys.detailGear(tripId) });
   };
 
   const handleDeleteGearItem = async (itemId: string) => {
     await deleteGearItem(itemId);
-    await refreshGear();
+    queryClient.invalidateQueries({ queryKey: tripsKeys.detailGear(tripId) });
   };
 
   const handleApproveGearRequest = async (request: EnrichedGearRequest, neededQty: number) => {
     setProcessingGearRequestId(request.id);
     try {
       await approveGearRequest(request.id, neededQty);
-      await Promise.all([refreshGear(), refreshGearRequests()]);
+      queryClient.invalidateQueries({ queryKey: tripsKeys.detailGear(tripId) });
+      queryClient.invalidateQueries({ queryKey: tripsKeys.detailGearRequests(tripId) });
     } catch (e: any) {
       Alert.alert('Could not approve', e?.message || 'Please try again.');
     } finally {
@@ -979,7 +966,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     setProcessingGearRequestId(request.id);
     try {
       await declineGearRequest(request.id);
-      await refreshGearRequests();
+      queryClient.invalidateQueries({ queryKey: tripsKeys.detailGearRequests(tripId) });
     } catch (e: any) {
       Alert.alert('Could not decline', e?.message || 'Please try again.');
     } finally {
@@ -1002,21 +989,24 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     setUpdateDraft('');
   };
 
+  const patchUpdatesCache = (updater: (prev: AdminUpdate[]) => AdminUpdate[]) => {
+    queryClient.setQueryData<AdminUpdate[]>(tripsKeys.detailUpdates(tripId), prev =>
+      updater(prev ?? [])
+    );
+  };
+
   const handleSubmitUpdate = async () => {
     if (!currentUserId) return;
     const body = updateDraft.trim();
-    if (!body) {
-      handleCancelUpdateDraft();
-      return;
-    }
+    if (!body) { handleCancelUpdateDraft(); return; }
     setSavingUpdate(true);
     try {
       if (editingUpdateId) {
         const updated = await updateAdminUpdate(editingUpdateId, body);
-        setAdminUpdates(prev => prev.map(u => (u.id === updated.id ? updated : u)));
+        patchUpdatesCache(prev => prev.map(u => (u.id === updated.id ? updated : u)));
       } else {
         const created = await addAdminUpdate(tripId, currentUserId, body);
-        setAdminUpdates(prev => [created, ...prev]);
+        patchUpdatesCache(prev => [created, ...prev]);
       }
       handleCancelUpdateDraft();
     } catch (e: any) {
@@ -1041,7 +1031,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         onPress: async () => {
           try {
             await deleteAdminUpdate(update.id);
-            setAdminUpdates(prev => prev.filter(u => u.id !== update.id));
+            patchUpdatesCache(prev => prev.filter(u => u.id !== update.id));
             if (editingUpdateId === update.id) handleCancelUpdateDraft();
           } catch (e: any) {
             Alert.alert('Could not delete', e?.message || 'Please try again.');
@@ -1075,10 +1065,10 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     try {
       if (editingUpdateId) {
         const updated = await updateAdminUpdate(editingUpdateId, text);
-        setAdminUpdates(prev => prev.map(u => (u.id === updated.id ? updated : u)));
+        patchUpdatesCache(prev => prev.map(u => (u.id === updated.id ? updated : u)));
       } else {
         const created = await addAdminUpdate(tripId, currentUserId, text);
-        setAdminUpdates(prev => [created, ...prev]);
+        patchUpdatesCache(prev => [created, ...prev]);
       }
       handleCancelUpdateDraft();
     } catch (e: any) {
@@ -1095,12 +1085,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     const cleaned = names.map(n => n.trim()).filter(Boolean);
     try {
       await setTripGroupGear(tripId, cleaned);
-      const [tripData, participantsData] = await Promise.all([
-        getTripById(tripId),
-        getTripParticipants(tripId),
-      ]);
-      if (tripData) setTrip(tripData);
-      setParticipants(participantsData);
+      queryClient.invalidateQueries({ queryKey: tripsKeys.detail(tripId) });
     } catch (e: any) {
       Alert.alert('Could not save list', e?.message || 'Please try again.');
     }
@@ -1115,9 +1100,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     const next: PersonalGearItem[] = [...current, { name: trimmed, done: false }];
     try {
       await setMyPersonalGearList(tripId, currentUserId, next);
-      setParticipants(prev =>
-        prev.map(p => (p.user_id === currentUserId ? { ...p, personal_gear_by_me: next } : p))
-      );
+      patchParticipantsCache(p => ({ ...p, personal_gear_by_me: next }));
       setAddPersonalSheetOpen(false);
     } catch (e: any) {
       Alert.alert('Could not add', e?.message || 'Please try again.');
@@ -1127,13 +1110,11 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   };
 
   // -------------------------------------------------------------------------
-  if (loading) {
+  if (coreQuery.isLoading && !coreQuery.data) {
     return (
       <SafeAreaView style={styles.root} edges={['top']}>
         <Header onBack={onBack} />
-        <View style={styles.centered}>
-          <ActivityIndicator color="#0788B0" />
-        </View>
+        <TripDetailSkeleton />
       </SafeAreaView>
     );
   }
