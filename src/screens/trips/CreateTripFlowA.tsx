@@ -27,7 +27,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 
 import {
   HostingStyle,
@@ -72,6 +72,7 @@ import { AgeSheetContent } from '../../components/trips/sheets/AgeSheetContent';
 import { WhenSheetContent } from '../../components/trips/sheets/WhenSheetContent';
 import { HowItWorksSheetContent } from '../../components/trips/sheets/HowItWorksSheetContent';
 import { VibeSheetContent } from '../../components/trips/sheets/VibeSheetContent';
+import { TripIcon } from '../../components/trips/tripIcons';
 import { StayTypeSheetContent } from '../../components/trips/sheets/StayTypeSheetContent';
 import { SpecificStaySheetContent } from '../../components/trips/sheets/SpecificStaySheetContent';
 
@@ -157,8 +158,8 @@ const STEP_META: Record<StepKey, { title: string; subtitle: string }> = {
     title: 'Who is it for?',
     subtitle: 'The surfers, the levels, the wave.',
   },
-  basics: { title: 'Basic deets', subtitle: 'Where, when, what to call it.' },
-  vibez: { title: 'Trip vibez', subtitle: 'How it runs, the feel, the stay.' },
+  basics: { title: 'Trip details', subtitle: 'Where, when, what to call it.' },
+  vibez: { title: 'Trip Vibe', subtitle: 'How it runs, the feel, the stay.' },
   budget: { title: 'Budget', subtitle: 'Per person, in USD.' },
   aboutYou: { title: 'About you', subtitle: 'Why you’re the one to lead this.' },
   preview: { title: 'Preview', subtitle: 'How your trip will look.' },
@@ -591,6 +592,10 @@ interface SummaryRowProps {
   disabled?: boolean;
   /** When true, the top divider is hidden (use on the first row of a group). */
   noTopDivider?: boolean;
+  /** Optional left icon — rendered inside a grey bubble (Figma vibez list). */
+  icon?: React.ReactNode;
+  /** When true, the "Tap to set" placeholder uses the teal accent (Figma vibez). */
+  placeholderAccent?: boolean;
 }
 
 const SummaryRow: React.FC<SummaryRowProps> = ({
@@ -602,6 +607,8 @@ const SummaryRow: React.FC<SummaryRowProps> = ({
   optional,
   disabled,
   noTopDivider,
+  icon,
+  placeholderAccent,
 }) => {
   const hasValue = !!(value && value.trim().length > 0);
   const [pressed, setPressed] = useState(false);
@@ -623,7 +630,10 @@ const SummaryRow: React.FC<SummaryRowProps> = ({
           disabled && rowStyles.rowDisabled,
         ]}
       >
-        <Text style={[rowStyles.label, disabled && rowStyles.labelDisabled]}>{label}</Text>
+        <View style={rowStyles.leftGroup}>
+          {icon ? <View style={rowStyles.iconBubble}>{icon}</View> : null}
+          <Text style={[rowStyles.label, disabled && rowStyles.labelDisabled]}>{label}</Text>
+        </View>
         <View style={rowStyles.valueWrap}>
           {hasValue ? (
             <Text
@@ -637,7 +647,10 @@ const SummaryRow: React.FC<SummaryRowProps> = ({
               Optional · Tap to set
             </Text>
           ) : (
-            <Text style={rowStyles.placeholder} numberOfLines={1}>
+            <Text
+              style={[rowStyles.placeholder, placeholderAccent && rowStyles.placeholderAccent]}
+              numberOfLines={1}
+            >
               {placeholder}
             </Text>
           )}
@@ -683,6 +696,19 @@ const rowStyles = StyleSheet.create({
   rowDisabled: {
     opacity: 0.6,
   },
+  leftGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexShrink: 0,
+  },
+  iconBubble: {
+    backgroundColor: '#F7F7F7',
+    borderRadius: 8,
+    padding: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   label: {
     fontFamily: FONT_INTER,
     fontSize: 14,
@@ -718,6 +744,9 @@ const rowStyles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '400',
     color: COLORS.textPlaceholder,
+  },
+  placeholderAccent: {
+    color: '#05BCD3',
   },
   placeholderOptional: {
     flex: 1,
@@ -1180,6 +1209,21 @@ export default function CreateTripFlowA({
 
   // ---- Sheet management --------------------------------------------------
   const [openSheet, setOpenSheet] = useState<SheetKey | null>(null);
+
+  // ---- Keyboard avoidance for inline text fields -------------------------
+  // The chrome scrolls whichever input is in `focusedInputRef` clear of the
+  // keyboard + floating footer on keyboard-show.
+  const titleInputRef = useRef<TextInput | null>(null);
+  const descInputRef = useRef<TextInput | null>(null);
+  const focusedInputRef = useRef<TextInput | null>(null);
+  // The chrome assigns its keyboard-scroll function here; inputs call it on
+  // focus so it works even when the keyboard is already open.
+  const keyboardScrollRef = useRef<(() => void) | null>(null);
+  const handleFieldFocus = useCallback((ref: React.RefObject<TextInput | null>) => {
+    focusedInputRef.current = ref.current;
+    // Defer so focus/layout settles, then ask the chrome to scroll it into view.
+    requestAnimationFrame(() => keyboardScrollRef.current?.());
+  }, []);
 
   // ---- Audience strict-sequential progress -------------------------------
   // A card is "done" once its sheet has been opened + closed. Edit mode and
@@ -1979,11 +2023,18 @@ export default function CreateTripFlowA({
             resizeMode="contain"
           />
           <TextInput
+            ref={titleInputRef}
             style={localStyles.inputField}
             value={state.title}
             onChangeText={t => {
               update('title', t);
               if (errors.title) setError('title', null);
+            }}
+            onFocus={() => handleFieldFocus(titleInputRef)}
+            onBlur={() => {
+              if (focusedInputRef.current === titleInputRef.current) {
+                focusedInputRef.current = null;
+              }
             }}
             placeholder="Bali and Barrels"
             placeholderTextColor={COLORS.textPlaceholder}
@@ -2015,6 +2066,7 @@ export default function CreateTripFlowA({
             resizeMode="contain"
           />
           <TextInput
+            ref={descInputRef}
             style={[localStyles.inputField, localStyles.inputFieldTextarea]}
             value={state.description}
             onChangeText={t => {
@@ -2022,6 +2074,12 @@ export default function CreateTripFlowA({
                 t.length > DESCRIPTION_MAX_LENGTH ? t.slice(0, DESCRIPTION_MAX_LENGTH) : t;
               update('description', next);
               if (errors.description) setError('description', null);
+            }}
+            onFocus={() => handleFieldFocus(descInputRef)}
+            onBlur={() => {
+              if (focusedInputRef.current === descInputRef.current) {
+                focusedInputRef.current = null;
+              }
             }}
             placeholder="Tell people what makes this trip special — the surf, the crew, the place."
             placeholderTextColor={COLORS.textPlaceholder}
@@ -2031,14 +2089,13 @@ export default function CreateTripFlowA({
             maxLength={DESCRIPTION_MAX_LENGTH}
           />
         </View>
-        <Text style={localStyles.helper}>Required · up to 500 characters.</Text>
         {errors.description ? (
           <Text style={localStyles.errorText}>{errors.description}</Text>
         ) : null}
 
         {/* Max participants (inline stepper) */}
         <Text style={[localStyles.fieldLabel, localStyles.fieldTopGap]}>Max participants</Text>
-        <Text style={localStyles.helper}>Including you. Leave at "Any" for no limit.</Text>
+        <Text style={[localStyles.helper, localStyles.helperTight]}>Leave at "Any" for no limit</Text>
         <View style={localStyles.stepperRow}>
           <TouchableOpacity
             activeOpacity={0.85}
@@ -2137,6 +2194,13 @@ export default function CreateTripFlowA({
   const renderVibezStep = () => {
     const lockedAnswer = state.accommodationLocked;
     const canToggle = !editMode;
+    // Flow A ("planned together") gets the Figma redesign: icon-bubble list rows
+    // + full-width stacked gate cards. B/C keep the plain rows.
+    const vibeListIcons = !requiresSpecificStay;
+    const hasStayInfo =
+      !!state.accommodationName.trim() ||
+      !!state.accommodationUrl.trim() ||
+      !!state.accommodationImageUri;
 
     return (
       <View>
@@ -2146,17 +2210,27 @@ export default function CreateTripFlowA({
             value={formatTagsSummary(state.tripStructure, TRIP_STRUCTURE_OPTIONS)}
             onPress={() => setOpenSheet('howWorks')}
             noTopDivider
+            placeholderAccent={vibeListIcons}
+            icon={
+              vibeListIcons ? (
+                <Ionicons name="list-outline" size={18} color={COLORS.inkBody} />
+              ) : undefined
+            }
           />
           <SummaryRow
             label="Vibe"
             value={formatTagsSummary(state.tripVibes, TRIP_VIBE_OPTIONS)}
             onPress={() => setOpenSheet('vibe')}
+            placeholderAccent={vibeListIcons}
+            icon={vibeListIcons ? <TripIcon name="sun-setting-03" size={18} /> : undefined}
           />
           <SummaryRow
             label="Stay type"
             value={state.accommodationKind ? ACCOMMODATION_LABEL[state.accommodationKind] : ''}
             onPress={() => setOpenSheet('stayType')}
             error={errors.accommodationKind ?? undefined}
+            placeholderAccent={vibeListIcons}
+            icon={vibeListIcons ? <TripIcon name="home-03" size={18} /> : undefined}
           />
         </View>
 
@@ -2172,7 +2246,7 @@ export default function CreateTripFlowA({
           </>
         ) : (
           <>
-        <Text style={[localStyles.fieldLabel, localStyles.groupTopGap]}>
+        <Text style={[localStyles.gateSectionTitle, localStyles.groupTopGap]}>
           Did you decide on a specific stay?
         </Text>
         <Text style={localStyles.helper}>
@@ -2180,24 +2254,24 @@ export default function CreateTripFlowA({
             ? 'Locked from when you first published.'
             : "You can't change this after you publish."}
         </Text>
-        <View style={localStyles.gateRow}>
+        <View style={localStyles.gateList}>
           {(
             [
               {
-                key: true as const,
-                icon: 'lock-closed-outline' as const,
-                title: 'Yes',
-                subtitle: 'I have a place locked in.',
+                key: false as const,
+                icon: 'marker-pin-05' as const,
+                title: 'No',
+                subtitle: 'Still looking - flexible',
               },
               {
-                key: false as const,
-                icon: 'search-outline' as const,
-                title: 'No',
-                subtitle: 'Still looking — flexible.',
+                key: true as const,
+                icon: 'home-03' as const,
+                title: 'Yes',
+                subtitle: 'I have a place locked in',
               },
             ] as {
               key: boolean;
-              icon: keyof typeof Ionicons.glyphMap;
+              icon: 'marker-pin-05' | 'home-03';
               title: string;
               subtitle: string;
             }[]
@@ -2212,6 +2286,9 @@ export default function CreateTripFlowA({
                 key={String(opt.key)}
                 activeOpacity={tapDisabled ? 1 : 0.85}
                 disabled={tapDisabled}
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: selected }}
+                accessibilityLabel={`${opt.title} — ${opt.subtitle}`}
                 onPress={() => {
                   if (opt.key === true) {
                     if (canToggle) update('accommodationLocked', true);
@@ -2225,21 +2302,58 @@ export default function CreateTripFlowA({
                   }
                 }}
                 style={[
-                  localStyles.gateCard,
-                  selected && localStyles.gateCardActive,
+                  localStyles.gateCardRow,
+                  selected && localStyles.gateCardRowActive,
                   dimmed && localStyles.gateCardDisabled,
                 ]}
               >
-                <Ionicons name={opt.icon} size={28} color={COLORS.brandTeal} />
-                <Text
-                  style={[
-                    localStyles.gateCardTitle,
-                    selected && localStyles.gateCardTitleActive,
-                  ]}
-                >
-                  {opt.title}
-                </Text>
-                <Text style={localStyles.gateCardSubtitle}>{opt.subtitle}</Text>
+                <View style={localStyles.gateCardInner}>
+                  <View style={localStyles.gateIconBubble}>
+                    <TripIcon name={opt.icon} size={18} color={COLORS.inkBody} />
+                  </View>
+                  <View style={localStyles.gateTextCol}>
+                    <Text style={localStyles.gateRowTitle}>{opt.title}</Text>
+                    <Text style={localStyles.gateRowSubtitle}>{opt.subtitle}</Text>
+                  </View>
+                  <View
+                    style={[
+                      localStyles.gateCheckbox,
+                      selected ? localStyles.gateCheckboxOn : localStyles.gateCheckboxOff,
+                    ]}
+                  >
+                    {selected ? (
+                      <MaterialCommunityIcons name="check-bold" size={14} color="#FFFFFF" />
+                    ) : null}
+                  </View>
+                </View>
+
+                {/* Stay preview — nested inside the Yes card once details are added. */}
+                {opt.key === true && selected && hasStayInfo ? (
+                  <View style={localStyles.stayPreview}>
+                    {state.accommodationImageUri ? (
+                      <Image
+                        source={{ uri: state.accommodationImageUri }}
+                        style={localStyles.stayPreviewPhoto}
+                        resizeMode="cover"
+                      />
+                    ) : null}
+                    <View style={localStyles.stayPreviewInfo}>
+                      <View style={localStyles.stayPreviewIconCircle}>
+                        <TripIcon name="home-03" size={18} color={COLORS.inkBody} />
+                      </View>
+                      <View style={localStyles.stayPreviewTextCol}>
+                        <Text style={localStyles.stayPreviewName} numberOfLines={1}>
+                          {state.accommodationName.trim() || 'Your stay'}
+                        </Text>
+                        {state.accommodationUrl.trim() ? (
+                          <Text style={localStyles.stayPreviewUrl} numberOfLines={1}>
+                            {state.accommodationUrl.trim()}
+                          </Text>
+                        ) : null}
+                      </View>
+                    </View>
+                  </View>
+                ) : null}
               </TouchableOpacity>
             );
           })}
@@ -2253,13 +2367,10 @@ export default function CreateTripFlowA({
           <Text style={localStyles.errorText}>{errors.specificStay}</Text>
         ) : null}
 
-        {/* Stay details card — B & C always; A only when the gate is "Yes". */}
-        {requiresSpecificStay || lockedAnswer === true ? (
+        {/* Stay details card — B & C only (Flow A nests the preview in the Yes card). */}
+        {requiresSpecificStay ? (
           (() => {
-            const hasInfo =
-              !!state.accommodationName.trim() ||
-              !!state.accommodationUrl.trim() ||
-              !!state.accommodationImageUri;
+            const hasInfo = hasStayInfo;
             if (!hasInfo) {
               return (
                 <TouchableOpacity
@@ -2794,6 +2905,9 @@ export default function CreateTripFlowA({
         submitting={submitting}
         hideProgress
         flushContent={step === 'preview'}
+        focusedInputRef={focusedInputRef}
+        keyboardScrollRef={keyboardScrollRef}
+        suppressKeyboardScroll={openSheet !== null}
       >
         {renderStep()}
       </CreateTripWizardChrome>
@@ -2916,6 +3030,7 @@ export default function CreateTripFlowA({
       <WizardBottomSheet
         visible={openSheet === 'when'}
         title="When?"
+        titleAlign="left"
         onClose={closeSheet}
         heightMode="full"
         footer={
@@ -2964,6 +3079,8 @@ export default function CreateTripFlowA({
       <WizardBottomSheet
         visible={openSheet === 'howWorks'}
         title="How does it work?"
+        titleAlign="left"
+        hideHeaderDivider
         onClose={closeSheet}
         heightMode="full"
       >
@@ -2976,6 +3093,8 @@ export default function CreateTripFlowA({
       <WizardBottomSheet
         visible={openSheet === 'vibe'}
         title="Vibe"
+        titleAlign="left"
+        hideHeaderDivider
         onClose={closeSheet}
         heightMode="full"
       >
@@ -2988,6 +3107,8 @@ export default function CreateTripFlowA({
       <WizardBottomSheet
         visible={openSheet === 'stayType'}
         title="Stay type"
+        titleAlign="left"
+        hideHeaderDivider
         onClose={closeSheet}
         heightMode="full"
       >
@@ -3004,8 +3125,22 @@ export default function CreateTripFlowA({
       <WizardBottomSheet
         visible={openSheet === 'specificStay'}
         title="Stay details"
+        titleAlign="left"
+        hideHeaderDivider
         onClose={closeSheet}
         heightMode="full"
+        extendBehindKeyboard
+        footer={
+          <TouchableOpacity
+            onPress={closeSheet}
+            activeOpacity={0.85}
+            style={localStyles.sheetSetBtn}
+            accessibilityRole="button"
+            accessibilityLabel="Save stay details and close"
+          >
+            <Text style={localStyles.sheetSetBtnText}>Save</Text>
+          </TouchableOpacity>
+        }
       >
         <SpecificStaySheetContent
           name={state.accommodationName}
@@ -3326,6 +3461,10 @@ const localStyles = StyleSheet.create({
     color: COLORS.textMuted,
     marginTop: 4,
   },
+  // Pulls a helper tight under its title (same 4px gap as Cover photo).
+  helperTight: {
+    marginTop: -4,
+  },
   // Tighter helper that sits directly under a SummaryRow.
   helperRowFootnote: {
     marginTop: -2,
@@ -3616,58 +3755,135 @@ const localStyles = StyleSheet.create({
     marginBottom: 10,
   },
 
-  // Accommodation gate
-  gateRow: {
-    flexDirection: 'row',
-    gap: 12,
-    marginTop: 12,
+  // Accommodation gate — full-width stacked cards (Figma node 12635:3734)
+  gateSectionTitle: {
+    fontFamily: FONT_INTER,
+    fontSize: 20,
+    lineHeight: 24,
+    fontWeight: '700',
+    color: COLORS.inkBody,
+    marginBottom: 4,
   },
-  gateCard: {
-    flex: 1,
-    padding: 16,
-    borderRadius: 16,
+  gateList: {
+    gap: 16,
+    marginTop: 16,
+  },
+  gateCardRow: {
+    gap: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 16,
+    borderRadius: 20,
     borderWidth: 1,
-    borderColor: COLORS.borderField,
+    borderColor: 'transparent', // reserves space so the selected border adds no shift
     backgroundColor: COLORS.surfaceCard,
-    alignItems: 'center',
+    shadowColor: '#596E7C',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 4,
   },
-  gateCardActive: {
-    borderWidth: 2,
-    borderColor: COLORS.brandTeal,
-    backgroundColor: COLORS.brandTealTint,
-    padding: 15,
+  gateCardInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+  },
+  gateCardRowActive: {
+    borderColor: '#05BCD3',
   },
   gateCardDisabled: {
     opacity: 0.35,
   },
-  gateCardTitle: {
-    marginTop: 8,
-    fontFamily: FONT_MONTSERRAT,
-    fontSize: 16,
+  gateIconBubble: {
+    backgroundColor: '#F7F7F7',
+    borderRadius: 8,
+    padding: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  gateTextCol: {
+    flex: 1,
+    gap: 4,
+  },
+  gateRowTitle: {
+    fontFamily: FONT_INTER,
+    fontSize: 20,
+    lineHeight: 24,
     fontWeight: '700',
     color: COLORS.inkBody,
   },
-  gateCardTitleActive: {
-    color: COLORS.brandTealText,
-  },
-  gateCardSubtitle: {
-    marginTop: 4,
+  gateRowSubtitle: {
     fontFamily: FONT_INTER,
     fontSize: 12,
-    lineHeight: 16,
+    lineHeight: 18,
+    fontWeight: '400',
     color: COLORS.textMuted,
-    textAlign: 'center',
+  },
+  gateCheckbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  gateCheckboxOn: {
+    backgroundColor: '#05BCD3',
+  },
+  gateCheckboxOff: {
+    backgroundColor: '#F7F7F7',
+    borderWidth: 1,
+    borderColor: '#CFCFCF',
+  },
+  // Nested stay preview (Figma node 12509:17367) — photo + name/URL pill.
+  stayPreview: {
+    gap: 12,
+  },
+  stayPreviewPhoto: {
+    width: '100%',
+    height: 198,
+    borderRadius: 24,
+    backgroundColor: '#F2F2F2',
+  },
+  stayPreviewInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#F7F7F7',
+    borderRadius: 32,
+    paddingHorizontal: 8,
+    paddingVertical: 7,
+  },
+  stayPreviewIconCircle: {
+    backgroundColor: COLORS.surfaceCard,
+    borderRadius: 32,
+    padding: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stayPreviewTextCol: {
+    flex: 1,
+    paddingRight: 4,
+  },
+  stayPreviewName: {
+    fontFamily: FONT_INTER,
+    fontSize: 16,
+    lineHeight: 18,
+    fontWeight: '700',
+    color: '#0A0A0A',
+  },
+  stayPreviewUrl: {
+    fontFamily: FONT_INTER,
+    fontSize: 10,
+    lineHeight: 14,
+    fontWeight: '400',
+    color: '#05BCD3',
   },
 
-  // Max-participants stepper — three bordered white boxes (− | value | +),
-  // matching the Figma "Trip Details" design. The value bubble is narrower
-  // and taller than the round +/- buttons.
+  // Max-participants stepper — square −/+ buttons flanking a wide "Any" pill.
   stepperRow: {
     marginTop: 12,
     flexDirection: 'row',
     alignItems: 'center',
-    alignSelf: 'flex-start',
-    gap: 14,
+    gap: 16,
   },
   stepperBtn: {
     width: 54,
@@ -3680,8 +3896,8 @@ const localStyles = StyleSheet.create({
     justifyContent: 'center',
   },
   stepperValueBox: {
-    width: 104,
-    height: 64,
+    flex: 1,
+    height: 54,
     borderRadius: 16,
     borderWidth: 1,
     borderColor: COLORS.borderHairline,

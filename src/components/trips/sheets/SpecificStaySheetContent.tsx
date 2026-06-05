@@ -1,5 +1,7 @@
-// SpecificStaySheetContent — name + URL (auto-prefix + validate) + photo picker for the locked-stay step.
-import React, { useEffect, useRef, useState } from 'react';
+// SpecificStaySheetContent — name + URL (auto-prefix) + photo picker for the locked-stay step.
+// Styled to the Figma "Stay details" bottom sheet (node 12509:17052): bold dark
+// labels, inline char counter, pencil-prefixed fields, dashed cover-photo box.
+import React, { useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -12,24 +14,23 @@ import {
   Keyboard,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { Images } from '../../../assets/images';
 
 const FONT_INTER = Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter';
 
 const C = {
-  brandTealText: '#066b8c',
-  inkBody: '#222B30',
-  textMuted: '#7B7B7B',
-  borderField: '#CFCFCF',
-  borderDivider: '#E0E0E0',
+  accent: '#05BCD3', // text/m-accent — teal link text
+  ink: '#333333', // text/m-01 — bold labels + typed text
+  textMuted: '#7B7B7B', // text/m-02 — placeholder, counter, icons
+  borderField: '#EEEEEE', // stroke/m-04 — input border
+  borderDashed: '#CFCFCF', // stroke/m-03 — photo dashed border
+  borderDivider: '#EEEEEE',
   surfaceCard: '#FFFFFF',
-  placeholderBg: '#F5FBFD',
-  placeholderIcon: '#0788B0',
   errorText: '#C0392B',
   errorBorder: '#FF6B6B',
-  success: '#34C759',
 };
 
-const NAME_MAX = 25;
+const NAME_MAX = 18;
 
 export interface SpecificStaySheetContentProps {
   name: string;
@@ -38,16 +39,6 @@ export interface SpecificStaySheetContentProps {
   onChange: (next: { name: string; url: string; photoUri: string | null }) => void;
   errors?: { name?: string; url?: string; photo?: string };
 }
-
-const looksLikeUrl = (v: string): boolean => {
-  if (!v) return false;
-  // Basic check — has at least one dot in the host portion, no whitespace.
-  const trimmed = v.trim();
-  if (/\s/.test(trimmed)) return false;
-  // Strip scheme if present, then require at least one dot in the rest.
-  const stripped = trimmed.replace(/^https?:\/\//i, '');
-  return /\./.test(stripped) && stripped.length > 2;
-};
 
 const pickImage = async (): Promise<string | null> => {
   try {
@@ -87,7 +78,6 @@ export const SpecificStaySheetContent: React.FC<SpecificStaySheetContentProps> =
   onChange,
   errors,
 }) => {
-  const [urlTouched, setUrlTouched] = useState(false);
   const nameRef = useRef<TextInput>(null);
   const urlRef = useRef<TextInput>(null);
 
@@ -109,7 +99,6 @@ export const SpecificStaySheetContent: React.FC<SpecificStaySheetContentProps> =
   };
 
   const handleUrlBlur = () => {
-    setUrlTouched(true);
     const trimmed = url.trim();
     if (!trimmed) return;
     if (!/^https?:\/\//i.test(trimmed)) {
@@ -120,31 +109,40 @@ export const SpecificStaySheetContent: React.FC<SpecificStaySheetContentProps> =
   };
 
   const handlePickPhoto = async () => {
+    // Drop the keyboard before the picker opens so the sheet isn't left
+    // scrolled up behind a keyboard once a photo comes back.
+    Keyboard.dismiss();
     const uri = await pickImage();
     if (uri) onChange({ name, url, photoUri: uri });
   };
 
-  const urlValid = looksLikeUrl(url);
-  const showUrlGood = urlTouched && url.length > 0 && urlValid;
-  const showUrlBad = urlTouched && url.length > 0 && !urlValid;
-
   return (
     <View style={styles.container}>
-      {/* Name */}
-      <View style={styles.field}>
-        <Text style={styles.label}>Name</Text>
+      {/* Name — divider above separates it from the sheet title */}
+      <View style={[styles.field, styles.fieldDivided]}>
+        <View style={styles.labelRow}>
+          <Text style={styles.label}>Name</Text>
+          <Text style={styles.counter}>
+            {name.length} /{NAME_MAX}
+          </Text>
+        </View>
         <View
           style={[
             styles.inputBox,
             errors?.name ? styles.inputBoxError : null,
           ]}
         >
+          <Image
+            source={Images.tripDeets.pencil}
+            style={styles.leadIcon}
+            resizeMode="contain"
+          />
           <TextInput
             ref={nameRef}
             value={name}
             onChangeText={handleNameChange}
             maxLength={NAME_MAX}
-            placeholder="e.g. Casa del Mar"
+            placeholder="e.g Casa del Mar"
             placeholderTextColor={C.textMuted}
             style={styles.input}
             accessibilityLabel="Accommodation name"
@@ -152,34 +150,31 @@ export const SpecificStaySheetContent: React.FC<SpecificStaySheetContentProps> =
             onSubmitEditing={() => urlRef.current?.focus()}
           />
         </View>
-        <View style={styles.helperRow}>
-          {errors?.name ? (
-            <Text style={styles.error}>{errors.name}</Text>
-          ) : (
-            <View />
-          )}
-          <Text style={styles.counter}>
-            {name.length}/{NAME_MAX}
-          </Text>
-        </View>
+        {errors?.name ? <Text style={styles.error}>{errors.name}</Text> : null}
       </View>
 
-      {/* URL */}
+      {/* Link */}
       <View style={styles.field}>
-        <Text style={styles.label}>Link</Text>
+        <View style={styles.labelRow}>
+          <Text style={styles.label}>Link</Text>
+        </View>
         <View
           style={[
             styles.inputBox,
-            (errors?.url || showUrlBad) ? styles.inputBoxError : null,
-            showUrlGood ? styles.inputBoxValid : null,
+            errors?.url ? styles.inputBoxError : null,
           ]}
         >
+          <Image
+            source={Images.tripDeets.pencil}
+            style={styles.leadIcon}
+            resizeMode="contain"
+          />
           <TextInput
             ref={urlRef}
             value={url}
             onChangeText={handleUrlChange}
             onBlur={handleUrlBlur}
-            placeholder="booking.com/..."
+            placeholder="Booking.com"
             placeholderTextColor={C.textMuted}
             autoCapitalize="none"
             autoCorrect={false}
@@ -190,31 +185,13 @@ export const SpecificStaySheetContent: React.FC<SpecificStaySheetContentProps> =
             returnKeyType="done"
             onSubmitEditing={() => Keyboard.dismiss()}
           />
-          {showUrlGood ? (
-            <Ionicons
-              name="checkmark-circle"
-              size={22}
-              color={C.success}
-              style={styles.inputIcon}
-            />
-          ) : null}
-          {showUrlBad ? (
-            <Ionicons
-              name="close-circle"
-              size={22}
-              color={C.errorText}
-              style={styles.inputIcon}
-            />
-          ) : null}
         </View>
-        {errors?.url ? (
-          <Text style={styles.error}>{errors.url}</Text>
-        ) : null}
+        {errors?.url ? <Text style={styles.error}>{errors.url}</Text> : null}
       </View>
 
       {/* Photo */}
       <View style={styles.field}>
-        <Text style={styles.label}>Photo</Text>
+        <Text style={styles.photoLabel}>Photo</Text>
         <TouchableOpacity
           activeOpacity={0.85}
           onPress={handlePickPhoto}
@@ -227,30 +204,27 @@ export const SpecificStaySheetContent: React.FC<SpecificStaySheetContentProps> =
           ]}
         >
           {photoUri ? (
-            <Image
-              source={{ uri: photoUri }}
-              style={styles.photo}
-              resizeMode="cover"
-            />
+            <>
+              <Image
+                source={{ uri: photoUri }}
+                style={styles.photo}
+                resizeMode="cover"
+              />
+              <View style={styles.changeOverlay}>
+                <Ionicons name="camera" size={14} color="#FFFFFF" />
+                <Text style={styles.changeOverlayText}>Change photo</Text>
+              </View>
+            </>
           ) : (
             <View style={styles.photoPlaceholder}>
-              <View style={styles.photoIconBubble}>
-                <Ionicons
-                  name="image-outline"
-                  size={26}
-                  color={C.placeholderIcon}
-                />
-              </View>
-              <Text style={styles.photoPlaceholderText}>Tap to pick a photo</Text>
-              <Text style={styles.photoPlaceholderHint}>
-                Any pic (from online) works
+              <Ionicons name="image-outline" size={34} color={C.textMuted} />
+              <Text style={styles.photoPlaceholderText}>
+                Tap to add cover photo
               </Text>
             </View>
           )}
         </TouchableOpacity>
-        {errors?.photo ? (
-          <Text style={styles.error}>{errors.photo}</Text>
-        ) : null}
+        {errors?.photo ? <Text style={styles.error}>{errors.photo}</Text> : null}
       </View>
     </View>
   );
@@ -258,61 +232,70 @@ export const SpecificStaySheetContent: React.FC<SpecificStaySheetContentProps> =
 
 const styles = StyleSheet.create({
   container: {
-    gap: 16,
+    gap: 24,
     paddingBottom: 8,
   },
   field: {
-    gap: 4,
+    gap: 8,
+  },
+  fieldDivided: {
+    marginTop: -14,
+    borderTopWidth: 1,
+    borderTopColor: C.borderDivider,
+    paddingTop: 28,
+  },
+  labelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingRight: 4,
   },
   label: {
     fontFamily: FONT_INTER,
-    fontSize: 12,
-    lineHeight: 16,
-    fontWeight: '700',
-    color: C.textMuted,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  inputBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: C.borderField,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    backgroundColor: C.surfaceCard,
-    minHeight: 48,
-  },
-  inputBoxError: {
-    borderColor: C.errorBorder,
-  },
-  inputBoxValid: {
-    borderColor: C.success,
-  },
-  input: {
-    flex: 1,
-    fontFamily: FONT_INTER,
-    fontSize: 16,
+    fontSize: 18,
     lineHeight: 22,
-    color: C.inkBody,
-    padding: 0,
-    paddingVertical: 10,
+    fontWeight: '700',
+    color: C.ink,
   },
-  inputIcon: {
-    marginLeft: 8,
-  },
-  helperRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 4,
+  photoLabel: {
+    fontFamily: FONT_INTER,
+    fontSize: 20,
+    lineHeight: 24,
+    fontWeight: '700',
+    color: C.ink,
   },
   counter: {
     fontFamily: FONT_INTER,
     fontSize: 12,
-    lineHeight: 16,
+    lineHeight: 18,
     fontWeight: '400',
     color: C.textMuted,
+  },
+  inputBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    height: 56,
+    borderWidth: 1,
+    borderColor: C.borderField,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    backgroundColor: C.surfaceCard,
+  },
+  inputBoxError: {
+    borderColor: C.errorBorder,
+  },
+  leadIcon: {
+    width: 22,
+    height: 22,
+  },
+  input: {
+    flex: 1,
+    fontFamily: FONT_INTER,
+    fontSize: 14,
+    lineHeight: 18,
+    color: C.ink,
+    padding: 0,
   },
   error: {
     marginTop: 4,
@@ -324,12 +307,12 @@ const styles = StyleSheet.create({
   },
   photoBox: {
     width: '100%',
-    height: 140,
-    borderRadius: 12,
+    height: 148,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: C.borderField,
+    borderColor: C.borderDashed,
     borderStyle: 'dashed',
-    backgroundColor: C.placeholderBg,
+    backgroundColor: C.surfaceCard,
     overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
@@ -345,39 +328,37 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
+  changeOverlay: {
+    position: 'absolute',
+    bottom: 10,
+    right: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  changeOverlayText: {
+    fontFamily: FONT_INTER,
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
   photoPlaceholder: {
     flex: 1,
     width: '100%',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
-  },
-  photoIconBubble: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#FFFFFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.06,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 1,
+    gap: 8,
   },
   photoPlaceholderText: {
     fontFamily: FONT_INTER,
-    fontSize: 13,
-    lineHeight: 16,
-    fontWeight: '600',
-    color: C.brandTealText,
-  },
-  photoPlaceholderHint: {
-    fontFamily: FONT_INTER,
-    fontSize: 11,
-    lineHeight: 14,
+    fontSize: 14,
+    lineHeight: 18,
     fontWeight: '400',
-    color: C.textMuted,
+    color: C.accent,
   },
 });
 

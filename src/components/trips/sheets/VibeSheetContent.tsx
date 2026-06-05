@@ -32,6 +32,7 @@ export const VibeSheetContent: React.FC<VibeSheetContentProps> = ({
         onChange={onChange}
         singleSelect
         accessibilityLabel="Trip vibe"
+        style={styles.picker}
       />
     </View>
   );
@@ -39,7 +40,7 @@ export const VibeSheetContent: React.FC<VibeSheetContentProps> = ({
 
 const styles = StyleSheet.create({
   container: {
-    gap: 12,
+    marginTop: -16,
   },
   header: {
     fontFamily: FONT_INTER,
@@ -53,8 +54,11 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 16,
     fontWeight: '500',
-    color: '#9CB6C0',
-    marginTop: -4,
+    color: C.textMuted,
+    marginTop: 2,
+  },
+  picker: {
+    marginTop: 20,
   },
 });
 

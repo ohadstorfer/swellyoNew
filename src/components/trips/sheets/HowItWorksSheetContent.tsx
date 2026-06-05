@@ -36,6 +36,7 @@ export const HowItWorksSheetContent: React.FC<HowItWorksSheetContentProps> = ({
         onChange={onChange}
         mutexPairs={TRIP_STRUCTURE_MUTEX}
         accessibilityLabel="How the trip runs"
+        style={styles.picker}
       />
     </View>
   );
@@ -43,7 +44,7 @@ export const HowItWorksSheetContent: React.FC<HowItWorksSheetContentProps> = ({
 
 const styles = StyleSheet.create({
   container: {
-    gap: 12,
+    marginTop: -16,
   },
   header: {
     fontFamily: FONT_INTER,
@@ -51,6 +52,9 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     fontWeight: '400',
     color: C.textMuted,
+  },
+  picker: {
+    marginTop: 20,
   },
 });
 

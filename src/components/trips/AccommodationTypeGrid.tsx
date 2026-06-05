@@ -6,7 +6,7 @@ import {
   TouchableOpacity,
   Platform,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import Reanimated, { FadeIn } from 'react-native-reanimated';
 
 // --------------------------------------------------------------------------
@@ -24,6 +24,7 @@ const FONT_INTER = Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter';
 
 // Design tokens (spec §2)
 const C = {
+  accent: '#05BCD3',
   brandTeal: '#0788B0',
   brandTealTint: '#E6F4F8',
   brandTealText: '#066b8c',
@@ -99,14 +100,15 @@ export const AccommodationTypeGrid: React.FC<AccommodationTypeGridProps> = ({
               accessibilityLabel={k.title}
               style={[styles.tile, isSelected && styles.tileSelected]}
             >
-              <Ionicons
-                name={k.icon}
-                size={28}
-                color={isSelected ? C.brandTeal : C.textMuted}
-              />
-              <Text style={[styles.tileLabel, isSelected && styles.tileLabelSelected]}>
-                {k.title}
-              </Text>
+              <View style={styles.iconBubble}>
+                <Ionicons name={k.icon} size={24} color={C.inkBody} />
+              </View>
+              <Text style={styles.tileLabel}>{k.title}</Text>
+              {isSelected ? (
+                <View style={styles.checkBadge}>
+                  <MaterialCommunityIcons name="check-bold" size={14} color="#FFFFFF" />
+                </View>
+              ) : null}
             </TouchableOpacity>
           );
         })}
@@ -136,31 +138,49 @@ const styles = StyleSheet.create({
   },
   tile: {
     width: '48%',
-    aspectRatio: 1.7,
-    marginBottom: 10,
-    borderRadius: 16,
+    aspectRatio: 1.3,
+    marginBottom: 12,
+    borderRadius: 20,
     borderWidth: 1,
-    borderColor: C.borderField,
+    borderColor: 'transparent', // reserves space so the selected border adds no shift
     backgroundColor: C.surfaceCard,
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 10,
     padding: 12,
+    shadowColor: '#596E7C',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 4,
   },
   tileSelected: {
-    borderWidth: 2,
-    borderColor: C.brandTeal,
-    backgroundColor: C.brandTealTint,
+    borderColor: C.accent,
+  },
+  iconBubble: {
+    backgroundColor: '#F7F7F7',
+    borderRadius: 12,
+    padding: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkBadge: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: C.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   tileLabel: {
-    marginTop: 8,
     fontFamily: FONT_INTER,
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: 15,
+    fontWeight: '700',
     color: C.inkBody,
     textAlign: 'center',
-  },
-  tileLabelSelected: {
-    color: C.brandTealText,
   },
   descPanel: {
     marginTop: 16,

@@ -8,7 +8,7 @@ import {
   StyleProp,
   ViewStyle,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 // --------------------------------------------------------------------------
 // TripTagPicker — generic multi-select picker rendered as a vertical stack
@@ -30,13 +30,16 @@ const FONT_INTER = Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter';
 
 // Design tokens (mirrors SurfChipPicker)
 const C = {
+  accent: '#05BCD3',
   brandTeal: '#0788B0',
   brandTealText: '#066b8c',
   brandTealTint: '#E6F4F8',
-  inkBody: '#222B30',
+  inkBody: '#333333',
   textMuted: '#7B7B7B',
   borderField: '#E0E0E0',
   surfaceCard: '#FFFFFF',
+  checkboxOffBg: '#F7F7F7',
+  checkboxOffBorder: '#CFCFCF',
   errorText: '#C0392B',
   meterFill: '#9CB6C0',
   meterEmpty: '#E0E0E0',
@@ -158,33 +161,22 @@ export function TripTagPicker<TSlug extends string>({
               accessibilityRole="checkbox"
               accessibilityState={{ checked: isSelected }}
               accessibilityLabel={opt.label}
-              style={[
-                styles.pill,
-                {
-                  borderColor: isSelected ? C.brandTeal : C.borderField,
-                  backgroundColor: isSelected ? C.brandTealTint : C.surfaceCard,
-                },
-              ]}
+              style={[styles.pill, isSelected && styles.pillSelected]}
             >
-              <Text
-                style={[
-                  styles.label,
-                  { color: isSelected ? C.brandTealText : C.inkBody },
-                ]}
-              >
-                {opt.label}
-              </Text>
+              <Text style={styles.label}>{opt.label}</Text>
               {opt.intensity != null ? (
                 <IntensityMeter level={opt.intensity} active={isSelected} />
               ) : null}
-              {isSelected ? (
-                <Ionicons
-                  name="checkmark-circle"
-                  size={20}
-                  color={C.brandTeal}
-                  style={styles.check}
-                />
-              ) : null}
+              <View
+                style={[
+                  styles.checkbox,
+                  isSelected ? styles.checkboxOn : styles.checkboxOff,
+                ]}
+              >
+                {isSelected ? (
+                  <MaterialCommunityIcons name="check-bold" size={14} color="#FFFFFF" />
+                ) : null}
+              </View>
             </TouchableOpacity>
           );
         })}
@@ -200,23 +192,50 @@ export function TripTagPicker<TSlug extends string>({
 
 const styles = StyleSheet.create({
   list: {
-    gap: 8,
+    gap: 12,
   },
   pill: {
     flexDirection: 'row',
     alignItems: 'center',
-    minHeight: 48,
-    paddingVertical: 12,
+    minHeight: 64,
+    paddingVertical: 20,
     paddingHorizontal: 16,
+    borderRadius: 16,
     borderWidth: 1,
-    borderRadius: 12,
+    borderColor: 'transparent', // reserves space so the selected border adds no shift
+    backgroundColor: C.surfaceCard,
+    shadowColor: '#596E7C',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  pillSelected: {
+    borderColor: C.accent,
   },
   label: {
     flex: 1,
     fontFamily: FONT_INTER,
-    fontSize: 15,
-    lineHeight: 20,
-    fontWeight: '600',
+    fontSize: 16,
+    lineHeight: 22,
+    fontWeight: '500',
+    color: C.inkBody,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 8,
+  },
+  checkboxOn: {
+    backgroundColor: C.accent,
+  },
+  checkboxOff: {
+    backgroundColor: C.checkboxOffBg,
+    borderWidth: 1,
+    borderColor: C.checkboxOffBorder,
   },
   meter: {
     flexDirection: 'row',
@@ -228,9 +247,6 @@ const styles = StyleSheet.create({
   meterBar: {
     width: 3,
     borderRadius: 1.5,
-  },
-  check: {
-    marginLeft: 8,
   },
   error: {
     marginTop: 8,
