@@ -24,10 +24,15 @@ export const tripsKeys = {
   all: ['trips'] as const,
   explore: ['trips', 'explore'] as const,
   my: (userId: string) => ['trips', 'my', userId] as const,
+  detail: (id: string) => ['trips', 'detail', id] as const,
+  detailUpdates: (id: string) => ['trips', 'detail-updates', id] as const,
+  detailGear: (id: string) => ['trips', 'detail-gear', id] as const,
+  detailRequests: (id: string) => ['trips', 'detail-requests', id] as const,
+  detailGearRequests: (id: string) => ['trips', 'detail-gear-requests', id] as const,
 };
 
-type ExploreData = { trips: GroupTrip[]; meta: Map<string, TripCardMeta> };
-type MyTripsData = { buckets: MyTripsBuckets; meta: Map<string, TripCardMeta> };
+export type ExploreData = { trips: GroupTrip[]; meta: Map<string, TripCardMeta> };
+export type MyTripsData = { buckets: MyTripsBuckets; meta: Map<string, TripCardMeta> };
 
 /** Explore deck: active group trips + batched card meta. */
 export function useExploreTrips() {

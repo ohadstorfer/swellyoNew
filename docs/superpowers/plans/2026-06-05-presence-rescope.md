@@ -1,6 +1,43 @@
+# User Presence Re-scope Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Replace the single global `presence:users` Realtime channel (O(N²) fan-out) with per-user presence topics (`presence:user:{id}`), keeping presence live and "online = app open" semantics, with no caller or DB changes.
+
+**Architecture:** Each user tracks presence on their own topic while foregrounded (publish side); to render a peer's online dot, the client subscribes read-only to that peer's topic (subscribe side). On a per-user topic, any presence entry means that user is online. `last_seen_at` (`user_activity`, < 5 min) stays as the realtime-down fallback and the initial-paint seed. Total fan-out becomes O(N).
+
+**Tech Stack:** React Native 0.81 / Expo 54, `@supabase/supabase-js` Realtime Presence, TypeScript.
+
+**Project testing note:** This repo has **no test harness** (no jest, no `test` script, no test files). Verification is therefore (a) `npx tsc --noEmit` for type safety and (b) a manual two-account test in Expo Go covering the spec's acceptance criteria. Standing up jest + mocking Supabase Realtime is intentionally out of scope — it would be a large separate effort and would not meaningfully de-risk realtime-channel wiring, which only integration testing exercises.
+
+**Commit note:** Ohad commits manually. Commit commands below are the suggested grouping; if running inline, review the diff and commit yourself rather than auto-committing.
+
+**Spec:** `docs/superpowers/specs/2026-06-05-presence-rescope-design.md`
+
+---
+
+## File Structure
+
+| File | Responsibility | Change |
+|---|---|---|
+| `src/services/presence/userPresenceService.ts` | Singleton managing own-presence publish + per-peer watch subscriptions + DB fallback | **Full internal rewrite.** Public API (`trackCurrentUser`, `subscribeToUserStatus`, `stopTrackingCurrentUser`, `cleanup`) unchanged. |
+
+No other files change. Callers (`MessagingProvider.tsx`, `logout.ts`, `DirectMessageScreen.tsx`, `DirectGroupChat.tsx`) consume the unchanged public API and are not modified.
+
+---
+
+## Task 1: Rewrite `userPresenceService` to per-user topics
+
+**Files:**
+- Modify (replace contents): `src/services/presence/userPresenceService.ts`
+
+This is an all-or-nothing internal rewrite — the file must be replaced wholesale because the global-channel methods (`ensurePresenceChannel`, `notifyAllSubscribers`, `notifySubscribersForUser`, `getBatchUserStatus`) are deleted and replaced by own-channel + watch-channel methods. A partial edit would not type-check.
+
+- [ ] **Step 1: Replace the entire file with the implementation below**
+
+```typescript
 import { supabase, isSupabaseConfigured } from '../../config/supabase';
 import { AppState, AppStateStatus } from 'react-native';
-import { ensureConnected } from '../../lib/realtimeConnection';
 
 /**
  * User Presence Service — per-user topics
@@ -44,7 +81,7 @@ class UserPresenceService {
   private ownChannelHealthy = false;
   private recoveryAttempts = 0;
   private recoveryTimeout: ReturnType<typeof setTimeout> | null = null;
-  private presenceUpdateInterval: ReturnType<typeof setInterval> | null = null;
+  private presenceUpdateInterval: NodeJS.Timeout | null = null;
   private appStateSubscription: any = null;
   private lastDbWrite = 0;
   private readonly DB_WRITE_COOLDOWN = 60000;
@@ -59,7 +96,7 @@ class UserPresenceService {
 
   // --- metrics ---
   private metrics = { presenceUpdates: 0, dbWrites: 0, statusQueries: 0, lastReset: Date.now() };
-  private metricsLogInterval: ReturnType<typeof setInterval> | null = null;
+  private metricsLogInterval: NodeJS.Timeout | null = null;
 
   private constructor() {}
 
@@ -228,23 +265,16 @@ class UserPresenceService {
 
     // Seed initial status. The watch channel is not SUBSCRIBED yet (subscribe is
     // async), so this resolves via the DB fallback for an instant first paint;
-    // live presence takes over once the channel reaches SUBSCRIBED. `active` guards
-    // against the consumer unsubscribing before this async seed resolves.
-    let active = true;
+    // live presence takes over once the channel reaches SUBSCRIBED.
     this.computeWatchedStatus(userId).then(isOnline => {
-      if (!active) return;
       this.lastNotifiedStatus.set(userId, isOnline);
       callback(isOnline);
     }).catch(() => {
-      if (!active) return;
       this.lastNotifiedStatus.set(userId, false);
       callback(false);
     });
 
-    return () => {
-      active = false;
-      this.unsubscribeFromUserStatus(userId, callback);
-    };
+    return () => this.unsubscribeFromUserStatus(userId, callback);
   }
 
   private unsubscribeFromUserStatus(userId: string, callback: (isOnline: boolean) => void): void {
@@ -266,14 +296,6 @@ class UserPresenceService {
         config: { presence: { key: userId } },
       });
       this.watchChannels.set(userId, channel);
-
-      // trackCurrentUser() may have resolved while we were creating this channel.
-      // If userId turns out to be the current user, our own channel already owns
-      // this topic — drop the duplicate watch channel rather than competing on it.
-      if (userId === this.currentUserId) {
-        this.teardownWatchChannel(userId);
-        return;
-      }
 
       channel
         .on('presence', { event: 'sync' }, () => this.notifyForWatchedUser(userId))
@@ -359,12 +381,8 @@ class UserPresenceService {
     const channel = this.watchChannels.get(userId);
     if (channel && this.watchHealthy.get(userId)) {
       try {
-        // The peer tracks on this topic under key = their own userId, so check
-        // that specific key rather than "any entry" — avoids reading ghost
-        // entries from other clients as this user being online.
-        const state = channel.presenceState() as Record<string, unknown[]>;
-        const entries = state[userId];
-        return Array.isArray(entries) && entries.length > 0;
+        const state = channel.presenceState();
+        return Object.keys(state).length > 0;
       } catch (_) {
         return this.getUserStatusFromDatabase(userId);
       }
@@ -469,9 +487,6 @@ class UserPresenceService {
     this.appStateSubscription = AppState.addEventListener('change', async (nextAppState: AppStateStatus) => {
       if (!this.currentUserId) return;
       if (nextAppState === 'active') {
-        // The socket may have been manually disconnected (channel count hit 0)
-        // while backgrounded; revive it before rebuilding channels.
-        ensureConnected();
         // Foregrounding is the natural "try again" signal on mobile.
         if (!this.ownChannelHealthy && this.recoveryAttempts >= MAX_RECOVERY_ATTEMPTS) {
           console.log('[UserPresenceService] App active — rebuilding own presence channel');
@@ -510,18 +525,12 @@ class UserPresenceService {
         this.ownChannelHealthy = false;
       }
 
-      // Tear down all watch channels and their retry timers. Guard each so one
-      // failure can't abort the rest, then clear any maps teardown didn't cover
-      // (e.g. a userId whose channel creation threw before it was stored).
+      // Tear down all watch channels and their retry timers.
       for (const userId of Array.from(this.watchChannels.keys())) {
-        try { this.teardownWatchChannel(userId); } catch (_) { /* best effort */ }
+        this.teardownWatchChannel(userId);
       }
       this.userStatusSubscriptions.clear();
       this.lastNotifiedStatus.clear();
-      this.watchHealthy.clear();
-      this.watchRetryAttempts.clear();
-      for (const t of this.watchRetryTimeouts.values()) clearTimeout(t);
-      this.watchRetryTimeouts.clear();
 
       console.log('[UserPresenceService] Stopped tracking and cleaned up');
     } catch (error) {
@@ -536,3 +545,97 @@ class UserPresenceService {
 
 // Export singleton instance
 export const userPresenceService = UserPresenceService.getInstance();
+```
+
+- [ ] **Step 2: Type-check the file**
+
+Run: `npx tsc --noEmit -p tsconfig.json 2>&1 | rg "userPresenceService" || echo "✓ no errors in userPresenceService"`
+Expected: `✓ no errors in userPresenceService` (the repo has ~174 pre-existing errors elsewhere; only this file matters here).
+
+- [ ] **Step 3: Self-review checklist (read the diff against the old file)**
+
+Confirm each is true:
+- `presence:users` no longer appears anywhere in the file.
+- Public methods present with identical signatures: `trackCurrentUser()`, `subscribeToUserStatus(userId, callback)`, `stopTrackingCurrentUser()`, `cleanup()`.
+- Deleted methods are gone: `ensurePresenceChannel`, `updateCurrentUserPresence`, `notifyAllSubscribers`, `notifySubscribersForUser`, `getBatchUserStatus`, `getUserStatus`.
+- Own channel and watch channels both use `presenceTopic(id)` = `presence:user:{id}`.
+- Watcher path never calls `.track()` (only the own channel tracks).
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add src/services/presence/userPresenceService.ts
+git commit -m "refactor(presence): global presence:users channel -> per-user topics (O(N^2)->O(N))"
+```
+
+---
+
+## Task 2: Sanity-check callers and global-channel removal
+
+No code changes — verify the rewrite didn't break the contract.
+
+**Files:** none (verification only)
+
+- [ ] **Step 1: Confirm the global channel is fully gone**
+
+Run: `rg -n "presence:users|notifyAllSubscribers|getBatchUserStatus" src/`
+Expected: no matches.
+
+- [ ] **Step 2: Confirm callers still resolve the unchanged API**
+
+Run: `rg -n "userPresenceService\.(trackCurrentUser|subscribeToUserStatus|stopTrackingCurrentUser|cleanup)\b" src/`
+Expected: matches in `MessagingProvider.tsx` (track + stop), `logout.ts` (stop), `DirectMessageScreen.tsx` (subscribe), `DirectGroupChat.tsx` (subscribe) — i.e. the same call sites as before, unedited.
+
+- [ ] **Step 3: Full type-check passes for the touched file**
+
+Run: `npx tsc --noEmit -p tsconfig.json 2>&1 | rg "presence|DirectMessageScreen|DirectGroupChat|MessagingProvider" || echo "✓ no new errors in presence path"`
+Expected: `✓ no new errors in presence path`.
+
+---
+
+## Task 3: Manual two-account verification (acceptance criteria)
+
+The only meaningful test of realtime wiring. Run in Expo Go on two accounts (A and B); a third (C) for the isolation check. Presence works in Expo Go (pure JS websocket, no native module).
+
+**Files:** none
+
+- [ ] **Step 1: Live online (criterion 1) — "online = app open anywhere"**
+
+A and B open the A↔B DM on two devices. Foreground A's app but navigate A to a **non-chat** screen (e.g. Trips). Expected: B's header dot for A shows **online** within ~1–2s. Background/close A. Expected: B's dot flips **offline** within a couple seconds (instant-flip, not 5-min lag).
+
+- [ ] **Step 2: No global fan-out (criterion 2)**
+
+With A online and B watching, have a third user C open a DM with **someone other than A**. Watch C's realtime frames (Expo dev tools / network). Expected: C receives **no** presence traffic about A. (Pre-rewrite, every client got every user's presence.)
+
+- [ ] **Step 3: Realtime-down fallback (criterion 3)**
+
+On B, kill connectivity briefly (airplane mode ~10s) while viewing A's chat, then restore. Expected: the dot falls back to `last_seen_at` behavior (A shows online if active in last 5 min) and does **not** get stuck; once reconnected, live presence resumes.
+
+- [ ] **Step 4: Logout teardown (criterion 4)**
+
+Log B out while viewing A's chat. Expected: no console errors from `UserPresenceService`; on re-login presence re-initializes cleanly (A's dot still resolves).
+
+- [ ] **Step 5: Record result**
+
+If all pass, update the spec status line and commit:
+
+```bash
+# In docs/superpowers/specs/2026-06-05-presence-rescope-design.md change Status to:
+# **Status:** Done — implemented and verified (two-account test passed).
+git add docs/superpowers/specs/2026-06-05-presence-rescope-design.md
+git commit -m "docs(presence): mark per-user-topics design verified"
+```
+
+---
+
+## Self-Review (plan vs spec)
+
+- **Spec §4.1 topology** → Task 1 (`ensureOwnChannel`, `ensureWatchChannel`, `presenceTopic`). ✓
+- **Spec §4.3 API preserved / no caller changes** → Task 1 keeps signatures; Task 2 Step 2 verifies call sites unchanged. ✓
+- **Spec §4.4 public channels / no migration** → Task 1 creates channels without `{ private: true }`; no migration task exists. ✓
+- **Spec §4.5 internals + deletions** → Task 1 deletes `ensurePresenceChannel`/`notifyAllSubscribers`/`notifySubscribersForUser`/`getBatchUserStatus`; Task 2 Step 1 verifies. ✓
+- **Spec §4.6 edge cases** → self-watch guard (`userId === this.currentUserId`) in `ensureWatchChannel`; reconnect via `scheduleOwnChannelRecovery`/`scheduleWatchRecovery`; logout teardown in `stopTrackingCurrentUser`. ✓
+- **Spec §6 acceptance criteria 1–5** → Task 3 Steps 1–4 (criterion 5 "no UX regression" is covered by Step 1 exercising the real header dot). ✓
+- **Placeholder scan:** none. **Type consistency:** `presenceTopic`, `ownChannel`/`ownChannelHealthy`, `watchChannels`/`watchHealthy`/`watchRetryAttempts`/`watchRetryTimeouts`, `computeWatchedStatus` used consistently across Task 1. ✓
+
+> Note: the rewrite also fixes a latent bug in the old code — the global channel set `config.presence.key` to the literal string `'user_id'` (not the actual id), so `presenceState()[userId]` never matched and presence-based lookups silently always fell through to the DB. Per-user topics use "any presence entry = online", which sidesteps the key entirely.

@@ -49,6 +49,8 @@ import Reanimated, {
   useSharedValue,
   withTiming,
   type SharedValue,
+  SlideInRight,
+  SlideOutRight,
 } from 'react-native-reanimated';
 
 // Hosting-style chooser content. Lifted out of CreateTripWizard so the chooser
@@ -905,17 +907,23 @@ export default function TripsScreen({ onBack, initialTripId, onOpenGroupChat, on
 
   if (selectedTripId) {
     return (
-      <TripDetailScreen
-        tripId={selectedTripId}
-        onBack={() => setSelectedTripId(null)}
-        onOpenGroupChat={onOpenGroupChat}
-        onEditTrip={setEditingTrip}
-        onViewUserProfile={
-          onViewUserProfile
-            ? (userId: string) => onViewUserProfile(userId, selectedTripId)
-            : undefined
-        }
-      />
+      <Reanimated.View
+        style={{ flex: 1 }}
+        entering={reduceMotion ? undefined : SlideInRight.duration(280).easing(Easing.out(Easing.cubic))}
+        exiting={reduceMotion ? undefined : SlideOutRight.duration(220).easing(Easing.in(Easing.cubic))}
+      >
+        <TripDetailScreen
+          tripId={selectedTripId}
+          onBack={() => setSelectedTripId(null)}
+          onOpenGroupChat={onOpenGroupChat}
+          onEditTrip={setEditingTrip}
+          onViewUserProfile={
+            onViewUserProfile
+              ? (userId: string) => onViewUserProfile(userId, selectedTripId)
+              : undefined
+          }
+        />
+      </Reanimated.View>
     );
   }
 

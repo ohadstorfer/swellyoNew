@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   StyleSheet,
@@ -134,9 +134,18 @@ export const VideoPreviewModal: React.FC<VideoPreviewModalProps> = ({
 
   const translateY = useSharedValue(0);
 
+  // Re-entrancy guard. onSend (the host's handleVideoSend) is async and only
+  // closes this modal after a network round-trip, so the send button stays live
+  // for that whole window. Without a synchronous guard a fast double-tap — or a
+  // single Android press the OS delivers as two touch events — fires onSend
+  // twice and uploads the video twice. A ref blocks within the same tick; state
+  // wouldn't update fast enough.
+  const sendingRef = useRef(false);
+
   useEffect(() => {
     if (visible) {
       translateY.value = 0;
+      sendingRef.current = false;
     }
   }, [visible, translateY]);
 
@@ -150,6 +159,8 @@ export const VideoPreviewModal: React.FC<VideoPreviewModalProps> = ({
       });
     }
     if (isProcessing) return;
+    if (sendingRef.current) return;
+    sendingRef.current = true;
     onSend(caption.trim() || undefined, currentVideoUri !== videoUri ? currentVideoUri : undefined);
     setCaption('');
   };
