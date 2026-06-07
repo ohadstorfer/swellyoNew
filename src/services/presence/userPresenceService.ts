@@ -1,6 +1,5 @@
 import { supabase, isSupabaseConfigured } from '../../config/supabase';
 import { AppState, AppStateStatus } from 'react-native';
-import { ensureConnected } from '../../lib/realtimeConnection';
 
 /**
  * User Presence Service — per-user topics
@@ -469,9 +468,6 @@ class UserPresenceService {
     this.appStateSubscription = AppState.addEventListener('change', async (nextAppState: AppStateStatus) => {
       if (!this.currentUserId) return;
       if (nextAppState === 'active') {
-        // The socket may have been manually disconnected (channel count hit 0)
-        // while backgrounded; revive it before rebuilding channels.
-        ensureConnected();
         // Foregrounding is the natural "try again" signal on mobile.
         if (!this.ownChannelHealthy && this.recoveryAttempts >= MAX_RECOVERY_ATTEMPTS) {
           console.log('[UserPresenceService] App active — rebuilding own presence channel');

@@ -38,6 +38,15 @@ serve(async (req) => {
   if (req.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405, headers: { 'Content-Type': 'application/json' } })
   }
+  // Caller authentication: operator-only admin function. Fails closed if
+  // ADMIN_FUNCTION_SECRET is unset.
+  {
+    const provided = req.headers.get('x-internal-secret') || ''
+    const expected = Deno.env.get('ADMIN_FUNCTION_SECRET') || ''
+    if (!expected || provided !== expected) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } })
+    }
+  }
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
   const { data: rows, error: selectError } = await supabase
     .from('user_destinations')

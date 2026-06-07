@@ -141,6 +141,28 @@ serve(async (req) => {
       );
     }
 
+    // Caller authorization: invoked from the client by the trip host doing the
+    // removal. Verify the caller's JWT and that they are the host of this trip
+    // (group_trips has no admin role). Self-leave uses leaveTrip() and never
+    // hits here.
+    const authHeader = req.headers.get('Authorization') || '';
+    if (!authHeader.startsWith('Bearer ')) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
+    }
+    const { data: { user }, error: authError } = await supabase.auth.getUser(authHeader.slice(7));
+    if (authError || !user) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
+    }
+    const { data: trip } = await supabase
+      .from('group_trips')
+      .select('host_id')
+      .eq('id', tripId)
+      .maybeSingle();
+    if (!trip || trip.host_id !== user.id) {
+      console.warn(`[Trip Removed Notif] [${reqId}] Forbidden: ${user.id} is not host of ${tripId}`);
+      return new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
+    }
+
     await sendRemovedNotification(supabase, tripId, removedUserId);
 
     return new Response(

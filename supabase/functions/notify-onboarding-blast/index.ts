@@ -30,6 +30,19 @@ serve(async (req) => {
     })
   }
 
+  // Caller authentication: operator-only blast function. Fails closed if
+  // ADMIN_FUNCTION_SECRET is unset.
+  {
+    const provided = req.headers.get('x-internal-secret') || ''
+    const expected = Deno.env.get('ADMIN_FUNCTION_SECRET') || ''
+    if (!expected || provided !== expected) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+  }
+
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
     auth: { autoRefreshToken: false, persistSession: false },
   })

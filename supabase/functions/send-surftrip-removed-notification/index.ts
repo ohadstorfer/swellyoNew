@@ -128,6 +128,30 @@ serve(async (req) => {
       );
     }
 
+    // Caller authorization: this function is invoked from the client by the
+    // host/admin doing the removal. Verify the caller's JWT and that they are
+    // actually a host or admin of this group (mirrors the RLS DELETE policy on
+    // surftrip_group_members). Self-leave uses leaveGroup() and never hits here.
+    const authHeader = req.headers.get('Authorization') || '';
+    if (!authHeader.startsWith('Bearer ')) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
+    }
+    const { data: { user }, error: authError } = await supabase.auth.getUser(authHeader.slice(7));
+    if (authError || !user) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
+    }
+    const { data: membership } = await supabase
+      .from('surftrip_group_members')
+      .select('role')
+      .eq('group_id', groupId)
+      .eq('user_id', user.id)
+      .in('role', ['host', 'admin'])
+      .maybeSingle();
+    if (!membership) {
+      console.warn(`[Surftrip Removed Notif] [${reqId}] Forbidden: ${user.id} is not host/admin of ${groupId}`);
+      return new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
+    }
+
     await sendRemovedNotification(supabase, groupId, removedUserId);
 
     return new Response(
