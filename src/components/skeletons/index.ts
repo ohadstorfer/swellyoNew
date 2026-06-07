@@ -17,5 +17,6 @@ export {
   MyTripsSkeleton,
   ExploreDeckSkeleton,
   BudgetCardsSkeleton,
+  TripDetailSkeleton,
 } from './TripSkeletons';
 

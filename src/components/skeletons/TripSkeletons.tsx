@@ -143,6 +143,34 @@ export const BudgetCardsSkeleton: React.FC = () => (
   </View>
 );
 
+// ---------------------------------------------------------------------------
+// Trip Detail — hero + section placeholders matching the real layout.
+// ---------------------------------------------------------------------------
+export const TripDetailSkeleton: React.FC = () => (
+  <View style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
+    <SkeletonBase width="100%" height={260} borderRadius={0} />
+    <View style={{ padding: 20, gap: 12 }}>
+      <SkeletonBase width="70%" height={24} borderRadius={6} />
+      <View style={{ flexDirection: 'row', gap: 12 }}>
+        <SkeletonBase width={120} height={16} borderRadius={6} />
+        <SkeletonBase width={100} height={16} borderRadius={6} />
+      </View>
+      <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
+        {[0, 1, 2, 3].map(i => (
+          <SkeletonBase key={i} width={36} height={36} borderRadius={18} />
+        ))}
+      </View>
+      <SkeletonBase width="40%" height={18} borderRadius={6} style={{ marginTop: 16 } as any} />
+      <SkeletonBase width="100%" height={14} borderRadius={6} />
+      <SkeletonBase width="90%" height={14} borderRadius={6} />
+      <SkeletonBase width="60%" height={14} borderRadius={6} />
+      <SkeletonBase width="40%" height={18} borderRadius={6} style={{ marginTop: 16 } as any} />
+      <SkeletonBase width="100%" height={14} borderRadius={6} />
+      <SkeletonBase width="80%" height={14} borderRadius={6} />
+    </View>
+  </View>
+);
+
 const styles = StyleSheet.create({
   // My Trips
   myTripsRoot: {

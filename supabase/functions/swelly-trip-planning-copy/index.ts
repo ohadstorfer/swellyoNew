@@ -238,10 +238,16 @@ function getTravelExpLevelInline(t: number | string | undefined | null): number 
   }
   return 2
 }
+// Only the columns actually read by the matching path (criteria filter, scoring, and the
+// MatchResult mapping). Selecting these explicitly instead of '*' avoids pulling ~37 unused
+// columns per surfer (bio, onboarding_summary_text, lifestyle_image_urls, home_break_*,
+// expo_push_token, etc.) on every match request — pure egress reduction, zero behavior change.
+const SURFER_MATCH_COLUMNS =
+  'user_id, name, profile_image_url, country_from, surfboard_type, surf_level, surf_level_category, age, travel_experience, destinations_array'
 function buildSurferQueryInline(req: any, requestingUserId: string, excludedIds: string[], supabaseAdmin: any): any {
   let q = supabaseAdmin
     .from('surfers')
-    .select('*')
+    .select(SURFER_MATCH_COLUMNS)
     .neq('user_id', requestingUserId)
     .or('is_demo_user.is.null,is_demo_user.eq.false')
   if (excludedIds?.length > 0) {

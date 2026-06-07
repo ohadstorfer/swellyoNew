@@ -91,17 +91,6 @@ export default Sentry.wrap(function App() {
     return () => sub.remove();
   }, []);
 
-  // 🧪 TEMP — Sentry smoke test. REMOVE after verifying. Runs only when
-  // EXPO_PUBLIC_SENTRY_DEBUG=true, so it can never fire in normal dev or prod.
-  useEffect(() => {
-    if (process.env.EXPO_PUBLIC_SENTRY_DEBUG !== 'true') return;
-    const t = setTimeout(() => {
-      console.log('[SentryTest] sending test event to Sentry…');
-      Sentry.captureException(new Error(`Sentry smoke test — ${Platform.OS} @ ${new Date().toISOString()}`));
-    }, 3000);
-    return () => clearTimeout(t);
-  }, []);
-
   const handleNavigationReady = () => {
     setIsNavigationReady(true);
   };

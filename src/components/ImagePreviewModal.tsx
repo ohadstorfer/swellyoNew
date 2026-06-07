@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   StyleSheet,
@@ -86,15 +86,27 @@ export const ImagePreviewModal: React.FC<ImagePreviewModalProps> = ({
 
   const translateY = useSharedValue(0);
 
-  // Reset the animated offset every time the modal opens so re-opens start centered.
+  // Re-entrancy guard. onSend (the host's handleImageSend) is async and only
+  // closes this modal after a network round-trip, so the send button stays live
+  // for that whole window. Without a synchronous guard a fast double-tap — or a
+  // single Android press the OS delivers as two touch events — fires onSend
+  // twice and uploads the image twice. A ref blocks within the same tick; state
+  // wouldn't update fast enough.
+  const sendingRef = useRef(false);
+
+  // Reset the animated offset (and re-arm the send guard) every time the modal
+  // opens so re-opens start centered and can send again.
   useEffect(() => {
     if (visible) {
       translateY.value = 0;
+      sendingRef.current = false;
     }
   }, [visible, translateY]);
 
   const handleSend = () => {
     if (isProcessing) return;
+    if (sendingRef.current) return;
+    sendingRef.current = true;
     onSend(caption.trim() || undefined);
     setCaption('');
   };

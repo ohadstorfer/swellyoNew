@@ -1,4 +1,5 @@
 import { authService } from '../services/auth/authService';
+import { stopSessionKeepalive } from '../lib/realtimeConnection';
 import { analyticsService } from '../services/analytics/analyticsService';
 import { userPresenceService } from '../services/presence/userPresenceService';
 import { logoutRegistry } from './logoutRegistry';
@@ -57,6 +58,15 @@ async function destroySession(signal: AbortSignal): Promise<void> {
     console.log('[Logout] Presence tracking stopped');
   } catch (presenceError) {
     console.error('[Logout] Error stopping presence tracking:', presenceError);
+  }
+
+  // Remove the realtime keepalive channel so the socket can close on sign-out
+  // (we WANT it down when logged out).
+  try {
+    stopSessionKeepalive();
+    console.log('[Logout] Realtime keepalive stopped');
+  } catch (keepaliveError) {
+    console.error('[Logout] Error stopping realtime keepalive:', keepaliveError);
   }
 
   if (signal.aborted) return;

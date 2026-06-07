@@ -1058,7 +1058,7 @@ export async function findMatchingUsers(
         console.error('Error querying all surfers for closest matches:', relaxedError);
         return [];
       }
-      
+
       allSurfers = allSurfersRelaxed || [];
       console.log(`Relaxed query returned ${allSurfers.length} surfers for closest match scoring`);
     }
@@ -1116,7 +1116,7 @@ export async function findMatchingUsers(
         .neq('user_id', requestingUserId)
         .or('is_demo_user.is.null,is_demo_user.eq.false') // Exclude demo users
         .or('pending_deletion.is.null,pending_deletion.eq.false') // Exclude pending deletion users
-      
+
       // Exclude previously matched users in relaxed query too
       // Note: We'll filter in-memory below as the primary exclusion method
       
