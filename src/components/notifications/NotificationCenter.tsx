@@ -36,6 +36,8 @@ import {
 interface Props {
   /** Current user id — used for the realtime filter. Null while logged out. */
   userId: string | null;
+  /** Render a bare bell (no dark circle) to sit next to other plain header icons. */
+  bare?: boolean;
 }
 
 // Strong ease-out (emil): starts fast, feels responsive.
@@ -64,7 +66,7 @@ type Decision = 'approved' | 'declined';
  * Self-contained: owns its fetch, realtime subscription, unread badge and panel.
  * Drop `<NotificationCenter userId={...} />` into the header and that's it.
  */
-export const NotificationCenter: React.FC<Props> = ({ userId }) => {
+export const NotificationCenter: React.FC<Props> = ({ userId, bare = false }) => {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   // Full-screen panel — slides in from the right edge over the whole screen.
@@ -259,13 +261,13 @@ export const NotificationCenter: React.FC<Props> = ({ userId }) => {
     <>
       <TouchableOpacity
         testID="notifications-bell-button"
-        style={styles.bellButton}
+        style={[styles.bellButton, bare && styles.bellButtonBare]}
         onPress={openPanel}
         activeOpacity={0.7}
         accessibilityLabel="Notifications"
         accessibilityRole="button"
       >
-        <Ionicons name="notifications-outline" size={20} color="#FFFFFF" />
+        <Ionicons name="notifications-outline" size={bare ? 24 : 20} color="#FFFFFF" />
         {unread > 0 && (
           <View style={styles.badge}>
             {unread > 1 ? <Text style={styles.badgeText}>{unread > 9 ? '9+' : unread}</Text> : null}
@@ -447,6 +449,9 @@ const NotificationItem: React.FC<ItemProps> = ({ n, isUnread, acting, disabled, 
 
 const styles = StyleSheet.create({
   // Bell matches the existing headerButton (36x36 #333 circle).
+  bellButtonBare: {
+    backgroundColor: 'transparent',
+  },
   bellButton: {
     width: 36,
     height: 36,

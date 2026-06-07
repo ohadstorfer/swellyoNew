@@ -1,4 +1,6 @@
-// Spacy vertical-stack budget tier picker — supersedes BudgetTierCards.tsx.
+// Budget tier picker — Figma node 12541:3162. Three row cards (checkbox · plan ·
+// price), an "Estimated by AI" pill, and "Based on:" chips. Reuses the white
+// floating-card + circular-checkbox language from AudienceCard / SheetOptionCard.
 
 import React from 'react';
 import {
@@ -8,22 +10,23 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Text } from '../Text';
 
 const FONT_INTER = Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter';
-const FONT_MONTSERRAT =
-  Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat';
 
 const C = {
-  brandTeal: '#0788B0',
-  brandTealText: '#066b8c',
-  brandTealTint: '#E6F4F8',
+  accent: '#05BCD3', // brand cyan — selection + checkbox
+  aiGradStart: '#FF5367', // "Estimated by AI" gradient border — accent/100 (pink)
+  aiGradEnd: '#B72DF2', //   → accent/200 (purple)
   inkDark: '#212121',
-  inkBody: '#222B30',
+  inkBody: '#333333',
   textMuted: '#7B7B7B',
-  borderField: '#CFCFCF',
+  borderHairline: '#EEEEEE',
+  checkboxOffBg: '#F7F7F7',
+  checkboxOffBorder: '#CFCFCF',
+  chipBg: '#EEEEEE',
   surface: '#FFFFFF',
   errorText: '#C0392B',
 };
@@ -40,41 +43,36 @@ export interface BudgetTierCardsBigProps {
   ranges: Record<BudgetTier, BudgetTierRange>;
   selected: BudgetTier | null;
   onChange: (tier: BudgetTier) => void;
+  /** Chips rendered after "Based on:" (e.g. ['Bali', '10 days', 'bungalow']). */
+  basedOnTags?: string[];
+  /** Fallback single-line derivation if no tags are passed. */
   derivation?: string;
   onManualOverride?: () => void;
   error?: string;
-  /** Currency code shown next to ranges. Defaults to USD. */
-  currency?: string;
 }
 
 const TIER_ORDER: BudgetTier[] = ['low', 'medium', 'high'];
 const TIER_LABEL: Record<BudgetTier, string> = {
-  low: 'Budget',
-  medium: 'Mid-range',
+  low: 'Basic',
+  medium: 'Balanced',
   high: 'Premium',
 };
-
-// Placeholder gradients — Eyal will swap real artwork later.
-const TIER_GRADIENT: Record<BudgetTier, [string, string]> = {
-  low: ['#E6F4F8', '#C7E8F2'],
-  medium: ['#0788B0', '#066b8c'],
-  high: ['#212121', '#3a3a3a'],
-};
+const CARD_SUBTITLE = 'Accommodation & Meals';
 
 const formatMoney = (n: number): string => {
-  if (!Number.isFinite(n)) return '$—';
-  return '$' + Math.round(n).toLocaleString('en-US');
+  if (!Number.isFinite(n)) return '-';
+  return Math.round(n).toLocaleString('en-US') + '$';
 };
 
 const formatRange = (r: BudgetTierRange): string => {
   if (r.min === r.max) return formatMoney(r.min);
-  return `${formatMoney(r.min)}–${formatMoney(r.max)}`;
+  return `${formatMoney(r.min)} - ${formatMoney(r.max)}`;
 };
 
 const showAiInfo = (): void => {
   Alert.alert(
     'How this estimate works',
-    'Ranges come from destination, duration, and accommodation type.',
+    'Ranges come from your destination, trip length, and accommodation type.',
     [{ text: 'OK' }],
   );
 };
@@ -83,89 +81,94 @@ export const BudgetTierCardsBig: React.FC<BudgetTierCardsBigProps> = ({
   ranges,
   selected,
   onChange,
+  basedOnTags,
   derivation,
   onManualOverride,
   error,
-  currency = 'USD',
 }) => {
   return (
     <View>
-      {/* AI estimate badge — tappable */}
+      {/* Estimated by AI pill — pink→purple gradient border */}
       <TouchableOpacity
         activeOpacity={0.7}
         onPress={showAiInfo}
         accessibilityRole="button"
-        accessibilityLabel="AI estimated — tap for details"
+        accessibilityLabel="Estimated by AI — tap for details"
         hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-        style={styles.aiBadge}
+        style={styles.aiPillWrap}
       >
-        <Ionicons name="sparkles-outline" size={14} color={C.brandTeal} />
-        <Text style={styles.aiBadgeText}>AI estimated</Text>
-        <Ionicons name="information-circle-outline" size={14} color={C.brandTeal} />
+        <LinearGradient
+          colors={[C.aiGradStart, C.aiGradEnd]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={styles.aiPillGradient}
+        >
+          <View style={styles.aiPillInner}>
+            <Ionicons name="sparkles" size={15} color={C.inkBody} />
+            <Text style={styles.aiPillText}>Estimated by AI</Text>
+          </View>
+        </LinearGradient>
       </TouchableOpacity>
 
-      {derivation ? (
+      {/* Based on: + chips */}
+      {basedOnTags && basedOnTags.length > 0 ? (
+        <View style={styles.basedOnRow}>
+          <Text style={styles.basedOnLabel}>Based on:</Text>
+          <View style={styles.chipsRow}>
+            {basedOnTags.map((t, i) => (
+              <View key={`${t}-${i}`} style={styles.chip}>
+                <Text style={styles.chipText}>{t}</Text>
+              </View>
+            ))}
+          </View>
+        </View>
+      ) : derivation ? (
         <Text style={styles.derivation}>{derivation}</Text>
       ) : null}
 
-      {/* Stack — vertical with generous gap between cards */}
+      {/* Card stack */}
       <View style={styles.stack}>
         {TIER_ORDER.map(tier => {
           const range = ranges[tier];
           const isSelected = selected === tier;
-          const gradient = TIER_GRADIENT[tier];
-          const isDarkBg = tier === 'medium' || tier === 'high';
+          const isBest = tier === 'medium';
 
           return (
             <TouchableOpacity
               key={tier}
-              activeOpacity={0.92}
+              activeOpacity={0.85}
               onPress={() => onChange(tier)}
               accessibilityRole="button"
               accessibilityState={{ selected: isSelected }}
-              accessibilityLabel={`${TIER_LABEL[tier]}, ${formatRange(range)} ${currency} per person`}
+              accessibilityLabel={`${TIER_LABEL[tier]}, ${formatRange(range)} per person`}
               style={[styles.card, isSelected && styles.cardSelected]}
             >
-              <LinearGradient
-                colors={gradient}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={StyleSheet.absoluteFill}
-              />
-
-              {/* "Best for most" pill on the medium card. Stays inside the
-                  card top-right with comfortable inset to avoid clipping. */}
-              {tier === 'medium' ? (
-                <View style={styles.popularBadge}>
+              {isBest ? (
+                <View style={styles.bestBadge}>
                   <Ionicons name="star" size={11} color="#FFFFFF" />
-                  <Text style={styles.popularBadgeText}>BEST FOR MOST</Text>
+                  <Text style={styles.bestBadgeText}>BEST FOR MOST</Text>
                 </View>
               ) : null}
 
-              {/* Selected check icon top-right */}
-              {isSelected ? (
-                <View style={styles.checkBadge}>
-                  <Ionicons
-                    name="checkmark-circle"
-                    size={28}
-                    color={C.brandTeal}
-                  />
-                </View>
-              ) : null}
-
-              {/* White overlay panel so text reads on any background */}
               <View
                 style={[
-                  styles.panel,
-                  isDarkBg ? styles.panelOnDark : styles.panelOnLight,
+                  styles.checkbox,
+                  isSelected ? styles.checkboxOn : styles.checkboxOff,
                 ]}
               >
-                <Text style={styles.tierName}>{TIER_LABEL[tier]}</Text>
-                <Text style={styles.tierRange}>{formatRange(range)}</Text>
-                <Text style={styles.tierCurrency}>{currency} · per person</Text>
-                {range.label ? (
-                  <Text style={styles.tierExtra}>{range.label}</Text>
+                {isSelected ? (
+                  <MaterialCommunityIcons name="check-bold" size={13} color="#FFFFFF" />
                 ) : null}
+              </View>
+
+              <View style={styles.planInfo}>
+                <Text style={styles.planTitle}>{TIER_LABEL[tier]}</Text>
+                <Text style={styles.planSub}>{range.label ?? CARD_SUBTITLE}</Text>
+              </View>
+
+              <View style={styles.planPrice}>
+                <Text style={styles.priceText}>{formatRange(range)}</Text>
+                <Text style={styles.perPerson}>Per person</Text>
               </View>
             </TouchableOpacity>
           );
@@ -181,7 +184,7 @@ export const BudgetTierCardsBig: React.FC<BudgetTierCardsBigProps> = ({
           style={styles.manualLinkBtn}
           hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
         >
-          <Text style={styles.manualLink}>Adjust manually →</Text>
+          <Text style={styles.manualLink}>Adjust manually</Text>
         </TouchableOpacity>
       ) : null}
 
@@ -193,142 +196,166 @@ export const BudgetTierCardsBig: React.FC<BudgetTierCardsBigProps> = ({
 export default BudgetTierCardsBig;
 
 const styles = StyleSheet.create({
-  aiBadge: {
+  // Gradient "border" = gradient fill with a 1.5px pad and a white inner.
+  aiPillWrap: {
+    alignSelf: 'flex-start',
+  },
+  aiPillGradient: {
+    borderRadius: 9,
+    padding: 1.5,
+  },
+  aiPillInner: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    alignSelf: 'flex-start',
-    backgroundColor: C.brandTealTint,
+    backgroundColor: C.surface,
+    borderRadius: 7.5,
     paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 10,
+    paddingVertical: 7,
   },
-  aiBadgeText: {
+  aiPillText: {
+    fontFamily: FONT_INTER,
+    fontSize: 15,
+    fontWeight: '700',
+    color: C.inkBody,
+  },
+  basedOnRow: {
+    marginTop: 18,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  basedOnLabel: {
+    fontFamily: FONT_INTER,
+    fontSize: 17,
+    fontWeight: '700',
+    color: C.inkBody,
+  },
+  chipsRow: {
+    flex: 1,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 8,
+  },
+  chip: {
+    backgroundColor: C.chipBg,
+    borderRadius: 15,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+  },
+  chipText: {
     fontFamily: FONT_INTER,
     fontSize: 12,
-    fontWeight: '700',
-    color: C.brandTealText,
+    lineHeight: 18,
+    fontWeight: '400',
+    color: C.inkBody,
   },
   derivation: {
-    marginTop: 8,
+    marginTop: 10,
     fontFamily: FONT_INTER,
     fontSize: 13,
     lineHeight: 18,
     color: C.textMuted,
   },
   stack: {
-    marginTop: 16,
-    gap: 16,
+    marginTop: 24,
+    gap: 26,
   },
+  // Floating row card — Box Shadow 01 (same as AudienceCard).
   card: {
-    height: 160,
-    width: '100%',
-    borderRadius: 18,
-    overflow: 'hidden',
-    borderWidth: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 30,
+    borderRadius: 20,
+    borderWidth: 1.5,
     borderColor: 'transparent',
-    position: 'relative',
-    justifyContent: 'center',
-    paddingVertical: 24,
-    paddingHorizontal: 20,
-    shadowColor: '#000',
-    shadowOpacity: 0.12,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 3,
+    backgroundColor: C.surface,
+    shadowColor: '#596E7C',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 4,
   },
   cardSelected: {
-    borderColor: C.brandTeal,
-    borderWidth: 3,
+    borderColor: C.accent,
   },
-  checkBadge: {
-    position: 'absolute',
-    top: 12,
-    right: 12,
-    backgroundColor: C.surface,
-    borderRadius: 16,
-    width: 32,
-    height: 32,
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     alignItems: 'center',
     justifyContent: 'center',
-    zIndex: 2,
-    shadowColor: '#000',
-    shadowOpacity: 0.18,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 1 },
-    elevation: 2,
   },
-  // "Best for most" pill — anchored top-left so it doesn't conflict with the
-  // selection check on the top-right.
-  popularBadge: {
+  checkboxOn: {
+    backgroundColor: C.accent,
+  },
+  checkboxOff: {
+    backgroundColor: C.checkboxOffBg,
+    borderWidth: 1,
+    borderColor: C.checkboxOffBorder,
+  },
+  planInfo: {
+    flex: 1,
+    gap: 4,
+  },
+  planTitle: {
+    fontFamily: FONT_INTER,
+    fontSize: 19,
+    lineHeight: 24,
+    fontWeight: '700',
+    color: C.inkBody,
+  },
+  planSub: {
+    fontFamily: FONT_INTER,
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '400',
+    color: C.textMuted,
+  },
+  planPrice: {
+    alignItems: 'flex-end',
+    gap: 4,
+  },
+  priceText: {
+    fontFamily: FONT_INTER,
+    fontSize: 19,
+    lineHeight: 24,
+    fontWeight: '700',
+    color: C.inkBody,
+  },
+  perPerson: {
+    fontFamily: FONT_INTER,
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '400',
+    color: C.textMuted,
+  },
+  // Black "BEST FOR MOST" pill overlapping the card's top edge.
+  bestBadge: {
     position: 'absolute',
-    top: 12,
-    left: 12,
+    top: -11,
+    left: 14,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
     backgroundColor: C.inkDark,
-    paddingHorizontal: 10,
+    paddingHorizontal: 8,
     paddingVertical: 4,
-    borderRadius: 999,
+    borderRadius: 9,
     zIndex: 2,
-    shadowColor: '#000',
-    shadowOpacity: 0.18,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 1 },
-    elevation: 2,
   },
-  popularBadgeText: {
+  bestBadgeText: {
     fontFamily: FONT_INTER,
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '800',
     color: '#FFFFFF',
-    letterSpacing: 0.6,
-  },
-  panel: {
-    alignSelf: 'flex-start',
-    maxWidth: '85%',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 14,
-    backgroundColor: 'rgba(255, 255, 255, 0.94)',
-  },
-  panelOnLight: {
-    backgroundColor: 'rgba(255, 255, 255, 0.96)',
-  },
-  panelOnDark: {
-    backgroundColor: 'rgba(255, 255, 255, 0.96)',
-  },
-  tierName: {
-    fontFamily: FONT_MONTSERRAT,
-    fontSize: 18,
-    fontWeight: '700',
-    color: C.inkBody,
-    marginBottom: 2,
-  },
-  tierRange: {
-    fontFamily: FONT_MONTSERRAT,
-    fontSize: 26,
-    lineHeight: 30,
-    fontWeight: '800',
-    color: C.inkDark,
-  },
-  tierCurrency: {
-    marginTop: 2,
-    fontFamily: FONT_INTER,
-    fontSize: 12,
-    fontWeight: '400',
-    color: C.textMuted,
-  },
-  tierExtra: {
-    marginTop: 6,
-    fontFamily: FONT_INTER,
-    fontSize: 14,
-    fontWeight: '400',
-    color: C.textMuted,
+    letterSpacing: 0.4,
   },
   manualLinkBtn: {
-    marginTop: 16,
+    marginTop: 18,
     alignSelf: 'center',
     paddingVertical: 8,
     paddingHorizontal: 16,
@@ -337,7 +364,7 @@ const styles = StyleSheet.create({
     fontFamily: FONT_INTER,
     fontSize: 14,
     fontWeight: '600',
-    color: C.brandTeal,
+    color: C.accent,
   },
   error: {
     marginTop: 10,

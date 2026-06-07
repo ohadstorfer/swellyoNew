@@ -295,7 +295,7 @@ export const WhenSheetContent: React.FC<WhenSheetContentProps> = ({
                 <Ionicons
                   name="swap-horizontal"
                   size={14}
-                  color={C.textMuted}
+                  color="#FFFFFF"
                 />
               </TouchableOpacity>
             </View>
@@ -413,52 +413,47 @@ const styles = StyleSheet.create({
   },
   durationLabel: {
     fontFamily: FONT_INTER,
-    fontSize: 13,
-    lineHeight: 16,
-    fontWeight: '600',
-    color: C.textMuted,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    fontSize: 14,
+    lineHeight: 18,
+    fontWeight: '700',
+    color: C.inkBody,
   },
+  // One continuous bar: number on the left, colored unit toggle attached on the
+  // right. overflow:hidden clips the toggle to the bar's rounded corners.
   durationInputRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+    alignItems: 'stretch',
+    height: 54,
     borderWidth: 1,
-    borderColor: C.borderField,
+    borderColor: '#EEEEEE',
     borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    overflow: 'hidden',
     backgroundColor: C.surfaceCard,
   },
   durationInput: {
     flex: 1,
+    paddingHorizontal: 16,
     fontFamily: FONT_MONTSERRAT,
     fontSize: 22,
-    lineHeight: 28,
     fontWeight: '700',
     color: C.inkBody,
-    padding: 0,
-    minHeight: 32,
+    textAlignVertical: 'center',
   },
-  // Neutral white pill with a hairline border — matches the other buttons in
-  // the flow (no teal fill).
+  // Colored section of the bar — reads as an attached toggle button. Fixed
+  // width so it doesn't resize between "days" and "weeks".
   unitPill: {
+    width: 96,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#EEEEEE',
-    backgroundColor: C.surfaceCard,
+    backgroundColor: C.brandTeal,
   },
   unitPillText: {
     fontFamily: FONT_INTER,
     fontSize: 14,
     fontWeight: '700',
-    color: C.inkBody,
+    color: '#FFFFFF',
   },
 
   accessoryBar: {

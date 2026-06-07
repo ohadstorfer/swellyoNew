@@ -25,8 +25,11 @@ import {
   type SurfStyle,
   type HostingStyle,
 } from '../../services/trips/groupTripsService';
+import { TRIP_TYPE_BYLINE } from '../../services/trips/tripVocabulary';
 import {
   priceInclusionSections,
+  priceInclusionAddOns,
+  CATEGORY_TITLE,
   type PriceInclusions,
 } from '../../services/trips/priceInclusions';
 import { WizardBottomSheet } from './WizardBottomSheet';
@@ -51,14 +54,33 @@ const C = {
   brandTeal: '#0788B0',
   brandTealText: '#066b8c',
   brandTealTint: '#E6F4F8',
+  // Cyan accent — the same blue used across the create-trip flow.
+  accent: '#05BCD3',
+  accentTint: '#EAF9FC',
   inkDark: '#212121',
   inkBody: '#222B30',
   textMuted: '#7B7B7B',
   borderCard: '#E0E0E0',
   borderHairline: '#EEEEEE',
+  iconBubble: '#F4F6F7',
   surface: '#FFFFFF',
   surfaceMuted: '#EEF2F4',
   avatarBg: '#D6E2E8',
+};
+
+// Icon per "What's included" category — keyed by display title so the read-only
+// sheet can show the same glyphs as the create-flow pricing step.
+const INCLUDE_ICON: Record<string, keyof typeof Ionicons.glyphMap> = {
+  [CATEGORY_TITLE.meals]: 'restaurant-outline',
+  [CATEGORY_TITLE.accommodation]: 'bed-outline',
+  [CATEGORY_TITLE.transportation]: 'car-outline',
+  [CATEGORY_TITLE.surfSessions]: 'water-outline',
+  [CATEGORY_TITLE.surfEquipment]: 'construct-outline',
+  [CATEGORY_TITLE.surfFilm]: 'film-outline',
+  [CATEGORY_TITLE.videoAnalysis]: 'videocam-outline',
+  [CATEGORY_TITLE.activities]: 'compass-outline',
+  [CATEGORY_TITLE.wellness]: 'leaf-outline',
+  [CATEGORY_TITLE.custom]: 'sparkles-outline',
 };
 
 // ---------------------------------------------------------------------------
@@ -98,6 +120,7 @@ export interface TripDetailVM {
   accommodationKindLabel: string | null;
   accommodationName: string | null;
   accommodationImageUri: string | null;
+  accommodationUrl: string | null;
 
   // Flow C — fixed per-person price + rich "What's included". Null for A/B.
   costPerPerson?: number | null;
@@ -106,6 +129,8 @@ export interface TripDetailVM {
   // Flow A/B — approximate budget range (for the overview "Budget" card).
   budgetMin?: number | null;
   budgetMax?: number | null;
+  // The AI tier the host picked — drives the "paying vibe" tag.
+  budgetTier?: 'low' | 'medium' | 'high' | null;
 
   // Drives the "Trip type" overview card.
   hostingStyle?: HostingStyle | null;
@@ -155,26 +180,31 @@ export function formatSkillRange(levels: string[]): string {
   const sorted = [...real].sort((a, b) => SKILL_ORDER.indexOf(a) - SKILL_ORDER.indexOf(b));
   const lowest = SKILL_LABEL[sorted[0]];
   const highest = SKILL_LABEL[sorted[sorted.length - 1]];
-  return lowest === highest ? lowest : `${lowest} – ${highest}`;
+  return lowest === highest ? lowest : `${lowest} - ${highest}`;
 }
 
 export function formatAge(min: number | null, max: number | null): string {
   if (min == null && max == null) return 'Any';
-  if (min != null && max != null) return `${min}–${max}`;
+  if (min != null && max != null) return `${min}-${max}`;
   return String(min ?? max);
 }
 
-// "Trip type" overview card — friendly label per hosting style.
-export const TRIP_TYPE_LABEL: Record<HostingStyle, string> = {
-  A: 'Planned together',
-  B: 'Leader-led',
-  C: 'Fully planned',
+// "Trip type" overview card — Crew · Captain · Operator byline per hosting style.
+// Aliased from the central vocabulary so every surface stays in sync, and kept
+// as a named export here for existing importers.
+export const TRIP_TYPE_LABEL = TRIP_TYPE_BYLINE;
+
+// "Paying vibe" tag per AI budget tier.
+export const BUDGET_VIBE: Record<'low' | 'medium' | 'high', string> = {
+  low: 'On a budget',
+  medium: 'Mid-range',
+  high: 'Premium',
 };
 
 /** "1500–2000$" / "1500$+" / "up to 2000$" from a min/max range. */
 export function formatBudgetRange(min: number | null, max: number | null): string | null {
   if (min == null && max == null) return null;
-  if (min != null && max != null) return `${min}–${max}$`;
+  if (min != null && max != null) return `${min}-${max}$`;
   if (min != null) return `${min}$+`;
   return `up to ${max}$`;
 }
@@ -194,8 +224,8 @@ export function formatDateRange(vm: TripDetailVM): string {
       const [ey, em, ed] = vm.endDateISO.split('-').map(Number);
       main =
         em === m
-          ? `${MONTH_SHORT[m - 1]} ${d}–${ed}, ${ey}`
-          : `${startLabel} – ${MONTH_SHORT[em - 1]} ${ed}, ${ey}`;
+          ? `${MONTH_SHORT[m - 1]} ${d}-${ed}, ${ey}`
+          : `${startLabel} - ${MONTH_SHORT[em - 1]} ${ed}, ${ey}`;
     } else {
       main = `${startLabel}, ${y}`;
     }
@@ -209,9 +239,15 @@ export function formatDateRange(vm: TripDetailVM): string {
     const first = sorted[0].split('-').map(Number);
     const last = sorted[sorted.length - 1].split('-').map(Number);
     const a = `${MONTH_SHORT[first[1] - 1]} ${first[0]}`;
-    if (sorted.length === 1) return a;
+    // Trip length sits next to the month(s), centered-dot separated — for
+    // month-only trips this is the only place the duration shows.
+    const lengthSuffix =
+      vm.durationDays && vm.durationDays > 0
+        ? ` · ${vm.durationDays} day${vm.durationDays === 1 ? '' : 's'}`
+        : '';
+    if (sorted.length === 1) return `${a}${lengthSuffix}`;
     const b = `${MONTH_SHORT[last[1] - 1]} ${last[0]}`;
-    return `${a} – ${b}`;
+    return `${a} - ${b}${lengthSuffix}`;
   }
   return 'Dates TBD';
 }
@@ -465,6 +501,7 @@ export const TripDetailView: React.FC<TripDetailViewProps> = ({
   bodyHidden,
 }) => {
   const [showIncludes, setShowIncludes] = useState(false);
+  const [showBudgetInfo, setShowBudgetInfo] = useState(false);
   const dateRange = formatDateRange(vm);
   const countdownTarget = computeCountdownTarget(vm);
   const skillLabel = formatSkillLevel(vm.skillLevels);
@@ -484,7 +521,7 @@ export const TripDetailView: React.FC<TripDetailViewProps> = ({
     vm.waveSizeMin != null && vm.waveSizeMax != null
       ? vm.waveSizeMin === vm.waveSizeMax
         ? `${vm.waveSizeMax} ft`
-        : `${vm.waveSizeMin}–${vm.waveSizeMax} ft`
+        : `${vm.waveSizeMin}-${vm.waveSizeMax} ft`
       : null;
 
   const showAccommodation =
@@ -493,10 +530,13 @@ export const TripDetailView: React.FC<TripDetailViewProps> = ({
   const priceLabel =
     vm.costPerPerson != null ? `$${vm.costPerPerson.toLocaleString('en-US')}` : null;
   const includeSections = priceInclusionSections(vm.priceInclusions);
+  const addOns = priceInclusionAddOns(vm.priceInclusions);
+  const hasPriceDetail = includeSections.length > 0 || addOns.length > 0;
 
   // Horizontal overview cards below the countdown — fixed order, each shown only
   // when it has data. (Spec: screenshot 2026-06-01 154101.)
   const budgetLabel = formatBudgetRange(vm.budgetMin ?? null, vm.budgetMax ?? null);
+  const budgetVibe = vm.budgetTier ? BUDGET_VIBE[vm.budgetTier] : null;
   const tripTypeLabel = vm.hostingStyle ? TRIP_TYPE_LABEL[vm.hostingStyle] : null;
   const overviewCards: {
     icon: keyof typeof Ionicons.glyphMap;
@@ -513,11 +553,18 @@ export const TripDetailView: React.FC<TripDetailViewProps> = ({
       label: 'Price',
       value: `${vm.costPerPerson}$`,
       highlight: true,
-      footer: includeSections.length > 0 ? 'See what’s included' : undefined,
-      onPress: includeSections.length > 0 ? () => setShowIncludes(true) : undefined,
+      footer: hasPriceDetail ? 'See what’s included' : undefined,
+      onPress: hasPriceDetail ? () => setShowIncludes(true) : undefined,
     });
   } else if (budgetLabel) {
-    overviewCards.push({ icon: 'cash-outline', label: 'Budget', value: budgetLabel });
+    // AI-estimated budget range — taps open the "About this estimate" sheet.
+    overviewCards.push({
+      icon: 'cash-outline',
+      label: budgetVibe ?? 'Budget',
+      value: budgetLabel,
+      footer: 'How is this estimated?',
+      onPress: () => setShowBudgetInfo(true),
+    });
   }
   overviewCards.push({ icon: 'ribbon-outline', label: 'Level', value: skillLabel });
   overviewCards.push({ icon: 'person-outline', label: 'Age range', value: ageLabel });
@@ -534,6 +581,31 @@ export const TripDetailView: React.FC<TripDetailViewProps> = ({
   if (vm.waveShapeLabel) {
     overviewCards.push({ icon: 'water-outline', label: 'Wave type', value: vm.waveShapeLabel });
   }
+
+  // Static "Based on" chips for the budget-info sheet — from data we already
+  // have, no extra AI call.
+  const budgetBasedOn: string[] = (
+    [
+      vm.destinationLabel,
+      vm.durationDays ? `${vm.durationDays} day${vm.durationDays === 1 ? '' : 's'}` : null,
+      vm.accommodationKindLabel,
+    ].filter(Boolean) as string[]
+  );
+  // What the estimate covers — mirrors the AI prompt (accommodation + food +
+  // local transport + surf activities; international flights excluded).
+  const budgetAccLower = vm.accommodationKindLabel?.toLowerCase();
+  const budgetStayLine = vm.durationDays
+    ? `${vm.durationDays} ${vm.durationDays === 1 ? 'day' : 'days'} at a ${budgetAccLower ?? 'place to stay'}`
+    : budgetAccLower
+      ? `Your stay at a ${budgetAccLower}`
+      : 'Accommodation for your whole stay';
+  const budgetCovers: { icon: keyof typeof Ionicons.glyphMap; text: string }[] = [
+    { icon: 'bed-outline', text: budgetStayLine },
+    { icon: 'restaurant-outline', text: 'Three meals a day' },
+    { icon: 'airplane-outline', text: 'Airport transfers both ways' },
+    { icon: 'car-outline', text: 'Getting around the spot and nearby' },
+    { icon: 'water-outline', text: 'Everyday surf activities' },
+  ];
 
   return (
     <View style={styles.root}>
@@ -589,10 +661,17 @@ export const TripDetailView: React.FC<TripDetailViewProps> = ({
               </Text>
               {c.footer ? (
                 <View style={styles.ovFooterRow}>
-                  <Text style={styles.ovFooter} numberOfLines={1}>
+                  <Text
+                    style={[styles.ovFooter, !c.highlight && styles.ovFooterDark]}
+                    numberOfLines={1}
+                  >
                     {c.footer}
                   </Text>
-                  <Ionicons name="chevron-forward" size={12} color="#FFFFFF" />
+                  <Ionicons
+                    name="chevron-forward"
+                    size={12}
+                    color={c.highlight ? '#FFFFFF' : C.brandTeal}
+                  />
                 </View>
               ) : null}
             </>
@@ -605,7 +684,7 @@ export const TripDetailView: React.FC<TripDetailViewProps> = ({
               onPress={c.onPress}
               style={cardStyle}
               accessibilityRole="button"
-              accessibilityLabel={`${c.label} ${c.value}. See what's included.`}
+              accessibilityLabel={`${c.label} ${c.value}.${c.footer ? ` ${c.footer}` : ''}`}
             >
               {inner}
             </TouchableOpacity>
@@ -675,10 +754,10 @@ export const TripDetailView: React.FC<TripDetailViewProps> = ({
         </View>
       ) : null}
 
-      {/* ---- Meet your leader (Flow B) ---- */}
+      {/* ---- Meet your Captain (Flow B) ---- */}
       {vm.leader ? (
         <View style={styles.section}>
-          <SectionTitle title="Meet your leader" />
+          <SectionTitle title="Meet your Captain" />
           <View style={styles.leaderBlock}>
             <TouchableOpacity
               activeOpacity={onLeaderPress ? 0.8 : 1}
@@ -697,7 +776,7 @@ export const TripDetailView: React.FC<TripDetailViewProps> = ({
               )}
               <View style={{ flex: 1 }}>
                 <Text style={styles.leaderName} numberOfLines={1}>
-                  {vm.leader.name || 'The leader'}
+                  {vm.leader.name || 'The Captain'}
                   {vm.leader.age != null ? (
                     <Text style={styles.leaderMeta}>{`  ·  ${vm.leader.age}${
                       vm.leader.countryFrom ? ` from ${vm.leader.countryFrom}` : ''
@@ -789,13 +868,13 @@ export const TripDetailView: React.FC<TripDetailViewProps> = ({
             <TwoCell
               a={{
                 label: 'Type',
-                value: vm.accommodationKindLabel ?? '—',
+                value: vm.accommodationKindLabel ?? '-',
               }}
               b={{
                 label: 'Specific stay',
                 value:
                   vm.specificStaySelected == null
-                    ? '—'
+                    ? '-'
                     : vm.specificStaySelected
                       ? 'Selected'
                       : 'Not yet',
@@ -812,34 +891,143 @@ export const TripDetailView: React.FC<TripDetailViewProps> = ({
       <WizardBottomSheet
         visible={showIncludes}
         title="What's included"
+        titleAlign="left"
+        hideHeaderDivider
+        largeTitle
         onClose={() => setShowIncludes(false)}
         heightMode="full"
       >
         {priceLabel ? (
-          <View style={styles.includesSheetPrice}>
-            <Text style={styles.priceValue}>{priceLabel}</Text>
-            <Text style={styles.pricePer}>per person</Text>
+          <View style={styles.priceHero}>
+            <View style={styles.priceHeroLeft}>
+              <Text style={styles.priceHeroValue} numberOfLines={1} adjustsFontSizeToFit>
+                {priceLabel}
+              </Text>
+              <Text style={styles.priceHeroPer}>per person</Text>
+            </View>
+            <View style={styles.priceHeroTag}>
+              <Ionicons name="shield-checkmark" size={13} color="#FFFFFF" />
+              <Text style={styles.priceHeroTagText}>Set by host</Text>
+            </View>
           </View>
         ) : null}
-        <View style={styles.includesCard}>
-          {includeSections.map((sec, i) => (
+
+        <Text style={styles.sheetIntro}>
+          One fixed, all-in price. Here’s everything it covers.
+        </Text>
+
+        {includeSections.length > 0 ? (
+          <View style={styles.sheetList}>
+            {includeSections.map((sec, i) => (
+              <View
+                key={sec.title}
+                style={[styles.sheetRow, i > 0 && styles.sheetRowDivider]}
+              >
+                <View style={styles.sheetRowIcon}>
+                  <Ionicons
+                    name={INCLUDE_ICON[sec.title] ?? 'checkmark'}
+                    size={18}
+                    color={C.inkBody}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.sheetRowTitle}>{sec.title}</Text>
+                  {sec.asTags ? (
+                    <Text style={styles.sheetRowItem}>{sec.items.join(', ')}</Text>
+                  ) : (
+                    sec.items.map((it, j) => (
+                      <Text key={j} style={styles.sheetRowItem}>
+                        {it}
+                      </Text>
+                    ))
+                  )}
+                </View>
+              </View>
+            ))}
+          </View>
+        ) : null}
+
+        {addOns.length > 0 ? (
+          <View style={styles.addOnsCard}>
+            <Text style={styles.addOnsTitle}>Add-ons for extra price</Text>
+            <Text style={styles.addOnsHint}>Available on the trip for an extra cost.</Text>
+            <View style={styles.addOnTags}>
+              {addOns.map(label => (
+                <View key={label} style={styles.addOnTag}>
+                  <Text style={styles.addOnTagText}>{label}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        ) : null}
+      </WizardBottomSheet>
+
+      {/* ---- "About this estimate" sheet (A/B — opened from the Budget card).
+              Pure description from data we already have; no AI call. ---- */}
+      <WizardBottomSheet
+        visible={showBudgetInfo}
+        title="About this estimate"
+        titleAlign="left"
+        hideHeaderDivider
+        largeTitle
+        onClose={() => setShowBudgetInfo(false)}
+        heightMode="auto"
+      >
+        {budgetLabel ? (
+          <View style={styles.priceHero}>
+            <View style={styles.priceHeroLeft}>
+              <Text style={styles.priceHeroValue} numberOfLines={1} adjustsFontSizeToFit>
+                {budgetLabel}
+              </Text>
+              <Text style={styles.priceHeroPer}>per person · estimated</Text>
+            </View>
+            {budgetVibe ? (
+              <View style={styles.priceHeroTag}>
+                <Ionicons name="pricetag" size={12} color="#FFFFFF" />
+                <Text style={styles.priceHeroTagText}>{budgetVibe}</Text>
+              </View>
+            ) : null}
+          </View>
+        ) : null}
+
+        <Text style={styles.sheetIntro}>
+          A rough AI estimate to plan around - not a fixed price. What
+          you actually spend depends on how you travel.
+        </Text>
+
+        {budgetBasedOn.length > 0 ? (
+          <>
+            <Text style={styles.sheetSectionLabel}>Based on</Text>
+            <View style={styles.chipRow}>
+              {budgetBasedOn.map((t, i) => (
+                <View key={`${t}-${i}`} style={styles.chip}>
+                  <Text style={styles.chipText}>{t}</Text>
+                </View>
+              ))}
+            </View>
+          </>
+        ) : null}
+
+        <Text style={styles.sheetSectionLabel}>What it covers</Text>
+        <View style={styles.sheetList}>
+          {budgetCovers.map((c, i) => (
             <View
-              key={sec.title}
-              style={[styles.includeRow, i > 0 && styles.includeRowDivider]}
+              key={c.text}
+              style={[styles.sheetRow, i > 0 && styles.sheetRowDivider]}
             >
-              <View style={styles.includeBullet}>
-                <Ionicons name="checkmark" size={14} color={C.brandTeal} />
+              <View style={styles.sheetRowIcon}>
+                <Ionicons name={c.icon} size={18} color={C.inkBody} />
               </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.includeTitle}>{sec.title}</Text>
-                {sec.items.map((it, j) => (
-                  <Text key={j} style={styles.includeItem}>
-                    {it}
-                  </Text>
-                ))}
-              </View>
+              <Text style={[styles.sheetRowTitle, styles.sheetRowTitleFlex]}>{c.text}</Text>
             </View>
           ))}
+        </View>
+
+        <View style={styles.callout}>
+          <Ionicons name="airplane-outline" size={16} color={C.textMuted} />
+          <Text style={styles.calloutText}>
+            International flights aren’t included - book those separately.
+          </Text>
         </View>
       </WizardBottomSheet>
     </View>
@@ -987,6 +1175,9 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#FFFFFF',
   },
+  ovFooterDark: {
+    color: C.brandTeal,
+  },
 
   // Generic section
   section: {
@@ -1078,68 +1269,205 @@ const styles = StyleSheet.create({
     color: C.textMuted,
   },
 
-  // Price header inside the "What's included" sheet (Flow C).
-  includesSheetPrice: {
+  // ---- Shared "info sheet" design (price/included + budget estimate) ----
+  // Price hero — the headline number on a soft cyan field, with a small
+  // qualifier tag (Set by host / paying vibe).
+  priceHero: {
     flexDirection: 'row',
-    alignItems: 'baseline',
-    gap: 8,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: C.borderCard,
-    borderRadius: 16,
-    paddingVertical: 16,
-    paddingHorizontal: 18,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    backgroundColor: C.surface,
+    borderRadius: 20,
+    paddingVertical: 18,
+    paddingHorizontal: 20,
+    shadowColor: '#596E7C',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 4,
   },
-  priceValue: {
+  priceHeroLeft: {
+    flex: 1,
+  },
+  priceHeroValue: {
     fontFamily: FONT_MONTSERRAT,
-    fontSize: 26,
+    fontSize: 30,
+    lineHeight: 34,
     fontWeight: '800',
     color: C.inkDark,
   },
-  pricePer: {
-    fontFamily: FONT_INTER,
-    fontSize: 14,
-    fontWeight: '500',
-    color: C.textMuted,
-  },
-
-  // What's included (Flow C)
-  includesCard: {
-    borderWidth: 1,
-    borderColor: C.borderCard,
-    borderRadius: 16,
-    paddingHorizontal: 14,
-  },
-  includeRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 12,
-    paddingVertical: 12,
-  },
-  includeRowDivider: {
-    borderTopWidth: 1,
-    borderTopColor: C.borderHairline,
-  },
-  includeBullet: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: C.brandTealTint,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 1,
-  },
-  includeTitle: {
-    fontFamily: FONT_MONTSERRAT,
-    fontSize: 14,
-    fontWeight: '700',
-    color: C.inkBody,
-  },
-  includeItem: {
+  priceHeroPer: {
     marginTop: 2,
     fontFamily: FONT_INTER,
     fontSize: 13,
+    fontWeight: '500',
+    color: C.textMuted,
+  },
+  priceHeroTag: {
+    flexShrink: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: C.inkDark,
+    borderRadius: 999,
+    paddingHorizontal: 11,
+    paddingVertical: 6,
+  },
+  priceHeroTagText: {
+    fontFamily: FONT_INTER,
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  // Intro paragraph under the hero.
+  sheetIntro: {
+    marginTop: 16,
+    fontFamily: FONT_INTER,
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: '400',
+    color: C.inkBody,
+  },
+  // Bold section label (matches the create-flow field labels).
+  sheetSectionLabel: {
+    marginTop: 24,
+    marginBottom: 12,
+    fontFamily: FONT_INTER,
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: '700',
+    color: C.inkBody,
+  },
+  // Icon-bubble list (one row per included thing).
+  // One light container around the whole list — gives the "included" block
+  // structure without boxing every row.
+  sheetList: {
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: C.borderCard,
+    borderRadius: 16,
+    paddingHorizontal: 16,
+  },
+  // Add-ons — a distinct cyan-bordered card so "extra cost" reads apart from
+  // what's already included.
+  addOnsCard: {
+    marginTop: 28,
+    backgroundColor: C.surface,
+    borderRadius: 20,
+    paddingVertical: 18,
+    paddingHorizontal: 18,
+    shadowColor: '#596E7C',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  addOnsTitle: {
+    fontFamily: FONT_MONTSERRAT,
+    fontSize: 18,
+    lineHeight: 24,
+    fontWeight: '700',
+    color: C.inkDark,
+  },
+  addOnsHint: {
+    marginTop: 4,
+    fontFamily: FONT_INTER,
+    fontSize: 13,
     lineHeight: 18,
+    fontWeight: '400',
+    color: C.textMuted,
+  },
+  addOnTags: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 14,
+  },
+  addOnTag: {
+    backgroundColor: C.inkDark,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  addOnTagText: {
+    fontFamily: FONT_INTER,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  sheetRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingVertical: 14,
+  },
+  sheetRowDivider: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: C.borderHairline,
+  },
+  sheetRowIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: C.iconBubble,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sheetRowTitle: {
+    fontFamily: FONT_INTER,
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: '600',
+    color: C.inkBody,
+  },
+  sheetRowTitleFlex: {
+    flex: 1,
+  },
+  sheetRowItem: {
+    marginTop: 3,
+    fontFamily: FONT_INTER,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '400',
+    color: C.textMuted,
+  },
+  // "Based on" chips.
+  chipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  chip: {
+    backgroundColor: '#F2F2F2',
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  chipText: {
+    fontFamily: FONT_INTER,
+    fontSize: 13,
+    fontWeight: '500',
+    color: C.inkBody,
+  },
+  // Subtle footnote callout (e.g. flights excluded).
+  callout: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    marginTop: 24,
+    backgroundColor: '#F6F8F9',
+    borderRadius: 14,
+    paddingVertical: 13,
+    paddingHorizontal: 14,
+  },
+  calloutText: {
+    flex: 1,
+    fontFamily: FONT_INTER,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '400',
     color: C.textMuted,
   },
 

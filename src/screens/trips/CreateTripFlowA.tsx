@@ -17,6 +17,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Image,
   ImageSourcePropType,
@@ -48,7 +49,6 @@ import {
   BudgetEstimate,
 } from '../../services/trips/groupTripsService';
 import { uploadTripImage } from '../../services/storage/storageService';
-import { BudgetCardsSkeleton } from '../../components/skeletons';
 import { FadeInView } from '../../components/FadeInView';
 import { HomeBreakSearchSheet, HomeBreakSelection } from '../../components/HomeBreakSearchSheet';
 import { InlineMapView } from '../../components/MapPickerModal';
@@ -95,7 +95,6 @@ import {
   TRANSPORTATION_OPTIONS,
   SURF_SESSIONS_OPTIONS,
   SURF_EQUIPMENT_OPTIONS,
-  WELLNESS_OPTIONS,
   CATEGORY_TITLE,
   summarizeCategory,
   normalizePriceInclusions,
@@ -105,6 +104,7 @@ import {
   SurfFilmSheetContent,
   VideoAnalysisSheetContent,
   CustomInclusionSheetContent,
+  WellnessSheetContent,
 } from '../../components/trips/sheets/IncludesSheets';
 import { supabase } from '../../config/supabase';
 import { AudienceCard, type AudienceCardStatus } from '../../components/trips/AudienceCard';
@@ -161,7 +161,7 @@ const STEP_META: Record<StepKey, { title: string; subtitle: string }> = {
   basics: { title: 'Trip details', subtitle: 'Where, when, what to call it.' },
   vibez: { title: 'Trip Vibe', subtitle: 'How it runs, the feel, the stay.' },
   budget: { title: 'Budget', subtitle: 'Per person, in USD.' },
-  aboutYou: { title: 'About you', subtitle: 'Why you’re the one to lead this.' },
+  aboutYou: { title: 'About you', subtitle: 'Why you’re the right Captain for this.' },
   preview: { title: 'Preview', subtitle: 'How your trip will look.' },
 };
 
@@ -196,9 +196,9 @@ const AUDIENCE_ORDER: AudienceCardKey[] = ['levels', 'boards', 'wave', 'age'];
 // One-time nudge shown the first time the host opens the Surf level card. The
 // goal: stop strong surfers from just picking their own level — these choices
 // describe the crew they want to travel with, not themselves.
-const AUDIENCE_INTRO_TITLE = 'Pick for the crew, not yourself';
+const AUDIENCE_INTRO_TITLE = 'Pick for the GROUP, not yourself';
 const AUDIENCE_INTRO_MESSAGE =
-  'These choices decide who can join your trip — not how good you are.\n\nEven if you charge hard, locking it to your own level can leave you traveling solo. Who do you actually want to surf with?';
+  'These choices decide who can request to join - not your level. Who do you actually want to surf with?';
 
 const ACCOMMODATION_LABEL: Record<AccommodationKind, string> = {
   villa: 'Villa',
@@ -233,6 +233,7 @@ type FieldKey =
   | 'heroImage'
   | 'destination'
   | 'when'
+  | 'audience'
   | 'age'
   | 'skill'
   | 'waveShape'
@@ -456,7 +457,7 @@ const expandMonthRange = (from: string, to: string, cap = 6): string[] => {
 };
 const formatUsd = (n: number) => `$${Math.round(n).toLocaleString('en-US')}`;
 const formatRange = (r: { min: number; max: number }) =>
-  `${formatUsd(r.min)} – ${formatUsd(r.max)}`;
+  `${formatUsd(r.min)} - ${formatUsd(r.max)}`;
 const isRemoteUrl = (uri: string | null): boolean => !!uri && /^https?:\/\//.test(uri);
 
 // Short label for a YYYY-MM string. Empty input returns ''.
@@ -483,7 +484,13 @@ const formatLongDate = (iso: string | null): string => {
 const pickImage = async (aspect: [number, number] = [12, 5]): Promise<string | null> => {
   try {
     const ImagePicker = require('expo-image-picker');
-    const usePhotoPicker = Platform.OS === 'android' && Platform.Version >= 33;
+    // The system photo picker (iOS PHPicker, Android 13+ Photo Picker) runs
+    // out-of-process and needs NO library permission. Requesting it anyway adds
+    // a native round-trip (slow) and — because dismissing the permission dialog
+    // blocks presenting the picker on the same runloop tick — forces a second
+    // tap. So only the legacy pre-13 Android path requests permission.
+    const usePhotoPicker =
+      Platform.OS === 'ios' || (Platform.OS === 'android' && Platform.Version >= 33);
     if (!usePhotoPicker) {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
@@ -714,7 +721,7 @@ const rowStyles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: COLORS.inkBody,
-    marginRight: 12,
+    marginRight: 44,
     flexShrink: 0,
   },
   labelDisabled: {
@@ -1069,7 +1076,7 @@ const waveChips = (state: WizardState): string[] => {
   const minStr = state.waveSizeMin >= 12 ? '12+' : `${state.waveSizeMin}`;
   const maxStr = state.waveSizeMax >= 12 ? '12+' : `${state.waveSizeMax}`;
   chips.push(
-    state.waveSizeMin === state.waveSizeMax ? `${maxStr} ft` : `${minStr} – ${maxStr} ft`,
+    state.waveSizeMin === state.waveSizeMax ? `${maxStr} ft` : `${minStr} - ${maxStr} ft`,
   );
   return chips;
 };
@@ -1091,7 +1098,7 @@ const formatWhenSummary = (state: WizardState): string => {
     const endMonthDay = `${MONTH_SHORT[String(endD.getMonth() + 1).padStart(2, '0')]} ${endD.getDate()}`;
     const endYear = endD.getFullYear();
     // Specific dates already encode the length — no need to show " · N days".
-    return `${startMonthDay} – ${endMonthDay}, ${endYear}`;
+    return `${startMonthDay} - ${endMonthDay}, ${endYear}`;
   }
   // months mode
   const from = state.monthFrom;
@@ -1109,8 +1116,8 @@ const formatWhenSummary = (state: WizardState): string => {
   if (from && to) {
     const sameYear = monthYear(from) === monthYear(to);
     const part = sameYear
-      ? `${monthShort(from)} – ${monthShort(to)} ${monthYear(to)}`
-      : `${monthShort(from)} ${monthYear(from)} – ${monthShort(to)} ${monthYear(to)}`;
+      ? `${monthShort(from)} - ${monthShort(to)} ${monthYear(to)}`
+      : `${monthShort(from)} ${monthYear(from)} - ${monthShort(to)} ${monthYear(to)}`;
     if (days > 0) return `${part} · ${days} day${days === 1 ? '' : 's'}`;
     return part;
   }
@@ -1125,8 +1132,8 @@ const formatTagsSummary = <T extends string>(
   if (selected.length === 0) return '';
   const labels = selected
     .map(s => options.find(o => o.slug === s)?.label ?? s)
-    // Some labels have an em-dash with extra context — keep just the head.
-    .map(l => l.split(' — ')[0].split(' – ')[0]);
+    // Some labels carry extra context after a " - " separator — keep the head.
+    .map(l => l.split(' - ')[0].split(' — ')[0].split(' – ')[0]);
   if (labels.length <= truncateAt) return labels.join(', ');
   const head = labels.slice(0, truncateAt).join(', ');
   return `${head} +${labels.length - truncateAt}`;
@@ -1138,6 +1145,22 @@ const formatSpecificStaySummary = (state: WizardState): string => {
   if (state.accommodationUrl.trim()) parts.push('URL set');
   if (state.accommodationImageUri) parts.push('Photo set');
   return parts.join(' · ');
+};
+
+// Stay-card subtext — names which pieces are filled, e.g. "Name added",
+// "Name & link added", "Name, link & photo added". Grows as fields are entered.
+const formatStayProgress = (state: WizardState): string => {
+  const bits: string[] = [];
+  if (state.accommodationName.trim()) bits.push('Name');
+  if (state.accommodationUrl.trim()) bits.push('Link');
+  if (state.accommodationImageUri) bits.push('Photo');
+  if (bits.length === 0) return '';
+  const norm = bits.map((b, i) => (i === 0 ? b : b.toLowerCase()));
+  const joined =
+    norm.length === 1
+      ? norm[0]
+      : `${norm.slice(0, -1).join(', ')} & ${norm[norm.length - 1]}`;
+  return `${joined} added`;
 };
 
 // =============================================================================
@@ -1174,14 +1197,17 @@ export default function CreateTripFlowA({
   // B and C both lock in a specific stay — no Yes/No gate, the stay card is
   // always shown and its details are required. Only A uses the gate.
   const requiresSpecificStay = isLeaderFlow || isFixedFlow;
+  // B and C both show the "About you" step (host profile + familiarity + lead
+  // note). Only A skips it.
+  const hasAboutYou = isLeaderFlow || isFixedFlow;
 
-  // Step order — Flow B inserts 'aboutYou' after 'budget' (dest + stay are known
+  // Step order — B & C insert 'aboutYou' after 'budget' (dest + stay are known
   // by then, so the familiarity fields can name them).
   const steps = useMemo<StepKey[]>(() => {
-    if (!isLeaderFlow) return STEPS_BASE;
+    if (!hasAboutYou) return STEPS_BASE;
     const idx = STEPS_BASE.indexOf('preview');
     return [...STEPS_BASE.slice(0, idx), 'aboutYou', ...STEPS_BASE.slice(idx)];
-  }, [isLeaderFlow]);
+  }, [hasAboutYou]);
 
   // ---- Wizard state (draft-backed) ----------------------------------------
   const initialState = useMemo<WizardState>(
@@ -1232,9 +1258,13 @@ export default function CreateTripFlowA({
   const [audienceDone, setAudienceDone] = useState<Set<AudienceCardKey>>(
     () => (editMode || resumeDraft ? new Set(AUDIENCE_ORDER) : new Set()),
   );
-  const markAudienceDone = useCallback((key: AudienceCardKey) => {
-    setAudienceDone(prev => (prev.has(key) ? prev : new Set(prev).add(key)));
-  }, []);
+  const markAudienceDone = useCallback(
+    (key: AudienceCardKey) => {
+      setAudienceDone(prev => (prev.has(key) ? prev : new Set(prev).add(key)));
+      setError('audience', null);
+    },
+    [setError],
+  );
 
   // First tap on the Surf level card pops a one-time "this is about the group"
   // reminder before the sheet opens. Skipped in edit/resume (already past intro).
@@ -1289,8 +1319,8 @@ export default function CreateTripFlowA({
   }, [hostId]);
 
   useEffect(() => {
-    if (isLeaderFlow) void loadHostSurfer();
-  }, [isLeaderFlow, loadHostSurfer]);
+    if (hasAboutYou) void loadHostSurfer();
+  }, [hasAboutYou, loadHostSurfer]);
 
   // Flow C is exact-dates only — pin datesMode to 'exact' (covers initial mount
   // and any restored draft that carried 'months').
@@ -1434,6 +1464,11 @@ export default function CreateTripFlowA({
 
     switch (step) {
       case 'audience': {
+        // Must open + set all four cards before advancing — every card has a
+        // valid default, so without this the host could skip straight past.
+        if (!AUDIENCE_ORDER.every(k => audienceDone.has(k))) {
+          fail('audience', 'Tap through all four to continue');
+        }
         // One-sided (only min OR only max) is valid — interpreted as "no
         // upper limit" / "no lower limit". Both empty is also valid ("Any").
         const minRaw = state.ageMin ? parseInt(state.ageMin, 10) : null;
@@ -1441,7 +1476,7 @@ export default function CreateTripFlowA({
         const minOk = minRaw == null || (minRaw >= 16 && minRaw <= 99);
         const maxOk = maxRaw == null || (maxRaw >= 16 && maxRaw <= 99);
         if (!minOk || !maxOk) {
-          fail('age', 'Ages must be 16–99');
+          fail('age', 'Ages must be 16-99');
         } else if (minRaw != null && maxRaw != null) {
           if (maxRaw < minRaw) {
             fail('age', 'Maximum age must be at least the minimum');
@@ -1457,10 +1492,8 @@ export default function CreateTripFlowA({
         return ok;
       }
       case 'basics': {
-        // TEMP: destination optional while Google Places is down (testing).
-        // Restore this once Places works again:
-        // if (!editMode && !state.destination.trim())
-        //   fail('destination', 'Pick a destination for your trip');
+        if (!editMode && !state.destination.trim())
+          fail('destination', 'Pick a destination for your trip');
 
         if (state.datesMode === 'months') {
           if (!state.monthFrom) fail('when', 'Pick at least one month for your trip');
@@ -1550,6 +1583,7 @@ export default function CreateTripFlowA({
     budgetEstimate,
     isLeaderFlow,
     isFixedFlow,
+    audienceDone,
     clearErrors,
     setError,
   ]);
@@ -1588,7 +1622,7 @@ export default function CreateTripFlowA({
   const { guardedCancel } = useDiscardConfirm({
     dirty: hasBeenTouched && !editMode,
     title: 'Are you sure you want to exit?',
-    message: 'Your progress will be saved — you can pick it back up next time.',
+    message: 'Your progress will be saved - you can pick it back up next time.',
     discardLabel: 'Yes, exit',
     keepEditingLabel: 'No',
     onDiscard: async () => {
@@ -1624,8 +1658,8 @@ export default function CreateTripFlowA({
       // always have a specific stay (no Yes/No gate), so it's always committed.
       const accommodationCommitted = requiresSpecificStay || state.accommodationLocked === true;
 
-      // Flow B leader credibility fields (null for A/C).
-      const leaderFields = isLeaderFlow
+      // Host credibility fields (B & C have the "About you" step; null for A).
+      const leaderFields = hasAboutYou
         ? {
             host_destination_familiarity: state.hostDestFamiliarity,
             host_stay_familiarity: state.hostStayFamiliarity,
@@ -1859,7 +1893,9 @@ export default function CreateTripFlowA({
         : editMode
           ? 'Confirm the range for your trip.'
           : meta.subtitle
-      : meta.subtitle;
+      : step === 'aboutYou' && isFixedFlow
+        ? 'Why surfers can trust your operation.'
+        : meta.subtitle;
 
   const renderStep = () => {
     switch (step) {
@@ -1925,6 +1961,9 @@ export default function CreateTripFlowA({
           status={statusFor('age')}
           onPress={() => setOpenSheet('age')}
         />
+        {errors.audience ? (
+          <Text style={localStyles.errorText}>{errors.audience}</Text>
+        ) : null}
       </View>
     );
   };
@@ -1984,7 +2023,7 @@ export default function CreateTripFlowA({
             style={localStyles.mapPlaceholder}
           >
             <View style={localStyles.mapPlaceholderPin}>
-              <Ionicons name="location" size={26} color={COLORS.brandTeal} />
+              <Ionicons name="location" size={26} color={COLORS.cyan} />
             </View>
             <Text style={localStyles.mapPlaceholderText}>
               Tap to drop your destination pin
@@ -2081,7 +2120,7 @@ export default function CreateTripFlowA({
                 focusedInputRef.current = null;
               }
             }}
-            placeholder="Tell people what makes this trip special — the surf, the crew, the place."
+            placeholder="Tell people what makes this trip special - the surf, the crew, the place."
             placeholderTextColor={COLORS.textPlaceholder}
             multiline
             numberOfLines={6}
@@ -2194,9 +2233,6 @@ export default function CreateTripFlowA({
   const renderVibezStep = () => {
     const lockedAnswer = state.accommodationLocked;
     const canToggle = !editMode;
-    // Flow A ("planned together") gets the Figma redesign: icon-bubble list rows
-    // + full-width stacked gate cards. B/C keep the plain rows.
-    const vibeListIcons = !requiresSpecificStay;
     const hasStayInfo =
       !!state.accommodationName.trim() ||
       !!state.accommodationUrl.trim() ||
@@ -2210,27 +2246,23 @@ export default function CreateTripFlowA({
             value={formatTagsSummary(state.tripStructure, TRIP_STRUCTURE_OPTIONS)}
             onPress={() => setOpenSheet('howWorks')}
             noTopDivider
-            placeholderAccent={vibeListIcons}
-            icon={
-              vibeListIcons ? (
-                <Ionicons name="list-outline" size={18} color={COLORS.inkBody} />
-              ) : undefined
-            }
+            placeholderAccent
+            icon={<Ionicons name="list-outline" size={18} color={COLORS.inkBody} />}
           />
           <SummaryRow
             label="Vibe"
             value={formatTagsSummary(state.tripVibes, TRIP_VIBE_OPTIONS)}
             onPress={() => setOpenSheet('vibe')}
-            placeholderAccent={vibeListIcons}
-            icon={vibeListIcons ? <TripIcon name="sun-setting-03" size={18} /> : undefined}
+            placeholderAccent
+            icon={<TripIcon name="sun-setting-03" size={18} />}
           />
           <SummaryRow
             label="Stay type"
             value={state.accommodationKind ? ACCOMMODATION_LABEL[state.accommodationKind] : ''}
             onPress={() => setOpenSheet('stayType')}
             error={errors.accommodationKind ?? undefined}
-            placeholderAccent={vibeListIcons}
-            icon={vibeListIcons ? <TripIcon name="home-03" size={18} /> : undefined}
+            placeholderAccent
+            icon={<TripIcon name="home-03" size={18} />}
           />
         </View>
 
@@ -2240,7 +2272,7 @@ export default function CreateTripFlowA({
             <Text style={[localStyles.fieldLabel, localStyles.groupTopGap]}>Your stay</Text>
             <Text style={localStyles.helper}>
               {isLeaderFlow
-                ? 'As the leader, add the place you’ll all stay at.'
+                ? 'As the Captain, add the place you’ll all stay at.'
                 : 'Add the place everyone will stay at.'}
             </Text>
           </>
@@ -2367,54 +2399,63 @@ export default function CreateTripFlowA({
           <Text style={localStyles.errorText}>{errors.specificStay}</Text>
         ) : null}
 
-        {/* Stay details card — B & C only (Flow A nests the preview in the Yes card). */}
+        {/* Stay details — B & C. Wears the same gate-card language as the Flow A
+            Yes/No buttons: white card + shadow, grey icon bubble, title +
+            subtitle, and a circular affordance on the right. Empty = "+" to add;
+            filled = the stay name/url, a pencil, and the photo nested below
+            (same big preview the Flow A Yes card uses). */}
         {requiresSpecificStay ? (
-          (() => {
-            const hasInfo = hasStayInfo;
-            if (!hasInfo) {
-              return (
-                <TouchableOpacity
-                  activeOpacity={0.85}
-                  onPress={() => setOpenSheet('specificStay')}
-                  style={localStyles.addStayBtn}
-                >
-                  <Ionicons name="add-circle-outline" size={20} color={COLORS.brandTeal} />
-                  <Text style={localStyles.addStayBtnText}>Add stay details</Text>
-                </TouchableOpacity>
-              );
-            }
-            return (
-              <TouchableOpacity
-                activeOpacity={0.85}
-                onPress={() => setOpenSheet('specificStay')}
-                style={localStyles.stayCard}
-                accessibilityRole="button"
-                accessibilityLabel="Edit stay details"
-              >
-                <View style={localStyles.stayCardHeader}>
-                  <Text style={localStyles.stayCardName} numberOfLines={1}>
-                    {state.accommodationName.trim() || 'Your stay'}
-                  </Text>
-                  <Ionicons name="pencil" size={16} color={COLORS.textMuted} />
-                </View>
-                {state.accommodationImageUri ? (
-                  <Image
-                    source={{ uri: state.accommodationImageUri }}
-                    style={localStyles.stayPhoto}
-                    resizeMode="cover"
-                  />
-                ) : null}
-                {state.accommodationUrl.trim() ? (
-                  <View style={localStyles.stayUrlRow}>
-                    <Ionicons name="link-outline" size={14} color={COLORS.brandTealText} />
-                    <Text style={localStyles.stayUrl} numberOfLines={1}>
-                      {state.accommodationUrl.trim()}
-                    </Text>
-                  </View>
-                ) : null}
-              </TouchableOpacity>
-            );
-          })()
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={() => {
+              setOpenSheet('specificStay');
+              if (errors.specificStay) setError('specificStay', null);
+            }}
+            accessibilityRole="button"
+            accessibilityLabel={hasStayInfo ? 'Edit stay details' : 'Add stay details'}
+            style={[
+              localStyles.gateCardRow,
+              localStyles.stayGateCard,
+              hasStayInfo && localStyles.gateCardRowActive,
+            ]}
+          >
+            <View style={localStyles.gateCardInner}>
+              <View style={localStyles.stayIconBubble}>
+                <TripIcon name="home-03" size={26} color={COLORS.inkBody} />
+              </View>
+              <View style={localStyles.gateTextCol}>
+                <Text style={localStyles.stayGateTitle} numberOfLines={1}>
+                  {hasStayInfo
+                    ? state.accommodationName.trim() || 'Your stay'
+                    : 'Add stay details'}
+                </Text>
+                <Text style={localStyles.gateRowSubtitle} numberOfLines={1}>
+                  {hasStayInfo
+                    ? formatStayProgress(state)
+                    : 'Add the name, link and a photo'}
+                </Text>
+              </View>
+              {hasStayInfo ? (
+                // Bare pencil — same asset as the stay sheet, no surrounding box.
+                <Image
+                  source={Images.tripDeets.pencil}
+                  style={localStyles.stayEditIcon}
+                  resizeMode="contain"
+                />
+              ) : (
+                // Bare cyan "+" — same affordance as the "Who is it for?" cards.
+                <Ionicons name="add" size={24} color="#05BCD3" />
+              )}
+            </View>
+
+            {hasStayInfo && state.accommodationImageUri ? (
+              <Image
+                source={{ uri: state.accommodationImageUri }}
+                style={localStyles.stayPreviewPhoto}
+                resizeMode="cover"
+              />
+            ) : null}
+          </TouchableOpacity>
         ) : null}
       </View>
     );
@@ -2449,23 +2490,29 @@ export default function CreateTripFlowA({
   const renderPricingStep = () => {
     const inc = state.priceInclusions;
     const customItems = customList;
-    const rows: { key: keyof PriceInclusions; sheet: SheetKey }[] = [
-      { key: 'meals', sheet: 'incMeals' },
-      { key: 'accommodation', sheet: 'incAccommodation' },
-      { key: 'transportation', sheet: 'incTransportation' },
-      { key: 'surfSessions', sheet: 'incSurfSessions' },
-      { key: 'surfEquipment', sheet: 'incSurfEquipment' },
-      { key: 'surfFilm', sheet: 'incSurfFilm' },
-      { key: 'videoAnalysis', sheet: 'incVideoAnalysis' },
-      { key: 'activities', sheet: 'incActivities' },
-      { key: 'wellness', sheet: 'incWellness' },
+    const rows: {
+      key: keyof PriceInclusions;
+      sheet: SheetKey;
+      icon: keyof typeof Ionicons.glyphMap;
+    }[] = [
+      { key: 'meals', sheet: 'incMeals', icon: 'restaurant-outline' },
+      { key: 'accommodation', sheet: 'incAccommodation', icon: 'bed-outline' },
+      { key: 'transportation', sheet: 'incTransportation', icon: 'car-outline' },
+      { key: 'surfSessions', sheet: 'incSurfSessions', icon: 'water-outline' },
+      { key: 'surfEquipment', sheet: 'incSurfEquipment', icon: 'construct-outline' },
+      { key: 'surfFilm', sheet: 'incSurfFilm', icon: 'film-outline' },
+      { key: 'videoAnalysis', sheet: 'incVideoAnalysis', icon: 'videocam-outline' },
+      { key: 'activities', sheet: 'incActivities', icon: 'compass-outline' },
+      { key: 'wellness', sheet: 'incWellness', icon: 'leaf-outline' },
     ];
 
     return (
       <View>
         <Text style={localStyles.fieldLabel}>Price per person · USD</Text>
         <View style={localStyles.priceRow}>
-          <Text style={localStyles.priceDollar}>$</Text>
+          <View style={localStyles.priceIconBubble}>
+            <TripIcon name="currency-dollar-circle" size={22} color={COLORS.inkBody} />
+          </View>
           <TextInput
             style={[
               localStyles.input,
@@ -2477,7 +2524,7 @@ export default function CreateTripFlowA({
               update('costPerPerson', t.replace(/[^0-9]/g, ''));
               if (errors.price) setError('price', null);
             }}
-            placeholder="1200"
+            placeholder="3000"
             placeholderTextColor={COLORS.textPlaceholder}
             keyboardType="number-pad"
             maxLength={6}
@@ -2496,14 +2543,15 @@ export default function CreateTripFlowA({
               label={CATEGORY_TITLE[r.key]}
               value={summarizeCategory(inc, r.key)}
               placeholder="Not included"
+              placeholderAccent
               onPress={() => setOpenSheet(r.sheet)}
               noTopDivider={i === 0}
+              icon={<Ionicons name={r.icon} size={18} color={COLORS.inkBody} />}
             />
           ))}
         </View>
 
         <Text style={[localStyles.fieldLabel, localStyles.fieldTopGap]}>Add your own</Text>
-        <Text style={localStyles.helper}>Anything else the price covers.</Text>
         {customItems.length > 0 ? (
           <View style={[localStyles.summaryGroup, { marginTop: 12 }]}>
             {customItems.map((item, i) => (
@@ -2529,14 +2577,24 @@ export default function CreateTripFlowA({
             setCustomEditIndex(next.length - 1);
             setOpenSheet('incCustom');
           }}
-          style={[localStyles.addStayBtn, { marginTop: 12 }]}
+          style={[localStyles.gateCardRow, localStyles.stayGateCard]}
           accessibilityRole="button"
           accessibilityLabel="Add your own inclusion"
         >
-          <Ionicons name="add-circle-outline" size={20} color={COLORS.brandTeal} />
-          <Text style={localStyles.addStayBtnText}>
-            {customItems.length > 0 ? 'Add another' : 'Add your own'}
-          </Text>
+          <View style={localStyles.gateCardInner}>
+            <View style={localStyles.stayIconBubble}>
+              <Ionicons name="sparkles-outline" size={24} color={COLORS.inkBody} />
+            </View>
+            <View style={localStyles.gateTextCol}>
+              <Text style={localStyles.stayGateTitle}>
+                {customItems.length > 0 ? 'Add another' : 'Add an inclusion'}
+              </Text>
+              <Text style={localStyles.gateRowSubtitle}>
+                Anything extra the price covers.
+              </Text>
+            </View>
+            <Ionicons name="add" size={24} color="#05BCD3" />
+          </View>
         </TouchableOpacity>
       </View>
     );
@@ -2559,7 +2617,7 @@ export default function CreateTripFlowA({
                 color={COLORS.errorText}
               />
               <Text style={localStyles.errorBannerText}>
-                We couldn't estimate this one — enter a range yourself.
+                We couldn't estimate this one - enter a range yourself.
               </Text>
             </View>
           ) : null}
@@ -2640,14 +2698,30 @@ export default function CreateTripFlowA({
     }
 
     if (budgetLoading || !budgetEstimate) {
-      return <BudgetCardsSkeleton />;
+      return (
+        <View style={localStyles.budgetLoading}>
+          <View style={localStyles.budgetLoadingIconWrap}>
+            <Ionicons name="sparkles" size={28} color="#05BCD3" />
+          </View>
+          <Text style={localStyles.budgetLoadingTitle}>Estimating your budget…</Text>
+          <Text style={localStyles.budgetLoadingSub}>
+            Crunching your destination, dates and stay.
+          </Text>
+          <ActivityIndicator
+            color="#05BCD3"
+            style={{ marginTop: 20 }}
+          />
+        </View>
+      );
     }
 
     const days = tripDurationDays();
     const accKind = state.accommodationKind ? ACCOMMODATION_LABEL[state.accommodationKind] : '';
-    const derivation = `Based on ${state.destination || 'your destination'}, ${days} day${
-      days === 1 ? '' : 's'
-    }${accKind ? `, ${accKind.toLowerCase()}` : ''}.`;
+    const basedOnTags = [
+      state.destination || 'your destination',
+      `${days} day${days === 1 ? '' : 's'}`,
+      ...(accKind ? [accKind.toLowerCase()] : []),
+    ];
 
     return (
       <FadeInView style={localStyles.budgetWrap}>
@@ -2658,7 +2732,7 @@ export default function CreateTripFlowA({
             update('budgetTier', tier);
             if (errors.budget) setError('budget', null);
           }}
-          derivation={derivation}
+          basedOnTags={basedOnTags}
           error={errors.budget ?? undefined}
         />
       </FadeInView>
@@ -2685,51 +2759,76 @@ export default function CreateTripFlowA({
     const stayFamLabel = state.hostStayFamiliarity
       ? STAY_FAMILIARITY_OPTIONS.find(o => o.slug === state.hostStayFamiliarity)?.label ?? ''
       : '';
-    const metaBits = [
-      age != null ? `${age}${s?.country_from ? ` from ${s.country_from}` : ''}` : null,
-    ].filter(Boolean);
-    const statBits = [
-      levelLabel,
-      boardLabel,
+    // Two lines of pills: top = trips + board, bottom = level, age, origin.
+    const tagsTop = [
       trips != null ? `${trips} Surf Trips` : null,
-    ].filter(Boolean);
+      boardLabel,
+    ].filter(Boolean) as string[];
+    const tagsBottom = [
+      levelLabel,
+      age != null ? `${age}` : null,
+      s?.country_from || null,
+    ].filter(Boolean) as string[];
 
     return (
       <View>
-        {/* Embedded profile card */}
-        <View style={localStyles.leaderCard}>
+        {/* Floating, tappable profile card — same language as the "Who is it
+            for?" cards: circle avatar, name header, gray info tags. Tapping the
+            card opens the profile editor (no separate "Edit profile" link). */}
+        <TouchableOpacity
+          activeOpacity={0.85}
+          onPress={() => setEditingProfile(true)}
+          style={localStyles.leaderCard}
+          accessibilityRole="button"
+          accessibilityLabel="Edit your profile"
+        >
           {s?.profile_image_url ? (
             <Image source={{ uri: s.profile_image_url }} style={localStyles.leaderAvatar} />
           ) : (
             <View style={[localStyles.leaderAvatar, localStyles.leaderAvatarEmpty]}>
-              <Ionicons name="person" size={24} color="#FFFFFF" />
+              <Ionicons name="person" size={28} color="#FFFFFF" />
             </View>
           )}
           <View style={{ flex: 1 }}>
             <Text style={localStyles.leaderName} numberOfLines={1}>
               {s?.name || 'You'}
-              {metaBits.length ? (
-                <Text style={localStyles.leaderMeta}>{`  ·  ${metaBits.join(' · ')}`}</Text>
-              ) : null}
             </Text>
-            {statBits.length ? (
-              <Text style={localStyles.leaderMeta}>{statBits.join('  ·  ')}</Text>
+            {tagsTop.length ? (
+              <View style={localStyles.leaderTagsRow}>
+                {tagsTop.map((t, i) => (
+                  <View key={`top-${t}-${i}`} style={localStyles.leaderTag}>
+                    <Text style={localStyles.leaderTagText} numberOfLines={1}>
+                      {t}
+                    </Text>
+                  </View>
+                ))}
+              </View>
             ) : null}
-            <TouchableOpacity
-              onPress={() => setEditingProfile(true)}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            >
-              <Text style={localStyles.leaderEditLink}>Edit profile</Text>
-            </TouchableOpacity>
+            {tagsBottom.length ? (
+              <View style={[localStyles.leaderTagsRow, localStyles.leaderTagsRowSecond]}>
+                {tagsBottom.map((t, i) => (
+                  <View key={`bot-${t}-${i}`} style={localStyles.leaderTag}>
+                    <Text style={localStyles.leaderTagText} numberOfLines={1}>
+                      {t}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            ) : null}
           </View>
-        </View>
+        </TouchableOpacity>
 
-        <Text style={[localStyles.sectionTitle, localStyles.groupTopGap]}>Trip expertise</Text>
+        <Text style={[localStyles.fieldLabel, localStyles.aboutSectionGap]}>Trip expertise</Text>
+        <Text style={localStyles.aboutSubtitle}>
+          How well you know the destination and stay.
+        </Text>
         <View style={localStyles.summaryGroup}>
           <SummaryRow
-            label={`Familiarity with ${destLabel}`}
+            label={destLabel}
             value={destFamLabel}
-            placeholder="Tap to choose"
+            placeholder="Tap to set"
+            placeholderAccent
+            icon={<TripIcon name="marker-pin-05" size={18} />}
             onPress={() => {
               setOpenSheet('destFamiliarity');
               if (errors.hostDestFamiliarity) setError('hostDestFamiliarity', null);
@@ -2738,9 +2837,11 @@ export default function CreateTripFlowA({
             noTopDivider
           />
           <SummaryRow
-            label={`Familiarity with ${stayLabel}`}
+            label={stayLabel}
             value={stayFamLabel}
-            placeholder="Tap to choose"
+            placeholder="Tap to set"
+            placeholderAccent
+            icon={<TripIcon name="home-03" size={18} />}
             onPress={() => {
               setOpenSheet('stayFamiliarity');
               if (errors.hostStayFamiliarity) setError('hostStayFamiliarity', null);
@@ -2749,27 +2850,35 @@ export default function CreateTripFlowA({
           />
         </View>
 
-        <View style={[localStyles.labelRow, localStyles.fieldTopGap]}>
-          <Text style={localStyles.fieldLabel}>Why you’re the right person to lead</Text>
-          <Text
-            style={[
-              localStyles.counter,
-              { color: state.hostLeadNote.length >= 250 ? COLORS.errorText : COLORS.textMuted },
-            ]}
-          >
-            {state.hostLeadNote.length}/250
-          </Text>
+        <Text style={[localStyles.fieldLabel, localStyles.aboutSectionGap]}>
+          {isFixedFlow ? 'Why surfers can trust your operation' : 'Why you’re the right Captain'}
+        </Text>
+        <Text
+          style={[
+            localStyles.counter,
+            localStyles.leadCounter,
+            { color: state.hostLeadNote.length >= 250 ? COLORS.errorText : COLORS.textMuted },
+          ]}
+        >
+          {state.hostLeadNote.length}/250
+        </Text>
+        <View style={[localStyles.inputWrap, localStyles.inputWrapTextarea]}>
+          <Image
+            source={Images.tripDeets.pencil}
+            style={localStyles.inputPencil}
+            resizeMode="contain"
+          />
+          <TextInput
+            style={[localStyles.inputField, localStyles.inputFieldTextarea]}
+            value={state.hostLeadNote}
+            onChangeText={t => update('hostLeadNote', t.slice(0, 250))}
+            placeholder="Mention anything that brings credibility to your experience here"
+            placeholderTextColor={COLORS.textPlaceholder}
+            multiline
+            maxLength={250}
+            textAlignVertical="top"
+          />
         </View>
-        <TextInput
-          style={[localStyles.input, localStyles.textarea]}
-          value={state.hostLeadNote}
-          onChangeText={t => update('hostLeadNote', t.slice(0, 250))}
-          placeholder="Mention anything that brings credibility to your experience here"
-          placeholderTextColor={COLORS.textPlaceholder}
-          multiline
-          maxLength={250}
-          textAlignVertical="top"
-        />
       </View>
     );
   };
@@ -2811,6 +2920,10 @@ export default function CreateTripFlowA({
           : null,
       accommodationImageUri:
         requiresSpecificStay || state.accommodationLocked ? state.accommodationImageUri : null,
+      accommodationUrl:
+        requiresSpecificStay || state.accommodationLocked
+          ? state.accommodationUrl || null
+          : null,
       costPerPerson:
         isFixedFlow && state.costPerPerson ? parseInt(state.costPerPerson, 10) : null,
       priceInclusions: isFixedFlow
@@ -2818,8 +2931,9 @@ export default function CreateTripFlowA({
         : null,
       budgetMin: isFixedFlow ? null : resolveBudget().min,
       budgetMax: isFixedFlow ? null : resolveBudget().max,
+      budgetTier: isFixedFlow || state.manualBudget ? null : state.budgetTier,
       hostingStyle: effectiveStyle,
-      leader: isLeaderFlow
+      leader: hasAboutYou
         ? {
             name: hostSurfer?.name ?? null,
             avatarUrl: hostSurfer?.profile_image_url ?? null,
@@ -3033,6 +3147,7 @@ export default function CreateTripFlowA({
         titleAlign="left"
         onClose={closeSheet}
         heightMode="full"
+        extendBehindKeyboard
         footer={
           <TouchableOpacity
             onPress={closeSheet}
@@ -3163,6 +3278,8 @@ export default function CreateTripFlowA({
       <WizardBottomSheet
         visible={openSheet === 'destFamiliarity'}
         title="How well do you know the destination?"
+        titleAlign="left"
+        hideHeaderDivider
         onClose={closeSheet}
       >
         <TripTagPicker<DestinationFamiliarity>
@@ -3182,6 +3299,8 @@ export default function CreateTripFlowA({
       <WizardBottomSheet
         visible={openSheet === 'stayFamiliarity'}
         title="How well do you know the stay?"
+        titleAlign="left"
+        hideHeaderDivider
         onClose={closeSheet}
       >
         <TripTagPicker<StayFamiliarity>
@@ -3202,6 +3321,8 @@ export default function CreateTripFlowA({
       <WizardBottomSheet
         visible={openSheet === 'incMeals'}
         title="Meals"
+        titleAlign="left"
+        hideHeaderDivider
         onClose={closeSheet}
       >
         <TripTagPicker<string>
@@ -3215,6 +3336,8 @@ export default function CreateTripFlowA({
       <WizardBottomSheet
         visible={openSheet === 'incAccommodation'}
         title="Accommodation"
+        titleAlign="left"
+        hideHeaderDivider
         onClose={closeSheet}
       >
         <TripTagPicker<string>
@@ -3228,6 +3351,8 @@ export default function CreateTripFlowA({
       <WizardBottomSheet
         visible={openSheet === 'incTransportation'}
         title="Transportation"
+        titleAlign="left"
+        hideHeaderDivider
         onClose={closeSheet}
       >
         <TripTagPicker<string>
@@ -3241,6 +3366,8 @@ export default function CreateTripFlowA({
       <WizardBottomSheet
         visible={openSheet === 'incSurfSessions'}
         title="Surf sessions"
+        titleAlign="left"
+        hideHeaderDivider
         onClose={closeSheet}
       >
         <TripTagPicker<string>
@@ -3254,6 +3381,8 @@ export default function CreateTripFlowA({
       <WizardBottomSheet
         visible={openSheet === 'incSurfEquipment'}
         title="Surf equipment"
+        titleAlign="left"
+        hideHeaderDivider
         onClose={closeSheet}
       >
         <TripTagPicker<string>
@@ -3266,7 +3395,9 @@ export default function CreateTripFlowA({
 
       <WizardBottomSheet
         visible={openSheet === 'incSurfFilm'}
-        title="Surf film"
+        title="Filmed surf sessions"
+        titleAlign="left"
+        hideHeaderDivider
         onClose={closeSheet}
       >
         <SurfFilmSheetContent
@@ -3278,6 +3409,8 @@ export default function CreateTripFlowA({
       <WizardBottomSheet
         visible={openSheet === 'incVideoAnalysis'}
         title="Video analysis"
+        titleAlign="left"
+        hideHeaderDivider
         onClose={closeSheet}
       >
         <VideoAnalysisSheetContent
@@ -3289,6 +3422,8 @@ export default function CreateTripFlowA({
       <WizardBottomSheet
         visible={openSheet === 'incActivities'}
         title="Activities & excursions"
+        titleAlign="left"
+        hideHeaderDivider
         onClose={closeSheet}
       >
         <ActivitiesSheetContent
@@ -3300,20 +3435,23 @@ export default function CreateTripFlowA({
       <WizardBottomSheet
         visible={openSheet === 'incWellness'}
         title="Wellness & recovery"
+        titleAlign="left"
+        hideHeaderDivider
         onClose={closeSheet}
       >
-        <TripTagPicker<string>
-          options={[...WELLNESS_OPTIONS]}
-          selected={state.priceInclusions.wellness ?? []}
+        <WellnessSheetContent
+          value={state.priceInclusions.wellness ?? []}
           onChange={next => setInclusions({ wellness: next })}
-          accessibilityLabel="Wellness included"
         />
       </WizardBottomSheet>
 
       <WizardBottomSheet
         visible={openSheet === 'incCustom'}
         title="Add your own"
+        titleAlign="left"
+        hideHeaderDivider
         onClose={closeCustomSheet}
+        heightMode="full"
         extendBehindKeyboard
       >
         <CustomInclusionSheetContent
@@ -3438,6 +3576,25 @@ const localStyles = StyleSheet.create({
   groupTopGap: {
     marginTop: 24,
   },
+  // About-you step — roomier gap between sections + a gray subtitle under each
+  // header for breathing space.
+  aboutSectionGap: {
+    marginTop: 44,
+  },
+  aboutSubtitle: {
+    fontFamily: FONT_INTER,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '400',
+    color: COLORS.textMuted,
+    marginTop: -2,
+    marginBottom: 14,
+  },
+  // Char counter for the lead note — right-aligned, just above the bubble.
+  leadCounter: {
+    alignSelf: 'flex-end',
+    marginBottom: 6,
+  },
   // Container that wraps a contiguous list of SummaryRows.
   summaryGroup: {
     backgroundColor: COLORS.surfaceCard,
@@ -3553,13 +3710,20 @@ const localStyles = StyleSheet.create({
   },
   inputField: {
     flex: 1,
+    // Let the row's `alignItems: 'center'` center the single line; an explicit
+    // lineHeight gives descenders room so nothing clips (the reason the old
+    // stretch hack existed). No alignSelf stretch — that left iOS text sitting
+    // low and out of line with the pencil icon.
     fontFamily: FONT_INTER,
     fontSize: 16,
+    lineHeight: 20,
     color: COLORS.inkBody,
-    padding: 0,
+    paddingVertical: 0,
+    paddingHorizontal: 0,
   },
   inputFieldTextarea: {
     height: 118,
+    alignSelf: 'auto',
     textAlignVertical: 'top',
   },
   textarea: {
@@ -3581,11 +3745,12 @@ const localStyles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
   },
-  priceDollar: {
-    fontFamily: FONT_MONTSERRAT,
-    fontSize: 22,
-    fontWeight: '800',
-    color: COLORS.inkBody,
+  priceIconBubble: {
+    backgroundColor: '#F7F7F7',
+    borderRadius: 10,
+    padding: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   // Trip title preview line
@@ -3768,6 +3933,36 @@ const localStyles = StyleSheet.create({
     gap: 16,
     marginTop: 16,
   },
+  // Single gate-style stay card (B & C) — sits below the "Your stay" helper.
+  // Roomier padding than the Yes/No gate cards to breathe around the bigger
+  // icon box + the right-side affordance.
+  stayGateCard: {
+    marginTop: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 18,
+  },
+  // Bigger grey icon box than the Yes/No gate bubble (the stay card's own).
+  stayIconBubble: {
+    width: 56,
+    height: 56,
+    backgroundColor: '#F7F7F7',
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // Title sized to match the "Who is it for?" audience-card headers (17px).
+  stayGateTitle: {
+    fontFamily: FONT_INTER,
+    fontSize: 17,
+    lineHeight: 22,
+    fontWeight: '700',
+    color: COLORS.inkBody,
+  },
+  // Bare edit pencil — same asset the stay bottom sheet uses on its fields.
+  stayEditIcon: {
+    width: 22,
+    height: 22,
+  },
   gateCardRow: {
     gap: 16,
     paddingHorizontal: 12,
@@ -3919,21 +4114,27 @@ const localStyles = StyleSheet.create({
     color: '#05BCD3',
   },
 
-  // Flow B "About you" — embedded profile card.
+  // Flow B "About you" — floating, tappable profile card (Box Shadow 01),
+  // same language as the "Who is it for?" audience cards.
   leaderCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
-    padding: 14,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: COLORS.borderCard,
+    gap: 18,
+    paddingLeft: 16,
+    paddingRight: 18,
+    paddingVertical: 22,
+    borderRadius: 20,
     backgroundColor: COLORS.surfaceCard,
+    shadowColor: '#596E7C',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 4,
   },
   leaderAvatar: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 76,
+    height: 76,
+    borderRadius: 38,
     backgroundColor: COLORS.surfaceMuted,
   },
   leaderAvatarEmpty: {
@@ -3942,23 +4143,38 @@ const localStyles = StyleSheet.create({
     backgroundColor: '#9CB6C0',
   },
   leaderName: {
-    fontFamily: FONT_MONTSERRAT,
-    fontSize: 16,
+    fontFamily: FONT_INTER,
+    fontSize: 18,
+    lineHeight: 24,
     fontWeight: '700',
     color: COLORS.inkBody,
   },
-  leaderMeta: {
-    fontFamily: FONT_INTER,
-    fontSize: 13,
-    fontWeight: '400',
-    color: COLORS.textMuted,
+  // Gray info pills (age, country, level, board, trips) — match the audience
+  // card's completed-state chips.
+  leaderTagsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 10,
   },
-  leaderEditLink: {
-    marginTop: 4,
+  leaderTagsRowSecond: {
+    marginTop: 8,
+  },
+  leaderTag: {
+    backgroundColor: '#EEEEEE',
+    borderWidth: 1,
+    borderColor: '#EEEEEE',
+    borderRadius: 15,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  leaderTagText: {
     fontFamily: FONT_INTER,
     fontSize: 13,
-    fontWeight: '600',
-    color: COLORS.brandTeal,
+    lineHeight: 17,
+    fontWeight: '400',
+    color: '#333333',
   },
 
   // Yes → inline stay-details preview card (name, pic, url).
@@ -4002,29 +4218,44 @@ const localStyles = StyleSheet.create({
     lineHeight: 18,
     color: COLORS.brandTealText,
   },
-  addStayBtn: {
-    marginTop: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 14,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderStyle: 'dashed',
-    borderColor: COLORS.brandTeal,
-    backgroundColor: COLORS.brandTealTint,
-  },
-  addStayBtnText: {
-    fontFamily: FONT_MONTSERRAT,
-    fontSize: 14,
-    fontWeight: '700',
-    color: COLORS.brandTealText,
-  },
 
   // Budget — center-stage container with breathing room above/below.
   budgetWrap: {
     paddingVertical: 8,
+  },
+
+  // Budget — "AI is estimating" loading state.
+  budgetLoading: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: 72,
+    paddingHorizontal: 24,
+  },
+  budgetLoadingIconWrap: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#E6F8FB',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 18,
+  },
+  budgetLoadingTitle: {
+    fontFamily: FONT_MONTSERRAT,
+    fontSize: 18,
+    lineHeight: 24,
+    fontWeight: '700',
+    color: COLORS.inkBody,
+    textAlign: 'center',
+  },
+  budgetLoadingSub: {
+    marginTop: 6,
+    fontFamily: FONT_INTER,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '400',
+    color: COLORS.textMuted,
+    textAlign: 'center',
   },
 
   // Budget — error banner / skeleton / retry

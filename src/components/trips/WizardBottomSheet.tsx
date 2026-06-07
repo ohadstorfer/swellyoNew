@@ -10,6 +10,7 @@ import {
   PanResponder,
   Platform,
   ScrollView,
+  StatusBar,
   StyleSheet,
   TouchableOpacity,
   TouchableWithoutFeedback,
@@ -248,6 +249,9 @@ export const WizardBottomSheet: React.FC<WizardBottomSheetProps> = ({
 
   return (
     <Modal visible transparent animationType="none" onRequestClose={onClose}>
+      {/* The dark scrim covers the status-bar area, so force light icons
+          (iOS resets the bar to its default dark when a Modal presents). */}
+      <StatusBar barStyle="light-content" />
       {/* RNGH gestures (used by sliders inside sheet content) require this
           root inside the Modal — gestures don't bubble through RN's Modal. */}
       <GestureHandlerRootView style={styles.root}>
@@ -435,9 +439,9 @@ const styles = StyleSheet.create({
     paddingBottom: 32,
   },
   contentInnerWithFooter: {
-    // Small gap beneath the last item so the footer button sits close to the
-    // cards above without touching them.
-    paddingBottom: 8,
+    // Room beneath the last item so its drop shadow isn't clipped and the
+    // footer button sits clear of the cards above.
+    paddingBottom: 24,
   },
   footer: {
     paddingHorizontal: 16,

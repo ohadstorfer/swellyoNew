@@ -27,10 +27,16 @@ import {
   ScrollView,
   TouchableOpacity,
   Dimensions,
+  Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { TRIP_VIBE_OPTIONS } from '../../services/trips/groupTripsService';
-import { priceInclusionSections } from '../../services/trips/priceInclusions';
+import {
+  priceInclusionSections,
+  priceInclusionAddOns,
+  CATEGORY_TITLE,
+} from '../../services/trips/priceInclusions';
 import { WizardBottomSheet } from './WizardBottomSheet';
 import { TripIcon, type TripIconName } from './tripIcons';
 
@@ -53,7 +59,7 @@ import {
   BOARD_IMAGE,
   BOARD_SHORT,
   STRUCTURE_DISPLAY,
-  TRIP_TYPE_LABEL,
+  BUDGET_VIBE,
   formatAge,
   formatBudgetRange,
   formatDateRange,
@@ -61,29 +67,55 @@ import {
   formatSkillRange,
   computeCountdownTarget,
 } from './TripDetailView';
+import { TRIP_TYPE_WORD, TRIP_TYPE_GRADIENT } from '../../services/trips/tripVocabulary';
 
 const FONT_INTER = Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter';
 const FONT_MONTSERRAT = Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat';
 
+// Open the accommodation booking/listing link, tolerating URLs typed without a
+// scheme (e.g. "airbnb.com/...").
+function openStayUrl(raw: string) {
+  const url = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+  Linking.openURL(url).catch(() => {});
+}
+
 const SCREEN_WIDTH = Dimensions.get('window').width;
-// Info chips show ~2.7 per screen. Page gutter is 16, gap is 10.
-const CHIP_WIDTH = Math.round((SCREEN_WIDTH - 16) / 2.7) - 8;
+// Info chips show ~2.4 per screen. Page gutter is 16, gap is 10.
+const CHIP_WIDTH = Math.round((SCREEN_WIDTH - 16) / 2.4) - 8;
 
 const C = {
   accent: '#05BCD3', // countdown numbers (brighter Figma accent)
+  accentTint: '#EAF9FC',
   brandTeal: '#0788B0', // chip icons + links
   ink: '#333333',
+  inkDark: '#212121',
   inkBody: '#222B30',
   textMuted: '#7B7B7B',
   textFaint: '#A0A0A0',
   textHowDesc: '#4A5565',
   border: '#EEEEEE',
   borderCard: '#E8E8E8',
+  iconBubble: '#F4F6F7',
   surface: '#FFFFFF',
   surfaceMuted: '#F7F7F7',
   chipBg: '#EEEEEE',
   brandTealTint: '#E6F4F8',
   avatarBg: '#9CB6C0',
+};
+
+// Icon per "What's included" category — keyed by display title, mirroring the
+// create-flow pricing step.
+const INCLUDE_ICON: Record<string, keyof typeof Ionicons.glyphMap> = {
+  [CATEGORY_TITLE.meals]: 'restaurant-outline',
+  [CATEGORY_TITLE.accommodation]: 'bed-outline',
+  [CATEGORY_TITLE.transportation]: 'car-outline',
+  [CATEGORY_TITLE.surfSessions]: 'water-outline',
+  [CATEGORY_TITLE.surfEquipment]: 'construct-outline',
+  [CATEGORY_TITLE.surfFilm]: 'film-outline',
+  [CATEGORY_TITLE.videoAnalysis]: 'videocam-outline',
+  [CATEGORY_TITLE.activities]: 'compass-outline',
+  [CATEGORY_TITLE.wellness]: 'leaf-outline',
+  [CATEGORY_TITLE.custom]: 'sparkles-outline',
 };
 
 // ---------------------------------------------------------------------------
@@ -196,7 +228,7 @@ const IconCell: React.FC<{
 }> = ({ icon, label, value }) => (
   <View style={styles.iconCell}>
     <View style={styles.iconCellBox}>
-      <TripIcon name={icon} size={18} color={ICON_INK} />
+      <TripIcon name={icon} size={22} color={ICON_INK} strokeWidth={1.1} />
     </View>
     <View style={styles.iconCellText}>
       <Text style={styles.iconCellLabel} numberOfLines={1}>
@@ -226,6 +258,7 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
   onEditAccommodation,
 }) => {
   const [showIncludes, setShowIncludes] = useState(false);
+  const [showBudgetInfo, setShowBudgetInfo] = useState(false);
   const [aboutExpanded, setAboutExpanded] = useState(false);
   const [aboutHostExpanded, setAboutHostExpanded] = useState(false);
 
@@ -246,7 +279,9 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
   // Pill font scales with how much room the boards illustration leaves: with all
   // 4 boards it eats ~half the row, so drop to 10px to keep the pills in 2 lines.
   // 3 or fewer boards → narrower illustration → 14px still fits in 2 lines.
-  const surfPillFontSize = surfStyles.length >= 4 ? 10 : 14;
+  // Boards sit beside the pills, so 4 long labels ("Mid - Length") only fit two
+  // rows at a small size; fewer boards leave room to stay big.
+  const surfPillFontSize = surfStyles.length >= 4 ? 10 : surfStyles.length === 3 ? 14 : 18;
   const structures = vm.structureSlugs.filter(s => STRUCTURE_DISPLAY[s]);
 
   const waveSizeLabel =
@@ -258,15 +293,22 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
 
   const showAccommodation =
     !!vm.accommodationName || !!vm.accommodationKindLabel || vm.specificStaySelected != null;
+  // Tapping the stay card opens the host's booking/listing link, if one was set.
+  const stayUrl = vm.accommodationUrl?.trim() || null;
 
   const priceLabel =
     vm.costPerPerson != null ? `$${vm.costPerPerson.toLocaleString('en-US')}` : null;
   const includeSections = priceInclusionSections(vm.priceInclusions);
+  const addOns = priceInclusionAddOns(vm.priceInclusions);
+  const hasPriceDetail = includeSections.length > 0 || addOns.length > 0;
 
   // Horizontal info chips below the countdown — fixed order, each shown only
   // when it has data.
   const budgetLabel = formatBudgetRange(vm.budgetMin ?? null, vm.budgetMax ?? null);
-  const tripTypeLabel = vm.hostingStyle ? TRIP_TYPE_LABEL[vm.hostingStyle] : null;
+  const budgetVibe = vm.budgetTier ? BUDGET_VIBE[vm.budgetTier] : null;
+  // Coloured trip-type tag straddling the top of the countdown card.
+  const typeTagWord = vm.hostingStyle ? TRIP_TYPE_WORD[vm.hostingStyle] : null;
+  const typeTagGradient = vm.hostingStyle ? TRIP_TYPE_GRADIENT[vm.hostingStyle] : null;
   const chips: {
     icon: TripIconName;
     label: string;
@@ -288,24 +330,59 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
       label: 'Price',
       value: `${vm.costPerPerson}$`,
       highlight: true,
-      footer: includeSections.length > 0 ? 'See what’s included' : undefined,
-      onPress: includeSections.length > 0 ? () => setShowIncludes(true) : undefined,
+      footer: hasPriceDetail ? 'What’s included' : undefined,
+      onPress: hasPriceDetail ? () => setShowIncludes(true) : undefined,
     });
   } else if (budgetLabel) {
+    const operatorIncludes = isOperator && hasPriceDetail;
     chips.push({
       icon: 'currency-dollar-circle',
-      label: isOperator ? 'Price' : 'Budget',
+      label: isOperator ? 'Price' : budgetVibe ?? 'Budget',
       value: budgetLabel,
-      highlight: isOperator || undefined,
-      footer: isOperator && includeSections.length > 0 ? 'See what’s included' : undefined,
-      onPress:
-        isOperator && includeSections.length > 0 ? () => setShowIncludes(true) : undefined,
+      highlight: true,
+      // Operator price → "what's included"; AI budget range → "see estimation".
+      footer: operatorIncludes
+        ? 'What’s included'
+        : !isOperator
+          ? 'See estimation'
+          : undefined,
+      onPress: operatorIncludes
+        ? () => setShowIncludes(true)
+        : !isOperator
+          ? () => setShowBudgetInfo(true)
+          : undefined,
     });
   }
+
+  // Static "Based on" chips for the budget-info sheet — from data we already
+  // have, no extra AI call.
+  const budgetBasedOn: string[] = (
+    [
+      vm.destinationLabel,
+      vm.durationDays ? `${vm.durationDays} day${vm.durationDays === 1 ? '' : 's'}` : null,
+      vm.accommodationKindLabel,
+    ].filter(Boolean) as string[]
+  );
+  // What the estimate covers — mirrors the AI prompt (accommodation + food +
+  // local transport + surf activities; international flights excluded).
+  const accLower = vm.accommodationKindLabel?.toLowerCase();
+  const stayLine = vm.durationDays
+    ? `${vm.durationDays} ${vm.durationDays === 1 ? 'day' : 'days'} at a ${accLower ?? 'place to stay'}`
+    : accLower
+      ? `Your stay at a ${accLower}`
+      : 'Accommodation for your whole stay';
+  const budgetCovers: { icon: keyof typeof Ionicons.glyphMap; text: string }[] = [
+    { icon: 'bed-outline', text: stayLine },
+    { icon: 'restaurant-outline', text: 'Three meals a day' },
+    { icon: 'airplane-outline', text: 'Airport transfers both ways' },
+    { icon: 'car-outline', text: 'Getting around the spot and nearby' },
+    { icon: 'water-outline', text: 'Everyday surf activities' },
+  ];
   chips.push({ icon: 'bar-chart-10', label: 'Level', value: skillLabel });
   chips.push({ icon: 'calendar', label: 'Age range', value: ageLabel });
   chips.push({ icon: 'users-02', label: 'Participants', value: participantsLabel });
-  if (tripTypeLabel) chips.push({ icon: 'marker-pin-05', label: 'Trip type', value: tripTypeLabel });
+  // Trip type is now shown as the coloured tag above the countdown card, so it's
+  // no longer repeated as a chip here.
   if (vibeLabel) chips.push({ icon: 'sun-setting-03', label: 'Focus vibe', value: vibeLabel });
   if (waveSizeLabel) chips.push({ icon: 'ruler', label: 'Wave size', value: waveSizeLabel });
   if (vm.waveShapeLabel)
@@ -328,18 +405,28 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
 
   // Trip Operator (Flow C): host profile detail badges shown in "About <host>",
   // mirroring the create-trip "About you" stats (age, origin, level, board, trips).
-  const hostBadges: string[] = isOperator && aboutHost
+  // Two lines of badges (mirrors the create-flow "About you" card): top =
+  // trips + board, bottom = level, age, origin.
+  const hostBadgesTop: string[] = isOperator && aboutHost
     ? ([
-        aboutHost.age != null ? `${aboutHost.age} yrs` : null,
-        aboutHost.countryFrom,
-        aboutHost.surfLevelLabel,
-        aboutHost.boardLabel,
         aboutHost.surfTrips != null ? `${aboutHost.surfTrips} Surf Trips` : null,
+        aboutHost.boardLabel,
       ].filter(Boolean) as string[])
     : [];
+  const hostBadgesBottom: string[] = isOperator && aboutHost
+    ? ([
+        aboutHost.surfLevelLabel,
+        aboutHost.age != null ? `${aboutHost.age} yrs` : null,
+        aboutHost.countryFrom,
+      ].filter(Boolean) as string[])
+    : [];
+  const hasHostBadges = hostBadgesTop.length > 0 || hostBadgesBottom.length > 0;
 
   return (
     <View style={styles.root}>
+      {/* White header zone — the hero, countdown card and the Overview/Plan
+          toggle sit on white; everything below the toggle is the #FAFAFA body. */}
+      <View style={styles.headerWhite}>
       {/* ---- Hero + overlapping card with countdown ---- */}
       <View style={styles.heroWrap}>
         {vm.heroImageUri ? (
@@ -355,6 +442,19 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
           </View>
         ) : null}
         <View style={styles.heroCard}>
+          {/* Coloured trip-type tag, straddling the top edge of the card. */}
+          {typeTagWord ? (
+            <View style={styles.typeTagWrap} pointerEvents="none">
+              <LinearGradient
+                colors={typeTagGradient ?? [C.accent, C.accent, C.accent]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.typeTag}
+              >
+                <Text style={styles.typeTagText}>{typeTagWord}</Text>
+              </LinearGradient>
+            </View>
+          ) : null}
           <View style={styles.heroDateRow}>
             <Text style={styles.heroDate}>{dateRange}</Text>
             {canEditDates ? <EditPill label="Set dates" onPress={onEditDates} /> : null}
@@ -368,6 +468,7 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
 
       {/* Shared chrome slot (Overview/Plan toggle) — sits between hero and body. */}
       {afterHeroSlot ?? null}
+      </View>
 
       {!bodyHidden && (
         <>
@@ -381,8 +482,13 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
             {chips.map((c, i) => {
               const inner = (
                 <>
-                  <View style={styles.chipIconBox}>
-                    <TripIcon name={c.icon} size={18} color={ICON_INK} />
+                  <View style={[styles.chipIconBox, c.highlight && styles.chipIconBoxHighlight]}>
+                    <TripIcon
+                      name={c.icon}
+                      size={22}
+                      color={c.highlight ? '#FFFFFF' : ICON_INK}
+                      strokeWidth={1.1}
+                    />
                   </View>
                   <View style={styles.chipText}>
                     <Text style={styles.chipLabel} numberOfLines={1}>
@@ -396,7 +502,7 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
                         <Text style={styles.chipFooter} numberOfLines={1}>
                           {c.footer}
                         </Text>
-                        <Ionicons name="chevron-forward" size={11} color={C.brandTeal} />
+                        <Ionicons name="arrow-forward" size={14} color={C.brandTeal} />
                       </View>
                     ) : null}
                   </View>
@@ -410,7 +516,7 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
                   onPress={c.onPress}
                   style={cardStyle}
                   accessibilityRole="button"
-                  accessibilityLabel={`${c.label} ${c.value}. See what's included.`}
+                  accessibilityLabel={`${c.label} ${c.value}.${c.footer ? ` ${c.footer}` : ''}`}
                 >
                   {inner}
                 </TouchableOpacity>
@@ -425,7 +531,7 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
           {/* ---- About <host> (organizer self-intro) — host_lead_note. Shown
                   when the host wrote one, or always to the host so they can add
                   one via "Edit Profile". ---- */}
-          {!isPlannedTogether && aboutHost && (aboutHost.bio || isHost || hostBadges.length > 0) ? (
+          {!isPlannedTogether && aboutHost && (aboutHost.bio || isHost || hasHostBadges) ? (
             <View style={styles.section}>
               <View style={styles.aboutHostHeader}>
                 {aboutHost.avatarUrl ? (
@@ -436,19 +542,38 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
                   </View>
                 )}
                 <Text style={styles.aboutHostName} numberOfLines={1}>
-                  {aboutHost.name ? `About ${aboutHost.name}` : 'About the organizer'}
+                  {aboutHost.name
+                    ? `About ${aboutHost.name}`
+                    : isOperator
+                      ? 'About the operator'
+                      : 'About the Captain'}
                 </Text>
                 {isHost ? <EditPill label="Edit Profile" onPress={onEditAboutHost} /> : null}
               </View>
-              {hostBadges.length > 0 ? (
-                <View style={styles.hostBadgeRow}>
-                  {hostBadges.map((b, i) => (
-                    <View key={`${b}-${i}`} style={styles.hostBadge}>
-                      <Text style={styles.hostBadgeText} numberOfLines={1}>
-                        {b}
-                      </Text>
+              {hasHostBadges ? (
+                <View style={styles.hostBadgeGroup}>
+                  {hostBadgesTop.length > 0 ? (
+                    <View style={styles.hostBadgeRow}>
+                      {hostBadgesTop.map((b, i) => (
+                        <View key={`top-${b}-${i}`} style={styles.hostBadge}>
+                          <Text style={styles.hostBadgeText} numberOfLines={1}>
+                            {b}
+                          </Text>
+                        </View>
+                      ))}
                     </View>
-                  ))}
+                  ) : null}
+                  {hostBadgesBottom.length > 0 ? (
+                    <View style={styles.hostBadgeRow}>
+                      {hostBadgesBottom.map((b, i) => (
+                        <View key={`bot-${b}-${i}`} style={styles.hostBadge}>
+                          <Text style={styles.hostBadgeText} numberOfLines={1}>
+                            {b}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  ) : null}
                 </View>
               ) : null}
               {aboutHost.bio ? (
@@ -470,7 +595,9 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
                 </>
               ) : (
                 <Text style={styles.bodyPlaceholder}>
-                  Tell surfers who you are and why you’re leading this trip.
+                  {isOperator
+                    ? 'Tell surfers who you are and why you run great trips.'
+                    : 'Tell surfers who you are and why you’re the Captain for this trip.'}
                 </Text>
               )}
             </View>
@@ -539,7 +666,7 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
           {structures.length > 0 ? (
             <View style={styles.section}>
               <SectionTitle title="How this trip works" />
-              <View style={{ gap: 24, marginTop: 4 }}>
+              <View style={{ gap: 30, marginTop: 16 }}>
                 {structures.map(slug => {
                   const d = STRUCTURE_DISPLAY[slug];
                   return (
@@ -556,10 +683,10 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
             </View>
           ) : null}
 
-          {/* ---- Meet your leader (Flow B) ---- */}
+          {/* ---- Meet your Captain (Flow B) ---- */}
           {vm.leader ? (
             <View style={styles.section}>
-              <SectionTitle title="Meet your leader" />
+              <SectionTitle title="Meet your Captain" />
               <View style={styles.leaderBlock}>
                 <TouchableOpacity
                   activeOpacity={onLeaderPress ? 0.8 : 1}
@@ -578,7 +705,7 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
                   )}
                   <View style={{ flex: 1 }}>
                     <Text style={styles.leaderName} numberOfLines={1}>
-                      {vm.leader.name || 'The leader'}
+                      {vm.leader.name || 'The Captain'}
                       {vm.leader.age != null ? (
                         <Text style={styles.leaderMeta}>{`  ·  ${vm.leader.age}${
                           vm.leader.countryFrom ? ` from ${vm.leader.countryFrom}` : ''
@@ -671,7 +798,7 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
 
           {/* ---- Who it's for ---- */}
           {showWhoFor ? (
-            <View style={styles.section}>
+            <View style={[styles.section, styles.sectionPadBottom]}>
               <SectionTitle title="Who it's for" />
               <View style={styles.cellRow}>
                 <IconCell icon="calendar-date" label="Age range" value={ageLabel} />
@@ -682,7 +809,7 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
 
           {/* ---- Wave information ---- */}
           {showWaveInfo ? (
-            <View style={styles.section}>
+            <View style={[styles.section, styles.sectionPadBottom]}>
               <SectionTitle title="Wave information" />
               <View style={styles.cellRow}>
                 <IconCell icon="ruler" label="Wave size" value={waveSizeLabel ?? '—'} />
@@ -710,7 +837,14 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
                 }
               />
               {vm.specificStaySelected && vm.accommodationName ? (
-                <View style={styles.stayCard}>
+                <TouchableOpacity
+                  style={styles.stayCard}
+                  activeOpacity={stayUrl ? 0.85 : 1}
+                  disabled={!stayUrl}
+                  onPress={stayUrl ? () => openStayUrl(stayUrl) : undefined}
+                  accessibilityRole={stayUrl ? 'link' : undefined}
+                  accessibilityLabel={stayUrl ? `Open ${vm.accommodationName}` : undefined}
+                >
                   {vm.accommodationImageUri ? (
                     <Image
                       source={{ uri: vm.accommodationImageUri }}
@@ -724,7 +858,7 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
                   )}
                   <View style={styles.stayPill}>
                     <View style={styles.stayPillIcon}>
-                      <TripIcon name="home-03" size={18} color={ICON_INK} />
+                      <TripIcon name="home-03" size={24} color={ICON_INK} />
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.stayName} numberOfLines={1}>
@@ -737,7 +871,7 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
                       </Text>
                     </View>
                   </View>
-                </View>
+                </TouchableOpacity>
               ) : (
                 <View style={styles.cellRow}>
                   <IconCell
@@ -767,31 +901,143 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
       <WizardBottomSheet
         visible={showIncludes}
         title="What's included"
+        titleAlign="left"
+        hideHeaderDivider
+        largeTitle
         onClose={() => setShowIncludes(false)}
         heightMode="full"
       >
         {priceLabel ? (
-          <View style={styles.includesSheetPrice}>
-            <Text style={styles.priceValue}>{priceLabel}</Text>
-            <Text style={styles.pricePer}>per person</Text>
+          <View style={styles.priceHero}>
+            <View style={styles.priceHeroLeft}>
+              <Text style={styles.priceHeroValue} numberOfLines={1} adjustsFontSizeToFit>
+                {priceLabel}
+              </Text>
+              <Text style={styles.priceHeroPer}>per person</Text>
+            </View>
+            <View style={styles.priceHeroTag}>
+              <Ionicons name="shield-checkmark" size={13} color="#FFFFFF" />
+              <Text style={styles.priceHeroTagText}>Set by host</Text>
+            </View>
           </View>
         ) : null}
-        <View style={styles.includesCard}>
-          {includeSections.map((sec, i) => (
-            <View key={sec.title} style={[styles.includeRow, i > 0 && styles.includeRowDivider]}>
-              <View style={styles.includeBullet}>
-                <Ionicons name="checkmark" size={14} color={C.brandTeal} />
+
+        <Text style={styles.sheetIntro}>
+          One fixed, all-in price. Here’s everything it covers.
+        </Text>
+
+        {includeSections.length > 0 ? (
+          <View style={styles.sheetList}>
+            {includeSections.map((sec, i) => (
+              <View
+                key={sec.title}
+                style={[styles.sheetRow, i > 0 && styles.sheetRowDivider]}
+              >
+                <View style={styles.sheetRowIcon}>
+                  <Ionicons
+                    name={INCLUDE_ICON[sec.title] ?? 'checkmark'}
+                    size={18}
+                    color={C.inkBody}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.sheetRowTitle}>{sec.title}</Text>
+                  {sec.asTags ? (
+                    <Text style={styles.sheetRowItem}>{sec.items.join(', ')}</Text>
+                  ) : (
+                    sec.items.map((it, j) => (
+                      <Text key={j} style={styles.sheetRowItem}>
+                        {it}
+                      </Text>
+                    ))
+                  )}
+                </View>
               </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.includeTitle}>{sec.title}</Text>
-                {sec.items.map((it, j) => (
-                  <Text key={j} style={styles.includeItem}>
-                    {it}
-                  </Text>
-                ))}
+            ))}
+          </View>
+        ) : null}
+
+        {addOns.length > 0 ? (
+          <View style={styles.addOnsCard}>
+            <Text style={styles.addOnsTitle}>Add-ons for extra price</Text>
+            <Text style={styles.addOnsHint}>Available on the trip for an extra cost.</Text>
+            <View style={styles.addOnTags}>
+              {addOns.map(label => (
+                <View key={label} style={styles.addOnTag}>
+                  <Text style={styles.addOnTagText}>{label}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        ) : null}
+      </WizardBottomSheet>
+
+      {/* ---- "About this estimate" sheet (A/B — opened from the Budget chip).
+              Pure description from data we already have; no AI call. ---- */}
+      <WizardBottomSheet
+        visible={showBudgetInfo}
+        title="About this estimate"
+        titleAlign="left"
+        hideHeaderDivider
+        largeTitle
+        onClose={() => setShowBudgetInfo(false)}
+        heightMode="auto"
+      >
+        {budgetLabel ? (
+          <View style={styles.priceHero}>
+            <View style={styles.priceHeroLeft}>
+              <Text style={styles.priceHeroValue} numberOfLines={1} adjustsFontSizeToFit>
+                {budgetLabel}
+              </Text>
+              <Text style={styles.priceHeroPer}>per person · estimated</Text>
+            </View>
+            {budgetVibe ? (
+              <View style={styles.priceHeroTag}>
+                <Ionicons name="pricetag" size={12} color="#FFFFFF" />
+                <Text style={styles.priceHeroTagText}>{budgetVibe}</Text>
               </View>
+            ) : null}
+          </View>
+        ) : null}
+
+        <Text style={styles.sheetIntro}>
+          A rough AI estimate to plan around - not a price the organizer set. What
+          you actually spend depends on how you travel.
+        </Text>
+
+        {budgetBasedOn.length > 0 ? (
+          <>
+            <Text style={styles.sheetSectionLabel}>Based on</Text>
+            <View style={styles.basedOnRow}>
+              {budgetBasedOn.map((t, i) => (
+                <View key={`${t}-${i}`} style={styles.basedOnChip}>
+                  <Text style={styles.basedOnChipText}>{t}</Text>
+                </View>
+              ))}
+            </View>
+          </>
+        ) : null}
+
+        <Text style={styles.sheetSectionLabel}>What it covers</Text>
+        <View style={styles.sheetList}>
+          {budgetCovers.map((c, i) => (
+            <View
+              key={c.text}
+              style={[styles.sheetRow, i > 0 && styles.sheetRowDivider]}
+            >
+              <View style={styles.sheetRowIcon}>
+                <Ionicons name={c.icon} size={18} color={C.inkBody} />
+              </View>
+              <Text style={[styles.sheetRowTitle, styles.sheetRowTitleFlex]}>{c.text}</Text>
             </View>
           ))}
+        </View>
+
+        <View style={styles.callout}>
+          <Ionicons name="airplane-outline" size={16} color={C.textMuted} />
+          <Text style={styles.calloutText}>
+            International flights aren’t included - book those separately.
+          </Text>
         </View>
       </WizardBottomSheet>
     </View>
@@ -806,15 +1052,25 @@ const styles = StyleSheet.create({
   root: {
     paddingHorizontal: 16,
   },
+  // White zone for the hero + countdown card + toggle. Bleeds full-width; the
+  // body below it sits on the screen's #FAFAFA.
+  headerWhite: {
+    backgroundColor: '#FFFFFF',
+    marginHorizontal: -16,
+    paddingHorizontal: 16,
+  },
 
-  // Hero + floating card
+  // Hero + floating card. White background so the area behind the overlapping
+  // countdown card (which is pulled up over the hero) stays white, not the
+  // page's #FAFAFA.
   heroWrap: {
     marginHorizontal: -16,
     marginBottom: 8,
+    backgroundColor: '#FFFFFF',
   },
   hero: {
     width: '100%',
-    height: 220,
+    height: 280,
     backgroundColor: C.border,
   },
   heroPlaceholder: {
@@ -822,21 +1078,41 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   heroCard: {
-    marginTop: -52,
-    marginHorizontal: 16,
+    marginTop: -120,
+    marginHorizontal: 24,
     backgroundColor: C.surface,
     borderWidth: 1,
     borderColor: C.border,
     borderRadius: 16,
     paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 22,
+    paddingTop: 26,
+    paddingBottom: 32,
     shadowColor: '#000',
-    shadowOpacity: 0.07,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 4,
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 3,
     alignItems: 'center',
+  },
+  // Coloured trip-type tag — centered, straddling the card's top edge.
+  typeTagWrap: {
+    position: 'absolute',
+    top: -14,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    zIndex: 5,
+  },
+  typeTag: {
+    paddingHorizontal: 16,
+    paddingVertical: 7,
+    borderRadius: 9,
+  },
+  typeTagText: {
+    fontFamily: FONT_INTER,
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
   heroDateRow: {
     flexDirection: 'row',
@@ -870,9 +1146,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   countdownBox: {
-    width: 52,
-    height: 52,
-    borderRadius: 8,
+    width: 64,
+    height: 64,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: C.border,
     backgroundColor: C.surface,
@@ -882,22 +1158,22 @@ const styles = StyleSheet.create({
   },
   countdownValue: {
     fontFamily: FONT_MONTSERRAT,
-    fontSize: 18,
-    lineHeight: 22,
+    fontSize: 22,
+    lineHeight: 26,
     fontWeight: '800',
     color: C.accent,
   },
   countdownLabel: {
     fontFamily: FONT_INTER,
-    fontSize: 9,
-    lineHeight: 12,
+    fontSize: 12,
+    lineHeight: 16,
     fontWeight: '400',
     color: C.inkBody,
   },
 
   // Info chips — horizontal scroll, bleeds edge-to-edge.
   chipsScroll: {
-    marginTop: 14,
+    marginTop: 34,
     marginHorizontal: -16,
   },
   chipsScrollContent: {
@@ -908,23 +1184,27 @@ const styles = StyleSheet.create({
     width: CHIP_WIDTH,
     flexDirection: 'column',
     alignItems: 'flex-start',
-    gap: 8,
+    gap: 12,
     borderWidth: 1,
     borderColor: C.border,
-    borderRadius: 16,
-    padding: 8,
+    borderRadius: 18,
+    padding: 12,
     backgroundColor: C.surface,
   },
   chipHighlight: {
     borderColor: C.brandTeal,
   },
   chipIconBox: {
-    width: 38,
-    height: 38,
-    borderRadius: 8,
+    width: 48,
+    height: 48,
+    borderRadius: 12,
     backgroundColor: C.surfaceMuted,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  // Price/budget card — filled teal icon (white glyph), per design.
+  chipIconBoxHighlight: {
+    backgroundColor: C.accent,
   },
   chipText: {
     width: '100%',
@@ -938,28 +1218,28 @@ const styles = StyleSheet.create({
   },
   chipValue: {
     fontFamily: FONT_INTER,
-    fontSize: 16,
-    lineHeight: 18,
+    fontSize: 17,
+    lineHeight: 20,
     fontWeight: '700',
     color: C.ink,
   },
   chipFooterRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 2,
-    marginTop: 2,
+    gap: 3,
+    marginTop: 6,
   },
   chipFooter: {
     fontFamily: FONT_INTER,
-    fontSize: 10,
+    fontSize: 13,
     fontWeight: '600',
     color: C.brandTeal,
   },
 
   // Sections — separated by a hairline top border like the Figma rows.
   section: {
-    marginTop: 20,
-    paddingTop: 20,
+    marginTop: 36,
+    paddingTop: 36,
     borderTopWidth: 1,
     borderTopColor: C.border,
   },
@@ -967,7 +1247,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 12,
+    marginBottom: 22,
+  },
+  // Extra breathing room under the icon-cell sections (Who it's for / Wave)
+  // before the next section's divider line.
+  sectionPadBottom: {
+    paddingBottom: 16,
   },
   sectionTitle: {
     fontFamily: FONT_INTER,
@@ -981,6 +1266,8 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     color: C.textMuted,
+    // Wrap the description earlier so it doesn't run to the right edge.
+    marginRight: 44,
   },
   bodyPlaceholder: {
     fontFamily: FONT_INTER,
@@ -1044,19 +1331,27 @@ const styles = StyleSheet.create({
     color: C.ink,
   },
   // Host profile detail badges (Trip Operator) — soft pill tags under the bio.
+  hostBadgeGroup: {
+    gap: 8,
+    marginBottom: 22,
+  },
   hostBadgeRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
-    marginBottom: 14,
   },
+  // Floating chips — white, no border/fill tint, soft drop shadow so they lift
+  // off the card.
   hostBadge: {
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 999,
-    borderWidth: 1,
-    borderColor: C.border,
-    backgroundColor: C.surfaceMuted,
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#000',
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
   },
   hostBadgeText: {
     fontFamily: FONT_INTER,
@@ -1096,23 +1391,22 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
+    columnGap: 8,
+    rowGap: 12,
   },
   surfPill: {
     borderWidth: 1,
     borderColor: C.border,
     backgroundColor: C.chipBg,
-    borderRadius: 15,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
   },
   surfPillText: {
     fontFamily: FONT_INTER,
-    // Base 14px. Overridden to 10px when there are 4 boards (see surfPillFontSize)
-    // — with 4, the boards illustration takes ~half the row so 14px wraps to 3
-    // lines; fewer boards leave room to keep 14px in 2 lines.
-    fontSize: 14,
-    lineHeight: 20,
+    // Base size comes from surfPillFontSize (16, or 12 with 4 boards) — set inline.
+    fontSize: 16,
+    lineHeight: 22,
     fontWeight: '400',
     color: C.ink,
     textAlign: 'center',
@@ -1120,19 +1414,19 @@ const styles = StyleSheet.create({
   boardsRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    gap: 16,
-    height: 70,
+    gap: 10,
+    height: 112,
   },
   boardImg: {
-    width: 22,
-    height: 72,
+    width: 28,
+    height: 112,
   },
 
   // How it works
   howRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: 8,
+    gap: 14,
   },
   howTitle: {
     fontFamily: FONT_INTER,
@@ -1141,31 +1435,37 @@ const styles = StyleSheet.create({
     color: '#0A0A0A',
   },
   howDesc: {
-    marginTop: 1,
+    marginTop: 2,
     fontFamily: FONT_INTER,
-    fontSize: 14,
-    lineHeight: 20,
+    fontSize: 12,
+    lineHeight: 17,
     color: C.textHowDesc,
   },
 
   // Icon-box cells (Who it's for / Wave information / Accommodation fallback)
   cellRow: {
     flexDirection: 'row',
-    gap: 16,
+    gap: 4,
   },
   iconCell: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 10,
   },
+  // White square sized to the height of the label+value text beside it.
   iconCellBox: {
-    width: 38,
-    height: 38,
-    borderRadius: 8,
-    backgroundColor: C.surfaceMuted,
+    width: 44,
+    height: 44,
+    borderRadius: 10,
+    backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.06,
+    shadowRadius: 5,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 2,
   },
   iconCellText: {
     flex: 1,
@@ -1178,7 +1478,7 @@ const styles = StyleSheet.create({
     color: C.textMuted,
   },
   iconCellValue: {
-    marginTop: 1,
+    marginTop: 3,
     fontFamily: FONT_INTER,
     fontSize: 14,
     fontWeight: '700',
@@ -1243,16 +1543,20 @@ const styles = StyleSheet.create({
   // Accommodation card
   stayCard: {
     backgroundColor: C.surface,
-    borderWidth: 1,
-    borderColor: C.border,
-    borderRadius: 28,
-    padding: 10,
-    gap: 10,
+    borderRadius: 36,
+    padding: 16,
+    gap: 12,
+    // No border — a small float instead.
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
   },
   stayImage: {
     width: '100%',
-    height: 190,
-    borderRadius: 22,
+    aspectRatio: 328 / 198, // ≈ 3.3 wide : 2 tall (landscape, per Figma)
+    borderRadius: 28,
     backgroundColor: C.surfaceMuted,
   },
   stayImagePlaceholder: {
@@ -1262,15 +1566,15 @@ const styles = StyleSheet.create({
   stayPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 12,
     backgroundColor: C.surfaceMuted,
-    borderRadius: 28,
-    paddingHorizontal: 8,
-    paddingVertical: 7,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
   },
   stayPillIcon: {
-    width: 38,
-    height: 38,
+    width: 48,
+    height: 48,
     borderRadius: 28,
     backgroundColor: C.surface,
     alignItems: 'center',
@@ -1291,66 +1595,198 @@ const styles = StyleSheet.create({
     color: C.textHowDesc,
   },
 
-  // "What's included" sheet (Flow C)
-  includesSheetPrice: {
+  // ---- Shared "info sheet" design (price/included + budget estimate) ----
+  priceHero: {
     flexDirection: 'row',
-    alignItems: 'baseline',
-    gap: 8,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: C.borderCard,
-    borderRadius: 16,
-    paddingVertical: 16,
-    paddingHorizontal: 18,
-  },
-  priceValue: {
-    fontFamily: FONT_MONTSERRAT,
-    fontSize: 26,
-    fontWeight: '800',
-    color: C.ink,
-  },
-  pricePer: {
-    fontFamily: FONT_INTER,
-    fontSize: 14,
-    fontWeight: '500',
-    color: C.textMuted,
-  },
-  includesCard: {
-    borderWidth: 1,
-    borderColor: C.borderCard,
-    borderRadius: 16,
-    paddingHorizontal: 14,
-  },
-  includeRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 12,
-    paddingVertical: 12,
-  },
-  includeRowDivider: {
-    borderTopWidth: 1,
-    borderTopColor: C.border,
-  },
-  includeBullet: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: C.brandTealTint,
     alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 1,
+    justifyContent: 'space-between',
+    gap: 12,
+    backgroundColor: C.surface,
+    borderRadius: 20,
+    paddingVertical: 18,
+    paddingHorizontal: 20,
+    shadowColor: '#596E7C',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 4,
   },
-  includeTitle: {
+  priceHeroLeft: {
+    flex: 1,
+  },
+  priceHeroValue: {
     fontFamily: FONT_MONTSERRAT,
-    fontSize: 14,
-    fontWeight: '700',
-    color: C.inkBody,
+    fontSize: 30,
+    lineHeight: 34,
+    fontWeight: '800',
+    color: C.inkDark,
   },
-  includeItem: {
+  priceHeroPer: {
     marginTop: 2,
     fontFamily: FONT_INTER,
     fontSize: 13,
+    fontWeight: '500',
+    color: C.textMuted,
+  },
+  priceHeroTag: {
+    flexShrink: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: C.inkDark,
+    borderRadius: 999,
+    paddingHorizontal: 11,
+    paddingVertical: 6,
+  },
+  priceHeroTagText: {
+    fontFamily: FONT_INTER,
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  sheetIntro: {
+    marginTop: 16,
+    fontFamily: FONT_INTER,
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: '400',
+    color: C.inkBody,
+  },
+  sheetSectionLabel: {
+    marginTop: 24,
+    marginBottom: 12,
+    fontFamily: FONT_INTER,
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: '700',
+    color: C.inkBody,
+  },
+  // One light container around the whole list — gives the "included" block
+  // structure without boxing every row.
+  sheetList: {
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: C.borderCard,
+    borderRadius: 16,
+    paddingHorizontal: 16,
+  },
+  // Add-ons — a distinct cyan-bordered card so "extra cost" reads apart from
+  // what's already included.
+  addOnsCard: {
+    marginTop: 28,
+    backgroundColor: C.surface,
+    borderRadius: 20,
+    paddingVertical: 18,
+    paddingHorizontal: 18,
+    shadowColor: '#596E7C',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  addOnsTitle: {
+    fontFamily: FONT_MONTSERRAT,
+    fontSize: 18,
+    lineHeight: 24,
+    fontWeight: '700',
+    color: C.inkDark,
+  },
+  addOnsHint: {
+    marginTop: 4,
+    fontFamily: FONT_INTER,
+    fontSize: 13,
     lineHeight: 18,
+    fontWeight: '400',
+    color: C.textMuted,
+  },
+  addOnTags: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 14,
+  },
+  addOnTag: {
+    backgroundColor: C.inkDark,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  addOnTagText: {
+    fontFamily: FONT_INTER,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  sheetRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingVertical: 14,
+  },
+  sheetRowDivider: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: C.border,
+  },
+  sheetRowIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: C.iconBubble,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sheetRowTitle: {
+    fontFamily: FONT_INTER,
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: '600',
+    color: C.inkBody,
+  },
+  sheetRowTitleFlex: {
+    flex: 1,
+  },
+  sheetRowItem: {
+    marginTop: 3,
+    fontFamily: FONT_INTER,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '400',
+    color: C.textMuted,
+  },
+  basedOnRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  basedOnChip: {
+    backgroundColor: '#F2F2F2',
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  basedOnChipText: {
+    fontFamily: FONT_INTER,
+    fontSize: 13,
+    fontWeight: '500',
+    color: C.inkBody,
+  },
+  callout: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    marginTop: 24,
+    backgroundColor: '#F6F8F9',
+    borderRadius: 14,
+    paddingVertical: 13,
+    paddingHorizontal: 14,
+  },
+  calloutText: {
+    flex: 1,
+    fontFamily: FONT_INTER,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '400',
     color: C.textMuted,
   },
 
