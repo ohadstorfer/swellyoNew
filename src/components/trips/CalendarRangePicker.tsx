@@ -50,7 +50,7 @@ const formatRangeSummary = (start: Date | null, end: Date | null): string => {
   const endFmt = end.toLocaleDateString('en-US', opts);
   const days =
     Math.round((startOfDay(end).getTime() - startOfDay(start).getTime()) / 86400000) + 1;
-  return `${startFmt} – ${endFmt}${days > 0 ? ` · ${days} ${days === 1 ? 'day' : 'days'}` : ''}`;
+  return `${startFmt} - ${endFmt}${days > 0 ? ` · ${days} ${days === 1 ? 'day' : 'days'}` : ''}`;
 };
 const monthLabel = (d: Date) =>
   d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
@@ -125,7 +125,7 @@ export const CalendarRangePicker: React.FC<CalendarRangePickerProps> = ({
           onPress={() => setOpen(!open)}
           activeOpacity={0.7}
         >
-          <Ionicons name="calendar-outline" size={18} color="#0788B0" />
+          <Ionicons name="calendar-outline" size={18} color="#05BCD3" />
           <Text style={[styles.fieldText, !summary && styles.fieldPlaceholder]} numberOfLines={1}>
             {summary || placeholder}
           </Text>
@@ -304,7 +304,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  cellEndpointInner: { backgroundColor: '#0788B0' },
+  cellEndpointInner: { backgroundColor: '#05BCD3' },
 
   cellText: {
     fontSize: 14,
@@ -312,7 +312,7 @@ const styles = StyleSheet.create({
     color: '#222B30',
     fontFamily: FONT_INTER,
   },
-  cellTextMid: { color: '#066b8c', fontWeight: '600' },
+  cellTextMid: { color: '#05BCD3', fontWeight: '600' },
   cellTextEndpoint: { color: '#FFF', fontWeight: '700' },
   cellTextDisabled: { color: '#D0D0D0' },
 });

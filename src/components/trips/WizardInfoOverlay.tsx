@@ -12,6 +12,7 @@ import {
   View,
   Text,
   StyleSheet,
+  StatusBar,
   TouchableOpacity,
   Platform,
 } from 'react-native';
@@ -51,6 +52,7 @@ export const WizardInfoOverlay: React.FC<WizardInfoOverlayProps> = ({
       statusBarTranslucent
       onRequestClose={onDismiss}
     >
+      <StatusBar barStyle="light-content" />
       <View style={styles.scrim}>
         <View style={styles.card}>
           <View style={styles.messageContainer}>
@@ -86,7 +88,7 @@ const styles = StyleSheet.create({
     maxWidth: 360,
     backgroundColor: C.surface,
     borderRadius: 24,
-    paddingHorizontal: 16,
+    paddingHorizontal: 28,
     paddingVertical: 24,
     gap: 32,
   },

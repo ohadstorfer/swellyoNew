@@ -5,6 +5,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Dimensions,
   Keyboard,
   Platform,
   ScrollView,
@@ -17,10 +18,8 @@ import {
 } from 'react-native';
 import Animated, {
   Easing,
-  SlideInLeft,
-  SlideInRight,
-  SlideOutLeft,
-  SlideOutRight,
+  useSharedValue,
+  withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -45,6 +44,12 @@ const fonts = {
   montserrat: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat',
   inter: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
 };
+
+// Step-transition slide — incoming + outgoing share these so the center moves
+// as one connected strip.
+const SLIDE_MS = 300;
+const SLIDE_EASING = Easing.inOut(Easing.cubic);
+const SCREEN_W = Dimensions.get('window').width;
 
 // Figma exact values, tuned per Eyal.
 const HEADER_BORDER_BOTTOM = 4;
@@ -137,14 +142,53 @@ export function CreateTripWizardChrome(props: CreateTripWizardChromeProps): Reac
 
   const insets = useSafeAreaInsets();
 
-  // -------- Slide direction tracking --------
-  const prevStepIndexRef = useRef(stepIndex);
-  const directionRef = useRef<'forward' | 'backward'>('forward');
-  if (prevStepIndexRef.current !== stepIndex) {
-    directionRef.current = stepIndex > prevStepIndexRef.current ? 'forward' : 'backward';
-    prevStepIndexRef.current = stepIndex;
-  }
-  const goingForward = directionRef.current === 'forward';
+  // -------- Step-slide direction --------
+  // 1 = forward (Next), -1 = backward (Back). Set on the button press BEFORE the
+  // step changes, so the exiting worklet reads the *current* direction at unmount
+  // time (the built-in Slide animations bake direction in at creation, which goes
+  // stale on Back — that was the glitch). The custom worklets below read it live.
+  const dir = useSharedValue(1);
+  const handlePrimary = useCallback(() => {
+    dir.value = 1;
+    onPrimary();
+  }, [dir, onPrimary]);
+  const handleSecondary = useCallback(() => {
+    dir.value = -1;
+    onSecondary();
+  }, [dir, onSecondary]);
+  const handleClose = useCallback(() => {
+    dir.value = -1;
+    (onClose ?? onSecondary)();
+  }, [dir, onClose, onSecondary]);
+
+  // Incoming enters from the side we're heading toward; outgoing leaves the
+  // opposite way — a true mirror between Next and Back.
+  const enterAnim = useCallback(
+    (values: any) => {
+      'worklet';
+      const fromX = dir.value >= 0 ? SCREEN_W : -SCREEN_W;
+      return {
+        initialValues: { transform: [{ translateX: fromX }] },
+        animations: {
+          transform: [{ translateX: withTiming(0, { duration: SLIDE_MS, easing: SLIDE_EASING }) }],
+        },
+      };
+    },
+    [dir],
+  );
+  const exitAnim = useCallback(
+    (values: any) => {
+      'worklet';
+      const toX = dir.value >= 0 ? -SCREEN_W : SCREEN_W;
+      return {
+        initialValues: { transform: [{ translateX: 0 }] },
+        animations: {
+          transform: [{ translateX: withTiming(toX, { duration: SLIDE_MS, easing: SLIDE_EASING }) }],
+        },
+      };
+    },
+    [dir],
+  );
 
   // -------- Scroll-to-top on step change --------
   const scrollRef = useRef<ScrollView | null>(null);
@@ -271,7 +315,7 @@ export function CreateTripWizardChrome(props: CreateTripWizardChromeProps): Reac
             accessibilityRole="button"
             accessibilityLabel="Back"
             activeOpacity={0.7}
-            onPress={onSecondary}
+            onPress={handleSecondary}
             disabled={secondaryDisabled}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             style={styles.backArrowBtn}
@@ -285,7 +329,7 @@ export function CreateTripWizardChrome(props: CreateTripWizardChromeProps): Reac
             accessibilityRole="button"
             accessibilityLabel="Close"
             activeOpacity={0.7}
-            onPress={onClose ?? onSecondary}
+            onPress={handleClose}
             disabled={secondaryDisabled}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             style={styles.closeBtn}
@@ -314,15 +358,7 @@ export function CreateTripWizardChrome(props: CreateTripWizardChromeProps): Reac
           scrollYRef.current = e.nativeEvent.contentOffset.y;
         }}
       >
-        <Animated.View
-          key={stepIndex}
-          entering={
-            goingForward
-              ? SlideInRight.duration(260).easing(Easing.out(Easing.cubic))
-              : SlideInLeft.duration(260).easing(Easing.out(Easing.cubic))
-          }
-          exiting={goingForward ? SlideOutLeft.duration(220) : SlideOutRight.duration(220)}
-        >
+        <Animated.View key={stepIndex} entering={enterAnim} exiting={exitAnim}>
           {children}
         </Animated.View>
       </KeyboardAwareScrollView>
@@ -356,7 +392,7 @@ export function CreateTripWizardChrome(props: CreateTripWizardChromeProps): Reac
             accessibilityRole="button"
             accessibilityState={{ disabled: primaryButtonDisabled }}
             activeOpacity={0.85}
-            onPress={onPrimary}
+            onPress={handlePrimary}
             disabled={primaryButtonDisabled}
             style={[styles.primaryButton, primaryButtonDisabled && styles.buttonDisabled]}
           >
@@ -475,14 +511,16 @@ const styles = StyleSheet.create({
     includeFontPadding: false,
   },
 
-  // Primary — fills remaining width, bg #333, white text.
+  // Primary — narrower than full width, softer (not pill) corners. Matches the
+  // Figma CTA: ~300pt wide, 12-14px radius.
   primaryButton: {
     flex: 1,
     minWidth: 150,
+    marginHorizontal: 24,
     height: FOOTER_BUTTON_HEIGHT,
     paddingHorizontal: 24,
     paddingVertical: 12,
-    borderRadius: 30,
+    borderRadius: 14,
     backgroundColor: tokens.inkDark2,
     alignItems: 'center',
     justifyContent: 'center',

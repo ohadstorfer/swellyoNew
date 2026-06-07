@@ -39,10 +39,10 @@ export const TRIP_STRUCTURE_OPTIONS: { slug: TripStructureSlug; label: string }[
 // Single-select (radio). Order = display order, top→bottom = most→least surf.
 // `intensity` (1–4) drives the surf-intensity meter shown on each pill.
 export const TRIP_VIBE_OPTIONS: { slug: TripVibeSlug; label: string; intensity: number }[] = [
-  { slug: 'improve_surf', label: 'Improve your surfing — training camp',        intensity: 4 },
-  { slug: 'surf_focused', label: 'Surf-focused — wake up early, surf a lot',     intensity: 3 },
+  { slug: 'improve_surf', label: 'Improve your surfing - training camp',        intensity: 4 },
+  { slug: 'surf_focused', label: 'Surf-focused - wake up early, surf a lot',     intensity: 3 },
   { slug: 'explore',      label: 'Surf + Explore',                               intensity: 2 },
-  { slug: 'vacation',     label: 'Vacation style — chill, loose surf, lay-days', intensity: 1 },
+  { slug: 'vacation',     label: 'Vacation style - chill, loose surf, lay-days', intensity: 1 },
 ];
 
 export const TRIP_STRUCTURE_MUTEX: [TripStructureSlug, TripStructureSlug][] = [

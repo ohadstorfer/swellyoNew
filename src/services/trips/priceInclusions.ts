@@ -74,6 +74,13 @@ export const WELLNESS_OPTIONS = [
   { slug: 'sound_healing', label: 'Sound healing' },
   { slug: 'physio', label: 'Physio / recovery sessions' },
   { slug: 'nutrition', label: 'Nutrition guidance' },
+  { slug: 'pilates', label: 'Pilates' },
+  { slug: 'spa', label: 'Spa access' },
+  { slug: 'thermal', label: 'Thermal baths / hot springs' },
+  { slug: 'acupuncture', label: 'Acupuncture' },
+  { slug: 'personal_training', label: 'Personal training' },
+  { slug: 'gym', label: 'Gym access' },
+  { slug: 'reiki', label: 'Reiki / energy work' },
 ] as const;
 
 // --- Sub-shapes for the categories with extra parameters ---------------------
@@ -94,6 +101,22 @@ export interface ActivityInclusion {
   note?: string;
 }
 
+/** A wellness selection is either covered by the price or available for extra pay. */
+export type WellnessPayment = 'included' | 'extra';
+export interface WellnessInclusion {
+  key: string;
+  payment: WellnessPayment;
+}
+
+/** Coerce wellness data (which may be legacy `string[]`) into the object shape,
+ *  defaulting each entry to "included". Safe to call on any stored value. */
+export const normalizeWellness = (
+  value: ReadonlyArray<WellnessInclusion | string> | undefined,
+): WellnessInclusion[] =>
+  (value ?? []).map(w =>
+    typeof w === 'string' ? { key: w, payment: 'included' as const } : w,
+  );
+
 /** A host-defined "add your own" inclusion — same shape as the built-in
  *  categories: a short title + a description. */
 export interface CustomInclusion {
@@ -111,7 +134,7 @@ export interface PriceInclusions {
   surfFilm?: SurfFilmInclusion;
   videoAnalysis?: VideoAnalysisInclusion;
   activities?: ActivityInclusion[];
-  wellness?: string[];
+  wellness?: WellnessInclusion[];
   custom?: CustomInclusion[]; // "add your own" — repeatable title + description
 }
 
@@ -160,7 +183,12 @@ export function summarizeCategory(
     case 'surfEquipment':
       return labelize(SURF_EQUIPMENT_OPTIONS, inc.surfEquipment).join(', ');
     case 'wellness':
-      return labelize(WELLNESS_OPTIONS, inc.wellness).join(', ');
+      return normalizeWellness(inc.wellness)
+        .map(w => {
+          const label = WELLNESS_OPTIONS.find(o => o.slug === w.key)?.label ?? w.key;
+          return w.payment === 'extra' ? `${label} (extra)` : label;
+        })
+        .join(', ');
     case 'activities':
       return labelize(
         ACTIVITIES_OPTIONS,
@@ -169,12 +197,26 @@ export function summarizeCategory(
     case 'surfFilm': {
       const f = inc.surfFilm;
       if (!f) return '';
-      const media = labelize(SURF_FILM_MEDIA_OPTIONS, f.media);
-      const parts = [...media];
-      if (f.count != null) parts.push(`×${f.count}`);
-      const types = labelize(SURF_FILM_TYPE_OPTIONS, f.filmTypes);
-      if (types.length) parts.push(`(${types.join(', ')})`);
-      return parts.join(' ');
+      const parts: string[] = [];
+      // Media: "Video and photo" / "Video" / "Photo".
+      const mediaLabels = labelize(SURF_FILM_MEDIA_OPTIONS, f.media);
+      if (mediaLabels.length) {
+        parts.push(
+          mediaLabels.map((m, i) => (i === 0 ? m : m.toLowerCase())).join(' and '),
+        );
+      }
+      // Count + types: "5 sessions of telephoto, in-water".
+      const typeLabels = labelize(SURF_FILM_TYPE_OPTIONS, f.filmTypes).map(t =>
+        t.toLowerCase(),
+      );
+      const types = typeLabels.join(', ');
+      if (f.count != null) {
+        const sessions = `${f.count} session${f.count === 1 ? '' : 's'}`;
+        parts.push(types ? `${sessions} of ${types}` : sessions);
+      } else if (types) {
+        parts.push(types);
+      }
+      return parts.join(', ');
     }
     case 'videoAnalysis': {
       const a = inc.videoAnalysis;
@@ -195,7 +237,7 @@ export function summarizeCategory(
 function customItemLine(c: CustomInclusion): string {
   const t = c.title.trim();
   const d = c.description?.trim();
-  return t && d ? `${t} — ${d}` : t || d || '';
+  return t && d ? `${t} - ${d}` : t || d || '';
 }
 
 /** Display title for each category (used by the wizard rows + detail view). */
@@ -205,7 +247,7 @@ export const CATEGORY_TITLE: Record<keyof PriceInclusions, string> = {
   transportation: 'Transportation',
   surfSessions: 'Surf sessions',
   surfEquipment: 'Surf equipment',
-  surfFilm: 'Surf film',
+  surfFilm: 'Filmed surf sessions',
   videoAnalysis: 'Video analysis',
   activities: 'Activities & excursions',
   wellness: 'Wellness & recovery',
@@ -225,13 +267,24 @@ export const CATEGORY_ORDER: (keyof PriceInclusions)[] = [
   'wellness',
 ];
 
+// Pure multi-select categories — their picks render as individual tags. The
+// rest (activities notes, custom title+desc, surf-film/video counts) carry a
+// description, so they stay as text lines.
+const TAG_OPTIONS: Partial<Record<keyof PriceInclusions, readonly IncludeOption[]>> = {
+  meals: MEALS_OPTIONS,
+  accommodation: ACCOMMODATION_INCL_OPTIONS,
+  transportation: TRANSPORTATION_OPTIONS,
+  surfSessions: SURF_SESSIONS_OPTIONS,
+  surfEquipment: SURF_EQUIPMENT_OPTIONS,
+};
+
 /** Flatten the inclusions into titled sections for the read-only detail view.
- *  Each section: a category title + its human-readable lines. */
+ *  `asTags` = render each item as its own pill; otherwise as description lines. */
 export function priceInclusionSections(
   inc: PriceInclusions | null | undefined,
-): { title: string; items: string[] }[] {
+): { title: string; items: string[]; asTags: boolean }[] {
   if (!inc) return [];
-  const out: { title: string; items: string[] }[] = [];
+  const out: { title: string; items: string[]; asTags: boolean }[] = [];
 
   for (const key of CATEGORY_ORDER) {
     if (key === 'activities') {
@@ -239,21 +292,48 @@ export function priceInclusionSections(
       if (!acts.length) continue;
       const items = acts.map(a => {
         const label = ACTIVITIES_OPTIONS.find(o => o.slug === a.key)?.label ?? a.key;
-        return a.note?.trim() ? `${label} — ${a.note.trim()}` : label;
+        return a.note?.trim() ? `${label} - ${a.note.trim()}` : label;
       });
-      out.push({ title: CATEGORY_TITLE.activities, items });
+      out.push({ title: CATEGORY_TITLE.activities, items, asTags: false });
+      continue;
+    }
+    if (key === 'wellness') {
+      // Only the "included" wellness picks belong in the covered list — the
+      // "extra pay" ones surface separately via priceInclusionAddOns().
+      const items = normalizeWellness(inc.wellness)
+        .filter(w => w.payment === 'included')
+        .map(w => WELLNESS_OPTIONS.find(o => o.slug === w.key)?.label ?? w.key);
+      if (items.length) out.push({ title: CATEGORY_TITLE.wellness, items, asTags: true });
       continue;
     }
     if (!hasCategoryValue(inc, key)) continue;
-    const summary = summarizeCategory(inc, key);
-    if (summary) out.push({ title: CATEGORY_TITLE[key], items: [summary] });
+    const tagOpts = TAG_OPTIONS[key];
+    if (tagOpts) {
+      const items = labelize(tagOpts, inc[key] as string[] | undefined);
+      if (items.length) out.push({ title: CATEGORY_TITLE[key], items, asTags: true });
+    } else {
+      // surf film / video analysis — descriptive single line.
+      const summary = summarizeCategory(inc, key);
+      if (summary) out.push({ title: CATEGORY_TITLE[key], items: [summary], asTags: false });
+    }
   }
 
   if (inc.custom?.length) {
     const items = inc.custom.map(customItemLine).filter(Boolean);
-    if (items.length) out.push({ title: CATEGORY_TITLE.custom, items });
+    if (items.length) out.push({ title: CATEGORY_TITLE.custom, items, asTags: false });
   }
   return out;
+}
+
+/** Items the host offers for an extra cost (currently the "extra pay" wellness
+ *  picks). Shown as a separate "Add-ons" section, apart from the price. */
+export function priceInclusionAddOns(
+  inc: PriceInclusions | null | undefined,
+): string[] {
+  if (!inc) return [];
+  return normalizeWellness(inc.wellness)
+    .filter(w => w.payment === 'extra')
+    .map(w => WELLNESS_OPTIONS.find(o => o.slug === w.key)?.label ?? w.key);
 }
 
 /** Null out an empty inclusions object so we don't persist `{}`. */

@@ -30,7 +30,11 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { TRIP_VIBE_OPTIONS } from '../../services/trips/groupTripsService';
-import { priceInclusionSections } from '../../services/trips/priceInclusions';
+import {
+  priceInclusionSections,
+  priceInclusionAddOns,
+  CATEGORY_TITLE,
+} from '../../services/trips/priceInclusions';
 import { WizardBottomSheet } from './WizardBottomSheet';
 import { TripIcon, type TripIconName } from './tripIcons';
 
@@ -54,6 +58,7 @@ import {
   BOARD_SHORT,
   STRUCTURE_DISPLAY,
   TRIP_TYPE_LABEL,
+  BUDGET_VIBE,
   formatAge,
   formatBudgetRange,
   formatDateRange,
@@ -71,19 +76,37 @@ const CHIP_WIDTH = Math.round((SCREEN_WIDTH - 16) / 2.7) - 8;
 
 const C = {
   accent: '#05BCD3', // countdown numbers (brighter Figma accent)
+  accentTint: '#EAF9FC',
   brandTeal: '#0788B0', // chip icons + links
   ink: '#333333',
+  inkDark: '#212121',
   inkBody: '#222B30',
   textMuted: '#7B7B7B',
   textFaint: '#A0A0A0',
   textHowDesc: '#4A5565',
   border: '#EEEEEE',
   borderCard: '#E8E8E8',
+  iconBubble: '#F4F6F7',
   surface: '#FFFFFF',
   surfaceMuted: '#F7F7F7',
   chipBg: '#EEEEEE',
   brandTealTint: '#E6F4F8',
   avatarBg: '#9CB6C0',
+};
+
+// Icon per "What's included" category — keyed by display title, mirroring the
+// create-flow pricing step.
+const INCLUDE_ICON: Record<string, keyof typeof Ionicons.glyphMap> = {
+  [CATEGORY_TITLE.meals]: 'restaurant-outline',
+  [CATEGORY_TITLE.accommodation]: 'bed-outline',
+  [CATEGORY_TITLE.transportation]: 'car-outline',
+  [CATEGORY_TITLE.surfSessions]: 'water-outline',
+  [CATEGORY_TITLE.surfEquipment]: 'construct-outline',
+  [CATEGORY_TITLE.surfFilm]: 'film-outline',
+  [CATEGORY_TITLE.videoAnalysis]: 'videocam-outline',
+  [CATEGORY_TITLE.activities]: 'compass-outline',
+  [CATEGORY_TITLE.wellness]: 'leaf-outline',
+  [CATEGORY_TITLE.custom]: 'sparkles-outline',
 };
 
 // ---------------------------------------------------------------------------
@@ -226,6 +249,7 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
   onEditAccommodation,
 }) => {
   const [showIncludes, setShowIncludes] = useState(false);
+  const [showBudgetInfo, setShowBudgetInfo] = useState(false);
   const [aboutExpanded, setAboutExpanded] = useState(false);
   const [aboutHostExpanded, setAboutHostExpanded] = useState(false);
 
@@ -262,10 +286,13 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
   const priceLabel =
     vm.costPerPerson != null ? `$${vm.costPerPerson.toLocaleString('en-US')}` : null;
   const includeSections = priceInclusionSections(vm.priceInclusions);
+  const addOns = priceInclusionAddOns(vm.priceInclusions);
+  const hasPriceDetail = includeSections.length > 0 || addOns.length > 0;
 
   // Horizontal info chips below the countdown — fixed order, each shown only
   // when it has data.
   const budgetLabel = formatBudgetRange(vm.budgetMin ?? null, vm.budgetMax ?? null);
+  const budgetVibe = vm.budgetTier ? BUDGET_VIBE[vm.budgetTier] : null;
   const tripTypeLabel = vm.hostingStyle ? TRIP_TYPE_LABEL[vm.hostingStyle] : null;
   const chips: {
     icon: TripIconName;
@@ -288,20 +315,54 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
       label: 'Price',
       value: `${vm.costPerPerson}$`,
       highlight: true,
-      footer: includeSections.length > 0 ? 'See what’s included' : undefined,
-      onPress: includeSections.length > 0 ? () => setShowIncludes(true) : undefined,
+      footer: hasPriceDetail ? 'See what’s included' : undefined,
+      onPress: hasPriceDetail ? () => setShowIncludes(true) : undefined,
     });
   } else if (budgetLabel) {
+    const operatorIncludes = isOperator && hasPriceDetail;
     chips.push({
       icon: 'currency-dollar-circle',
-      label: isOperator ? 'Price' : 'Budget',
+      label: isOperator ? 'Price' : budgetVibe ?? 'Budget',
       value: budgetLabel,
       highlight: isOperator || undefined,
-      footer: isOperator && includeSections.length > 0 ? 'See what’s included' : undefined,
-      onPress:
-        isOperator && includeSections.length > 0 ? () => setShowIncludes(true) : undefined,
+      // Operator price → "what's included"; AI budget range → "how it's estimated".
+      footer: operatorIncludes
+        ? 'See what’s included'
+        : !isOperator
+          ? 'How is this estimated?'
+          : undefined,
+      onPress: operatorIncludes
+        ? () => setShowIncludes(true)
+        : !isOperator
+          ? () => setShowBudgetInfo(true)
+          : undefined,
     });
   }
+
+  // Static "Based on" chips for the budget-info sheet — from data we already
+  // have, no extra AI call.
+  const budgetBasedOn: string[] = (
+    [
+      vm.destinationLabel,
+      vm.durationDays ? `${vm.durationDays} day${vm.durationDays === 1 ? '' : 's'}` : null,
+      vm.accommodationKindLabel,
+    ].filter(Boolean) as string[]
+  );
+  // What the estimate covers — mirrors the AI prompt (accommodation + food +
+  // local transport + surf activities; international flights excluded).
+  const accLower = vm.accommodationKindLabel?.toLowerCase();
+  const stayLine = vm.durationDays
+    ? `${vm.durationDays} ${vm.durationDays === 1 ? 'day' : 'days'} at a ${accLower ?? 'place to stay'}`
+    : accLower
+      ? `Your stay at a ${accLower}`
+      : 'Accommodation for your whole stay';
+  const budgetCovers: { icon: keyof typeof Ionicons.glyphMap; text: string }[] = [
+    { icon: 'bed-outline', text: stayLine },
+    { icon: 'restaurant-outline', text: 'Three meals a day' },
+    { icon: 'airplane-outline', text: 'Airport transfers both ways' },
+    { icon: 'car-outline', text: 'Getting around the spot and nearby' },
+    { icon: 'water-outline', text: 'Everyday surf activities' },
+  ];
   chips.push({ icon: 'bar-chart-10', label: 'Level', value: skillLabel });
   chips.push({ icon: 'calendar', label: 'Age range', value: ageLabel });
   chips.push({ icon: 'users-02', label: 'Participants', value: participantsLabel });
@@ -410,7 +471,7 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
                   onPress={c.onPress}
                   style={cardStyle}
                   accessibilityRole="button"
-                  accessibilityLabel={`${c.label} ${c.value}. See what's included.`}
+                  accessibilityLabel={`${c.label} ${c.value}.${c.footer ? ` ${c.footer}` : ''}`}
                 >
                   {inner}
                 </TouchableOpacity>
@@ -767,31 +828,143 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
       <WizardBottomSheet
         visible={showIncludes}
         title="What's included"
+        titleAlign="left"
+        hideHeaderDivider
+        largeTitle
         onClose={() => setShowIncludes(false)}
         heightMode="full"
       >
         {priceLabel ? (
-          <View style={styles.includesSheetPrice}>
-            <Text style={styles.priceValue}>{priceLabel}</Text>
-            <Text style={styles.pricePer}>per person</Text>
+          <View style={styles.priceHero}>
+            <View style={styles.priceHeroLeft}>
+              <Text style={styles.priceHeroValue} numberOfLines={1} adjustsFontSizeToFit>
+                {priceLabel}
+              </Text>
+              <Text style={styles.priceHeroPer}>per person</Text>
+            </View>
+            <View style={styles.priceHeroTag}>
+              <Ionicons name="shield-checkmark" size={13} color="#FFFFFF" />
+              <Text style={styles.priceHeroTagText}>Set by host</Text>
+            </View>
           </View>
         ) : null}
-        <View style={styles.includesCard}>
-          {includeSections.map((sec, i) => (
-            <View key={sec.title} style={[styles.includeRow, i > 0 && styles.includeRowDivider]}>
-              <View style={styles.includeBullet}>
-                <Ionicons name="checkmark" size={14} color={C.brandTeal} />
+
+        <Text style={styles.sheetIntro}>
+          One fixed, all-in price. Here’s everything it covers.
+        </Text>
+
+        {includeSections.length > 0 ? (
+          <View style={styles.sheetList}>
+            {includeSections.map((sec, i) => (
+              <View
+                key={sec.title}
+                style={[styles.sheetRow, i > 0 && styles.sheetRowDivider]}
+              >
+                <View style={styles.sheetRowIcon}>
+                  <Ionicons
+                    name={INCLUDE_ICON[sec.title] ?? 'checkmark'}
+                    size={18}
+                    color={C.inkBody}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.sheetRowTitle}>{sec.title}</Text>
+                  {sec.asTags ? (
+                    <Text style={styles.sheetRowItem}>{sec.items.join(', ')}</Text>
+                  ) : (
+                    sec.items.map((it, j) => (
+                      <Text key={j} style={styles.sheetRowItem}>
+                        {it}
+                      </Text>
+                    ))
+                  )}
+                </View>
               </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.includeTitle}>{sec.title}</Text>
-                {sec.items.map((it, j) => (
-                  <Text key={j} style={styles.includeItem}>
-                    {it}
-                  </Text>
-                ))}
+            ))}
+          </View>
+        ) : null}
+
+        {addOns.length > 0 ? (
+          <View style={styles.addOnsCard}>
+            <Text style={styles.addOnsTitle}>Add-ons for extra price</Text>
+            <Text style={styles.addOnsHint}>Available on the trip for an extra cost.</Text>
+            <View style={styles.addOnTags}>
+              {addOns.map(label => (
+                <View key={label} style={styles.addOnTag}>
+                  <Text style={styles.addOnTagText}>{label}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        ) : null}
+      </WizardBottomSheet>
+
+      {/* ---- "About this estimate" sheet (A/B — opened from the Budget chip).
+              Pure description from data we already have; no AI call. ---- */}
+      <WizardBottomSheet
+        visible={showBudgetInfo}
+        title="About this estimate"
+        titleAlign="left"
+        hideHeaderDivider
+        largeTitle
+        onClose={() => setShowBudgetInfo(false)}
+        heightMode="auto"
+      >
+        {budgetLabel ? (
+          <View style={styles.priceHero}>
+            <View style={styles.priceHeroLeft}>
+              <Text style={styles.priceHeroValue} numberOfLines={1} adjustsFontSizeToFit>
+                {budgetLabel}
+              </Text>
+              <Text style={styles.priceHeroPer}>per person · estimated</Text>
+            </View>
+            {budgetVibe ? (
+              <View style={styles.priceHeroTag}>
+                <Ionicons name="pricetag" size={12} color="#FFFFFF" />
+                <Text style={styles.priceHeroTagText}>{budgetVibe}</Text>
               </View>
+            ) : null}
+          </View>
+        ) : null}
+
+        <Text style={styles.sheetIntro}>
+          A rough AI estimate to plan around - not a price the organizer set. What
+          you actually spend depends on how you travel.
+        </Text>
+
+        {budgetBasedOn.length > 0 ? (
+          <>
+            <Text style={styles.sheetSectionLabel}>Based on</Text>
+            <View style={styles.basedOnRow}>
+              {budgetBasedOn.map((t, i) => (
+                <View key={`${t}-${i}`} style={styles.basedOnChip}>
+                  <Text style={styles.basedOnChipText}>{t}</Text>
+                </View>
+              ))}
+            </View>
+          </>
+        ) : null}
+
+        <Text style={styles.sheetSectionLabel}>What it covers</Text>
+        <View style={styles.sheetList}>
+          {budgetCovers.map((c, i) => (
+            <View
+              key={c.text}
+              style={[styles.sheetRow, i > 0 && styles.sheetRowDivider]}
+            >
+              <View style={styles.sheetRowIcon}>
+                <Ionicons name={c.icon} size={18} color={C.inkBody} />
+              </View>
+              <Text style={[styles.sheetRowTitle, styles.sheetRowTitleFlex]}>{c.text}</Text>
             </View>
           ))}
+        </View>
+
+        <View style={styles.callout}>
+          <Ionicons name="airplane-outline" size={16} color={C.textMuted} />
+          <Text style={styles.calloutText}>
+            International flights aren’t included - book those separately.
+          </Text>
         </View>
       </WizardBottomSheet>
     </View>
@@ -1291,66 +1464,198 @@ const styles = StyleSheet.create({
     color: C.textHowDesc,
   },
 
-  // "What's included" sheet (Flow C)
-  includesSheetPrice: {
+  // ---- Shared "info sheet" design (price/included + budget estimate) ----
+  priceHero: {
     flexDirection: 'row',
-    alignItems: 'baseline',
-    gap: 8,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: C.borderCard,
-    borderRadius: 16,
-    paddingVertical: 16,
-    paddingHorizontal: 18,
-  },
-  priceValue: {
-    fontFamily: FONT_MONTSERRAT,
-    fontSize: 26,
-    fontWeight: '800',
-    color: C.ink,
-  },
-  pricePer: {
-    fontFamily: FONT_INTER,
-    fontSize: 14,
-    fontWeight: '500',
-    color: C.textMuted,
-  },
-  includesCard: {
-    borderWidth: 1,
-    borderColor: C.borderCard,
-    borderRadius: 16,
-    paddingHorizontal: 14,
-  },
-  includeRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 12,
-    paddingVertical: 12,
-  },
-  includeRowDivider: {
-    borderTopWidth: 1,
-    borderTopColor: C.border,
-  },
-  includeBullet: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: C.brandTealTint,
     alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 1,
+    justifyContent: 'space-between',
+    gap: 12,
+    backgroundColor: C.surface,
+    borderRadius: 20,
+    paddingVertical: 18,
+    paddingHorizontal: 20,
+    shadowColor: '#596E7C',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 4,
   },
-  includeTitle: {
+  priceHeroLeft: {
+    flex: 1,
+  },
+  priceHeroValue: {
     fontFamily: FONT_MONTSERRAT,
-    fontSize: 14,
-    fontWeight: '700',
-    color: C.inkBody,
+    fontSize: 30,
+    lineHeight: 34,
+    fontWeight: '800',
+    color: C.inkDark,
   },
-  includeItem: {
+  priceHeroPer: {
     marginTop: 2,
     fontFamily: FONT_INTER,
     fontSize: 13,
+    fontWeight: '500',
+    color: C.textMuted,
+  },
+  priceHeroTag: {
+    flexShrink: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: C.inkDark,
+    borderRadius: 999,
+    paddingHorizontal: 11,
+    paddingVertical: 6,
+  },
+  priceHeroTagText: {
+    fontFamily: FONT_INTER,
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  sheetIntro: {
+    marginTop: 16,
+    fontFamily: FONT_INTER,
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: '400',
+    color: C.inkBody,
+  },
+  sheetSectionLabel: {
+    marginTop: 24,
+    marginBottom: 12,
+    fontFamily: FONT_INTER,
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: '700',
+    color: C.inkBody,
+  },
+  // One light container around the whole list — gives the "included" block
+  // structure without boxing every row.
+  sheetList: {
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: C.borderCard,
+    borderRadius: 16,
+    paddingHorizontal: 16,
+  },
+  // Add-ons — a distinct cyan-bordered card so "extra cost" reads apart from
+  // what's already included.
+  addOnsCard: {
+    marginTop: 28,
+    backgroundColor: C.surface,
+    borderRadius: 20,
+    paddingVertical: 18,
+    paddingHorizontal: 18,
+    shadowColor: '#596E7C',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  addOnsTitle: {
+    fontFamily: FONT_MONTSERRAT,
+    fontSize: 18,
+    lineHeight: 24,
+    fontWeight: '700',
+    color: C.inkDark,
+  },
+  addOnsHint: {
+    marginTop: 4,
+    fontFamily: FONT_INTER,
+    fontSize: 13,
     lineHeight: 18,
+    fontWeight: '400',
+    color: C.textMuted,
+  },
+  addOnTags: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 14,
+  },
+  addOnTag: {
+    backgroundColor: C.inkDark,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  addOnTagText: {
+    fontFamily: FONT_INTER,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  sheetRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingVertical: 14,
+  },
+  sheetRowDivider: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: C.border,
+  },
+  sheetRowIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: C.iconBubble,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sheetRowTitle: {
+    fontFamily: FONT_INTER,
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: '600',
+    color: C.inkBody,
+  },
+  sheetRowTitleFlex: {
+    flex: 1,
+  },
+  sheetRowItem: {
+    marginTop: 3,
+    fontFamily: FONT_INTER,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '400',
+    color: C.textMuted,
+  },
+  basedOnRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  basedOnChip: {
+    backgroundColor: '#F2F2F2',
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  basedOnChipText: {
+    fontFamily: FONT_INTER,
+    fontSize: 13,
+    fontWeight: '500',
+    color: C.inkBody,
+  },
+  callout: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    marginTop: 24,
+    backgroundColor: '#F6F8F9',
+    borderRadius: 14,
+    paddingVertical: 13,
+    paddingHorizontal: 14,
+  },
+  calloutText: {
+    flex: 1,
+    fontFamily: FONT_INTER,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '400',
     color: C.textMuted,
   },
 

@@ -40,7 +40,8 @@ export const VibeSheetContent: React.FC<VibeSheetContentProps> = ({
 
 const styles = StyleSheet.create({
   container: {
-    marginTop: -16,
+    // Pull the subtext up so it sits close under the sheet title.
+    marginTop: -30,
   },
   header: {
     fontFamily: FONT_INTER,
@@ -58,7 +59,8 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   picker: {
-    marginTop: 20,
+    // Clear gap between the subtext and the first selection bubble.
+    marginTop: 36,
   },
 });
 

@@ -9,13 +9,14 @@
 // Surf equipment, Wellness) use TripTagPicker directly from the wizard.
 // =============================================================================
 
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import {
   View,
   Text,
   TextInput,
   StyleSheet,
   TouchableOpacity,
+  Image,
   Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -23,16 +24,22 @@ import {
   ACTIVITIES_OPTIONS,
   SURF_FILM_MEDIA_OPTIONS,
   SURF_FILM_TYPE_OPTIONS,
+  WELLNESS_OPTIONS,
+  normalizeWellness,
   type ActivityInclusion,
   type SurfFilmInclusion,
   type VideoAnalysisInclusion,
   type CustomInclusion,
-  type IncludeOption,
+  type WellnessInclusion,
+  type WellnessPayment,
 } from '../../../services/trips/priceInclusions';
+import TripTagPicker from '../TripTagPicker';
+import { Images } from '../../../assets/images';
 
 const FONT_INTER = Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter';
 
 const C = {
+  accent: '#05BCD3',
   brandTeal: '#0788B0',
   brandTealText: '#066b8c',
   brandTealTint: '#E6F4F8',
@@ -41,9 +48,12 @@ const C = {
   textPlaceholder: '#B0B0B0',
   borderField: '#E0E0E0',
   surfaceCard: '#FFFFFF',
+  checkboxOffBg: '#F7F7F7',
+  checkboxOffBorder: '#CFCFCF',
 };
 
-// --- shared pill -------------------------------------------------------------
+// --- shared pill — same language as TripTagPicker (floating white card, cyan
+// border when selected, circular cyan checkbox on the right). -----------------
 const Pill: React.FC<{
   label: string;
   selected: boolean;
@@ -55,27 +65,14 @@ const Pill: React.FC<{
     accessibilityRole="checkbox"
     accessibilityState={{ checked: selected }}
     accessibilityLabel={label}
-    style={[
-      styles.pill,
-      {
-        borderColor: selected ? C.brandTeal : C.borderField,
-        backgroundColor: selected ? C.brandTealTint : C.surfaceCard,
-      },
-    ]}
+    style={[styles.pill, selected && styles.pillSelected]}
   >
-    <Text style={[styles.pillLabel, { color: selected ? C.brandTealText : C.inkBody }]}>
-      {label}
-    </Text>
-    {selected ? (
-      <Ionicons name="checkmark-circle" size={20} color={C.brandTeal} style={{ marginLeft: 8 }} />
-    ) : null}
+    <Text style={styles.pillLabel}>{label}</Text>
+    <View style={[styles.checkbox, selected ? styles.checkboxOn : styles.checkboxOff]}>
+      {selected ? <Ionicons name="checkmark" size={14} color="#FFFFFF" /> : null}
+    </View>
   </TouchableOpacity>
 );
-
-const toggleSlug = (arr: string[] | undefined, slug: string): string[] => {
-  const cur = arr ?? [];
-  return cur.includes(slug) ? cur.filter(s => s !== slug) : [...cur, slug];
-};
 
 const CountInput: React.FC<{
   label: string;
@@ -92,16 +89,45 @@ const CountInput: React.FC<{
         onChange(cleaned ? parseInt(cleaned, 10) : null);
       }}
       keyboardType="number-pad"
-      placeholder="—"
+      placeholder="-"
       placeholderTextColor={C.textPlaceholder}
       maxLength={3}
     />
   </View>
 );
 
-const SubLabel: React.FC<{ children: string }> = ({ children }) => (
-  <Text style={styles.subLabel}>{children}</Text>
-);
+// Keyboard-free counter (− value +) — keeps sheets at content height with no
+// keyboard shift. Empty/0 shows a dash.
+const CountStepper: React.FC<{
+  value: number | null | undefined;
+  onChange: (n: number | null) => void;
+}> = ({ value, onChange }) => {
+  const n = value ?? 0;
+  return (
+    <View style={styles.stepper}>
+      <TouchableOpacity
+        activeOpacity={0.85}
+        onPress={() => onChange(n <= 1 ? null : n - 1)}
+        disabled={n <= 0}
+        accessibilityRole="button"
+        accessibilityLabel="Decrease"
+        style={[styles.stepBtn, n <= 0 && styles.stepBtnDisabled]}
+      >
+        <Ionicons name="remove" size={20} color={n <= 0 ? C.textPlaceholder : C.inkBody} />
+      </TouchableOpacity>
+      <Text style={styles.stepValue}>{n > 0 ? n : '–'}</Text>
+      <TouchableOpacity
+        activeOpacity={0.85}
+        onPress={() => onChange(Math.min(99, n + 1))}
+        accessibilityRole="button"
+        accessibilityLabel="Increase"
+        style={styles.stepBtn}
+      >
+        <Ionicons name="add" size={20} color={C.inkBody} />
+      </TouchableOpacity>
+    </View>
+  );
+};
 
 // =============================================================================
 // Activities — each selected option carries its own note.
@@ -137,11 +163,83 @@ export const ActivitiesSheetContent: React.FC<{
                 style={styles.noteInput}
                 value={sel.note ?? ''}
                 onChangeText={t => setNote(opt.slug, t.slice(0, 200))}
-                placeholder="Where to, how long, why — a quick note"
+                placeholder="Where to, how long, why - a quick note"
                 placeholderTextColor={C.textPlaceholder}
                 multiline
                 maxLength={200}
                 textAlignVertical="top"
+              />
+            ) : null}
+          </View>
+        );
+      })}
+    </View>
+  );
+};
+
+// =============================================================================
+// Wellness & recovery — each selected option opens a small "Included / Extra
+// pay" toggle (defaults to Included).
+// =============================================================================
+const PaymentToggle: React.FC<{
+  value: WellnessPayment;
+  onChange: (next: WellnessPayment) => void;
+}> = ({ value, onChange }) => (
+  <View style={styles.payToggle}>
+    {(['included', 'extra'] as const).map(opt => {
+      const active = value === opt;
+      return (
+        <TouchableOpacity
+          key={opt}
+          activeOpacity={0.85}
+          onPress={() => onChange(opt)}
+          accessibilityRole="radio"
+          accessibilityState={{ selected: active }}
+          style={[styles.paySeg, active && styles.paySegActive]}
+        >
+          <Text style={[styles.paySegText, active && styles.paySegTextActive]}>
+            {opt === 'included' ? 'Included' : 'Extra pay'}
+          </Text>
+        </TouchableOpacity>
+      );
+    })}
+  </View>
+);
+
+export const WellnessSheetContent: React.FC<{
+  value: WellnessInclusion[];
+  onChange: (next: WellnessInclusion[]) => void;
+}> = ({ value, onChange }) => {
+  const items = normalizeWellness(value);
+  const toggle = useCallback(
+    (slug: string) => {
+      const exists = items.some(w => w.key === slug);
+      onChange(
+        exists
+          ? items.filter(w => w.key !== slug)
+          : [...items, { key: slug, payment: 'included' }],
+      );
+    },
+    [items, onChange],
+  );
+  const setPayment = useCallback(
+    (slug: string, payment: WellnessPayment) => {
+      onChange(items.map(w => (w.key === slug ? { ...w, payment } : w)));
+    },
+    [items, onChange],
+  );
+
+  return (
+    <View style={styles.list}>
+      {WELLNESS_OPTIONS.map(opt => {
+        const sel = items.find(w => w.key === opt.slug);
+        return (
+          <View key={opt.slug}>
+            <Pill label={opt.label} selected={!!sel} onPress={() => toggle(opt.slug)} />
+            {sel ? (
+              <PaymentToggle
+                value={sel.payment}
+                onChange={p => setPayment(opt.slug, p)}
               />
             ) : null}
           </View>
@@ -157,44 +255,37 @@ export const ActivitiesSheetContent: React.FC<{
 export const SurfFilmSheetContent: React.FC<{
   value: SurfFilmInclusion;
   onChange: (next: SurfFilmInclusion) => void;
-}> = ({ value, onChange }) => {
-  const renderPills = (
-    options: readonly IncludeOption[],
-    selected: string[] | undefined,
-    key: 'media' | 'filmTypes',
-  ) => (
-    <View style={styles.list}>
-      {options.map(opt => (
-        <Pill
-          key={opt.slug}
-          label={opt.label}
-          selected={(selected ?? []).includes(opt.slug)}
-          onPress={() => onChange({ ...value, [key]: toggleSlug(selected, opt.slug) })}
-        />
-      ))}
+}> = ({ value, onChange }) => (
+  <View style={{ gap: 24 }}>
+    <View>
+      <Text style={styles.sectionLabel}>Media</Text>
+      <TripTagPicker<string>
+        options={[...SURF_FILM_MEDIA_OPTIONS]}
+        selected={value.media ?? []}
+        onChange={next => onChange({ ...value, media: next })}
+        accessibilityLabel="Surf film media"
+      />
     </View>
-  );
 
-  return (
-    <View style={{ gap: 18 }}>
-      <View>
-        <SubLabel>Media</SubLabel>
-        {renderPills(SURF_FILM_MEDIA_OPTIONS, value.media, 'media')}
-      </View>
-
-      <CountInput
-        label="How many filmed sessions?"
+    <View>
+      <Text style={styles.sectionLabel}>How many filmed sessions?</Text>
+      <CountStepper
         value={value.count}
         onChange={n => onChange({ ...value, count: n })}
       />
-
-      <View>
-        <SubLabel>Film types (optional)</SubLabel>
-        {renderPills(SURF_FILM_TYPE_OPTIONS, value.filmTypes, 'filmTypes')}
-      </View>
     </View>
-  );
-};
+
+    <View>
+      <Text style={styles.sectionLabel}>Film types (optional)</Text>
+      <TripTagPicker<string>
+        options={[...SURF_FILM_TYPE_OPTIONS]}
+        selected={value.filmTypes ?? []}
+        onChange={next => onChange({ ...value, filmTypes: next })}
+        accessibilityLabel="Surf film types"
+      />
+    </View>
+  </View>
+);
 
 // =============================================================================
 // Video analysis — included toggle + session count.
@@ -226,32 +317,59 @@ export const CustomInclusionSheetContent: React.FC<{
   value: CustomInclusion;
   onChange: (next: CustomInclusion) => void;
   onRemove?: () => void;
-}> = ({ value, onChange, onRemove }) => (
-  <View style={{ gap: 16 }}>
-    <View>
-      <SubLabel>Title</SubLabel>
-      <TextInput
-        style={styles.titleInput}
-        value={value.title}
-        onChangeText={t => onChange({ ...value, title: t.slice(0, 60) })}
-        placeholder="e.g. Airport pickup"
-        placeholderTextColor={C.textPlaceholder}
-        maxLength={60}
-      />
+}> = ({ value, onChange, onRemove }) => {
+  const titleRef = useRef<TextInput>(null);
+  // Pop the keyboard on the Title field once the sheet has slid up.
+  useEffect(() => {
+    const t = setTimeout(() => titleRef.current?.focus(), 350);
+    return () => clearTimeout(t);
+  }, []);
+
+  return (
+  <View style={{ gap: 22 }}>
+    <View style={styles.field}>
+      <View style={styles.labelRow}>
+        <Text style={styles.fieldLabel}>Title</Text>
+        <Text style={styles.counter}>{value.title.length} / 60</Text>
+      </View>
+      <View style={styles.inputBox}>
+        <Image source={Images.tripDeets.pencil} style={styles.leadIcon} resizeMode="contain" />
+        <TextInput
+          ref={titleRef}
+          style={styles.inputText}
+          value={value.title}
+          onChangeText={t => onChange({ ...value, title: t.slice(0, 60) })}
+          placeholder="e.g. Airport pickup"
+          placeholderTextColor={C.textPlaceholder}
+          maxLength={60}
+        />
+      </View>
     </View>
-    <View>
-      <SubLabel>Description</SubLabel>
-      <TextInput
-        style={styles.noteInput}
-        value={value.description ?? ''}
-        onChangeText={t => onChange({ ...value, description: t.slice(0, 200) })}
-        placeholder="Details & examples — e.g. private car, up to 2 bags, hotel to airport"
-        placeholderTextColor={C.textPlaceholder}
-        multiline
-        maxLength={200}
-        textAlignVertical="top"
-      />
+
+    <View style={styles.field}>
+      <View style={styles.labelRow}>
+        <Text style={styles.fieldLabel}>Description</Text>
+        <Text style={styles.counter}>{(value.description ?? '').length} / 200</Text>
+      </View>
+      <View style={[styles.inputBox, styles.inputBoxTextarea]}>
+        <Image
+          source={Images.tripDeets.pencil}
+          style={[styles.leadIcon, styles.leadIconTextarea]}
+          resizeMode="contain"
+        />
+        <TextInput
+          style={[styles.inputText, styles.inputTextArea]}
+          value={value.description ?? ''}
+          onChangeText={t => onChange({ ...value, description: t.slice(0, 200) })}
+          placeholder="Details & examples - e.g. private car, up to 2 bags, hotel to airport"
+          placeholderTextColor={C.textPlaceholder}
+          multiline
+          maxLength={200}
+          textAlignVertical="top"
+        />
+      </View>
     </View>
+
     {onRemove ? (
       <TouchableOpacity
         onPress={onRemove}
@@ -264,25 +382,53 @@ export const CustomInclusionSheetContent: React.FC<{
       </TouchableOpacity>
     ) : null}
   </View>
-);
+  );
+};
 
 const styles = StyleSheet.create({
-  list: { gap: 8 },
+  list: { gap: 12 },
   pill: {
     flexDirection: 'row',
     alignItems: 'center',
-    minHeight: 48,
-    paddingVertical: 12,
+    minHeight: 64,
+    paddingVertical: 20,
     paddingHorizontal: 16,
+    borderRadius: 16,
     borderWidth: 1,
-    borderRadius: 12,
+    borderColor: 'transparent', // reserves space so the selected border adds no shift
+    backgroundColor: C.surfaceCard,
+    shadowColor: '#596E7C',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  pillSelected: {
+    borderColor: C.accent,
   },
   pillLabel: {
     flex: 1,
     fontFamily: FONT_INTER,
-    fontSize: 15,
-    lineHeight: 20,
-    fontWeight: '600',
+    fontSize: 16,
+    lineHeight: 22,
+    fontWeight: '500',
+    color: C.inkBody,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 8,
+  },
+  checkboxOn: {
+    backgroundColor: C.accent,
+  },
+  checkboxOff: {
+    backgroundColor: C.checkboxOffBg,
+    borderWidth: 1,
+    borderColor: C.checkboxOffBorder,
   },
   noteInput: {
     marginTop: 8,
@@ -298,14 +444,41 @@ const styles = StyleSheet.create({
     color: C.inkBody,
     backgroundColor: C.surfaceCard,
   },
-  subLabel: {
+  // Surf-film section header — matches the flow's bold section labels.
+  sectionLabel: {
     fontFamily: FONT_INTER,
-    fontSize: 13,
+    fontSize: 16,
+    lineHeight: 20,
     fontWeight: '700',
-    color: C.textMuted,
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
-    marginBottom: 8,
+    color: C.inkBody,
+    marginBottom: 12,
+  },
+  stepper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 20,
+  },
+  stepBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: C.borderField,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: C.surfaceCard,
+  },
+  stepBtnDisabled: {
+    opacity: 0.5,
+  },
+  stepValue: {
+    minWidth: 28,
+    textAlign: 'center',
+    fontFamily: FONT_INTER,
+    fontSize: 18,
+    fontWeight: '700',
+    color: C.inkBody,
   },
   countRow: {
     flexDirection: 'row',
@@ -333,16 +506,97 @@ const styles = StyleSheet.create({
     color: C.inkBody,
     backgroundColor: C.surfaceCard,
   },
-  titleInput: {
-    height: 52,
+  // "Add your own" inputs — match the create-flow pencil-box fields.
+  field: {
+    gap: 8,
+  },
+  labelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingRight: 4,
+  },
+  fieldLabel: {
+    fontFamily: FONT_INTER,
+    fontSize: 16,
+    lineHeight: 20,
+    fontWeight: '700',
+    color: C.inkBody,
+  },
+  counter: {
+    fontFamily: FONT_INTER,
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '400',
+    color: C.textMuted,
+  },
+  inputBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    minHeight: 56,
     borderWidth: 1,
     borderColor: C.borderField,
     borderRadius: 12,
-    paddingHorizontal: 14,
-    fontFamily: FONT_INTER,
-    fontSize: 16,
-    color: C.inkBody,
+    paddingHorizontal: 16,
     backgroundColor: C.surfaceCard,
+  },
+  inputBoxTextarea: {
+    alignItems: 'flex-start',
+    minHeight: 118,
+    paddingVertical: 14,
+  },
+  leadIcon: {
+    width: 22,
+    height: 22,
+  },
+  leadIconTextarea: {
+    marginTop: 1,
+  },
+  inputText: {
+    flex: 1,
+    fontFamily: FONT_INTER,
+    fontSize: 14,
+    lineHeight: 18,
+    color: C.inkBody,
+    padding: 0,
+  },
+  inputTextArea: {
+    minHeight: 84,
+  },
+  // Wellness "Included / Extra pay" segmented toggle (under a selected item).
+  payToggle: {
+    flexDirection: 'row',
+    alignSelf: 'flex-start',
+    marginTop: 8,
+    marginBottom: 4,
+    padding: 3,
+    borderRadius: 12,
+    backgroundColor: '#F2F2F2',
+    gap: 3,
+  },
+  paySeg: {
+    paddingVertical: 7,
+    paddingHorizontal: 16,
+    borderRadius: 9,
+  },
+  paySegActive: {
+    backgroundColor: C.surfaceCard,
+    shadowColor: '#596E7C',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.18,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  paySegText: {
+    fontFamily: FONT_INTER,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '600',
+    color: C.textMuted,
+  },
+  paySegTextActive: {
+    color: C.accent,
   },
   removeBtn: {
     flexDirection: 'row',

@@ -43,7 +43,7 @@ export const WaveSizeSheetContent: React.FC<WaveSizeSheetContentProps> = ({
         >
           <Text style={styles.pillNumber}>
             {lower}
-            <Text style={styles.pillDash}> – </Text>
+            <Text style={styles.pillDash}> - </Text>
             {upper}
           </Text>
           <Text style={styles.pillUnit}> ft</Text>

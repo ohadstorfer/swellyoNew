@@ -23,7 +23,7 @@ const STYLES: readonly StyleMeta[] = [
   {
     key: 'softtop',
     label: 'Soft-Top',
-    desc: 'Foamy and forgiving — easy paddling, stable take-offs.',
+    desc: 'Foamy and forgiving - easy paddling, stable take-offs.',
     image: Images.boardsEven.softtop,
   },
   {
@@ -35,13 +35,13 @@ const STYLES: readonly StyleMeta[] = [
   {
     key: 'midlength',
     label: 'Mid-Length',
-    desc: 'Versatile glider — speed and maneuverability in one.',
+    desc: 'Versatile glider - speed and maneuverability in one.',
     image: Images.boardsEven.midlength,
   },
   {
     key: 'longboard',
     label: 'Longboard',
-    desc: 'Classic logging — smooth trim and noserides on mellow waves.',
+    desc: 'Classic logging - smooth trim and noserides on mellow waves.',
     image: Images.boardsEven.longboard,
   },
 ];
