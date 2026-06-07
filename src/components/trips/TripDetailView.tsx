@@ -25,6 +25,7 @@ import {
   type SurfStyle,
   type HostingStyle,
 } from '../../services/trips/groupTripsService';
+import { TRIP_TYPE_BYLINE } from '../../services/trips/tripVocabulary';
 import {
   priceInclusionSections,
   priceInclusionAddOns,
@@ -119,6 +120,7 @@ export interface TripDetailVM {
   accommodationKindLabel: string | null;
   accommodationName: string | null;
   accommodationImageUri: string | null;
+  accommodationUrl: string | null;
 
   // Flow C — fixed per-person price + rich "What's included". Null for A/B.
   costPerPerson?: number | null;
@@ -187,12 +189,10 @@ export function formatAge(min: number | null, max: number | null): string {
   return String(min ?? max);
 }
 
-// "Trip type" overview card — friendly label per hosting style.
-export const TRIP_TYPE_LABEL: Record<HostingStyle, string> = {
-  A: 'Planned together',
-  B: 'Leader-led',
-  C: 'Fully planned',
-};
+// "Trip type" overview card — Crew · Captain · Operator byline per hosting style.
+// Aliased from the central vocabulary so every surface stays in sync, and kept
+// as a named export here for existing importers.
+export const TRIP_TYPE_LABEL = TRIP_TYPE_BYLINE;
 
 // "Paying vibe" tag per AI budget tier.
 export const BUDGET_VIBE: Record<'low' | 'medium' | 'high', string> = {
@@ -239,9 +239,15 @@ export function formatDateRange(vm: TripDetailVM): string {
     const first = sorted[0].split('-').map(Number);
     const last = sorted[sorted.length - 1].split('-').map(Number);
     const a = `${MONTH_SHORT[first[1] - 1]} ${first[0]}`;
-    if (sorted.length === 1) return a;
+    // Trip length sits next to the month(s), centered-dot separated — for
+    // month-only trips this is the only place the duration shows.
+    const lengthSuffix =
+      vm.durationDays && vm.durationDays > 0
+        ? ` · ${vm.durationDays} day${vm.durationDays === 1 ? '' : 's'}`
+        : '';
+    if (sorted.length === 1) return `${a}${lengthSuffix}`;
     const b = `${MONTH_SHORT[last[1] - 1]} ${last[0]}`;
-    return `${a} - ${b}`;
+    return `${a} - ${b}${lengthSuffix}`;
   }
   return 'Dates TBD';
 }
@@ -748,10 +754,10 @@ export const TripDetailView: React.FC<TripDetailViewProps> = ({
         </View>
       ) : null}
 
-      {/* ---- Meet your leader (Flow B) ---- */}
+      {/* ---- Meet your Captain (Flow B) ---- */}
       {vm.leader ? (
         <View style={styles.section}>
-          <SectionTitle title="Meet your leader" />
+          <SectionTitle title="Meet your Captain" />
           <View style={styles.leaderBlock}>
             <TouchableOpacity
               activeOpacity={onLeaderPress ? 0.8 : 1}
@@ -770,7 +776,7 @@ export const TripDetailView: React.FC<TripDetailViewProps> = ({
               )}
               <View style={{ flex: 1 }}>
                 <Text style={styles.leaderName} numberOfLines={1}>
-                  {vm.leader.name || 'The leader'}
+                  {vm.leader.name || 'The Captain'}
                   {vm.leader.age != null ? (
                     <Text style={styles.leaderMeta}>{`  ·  ${vm.leader.age}${
                       vm.leader.countryFrom ? ` from ${vm.leader.countryFrom}` : ''
@@ -985,7 +991,7 @@ export const TripDetailView: React.FC<TripDetailViewProps> = ({
         ) : null}
 
         <Text style={styles.sheetIntro}>
-          A rough AI estimate to plan around - not a price the organizer set. What
+          A rough AI estimate to plan around - not a fixed price. What
           you actually spend depends on how you travel.
         </Text>
 

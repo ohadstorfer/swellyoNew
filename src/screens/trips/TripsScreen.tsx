@@ -26,6 +26,7 @@ import {
   MyTripsBuckets,
   TripCardMeta,
 } from '../../services/trips/groupTripsService';
+import { TRIP_CHOOSER, TRIP_TYPE_PILL } from '../../services/trips/tripVocabulary';
 import { useQueryClient } from '@tanstack/react-query';
 import { useExploreTrips, useMyTrips, tripsKeys } from '../../hooks/trips/useTripQueries';
 import CreateTripWizard from './CreateTripWizard';
@@ -61,24 +62,9 @@ const HOSTING_STYLE_OPTIONS: {
   desc: string;
   image: number; // placeholder thumbnail (any local asset)
 }[] = [
-  {
-    key: 'A',
-    title: 'Planned Together',
-    desc: 'Group votes on key decisions.\nYou approve what moves forward.',
-    image: Images.createTrip.plannedTogether,
-  },
-  {
-    key: 'B',
-    title: 'Hosted (you lead decisions)',
-    desc: 'You make the decisions.\nMembers join and support the plan.',
-    image: Images.createTrip.hosted,
-  },
-  {
-    key: 'C',
-    title: 'Trip Operator',
-    desc: 'Everything is already decided.\nJoin knowing exactly what to expect.',
-    image: Images.createTrip.tripOperator,
-  },
+  { key: 'A', ...TRIP_CHOOSER.A, image: Images.createTrip.plannedTogether },
+  { key: 'B', ...TRIP_CHOOSER.B, image: Images.createTrip.hosted },
+  { key: 'C', ...TRIP_CHOOSER.C, image: Images.createTrip.tripOperator },
 ];
 
 export type TripsTab = 'explore' | 'my' | 'create';
@@ -317,9 +303,9 @@ const TRIP_TYPE: Record<
   HostingStyle,
   { label: string; icon: keyof typeof Ionicons.glyphMap }
 > = {
-  A: { label: 'Planned Together', icon: 'people-outline' },
-  B: { label: 'Hosted', icon: 'star-outline' },
-  C: { label: 'Fixed Plan', icon: 'briefcase-outline' },
+  A: { label: TRIP_TYPE_PILL.A, icon: 'people-outline' },
+  B: { label: TRIP_TYPE_PILL.B, icon: 'star-outline' },
+  C: { label: TRIP_TYPE_PILL.C, icon: 'briefcase-outline' },
 };
 
 const formatTripPrice = (trip: GroupTrip): string | null => {

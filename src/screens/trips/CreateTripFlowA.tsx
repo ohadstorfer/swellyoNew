@@ -161,7 +161,7 @@ const STEP_META: Record<StepKey, { title: string; subtitle: string }> = {
   basics: { title: 'Trip details', subtitle: 'Where, when, what to call it.' },
   vibez: { title: 'Trip Vibe', subtitle: 'How it runs, the feel, the stay.' },
   budget: { title: 'Budget', subtitle: 'Per person, in USD.' },
-  aboutYou: { title: 'About you', subtitle: 'Why you’re the one to lead this.' },
+  aboutYou: { title: 'About you', subtitle: 'Why you’re the right Captain for this.' },
   preview: { title: 'Preview', subtitle: 'How your trip will look.' },
 };
 
@@ -1893,7 +1893,9 @@ export default function CreateTripFlowA({
         : editMode
           ? 'Confirm the range for your trip.'
           : meta.subtitle
-      : meta.subtitle;
+      : step === 'aboutYou' && isFixedFlow
+        ? 'Why surfers can trust your operation.'
+        : meta.subtitle;
 
   const renderStep = () => {
     switch (step) {
@@ -2270,7 +2272,7 @@ export default function CreateTripFlowA({
             <Text style={[localStyles.fieldLabel, localStyles.groupTopGap]}>Your stay</Text>
             <Text style={localStyles.helper}>
               {isLeaderFlow
-                ? 'As the leader, add the place you’ll all stay at.'
+                ? 'As the Captain, add the place you’ll all stay at.'
                 : 'Add the place everyone will stay at.'}
             </Text>
           </>
@@ -2849,7 +2851,7 @@ export default function CreateTripFlowA({
         </View>
 
         <Text style={[localStyles.fieldLabel, localStyles.aboutSectionGap]}>
-          Why you’re the right person to lead
+          {isFixedFlow ? 'Why surfers can trust your operation' : 'Why you’re the right Captain'}
         </Text>
         <Text
           style={[
@@ -2918,6 +2920,10 @@ export default function CreateTripFlowA({
           : null,
       accommodationImageUri:
         requiresSpecificStay || state.accommodationLocked ? state.accommodationImageUri : null,
+      accommodationUrl:
+        requiresSpecificStay || state.accommodationLocked
+          ? state.accommodationUrl || null
+          : null,
       costPerPerson:
         isFixedFlow && state.costPerPerson ? parseInt(state.costPerPerson, 10) : null,
       priceInclusions: isFixedFlow

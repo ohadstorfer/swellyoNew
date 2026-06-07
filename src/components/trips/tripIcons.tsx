@@ -42,9 +42,16 @@ interface TripIconProps {
   size?: number;
   /** Stroke color — defaults to the Figma ink (#222B30). */
   color?: string;
+  /** Stroke weight in the icon's own viewBox units. Default 1.5; lower = thinner. */
+  strokeWidth?: number;
 }
 
-export const TripIcon: React.FC<TripIconProps> = ({ name, size = 18, color = '#222B30' }) => {
+export const TripIcon: React.FC<TripIconProps> = ({
+  name,
+  size = 18,
+  color = '#222B30',
+  strokeWidth = 1.5,
+}) => {
   const icon = ICONS[name];
   return (
     <Svg width={size} height={size} viewBox={icon.viewBox} fill="none">
@@ -52,7 +59,7 @@ export const TripIcon: React.FC<TripIconProps> = ({ name, size = 18, color = '#2
         d={icon.d}
         fill="none"
         stroke={color}
-        strokeWidth={1.5}
+        strokeWidth={strokeWidth}
         strokeLinecap="round"
         strokeLinejoin="round"
       />

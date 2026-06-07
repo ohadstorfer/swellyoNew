@@ -216,7 +216,10 @@ export function CreateTripWizardChrome(props: CreateTripWizardChromeProps): Reac
     }
     return () => {
       if (Platform.OS === 'ios') {
-        StatusBar.setBarStyle('dark-content', true);
+        // Restore the app-wide default (white icons on the dark tops elsewhere).
+        // Resetting to dark-content here used to leak black status-bar icons into
+        // the next screen.
+        StatusBar.setBarStyle('light-content', true);
       }
     };
   }, [hideHeader]);

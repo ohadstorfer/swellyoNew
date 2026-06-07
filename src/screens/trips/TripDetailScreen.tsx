@@ -13,7 +13,8 @@ import {
   KeyboardAvoidingView,
   Share,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useOnboarding } from '../../context/OnboardingContext';
 import {
@@ -79,6 +80,7 @@ import {
 } from '../../components/trips/TripEditSheets';
 import { uploadTripImage } from '../../services/storage/storageService';
 import { TripTabToggle, type TripTab } from '../../components/trips/TripTabToggle';
+import { NotificationCenter } from '../../components/notifications/NotificationCenter';
 import { HostTag } from '../../components/trips/HostTag';
 import { AdminUpdateSheet } from '../../components/trips/updates/AdminUpdateSheet';
 import { AddPersonalGearSheet } from '../../components/trips/gear/AddPersonalGearSheet';
@@ -195,6 +197,7 @@ const buildTripDetailVM = (
     : null,
   accommodationName: trip.accommodation_name,
   accommodationImageUri: trip.accommodation_image_url,
+  accommodationUrl: trip.accommodation_url,
   costPerPerson: trip.cost_per_person,
   priceInclusions: trip.price_inclusions,
   budgetMin: trip.budget_min,
@@ -313,6 +316,7 @@ const DangerRow: React.FC<{
 // ---------------------------------------------------------------------------
 export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEditTrip, onViewUserProfile, onOpenNotifications }: TripDetailScreenProps) {
   const { user: contextUser } = useOnboarding();
+  const insets = useSafeAreaInsets();
   const currentUserId = contextUser?.id?.toString() ?? null;
 
   const queryClient = useQueryClient();
@@ -688,10 +692,6 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     );
   };
 
-  const handleEdit = () => {
-    if (!trip || !onEditTrip) return;
-    onEditTrip(trip);
-  };
 
   // ---- Host-only inline edits (Figma admin view). Each persists one field via
   // updateGroupTrip and merges it locally (updateGroupTrip returns only the base
@@ -1138,6 +1138,13 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   // cancellation lock it the same way.
   const isLocked = isCancelled || isCompleted || isTripPast(trip);
 
+  // Whether a floating sticky CTA (join request / trip chat) is showing — drives
+  // the extra scroll bottom padding so content clears the floating button.
+  const showJoinCta =
+    !isHost && !isCancelled && !isApprovedMember && myRequest?.status !== 'approved';
+  const showChatCta = (isHost || isApprovedMember) && !isCancelled;
+  const stickyCtaVisible = showJoinCta || showChatCta;
+
   // Has the trip started yet? Gates "Mark as completed" — a host can close a
   // trip that's underway, not an upcoming one.
   const tripHasStarted = (() => {
@@ -1161,7 +1168,6 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   // and everyone sees just the Overview.
   const canSeePlan = (isHost || isApprovedMember) && !isLocked;
   const showPlan = canSeePlan && activeTab === 'plan';
-  const showOverview = !showPlan; // overview-only extras (Share, budget, members)
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
@@ -1186,26 +1192,9 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
                 )}
               </TouchableOpacity>
             ) : null}
-            {/* Edit — host only, while the trip is still live. */}
-            {isHost && !isLocked ? (
-              <TouchableOpacity
-                onPress={handleEdit}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                accessibilityLabel="Edit trip"
-              >
-                <Ionicons name="create-outline" size={24} color="#FFFFFF" />
-              </TouchableOpacity>
-            ) : null}
-            {/* Notification bell (Figma) — only when the navigator wires it. */}
-            {onOpenNotifications ? (
-              <TouchableOpacity
-                onPress={onOpenNotifications}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                accessibilityLabel="Open notifications"
-              >
-                <Ionicons name="notifications-outline" size={24} color="#FFFFFF" />
-              </TouchableOpacity>
-            ) : null}
+            {/* Notifications — self-contained bell + slide-in panel + unread
+                badge (same component the other headers use). */}
+            {currentUserId ? <NotificationCenter userId={currentUserId} bare /> : null}
           </View>
         }
       />
@@ -1215,7 +1204,10 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
       <ScrollView
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[
+          styles.scrollContent,
+          stickyCtaVisible && { paddingBottom: Math.max(insets.bottom, 16) + 100 },
+        ]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
@@ -1299,15 +1291,6 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           onEditDates={() => setEditSheet('dates')}
           onEditAccommodation={() => setEditSheet('accommodation')}
         />
-
-        {/* ============================ OVERVIEW ============================ */}
-        {/* Public, read-only extra below the TripDetailView body. The members
-            list lives in the Participants section now (tappable avatars). */}
-        {showOverview && (
-          <View style={[styles.actionRow, { marginTop: 20, paddingHorizontal: 16 }]}>
-            <ActionButton icon="share-outline" label="Share" onPress={handleShare} />
-          </View>
-        )}
 
         {/* ============================== PLAN ============================== */}
         {/* Interactive / operational content — members only. */}
@@ -1624,9 +1607,23 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
       </ScrollView>
       </KeyboardAvoidingView>
 
-      {/* Sticky CTA — only for the join flow (non-host, non-member, active trip) */}
-      {!isHost && !isCancelled && !isApprovedMember && myRequest?.status !== 'approved' && (
-        <View style={styles.cta}>
+      {/* Sticky CTA — floating pill over a foggy fade (mirrors the profile
+          "Connect to …" button). The overlay fades scroll content into the
+          background behind the button; the button itself keeps its own
+          colour + label. */}
+      {stickyCtaVisible && (
+        <View style={styles.ctaOverlay} pointerEvents="none">
+          <LinearGradient
+            colors={['rgba(250, 250, 250, 0)', 'rgba(250, 250, 250, 0.82)', 'rgba(250, 250, 250, 0.82)', '#FAFAFA']}
+            locations={[0, 0.22, 0.78, 1]}
+            style={styles.ctaOverlayGradient}
+          />
+        </View>
+      )}
+
+      {/* Join flow (non-host, non-member, active trip) */}
+      {showJoinCta && (
+        <View style={[styles.ctaFloat, { bottom: Math.max(insets.bottom, 16) + 12 }]}>
           <CtaButton
             myRequest={myRequest}
             submitting={submitting}
@@ -1636,10 +1633,9 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         </View>
       )}
 
-      {/* Sticky CTA — members get quick access to the group chat (Figma
-          "Trip Chat", accent). Mirrors the chat icon in the header. */}
-      {(isHost || isApprovedMember) && !isCancelled && (
-        <View style={styles.cta}>
+      {/* Members get quick access to the group chat (Figma "Trip Chat", accent). */}
+      {showChatCta && (
+        <View style={[styles.ctaFloat, { bottom: Math.max(insets.bottom, 16) + 12 }]}>
           <TouchableOpacity
             style={[styles.ctaBtn, styles.ctaChat]}
             onPress={handleOpenGroupChat}
@@ -1758,8 +1754,16 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
       <EditTextSheet
         visible={editSheet === 'about'}
         title="About you"
-        subtitle="Why you’re the right person to lead this."
-        label="Why you’re the right person to lead"
+        subtitle={
+          trip.hosting_style === 'C'
+            ? 'Why surfers can trust your operation.'
+            : 'Why you’re the right Captain for this.'
+        }
+        label={
+          trip.hosting_style === 'C'
+            ? 'Why surfers can trust your operation'
+            : 'Why you’re the right Captain'
+        }
         initialValue={trip.host_lead_note ?? ''}
         placeholder="Mention anything that brings credibility to your experience here"
         maxLength={250}
@@ -2048,17 +2052,41 @@ const styles = StyleSheet.create({
   dangerRowText: { color: '#C0392B', fontSize: 15, fontWeight: '500' },
 
   // Sticky CTA (join flow only)
-  cta: {
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    backgroundColor: '#FAFAFA',
+  // Foggy fade behind the floating CTA — fades scroll content into #FAFAFA
+  // (mirrors the profile "Connect to …" overlay, incl. the web blur mask).
+  ctaOverlay: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 175,
+    zIndex: 9,
+    overflow: 'hidden',
+    ...(Platform.OS === 'web' && {
+      backdropFilter: 'blur(6px)',
+      WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, black 45%)',
+      maskImage: 'linear-gradient(to bottom, transparent 0%, black 45%)',
+    }),
   },
+  ctaOverlayGradient: { flex: 1 },
+  // Floating button wrapper — pinned above the home indicator. Inset wider than
+  // the old full-width bar so the button reads "narrower", matching the create
+  // flow's "Next" CTA.
+  ctaFloat: {
+    position: 'absolute',
+    left: 56,
+    right: 56,
+    zIndex: 10,
+  },
+  // Shape copied from the create-flow "Next" button: taller (64), softer-but-
+  // not-pill corners (14).
   ctaBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    height: 56,
-    borderRadius: 12,
+    height: 64,
+    borderRadius: 14,
+    paddingHorizontal: 24,
     gap: 6,
   },
   ctaPrimary: { backgroundColor: '#212121' },
