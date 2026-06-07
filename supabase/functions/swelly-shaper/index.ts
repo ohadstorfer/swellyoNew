@@ -5,45 +5,6 @@ const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY')
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 
-// Rate limiting configuration
-const RATE_LIMIT_CONFIG = {
-  maxRequests: parseInt(Deno.env.get('RATE_LIMIT_MAX_REQUESTS') || '100', 10),
-  windowMs: parseInt(Deno.env.get('RATE_LIMIT_WINDOW_MS') || '60000', 10),
-}
-
-interface RateLimitEntry {
-  count: number
-  resetTime: number
-}
-
-const rateLimitStore = new Map<string, RateLimitEntry>()
-
-function checkRateLimit(userId: string): { allowed: boolean; remaining: number; resetTime: number } {
-  const now = Date.now()
-  const entry = rateLimitStore.get(userId)
-  
-  if (Math.random() < 0.01) {
-    for (const [key, value] of rateLimitStore.entries()) {
-      if (value.resetTime < now) {
-        rateLimitStore.delete(key)
-      }
-    }
-  }
-  
-  if (!entry || entry.resetTime < now) {
-    const resetTime = now + RATE_LIMIT_CONFIG.windowMs
-    rateLimitStore.set(userId, { count: 1, resetTime })
-    return { allowed: true, remaining: RATE_LIMIT_CONFIG.maxRequests - 1, resetTime }
-  }
-  
-  if (entry.count >= RATE_LIMIT_CONFIG.maxRequests) {
-    return { allowed: false, remaining: 0, resetTime: entry.resetTime }
-  }
-  
-  entry.count++
-  return { allowed: true, remaining: RATE_LIMIT_CONFIG.maxRequests - entry.count, resetTime: entry.resetTime }
-}
-
 interface ChatRequest {
   message: string
   chat_id?: string
@@ -217,11 +178,6 @@ SPECIAL HANDLING:
     * "Costa Rica, Tamarindo" → {"country": "Costa Rica", "area": ["Tamarindo"]}
     * "El Salvador" → {"country": "El Salvador", "area": []}
   - When user says they want to UPDATE an existing trip (e.g., "I was in Australia for 3 months but it should be 2 years"), you should UPDATE the existing trip by matching the country name
-  - When user wants to REMOVE/DELETE a trip (e.g., "remove my trip to Portugal", "delete my California trip"), return is_finished: true with the trip object including "_delete": true
-    * Format: {"country": "Portugal", "_delete": true}
-    * For USA: {"country": "USA", "state": "California", "_delete": true}
-    * Match by country (and state for USA), same as update matching
-    * Confirm with the user before deleting (e.g., "I'll remove your Portugal trip now")
   - Always extract both time_in_days (calculated) and time_in_text (preserved from user input, rounded to years/half-years if 1+ year)
   - Examples:
     * User says "3 weeks" → time_in_days: 21, time_in_text: "3 weeks"
@@ -727,23 +683,8 @@ async function updateUserProfile(userId: string, field: string, value: any, supa
       const existingTrips = surferData.destinations_array || []
       const updatedTrips = [...existingTrips]
       
-      // For each new trip, check for deletion or update/add
+      // For each new trip, check if it matches an existing one by country (and state for USA)
       for (const newTrip of value) {
-        // Handle deletion
-        if (newTrip._delete) {
-          const delCountry = (newTrip.country || '').toLowerCase()
-          const delState = newTrip.state?.toLowerCase()
-          const idx = updatedTrips.findIndex((t: any) => {
-            const tc = (t.country || '').toLowerCase()
-            const ts = t.state?.toLowerCase()
-            return tc === delCountry && (delCountry !== 'usa' || ts === delState)
-          })
-          if (idx !== -1) updatedTrips.splice(idx, 1)
-          continue
-        }
-
-        // Check if it matches an existing one by country (and state for USA)
-
         // Support both new structure (country, state?, area) and legacy (destination_name)
         const newCountry = newTrip.country || extractCountryFromDestination(newTrip.destination_name || '')
         const newState = newTrip.state
@@ -932,8 +873,20 @@ async function updateUserProfile(userId: string, field: string, value: any, supa
           updateData.surf_level_category = mapping.category
         }
       }
+    } else if (fieldMapping[field]) {
+      // Generic path: ONLY write columns that are in the allowlist. Never use a
+      // raw LLM-supplied field name as a DB column — a prompt-injection could
+      // otherwise write to arbitrary columns (e.g. finished_onboarding) on the
+      // caller's own surfers row.
+      updateData[fieldMapping[field]] = value
     } else {
-      updateData[dbField] = value
+      console.warn(`[swelly-shaper] Ignored update to non-allowlisted field "${field}"`)
+    }
+
+    // If nothing allowlisted was set, don't issue an empty/garbage update.
+    if (Object.keys(updateData).length === 0) {
+      console.warn(`[swelly-shaper] No allowlisted field to update for "${field}" — skipping.`)
+      return
     }
 
     // Update the profile
@@ -1002,30 +955,6 @@ serve(async (req: Request) => {
           headers: { 
             'Content-Type': 'application/json',
             'Access-Control-Allow-Origin': '*',
-          } 
-        }
-      )
-    }
-
-    // Rate limiting check
-    const rateLimit = checkRateLimit(user.id)
-    if (!rateLimit.allowed) {
-      const retryAfter = Math.ceil((rateLimit.resetTime - Date.now()) / 1000)
-      return new Response(
-        JSON.stringify({ 
-          error: 'Rate limit exceeded',
-          message: 'Too many requests. Please try again later.',
-          retryAfter 
-        }),
-        { 
-          status: 429, 
-          headers: { 
-            'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*',
-            'Retry-After': retryAfter.toString(),
-            'X-RateLimit-Limit': RATE_LIMIT_CONFIG.maxRequests.toString(),
-            'X-RateLimit-Remaining': '0',
-            'X-RateLimit-Reset': rateLimit.resetTime.toString(),
           } 
         }
       )

@@ -13,7 +13,7 @@ import {
   KeyboardAvoidingView,
   Share,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useOnboarding } from '../../context/OnboardingContext';
 import {
@@ -87,12 +87,19 @@ import { PersonalGearSheet } from '../../components/trips/gear/PersonalGearSheet
 import ParticipantCard from '../../components/trips/ParticipantCard';
 import PendingRequestCard from '../../components/trips/PendingRequestCard';
 import TripParticipantsBreakdown from '../../components/trips/TripParticipantsBreakdown';
-import { GearItemCard } from '../../components/trips/gear/GearItemCard';
 import { GearItemSheet } from '../../components/trips/gear/GearItemSheet';
 import { RequestGearSheet } from '../../components/trips/gear/RequestGearSheet';
 import { ManageGearSheet } from '../../components/trips/gear/ManageGearSheet';
 import { GearRequestsSheet } from '../../components/trips/gear/GearRequestsSheet';
 import { CommitmentSheet } from '../../components/trips/commitment/CommitmentSheet';
+import {
+  CommitPill,
+  AdminUpdatesCard,
+  GroupGearCard,
+  YourGearCard,
+  StickyTripChat,
+  StickyGradientFooter,
+} from '../../components/trips/plan/PlanSections';
 import { RequestToJoinSheet } from '../../components/trips/joinRequest/RequestToJoinSheet';
 import { supabase } from '../../config/supabase';
 import { messagingService } from '../../services/messaging/messagingService';
@@ -314,6 +321,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   const { user: contextUser } = useOnboarding();
   const currentUserId = contextUser?.id?.toString() ?? null;
 
+  const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
 
   // Data from react-query cache (survives screen unmount → instant reopen).
@@ -361,7 +369,6 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   const [addingPersonalItem, setAddingPersonalItem] = useState(false);
   const [personalItemDraft, setPersonalItemDraft] = useState('');
   const [savingPersonalItem, setSavingPersonalItem] = useState(false);
-  const [muted, setMuted] = useState(false);
   // Overview = public read-only facts; Plan = interactive (members only).
   const [activeTab, setActiveTab] = useState<TripTab>('overview');
   // Host-only inline edit sheets (Figma admin view): cover / about-host / description / dates / accommodation.
@@ -429,8 +436,6 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     })),
     ...myPersonalGear.map(it => ({ kind: 'mine' as const, name: it.name, done: it.done })),
   ];
-  const gearPreview = gearAllRows.slice(0, 3);
-  const gearHiddenCount = Math.max(0, gearAllRows.length - gearPreview.length);
   // Data is now managed by react-query hooks above.
   // refreshGear / refreshGearRequests replaced by queryClient.invalidateQueries.
 
@@ -759,7 +764,6 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     }
   };
 
-  const handleToggleMute = () => setMuted(m => !m);
 
   const handleOpenCommitSheet = () => {
     if (!currentUserId) return;
@@ -1162,6 +1166,12 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   const showPlan = canSeePlan && activeTab === 'plan';
   const showOverview = !showPlan; // overview-only extras (Share, budget, members)
 
+  // Sticky footers (both floating over a faded #FAFAFA gradient, Figma CTA
+  // frame 12557-3613): join CTA for outsiders, Trip Chat for members.
+  const showJoinCta = !isHost && !isCancelled && !isApprovedMember && myRequest?.status !== 'approved';
+  const showChatCta = (isHost || isApprovedMember) && !isCancelled;
+  const hasStickyFooter = showJoinCta || showChatCta;
+
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
       <Header
@@ -1312,16 +1322,69 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         {/* Interactive / operational content — members only. */}
         {showPlan && (
         <>
-        {/* Action row — Share / Mute (member actions). Chat now lives in the
-            header (top-right) so it stays reachable when the plan is locked. */}
-        <View style={[styles.actionRow, { marginTop: 20, paddingHorizontal: 16 }]}>
-          <ActionButton icon="share-outline" label="Share" onPress={handleShare} />
-          <ActionButton
-            icon={muted ? 'notifications-off' : 'notifications-outline'}
-            label={muted ? 'Muted' : 'Mute'}
-            onPress={handleToggleMute}
+        {/* Redesigned Plan (Figma 12557-5860 / 12716-6927): commit pill →
+            admin updates → Packing & Gear. Operational/host sections (join
+            requests, breakdown, destructive actions) stay below — they're not
+            in the Figma frames and live only here, not in Overview. */}
+
+        {/* 1) Commit pill — approved members only (host can't commit). */}
+        {isApprovedMember && (
+          <CommitPill status={myCommitmentStatus} onPress={handleOpenCommitSheet} />
+        )}
+
+        {/* 2) Recent admin updates */}
+        {(adminUpdates.length > 0 || isHost) && (
+          <AdminUpdatesCard
+            updates={adminUpdates}
+            isHost={isHost}
+            formatTime={formatRelativeTime}
+            onAddUpdate={handleStartAddUpdate}
+            onEditUpdate={handleEditUpdate}
+            onLongPressUpdate={handleLongPressUpdate}
+          />
+        )}
+
+        {/* 3) Packing & Gear — Group Gear + Your Gear */}
+        <View style={styles.planSection}>
+          <Text style={styles.planSectionHeading}>Packing & Gear</Text>
+          <GroupGearCard
+            items={gearItems}
+            isHost={isHost}
+            isApprovedMember={isApprovedMember}
+            onPressItem={item => setGearItemSheetItem(item)}
+            onManage={() => setManageSheetVisible(true)}
+            onRequestItem={() => setRequestSheetVisible(true)}
+          />
+          <YourGearCard
+            rows={gearAllRows}
+            totalCount={gearTotalCount}
+            doneCount={gearDoneCount}
+            isHost={isHost}
+            onOpen={() => setPersonalGearSheetOpen(true)}
+            onEditSuggested={() => setEditSuggestedSheetOpen(true)}
           />
         </View>
+
+        {/* ---- Operational sections (kept at the bottom of Plan; not in Figma) ---- */}
+
+        {/* Gear requests (host) — review members' "request item" submissions. */}
+        {isHost && (
+          <View style={styles.planSection}>
+            <TouchableOpacity
+              style={styles.gearReqsBadge}
+              onPress={() => setRequestsSheetVisible(true)}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="notifications-outline" size={16} color="#222B30" />
+              <Text style={styles.gearReqsBadgeText}>
+                {gearRequests.length > 0
+                  ? `${gearRequests.length} pending gear ${gearRequests.length === 1 ? 'request' : 'requests'}`
+                  : 'Gear requests'}
+              </Text>
+              <Ionicons name="chevron-forward" size={16} color="#222B30" />
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* Pending requests (host only) */}
         {isHost && pendingRequests.length > 0 && (
@@ -1355,184 +1418,6 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           </Section>
         )}
 
-        {/* About, Focus vibe, How it works, Accommodation, Who it's for, Wave
-            info, approximate budget and the members list now live in the
-            Overview tab (above / read-only). Everything below is Plan-only. */}
-
-        {/* Group Gear — shared items the host wants the group to bring. Shown to
-            approved members even when empty so they can still request an item. */}
-        {(gearItems.length > 0 || isHost || isApprovedMember) && !isCancelled && (
-          <View style={styles.section}>
-            <View style={styles.gearHeaderRow}>
-              <View>
-                <Text style={styles.gearHeaderTitle}>GROUP GEAR</Text>
-                <Text style={styles.gearHeaderSub}>Shared items for the trip</Text>
-              </View>
-              {isHost && (
-                <TouchableOpacity
-                  style={styles.gearManageBtn}
-                  onPress={() => setManageSheetVisible(true)}
-                >
-                  <Text style={styles.gearManageBtnText}>Manage</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-
-            {gearItems.length === 0 ? (
-              <Text style={styles.muted}>
-                {isHost ? 'No items yet — tap Manage to add some.' : 'No items yet.'}
-              </Text>
-            ) : (
-              gearItems.map(item => (
-                <GearItemCard
-                  key={item.id}
-                  item={item}
-                  onPress={() => setGearItemSheetItem(item)}
-                />
-              ))
-            )}
-
-            {isApprovedMember && (
-              <TouchableOpacity
-                style={styles.requestLinkBtn}
-                onPress={() => setRequestSheetVisible(true)}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.requestLinkText}>Missing something? Request item</Text>
-              </TouchableOpacity>
-            )}
-
-            {isHost && (
-              <TouchableOpacity
-                style={styles.gearReqsBadge}
-                onPress={() => setRequestsSheetVisible(true)}
-                activeOpacity={0.7}
-              >
-                <Ionicons name="notifications-outline" size={16} color="#222B30" />
-                <Text style={styles.gearReqsBadgeText}>
-                  {gearRequests.length > 0
-                    ? `${gearRequests.length} pending ${gearRequests.length === 1 ? 'request' : 'requests'}`
-                    : 'Gear requests'}
-                </Text>
-                <Ionicons name="chevron-forward" size={16} color="#222B30" />
-              </TouchableOpacity>
-            )}
-          </View>
-        )}
-
-        {/* Personal packing list — per-user items with done state. Always shown
-            to the host and approved members so they can add their own items even
-            when the host hasn't suggested any. */}
-        {(isHost || isApprovedMember) && !isCancelled && (
-          <View style={styles.section}>
-            <View style={styles.packingHeader}>
-              <Text style={styles.sectionTitle}>Your gear</Text>
-              {isHost && !isCancelled && (
-                <TouchableOpacity
-                  style={styles.editSuggestedBtn}
-                  onPress={() => setEditSuggestedSheetOpen(true)}
-                  activeOpacity={0.7}
-                  accessibilityLabel="Edit suggested gear"
-                >
-                  <Ionicons name="create-outline" size={15} color="#0788B0" />
-                  <Text style={styles.editSuggestedBtnText}>Edit suggested</Text>
-                  <HostTag />
-                </TouchableOpacity>
-              )}
-            </View>
-
-            {/* Compact summary — tap to open the full list (check / add). */}
-            <TouchableOpacity
-              style={styles.gearSummaryCard}
-              onPress={() => setPersonalGearSheetOpen(true)}
-              activeOpacity={0.7}
-            >
-              {gearTotalCount > 0 ? (
-                <>
-                  <Text style={styles.gearSummaryCount}>
-                    {gearTotalCount} {gearTotalCount === 1 ? 'item' : 'items'} · {gearDoneCount} packed
-                  </Text>
-                  {gearPreview.map(row => (
-                    <View key={`${row.kind}-${row.name}`} style={styles.gearSummaryRow}>
-                      <Ionicons
-                        name={row.done ? 'checkbox' : 'square-outline'}
-                        size={18}
-                        color={row.done ? '#34C759' : '#B0B0B0'}
-                      />
-                      <Text
-                        style={[styles.gearSummaryItem, row.done && styles.gearSummaryItemDone]}
-                        numberOfLines={1}
-                      >
-                        {row.name}
-                      </Text>
-                      {row.kind === 'host' ? <HostTag /> : null}
-                    </View>
-                  ))}
-                  {gearHiddenCount > 0 ? (
-                    <Text style={styles.gearSummaryMore}>+{gearHiddenCount} more</Text>
-                  ) : null}
-                  <View style={styles.gearSummaryViewAllRow}>
-                    <Text style={styles.gearSummaryViewAll}>View all</Text>
-                    <Ionicons name="chevron-forward" size={14} color="#0788B0" />
-                  </View>
-                </>
-              ) : (
-                <Text style={styles.muted}>
-                  {isHost
-                    ? 'No gear yet — add suggestions for everyone or your own items.'
-                    : 'No gear yet — tap to start your list.'}
-                </Text>
-              )}
-            </TouchableOpacity>
-
-            {(isHost || isApprovedMember) && !isCancelled && (
-              <TouchableOpacity
-                style={styles.personalAddBtn}
-                onPress={() => setAddPersonalSheetOpen(true)}
-                activeOpacity={0.7}
-              >
-                <Ionicons name="add" size={18} color="#0788B0" />
-                <Text style={styles.personalAddBtnText}>Add my item</Text>
-              </TouchableOpacity>
-            )}
-
-          </View>
-        )}
-
-        {/* Commitment CTA — only approved members. The host doesn't commit to
-            their own trip (nobody to approve them; semantically meaningless). */}
-        {isApprovedMember && !isCancelled && (
-          <View style={styles.commitWrapper}>
-            <TouchableOpacity
-              style={[
-                styles.commitCta,
-                myCommitmentStatus === 'approved' && styles.commitCtaApproved,
-                myCommitmentStatus === 'pending' && styles.commitCtaPending,
-              ]}
-              onPress={handleOpenCommitSheet}
-              activeOpacity={0.85}
-            >
-              {myCommitmentStatus === 'approved' && (
-                <Ionicons name="checkmark-circle" size={18} color="#FFFFFF" />
-              )}
-              <Text style={styles.commitCtaText}>
-                {myCommitmentStatus === 'approved'
-                  ? 'Committed'
-                  : myCommitmentStatus === 'pending'
-                  ? 'Commitment Pending…'
-                  : 'Committed to this trip'}
-              </Text>
-            </TouchableOpacity>
-            <Text style={styles.commitCtaCaption}>
-              {myCommitmentStatus === 'approved'
-                ? "You're locked in. Tap to update your details."
-                : myCommitmentStatus === 'pending'
-                ? 'Waiting for the host to approve. Tap to update.'
-                : "Let the host know how you're committed"}
-            </Text>
-          </View>
-        )}
-
         {/* Group breakdown — only when there's at least one member besides the host */}
         {hasNonHostMembers && (
           <Section title="Group breakdown">
@@ -1540,51 +1425,8 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           </Section>
         )}
 
-        {/* Admin updates — host-posted free-text lines, visible to all members. */}
-        {(adminUpdates.length > 0 || isHost) && (
-          <Section
-            title="Recent admin updates"
-            headerRight={
-              isHost ? (
-                <TouchableOpacity
-                  style={styles.addUpdateBtn}
-                  onPress={handleStartAddUpdate}
-                  activeOpacity={0.7}
-                >
-                  <Ionicons name="add" size={14} color="#222B30" />
-                  <Text style={styles.addUpdateBtnText}>Add update</Text>
-                  <HostTag />
-                </TouchableOpacity>
-              ) : null
-            }
-          >
-            {adminUpdates.length === 0 ? (
-              <Text style={styles.updatesEmpty}>No updates yet.</Text>
-            ) : (
-              adminUpdates.map(u => (
-                <TouchableOpacity
-                  key={u.id}
-                  style={styles.updateRow}
-                  onLongPress={() => handleLongPressUpdate(u)}
-                  activeOpacity={isHost ? 0.7 : 1}
-                  disabled={!isHost}
-                >
-                  <View style={styles.updateBullet} />
-                  <View style={styles.updateBody}>
-                    <Text style={styles.updateText}>
-                      <Text style={styles.updateAuthor}>Host </Text>
-                      {u.body}
-                    </Text>
-                    <Text style={styles.updateTime}>{formatRelativeTime(u.created_at)}</Text>
-                  </View>
-                </TouchableOpacity>
-              ))
-            )}
-          </Section>
-        )}
-
         {/* Bottom destructive — Exit (member) / Cancel (host), WhatsApp-style red rows */}
-        {!isCancelled && (isApprovedMember || isHost) && (
+        {(isApprovedMember || isHost) && (
           <View style={styles.destructiveCard}>
             {isApprovedMember && !isHost && (
               <DangerRow
@@ -1619,42 +1461,33 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         </>
         )}
 
-        <View style={{ height: 80 }} />
+        {/* Clearance for the floating sticky footer (Trip Chat / Join a Trip)
+            so the last content isn't hidden behind it; smaller otherwise. */}
+        <View style={{ height: hasStickyFooter ? insets.bottom + 96 : 40 }} />
       </ScrollView>
       </KeyboardAvoidingView>
 
-      {/* Sticky CTA — only for the join flow (non-host, non-member, active trip) */}
-      {!isHost && !isCancelled && !isApprovedMember && myRequest?.status !== 'approved' && (
-        <View style={styles.cta}>
+      {/* Sticky CTA — join flow (non-host, non-member, active trip). Floats over
+          the same faded #FAFAFA gradient as the member Trip Chat button. */}
+      {showJoinCta && (
+        <StickyGradientFooter bottomInset={insets.bottom}>
           <CtaButton
             myRequest={myRequest}
             submitting={submitting}
             onRequest={handleOpenJoinSheet}
             onWithdraw={handleWithdraw}
           />
-        </View>
+        </StickyGradientFooter>
       )}
 
       {/* Sticky CTA — members get quick access to the group chat (Figma
-          "Trip Chat", accent). Mirrors the chat icon in the header. */}
-      {(isHost || isApprovedMember) && !isCancelled && (
-        <View style={styles.cta}>
-          <TouchableOpacity
-            style={[styles.ctaBtn, styles.ctaChat]}
-            onPress={handleOpenGroupChat}
-            disabled={openingChat}
-            activeOpacity={0.85}
-          >
-            {openingChat ? (
-              <ActivityIndicator color="#FFFFFF" />
-            ) : (
-              <>
-                <Ionicons name="chatbubble-outline" size={18} color="#FFFFFF" />
-                <Text style={styles.ctaPrimaryText}>Trip Chat</Text>
-              </>
-            )}
-          </TouchableOpacity>
-        </View>
+          "Trip Chat", accent), floating over the faded gradient. */}
+      {showChatCta && (
+        <StickyTripChat
+          onPress={handleOpenGroupChat}
+          loading={openingChat}
+          bottomInset={insets.bottom}
+        />
       )}
 
       {/* Gear bottom sheets */}
@@ -1920,6 +1753,16 @@ const styles = StyleSheet.create({
 
   keyboardAvoider: { flex: 1, backgroundColor: '#FAFAFA' },
   scrollContent: { paddingBottom: 24 },
+
+  // Redesigned Plan tab (Figma) — light wrappers around the PlanSections cards.
+  planSection: { paddingHorizontal: 16, marginTop: 24 },
+  planSectionHeading: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#222B30',
+    marginBottom: 8,
+    ...(Platform.OS === 'web' ? { fontFamily: 'Montserrat, sans-serif' } : { fontFamily: 'Montserrat' }),
+  },
 
   // Top card — hero, title, action row (WhatsApp group header)
   topCard: { backgroundColor: '#FFFFFF', paddingBottom: 4 },

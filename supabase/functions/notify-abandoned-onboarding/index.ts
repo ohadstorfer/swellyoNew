@@ -183,6 +183,21 @@ serve(async (req) => {
     })
   }
 
+  // Caller authentication: triggered hourly by pg_cron, which sends the shared
+  // secret in the x-internal-secret header (sourced from Vault — see
+  // 20260606_secure_onboarding_cron.sql). Fails closed if the secret is unset.
+  {
+    const provided = req.headers.get('x-internal-secret') || ''
+    const expected = Deno.env.get('ADMIN_FUNCTION_SECRET') || ''
+    if (!expected || provided !== expected) {
+      console.log(`[Abandonment] [${requestId}] Unauthorized: missing/invalid x-internal-secret`)
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+  }
+
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
     auth: { autoRefreshToken: false, persistSession: false },
   })

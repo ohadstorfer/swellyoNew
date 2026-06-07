@@ -16,7 +16,7 @@ const BATCH_MODE = false
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-internal-secret',
 }
 
 interface Message {
@@ -385,6 +385,19 @@ serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
+  }
+
+  // Caller authentication: operator-only admin function. Fails closed if
+  // ADMIN_FUNCTION_SECRET is unset.
+  {
+    const provided = req.headers.get('x-internal-secret') || ''
+    const expected = Deno.env.get('ADMIN_FUNCTION_SECRET') || ''
+    if (!expected || provided !== expected) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
   }
 
   try {

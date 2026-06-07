@@ -153,6 +153,22 @@ serve(async (req) => {
   console.log(`[Surftrip Request Notif] [${traceId}] ${req.method}`);
 
   try {
+    // Caller authentication: this function is triggered by a Supabase DB
+    // webhook that sends Authorization: Bearer <service_role>. Accept if that
+    // bearer matches the service-role key, OR if x-internal-secret matches
+    // ADMIN_FUNCTION_SECRET (fallback for webhooks without the service-role
+    // bearer). The public anon key is never accepted. Fails closed.
+    {
+      const authHeader = req.headers.get('Authorization') || '';
+      const bearerOk = SUPABASE_SERVICE_ROLE_KEY.length > 0 && authHeader === `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`;
+      const provided = req.headers.get('x-internal-secret') || '';
+      const expected = Deno.env.get('ADMIN_FUNCTION_SECRET') || '';
+      const secretOk = expected.length > 0 && provided === expected;
+      if (!bearerOk && !secretOk) {
+        return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
+      }
+    }
+
     if (req.method !== 'POST') {
       return new Response(
         JSON.stringify({ error: 'Method not allowed' }),

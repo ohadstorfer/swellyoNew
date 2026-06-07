@@ -524,6 +524,24 @@ serve(async (req) => {
       );
     }
 
+    // Validate the JWT and identify the real caller. (The service-role client
+    // is needed both for getUser and for the later admin operations.)
+    const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+    const token = authHeader.replace('Bearer ', '');
+    const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
+    if (authError || !user) {
+      return new Response(
+        JSON.stringify({ success: false, error: 'Invalid token' }),
+        {
+          status: 401,
+          headers: {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+          },
+        }
+      );
+    }
+
     // Parse request body
     const body: ProcessVideoRequest = await req.json();
     const { videoPath, userId } = body;
@@ -533,6 +551,21 @@ serve(async (req) => {
         JSON.stringify({ success: false, error: 'Missing videoPath or userId' }),
         {
           status: 400,
+          headers: {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+          },
+        }
+      );
+    }
+
+    // Authorization: a caller may only process THEIR OWN video. The userId in
+    // the body must match the verified JWT user — otherwise this is an IDOR.
+    if (userId !== user.id) {
+      return new Response(
+        JSON.stringify({ success: false, error: 'Forbidden' }),
+        {
+          status: 403,
           headers: {
             'Content-Type': 'application/json',
             'Access-Control-Allow-Origin': '*',
@@ -555,8 +588,6 @@ serve(async (req) => {
       );
     }
 
-    // Create Supabase client with service role for admin operations
-    const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
     // Generate output path (final location)
     const fileName = videoPath.split('/').pop() || `profile-surf-video-${Date.now()}.mp4`;
