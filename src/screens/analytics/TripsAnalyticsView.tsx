@@ -25,6 +25,14 @@ export const TRIP_METRIC_INFO: Record<string, { what: string; when: string }> = 
   commitments_approved: { what: 'Commitments a host approved (flight booked, insurance, etc.) in the selected period.', when: 'When a host approves a member\'s commitment.' },
 };
 
+export const TRIP_METRIC_LABELS: Record<string, string> = {
+  trips_created: 'Trips created',
+  join_requests: 'Join requests',
+  members_joined: 'Members joined',
+  unique_hosts: 'Unique hosts',
+  commitments_approved: 'Commitments',
+};
+
 interface TripsAnalyticsViewProps {
   range: { from: string | null; to: string | null };
   onInfo: (key: string) => void;
@@ -45,7 +53,7 @@ export function TripsAnalyticsView({ range, onInfo, reloadToken }: TripsAnalytic
       .catch(e => { if (!cancelled) setError(e?.message ?? 'Failed to load'); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [range, reloadToken]);
+  }, [range.from, range.to, reloadToken]);
 
   if (loading && !data) {
     return (
@@ -197,8 +205,8 @@ function BreakdownCard({ title, icon, items }: { title: string; icon: IoniconNam
 
 // ============== Rates card ==============
 function RatesCard({ rates }: { rates: TripsDashboardData['rates'] }) {
-  const pct = (v: number | null) => (v === null ? '—' : `${(v * 100).toFixed(0)}%`);
-  const hrs = (v: number | null) => (v === null ? '—' : v < 1 ? `${Math.round(v * 60)} min` : `${v.toFixed(1)} h`);
+  const pct = (v: number | null) => (v === null ? '—' : `${Math.min(100, Math.max(0, v * 100)).toFixed(0)}%`);
+  const hrs = (v: number | null) => { if (v === null) return '—'; const h = Math.max(0, v); return h < 1 ? `${Math.round(h * 60)} min` : `${h.toFixed(1)} h`; };
   const rows: { label: string; value: string }[] = [
     { label: 'Avg fill rate', value: pct(rates.fill_rate_avg) },
     { label: 'Reached full', value: pct(rates.pct_reached_full) },

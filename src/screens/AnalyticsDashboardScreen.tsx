@@ -22,7 +22,7 @@ import {
   EventName,
 } from '../services/analytics/analyticsDashboardService';
 import { C, CARD_SHADOW, HIT, TILE_W, Sparkline, DeltaPill, StatTile, deltaPct, IoniconName } from './analytics/analyticsTokens';
-import { TripsAnalyticsView, TRIP_METRIC_INFO } from './analytics/TripsAnalyticsView';
+import { TripsAnalyticsView, TRIP_METRIC_INFO, TRIP_METRIC_LABELS } from './analytics/TripsAnalyticsView';
 
 const SCREEN_H = Dimensions.get('window').height;
 
@@ -403,7 +403,7 @@ export function AnalyticsDashboardScreen({ onBack }: AnalyticsDashboardScreenPro
         {tab === 'trips' && (
           <TripsAnalyticsView
             range={{ from: range.from, to: range.to }}
-            onInfo={setTripInfoKey}
+            onInfo={(k) => { if (TRIP_METRIC_INFO[k]) setTripInfoKey(k); }}
             reloadToken={reloadToken}
           />
         )}
@@ -415,7 +415,10 @@ export function AnalyticsDashboardScreen({ onBack }: AnalyticsDashboardScreenPro
         {tripInfoKey && TRIP_METRIC_INFO[tripInfoKey] && (
           <>
             <View style={styles.sheetHeader}>
-              <Text style={styles.sheetTitle}>{tripInfoKey}</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.sheetTitle}>{TRIP_METRIC_LABELS[tripInfoKey] ?? tripInfoKey}</Text>
+                <Text style={styles.infoEventName}>{tripInfoKey}</Text>
+              </View>
               <TouchableOpacity style={styles.sheetCloseBtn} onPress={() => setTripInfoKey(null)} hitSlop={HIT} activeOpacity={0.7}>
                 <Ionicons name="close" size={18} color={C.label} />
               </TouchableOpacity>
