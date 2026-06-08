@@ -31,11 +31,21 @@ declare
   v_join_req uuid; v_gear_req uuid; v_commit_req uuid;
   v_title text;
 begin
-  execute 'alter table public.notifications disable trigger trg_notifications_only_ohad';
+  -- The "only Ohad" gate may or may not exist on this DB (it is NOT on prod).
+  -- Only disable it if present, so the test runs everywhere.
+  if exists (
+    select 1 from pg_trigger
+    where tgname = 'trg_notifications_only_ohad'
+      and tgrelid = 'public.notifications'::regclass
+  ) then
+    execute 'alter table public.notifications disable trigger trg_notifications_only_ohad';
+  end if;
 
-  select array_agg(id) into u from (select id from public.users order by created_at limit 3) s;
+  -- Source users from EXISTING trip participants: they are guaranteed to satisfy
+  -- the group_trip_participants FK (public.users can contain orphan rows).
+  select array_agg(uid) into u from (select distinct user_id as uid from public.group_trip_participants limit 3) s;
   if array_length(u,1) is null or array_length(u,1) < 3 then
-    raise exception 'Need at least 3 users in public.users to run this test';
+    raise exception 'Need at least 3 existing trip participants to run this test';
   end if;
   v_host := u[1]; v_alice := u[2]; v_bob := u[3];
 
