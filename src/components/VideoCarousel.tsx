@@ -672,7 +672,9 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
                               style={styles.thumbnailImage}
                               resizeMode="cover"
                             />
-                          ) : null}
+                          ) : (
+                            <View style={[styles.thumbnailImage, { backgroundColor: '#EEE' }]} />
+                          )}
                         </View>
                       </View>
                     ) : (
@@ -683,7 +685,9 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
                             style={styles.thumbnailImage}
                             resizeMode="cover"
                           />
-                        ) : null}
+                        ) : (
+                          <View style={[styles.thumbnailImage, { backgroundColor: '#EEE' }]} />
+                        )}
                       </View>
                     )}
                   </Animated.View>
