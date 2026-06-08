@@ -23,6 +23,7 @@ import {
   EventName,
 } from '../services/analytics/analyticsDashboardService';
 import { C, CARD_SHADOW, HIT, TILE_W, Sparkline, DeltaPill, StatTile, deltaPct, IoniconName } from './analytics/analyticsTokens';
+import { TripsAnalyticsView, TRIP_METRIC_INFO } from './analytics/TripsAnalyticsView';
 
 const SCREEN_H = Dimensions.get('window').height;
 
@@ -207,6 +208,9 @@ export function AnalyticsDashboardScreen({ onBack }: AnalyticsDashboardScreenPro
   const [customFrom, setCustomFrom] = useState<Date>(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
   const [customTo, setCustomTo] = useState<Date>(new Date());
   const [infoEvent, setInfoEvent] = useState<InfoKey | null>(null);
+  const [tab, setTab] = useState<'users' | 'trips'>('users');
+  const [reloadToken, setReloadToken] = useState(0);
+  const [tripInfoKey, setTripInfoKey] = useState<string | null>(null);
 
   const rangeShort = PRESETS.find(p => p.key === range.preset)?.shortLabel
     ?? (range.from && range.to ? `${fmtShortDate(range.from)} → ${fmtShortDate(range.to)}` : 'all time');
@@ -309,6 +313,21 @@ export function AnalyticsDashboardScreen({ onBack }: AnalyticsDashboardScreenPro
         </ScrollView>
       </View>
 
+      <View style={styles.segmentWrap}>
+        {(['users', 'trips'] as const).map(t => (
+          <TouchableOpacity
+            key={t}
+            style={[styles.segment, tab === t && styles.segmentActive]}
+            activeOpacity={0.8}
+            onPress={() => setTab(t)}
+          >
+            <Text style={[styles.segmentText, tab === t && styles.segmentTextActive]}>
+              {t === 'users' ? 'Users' : 'Trips'}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
       {/* ============ Body ============ */}
       <ScrollView
         contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 40 }]}
@@ -316,7 +335,7 @@ export function AnalyticsDashboardScreen({ onBack }: AnalyticsDashboardScreenPro
         refreshControl={
           <RefreshControl
             refreshing={loading && !!data}
-            onRefresh={() => load(range)}
+            onRefresh={() => { if (tab === 'users') { load(range); } else { setReloadToken(x => x + 1); } }}
             tintColor={C.accent}
             colors={[C.accent]}
           />
@@ -336,7 +355,7 @@ export function AnalyticsDashboardScreen({ onBack }: AnalyticsDashboardScreenPro
           </View>
         )}
 
-        {data && (
+        {tab === 'users' && data && (
           <>
             {isAllEmpty && <EmptyBanner />}
 
@@ -381,9 +400,41 @@ export function AnalyticsDashboardScreen({ onBack }: AnalyticsDashboardScreenPro
             />
           </>
         )}
+
+        {tab === 'trips' && (
+          <TripsAnalyticsView
+            range={{ from: range.from, to: range.to }}
+            onInfo={setTripInfoKey}
+            reloadToken={reloadToken}
+          />
+        )}
       </ScrollView>
 
       <InfoSheet event={infoEvent} onClose={() => setInfoEvent(null)} />
+
+      <BottomSheet visible={tripInfoKey !== null} onClose={() => setTripInfoKey(null)}>
+        {tripInfoKey && TRIP_METRIC_INFO[tripInfoKey] && (
+          <>
+            <View style={styles.sheetHeader}>
+              <Text style={styles.sheetTitle}>{tripInfoKey}</Text>
+              <TouchableOpacity style={styles.sheetCloseBtn} onPress={() => setTripInfoKey(null)} hitSlop={HIT} activeOpacity={0.7}>
+                <Ionicons name="close" size={18} color={C.label} />
+              </TouchableOpacity>
+            </View>
+            <View style={styles.sheetBody}>
+              <Text style={styles.infoSectionLabel}>WHAT IT COUNTS</Text>
+              <Text style={styles.infoText}>{TRIP_METRIC_INFO[tripInfoKey].what}</Text>
+              <Text style={[styles.infoSectionLabel, { marginTop: 18 }]}>WHEN IT'S RECORDED</Text>
+              <Text style={styles.infoText}>{TRIP_METRIC_INFO[tripInfoKey].when}</Text>
+            </View>
+            <View style={[styles.sheetFooter, { paddingBottom: insets.bottom + 14 }]}>
+              <TouchableOpacity style={[styles.btnPrimary, { flex: 1 }]} onPress={() => setTripInfoKey(null)} activeOpacity={0.85}>
+                <Text style={styles.btnPrimaryText}>Got it</Text>
+              </TouchableOpacity>
+            </View>
+          </>
+        )}
+      </BottomSheet>
 
       <CustomRangeSheet
         visible={customOpen}
@@ -742,6 +793,13 @@ const styles = StyleSheet.create({
   chipActive: { backgroundColor: C.accent, borderColor: C.accent },
   chipText: { fontSize: 13, fontWeight: '600', color: C.text },
   chipTextActive: { color: '#FFFFFF' },
+
+  // ----- Segmented control -----
+  segmentWrap: { flexDirection: 'row', backgroundColor: C.track, borderRadius: 10, padding: 3, marginHorizontal: 16, marginTop: 12, gap: 3 },
+  segment: { flex: 1, paddingVertical: 9, borderRadius: 8, alignItems: 'center' },
+  segmentActive: { backgroundColor: C.card, ...CARD_SHADOW },
+  segmentText: { fontSize: 13.5, fontWeight: '700', color: C.textSecondary },
+  segmentTextActive: { color: C.accent },
 
   // ----- Scroll body -----
   scrollContent: { paddingHorizontal: 16, paddingTop: 18 },
