@@ -53,6 +53,40 @@
   tr:last-child td { border-bottom:none; }
   td.trigger { font-weight:600; }
   td.no { color:#b04a4a; }
+  td.ref, th.ref { width:46px; text-align:center; white-space:nowrap; }
+  .refcode { display:inline-block; background:var(--ink); color:#fff; font-size:11px; font-weight:700; padding:2px 7px; border-radius:6px; font-variant-numeric:tabular-nums; letter-spacing:0.3px; }
+  li .refcode { margin-right:7px; }
+  /* DELETED rows — kept for the record, struck through */
+  tr.deleted td { color:#b9c2c4; text-decoration:line-through; text-decoration-color:#d44; text-decoration-thickness:1.5px; }
+  tr.deleted td.ref { text-decoration:none; }
+  tr.deleted .refcode { background:#c9d1d2; }
+  tr.deleted .badge { opacity:0.4; }
+  .del-badge { display:inline-block; background:#d44; color:#fff; font-size:10px; font-weight:800; letter-spacing:0.5px; padding:2px 7px; border-radius:5px; margin-right:8px; text-decoration:none; vertical-align:middle; }
+  li.deleted { color:#b9c2c4; text-decoration:line-through; text-decoration-color:#d44; }
+  li.deleted .del-badge, li.deleted .refcode { text-decoration:none; }
+  /* CHANGED / added rows — green diff style */
+  tr.changed td { background:#eef9f1; }
+  tr.changed td.ref { box-shadow: inset 3px 0 0 #1f9d57; }
+  .chg-badge { display:inline-block; background:#1f9d57; color:#fff; font-size:10px; font-weight:800; letter-spacing:0.5px; padding:2px 7px; border-radius:5px; margin-right:8px; vertical-align:middle; }
+  /* Why-note explaining a delete/change */
+  .why { display:block; margin-top:6px; font-size:12px; font-style:italic; color:#6c7d81; line-height:1.45; font-weight:400; text-decoration:none; }
+  td.trigger .why { font-weight:400; }
+  .why b { font-style:normal; font-weight:700; }
+  tr.deleted .why b { color:#b04a4a; }
+  tr.changed .why b { color:#1f7a4d; }
+  tr.deleted td.trigger .why { text-decoration:none; color:#6c7d81; }
+  /* original value kept for reference inside a CHANGED cell */
+  .was { display:block; font-size:12px; color:#b07a7a; text-decoration:line-through; text-decoration-color:#d44; text-decoration-thickness:1.5px; margin-bottom:3px; font-weight:400; }
+  .was .badge { opacity:0.45; }
+  /* NEW / added-idea rows — indigo */
+  tr.added td { background:#f1f0fc; }
+  tr.added td.ref { box-shadow: inset 3px 0 0 #6c5ce7; }
+  .new-badge { display:inline-block; background:#6c5ce7; color:#fff; font-size:10px; font-weight:800; letter-spacing:0.5px; padding:2px 7px; border-radius:5px; margin-right:8px; vertical-align:middle; }
+  /* structured detail block (What / When / Who / Goal) */
+  .detail { display:block; margin-top:7px; font-size:12px; color:#5a6b6f; line-height:1.55; font-weight:400; }
+  .detail b { color:#067a8a; font-weight:700; }
+  li.hasref { padding-left:0; }
+  li.hasref::before { display:none; }
   .badge { display:inline-block; font-size:11px; font-weight:700; padding:2px 8px; border-radius:6px; white-space:nowrap; }
   .badge.push { background:var(--accent); color:#fff; }
   .badge.feed { background:#eef1f2; color:#5a6b6f; }
@@ -85,11 +119,11 @@
     <h2><span class="n">1</span> Principles</h2>
     <p class="sub">Five rules every notification must pass.</p>
     <ul>
-      <li><b>Push only if it's timely AND useful right now.</b> Everything else lives in the feed.</li>
-      <li><b>Always land on an action.</b> Every tap opens the exact screen to do the next thing.</li>
-      <li><b>One person, one action = one notification.</b> Batch the rest into a digest.</li>
-      <li><b>Respect quiet hours.</b> Hold non-urgent pushes from 9pm to 8am local.</li>
-      <li><b>Never repeat.</b> If they already saw it in the feed, don't push it too.</li>
+      <li class="hasref"><span class="refcode">P1</span><b>Push only if it's timely AND useful right now.</b> Everything else lives in the feed.</li>
+      <li class="hasref"><span class="refcode">P2</span><b>Always land on an action.</b> Every tap opens the exact screen to do the next thing.</li>
+      <li class="hasref"><span class="refcode">P3</span><b>One person, one action = one notification.</b> Batch the rest into a digest.</li>
+      <li class="hasref"><span class="refcode">P4</span><b>Respect quiet hours.</b> Hold non-urgent pushes from 9pm to 8am local.</li>
+      <li class="hasref"><span class="refcode">P5</span><b>Never repeat.</b> If they already saw it in the feed, don't push it too.</li>
     </ul>
   </section>
 
@@ -117,13 +151,14 @@
     <div class="stage">
       <h3>① Planning — host builds the trip, people request to join</h3>
       <table>
-        <thead><tr><th>Trigger</th><th>Who gets it</th><th>Who does NOT</th><th>Channel</th><th>Push-to-action</th></tr></thead>
+        <thead><tr><th class="ref">#</th><th>Trigger</th><th>Who gets it</th><th>Who does NOT</th><th>Channel</th><th>Push-to-action</th></tr></thead>
         <tbody>
-          <tr><td class="trigger">Someone requests to join</td><td>Host</td><td class="no">Members, requester</td><td><span class="badge push">Push</span></td><td>Approve or decline now</td></tr>
-          <tr><td class="trigger">Request approved</td><td>The requester</td><td class="no">Others</td><td><span class="badge push">Push</span></td><td>You're in — open the trip</td></tr>
-          <tr><td class="trigger">Request declined</td><td>The requester</td><td class="no">Everyone else</td><td><span class="badge feed">Feed</span></td><td>Soft, no interruption</td></tr>
-          <tr><td class="trigger">New member joined</td><td>Members + host</td><td class="no">The new member</td><td><span class="badge feed">Feed</span></td><td>Batched — "your group is growing"</td></tr>
-          <tr><td class="trigger">Last spots left</td><td>People with pending requests</td><td class="no">Confirmed members</td><td><span class="badge push">Push</span></td><td>2 spots left — confirm fast</td></tr>
+          <tr><td class="ref"><span class="refcode">1.1</span></td><td class="trigger">Someone requests to join</td><td>Host</td><td class="no">Members, requester</td><td><span class="badge push">Push</span></td><td>Approve or decline now</td></tr>
+          <tr><td class="ref"><span class="refcode">1.2</span></td><td class="trigger">Request approved</td><td>The requester</td><td class="no">Others</td><td><span class="badge push">Push</span></td><td>You're in — open the trip</td></tr>
+          <tr class="changed"><td class="ref"><span class="refcode">1.3</span></td><td class="trigger"><span class="chg-badge">CHANGED</span>Request declined<span class="why"><b>Why changed:</b> a decline left only in the feed leaves the requester hanging. A push gives clear closure and nudges them toward other trips.</span></td><td>The requester</td><td class="no">Everyone else</td><td><span class="was"><span class="badge feed">Feed</span></span><span class="badge push">Push</span></td><td><span class="was">Soft, no interruption</span>Not this time — explore other trips</td></tr>
+          <tr class="changed"><td class="ref"><span class="refcode">1.4</span></td><td class="trigger"><span class="chg-badge">CHANGED</span>New member joined<span class="why"><b>Why changed:</b> seeing the group grow is motivating social proof worth a gentle interrupt — still batched so 3 joins don't become 3 pushes.</span></td><td>Members + host</td><td class="no">The new member</td><td><span class="was"><span class="badge feed">Feed</span></span><span class="badge push">Push</span></td><td>Batched — "your group is growing"</td></tr>
+          <tr class="deleted"><td class="ref"><span class="refcode">1.5</span></td><td class="trigger"><span class="del-badge">DELETED</span>Last spots left<span class="why"><b>Why removed:</b> a pending requester can't act on "confirm fast" — they're waiting on the host, so the urgency is unactionable (breaks P2: always land on an action).</span></td><td>People with pending requests</td><td class="no">Confirmed members</td><td><span class="badge push">Push</span></td><td>2 spots left — confirm fast</td></tr>
+          <tr class="added"><td class="ref"><span class="refcode">1.6</span></td><td class="trigger"><span class="new-badge">NEW</span>A member left the trip<span class="detail"><b>What:</b> an approved member leaves or withdraws from the trip.<br><b>When:</b> any time before the trip starts.<br><b>Who gets it:</b> the host.<br><b>Goal:</b> let the host know a spot opened so they can refill it — and it can trigger RE4 (second-chance) for users who were turned away when full.</span></td><td>Host</td><td class="no">Other members, the leaver</td><td><span class="badge push">Push</span></td><td>A spot opened — invite or refill</td></tr>
         </tbody>
       </table>
     </div>
@@ -132,14 +167,19 @@
     <div class="stage">
       <h3>② Upcoming — approved, getting ready</h3>
       <table>
-        <thead><tr><th>Trigger</th><th>Who gets it</th><th>Who does NOT</th><th>Channel</th><th>Push-to-action</th></tr></thead>
+        <thead><tr><th class="ref">#</th><th>Trigger</th><th>Who gets it</th><th>Who does NOT</th><th>Channel</th><th>Push-to-action</th></tr></thead>
         <tbody>
-          <tr><td class="trigger">Host posts an update</td><td>All members</td><td class="no">The author</td><td><span class="badge push">Push</span></td><td>Read the plan update</td></tr>
-          <tr><td class="trigger">Host assigns you gear</td><td>That member</td><td class="no">Others</td><td><span class="badge push">Push</span></td><td>See what to bring</td></tr>
-          <tr><td class="trigger">You haven't committed yet</td><td>Uncommitted members</td><td class="no">Committed members</td><td><span class="badge push">Push</span></td><td>One nudge (~10 days out) — lock your spot</td></tr>
-          <tr><td class="trigger">Member claims gear</td><td>Host + members</td><td class="no">The claimer</td><td><span class="badge feed">Feed</span></td><td>Daily batch — packing list moving</td></tr>
-          <tr><td class="trigger">Group gear list changed</td><td>Members</td><td class="no">The editor</td><td><span class="badge feed">Feed</span></td><td>Low priority</td></tr>
-          <tr><td class="trigger">Gear still unclaimed</td><td>Members</td><td class="no">—</td><td><span class="badge feed">Feed</span></td><td>"3 items need an owner"</td></tr>
+          <tr><td class="ref"><span class="refcode">2.1</span></td><td class="trigger">Host posts an update</td><td>All members</td><td class="no">The author</td><td><span class="badge push">Push</span></td><td>Read the plan update</td></tr>
+          <tr class="changed"><td class="ref"><span class="refcode">2.2</span></td><td class="trigger"><span class="chg-badge">CHANGED</span><span class="was">Host assigns you gear</span>Host edits the personal gear checklist<span class="why"><b>Why changed:</b> the app has no per-member gear assignment — a host can't give gear to one person. The real event is the host editing the shared personal-gear checklist (<code>personal_gear_host_suggestion</code>) that fans out to everyone.</span></td><td><span class="was">That member</span>All members</td><td class="no"><span class="was">Others</span>The host</td><td><span class="badge push">Push</span></td><td><span class="was">See what to bring</span>See your updated packing list</td></tr>
+          <tr class="changed"><td class="ref"><span class="refcode">2.3</span></td><td class="trigger"><span class="chg-badge">CHANGED</span>You haven't committed yet<span class="why"><b>Why changed:</b> a single ~10-day nudge is too late to recover someone drifting. Stepped reminders at 30 / 15 / 10 / 5 days out build commitment gradually and create escalating urgency without spamming.</span></td><td>Uncommitted members</td><td class="no">Committed members</td><td><span class="badge push">Push</span></td><td><span class="was">One nudge (~10 days out) — lock your spot</span>Nudge at 30 / 15 / 10 / 5 days out — lock your spot</td></tr>
+          <tr><td class="ref"><span class="refcode">2.4</span></td><td class="trigger">Member claims gear</td><td>Host + members</td><td class="no">The claimer</td><td><span class="badge feed">Feed</span></td><td>Daily batch — packing list moving</td></tr>
+          <tr class="changed"><td class="ref"><span class="refcode">2.5</span></td><td class="trigger"><span class="chg-badge">CHANGED</span><span class="was">Group gear list changed</span>Host edits the group gear list<span class="why"><b>Why changed:</b> gear is now split into two explicit notifications — personal checklist (2.2) and group gear list (2.5) — and both promoted from Feed to Push so members never miss a packing change the host makes.</span></td><td>Members</td><td class="no"><span class="was">The editor</span>The host</td><td><span class="was"><span class="badge feed">Feed</span></span><span class="badge push">Push</span></td><td><span class="was">Low priority</span>See what changed in the gear list</td></tr>
+          <tr class="changed"><td class="ref"><span class="refcode">2.6</span></td><td class="trigger"><span class="chg-badge">CHANGED</span>Gear still unclaimed<span class="why"><b>Why changed:</b> unclaimed gear means the group risks arriving without essentials. It's now a Push that escalates as the trip nears — at 10 / 5 / 3 / 1 days before — instead of a passive feed note that's easy to miss.</span></td><td>Members</td><td class="no">—</td><td><span class="was"><span class="badge feed">Feed</span></span><span class="badge push">Push</span></td><td><span class="was">"3 items need an owner"</span>10 / 5 / 3 / 1 days before — "3 items still need an owner"</td></tr>
+          <tr class="added"><td class="ref"><span class="refcode">2.7</span></td><td class="trigger"><span class="new-badge">NEW</span>Member requests to commit<span class="detail"><b>What:</b> a member taps "commit" to lock their spot, which the host must approve.<br><b>When:</b> any time before the trip, once they're an approved member.<br><b>Who gets it:</b> the host.<br><b>Goal:</b> let the host confirm who's truly locked in.</span></td><td>Host</td><td class="no">Other members, the requester</td><td><span class="badge push">Push</span></td><td>Review &amp; approve the commit</td></tr>
+          <tr class="added"><td class="ref"><span class="refcode">2.8</span></td><td class="trigger"><span class="new-badge">NEW</span>Commit approved by host<span class="detail"><b>What:</b> the host approves a member's commit — that member is locked in, and the rest of the group sees the group filling up.<br><b>When:</b> right after the host approves.<br><b>Who gets it:</b> the committed member (confirmation) + all other members (momentum).<br><b>Goal:</b> reward the committer and build social momentum so others commit too.</span></td><td>The member + all other members</td><td class="no">—</td><td><span class="badge push">Push</span></td><td>Member: you're locked in · Others: group is filling up</td></tr>
+          <tr class="added"><td class="ref"><span class="refcode">2.9</span></td><td class="trigger"><span class="new-badge">NEW</span>Commit declined by host<span class="detail"><b>What:</b> the host declines a member's commit request.<br><b>When:</b> right after the host declines.<br><b>Who gets it:</b> only the member who tried to commit.<br><b>Goal:</b> tell them softly, without interrupting — mirrors the soft "request declined" (1.3). Channel is a judgment call; Feed keeps it gentle.</span></td><td>The member who tried to commit</td><td class="no">Everyone else</td><td><span class="badge feed">Feed</span></td><td>Soft, no interruption</td></tr>
+          <tr class="added"><td class="ref"><span class="refcode">2.10</span></td><td class="trigger"><span class="new-badge">NEW</span>Member proposes a missing group-gear item<span class="detail"><b>What:</b> a member requests to add an item the group still needs to the shared group-gear list. (The app already supports approve/decline gear requests.)<br><b>When:</b> any time before the trip.<br><b>Who gets it:</b> the host.<br><b>Goal:</b> let the host approve it onto the group gear list so others can claim it.</span></td><td>Host</td><td class="no">Other members, the requester</td><td><span class="badge push">Push</span></td><td>Approve it to the gear list</td></tr>
+          <tr class="added"><td class="ref"><span class="refcode">2.11</span></td><td class="trigger"><span class="new-badge">NEW</span>Decision on a proposed gear item<span class="detail"><b>What:</b> the host approves or declines the member's proposed group-gear item (the decision on 2.10).<br><b>When:</b> right after the host decides.<br><b>Who gets it:</b> only the member who proposed it.<br><b>Goal:</b> close the loop — if approved, prompt them to claim it; if declined, let them know softly.</span></td><td>The member who proposed it</td><td class="no">Everyone else</td><td><span class="badge push">Push</span></td><td>Approved: claim it now · Declined: not added</td></tr>
         </tbody>
       </table>
     </div>
@@ -148,11 +188,11 @@
     <div class="stage">
       <h3>③ About to start — T-7 to day-of (strongest pull)</h3>
       <table>
-        <thead><tr><th>Trigger</th><th>Who gets it</th><th>Who does NOT</th><th>Channel</th><th>Push-to-action</th></tr></thead>
+        <thead><tr><th class="ref">#</th><th>Trigger</th><th>Who gets it</th><th>Who does NOT</th><th>Channel</th><th>Push-to-action</th></tr></thead>
         <tbody>
-          <tr><td class="trigger">Trip starts in 1 week</td><td>All members</td><td class="no">Declined / left</td><td><span class="badge push">Push</span></td><td>Get ready — packing list inside</td></tr>
-          <tr><td class="trigger">Trip starts tomorrow</td><td>All members</td><td class="no">—</td><td><span class="badge push">Push</span></td><td>Tomorrow! Final details + meeting point</td></tr>
-          <tr><td class="trigger">It's today</td><td>All members</td><td class="no">—</td><td><span class="badge push">Push</span></td><td>Have a great trip 🌊</td></tr>
+          <tr><td class="ref"><span class="refcode">3.1</span></td><td class="trigger">Trip starts in 1 week</td><td>All members</td><td class="no">Declined / left</td><td><span class="badge push">Push</span></td><td>Get ready — packing list inside</td></tr>
+          <tr><td class="ref"><span class="refcode">3.2</span></td><td class="trigger">Trip starts tomorrow</td><td>All members</td><td class="no">—</td><td><span class="badge push">Push</span></td><td>Tomorrow! Final details + meeting point</td></tr>
+          <tr><td class="ref"><span class="refcode">3.3</span></td><td class="trigger">It's today</td><td>All members</td><td class="no">—</td><td><span class="badge push">Push</span></td><td>Have a great trip 🌊</td></tr>
         </tbody>
       </table>
     </div>
@@ -161,9 +201,9 @@
     <div class="stage">
       <h3>④ Active — during the trip (keep it light, they're surfing)</h3>
       <table>
-        <thead><tr><th>Trigger</th><th>Who gets it</th><th>Who does NOT</th><th>Channel</th><th>Push-to-action</th></tr></thead>
+        <thead><tr><th class="ref">#</th><th>Trigger</th><th>Who gets it</th><th>Who does NOT</th><th>Channel</th><th>Push-to-action</th></tr></thead>
         <tbody>
-          <tr><td class="trigger">New trip-chat message</td><td>Chat members</td><td class="no">Sender, muted users</td><td><span class="badge push">Push</span></td><td>Reply (existing)</td></tr>
+          <tr class="changed"><td class="ref"><span class="refcode">4.1</span></td><td class="trigger"><span class="chg-badge">CHANGED</span><span class="was">New trip-chat message</span>New message in any chat — DMs &amp; group trip chats<span class="why"><b>Why changed:</b> messaging pushes aren't limited to the active trip. Every message — 1:1 DMs from other users and any group trip chat — pushes to its participants, before / during / after the trip, always, unless that conversation is muted.</span></td><td><span class="was">Chat members</span>Chat participants</td><td class="no">Sender, muted users</td><td><span class="badge push">Push</span></td><td>Reply (existing)</td></tr>
         </tbody>
       </table>
     </div>
@@ -172,11 +212,11 @@
     <div class="stage">
       <h3>⑤ Past &amp; cancelled</h3>
       <table>
-        <thead><tr><th>Trigger</th><th>Who gets it</th><th>Who does NOT</th><th>Channel</th><th>Push-to-action</th></tr></thead>
+        <thead><tr><th class="ref">#</th><th>Trigger</th><th>Who gets it</th><th>Who does NOT</th><th>Channel</th><th>Push-to-action</th></tr></thead>
         <tbody>
-          <tr><td class="trigger">Trip ended</td><td>All members</td><td class="no">—</td><td><span class="badge feed">Feed</span></td><td>Share photos / leave a recap</td></tr>
-          <tr><td class="trigger">Trip cancelled</td><td>Members + pending requesters</td><td class="no">The host</td><td><span class="badge push">Push</span></td><td>Cancelled — see why</td></tr>
-          <tr><td class="trigger">You were removed</td><td>That user</td><td class="no">Others</td><td><span class="badge push">Push</span></td><td>Soft message (existing)</td></tr>
+          <tr class="changed"><td class="ref"><span class="refcode">5.1</span></td><td class="trigger"><span class="chg-badge">CHANGED</span>Trip ended<span class="why"><b>Why changed:</b> the post-trip glow is the best moment to capture memories and recaps. A push while it's fresh drives far more shares than a passive feed note.</span></td><td>All members</td><td class="no">—</td><td><span class="was"><span class="badge feed">Feed</span></span><span class="badge push">Push</span></td><td>Share your photos &amp; memories</td></tr>
+          <tr><td class="ref"><span class="refcode">5.2</span></td><td class="trigger">Trip cancelled</td><td>Members + pending requesters</td><td class="no">The host</td><td><span class="badge push">Push</span></td><td>Cancelled — see why</td></tr>
+          <tr><td class="ref"><span class="refcode">5.3</span></td><td class="trigger">You were removed</td><td>That user</td><td class="no">Others</td><td><span class="badge push">Push</span></td><td>Soft message (existing)</td></tr>
         </tbody>
       </table>
     </div>
@@ -185,6 +225,9 @@
       <span><span class="badge push">Push</span> interrupts — phone alert</span>
       <span><span class="badge feed">Feed</span> in-app only — bell icon</span>
       <span><span style="color:#b04a4a;font-weight:700;">Red</span> = deliberately excluded</span>
+      <span><span class="chg-badge">CHANGED</span> edited from the original</span>
+      <span><span class="del-badge">DELETED</span> removed, kept for the record</span>
+      <span><span class="new-badge">NEW</span> newly added idea</span>
     </div>
   </section>
 
@@ -193,23 +236,23 @@
     <h2><span class="n">4</span> Re-engagement — pull dormant users back</h2>
     <p class="sub">For members who've drifted away. These rely on FOMO and "your group is active without you."</p>
     <table>
-      <thead><tr><th>Trigger</th><th>Who gets it</th><th>Channel</th><th>The hook</th></tr></thead>
+      <thead><tr><th class="ref">#</th><th>Trigger</th><th>Who gets it</th><th>Channel</th><th>The hook</th></tr></thead>
       <tbody>
-        <tr><td class="trigger">Your trip starts soon &amp; you've been away</td><td>Dormant member</td><td><span class="badge push">Push</span></td><td>Strongest pull — real event, real date</td></tr>
-        <tr><td class="trigger">You missed activity in your trip</td><td>Dormant member with unread feed</td><td><span class="badge push">Push</span></td><td>Digest — "5 updates in Costa Rica camp"</td></tr>
-        <tr><td class="trigger">A friend started a trip you can join</td><td>Dormant user, not in a trip</td><td><span class="badge push">Push</span></td><td>Discovery FOMO</td></tr>
-        <tr><td class="trigger">A spot opened in a trip you wanted</td><td>User who withdrew / was full</td><td><span class="badge push">Push</span></td><td>Second chance</td></tr>
+        <tr><td class="ref"><span class="refcode">RE1</span></td><td class="trigger">Your trip starts soon &amp; you've been away<span class="detail"><b>What:</b> a personal reminder to a member who joined an upcoming trip but has gone quiet in the app.<br><b>When:</b> trip is ~14–7 days out AND the user hasn't opened the app in several days.<br><b>Who:</b> dormant members of an upcoming trip.<br><b>Goal:</b> pull them back before departure so they arrive prepared and committed — the strongest hook because it's a real event with a real date.</span></td><td>Dormant member</td><td><span class="badge push">Push</span></td><td>Strongest pull — real event, real date</td></tr>
+        <tr><td class="ref"><span class="refcode">RE2</span></td><td class="trigger">You missed activity in your trip<span class="detail"><b>What:</b> a digest push summarising what they missed in a trip they belong to.<br><b>When:</b> a dormant member has ~5+ unread feed items and hasn't opened the app in several days.<br><b>Who:</b> dormant members with an unread trip feed.<br><b>Goal:</b> re-spark interest through FOMO — "your group is active without you."</span></td><td>Dormant member with unread feed</td><td><span class="badge push">Push</span></td><td>Digest — "5 updates in Costa Rica camp"</td></tr>
+        <tr><td class="ref"><span class="refcode">RE3</span></td><td class="trigger">A friend started a trip you can join<span class="detail"><b>What:</b> a discovery push when someone in their network opens a new trip.<br><b>When:</b> a friend/connection creates an open trip and the user isn't currently in any trip.<br><b>Who:</b> dormant users not in a trip.<br><b>Goal:</b> pull them back into the core action (joining a trip) via social proof and discovery FOMO.</span></td><td>Dormant user, not in a trip</td><td><span class="badge push">Push</span></td><td>Discovery FOMO</td></tr>
+        <tr><td class="ref"><span class="refcode">RE4</span></td><td class="trigger">A spot opened in a trip you wanted<span class="detail"><b>What:</b> a second-chance push when capacity frees up in a trip they previously wanted.<br><b>When:</b> a spot opens (someone left/declined, or the trip grows) in a trip they'd requested but were full / withdrew from.<br><b>Who:</b> users who withdrew or were turned away when the trip was full.<br><b>Goal:</b> recover a high-intent user who already wanted in.</span></td><td>User who withdrew / was full</td><td><span class="badge push">Push</span></td><td>Second chance</td></tr>
       </tbody>
     </table>
 
     <div class="donts">
       <h4>When NOT to send (anti-spam guardrails)</h4>
       <ul>
-        <li class="no">Don't re-engage anyone active in the last 24 hours.</li>
-        <li class="no">Max <b>1</b> re-engagement push per user every 3 days.</li>
-        <li class="no">Back off after 2 ignored re-engagement pushes in a row.</li>
-        <li class="no">Never during quiet hours (9pm–8am local).</li>
-        <li class="no">Never if the user muted that trip or turned off re-engagement.</li>
+        <li class="no hasref"><span class="refcode">G1</span>Don't re-engage anyone active in the last 24 hours.</li>
+        <li class="no hasref"><span class="refcode">G2</span>Max <b>1</b> re-engagement push per user every 3 days.</li>
+        <li class="no hasref"><span class="refcode">G3</span>Back off after 2 ignored re-engagement pushes in a row.</li>
+        <li class="no hasref"><span class="refcode">G4</span>Never during quiet hours (9pm–8am local).</li>
+        <li class="no hasref"><span class="refcode">G5</span>Never if the user muted that trip or turned off re-engagement.</li>
       </ul>
     </div>
   </section>
@@ -219,14 +262,14 @@
     <h2><span class="n">5</span> Smart rules — the engine behind it</h2>
     <p class="sub">Cross-cutting logic that keeps the whole system calm and trustworthy.</p>
     <ul>
-      <li><b>Batch.</b> Group rapid events — 3 joins in an hour become one "3 people joined".</li>
-      <li><b>Frequency cap.</b> Max ~3 pushes per day per user across all their trips.</li>
-      <li><b>Quiet hours.</b> Queue non-urgent pushes and release them at 8am local.</li>
-      <li><b>Dedup.</b> If they read it in the feed, cancel the pending push.</li>
-      <li><b>Collapse.</b> One trip = one live push — newest replaces the older one.</li>
-      <li><b>Mute per trip.</b> Respect the existing mute; add a per-trip toggle.</li>
-      <li><b>Granular opt-out.</b> Separate switches: reminders · group activity · re-engagement.</li>
-      <li><b>Priority order.</b> Decisions &gt; reminders &gt; group activity &gt; re-engagement. High priority can skip the batch.</li>
+      <li class="hasref"><span class="refcode">SR1</span><b>Batch.</b> Group rapid events — 3 joins in an hour become one "3 people joined".</li>
+      <li class="hasref"><span class="refcode">SR2</span><b>Frequency cap.</b> Max ~3 pushes per day per user across all their trips.</li>
+      <li class="hasref"><span class="refcode">SR3</span><b>Quiet hours.</b> Queue non-urgent pushes and release them at 8am local.</li>
+      <li class="hasref"><span class="refcode">SR4</span><b>Dedup.</b> If they read it in the feed, cancel the pending push.</li>
+      <li class="hasref"><span class="refcode">SR5</span><b>Collapse.</b> One trip = one live push — newest replaces the older one.</li>
+      <li class="hasref"><span class="refcode">SR6</span><b>Mute per trip.</b> Respect the existing mute; add a per-trip toggle.</li>
+      <li class="hasref"><span class="refcode">SR7</span><b>Granular opt-out.</b> Separate switches: reminders · group activity · re-engagement.</li>
+      <li class="hasref"><span class="refcode">SR8</span><b>Priority order.</b> Decisions &gt; reminders &gt; group activity &gt; re-engagement. High priority can skip the batch.</li>
     </ul>
   </section>
 
