@@ -12,7 +12,6 @@ const corsHeaders = {
 const jsonHeaders = { ...corsHeaders, 'Content-Type': 'application/json' }
 
 const SPARKLINE_DAYS = 30
-const DAY_MS = 24 * 60 * 60 * 1000
 
 interface RequestBody { from?: string | null; to?: string | null }
 interface Counter { total: number; prev: number; series: number[] }
@@ -52,16 +51,12 @@ async function overviewTotals(from: string | null, to: string | null): Promise<R
 async function overviewSeries(): Promise<Record<OverviewKey, number[]>> {
   const { data, error } = await supabase.rpc('trips_overview_series', { p_days: SPARKLINE_DAYS })
   if (error) throw error
-  const todayMidnight = new Date(); todayMidnight.setUTCHours(0, 0, 0, 0)
-  const cutoffMs = todayMidnight.getTime() - (SPARKLINE_DAYS - 1) * DAY_MS
+  const rows = ((data ?? []) as Array<Record<string, unknown>>)
+    .slice()
+    .sort((a, b) => String(a.day).localeCompare(String(b.day)))
   const series = {} as Record<OverviewKey, number[]>
-  for (const k of OVERVIEW_KEYS) series[k] = new Array<number>(SPARKLINE_DAYS).fill(0)
-  for (const row of (data ?? []) as Array<Record<string, unknown>>) {
-    const t = new Date(`${row.day}T00:00:00Z`).getTime()
-    if (Number.isNaN(t)) continue
-    const idx = Math.round((t - cutoffMs) / DAY_MS)
-    if (idx < 0 || idx >= SPARKLINE_DAYS) continue
-    for (const k of OVERVIEW_KEYS) series[k][idx] = Number(row[k]) || 0
+  for (const k of OVERVIEW_KEYS) {
+    series[k] = rows.map(row => Number(row[k]) || 0)
   }
   return series
 }

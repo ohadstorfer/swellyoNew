@@ -15,7 +15,6 @@ import {
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Svg, { Polyline } from 'react-native-svg';
 import {
   fetchDashboard,
   DashboardData,
@@ -341,14 +340,14 @@ export function AnalyticsDashboardScreen({ onBack }: AnalyticsDashboardScreenPro
           />
         }
       >
-        {loading && !data && (
+        {tab === 'users' && loading && !data && (
           <View style={styles.firstLoad}>
             <ActivityIndicator size="large" color={C.accent} />
             <Text style={styles.firstLoadText}>Loading analytics…</Text>
           </View>
         )}
 
-        {error && (
+        {tab === 'users' && error && (
           <View style={styles.errorBanner}>
             <Ionicons name="alert-circle" size={18} color={C.down} />
             <Text style={styles.errorText}>{error}</Text>
