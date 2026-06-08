@@ -45,9 +45,10 @@ Three "annoying senior dev" agents reviewed: (1) the implementation design spec,
 ## 2. REAL BUGS in existing code (regressions worth a test each)
 
 - **B1 — `join_request_received` / `join_request_decided` / `gear_request_received` / `commitment_request_received` snapshots omit `trip_title`.** `renderNotification` falls back to the literal `"the trip"`. Users never see the real trip name. (`notification_center.sql` ~249,271; `notificationsService.ts:208,249`)
-- **B2 — `personal_gear_updated` shows "Someone updated your gear".** `actor_id` is null by design and `data` has no `actor_name`, so the host is never named. (`notification_center.sql:148`)
-- **B3 — `notificationsService.markAllRead` has no `recipient_id` filter** — relies entirely on RLS. Code smell; a service-role/misconfig would mark the whole table read. (`notificationsService.ts:113`)
+- **B2 — ~~`personal_gear_updated` shows "Someone updated your gear"~~ — FALSE, agent inaccuracy.** Verified against the real code: `notificationsService.ts:231` renders `"Your gear list for {trip} was updated."` with no actor reference at all. Pinned by a unit test. (No fix needed; the audit claim was wrong.)
+- **B3 — `notificationsService.markAllRead` has no `recipient_id` filter** — relies entirely on RLS. Code smell; a service-role/misconfig would mark the whole table read. (`notificationsService.ts:107-113`)
 - **B4 — mute check in `send-trip-request-notification` uses a fragile `metadata->>trip_id` filter**; if no linked conversation exists, the mute check is skipped and the host is always pushed. (`send-trip-request-notification` ~41)
+- **B5 — `formatNotificationTime` date fallback is timezone-buggy (NEW, found by the unit test).** It parses the ISO string as UTC but formats the day with local `getDate()/getMonth()` (`notificationsService.ts:262-273`). For notifications older than 7 days, a UTC-midnight timestamp renders the wrong calendar day in negative-offset timezones (e.g. UTC-3 shows `2026-05-01T00:00Z` as `30/04`). Fix: use `getUTCDate()/getUTCMonth()` or format consistently in the user's TZ. Pinned by `notificationsService.test.ts`.
 
 ---
 
@@ -84,3 +85,22 @@ Tooling found: supabase CLI 2.90.0; **Docker NOT running** (no local stack right
 - **Plane A (in-app triggers)** → extend `notifications_test.sql` (ROLLBACK-safe) with regression assertions for B1/B2 and recipient-exclusion correctness. Run against a **local stack** (needs Docker) or **prod inside the rolled-back txn** (needs DB creds; verified safe).
 - **Plane B (push edge functions)** → mocked-`fetch` unit tests (zero network) to assert recipient fan-out + B4. Needs deno (install) or a node harness extracting the logic.
 - **Never** run anything that lets pg_net actually send, and keep the onboarding cron suspended during any live-DB window.
+
+---
+
+## 5. What was actually built & run (2026-06-08)
+
+Environment found: no Docker/colima/podman (no local stack possible), no prod DB creds, no jest. So the only path that runs REAL code with a **literal zero-leak guarantee** was mocked client unit tests.
+
+**Built + RUN (green):**
+- `jest-expo` test infra (was none): `jest.config.js`, `test` script, devDeps installed.
+- `src/services/notifications/__tests__/notificationsService.test.ts` — **18 tests, all passing**. Covers `renderNotification` for all 12 types (full + degraded snapshots) and `formatNotificationTime`. Supabase client mocked → no network, no DB, cannot notify anyone.
+- This suite **found B5** (timezone date bug) and **disproved the B2 audit claim**.
+
+**Built, NOT run (needs a DB):**
+- `supabase/tests/notifications_b1_trip_title_regression.sql` — ROLLBACK-safe regression test for B1. **Expected RED until the triggers snapshot `trip_title`.** Run with `psql "$DB_URL" -f …` (safe on prod due to ROLLBACK) or a future local stack.
+
+**Still TODO (blocked on environment / decisions):**
+- Run the SQL trigger tests (existing `notifications_test.sql` + the new B1 regression) against a DB.
+- Plane B push-targeting tests (mocked `fetch`) for the edge functions.
+- Fix B1 (add `trip_title` to the 4 trigger snapshots), B3 (recipient filter), B4 (mute check), B5 (UTC getters).
