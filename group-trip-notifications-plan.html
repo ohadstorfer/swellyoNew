@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Group Trip Notifications — Plan</title>
+<style>
+  :root {
+    --accent: #05BCD3;
+    --accent-soft: #e4f8fb;
+    --ink: #16282b;
+    --muted: #6c7d81;
+    --line: #e7eced;
+    --bg: #f6f8f9;
+    --card: #ffffff;
+    --warn: #f0a202;
+    --warn-soft: #fdf2da;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: var(--ink);
+    background: var(--bg);
+    line-height: 1.5;
+    font-size: 15px;
+  }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 40px 20px 80px; }
+  header.top { margin-bottom: 28px; }
+  header.top h1 { font-size: 28px; margin: 0 0 6px; letter-spacing: -0.3px; }
+  header.top p { color: var(--muted); margin: 0; font-size: 15px; }
+  .tag { display:inline-block; background: var(--accent-soft); color:#067a8a; font-size:12px; font-weight:600; padding:3px 9px; border-radius:20px; margin-right:6px; }
+
+  section { background: var(--card); border:1px solid var(--line); border-radius:14px; padding:22px 24px; margin-bottom:18px; }
+  section > h2 { font-size:18px; margin:0 0 4px; display:flex; align-items:center; gap:9px; }
+  section > h2 .n { background:var(--accent); color:#fff; width:24px; height:24px; border-radius:7px; display:inline-flex; align-items:center; justify-content:center; font-size:13px; font-weight:700; }
+  section > .sub { color:var(--muted); font-size:13.5px; margin:0 0 14px; }
+
+  ul { margin: 8px 0 0; padding-left: 0; list-style: none; }
+  li { position: relative; padding-left: 20px; margin: 7px 0; }
+  li::before { content:""; position:absolute; left:4px; top:9px; width:6px; height:6px; border-radius:50%; background:var(--accent); }
+  li.no::before { background:#d44; }
+  li b { font-weight:600; }
+
+  .golden { background: var(--accent-soft); border:1px solid #c7eef3; border-radius:12px; padding:14px 18px; }
+  .golden .test { margin-top:10px; font-style:italic; color:#0a6b78; font-size:14px; }
+
+  .stage { margin-top:18px; }
+  .stage h3 { font-size:14px; text-transform:uppercase; letter-spacing:0.6px; color:var(--accent); margin:0 0 8px; }
+  table { width:100%; border-collapse:collapse; font-size:13.5px; }
+  th { text-align:left; font-size:11.5px; text-transform:uppercase; letter-spacing:0.4px; color:var(--muted); font-weight:600; padding:7px 10px; border-bottom:1.5px solid var(--line); }
+  td { padding:9px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
+  tr:last-child td { border-bottom:none; }
+  td.trigger { font-weight:600; }
+  td.no { color:#b04a4a; }
+  .badge { display:inline-block; font-size:11px; font-weight:700; padding:2px 8px; border-radius:6px; white-space:nowrap; }
+  .badge.push { background:var(--accent); color:#fff; }
+  .badge.feed { background:#eef1f2; color:#5a6b6f; }
+  .badge.both { background:#ddf3e7; color:#1f7a4d; }
+
+  .donts { background:var(--warn-soft); border:1px solid #f3e1b6; border-radius:12px; padding:14px 18px; margin-top:14px; }
+  .donts h4 { margin:0 0 6px; font-size:13px; text-transform:uppercase; letter-spacing:0.5px; color:#a9750a; }
+  .donts li::before { background:var(--warn); }
+
+  .legend { display:flex; gap:14px; flex-wrap:wrap; font-size:12px; color:var(--muted); margin-top:14px; }
+  .legend span { display:flex; align-items:center; gap:6px; }
+  footer { color:var(--muted); font-size:12px; text-align:center; margin-top:30px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <h1>Group Trip Notifications</h1>
+    <p>A simple, smart plan — keep members informed, pull dormant users back, never spam.</p>
+    <div style="margin-top:12px;">
+      <span class="tag">Scope: group_trips</span>
+      <span class="tag">Push + In-app feed</span>
+      <span class="tag">Goal: inform + re-engage</span>
+    </div>
+  </header>
+
+  <!-- 1. PRINCIPLES -->
+  <section>
+    <h2><span class="n">1</span> Principles</h2>
+    <p class="sub">Five rules every notification must pass.</p>
+    <ul>
+      <li><b>Push only if it's timely AND useful right now.</b> Everything else lives in the feed.</li>
+      <li><b>Always land on an action.</b> Every tap opens the exact screen to do the next thing.</li>
+      <li><b>One person, one action = one notification.</b> Batch the rest into a digest.</li>
+      <li><b>Respect quiet hours.</b> Hold non-urgent pushes from 9pm to 8am local.</li>
+      <li><b>Never repeat.</b> If they already saw it in the feed, don't push it too.</li>
+    </ul>
+  </section>
+
+  <!-- 2. GOLDEN RULE -->
+  <section>
+    <h2><span class="n">2</span> The golden rule: push vs feed</h2>
+    <p class="sub">Decide the channel before anything else.</p>
+    <div class="golden">
+      <ul style="margin-top:0;">
+        <li><b>Push</b> when it needs a decision, is time-sensitive, or is about <b>them</b> directly.
+          <br><span style="color:var(--muted);font-size:13px;">e.g. you're approved · trip starts tomorrow · someone asked to join your trip</span></li>
+        <li><b>Feed only</b> when it's nice-to-know group activity that can wait.
+          <br><span style="color:var(--muted);font-size:13px;">e.g. someone claimed gear · gear list was edited · a 4th member joined</span></li>
+      </ul>
+      <div class="test">Quick test: "If they never open the app, does this matter?" &nbsp;Yes → push. &nbsp;No → feed.</div>
+    </div>
+  </section>
+
+  <!-- 3. MASTER TABLE -->
+  <section>
+    <h2><span class="n">3</span> What to send, when, to whom</h2>
+    <p class="sub">Grouped by the trip's life stage. Existing notifications + new ones.</p>
+
+    <!-- Planning -->
+    <div class="stage">
+      <h3>① Planning — host builds the trip, people request to join</h3>
+      <table>
+        <thead><tr><th>Trigger</th><th>Who gets it</th><th>Who does NOT</th><th>Channel</th><th>Push-to-action</th></tr></thead>
+        <tbody>
+          <tr><td class="trigger">Someone requests to join</td><td>Host</td><td class="no">Members, requester</td><td><span class="badge push">Push</span></td><td>Approve or decline now</td></tr>
+          <tr><td class="trigger">Request approved</td><td>The requester</td><td class="no">Others</td><td><span class="badge push">Push</span></td><td>You're in — open the trip</td></tr>
+          <tr><td class="trigger">Request declined</td><td>The requester</td><td class="no">Everyone else</td><td><span class="badge feed">Feed</span></td><td>Soft, no interruption</td></tr>
+          <tr><td class="trigger">New member joined</td><td>Members + host</td><td class="no">The new member</td><td><span class="badge feed">Feed</span></td><td>Batched — "your group is growing"</td></tr>
+          <tr><td class="trigger">Last spots left</td><td>People with pending requests</td><td class="no">Confirmed members</td><td><span class="badge push">Push</span></td><td>2 spots left — confirm fast</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Upcoming -->
+    <div class="stage">
+      <h3>② Upcoming — approved, getting ready</h3>
+      <table>
+        <thead><tr><th>Trigger</th><th>Who gets it</th><th>Who does NOT</th><th>Channel</th><th>Push-to-action</th></tr></thead>
+        <tbody>
+          <tr><td class="trigger">Host posts an update</td><td>All members</td><td class="no">The author</td><td><span class="badge push">Push</span></td><td>Read the plan update</td></tr>
+          <tr><td class="trigger">Host assigns you gear</td><td>That member</td><td class="no">Others</td><td><span class="badge push">Push</span></td><td>See what to bring</td></tr>
+          <tr><td class="trigger">You haven't committed yet</td><td>Uncommitted members</td><td class="no">Committed members</td><td><span class="badge push">Push</span></td><td>One nudge (~10 days out) — lock your spot</td></tr>
+          <tr><td class="trigger">Member claims gear</td><td>Host + members</td><td class="no">The claimer</td><td><span class="badge feed">Feed</span></td><td>Daily batch — packing list moving</td></tr>
+          <tr><td class="trigger">Group gear list changed</td><td>Members</td><td class="no">The editor</td><td><span class="badge feed">Feed</span></td><td>Low priority</td></tr>
+          <tr><td class="trigger">Gear still unclaimed</td><td>Members</td><td class="no">—</td><td><span class="badge feed">Feed</span></td><td>"3 items need an owner"</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- About to start -->
+    <div class="stage">
+      <h3>③ About to start — T-7 to day-of (strongest pull)</h3>
+      <table>
+        <thead><tr><th>Trigger</th><th>Who gets it</th><th>Who does NOT</th><th>Channel</th><th>Push-to-action</th></tr></thead>
+        <tbody>
+          <tr><td class="trigger">Trip starts in 1 week</td><td>All members</td><td class="no">Declined / left</td><td><span class="badge push">Push</span></td><td>Get ready — packing list inside</td></tr>
+          <tr><td class="trigger">Trip starts tomorrow</td><td>All members</td><td class="no">—</td><td><span class="badge push">Push</span></td><td>Tomorrow! Final details + meeting point</td></tr>
+          <tr><td class="trigger">It's today</td><td>All members</td><td class="no">—</td><td><span class="badge push">Push</span></td><td>Have a great trip 🌊</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Active -->
+    <div class="stage">
+      <h3>④ Active — during the trip (keep it light, they're surfing)</h3>
+      <table>
+        <thead><tr><th>Trigger</th><th>Who gets it</th><th>Who does NOT</th><th>Channel</th><th>Push-to-action</th></tr></thead>
+        <tbody>
+          <tr><td class="trigger">New trip-chat message</td><td>Chat members</td><td class="no">Sender, muted users</td><td><span class="badge push">Push</span></td><td>Reply (existing)</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Past / cancelled -->
+    <div class="stage">
+      <h3>⑤ Past &amp; cancelled</h3>
+      <table>
+        <thead><tr><th>Trigger</th><th>Who gets it</th><th>Who does NOT</th><th>Channel</th><th>Push-to-action</th></tr></thead>
+        <tbody>
+          <tr><td class="trigger">Trip ended</td><td>All members</td><td class="no">—</td><td><span class="badge feed">Feed</span></td><td>Share photos / leave a recap</td></tr>
+          <tr><td class="trigger">Trip cancelled</td><td>Members + pending requesters</td><td class="no">The host</td><td><span class="badge push">Push</span></td><td>Cancelled — see why</td></tr>
+          <tr><td class="trigger">You were removed</td><td>That user</td><td class="no">Others</td><td><span class="badge push">Push</span></td><td>Soft message (existing)</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="legend">
+      <span><span class="badge push">Push</span> interrupts — phone alert</span>
+      <span><span class="badge feed">Feed</span> in-app only — bell icon</span>
+      <span><span style="color:#b04a4a;font-weight:700;">Red</span> = deliberately excluded</span>
+    </div>
+  </section>
+
+  <!-- 4. RE-ENGAGEMENT -->
+  <section>
+    <h2><span class="n">4</span> Re-engagement — pull dormant users back</h2>
+    <p class="sub">For members who've drifted away. These rely on FOMO and "your group is active without you."</p>
+    <table>
+      <thead><tr><th>Trigger</th><th>Who gets it</th><th>Channel</th><th>The hook</th></tr></thead>
+      <tbody>
+        <tr><td class="trigger">Your trip starts soon &amp; you've been away</td><td>Dormant member</td><td><span class="badge push">Push</span></td><td>Strongest pull — real event, real date</td></tr>
+        <tr><td class="trigger">You missed activity in your trip</td><td>Dormant member with unread feed</td><td><span class="badge push">Push</span></td><td>Digest — "5 updates in Costa Rica camp"</td></tr>
+        <tr><td class="trigger">A friend started a trip you can join</td><td>Dormant user, not in a trip</td><td><span class="badge push">Push</span></td><td>Discovery FOMO</td></tr>
+        <tr><td class="trigger">A spot opened in a trip you wanted</td><td>User who withdrew / was full</td><td><span class="badge push">Push</span></td><td>Second chance</td></tr>
+      </tbody>
+    </table>
+
+    <div class="donts">
+      <h4>When NOT to send (anti-spam guardrails)</h4>
+      <ul>
+        <li class="no">Don't re-engage anyone active in the last 24 hours.</li>
+        <li class="no">Max <b>1</b> re-engagement push per user every 3 days.</li>
+        <li class="no">Back off after 2 ignored re-engagement pushes in a row.</li>
+        <li class="no">Never during quiet hours (9pm–8am local).</li>
+        <li class="no">Never if the user muted that trip or turned off re-engagement.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- 5. SMART RULES -->
+  <section>
+    <h2><span class="n">5</span> Smart rules — the engine behind it</h2>
+    <p class="sub">Cross-cutting logic that keeps the whole system calm and trustworthy.</p>
+    <ul>
+      <li><b>Batch.</b> Group rapid events — 3 joins in an hour become one "3 people joined".</li>
+      <li><b>Frequency cap.</b> Max ~3 pushes per day per user across all their trips.</li>
+      <li><b>Quiet hours.</b> Queue non-urgent pushes and release them at 8am local.</li>
+      <li><b>Dedup.</b> If they read it in the feed, cancel the pending push.</li>
+      <li><b>Collapse.</b> One trip = one live push — newest replaces the older one.</li>
+      <li><b>Mute per trip.</b> Respect the existing mute; add a per-trip toggle.</li>
+      <li><b>Granular opt-out.</b> Separate switches: reminders · group activity · re-engagement.</li>
+      <li><b>Priority order.</b> Decisions &gt; reminders &gt; group activity &gt; re-engagement. High priority can skip the batch.</li>
+    </ul>
+  </section>
+
+  <footer>Group Trip Notifications Plan · group_trips · draft for review</footer>
+
+</div>
+</body>
+</html>
