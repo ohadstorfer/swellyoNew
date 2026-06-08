@@ -1,3 +1,4 @@
+// ⚠️ MANUAL DEPLOY: download the live version and diff before pasting this — live may be ahead of repo.
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
@@ -35,6 +36,16 @@ async function sendHostNotification(
   }
 
   // Mute check — if the host muted the linked group-trip conversation, skip the push.
+  // Schema (verified against client + sibling fns):
+  //   - A group_trip's chat is a `conversations` row (is_direct=false) whose JSONB
+  //     `metadata` carries { trip_id }. Created via messagingService.createGroupConversation
+  //     and looked up identically by getConversationByTripId (.eq('metadata->>trip_id', tripId)).
+  //   - Mute is per-member: conversation_members.preferences.muted_until (ISO timestamp, or a
+  //     far-future sentinel for "Always"). Written by messagingService.setMuteUntil; the same
+  //     read is used by send-push-notification / send-trip-removed-notification.
+  // Default when NO conversation exists yet: send the push. Mute is a property of a conversation
+  // the host has explicitly muted; with no conversation there is nothing muted, so failing OPEN
+  // (notifying) is correct — a host who hasn't opened/muted any trip chat still wants requests.
   const { data: tripConv } = await supabase
     .from('conversations')
     .select('id')

@@ -106,10 +106,13 @@ export const notificationsService = {
   /** Mark every unread notification for the current user as read. */
   async markAllRead(): Promise<void> {
     try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
       const nowIso = new Date().toISOString();
       const { error } = await supabase
         .from(TABLE)
         .update({ read_at: nowIso })
+        .eq('recipient_id', user.id)
         .is('read_at', null);
       if (error && !isMissingTableError(error)) {
         console.warn('[notificationsService] markAllRead error:', error.message);
@@ -270,5 +273,5 @@ export function formatNotificationTime(iso: string): string {
   const day = Math.floor(hr / 24);
   if (day < 7) return `${day}d`;
   const dte = new Date(iso);
-  return `${dte.getDate().toString().padStart(2, '0')}/${(dte.getMonth() + 1).toString().padStart(2, '0')}`;
+  return `${dte.getUTCDate().toString().padStart(2, '0')}/${(dte.getUTCMonth() + 1).toString().padStart(2, '0')}`;
 }
