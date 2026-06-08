@@ -36,10 +36,14 @@ import { swellyServiceCopy, SwellyChatResponse, UIMessage, type SwellyService as
 import { findMatchingUsersRpc } from '../services/matching/matchSurfersRpc';
 import { useOnboarding } from '../context/OnboardingContext';
 
-// Local-testing toggle (this NON-COPY screen only): true = use the in-DB match_surfers
-// RPC instead of the server edge function. Production (copy screen + edge fn) is untouched.
-// Flip to false to fall back to findMatchingUsersServer.
-const USE_MATCH_SURFERS_RPC = true;
+// Matching-engine gate (this NON-COPY screen = production path).
+//   web      -> in-DB match_surfers RPC (scalable; requires the match_surfers
+//               Postgres fn to be applied in prod).
+//   iOS/Android -> findMatchingUsersServer (the swelly-trip-planning-copy edge
+//               function) — the existing "old" flow, kept until we ship a mobile
+//               build that intentionally flips this on for native.
+// To move mobile onto the RPC later: change this to `true` and cut a mobile build.
+const USE_MATCH_SURFERS_RPC = Platform.OS === 'web';
 import { logEvent } from '../services/analytics/eventLogger';
 import { getImageUrl } from '../services/media/imageService';
 import { Images } from '../assets/images';

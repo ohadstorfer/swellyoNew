@@ -212,5 +212,20 @@ language sql stable security definer set search_path = public as $$
   limit greatest(coalesce(p_limit,3), 0)
 $$;
 
+-- ---------- access hardening ----------
+-- CREATE grants EXECUTE to PUBLIC by default, which would let `anon` (the public
+-- client key) call this SECURITY DEFINER fn and read surfer PII bypassing RLS.
+-- Revoke the implicit PUBLIC grant, then grant only signed-in users.
+revoke execute on function match_surfers(uuid, uuid[], text, text, text[], text[], text[], int, int, int)
+  from public, anon;
 grant execute on function match_surfers(uuid, uuid[], text, text, text[], text[], text[], int, int, int)
-  to authenticated, anon;
+  to authenticated;
+
+-- Pin helper search_path (clears the function_search_path_mutable advisor warnings).
+alter function mc_norm_board(text)                      set search_path = public;
+alter function mc_board_pass(text[], text)              set search_path = public;
+alter function mc_country_from_match(text[], text)      set search_path = public;
+alter function mc_dest_country(jsonb)                   set search_path = public;
+alter function mc_dest_country_match(text, text, text)  set search_path = public;
+alter function mc_area_match(jsonb, text)               set search_path = public;
+alter function mc_surf_level_pass(text[], text, int)    set search_path = public;

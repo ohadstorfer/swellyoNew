@@ -5,9 +5,9 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
-  Image,
 } from 'react-native';
-import { TripBottomSheet, SHEET } from '../TripBottomSheet';
+import { Ionicons } from '@expo/vector-icons';
+import { TripBottomSheet } from '../TripBottomSheet';
 import type { EnrichedGearItem } from '../../../services/trips/groupTripsService';
 
 interface Props {
@@ -18,10 +18,22 @@ interface Props {
   onSetClaim: (itemId: string, quantity: number) => Promise<void>;
 }
 
+// Figma gear-claim sheet (node 12833-12938) — exact tokens.
+const C = {
+  ink: '#333333',
+  muted: '#6a7282',
+  circleBg: '#f7f7f7',
+  circleBorder: '#cfcfcf',
+  dark: '#212121',
+  accent: '#05BCD3',
+  white: '#FFFFFF',
+  fontHead: 'Montserrat',
+  fontBody: 'Inter',
+} as const;
+
 export const GearItemSheet: React.FC<Props> = ({
   visible,
   item,
-  currentUserId,
   onClose,
   onSetClaim,
 }) => {
@@ -34,206 +46,203 @@ export const GearItemSheet: React.FC<Props> = ({
 
   if (!item) {
     return (
-      <TripBottomSheet visible={visible} onClose={onClose} title="Gear item">
+      <TripBottomSheet visible={visible} onClose={onClose} title="Group Gear" subtitle="Shared items for the trip">
         {null}
       </TripBottomSheet>
     );
   }
 
-  const isSingle = item.needed_qty === 1;
   const othersQty = item.claimed_qty - item.my_claim_qty;
-  const remainingForMe = item.needed_qty - othersQty; // max I could claim
-  const isCovered = item.claimed_qty >= item.needed_qty;
+  const maxForMe = Math.max(item.needed_qty - othersQty, 0); // most I could bring
+  const isSingleSlot = maxForMe <= 1;
+  const coveredByOthers = maxForMe <= 0 && item.my_claim_qty === 0;
   const iHaveIt = item.my_claim_qty > 0;
 
-  const handleSave = async (next: number) => {
+  const statusLine = (() => {
+    if (item.claimed_qty >= item.needed_qty) return 'Covered · All set';
+    if (item.claimed_qty === 0) return 'Not covered yet';
+    return `${item.claimed_qty} / ${item.needed_qty} collected · ${item.needed_qty - item.claimed_qty} more needed`;
+  })();
+
+  const inc = () => setDraft(d => Math.min(maxForMe, d + 1));
+  const dec = () => setDraft(d => Math.max(0, d - 1));
+
+  const handleConfirm = async () => {
     if (saving) return;
+    // "I got this" with no quantity picked defaults to bringing one.
+    const qty = draft > 0 ? draft : Math.min(1, maxForMe);
+    if (qty === item.my_claim_qty) {
+      onClose();
+      return;
+    }
     setSaving(true);
     try {
-      await onSetClaim(item.id, next);
+      await onSetClaim(item.id, qty);
       onClose();
     } finally {
       setSaving(false);
     }
   };
 
-  const renderSingleControls = () => {
-    if (iHaveIt) {
+  const primaryLabel = !iHaveIt ? 'I got this' : draft === 0 ? 'Remove mine' : 'Update';
+  const primaryDisabled = saving || (coveredByOthers && draft === 0);
+
+  // Right-side control: a "+" circle that becomes a single-slot toggle or a
+  // multi-quantity stepper depending on how many this item still needs.
+  const renderControl = () => {
+    if (coveredByOthers) return null; // nothing for me to bring
+    if (draft === 0) {
       return (
-        <View style={styles.actions}>
-          <TouchableOpacity
-            style={styles.btnSecondary}
-            onPress={() => handleSave(0)}
-            disabled={saving}
-          >
-            {saving ? <ActivityIndicator color={SHEET.brandTeal} /> : <Text style={styles.btnSecondaryText}>I'm no longer bringing this</Text>}
-          </TouchableOpacity>
-        </View>
+        <TouchableOpacity
+          style={styles.plusCircle}
+          onPress={() => maxForMe >= 1 && setDraft(1)}
+          activeOpacity={0.7}
+          accessibilityLabel="Add me"
+        >
+          <Ionicons name="add" size={24} color={C.ink} />
+        </TouchableOpacity>
       );
     }
-    if (isCovered) {
-      return null; // someone else got it
-    }
-    return (
-      <View style={styles.actions}>
+    if (isSingleSlot) {
+      return (
         <TouchableOpacity
-          style={styles.btnPrimary}
-          onPress={() => handleSave(1)}
-          disabled={saving}
+          style={[styles.plusCircle, styles.plusCircleActive]}
+          onPress={() => setDraft(0)}
+          activeOpacity={0.7}
+          accessibilityLabel="Remove me"
         >
-          {saving ? <ActivityIndicator color={SHEET.surface} /> : <Text style={styles.btnPrimaryText}>I got this</Text>}
+          <Ionicons name="checkmark" size={24} color={C.white} />
+        </TouchableOpacity>
+      );
+    }
+    // Multi-quantity stepper
+    return (
+      <View style={styles.stepper}>
+        <TouchableOpacity style={styles.stepBtn} onPress={dec} activeOpacity={0.7} accessibilityLabel="One less">
+          <Ionicons name="remove" size={20} color={C.ink} />
+        </TouchableOpacity>
+        <Text style={styles.stepValue}>{draft}</Text>
+        <TouchableOpacity
+          style={[styles.stepBtn, draft >= maxForMe && styles.stepBtnDisabled]}
+          onPress={inc}
+          disabled={draft >= maxForMe}
+          activeOpacity={0.7}
+          accessibilityLabel="One more"
+        >
+          <Ionicons name="add" size={20} color={C.ink} />
         </TouchableOpacity>
       </View>
     );
   };
 
-  const renderMultiControls = () => {
-    const canIncrement = draft < remainingForMe;
-    const canDecrement = draft > 0;
-    return (
-      <>
-        <Text style={styles.label}>HOW MANY CAN YOU BRING?</Text>
-        <View style={styles.counterRow}>
-          <TouchableOpacity
-            style={[styles.counterBtn, !canDecrement && styles.counterBtnDisabled]}
-            onPress={() => canDecrement && setDraft(d => Math.max(0, d - 1))}
-            disabled={!canDecrement}
-          >
-            <Text style={styles.counterBtnText}>−</Text>
-          </TouchableOpacity>
-          <Text style={styles.counterValue}>{draft}</Text>
-          <TouchableOpacity
-            style={[styles.counterBtn, !canIncrement && styles.counterBtnDisabled]}
-            onPress={() => canIncrement && setDraft(d => d + 1)}
-            disabled={!canIncrement}
-          >
-            <Text style={styles.counterBtnText}>+</Text>
-          </TouchableOpacity>
-        </View>
-        <View style={styles.actions}>
-          <TouchableOpacity
-            style={[styles.btnPrimary, draft === item.my_claim_qty && styles.btnDisabled]}
-            onPress={() => handleSave(draft)}
-            disabled={draft === item.my_claim_qty || saving}
-          >
-            {saving ? (
-              <ActivityIndicator color={SHEET.surface} />
-            ) : (
-              <Text style={styles.btnPrimaryText}>
-                {item.my_claim_qty === 0 ? 'Add mine' : draft === 0 ? 'Remove mine' : 'Update'}
-              </Text>
-            )}
-          </TouchableOpacity>
-        </View>
-      </>
-    );
-  };
-
-  const statusLine = (() => {
-    if (isCovered) return 'Covered · All set';
-    if (item.claimed_qty === 0) return 'Not covered yet';
-    return `${item.claimed_qty} / ${item.needed_qty} collected`;
-  })();
-  const remainingText = !isCovered && item.claimed_qty > 0
-    ? `${item.needed_qty - item.claimed_qty} more needed`
-    : !isCovered
-      ? 'Someone needs to bring this'
-      : null;
-
   return (
     <TripBottomSheet
       visible={visible}
       onClose={onClose}
-      title={item.name}
-      subtitle={statusLine}
+      title="Group Gear"
+      subtitle="Shared items for the trip"
+      footer={
+        <View style={styles.footerRow}>
+          <TouchableOpacity style={styles.btnGhost} onPress={onClose} activeOpacity={0.8}>
+            <Text style={styles.btnGhostText}>Maybe later</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.btnDark, primaryDisabled && styles.btnDisabled]}
+            onPress={handleConfirm}
+            disabled={primaryDisabled}
+            activeOpacity={0.85}
+          >
+            {saving ? (
+              <ActivityIndicator color={C.white} />
+            ) : (
+              <Text style={styles.btnDarkText}>{primaryLabel}</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+      }
     >
-      <Text style={styles.label}>STATUS</Text>
-      <Text style={styles.statusValue}>{statusLine}</Text>
-      {remainingText ? <Text style={styles.statusSub}>{remainingText}</Text> : null}
-
-      {item.contributors.length > 0 && (
-        <>
-          <Text style={[styles.label, { marginTop: 16 }]}>CONTRIBUTORS</Text>
-          {item.contributors.map(c => (
-            <View key={c.user_id} style={styles.contributorRow}>
-              {c.profile_image_url ? (
-                <Image source={{ uri: c.profile_image_url }} style={styles.avatar} />
-              ) : (
-                <View style={[styles.avatar, styles.avatarPlaceholder]} />
-              )}
-              <View style={{ flex: 1 }}>
-                <Text style={styles.contributorName}>
-                  {c.user_id === currentUserId ? 'You' : c.name || 'Someone'}
-                </Text>
-                <Text style={styles.contributorQty}>
-                  Bringing {c.quantity}
-                </Text>
-              </View>
-            </View>
-          ))}
-        </>
-      )}
-
-      {isSingle && isCovered && !iHaveIt && (
-        <Text style={styles.note}>Someone else has this covered.</Text>
-      )}
-      {!isSingle && (
-        <View style={styles.divider} />
-      )}
-
-      {isSingle ? renderSingleControls() : renderMultiControls()}
+      <View style={styles.itemRow}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.itemName}>{item.name}</Text>
+          <Text style={styles.itemStatus}>{statusLine}</Text>
+        </View>
+        {renderControl()}
+      </View>
     </TripBottomSheet>
   );
 };
 
 const styles = StyleSheet.create({
-  label: { fontFamily: SHEET.fontBody, fontSize: 11, fontWeight: '700', color: SHEET.inkBody, letterSpacing: 0.5 },
-  statusValue: { fontFamily: SHEET.fontHead, fontSize: 16, fontWeight: '700', color: SHEET.inkBody, marginTop: 4 },
-  statusSub: { fontFamily: SHEET.fontBody, fontSize: 13, color: SHEET.inkBody, marginTop: 2 },
-  contributorRow: { flexDirection: 'row', alignItems: 'center', marginTop: 10 },
-  avatar: { width: 32, height: 32, borderRadius: 16, marginRight: 12, backgroundColor: SHEET.border },
-  avatarPlaceholder: { borderWidth: 1, borderColor: SHEET.border, backgroundColor: SHEET.surfaceMuted },
-  contributorName: { fontFamily: SHEET.fontHead, fontSize: 14, fontWeight: '700', color: SHEET.inkBody },
-  contributorQty: { fontFamily: SHEET.fontBody, fontSize: 12, color: SHEET.textMuted, marginTop: 2 },
-  divider: { height: 1, backgroundColor: SHEET.border, marginVertical: 16 },
-  counterRow: {
+  itemRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    borderWidth: 1,
-    borderColor: SHEET.border,
-    borderRadius: 10,
-    paddingHorizontal: 4,
-    marginTop: 10,
-    backgroundColor: SHEET.surfaceMuted,
+    gap: 16,
+    paddingVertical: 16,
   },
-  counterBtn: {
-    width: 56,
-    height: 56,
+  itemName: { fontFamily: C.fontBody, fontSize: 18, lineHeight: 22, fontWeight: '700', color: C.ink },
+  itemStatus: { fontFamily: C.fontBody, fontSize: 12, lineHeight: 18, color: C.muted, marginTop: 4 },
+
+  // "+" circle (48px) — Figma node 12833:13762
+  plusCircle: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: C.circleBg,
+    borderWidth: 1,
+    borderColor: C.circleBorder,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  counterBtnDisabled: { opacity: 0.3 },
-  counterBtnText: { fontFamily: SHEET.fontHead, fontSize: 28, fontWeight: '600', color: SHEET.inkBody },
-  counterValue: { fontFamily: SHEET.fontHead, fontSize: 22, fontWeight: '700', color: SHEET.inkBody },
-  actions: { marginTop: 18 },
-  btnPrimary: {
-    backgroundColor: SHEET.brandTeal,
-    paddingVertical: 16,
-    borderRadius: 10,
-    alignItems: 'center',
+  plusCircleActive: {
+    backgroundColor: C.accent,
+    borderColor: C.accent,
   },
-  btnPrimaryText: { fontFamily: SHEET.fontHead, color: SHEET.surface, fontWeight: '700', fontSize: 15 },
-  btnDisabled: { opacity: 0.35 },
-  btnSecondary: {
+
+  // Multi-quantity stepper (shares the circle visual language)
+  stepper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: C.circleBg,
     borderWidth: 1,
-    borderColor: SHEET.brandTeal,
-    paddingVertical: 16,
-    borderRadius: 10,
-    alignItems: 'center',
+    borderColor: C.circleBorder,
+    paddingHorizontal: 4,
   },
-  btnSecondaryText: { fontFamily: SHEET.fontHead, color: SHEET.brandTeal, fontWeight: '700', fontSize: 15 },
-  note: { fontFamily: SHEET.fontBody, fontSize: 13, color: SHEET.textMuted, fontStyle: 'italic', marginTop: 16 },
+  stepBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  stepBtnDisabled: { opacity: 0.3 },
+  stepValue: {
+    fontFamily: C.fontHead,
+    fontSize: 16,
+    fontWeight: '700',
+    color: C.ink,
+    minWidth: 24,
+    textAlign: 'center',
+  },
+
+  // Footer buttons (Figma 12833:13670)
+  footerRow: { flexDirection: 'row', gap: 10 },
+  btnGhost: {
+    flex: 1,
+    height: 56,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: C.circleBorder,
+    backgroundColor: C.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  btnGhostText: { fontFamily: C.fontHead, fontSize: 16, fontWeight: '600', color: C.ink },
+  btnDark: {
+    flex: 1,
+    height: 56,
+    borderRadius: 12,
+    backgroundColor: C.dark,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  btnDarkText: { fontFamily: C.fontHead, fontSize: 16, fontWeight: '600', color: C.white },
+  btnDisabled: { opacity: 0.4 },
 });
 
 export default GearItemSheet;

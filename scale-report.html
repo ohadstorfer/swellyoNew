@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Swellyo — Scale Map</title>
+<style>
+  :root{
+    --bg:#0b1014; --panel:#11181f; --panel2:#0e141a; --line:#1e2a33;
+    --txt:#e6edf3; --muted:#8b9aa7; --accent:#36c5f0;
+    --green:#2ea043; --green-bg:#0f2417; --yellow:#d4a017; --yellow-bg:#2a2308; --red:#e5484d; --red-bg:#2a0f11;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:var(--bg);color:var(--txt);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;display:flex}
+  a{color:inherit}
+  /* sidebar */
+  #side{width:280px;flex:0 0 280px;height:100vh;overflow-y:auto;background:var(--panel2);border-right:1px solid var(--line);padding:18px 0}
+  #side h1{font-size:15px;letter-spacing:.5px;margin:0 18px 4px;color:var(--txt)}
+  #side .sub{font-size:12px;color:var(--muted);margin:0 18px 16px}
+  .navitem{display:flex;align-items:center;gap:10px;padding:9px 18px;cursor:pointer;border-left:3px solid transparent;font-size:14px}
+  .navitem:hover{background:#0f1822}
+  .navitem.active{background:#0f1c27;border-left-color:var(--accent)}
+  .navitem .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .dot{width:11px;height:11px;border-radius:50%;flex:0 0 11px}
+  .dot.green{background:var(--green)} .dot.yellow{background:var(--yellow)} .dot.red{background:var(--red)}
+  /* main */
+  #main{flex:1;height:100vh;overflow-y:auto;padding:36px 44px 80px}
+  .wrap{max-width:900px}
+  .crumb{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px}
+  h2{font-size:26px;margin:0 0 4px;display:flex;align-items:center;gap:12px}
+  .desc{color:var(--muted);font-size:14px;margin:14px 0 26px;padding:14px 16px;background:var(--panel);border:1px solid var(--line);border-radius:10px}
+  .breaks{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:8px;padding:14px 16px;margin-bottom:30px}
+  .breaks .lbl{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--accent);margin-bottom:5px}
+  .breaks .txt{font-size:15px}
+  .secttl{font-size:13px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin:0 0 12px}
+  table{width:100%;border-collapse:separate;border-spacing:0;margin-bottom:30px;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  th,td{padding:0;text-align:left}
+  thead th{background:var(--panel2);color:var(--muted);font-size:12px;font-weight:600;padding:10px 14px;border-bottom:1px solid var(--line)}
+  .cell{padding:12px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+  tbody tr:last-child .cell{border-bottom:none}
+  .cell.green{background:var(--green-bg)} .cell.yellow{background:var(--yellow-bg)} .cell.red{background:var(--red-bg)}
+  .badge{display:inline-flex;align-items:center;gap:6px;font-weight:700;font-size:13px}
+  .badge.green{color:#56d364} .badge.yellow{color:#e3b341} .badge.red{color:#ff7b72}
+  .reason{display:block;color:var(--muted);font-size:12.5px;margin-top:6px;line-height:1.45}
+  .colhead{width:25%}
+  /* evidence */
+  details{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:0 16px;margin-bottom:30px}
+  summary{cursor:pointer;padding:14px 0;font-size:13px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);list-style:none}
+  summary::-webkit-details-marker{display:none}
+  summary::before{content:"▸ ";color:var(--accent)}
+  details[open] summary::before{content:"▾ "}
+  .ev{border-top:1px solid var(--line);padding:12px 0;font-size:13.5px}
+  .ev .loc{display:block;color:var(--accent);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;margin-top:5px;word-break:break-all}
+  /* overview */
+  .ovgrid{display:grid;grid-template-columns:1fr;gap:0;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .ovrow{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line);cursor:pointer}
+  .ovrow:last-child{border-bottom:none}
+  .ovrow:hover{background:#0f1822}
+  .ovrow .nm{flex:0 0 230px;font-weight:600}
+  .ovrow .bk{flex:1;color:var(--muted);font-size:13px}
+  .legend{display:flex;gap:20px;margin:0 0 26px;font-size:13px;color:var(--muted);flex-wrap:wrap}
+  .legend span{display:inline-flex;align-items:center;gap:7px}
+  @media(max-width:760px){#side{display:none}#main{padding:24px 18px}.ovrow .nm{flex-basis:140px}}
+</style>
+</head>
+<body>
+<nav id="side">
+  <h1>Swellyo · Scale Map</h1>
+  <p class="sub">12 flows × scale, evidence-based</p>
+  <div id="nav"></div>
+</nav>
+<main id="main"><div class="wrap" id="content"></div></main>
+
+<script>
+const DATA = {
+  flows: [
+    {
+      id:"overview", name:"Overview", overall:"red", isOverview:true
+    },
+    {
+      id:"auth", name:"Auth & Session Restore", overall:"green",
+      desc:"Google OAuth (web PKCE, mobile native Sign-In) + on-boot session restore. onAuthStateChange fires a profile read/write cascade. All DB access is single-row PK / indexed-FK lookups.",
+      breaks:"A concurrent-login spike saturates Supabase Auth (GoTrue) + the connection pool via the chatty 5–6 round-trips fired per auth event — not table size, which stays O(1).",
+      total:{ "1K":["green",""], "10K":["green",""], "100K":["green",""], "1M":["green","all auth reads are single-row PK / indexed-FK lookups — O(1) regardless of row count"] },
+      conc:{ "100":["green",""], "1K":["yellow","each auth event fires ~5–6 sequential round-trips; chatty per-login latency adds up"], "10K":["red","full 5–6-query profile read/write on every restore — 10K concurrent logins saturate GoTrue + the shared Postgres pool"] },
+      ev:[
+        ["onAuthStateChange runs the full profile read/write cascade on EVERY auth event (sign-in, token refresh, boot restore) — not a cheap session check","src/services/auth/supabaseAuthService.ts:635-643"],
+        ["convertSupabaseUserToAppUser calls getOrCreateUserProfile (saveUser + surfers select + conditional saveSurfer) AND getCurrentUserData on every restore","src/services/auth/supabaseAuthService.ts:340-371"],
+        ["Redundant auth.getUser() network calls per restore (saveUser, surfer check, getCurrentUserData each re-fetch the auth user)","src/services/database/supabaseDatabaseService.ts:122 · supabaseAuthService.ts:421 · supabaseDatabaseService.ts:802"],
+        ["All profile lookups are single-row indexed (users PK, surfers user_id FK) — O(1) at any table size, no scan/pagination","src/services/database/supabaseDatabaseService.ts:134-138, 808-811"],
+        ["No realtime channel, list query, JSONB filter, or N+1 in the path — pressure is GoTrue throughput under concurrency, not data volume","src/services/auth/supabaseAuthService.ts:42-52"]
+      ]
+    },
+    {
+      id:"onboarding", name:"Onboarding", overall:"yellow",
+      desc:"6-step profile wizard. AsyncStorage save on every keystroke (local only), Supabase saveSurfer on Next, then find_and_connect_matches RPC on completion.",
+      breaks:"The find_and_connect_matches RPC fired at the end full-scans and scores the entire surfers table (per-row correlated Jaccard subquery, no LIMIT before scoring), so completion latency grows linearly with total users.",
+      total:{ "1K":["green",""], "10K":["green",""], "100K":["yellow","matching RPC seq-scans + scores all ~100K surfers with correlated Jaccard subquery per row before top-3 sort"], "1M":["red","RPC scores 1M rows synchronously per completion; computed scores + correlated subquery cannot use any index"] },
+      conc:{ "100":["green",""], "1K":["yellow","each step = saveSurfer SELECT-then-UPDATE (2 round-trips) + up to 3 auth.getUser() JWT calls, ×6 steps"], "10K":["red","long-running matching RPC holds a pooled connection per completion + multi-round-trip writes exhaust the pool"] },
+      ev:[
+        ["Matching RPC full-scans surfers, scoring every row with no LIMIT before scoring; ORDER BY total_score sorts all scored rows for top 3","supabase/migrations/20260323000000_create_find_and_connect_matches.sql:97-107"],
+        ["Per-row correlated subquery does unnest + Jaccard over lifestyle_keywords for every surfer — O(N) array work, un-indexable","…create_find_and_connect_matches.sql:81-95"],
+        ["Scoring uses computed CASE on age/country/surf_level/board — no index can accelerate it","…create_find_and_connect_matches.sql:37-74"],
+        ["saveSurfer reads existing row (SELECT *) then UPDATEs — 2 round-trips per save, called on every step (1-6)","src/services/database/supabaseDatabaseService.ts:274-453"],
+        ["saveSurfer calls auth.getUser() up to 3× per invocation, each a JWT-validation network call","src/services/database/supabaseDatabaseService.ts:266-292"],
+        ["AsyncStorage keystroke save is local-device only — no backend cost; video upload + destination geocode are fire-and-forget, non-blocking","src/context/OnboardingContext.tsx:225-229"]
+      ]
+    },
+    {
+      id:"swelly", name:"Swelly AI Chat", overall:"yellow",
+      desc:"swellyService calls edge fns swelly-chat / swelly-trip-planning. Each turn loads the full messages JSONB, calls OpenAI gpt-5.2 (blocking 2–10s), upserts the whole growing JSONB back. On finish, extra OpenAI calls fan out; matching uses the full-scan RPC.",
+      breaks:"find_and_connect_matches full-scans and per-row scores the entire surfers table (correlated Jaccard + ORDER BY computed score); no index can serve it, so match latency grows linearly with total users.",
+      total:{ "1K":["green",""], "10K":["yellow","matching RPC full-scans surfers with correlated subquery per row + ORDER BY computed score; no usable index"], "100K":["red","scores 100K rows per call with per-row subqueries + sort; seconds-long, no index on computed score"], "1M":["red","O(N) full-scan-and-score over 1M surfers per call; chat messages JSONB read+rewritten whole each turn, never trimmed"] },
+      conc:{ "100":["yellow","each turn blocks 2–10s on OpenAI gpt-5.2; trip-planning Promise.all fan-out multiplies OpenAI calls per finish"], "1K":["red","rate limiter is an in-memory per-instance Map (doesn't cap real concurrency); concurrent full-scan RPCs saturate the single Postgres"], "10K":["red","10K concurrent full-scan RPCs on one Postgres + blocking multi-call OpenAI fan-out → connection/CPU exhaustion + OpenAI 429s"] },
+      ev:[
+        ["Matching RPC full-scans surfers, per-row Jaccard subquery, ORDER BY computed total_score DESC LIMIT 3 — O(total users) per call","supabase/migrations/20260326000000_remove_conversation_creation_from_matching.sql:36-119"],
+        ["In-memory rate limiter is a per-instance Map; code comment admits it's non-distributed — doesn't cap concurrency across edge instances","supabase/functions/swelly-chat/index.ts:16-23"],
+        ["Every chat turn loads the entire messages JSONB and upserts it back whole; messages embed full matchedUsers objects — payload grows unbounded with length","supabase/functions/swelly-chat/index.ts:744-784"],
+        ["Trip-planning fans out OpenAI calls via Promise.all (correctCountryNameWithAI per unrecognized country) on top of the main gpt-5.2 call","supabase/functions/swelly-trip-planning/index.ts:721-744"],
+        ["Onboarding fires a 2nd blocking OpenAI call (matchLifestyleKeywordsToImages) on finish, doubling finish-step latency","supabase/functions/swelly-chat/index.ts:1044-1053"],
+        ["swelly_chat_history has only btree indexes on user_id/conversation_id, no GIN on messages, no row-size cap — large JSONB rows on the hot path","supabase/migrations/create_swelly_chat_history.sql:36-37"]
+      ]
+    },
+    {
+      id:"matching", name:"Matching", overall:"red",
+      desc:"findMatchingUsers() runs supabase.from('surfers').select('*') with NO pagination — pulls every non-demo surfer row + full destinations_array JSONB to the device, filters destinations in-memory, scores each user in a JS loop. On zero matches it re-runs the same unbounded select.",
+      breaks:"The unbounded select('*') with in-memory JSONB destination filtering: every match request downloads and scans the entire surfers table on the mobile client, so cost grows linearly with total users regardless of concurrency.",
+      total:{ "1K":["green",""], "10K":["yellow","select('*') pulls all 10K rows + full destinations_array JSONB to the device per search; payload + parse slow on mobile"], "100K":["red","no limit/range fetches 100K full rows client-side + filters JSONB in-memory; multi-MB egress + JS-thread scan freezes the device"], "1M":["red","full-table read of 1M rows over mobile network with in-memory filtering is unusable; relaxed re-query doubles it"] },
+      conc:{ "100":["yellow","each of 100 searches triggers its own full-table select('*'); egress + read load multiply by table size"], "1K":["red","1K concurrent full-table scans of surfers saturate DB read throughput + egress bandwidth"], "10K":["red","10K concurrent unbounded full-table reads overwhelm Postgres connections + egress; no caching or pagination"] },
+      ev:[
+        ["Main findMatchingUsers query select('*') with no pagination — only optional in/gte filters, never bounded","src/services/matching/matchingService.ts:930"],
+        ["V2 query select('*') with no limit/range fetches every non-demo surfer row and all columns","src/services/matching/matchingService.ts:693"],
+        ["Destination filtering done in-memory over full result set (JSONB not filterable in SQL); regex per destination per surfer","src/services/matching/matchingService.ts:1204"],
+        ["On zero matches re-runs the entire unfiltered select('*') a second time, doubling the full-table read","src/services/matching/matchingService.ts:1113"],
+        ["Scoring loop iterates every returned surfer in JS on the client device","src/services/matching/matchingService.ts:1286"],
+        ["Matching invoked client-side on chat completion — all egress + CPU is on-device","src/screens/TripPlanningChatScreen.tsx:786"]
+      ]
+    },
+    {
+      id:"feed", name:"Trips Feed", overall:"green",
+      desc:"Explore + My Trips lists in TripsScreen via groupTripsService. listExploreTrips is paginated+indexed, but the carousel is called with defaults only (no onEndReached) so it's functionally capped at 50 trips. Fetch-on-mount + pull-to-refresh, no realtime.",
+      breaks:"Under high concurrency the unpaginated getTripCardMeta participant fan-out (.in over 50 trips, no row cap) + 4 sequential round-trips per feed open multiplies DB load; Explore is silently capped at 50 trips.",
+      total:{ "1K":["green",""], "10K":["green",""], "100K":["green",""], "1M":["yellow","Explore hard-capped at 50 trips (no UI pagination) so a large catalog never fully surfaces; per-query cost stays flat via status+created_at index"] },
+      conc:{ "100":["green",""], "1K":["green",""], "10K":["yellow","each feed open fires 4 sequential round-trips; getTripCardMeta .in('trip_id') over 50 trips fetches all participant+surfer rows uncapped; no caching"] },
+      ev:[
+        ["listExploreTrips is paginated+indexed but ExploreTripsView calls it with defaults only (no onEndReached) — carousel functionally capped at 50 trips regardless of catalog size","src/services/trips/groupTripsService.ts:486-499"],
+        ["ExploreTripsView loads trips then awaits getTripCardMeta sequentially before render — 2 of the 4 round-trips serialized","src/screens/trips/TripsScreen.tsx:542-547"],
+        ["getTripCardMeta .in('trip_id', tripIds) has no row limit — fetches ALL participant rows for all 50 trips, then .in('user_id') over every host+member (bounded by trip size, but uncapped)","src/services/trips/groupTripsService.ts:637-659"],
+        ["All filter/sort columns indexed: group_trips(status),(created_at desc); participants(trip_id),(user_id); join_requests(trip_id),(status)","supabase/migrations/20260414000000_create_group_trips.sql:68-87"],
+        ["No realtime channels in the feed — purely fetch-on-mount + pull-to-refresh, no per-user connection risk","src/screens/trips/TripsScreen.tsx:542-552"]
+      ]
+    },
+    {
+      id:"tripdetail", name:"Trip Detail & Join Requests", overall:"yellow",
+      desc:"Open detail → parallel load of trip, participants, gear, admin updates, join requests → request/approve/decline, kept live via per-screen Supabase realtime channels (3 per SurftripDetailScreen viewer).",
+      breaks:"Per-open realtime channels (3 per viewer, scoped to one trip) accumulate with concurrent viewers and hit Supabase realtime channel limits long before any per-query cost matters.",
+      total:{ "1K":["green",""], "10K":["green",""], "100K":["green",""], "1M":["yellow","detail queries are per-trip + indexed; only AppContent-boot listUnseenJoinDecisions does an unbounded scan over the user's join_requests, mildly degrading at 1M"] },
+      conc:{ "100":["green",""], "1K":["yellow","each open screen opens 3 realtime channels (members/group/requests); every join-request event triggers a full participants+requests refetch for all co-viewers"], "10K":["red","~30k channels approaches the realtime cap; per-trip change events fan out full-list refetches to every co-viewer (thundering herd on a popular trip)"] },
+      ev:[
+        ["SurftripDetailScreen subscribes to 3 separate realtime channels per mounted screen — channel count grows linearly with concurrent open screens (the binding constraint)","src/screens/surftrips/SurftripDetailScreen.tsx:156"],
+        ["Realtime handler refetches the ENTIRE pending-requests list + the viewer's own request on every join_requests change — N full-list refetches per single action on a hot trip","src/screens/surftrips/SurftripDetailScreen.tsx:233"],
+        ["getTripParticipants does participants then a single batched surfers .in(userIds) — no N+1 per member (same batched pattern in pending/declined/gear)","src/services/trips/groupTripsService.ts:1345"],
+        ["Indexes exist on every filtered/sorted column: join_requests(trip_id, requester_id, status), participants(trip_id, user_id), surftrip equivalents — no missing-index hotspots","supabase/migrations/20260429000000_create_trip_join_requests.sql:23"],
+        ["approve/decline/leave/remove each chain several sequential round-trips (auth, conversation lookup, name lookup, system message, edge invoke) — multiplies write latency under heavy approval throughput","src/services/trips/groupTripsService.ts:1644"]
+      ]
+    },
+    {
+      id:"createtrip", name:"Create Trip", overall:"yellow",
+      desc:"Host fills a 5-6 step wizard, then publish runs sequentially: upload hero image → optional accommodation image → estimateTripBudget (OpenAI edge fn) → createGroupTrip (3 sequential INSERTs + count trigger + group conversation) → setTripDestination (upsert + fire-and-forget geocode).",
+      breaks:"Under high concurrency the OpenAI-backed estimateTripBudget call is the first to throttle/latency-spike — every non-Flow-C create blocks on a synchronous, uncached OpenAI completion.",
+      total:{ "1K":["green",""], "10K":["green",""], "100K":["green",""], "1M":["green","create is a single-row INSERT path indexed on host_id/trip_id/status; total-user count doesn't grow per-create work"] },
+      conc:{ "100":["green",""], "1K":["yellow","each create blocks on synchronous OpenAI budget estimate + 2 sequential storage uploads; latency stacks, OpenAI rate limits start to bite"], "10K":["red","estimate-trip-budget OpenAI calls hit account rate limits / edge concurrency caps; serial uploads + budget call make publish unacceptably slow or fail"] },
+      ev:[
+        ["Budget estimate is a synchronous OpenAI edge call with no caching, blocking the budget step for every non-Flow-C create","supabase/functions/estimate-trip-budget/index.ts:141 · src/screens/trips/CreateTripFlowA.tsx:1131"],
+        ["Hero + accommodation images upload sequentially (await one then the other) before any DB write, stacking latency under load","src/screens/trips/CreateTripFlowA.tsx:1373,1401"],
+        ["createGroupTrip does 3 sequential writes: insert group_trips, insert host participant, create group conversation — all awaited in series","src/services/trips/groupTripsService.ts:282,298,312"],
+        ["Host-participant insert fires an AFTER trigger re-running COUNT(*) over participants for that trip — scoped to one trip + indexed, stays cheap","supabase/migrations/20260531000004_group_trips_participant_counts.sql:38-75"],
+        ["No realtime channel, no full-table reads, no JSONB filtering in the create path — write-only and bounded","src/screens/trips/CreateTripFlowA.tsx:1360-1556"]
+      ]
+    },
+    {
+      id:"messaging", name:"Messaging & Realtime DMs", overall:"yellow",
+      desc:"Supabase Realtime postgres_changes. Each user holds a batched messages-list subscription + a new_conversations channel + a per-open DM channel. Sends are idempotent via outbox. Client caches are bounded (5MB LRU).",
+      breaks:"Filtered postgres_changes: every client holds a messages-table subscription whose filter+RLS is re-evaluated on every row change DB-wide, so the realtime layer saturates at high concurrent-connection counts before the DB query layer does.",
+      total:{ "1K":["green",""], "10K":["green",""], "100K":["yellow","getConversations fetches ALL membership rows unpaginated; unread query scans messages across all convs capped at 1000 — heavy-user inboxes get slow"], "1M":["yellow","messages table grows unbounded; reconnect sync fan-out (N+1 last-message + per-conv count) becomes a query storm for large inboxes"] },
+      conc:{ "100":["green",""], "1K":["yellow","each user opens 2+ realtime channels (batched list + new_conversations + per-open DM); filtered postgres_changes cost grows with concurrent subscribers"], "10K":["red","filtered postgres_changes on messages re-evaluates filter+RLS per change for every subscriber — O(connections × change-rate) saturates well before this"] },
+      ev:[
+        ["Per-user batched subscription on messages (conversation_id in.(...), chunked at 90) — filtered postgres_changes forces filter+RLS eval on every messages change DB-wide for every client (the concurrency ceiling)","src/services/messaging/messagingService.ts:2100-2148"],
+        ["Each open DM also creates its own per-conversation postgres_changes channel — a second filtered subscription per active chat","src/services/messaging/messagingService.ts:262-268"],
+        ["subscribeToNewConversations opens new_conversations:{userId} — N more subscriptions linear in concurrent users","src/services/messaging/messagingService.ts:2531-2550"],
+        ["getConversations fetches EVERY conversation_member row for the user with no pagination before paging conversations — unbounded for many-group users","src/services/messaging/messagingService.ts:309-316"],
+        ["getConversationsUpdatedSince is N+1: per-conversation last-message + member-read + exact-count query, run on every reconnect","src/services/messaging/messagingService.ts:2605-2646"],
+        ["Send path is robust: idempotent upsert on (sender_id, client_id) + persistent outbox flushed on reconnect — not a scaling bottleneck","src/services/messaging/messagingService.ts:760-851"]
+      ]
+    },
+    {
+      id:"notifications", name:"Notifications", overall:"yellow",
+      desc:"DB-trigger-written notifications rows read via notificationsService (RLS-scoped, one realtime channel per user) + push delivery via DB webhooks → edge functions that look up tokens and fan out to the Expo Push API sequentially.",
+      breaks:"The per-user realtime channel (notifications:userId) hits Supabase Realtime connection limits while edge functions sequentially loop the Expo Push API per recipient — high concurrent fan-out breaks before registered-user count matters.",
+      total:{ "1K":["green",""], "10K":["green",""], "100K":["yellow","saveTokenToSupabase clears token via .eq('expo_push_token') on surfers with NO index on that column — full-table scan per token save"], "1M":["yellow","unindexed expo_push_token full scan on every register + trigger write-amplification (one row per trip participant on broadcasts) bloats the table"] },
+      conc:{ "100":["green",""], "1K":["yellow","edge functions await the Expo Push API once per recipient in a sequential for-loop — fan-out latency scales with group size, no multicast batching"], "10K":["red","one realtime channel per active user saturates Realtime connection caps; sequential per-recipient Expo push loop compounds it"] },
+      ev:[
+        ["One dedicated realtime channel per user — N concurrent users = N persistent connections, hitting Realtime concurrency limits","src/services/notifications/notificationsService.ts:164-196"],
+        ["Token clear runs .eq('expo_push_token', token) on surfers; expo_push_token has NO index — full-table scan on every token save","src/services/notifications/pushNotificationService.ts:121-129"],
+        ["send-push-notification loops conversation members and awaits one Expo Push call per recipient sequentially (no multicast batching)","supabase/functions/send-push-notification/index.ts:203-218"],
+        ["Each sendPushNotification does ~4 sequential round-trips (block check, token, sender name, message) per recipient","supabase/functions/send-push-notification/index.ts:19-73"],
+        ["Trigger inserts one notifications row per trip participant on broadcast — write amplification proportional to trip size per approval","supabase/migrations/20260601010000_notification_center.sql:347-353"],
+        ["Good: composite index (recipient_id, created_at desc) + partial unread index back fetch/unreadCount/markAllRead, all RLS-scoped","supabase/migrations/20260601010000_notification_center.sql:57-79"]
+      ]
+    },
+    {
+      id:"media", name:"Media Upload", overall:"yellow",
+      desc:"Images/audio: client-compress then direct PUT to Supabase Storage. Video: edge fn mints presigned S3 PUT, client uploads bytes direct to S3, AWS MediaConvert transcodes async, client POLLS every 15s up to 28× (~7 min), each poll an edge invocation + S3 HEAD.",
+      breaks:"The per-upload 15s polling loop (28 edge invocations + 28 S3 HEADs per upload) amplifies concurrent uploads into a flood of edge/S3 requests, and MediaConvert job-queue slots are the hard transcode ceiling — both bite on concurrency before total-user count.",
+      total:{ "1K":["green",""], "10K":["green",""], "100K":["green",""], "1M":["yellow","images/audio route through Supabase Storage egress (not CDN-offloaded like video); stored media + egress grow linearly with no lifecycle/cleanup"] },
+      conc:{ "100":["green",""], "1K":["yellow","each in-flight video upload polls every 15s for ~7 min = 28 edge invocations + 28 S3 HEADs; 1K uploaders → sustained edge/S3 load + MediaConvert queue fills"], "10K":["red","polling fan-out saturates edge concurrency + MediaConvert queue; no debounce/backoff/webhook — uploads queue behind transcode slots, clients time out at 28 attempts"] },
+      ev:[
+        ["Video bytes go direct client→S3 via presigned PUT (good: no Supabase egress for video), edge only mints URLs","src/services/messaging/videoUploadService.ts:304-356"],
+        ["Per-upload polling loop: 28 attempts × 15s, each a full edge invocation doing an S3 HEAD; no webhook/backoff so concurrency multiplies request load","src/services/storage/storageService.ts:759-789"],
+        ["Duplicate identical polling loop for DM videos (same 28×15s), doubling the amplification path","src/services/messaging/videoUploadService.ts:423-474"],
+        ["sign-dm-video does 2 sequential S3 HEAD existence checks per video view + a conversation_members lookup","supabase/functions/process-profile-video-s3/index.ts:337-380"],
+        ["Images + audio upload through Supabase Storage (not S3/CDN), so all those bytes consume Supabase storage + egress","src/services/messaging/imageUploadService.ts:415-432"],
+        ["Client-side compression caps image size (15MB/2560px) before upload; video has no client transcode (raw up to ~250MB to S3)","src/services/messaging/imageUploadService.ts:49-53"]
+      ]
+    },
+    {
+      id:"profile", name:"Profile & User Data", overall:"green",
+      desc:"ProfileScreen loads a single surfer row by indexed user_id. Writes via saveSurfer (read-then-update). Destination cards render public-S3/Pexels images with an onError fallback that hits the external Pexels API. No per-user realtime channel, no N+1, no full-table scan.",
+      breaks:"Under high concurrency the country/lifestyle image onError fallback fan-out to the external Pexels API (no dedup/rate-limit, re-uploads per client) + the 7-min MediaConvert video-poll loop strain first — not the DB, which is a single indexed point-lookup.",
+      total:{ "1K":["green",""], "10K":["green",""], "100K":["green",""], "1M":["green","profile read/write is a single-row .eq('user_id').single() on the indexed surfers table; row count is irrelevant"] },
+      conc:{ "100":["green",""], "1K":["yellow","each profile open + image onError triggers an external Pexels API call with no cross-client dedup/cache; saveSurfer does an extra SELECT before every UPDATE"], "10K":["red","Pexels fallback fan-out (external API, no rate-limit/dedup, re-uploads per client) + concurrent 7-min MediaConvert poll loops; external quota is the cap, not Postgres"] },
+      ev:[
+        ["Profile read is a single indexed point-lookup by UUID PK — scales independent of total user count","src/services/database/supabaseDatabaseService.ts:752"],
+        ["saveSurfer does a full SELECT * read-then-update on every write (extra round-trip + reads all columns to overwrite one field)","src/services/database/supabaseDatabaseService.ts:274"],
+        ["Image onError fallback calls external Pexels API per render and re-uploads to storage, with no cross-client dedup or rate limiting","src/screens/ProfileScreen.tsx:1935"],
+        ["Video upload polls the DB every 2s up to 210× (7 min) per upload; many concurrent uploads = many long-lived poll loops","src/screens/ProfileScreen.tsx:1630"],
+        ["Each SurfSkillCard runs a 2s setInterval forcePlay loop; up to 4 always-on video players per profile (CPU/battery, not DB)","src/screens/ProfileScreen.tsx:605"],
+        ["No realtime channel opened in the profile flow — no per-user connection growth","src/screens/ProfileScreen.tsx:1168"]
+      ]
+    },
+    {
+      id:"presence", name:"Presence & Typing", overall:"green",
+      desc:"Per-user presence topics (presence:user:{userId}). Each online user owns one channel (own); watchers subscribe to a per-peer channel (watch) only while that chat is open, up to MAX_SUBSCRIPTIONS=50. 60s heartbeat re-tracks on own channel only. DB fallback (user_activity) is PK-indexed. Typing rides the per-conversation channel, rate-limited.",
+      breaks:"At very high concurrency the total open channel count (N own + up to N×50 watch) could approach Supabase Realtime channel limits, but in practice watch channels are only open while a DM is active — actual per-user channel count is much lower than the cap.",
+      total:{ "1K":["green",""], "10K":["green",""], "100K":["green",""], "1M":["green","presence is O(N) with per-user topics; user_activity DB fallback is PK-indexed, a single-row lookup; total-user count doesn't grow per-presence-event cost"] },
+      conc:{ "100":["green",""], "1K":["green","per-user topics: 1K own channels + watch channels only for active DMs; each heartbeat re-broadcasts only to watchers of that specific user, not all 1K"], "10K":["yellow","at 10K concurrent users total open channels could be high if users are actively watching many peers; MAX_SUBSCRIPTIONS=50 hard-caps client-side; server-side channel count is the limit to watch"] },
+      ev:[
+        ["FIXED — global 'presence:users' channel replaced with per-user topics 'presence:user:{userId}'; fan-out is now O(N) per event, not O(N²)","src/services/presence/userPresenceService.ts:35"],
+        ["Own channel: each user tracks only on their own topic (presence:user:{me}); heartbeat re-track fans out only to that user's watchers","src/services/presence/userPresenceService.ts:109"],
+        ["Watch channel: read-only subscription to presence:user:{X}, opened on demand when a peer's chat is active; closed immediately when the last watcher unsubscribes","src/services/presence/userPresenceService.ts:265"],
+        ["MAX_SUBSCRIPTIONS=50 now bounds both device memory AND server-side channel count (each watched user has one channel, not a shared global)","src/services/presence/userPresenceService.ts:25"],
+        ["DB fallback getUserStatusFromDatabase uses .eq('user_id') single-row lookup on user_activity (PK) — O(1) at any scale","src/services/presence/userPresenceService.ts:375"],
+        ["Typing uses the per-conversation channel, rate-limited to 1 event/500ms with 3s stale cleanup — scoped per conversation, not total users","src/services/messaging/messagingService.ts:265"]
+      ]
+    }
+  ]
+};
+
+const TOTAL_COLS=["1K","10K","100K","1M"];
+const CONC_COLS=["100","1K","10K"];
+const LIGHT_LABEL={green:"OK",yellow:"Degrades",red:"Breaks"};
+
+function el(tag,cls,html){const e=document.createElement(tag);if(cls)e.className=cls;if(html!=null)e.innerHTML=html;return e;}
+function esc(s){return (s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
+
+function renderTable(title,cols,obj){
+  let h=`<div class="secttl">${title}</div><table><thead><tr>`;
+  cols.forEach(c=>h+=`<th class="colhead">${c}</th>`);
+  h+=`</tr></thead><tbody><tr>`;
+  cols.forEach(c=>{
+    const [light,reason]=obj[c];
+    h+=`<td class="cell ${light}"><span class="badge ${light}"><span class="dot ${light}"></span>${LIGHT_LABEL[light]}</span>${reason?`<span class="reason">${esc(reason)}</span>`:""}</td>`;
+  });
+  h+=`</tr></tbody></table>`;
+  return h;
+}
+
+function renderFlow(f){
+  const c=document.getElementById("content");
+  let h=`<div class="crumb">Flow</div><h2><span class="dot ${f.overall}"></span>${esc(f.name)}</h2>`;
+  h+=`<div class="desc">${esc(f.desc)}</div>`;
+  h+=`<div class="breaks"><div class="lbl">What breaks first</div><div class="txt">${esc(f.breaks)}</div></div>`;
+  h+=renderTable("Total registered users",TOTAL_COLS,f.total);
+  h+=renderTable("Concurrent active users",CONC_COLS,f.conc);
+  h+=`<details><summary>Evidence — ${f.ev.length} findings from the code</summary>`;
+  f.ev.forEach(([find,loc])=>h+=`<div class="ev">${esc(find)}<span class="loc">${esc(loc)}</span></div>`);
+  h+=`</details>`;
+  c.innerHTML=h;
+  c.parentElement.scrollTop=0;
+}
+
+function renderOverview(){
+  const c=document.getElementById("content");
+  const flows=DATA.flows.filter(f=>!f.isOverview);
+  let h=`<div class="crumb">Swellyo</div><h2>Scale Map — 12 flows</h2>`;
+  h+=`<div class="desc">Each flow graded on two axes by an agent that read the actual code, queries, edge functions and realtime subscriptions. Click any flow for its tables + evidence.</div>`;
+  h+=`<div class="legend"><span><span class="dot green"></span>OK at this level</span><span><span class="dot yellow"></span>Degrades — works but slow</span><span><span class="dot red"></span>Breaks — unacceptable</span></div>`;
+  h+=`<div class="ovgrid">`;
+  flows.forEach(f=>{
+    h+=`<div class="ovrow" data-go="${f.id}"><span class="dot ${f.overall}"></span><span class="nm">${esc(f.name)}</span><span class="bk">${esc(f.breaks)}</span></div>`;
+  });
+  h+=`</div>`;
+  c.innerHTML=h;
+  c.querySelectorAll("[data-go]").forEach(r=>r.onclick=()=>select(r.getAttribute("data-go")));
+  c.parentElement.scrollTop=0;
+}
+
+function buildNav(){
+  const nav=document.getElementById("nav");
+  DATA.flows.forEach(f=>{
+    const item=el("div","navitem","");
+    item.dataset.id=f.id;
+    if(f.isOverview){ item.innerHTML=`<span class="nm" style="font-weight:600">▣ ${esc(f.name)}</span>`; }
+    else { item.innerHTML=`<span class="dot ${f.overall}"></span><span class="nm">${esc(f.name)}</span>`; }
+    item.onclick=()=>select(f.id);
+    nav.appendChild(item);
+  });
+}
+
+function select(id){
+  document.querySelectorAll(".navitem").forEach(n=>n.classList.toggle("active",n.dataset.id===id));
+  const f=DATA.flows.find(x=>x.id===id);
+  if(f.isOverview) renderOverview(); else renderFlow(f);
+  location.hash=id;
+}
+
+buildNav();
+select(location.hash? location.hash.slice(1):"overview");
+window.addEventListener("hashchange",()=>{const id=location.hash.slice(1);if(id&&DATA.flows.find(x=>x.id===id))select(id);});
+</script>
+</body>
+</html>

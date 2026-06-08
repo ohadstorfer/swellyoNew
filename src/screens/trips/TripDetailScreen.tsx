@@ -425,9 +425,6 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     [participants, currentUserId]
   );
   const gearTotalCount = (trip?.personal_gear_host_suggestion?.length ?? 0) + myPersonalGear.length;
-  const gearDoneCount =
-    myGroupGear.filter(it => it.done && (trip?.personal_gear_host_suggestion ?? []).includes(it.name)).length +
-    myPersonalGear.filter(it => it.done).length;
   // Combined rows (host-suggested + my own) for the "Your gear" summary preview.
   const gearAllRows = [
     ...(trip?.personal_gear_host_suggestion ?? []).map(name => ({
@@ -1335,10 +1332,14 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           <YourGearCard
             rows={gearAllRows}
             totalCount={gearTotalCount}
-            doneCount={gearDoneCount}
             isHost={isHost}
             onOpen={() => setPersonalGearSheetOpen(true)}
             onEditSuggested={() => setEditSuggestedSheetOpen(true)}
+            onToggleItem={row =>
+              row.kind === 'host'
+                ? handleToggleGroupGearItem(row.name)
+                : handleTogglePersonalItem(row.name)
+            }
           />
         </View>
 

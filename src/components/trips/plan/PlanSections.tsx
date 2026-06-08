@@ -321,55 +321,83 @@ export const GroupGearCard: React.FC<{
 // 3b) Your Gear
 export type YourGearRow = { kind: 'host' | 'mine'; name: string; done: boolean };
 
+// 20px rounded checkbox — Figma component 2015:9638 (empty) / 2015:9664 (checked).
+const GearCheckbox: React.FC<{ checked: boolean }> = ({ checked }) => (
+  <View style={[styles.cbBox, checked && styles.cbBoxChecked]}>
+    {checked ? <Ionicons name="checkmark" size={14} color="#FFFFFF" /> : null}
+  </View>
+);
+
 export const YourGearCard: React.FC<{
   rows: YourGearRow[];
   totalCount: number;
-  doneCount: number;
   isHost: boolean;
   onOpen: () => void;
   onEditSuggested: () => void;
-}> = ({ rows, totalCount, isHost, onOpen, onEditSuggested }) => {
+  /** Toggle an item's "packed" state inline — no overlay (Figma 12716-7051). */
+  onToggleItem: (row: YourGearRow) => void;
+}> = ({ rows, totalCount, isHost, onOpen, onEditSuggested, onToggleItem }) => {
   const PREVIEW = 3;
   const preview = rows.slice(0, PREVIEW);
   const hidden = Math.max(0, totalCount - preview.length);
 
-  return (
-    <View style={styles.subBlock}>
-      <SectionHeader
-        title="Your Gear"
-        subtitle="Things you want to bring"
-        right={<LinkText label="View all" onPress={onOpen} />}
-      />
-      <PressableScale onPress={onOpen} style={undefined} scaleTo={0.99}>
-        <SectionCard>
-          {totalCount === 0 ? (
-            <Text style={styles.empty}>
-              {isHost ? 'No gear yet — add suggestions or your own items.' : 'No gear yet — tap to start your list.'}
+  // Build the row list so the LAST one can drop its divider (collapsing borders).
+  type RowDef = { key: string; onPress?: () => void; center?: boolean; node: React.ReactNode };
+  const rowDefs: RowDef[] = [];
+  if (totalCount === 0) {
+    rowDefs.push({
+      key: 'empty',
+      node: (
+        <Text style={styles.ygEmpty}>
+          {isHost ? 'No gear yet — add suggestions or your own items.' : 'No gear yet — tap to start your list.'}
+        </Text>
+      ),
+    });
+  } else {
+    preview.forEach(row =>
+      rowDefs.push({
+        key: `${row.kind}-${row.name}`,
+        onPress: () => onToggleItem(row),
+        node: (
+          <>
+            <GearCheckbox checked={row.done} />
+            <Text style={[styles.ygItem, row.done && styles.ygItemDone]} numberOfLines={1}>
+              {row.name}
             </Text>
-          ) : (
-            <>
-              {preview.map((row, i) => (
-                <View key={`${row.kind}-${row.name}`} style={[styles.checkRow, i > 0 && { marginTop: 12 }]}>
-                  <Ionicons
-                    name={row.done ? 'checkbox' : 'square-outline'}
-                    size={18}
-                    color={row.done ? T.accent : '#C4C4C4'}
-                  />
-                  <Text style={[styles.checkText, row.done && styles.checkTextDone]} numberOfLines={1}>
-                    {row.name}
-                  </Text>
-                </View>
-              ))}
-              {hidden > 0 ? <Text style={styles.gearMore}>+{hidden} more</Text> : null}
-            </>
-          )}
-        </SectionCard>
-      </PressableScale>
-      {isHost ? (
-        <View style={styles.editGearWrap}>
-          <LinkText label="Edit gear" onPress={onEditSuggested} />
+          </>
+        ),
+      }),
+    );
+    if (hidden > 0) {
+      rowDefs.push({ key: 'more', onPress: onOpen, center: true, node: <Text style={styles.ygMore}>+{hidden} more</Text> });
+    }
+  }
+  if (isHost) {
+    rowDefs.push({ key: 'edit', onPress: onEditSuggested, center: true, node: <Text style={styles.ygEdit}>Edit gear</Text> });
+  }
+
+  return (
+    <View style={styles.ygBlock}>
+      <View style={styles.ygHeader}>
+        <View style={styles.ygHeaderText}>
+          <Text style={styles.ygTitle}>Your Gear</Text>
+          <Text style={styles.ygSub}>Things you want to bring</Text>
         </View>
-      ) : null}
+        <Pressable onPress={onOpen} hitSlop={8}>
+          <Text style={styles.ygViewAll}>View all</Text>
+        </Pressable>
+      </View>
+      <View style={styles.ygCard}>
+        {rowDefs.map((d, i) => (
+          <Pressable
+            key={d.key}
+            onPress={d.onPress}
+            style={[styles.ygRow, d.center && styles.ygRowCenter, i === rowDefs.length - 1 && styles.ygRowLast]}
+          >
+            {d.node}
+          </Pressable>
+        ))}
+      </View>
     </View>
   );
 };
@@ -514,12 +542,47 @@ const styles = StyleSheet.create({
   },
   zeroChipText: { fontFamily: T.fontBody, fontSize: 12, color: T.muted },
 
-  // Your gear
-  checkRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  checkText: { flex: 1, fontFamily: T.fontBody, fontSize: 12, color: T.inkBody },
-  checkTextDone: { textDecorationLine: 'line-through', color: '#9AA0A6' },
-  gearMore: { fontFamily: T.fontBody, fontSize: 12, fontWeight: '600', color: T.muted, marginTop: 12, marginLeft: 30 },
-  editGearWrap: { alignItems: 'center', marginTop: 12 },
+  // Your Gear — exact match to Figma node 12716-7051
+  ygBlock: { marginTop: 16, paddingHorizontal: 16, paddingTop: 20, borderTopWidth: 1, borderTopColor: '#EEEEEE' },
+  ygHeader: { flexDirection: 'row', alignItems: 'flex-end', marginBottom: 16 },
+  ygHeaderText: { flex: 1, gap: 4 },
+  ygTitle: { fontFamily: T.fontBody, fontSize: 18, lineHeight: 22, fontWeight: '700', color: '#333333' },
+  ygSub: { fontFamily: T.fontBody, fontSize: 16, lineHeight: 18, color: '#6a7282' },
+  ygViewAll: { fontFamily: T.fontBody, fontSize: 16, lineHeight: 18, color: T.accent },
+  ygCard: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#EEEEEE',
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  ygRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    height: 54,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#EEEEEE',
+  },
+  ygRowCenter: { justifyContent: 'center' },
+  ygRowLast: { borderBottomWidth: 0 },
+  ygItem: { flex: 1, fontFamily: T.fontBody, fontSize: 16, lineHeight: 18, color: '#333333' },
+  ygItemDone: { textDecorationLine: 'line-through', color: '#a0a0a0' },
+  ygMore: { fontFamily: T.fontBody, fontSize: 16, color: T.muted },
+  ygEdit: { fontFamily: T.fontBody, fontSize: 18, lineHeight: 22, color: T.accent },
+  ygEmpty: { fontFamily: T.fontBody, fontSize: 16, color: T.muted },
+  // 20px rounded checkbox
+  cbBox: {
+    width: 20,
+    height: 20,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#d5d7da',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cbBoxChecked: { backgroundColor: T.accent, borderColor: T.accent },
 
   // Sticky Trip Chat
   footerOverlay: {
