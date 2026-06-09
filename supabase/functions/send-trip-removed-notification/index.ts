@@ -3,11 +3,15 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-const EXPO_ACCESS_TOKEN = Deno.env.get('EXPO_ACCESS_TOKEN')
 
 /**
- * Push notification to a participant who was removed from a trip by the host.
+ * Notify a participant who was removed from a trip by the host.
  * Invoked from groupTripsService.removeParticipant after the DELETE succeeds.
+ *
+ * Writes a member_removed feed row (5.3); the AFTER INSERT enqueue trigger turns
+ * it into a queued push (P0) and the queue dispatcher is the sole sender — it
+ * handles mute, missing-token, and DeviceNotRegistered itself. The direct Expo
+ * send that used to live here was removed at cutover (2026-06-09).
  */
 async function sendRemovedNotification(
   supabase: any,
@@ -16,7 +20,7 @@ async function sendRemovedNotification(
 ): Promise<void> {
   const { data: trip, error: tripError } = await supabase
     .from('group_trips')
-    .select('title, group_trip_destinations(short_label, name, country)')
+    .select('title')
     .eq('id', tripId)
     .single();
 
@@ -25,88 +29,17 @@ async function sendRemovedNotification(
     return;
   }
 
-  // Mute check — if the removed user muted the linked group-trip conversation, skip the push.
-  const { data: tripConv } = await supabase
-    .from('conversations')
-    .select('id')
-    .eq('metadata->>trip_id', tripId)
-    .maybeSingle();
-  if (tripConv?.id) {
-    const { data: member } = await supabase
-      .from('conversation_members')
-      .select('preferences')
-      .eq('conversation_id', tripConv.id)
-      .eq('user_id', removedUserId)
-      .maybeSingle();
-    const mutedUntilRaw = member?.preferences?.muted_until;
-    if (mutedUntilRaw) {
-      const mutedUntilMs = Date.parse(mutedUntilRaw);
-      if (!isNaN(mutedUntilMs) && mutedUntilMs > Date.now()) {
-        console.log(`[Trip Removed Notif] Skipping ${removedUserId} — muted until ${mutedUntilRaw}`);
-        return;
-      }
-    }
-  }
-
-  const { data: surfer } = await supabase
-    .from('surfers')
-    .select('expo_push_token')
-    .eq('user_id', removedUserId)
-    .single();
-
-  const pushToken = surfer?.expo_push_token;
-  if (!pushToken) {
-    console.log(`[Trip Removed Notif] No push token for user ${removedUserId}`);
-    return;
-  }
-
-  const dest = Array.isArray((trip as any).group_trip_destinations)
-    ? (trip as any).group_trip_destinations[0]
-    : (trip as any).group_trip_destinations;
-  const tripLabel =
-    trip.title ||
-    dest?.short_label ||
-    dest?.name ||
-    dest?.country ||
-    'a trip';
-
-  const title = 'You were removed from a trip';
-  const body = `The host removed you from ${tripLabel}.`;
-
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-  };
-  if (EXPO_ACCESS_TOKEN) {
-    headers['Authorization'] = `Bearer ${EXPO_ACCESS_TOKEN}`;
-  }
-
-  const pushResponse = await fetch('https://exp.host/--/api/v2/push/send', {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      to: pushToken,
-      title,
-      body,
-      sound: 'default',
-      data: { type: 'trip_removed', tripId },
-    }),
+  const { error: feedError } = await supabase.from('notifications').insert({
+    recipient_id: removedUserId,
+    trip_id: tripId,
+    type: 'member_removed',
+    audience: 'user',
+    entity_type: 'group_trip',
+    entity_id: tripId,
+    data: { trip_title: (trip as any).title ?? null },
   });
-
-  if (!pushResponse.ok) {
-    const errorData = await pushResponse.json().catch(() => ({ message: 'Unknown error' }));
-    console.error(`[Trip Removed Notif] Expo API error (${pushResponse.status}):`, JSON.stringify(errorData));
-    return;
-  }
-
-  const result = await pushResponse.json();
-  console.log(`[Trip Removed Notif] Sent to ${removedUserId}:`, JSON.stringify(result));
-
-  if (result.data?.status === 'error' && result.data?.details?.error === 'DeviceNotRegistered') {
-    console.log(`[Trip Removed Notif] Clearing stale token for ${removedUserId}`);
-    await supabase
-      .from('surfers')
-      .update({ expo_push_token: null })
-      .eq('user_id', removedUserId);
+  if (feedError) {
+    console.error('[Trip Removed Notif] member_removed feed insert failed:', feedError);
   }
 }
 

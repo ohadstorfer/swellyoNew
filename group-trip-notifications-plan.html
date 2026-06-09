@@ -91,6 +91,13 @@
   .badge.push { background:var(--accent); color:#fff; }
   .badge.feed { background:#eef1f2; color:#5a6b6f; }
   .badge.both { background:#ddf3e7; color:#1f7a4d; }
+  /* Section 5 priority tiers */
+  .pri { display:inline-block; font-size:10px; font-weight:800; letter-spacing:0.5px; padding:2px 7px; border-radius:5px; margin-right:8px; vertical-align:middle; }
+  .pri.now   { background:#1f9d57; color:#fff; }
+  .pri.later { background:#f0a202; color:#fff; }
+  .pri.skip  { background:#c9d1d2; color:#5a6b6f; }
+  li.tier-skip { opacity:0.62; }
+  li.tier-skip b { text-decoration:line-through; text-decoration-color:#b9c2c4; }
 
   .donts { background:var(--warn-soft); border:1px solid #f3e1b6; border-radius:12px; padding:14px 18px; margin-top:14px; }
   .donts h4 { margin:0 0 6px; font-size:13px; text-transform:uppercase; letter-spacing:0.5px; color:#a9750a; }
@@ -260,16 +267,16 @@
   <!-- 5. SMART RULES -->
   <section>
     <h2><span class="n">5</span> Smart rules — the engine behind it</h2>
-    <p class="sub">Cross-cutting logic that keeps the whole system calm and trustworthy.</p>
+    <p class="sub">Cross-cutting logic that keeps the system calm. <b>Tagged for this round:</b> <span class="pri now">NOW</span> ship with push · <span class="pri later">LATER</span> phase 2/3 · <span class="pri skip">SKIP</span> dropped for now.</p>
     <ul>
-      <li class="hasref"><span class="refcode">SR1</span><b>Batch.</b> Group rapid events — 3 joins in an hour become one "3 people joined".</li>
-      <li class="hasref"><span class="refcode">SR2</span><b>Frequency cap.</b> Max ~3 pushes per day per user across all their trips.</li>
-      <li class="hasref"><span class="refcode">SR3</span><b>Quiet hours.</b> Queue non-urgent pushes and release them at 8am local.</li>
-      <li class="hasref"><span class="refcode">SR4</span><b>Dedup.</b> If they read it in the feed, cancel the pending push.</li>
-      <li class="hasref"><span class="refcode">SR5</span><b>Collapse.</b> One trip = one live push — newest replaces the older one.</li>
-      <li class="hasref"><span class="refcode">SR6</span><b>Mute per trip.</b> Respect the existing mute; add a per-trip toggle.</li>
-      <li class="hasref"><span class="refcode">SR7</span><b>Granular opt-out.</b> Separate switches: reminders · group activity · re-engagement.</li>
-      <li class="hasref"><span class="refcode">SR8</span><b>Priority order.</b> Decisions &gt; reminders &gt; group activity &gt; re-engagement. High priority can skip the batch.</li>
+      <li class="hasref"><span class="pri now">NOW</span><span class="refcode">SR8</span><b>Priority order.</b> Decisions &gt; reminders &gt; group activity &gt; re-engagement. High priority skips the batch.<span class="why">Foundational — it's how we decide what pushes instantly vs waits. Just a priority field; the other rules lean on it.</span></li>
+      <li class="hasref"><span class="pri now">NOW</span><span class="refcode">SR4</span><b>Dedup vs feed.</b> If they already read it in the bell, cancel the pending push.<span class="why">Kills the most obvious annoyance — being pinged for something you just saw. High value, low cost.</span></li>
+      <li class="hasref"><span class="pri now">NOW</span><span class="refcode">SR6</span><b>Mute per trip.</b> Respect the existing mute; add a per-trip toggle.<span class="why">Mute already partly exists for chats — cheap to honour it for trip pushes too.</span></li>
+      <li class="hasref"><span class="pri now">NOW</span><span class="refcode">SR5</span><b>Collapse.</b> One trip = one live push — newest replaces the older one.<span class="why">Nearly free via Expo <code>collapseId</code> / Android thread id. Keeps the lock screen tidy.</span></li>
+      <li class="hasref"><span class="pri later">LATER</span><span class="refcode">SR1</span><b>Batch.</b> Group rapid events — 3 joins in an hour become one "3 people joined".<span class="why">Needs the push queue + a batching window. Worth doing, but after the backbone is solid.</span></li>
+      <li class="hasref"><span class="pri later">LATER</span><span class="refcode">SR3</span><b>Quiet hours.</b> Queue non-urgent pushes and release them at 8am local.<span class="why">Needs a per-user timezone we may not store yet. Phase it once TZ is sorted.</span></li>
+      <li class="hasref"><span class="pri later">LATER</span><span class="refcode">SR2</span><b>Frequency cap.</b> Max ~3 pushes per day per user across all their trips.<span class="why">Needs a sent-push log to count against — the queue's <code>sent</code> rows can serve as that later.</span></li>
+      <li class="hasref tier-skip"><span class="pri skip">SKIP</span><span class="refcode">SR7</span><b>Granular opt-out.</b> Separate switches: reminders · group activity · re-engagement.<span class="why">Needs a preferences screen (Phase 3). Out of scope for this round.</span></li>
     </ul>
   </section>
 

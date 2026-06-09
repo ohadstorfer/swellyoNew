@@ -75,6 +75,7 @@
     },
     "plugins": [
       "expo-web-browser",
+      "expo-localization",
       [
         "expo-image-picker",
         {
