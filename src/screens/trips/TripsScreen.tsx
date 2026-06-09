@@ -17,6 +17,8 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { BlurView } from 'expo-blur';
+const NOISE_TEXTURE = require('../../../assets/textures/noise.png');
 const FONT_INTER = Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter';
 const FONT_MONTSERRAT = Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat';
 import { useOnboarding } from '../../context/OnboardingContext';
@@ -189,7 +191,7 @@ const TripCard: React.FC<{
             <Image source={{ uri: meta.hostAvatar }} style={styles.hostAvatar} />
           ) : (
             <View style={[styles.hostAvatar, styles.hostAvatarPlaceholder]}>
-              <Ionicons name="person" size={18} color="#FFFFFF" />
+              <Ionicons name="person" size={24} color="#FFFFFF" />
             </View>
           )}
           {!!meta?.hostName && (
@@ -199,33 +201,42 @@ const TripCard: React.FC<{
           )}
         </View>
 
-        {/* Bottom darkening so the title/description stay legible on any photo */}
-        <LinearGradient
-          colors={['transparent', 'rgba(0,0,0,0.55)']}
-          style={styles.cardGradient}
-          pointerEvents="none"
-        />
-
+        {/* Noise-glass panel behind the title/description (Figma: blur 3.5px +
+            black 0.2 tint + fractalNoise grain). Parent clips the rounded corners. */}
         <View style={styles.cardTextBlock}>
-          <Text style={styles.cardTitle} numberOfLines={1}>
-            {formatDestination(trip)}
-          </Text>
-          {!!trip.description && (
-            <Text style={styles.cardDesc} numberOfLines={2}>
-              {trip.description}
+          <BlurView intensity={20} tint="dark" style={StyleSheet.absoluteFill} />
+          <View style={styles.cardGlassTint} pointerEvents="none" />
+          <Image
+            source={NOISE_TEXTURE}
+            style={styles.cardNoise}
+            resizeMode="repeat"
+            pointerEvents="none"
+          />
+          <View style={styles.cardTextContent}>
+            <Text style={styles.cardTitle} numberOfLines={1}>
+              {trip.title?.trim() || formatDestination(trip)}
             </Text>
-          )}
+            {!!trip.description && (
+              <Text style={styles.cardDesc} numberOfLines={2}>
+                {trip.description}
+              </Text>
+            )}
+          </View>
         </View>
 
         {/* Participant cluster (bottom-right). Falls back to an icon + count when
             no avatars are available (e.g. Explore trips the viewer isn't in). */}
         {avatars.length > 0 ? (
-          <View style={styles.avatarCluster}>
+          <View style={[styles.avatarCluster, overflow <= 0 && styles.avatarClusterTight]}>
             {avatars.map((uri, i) => (
               <Image
                 key={`${uri}-${i}`}
                 source={{ uri }}
-                style={[styles.clusterAvatar, i > 0 && styles.clusterAvatarOverlap]}
+                style={[
+                  styles.clusterAvatar,
+                  i > 0 && styles.clusterAvatarOverlap,
+                  { zIndex: avatars.length - i },
+                ]}
               />
             ))}
             {overflow > 0 && <Text style={styles.clusterMore}>+{overflow}</Text>}
@@ -269,11 +280,7 @@ const TripFilterBar: React.FC<{
     { key: 'completed', label: `Completed (${counts.completed})` },
   ];
   return (
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      contentContainerStyle={styles.filterRow}
-    >
+    <View style={styles.filterRow}>
       {items.map(it => {
         const isActive = active === it.key;
         return (
@@ -285,13 +292,16 @@ const TripFilterBar: React.FC<{
             accessibilityRole="button"
             accessibilityState={{ selected: isActive }}
           >
-            <Text style={[styles.filterText, isActive ? styles.filterTextActive : styles.filterTextInactive]}>
+            <Text
+              numberOfLines={1}
+              style={[styles.filterText, isActive ? styles.filterTextActive : styles.filterTextInactive]}
+            >
               {it.label}
             </Text>
           </TouchableOpacity>
         );
       })}
-    </ScrollView>
+    </View>
   );
 };
 
@@ -929,7 +939,7 @@ export default function TripsScreen({ onBack, initialTripId, onOpenGroupChat, on
             <Logo size={40} iconOnly />
             <Text style={styles.tripsHeaderTitle}>Trips</Text>
           </View>
-          <NotificationCenter userId={currentUserId} />
+          <NotificationCenter userId={currentUserId} bare />
         </View>
 
         <TripsHeaderTabs active={activeTab} onChange={goToTab} />
@@ -1067,7 +1077,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingLeft: 12,
-    paddingRight: 8,
+    paddingRight: 18,
     paddingVertical: 10,
   },
   headerLeft: {
@@ -1090,22 +1100,23 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 12,
+    paddingTop: 12,
+    paddingBottom: 18,
     paddingHorizontal: 8,
   },
   tabBtnActive: {
-    borderBottomWidth: 3,
+    borderBottomWidth: 4,
     borderBottomColor: '#05BCD3',
   },
   tabBtnInactive: {
     borderBottomWidth: 2,
     borderBottomColor: '#7B7B7B',
   },
-  tabLabel: { fontFamily: FONT_INTER, fontSize: 14, lineHeight: 18, fontWeight: '400' },
+  tabLabel: { fontFamily: FONT_INTER, fontSize: 17, lineHeight: 21, fontWeight: '400', letterSpacing: 0.3 },
   tabLabelActive: { color: '#05BCD3' },
   tabLabelInactive: { color: '#FFFFFF' },
 
-  body: { flex: 1, backgroundColor: '#FFFFFF', paddingTop: 16, overflow: 'hidden' },
+  body: { flex: 1, backgroundColor: '#FFFFFF', paddingTop: 0, overflow: 'hidden' },
   // Horizontal pager row: three full-width panes laid side by side; translateX
   // slides between them. Width is set inline once the viewport is measured.
   pagerRow: { flex: 1, flexDirection: 'row' },
@@ -1124,12 +1135,18 @@ const styles = StyleSheet.create({
   listContent: { paddingHorizontal: 16, paddingBottom: 24, flexGrow: 1 },
 
   // Filter pills (My Trips).
-  filterRow: { flexDirection: 'row', gap: 11, paddingBottom: 12, alignItems: 'center' },
+  filterRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 22,
+    marginBottom: 28,
+    marginHorizontal: 6,
+    alignItems: 'center',
+  },
   filterPill: {
-    minWidth: 42,
     borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 11,
+    paddingVertical: 13,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1139,7 +1156,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#EEEEEE',
   },
-  filterText: { fontFamily: FONT_INTER, fontSize: 10, lineHeight: 20, textAlign: 'center' },
+  filterText: { fontFamily: FONT_INTER, fontSize: 13, lineHeight: 18, textAlign: 'center' },
   filterTextActive: { color: '#FFFFFF' },
   filterTextInactive: { color: '#333333' },
   filterEmpty: { alignItems: 'center', justifyContent: 'center', paddingVertical: 48 },
@@ -1178,10 +1195,10 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   hostAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    borderWidth: 1,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    borderWidth: 1.5,
     borderColor: '#FFFFFF',
     backgroundColor: '#3A3A3A',
   },
@@ -1189,20 +1206,13 @@ const styles = StyleSheet.create({
   hostName: {
     flex: 1,
     color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '500',
+    fontSize: 17,
+    fontWeight: '600',
     textShadowColor: 'rgba(0,0,0,0.4)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 3,
   },
 
-  cardGradient: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: 130,
-  },
   cardTextBlock: {
     position: 'absolute',
     left: 0,
@@ -1210,12 +1220,26 @@ const styles = StyleSheet.create({
     bottom: 0,
     height: 120,
     justifyContent: 'flex-end',
+    overflow: 'hidden',
+  },
+  // Black tint over the blur (Figma glass: rgba(0,0,0,0.2) + the blur's 0.1).
+  cardGlassTint: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.30)',
+  },
+  // Tiled fractal-noise grain (baked PNG already carries the low alpha).
+  cardNoise: {
+    ...StyleSheet.absoluteFillObject,
+    width: '100%',
+    height: '100%',
+  },
+  cardTextContent: {
+    justifyContent: 'flex-end',
     paddingTop: 8,
     paddingRight: 16,
     paddingBottom: 24,
     paddingLeft: 16,
     gap: 10,
-    backgroundColor: 'rgba(0, 0, 0, 0.20)',
   },
   cardTitle: {
     fontFamily: FONT_MONTSERRAT,
@@ -1251,23 +1275,31 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#CFCFCF',
     borderRadius: 56,
-    paddingVertical: 2,
-    paddingLeft: 2,
-    paddingRight: 8,
+    paddingVertical: 0,
+    paddingLeft: 0,
+    paddingRight: 7,
   },
   clusterAvatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: '#DDDDDD',
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.18,
+    shadowRadius: 2.5,
+    elevation: 3,
   },
-  clusterAvatarOverlap: { marginLeft: -16 },
+  clusterAvatarOverlap: { marginLeft: -20 },
+  avatarClusterTight: { paddingRight: 0 },
   avatarClusterCount: { gap: 4, paddingLeft: 8 },
   clusterMore: {
-    marginLeft: 6,
+    marginLeft: 1,
     fontFamily: FONT_MONTSERRAT,
-    fontSize: 16,
-    lineHeight: 20,
+    fontSize: 14,
+    lineHeight: 18,
     color: '#7B7B7B',
     fontWeight: '400',
   },
@@ -1295,8 +1327,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingRight: 8,
   },
-  statusLabel: { fontFamily: FONT_INTER, color: '#0A0A0A', fontSize: 12, lineHeight: 18 },
-  statusDate: { fontFamily: FONT_INTER, color: '#4A5565', fontSize: 12, lineHeight: 18 },
+  statusLabel: { fontFamily: FONT_INTER, color: '#0A0A0A', fontSize: 13, lineHeight: 19, fontWeight: '500' },
+  statusDate: { fontFamily: FONT_INTER, color: '#4A5565', fontSize: 13, lineHeight: 19, fontWeight: '500' },
 
   // Explore snap-carousel (Figma 11966:32391) — centered card, peeking neighbours.
   deckRoot: {
