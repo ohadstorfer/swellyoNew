@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Alert, Keyboard, Linking, Platform, Pressable, StyleSheet, View, TouchableOpacity, Text as RNText } from 'react-native';
+import { Alert, AppState, Keyboard, Linking, Platform, Pressable, StyleSheet, View, TouchableOpacity, Text as RNText } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { WelcomeScreen } from '../screens/WelcomeScreen';
 import { OnboardingWelcomeScreen } from '../screens/OnboardingWelcomeScreen';
@@ -52,6 +52,7 @@ import { ageGateService } from '../services/ageGate/ageGateService';
 import { swellyServiceCopy, swellyServiceCopyCopy } from '../services/swelly/swellyServiceCopy';
 import { findAndConnectMatches, OnboardingMatchResult } from '../services/matching/onboardingMatchingService';
 import { pushNotificationService } from '../services/notifications/pushNotificationService';
+import { syncDeviceTimezone } from '../services/notifications/deviceTimezone';
 import { useMessaging } from '../context/MessagingProvider';
 
 export const AppContent: React.FC = () => {
@@ -1624,6 +1625,15 @@ export const AppContent: React.FC = () => {
       );
     }
   }, [shouldShowConversations]);
+
+  // Keep the user's device timezone synced (powers per-user quiet hours for notifications).
+  useEffect(() => {
+    const uid = (user as any)?.id;
+    if (!shouldShowConversations || !uid) return;
+    syncDeviceTimezone(uid);
+    const sub = AppState.addEventListener('change', (s) => { if (s === 'active') syncDeviceTimezone(uid); });
+    return () => sub.remove();
+  }, [shouldShowConversations, user]);
 
   // Load current user profile data (name + avatar) when entering main app
   useEffect(() => {
