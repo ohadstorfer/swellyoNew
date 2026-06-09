@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -581,7 +581,11 @@ const TripDeck: React.FC<{
         snapToAlignment="start"
         decelerationRate="fast"
         disableIntervalMomentum
-        scrollEventThrottle={16}
+        // 1 (not 16) so the card transform gets every display frame. At 16 the
+        // scroll-event stream is capped to ~60/s while a ProMotion screen runs at
+        // 120 — fine during fast motion, but at the slow tail of the snap the
+        // transform steps at half the display rate and clips into its final state.
+        scrollEventThrottle={1}
         getItemLayout={(_, index) => ({
           length: DECK_ITEM_W,
           offset: index * DECK_ITEM_W,
@@ -604,35 +608,135 @@ const TripDeck: React.FC<{
 };
 
 // ---------------------------------------------------------------------------
-// Explore header — title + filter pills (Figma 11966:32392).
-// The filters are VISUAL ONLY for now: "All" reads active, the rest are inert
-// placeholders (no state, no query wiring) until filtering is built.
+// Explore filters (Figma 11966:32392) — month + budget chips, all client-side.
+// Chips toggle independently. Within a group (months / budget) the matches are
+// OR'd; across groups they're AND'd. "All" clears every selection.
 // ---------------------------------------------------------------------------
-const EXPLORE_FILTERS = ['All', 'Dates', 'Level', 'Vibe', 'Budget'];
+const BUDGET_THRESHOLD = 1000; // $ — the below/above split point (boundary inclusive)
 
-const ExploreHeader: React.FC = () => (
-  <View style={styles.exHeader}>
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      contentContainerStyle={styles.exFilterRow}
-    >
-      {EXPLORE_FILTERS.map((label, i) => {
-        const active = i === 0; // "All" — static until filters are wired
-        return (
-          <View
-            key={label}
-            style={[styles.exFilterPill, active ? styles.exFilterPillActive : styles.exFilterPillInactive]}
-          >
-            <Text style={active ? styles.exFilterTextActive : styles.exFilterTextInactive}>
-              {label}
-            </Text>
-          </View>
-        );
-      })}
-    </ScrollView>
-  </View>
-);
+type ExploreChipKind = 'month' | 'budget';
+interface ExploreChip {
+  id: string;
+  label: string;
+  kind: ExploreChipKind;
+  value: string; // month → "YYYY-MM"; budget → "below" | "above"
+}
+
+// Three rolling month chips derived from the device clock, so the labels move
+// forward on their own every month. First two read "This/Next Month"; the third
+// shows the literal month name (e.g. "August").
+const buildExploreChips = (now: Date): ExploreChip[] => {
+  const ymOffset = (offset: number) => {
+    const d = new Date(now.getFullYear(), now.getMonth() + offset, 1);
+    const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    const name = d.toLocaleDateString(undefined, { month: 'long' });
+    return { ym, name };
+  };
+  const m0 = ymOffset(0);
+  const m1 = ymOffset(1);
+  const m2 = ymOffset(2);
+  return [
+    { id: `m:${m0.ym}`, label: 'This Month', kind: 'month', value: m0.ym },
+    { id: `m:${m1.ym}`, label: 'Next Month', kind: 'month', value: m1.ym },
+    { id: `m:${m2.ym}`, label: m2.name, kind: 'month', value: m2.ym },
+    { id: 'b:below', label: `Below $${BUDGET_THRESHOLD / 1000}k`, kind: 'budget', value: 'below' },
+    { id: 'b:above', label: `Above $${BUDGET_THRESHOLD / 1000}k`, kind: 'budget', value: 'above' },
+  ];
+};
+
+// A trip happens in month "YYYY-MM" if its loose months list includes it, or if
+// the month falls within the firm start..end range (so a Jun–Jul trip matches
+// both June and July). Trips with no dates ("TBD") match no month filter.
+const tripInMonth = (trip: GroupTrip, ym: string): boolean => {
+  if (trip.date_months?.some(m => m === ym)) return true;
+  if (trip.start_date && trip.end_date) {
+    return ym >= trip.start_date.slice(0, 7) && ym <= trip.end_date.slice(0, 7);
+  }
+  return false;
+};
+
+// Collapse the three possible budget shapes into one [min, max] band: a flat
+// per-person price is a zero-width band; otherwise the min/max pair.
+const tripBudgetBand = (trip: GroupTrip): [number, number] | null => {
+  if (trip.cost_per_person != null) return [trip.cost_per_person, trip.cost_per_person];
+  const lo = trip.budget_min;
+  const hi = trip.budget_max;
+  if (lo != null || hi != null) {
+    const min = lo ?? hi!;
+    const max = hi ?? lo!;
+    return [min, max];
+  }
+  return null;
+};
+
+// "Below" = the band dips to/under the threshold; "Above" = it reaches/over it.
+// Boundary is inclusive both ways, so a trip priced exactly at the threshold
+// matches both chips.
+const tripInBudget = (trip: GroupTrip, value: string): boolean => {
+  const band = tripBudgetBand(trip);
+  if (!band) return false;
+  return value === 'below' ? band[0] <= BUDGET_THRESHOLD : band[1] >= BUDGET_THRESHOLD;
+};
+
+const applyExploreFilters = (
+  trips: GroupTrip[],
+  chips: ExploreChip[],
+  selected: Set<string>,
+): GroupTrip[] => {
+  if (selected.size === 0) return trips;
+  const months = chips.filter(c => c.kind === 'month' && selected.has(c.id)).map(c => c.value);
+  const budgets = chips.filter(c => c.kind === 'budget' && selected.has(c.id)).map(c => c.value);
+  return trips.filter(t => {
+    const monthOk = months.length === 0 || months.some(ym => tripInMonth(t, ym));
+    const budgetOk = budgets.length === 0 || budgets.some(v => tripInBudget(t, v));
+    return monthOk && budgetOk;
+  });
+};
+
+const ExploreHeader: React.FC<{
+  chips: ExploreChip[];
+  selected: Set<string>;
+  onToggle: (id: string) => void;
+  onClear: () => void;
+}> = ({ chips, selected, onToggle, onClear }) => {
+  const allActive = selected.size === 0;
+  return (
+    <View style={styles.exHeader}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.exFilterRow}
+      >
+        <TouchableOpacity
+          style={[styles.exFilterPill, allActive ? styles.exFilterPillActive : styles.exFilterPillInactive]}
+          onPress={onClear}
+          activeOpacity={0.8}
+          accessibilityRole="button"
+          accessibilityState={{ selected: allActive }}
+        >
+          <Text style={allActive ? styles.exFilterTextActive : styles.exFilterTextInactive}>All</Text>
+        </TouchableOpacity>
+        {chips.map(chip => {
+          const active = selected.has(chip.id);
+          return (
+            <TouchableOpacity
+              key={chip.id}
+              style={[styles.exFilterPill, active ? styles.exFilterPillActive : styles.exFilterPillInactive]}
+              onPress={() => onToggle(chip.id)}
+              activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityState={{ selected: active }}
+            >
+              <Text style={active ? styles.exFilterTextActive : styles.exFilterTextInactive}>
+                {chip.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+    </View>
+  );
+};
 
 // ---------------------------------------------------------------------------
 // Explore view
@@ -650,6 +754,23 @@ const ExploreTripsView: React.FC<{ onOpenTrip: (tripId: string) => void }> = ({ 
   const trips = data?.trips ?? [];
   const meta = data?.meta ?? EMPTY_META;
 
+  // Month chips roll off the device clock; built once per mount.
+  const chips = useMemo(() => buildExploreChips(new Date()), []);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const toggleChip = useCallback((id: string) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }, []);
+  const clearChips = useCallback(() => setSelected(new Set()), []);
+
+  const filtered = useMemo(
+    () => applyExploreFilters(trips, chips, selected),
+    [trips, chips, selected],
+  );
+
   if (isLoading) {
     return <ExploreDeckSkeleton />;
   }
@@ -663,9 +784,9 @@ const ExploreTripsView: React.FC<{ onOpenTrip: (tripId: string) => void }> = ({ 
     );
   }
 
-  // Vertical scroll of horizontal swipe-deck carousels. "Popular" shows every
-  // trip; "Trip Operators" is filtered to operator-run trips (hosting_style 'C').
-  const operatorTrips = trips.filter(t => t.hosting_style === 'C');
+  // Vertical scroll of horizontal swipe-deck carousels. "Popular" shows the
+  // filtered set; "Trip Operators" narrows that to operator-run trips (style 'C').
+  const operatorTrips = filtered.filter(t => t.hosting_style === 'C');
   return (
     <FadeInView style={styles.fillFlex}>
       <ScrollView
@@ -673,13 +794,26 @@ const ExploreTripsView: React.FC<{ onOpenTrip: (tripId: string) => void }> = ({ 
         contentContainerStyle={styles.exScrollContent}
       >
         <Text style={styles.exploreTitle}>Discover the world{'\n'}with Swellyo</Text>
-        <ExploreHeader />
-        <Text style={styles.exSectionTitle}>Popular</Text>
-        <TripDeck trips={trips} meta={meta} onOpenTrip={onOpenTrip} />
-        {operatorTrips.length > 0 && (
+        <ExploreHeader
+          chips={chips}
+          selected={selected}
+          onToggle={toggleChip}
+          onClear={clearChips}
+        />
+        {filtered.length === 0 ? (
+          <View style={styles.filterEmpty}>
+            <Text style={styles.emptyText}>No trips match these filters.</Text>
+          </View>
+        ) : (
           <>
-            <Text style={[styles.exSectionTitle, styles.exSectionTitleStacked]}>Trip Operators</Text>
-            <TripDeck trips={operatorTrips} meta={meta} onOpenTrip={onOpenTrip} />
+            <Text style={styles.exSectionTitle}>Popular</Text>
+            <TripDeck trips={filtered} meta={meta} onOpenTrip={onOpenTrip} />
+            {operatorTrips.length > 0 && (
+              <>
+                <Text style={[styles.exSectionTitle, styles.exSectionTitleStacked]}>Trip Operators</Text>
+                <TripDeck trips={operatorTrips} meta={meta} onOpenTrip={onOpenTrip} />
+              </>
+            )}
           </>
         )}
       </ScrollView>
