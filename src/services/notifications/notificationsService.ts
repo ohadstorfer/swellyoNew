@@ -23,7 +23,12 @@ export type NotificationType =
   | 'join_request_decided'
   | 'join_request_received'
   | 'gear_request_received'
-  | 'commitment_request_received';
+  | 'commitment_request_received'
+  | 'member_left'
+  | 'trip_cancelled'
+  | 'member_removed'
+  | 'trip_reminder'
+  | 'trip_ended';
 
 export interface NotificationRow {
   id: string;
@@ -256,6 +261,22 @@ export function renderNotification(n: NotificationRow): RenderedNotification {
       return { title: 'New gear request', body: `${who} requested ${d.item_name ?? 'gear'}.`, icon: 'cube-outline' };
     case 'commitment_request_received':
       return { title: 'New commitment request', body: `${who} wants to commit to ${trip}.`, icon: 'hand-right-outline' };
+    case 'member_left':
+      return { title: 'A member left', body: `${who} left ${trip}.`, icon: 'exit-outline' };
+    case 'trip_cancelled':
+      return { title: 'Trip cancelled', body: `${trip} was cancelled.`, icon: 'close-circle-outline' };
+    case 'member_removed':
+      return { title: 'Removed from trip', body: `You're no longer part of ${trip}.`, icon: 'remove-circle-outline' };
+    case 'trip_reminder': {
+      const s = d.stage || '';
+      if (s === 'tomorrow') return { title: 'Trip tomorrow', body: `${trip} starts tomorrow.`, icon: 'time-outline' };
+      if (s === 'today') return { title: 'Trip today', body: `${trip} starts today.`, icon: 'time-outline' };
+      if (s.startsWith('commit_')) return { title: 'Lock your spot', body: `Commit to ${trip} before it fills up.`, icon: 'time-outline' };
+      if (s.startsWith('gear_')) return { title: 'Gear still needed', body: `Some gear for ${trip} still needs an owner.`, icon: 'time-outline' };
+      return { title: 'Trip reminder', body: `${trip} is coming up.`, icon: 'time-outline' };
+    }
+    case 'trip_ended':
+      return { title: 'Trip ended', body: `Share your photos & memories from ${trip}.`, icon: 'images-outline' };
     default:
       return { title: 'Notification', body: '', icon: 'notifications-outline' };
   }

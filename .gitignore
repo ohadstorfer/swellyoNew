@@ -60,3 +60,4 @@ android/sentry.properties
 ios/sentry.properties
 .sentryclirc
 scripts/.jwt
+.claude/worktrees/

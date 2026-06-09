@@ -1200,6 +1200,14 @@ export async function leaveTrip(tripId: string, userId: string): Promise<void> {
     console.warn('[groupTripsService] leaveTrip banner failed:', bannerError);
   }
 
+  // Notify the host that a member left (opens a spot). Best-effort: never block leaving.
+  // Must run BEFORE the delete — fn_notify_member_left verifies the caller is still a participant.
+  try {
+    await supabase.rpc('fn_notify_member_left', { p_trip_id: tripId });
+  } catch (e) {
+    console.warn('[groupTripsService] leaveTrip member_left notify failed (non-fatal):', e);
+  }
+
   const { error } = await supabase
     .from('group_trip_participants')
     .delete()

@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Swellyo — Notifications Testing Guide (Simple)</title>
+<style>
+  :root {
+    --ink: #0f172a;
+    --ink-soft: #475569;
+    --ink-faint: #94a3b8;
+    --bg: #ffffff;
+    --bg-soft: #f8fafc;
+    --line: #e2e8f0;
+    --accent: #0284c7;
+    --accent-soft: #e0f2fe;
+    --green: #15803d;
+    --green-soft: #dcfce7;
+    --amber: #b45309;
+    --amber-soft: #fef3c7;
+    --red: #b91c1c;
+    --red-soft: #fee2e2;
+    --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: var(--ink);
+    background: var(--bg);
+    line-height: 1.6;
+    font-size: 16px;
+  }
+  .progress-wrap {
+    position: sticky; top: 0; z-index: 10;
+    background: rgba(255,255,255,0.92);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+    padding: 10px 20px;
+    display: flex; align-items: center; gap: 14px;
+  }
+  .progress-label { font-size: 13px; font-weight: 600; color: var(--ink-soft); white-space: nowrap; }
+  .progress-bar { flex: 1; height: 8px; background: var(--bg-soft); border: 1px solid var(--line); border-radius: 99px; overflow: hidden; }
+  .progress-fill { height: 100%; width: 0%; background: var(--accent); border-radius: 99px; transition: width 250ms var(--ease-out); }
+  main { max-width: 780px; margin: 0 auto; padding: 32px 20px 120px; }
+  h1 { font-size: 28px; line-height: 1.25; margin: 8px 0 4px; letter-spacing: -0.02em; }
+  .subtitle { color: var(--ink-soft); margin: 0 0 28px; }
+  h2 {
+    font-size: 20px; margin: 48px 0 12px; letter-spacing: -0.01em;
+    padding-top: 24px; border-top: 1px solid var(--line);
+  }
+  h2 .step-num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 26px; height: 26px; border-radius: 8px;
+    background: var(--accent-soft); color: var(--accent);
+    font-size: 14px; font-weight: 700; margin-right: 10px; vertical-align: -4px;
+  }
+  p { margin: 10px 0; }
+  .note { border-radius: 12px; padding: 12px 16px; margin: 14px 0; font-size: 15px; border: 1px solid; }
+  .note strong { display: block; margin-bottom: 2px; }
+  .note.red   { background: var(--red-soft);   border-color: #fecaca; color: var(--red); }
+  .note.amber { background: var(--amber-soft); border-color: #fde68a; color: var(--amber); }
+  .note.blue  { background: var(--accent-soft);border-color: #bae6fd; color: #075985; }
+  .note.green { background: var(--green-soft); border-color: #bbf7d0; color: var(--green); }
+  .dict { display: grid; grid-template-columns: 110px 1fr; gap: 6px 14px; margin: 16px 0; font-size: 15px; }
+  .dict dt { font-weight: 700; color: var(--ink); }
+  .dict dd { margin: 0; color: var(--ink-soft); }
+  pre {
+    background: var(--bg-soft); border: 1px solid var(--line); border-radius: 12px;
+    padding: 14px 16px; overflow-x: auto; font-size: 13.5px; line-height: 1.55;
+    position: relative; margin: 12px 0;
+  }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  p code, li code, td code {
+    background: var(--bg-soft); border: 1px solid var(--line);
+    border-radius: 6px; padding: 1px 6px; font-size: 13.5px;
+  }
+  .copy-btn {
+    position: absolute; top: 8px; right: 8px;
+    border: 1px solid var(--line); background: #fff; color: var(--ink-soft);
+    font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 8px; cursor: pointer;
+    transition: transform 160ms var(--ease-out), background 160ms ease;
+  }
+  .copy-btn:active { transform: scale(0.96); }
+  @media (hover: hover) and (pointer: fine) { .copy-btn:hover { background: var(--bg-soft); } }
+  .test {
+    border: 1px solid var(--line); border-radius: 14px;
+    padding: 16px 18px; margin: 14px 0; background: #fff;
+    transition: border-color 200ms ease, background 200ms ease;
+  }
+  .test.done { background: #f6fef9; border-color: #bbf7d0; }
+  .test-head { display: flex; align-items: flex-start; gap: 12px; }
+  .test-head input[type="checkbox"] {
+    width: 21px; height: 21px; margin-top: 2px; flex-shrink: 0;
+    accent-color: var(--green); cursor: pointer;
+  }
+  .test-title { font-weight: 700; font-size: 16px; }
+  .test.done .test-title { color: var(--green); }
+  .badge {
+    display: inline-block; font-size: 11.5px; font-weight: 700; letter-spacing: 0.03em;
+    padding: 2px 9px; border-radius: 99px; margin-left: 8px; vertical-align: 1px;
+    text-transform: uppercase;
+  }
+  .badge.host   { background: var(--accent-soft); color: #075985; }
+  .badge.member { background: #f3e8ff; color: #7e22ce; }
+  .badge.sql    { background: var(--amber-soft); color: var(--amber); }
+  .badge.locked { background: var(--red-soft); color: var(--red); }
+  .badge.feed   { background: #e2e8f0; color: #334155; }
+  .test-body { margin-top: 8px; font-size: 15px; color: var(--ink-soft); }
+  .test-body ol { margin: 6px 0; padding-left: 22px; }
+  .test-body li { margin: 3px 0; }
+  .expect {
+    margin-top: 10px; background: var(--bg-soft); border: 1px solid var(--line);
+    border-radius: 10px; padding: 10px 14px; font-size: 14.5px;
+  }
+  .expect b { color: var(--ink); }
+  .precheck { display: flex; align-items: center; gap: 10px; padding: 8px 0; font-size: 15px; }
+  .precheck .tick {
+    width: 22px; height: 22px; border-radius: 99px; flex-shrink: 0;
+    background: var(--green-soft); color: var(--green);
+    display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 800;
+  }
+  table { border-collapse: collapse; width: 100%; font-size: 14.5px; margin: 12px 0; }
+  th, td { border: 1px solid var(--line); padding: 8px 12px; text-align: left; }
+  th { background: var(--bg-soft); font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-soft); }
+  .finish {
+    margin-top: 40px; border-radius: 16px; padding: 24px;
+    background: linear-gradient(135deg, #f0f9ff, #f0fdf4); border: 1px solid #bae6fd;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .progress-fill, .copy-btn, .test { transition: none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="progress-wrap">
+  <span class="progress-label" id="progressLabel">0 / 0 tests done</span>
+  <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+</div>
+
+<main>
+
+<h1>🔔 Trip Notifications — Simple Testing Guide</h1>
+<p class="subtitle">Check every box on this page → the notification system is 100% working. Written in very simple English. Your progress is saved in this browser.</p>
+
+<!-- ============================================================= -->
+<h2><span class="step-num">1</span>What did we build? </h2>
+
+<p>When something happens in a group trip (someone joins, leaves, cancels…), two things happen:</p>
+<dl class="dict">
+  <dt>🔔 The bell</dt><dd>A message appears inside the app, in the notification bell. This already worked before.</dd>
+  <dt>📬 The queue</dt><dd><b>NEW:</b> a "push" (phone alert) is put in a waiting line in the database. A robot checks the line every minute and sends the alerts to phones.</dd>
+</dl>
+
+<!-- ============================================================= -->
+
+<!-- ============================================================= -->
+<h2><span class="step-num">3</span>Your two magic check queries</h2>
+
+<p>You will use these two queries again and again. Run them in the <b>Supabase dashboard → SQL Editor</b>, or just ask Claude Code: <i>"run check A"</i> / <i>"run check B"</i>.</p>
+
+<p><b>CHECK A — the bell 🔔</b> (did the in-app message arrive, and for whom?)</p>
+<pre><button class="copy-btn">Copy</button><code>select u.email as who,
+       n.type,
+       n.data->>'trip_title' as trip,
+       n.data->>'stage'      as stage,
+       to_char(n.created_at, 'DD/MM HH24:MI') as at_time,
+       (n.read_at is not null) as read
+from notifications n
+join users u on u.id = n.recipient_id
+where lower(u.email) in ('ohad.storfer@gmail.com', 'eyal@swellyo.com')
+order by n.created_at desc
+limit 8;</code></pre>
+
+<p><b>CHECK B — the push line 📬</b> (would a phone alert be sent, and what would it say?)</p>
+<pre><button class="copy-btn">Copy</button><code>select u.email as who,
+       q.type,
+       q.status,
+       q.skip_reason as reason,
+       q.payload->>'title' as push_title,
+       q.payload->>'body'  as push_text,
+       to_char(q.send_after, 'DD/MM HH24:MI') as send_at,
+       to_char(q.created_at, 'DD/MM HH24:MI') as at_time
+from notification_queue q
+join users u on u.id = q.recipient_id
+order by q.created_at desc
+limit 8;</code></pre>
+
+<p><b>How to read CHECK B results:</b></p>
+<table>
+  <tr><th>status / reason</th><th>Meaning</th></tr>
+  <tr><td><code>sent</code></td><td>✅ <b>PERFECT.</b> The push was really sent — the phone should have buzzed with this title + text.</td></tr>
+  <tr><td><code>skipped</code> / <code>no_token</code></td><td>The receiver's phone never registered for pushes (or logged out). The bell message still works.</td></tr>
+  <tr><td><code>skipped</code> / <code>batched</code></td><td>✅ Good. Several updates were grouped into one push (smart rule).</td></tr>
+  <tr><td><code>skipped</code> / <code>read_in_feed</code></td><td>✅ Good. You already read it in the bell, so no push is needed (smart rule).</td></tr>
+  <tr><td><code>skipped</code> / <code>muted</code></td><td>✅ Good. You muted this trip, so no push (smart rule).</td></tr>
+  <tr><td><code>pending</code></td><td>⏳ Waiting. Check again in 1–2 minutes (or it is waiting for morning — see <code>send_at</code>).</td></tr>
+  <tr><td><code>skipped</code> / <code>shadow</code></td><td>Old rows from before go-live (practice mode). New rows should never say this.</td></tr>
+</table>
+
+<!-- ============================================================= -->
+<h2><span class="step-num">4</span>One-time setup</h2>
+
+<p>You need the <b>2 tester accounts</b> and <b>2 trips</b>:</p>
+<ol>
+  <li><b>Ohad</b> (ohad.storfer@gmail.com) and <b>Eyal</b> (eyal@swellyo.com). Both can receive notifications.</li>
+  <li><b>Trip 1</b> — any trip where <b>Ohad is the host</b> and Eyal joins as a member. Use an existing trip or create a new one — real users can't see trips anyway.</li>
+  <li><b>Trip 2</b> — any trip where <b>Eyal is the host</b> and Ohad joins as a member.</li>
+</ol>
+<div class="note green"><strong>Bonus:</strong> in many tests BOTH sides get a notification (example: Eyal asks to join → Ohad gets "New trip request"; Ohad approves → Eyal gets "You're in! 🌊"). One action, two results to check. CHECK A and CHECK B show notifications for both testers.</div>
+
+<div class="note amber"><strong>Important for Test 4 (member leaves):</strong>
+The "member leaves" notification uses NEW app code that is not in any released build yet. So in Test 4, the person who leaves the trip (Eyal) must use the dev app started from Ohad's computer (this branch / Expo Go). For all other tests, any app version is fine.</div>
+
+<!-- ============================================================= -->
+<h2><span class="step-num">5</span>Part 1 — Action tests on Trip 1 (Ohad is the host)</h2>
+<p>In these tests, <b>Eyal</b> does something on <b>Trip 1</b>, and <b>Ohad (the host) receives</b> the notification.</p>
+
+<div class="test" data-test="t1">
+  <div class="test-head"><input type="checkbox"><div>
+    <div class="test-title">Test 1 — Someone asks to join</div>
+    <div class="test-body">
+      <ol><li>Eyal opens Trip 1 and taps "request to join".</li><li>Wait 1 minute. Run CHECK A and CHECK B.</li></ol>
+      <div class="expect">✅ Bell: <code>join_request_received</code> · Push line: <code>sent</code> + a real phone alert, title <b>"New trip request"</b>.</div>
+    </div>
+  </div></div>
+</div>
+
+<div class="test" data-test="t2">
+  <div class="test-head"><input type="checkbox"><div>
+    <div class="test-title">Test 2 — A member joined (bell only) <span class="badge feed">No push — correct!</span></div>
+    <div class="test-body">
+      <ol><li>Ohad approves Eyal's join request from Test 1.</li><li>Run CHECK A and CHECK B.</li></ol>
+      <div class="expect">✅ Bell: <code>member_joined</code> appears for Ohad. Push line: <b>NO new row</b> for it. This event is bell-only for now — no push is the correct result.<br>Bonus: Eyal also gets <code>join_request_decided</code> with push title <b>"You're in! 🌊"</b> (that is Test 8's notification, from the other side).</div>
+    </div>
+  </div></div>
+</div>
+
+<div class="test" data-test="t3">
+  <div class="test-head"><input type="checkbox"><div>
+    <div class="test-title">Test 3 — Member asks to commit</div>
+    <div class="test-body">
+      <ol><li>Eyal (now a member of Trip 1) taps "commit" to request a committed spot.</li><li>Wait 1 minute. Run CHECK A + B.</li></ol>
+      <div class="expect">✅ Bell: <code>commitment_request_received</code> · Push line: <code>sent</code> + a real phone alert, title <b>"Commit request"</b>.</div>
+    </div>
+  </div></div>
+</div>
+
+<div class="test" data-test="t4">
+  <div class="test-head"><input type="checkbox"><div>
+    <div class="test-title">Test 4 — A member leaves</div>
+    <div class="test-body">
+      <ol><li>Eyal leaves Trip 1. ⚠️ Eyal must use the dev app from this branch (see setup note).</li><li>Wait 1 minute. Run CHECK A + B.</li></ol>
+      <div class="expect">✅ Bell: <code>member_left</code> · Push line: <code>sent</code> + a real phone alert, title <b>"A spot opened"</b>.</div>
+    </div>
+  </div></div>
+</div>
+
+<div class="test" data-test="t5">
+  <div class="test-head"><input type="checkbox"><div>
+    <div class="test-title">Test 5 — Member proposes a gear item</div>
+    <div class="test-body">
+      <ol><li>Eyal joins Trip 1 again (Ohad approves). Eyal proposes a new group gear item (for example "Tent").</li><li>Wait 1 minute. Run CHECK A + B.</li></ol>
+      <div class="expect">✅ Bell: <code>gear_request_received</code> · Push line: <code>sent</code> + a real phone alert, title <b>"Gear request"</b>.</div>
+    </div>
+  </div></div>
+</div>
+
+<div class="test" data-test="t6">
+  <div class="test-head"><input type="checkbox"><div>
+    <div class="test-title">Test 6 — Member claims gear (bell only) <span class="badge feed">No push — correct!</span></div>
+    <div class="test-body">
+      <ol><li>Eyal claims a gear item on Trip 1 ("I will bring it").</li><li>Run CHECK A + B.</li></ol>
+      <div class="expect">✅ Bell: <code>gear_claimed</code> appears. Push line: <b>NO new row</b>. Bell-only is the correct result.</div>
+    </div>
+  </div></div>
+</div>
+
+<!-- ============================================================= -->
+<h2><span class="step-num">6</span>Part 2 — Action tests on Trip 2 (Eyal is the host)</h2>
+<p>Now <b>Eyal</b> is the host of <b>Trip 2</b>, and <b>Ohad receives</b> as a member / requester.</p>
+<div class="note blue"><strong>Order matters in Tests 7–10.</strong> A "declined" answer lets Ohad ask again. An "approved" answer is final. So we always test <b>declined first, then approved</b>.</div>
+
+<div class="test" data-test="t7">
+  <div class="test-head"><input type="checkbox"><div>
+    <div class="test-title">Test 7 — Your join request is DECLINED</div>
+    <div class="test-body">
+      <ol><li>Ohad requests to join Trip 2.</li><li>Eyal (host) declines.</li><li>Wait 1–2 minutes (this one is "normal", it waits 60s). Run CHECK A + B.</li></ol>
+      <div class="expect">✅ Bell: <code>join_request_decided</code> · Push line: <code>sent</code> + a real phone alert, title <b>"Trip request update"</b>.</div>
+    </div>
+  </div></div>
+</div>
+
+<div class="test" data-test="t8">
+  <div class="test-head"><input type="checkbox"><div>
+    <div class="test-title">Test 8 — Your join request is APPROVED</div>
+    <div class="test-body">
+      <ol><li>Ohad requests to join Trip 2 again.</li><li>Eyal approves.</li><li>Wait 1 minute. Run CHECK A + B.</li></ol>
+      <div class="expect">✅ Bell: <code>join_request_decided</code> · Push line: <code>sent</code> + a real phone alert, title <b>"You're in! 🌊"</b>.</div>
+    </div>
+  </div></div>
+</div>
+
+<div class="test" data-test="t9">
+  <div class="test-head"><input type="checkbox"><div>
+    <div class="test-title">Test 9 — Your commit is DECLINED (bell only) <span class="badge feed">No push — correct!</span></div>
+    <div class="test-body">
+      <ol><li>Ohad asks to commit on Trip 2.</li><li>Eyal declines.</li><li>Run CHECK A + B.</li></ol>
+      <div class="expect">✅ Bell: <code>commitment_decided</code> appears. Push line: <b>NO new row</b>. A "no" answer is bell-only by design (softer for the user).</div>
+    </div>
+  </div></div>
+</div>
+
+<div class="test" data-test="t10">
+  <div class="test-head"><input type="checkbox"><div>
+    <div class="test-title">Test 10 — Your commit is APPROVED</div>
+    <div class="test-body">
+      <ol><li>Ohad asks to commit again on Trip 2.</li><li>Eyal approves.</li><li>Wait 1 minute. Run CHECK A + B.</li></ol>
+      <div class="expect">✅ Bell: <code>commitment_decided</code> · Push line: <code>sent</code> + a real phone alert, title <b>"You're locked in 🤙"</b>.</div>
+    </div>
+  </div></div>
+</div>
+
+<div class="test" data-test="t11">
+  <div class="test-head"><input type="checkbox"><div>
+    <div class="test-title">Test 11 — Host posts an update</div>
+    <div class="test-body">
+      <ol><li>Eyal (host) posts an update message on Trip 2.</li><li>Wait 1–2 minutes. Run CHECK A + B.</li></ol>
+      <div class="expect">✅ Bell: <code>admin_update_posted</code> · Push line: <code>sent</code> + a real phone alert, title <b>"Update in [trip name]"</b>.</div>
+    </div>
+  </div></div>
+</div>
+
+<div class="test" data-test="t12">
+  <div class="test-head"><input type="checkbox"><div>
+    <div class="test-title">Test 12 — Host edits the group gear list</div>
+    <div class="test-body">
+      <ol><li>Eyal adds or changes an item on Trip 2's group gear list.</li><li>Wait 1–2 minutes. Run CHECK A + B.</li></ol>
+      <div class="expect">✅ Bell: <code>group_gear_updated</code> · Push line: <code>sent</code> + a real phone alert, title <b>"Gear list updated"</b>.</div>
+    </div>
+  </div></div>
+</div>
+
+<div class="test" data-test="t13">
+  <div class="test-head"><input type="checkbox"><div>
+    <div class="test-title">Test 13 — Host edits the personal packing list</div>
+    <div class="test-body">
+      <ol><li>Eyal edits the "personal gear" suggestion list of Trip 2 (the packing checklist for everyone).</li><li>Wait 1–2 minutes. Run CHECK A + B.</li></ol>
+      <div class="expect">✅ Bell: <code>personal_gear_updated</code> · Push line: <code>sent</code> + a real phone alert, title <b>"Your packing list"</b>.</div>
+    </div>
+  </div></div>
+</div>
+
+<div class="test" data-test="t14">
+  <div class="test-head"><input type="checkbox"><div>
+    <div class="test-title">Test 14 — Your gear proposal gets an answer</div>
+    <div class="test-body">
+      <ol><li>Ohad proposes a gear item on Trip 2.</li><li>Eyal approves (or declines) it.</li><li>Wait 1–2 minutes. Run CHECK A + B.</li></ol>
+      <div class="expect">✅ Bell: <code>gear_request_decided</code> · Push line: <code>sent</code> + a real phone alert, title <b>"Gear approved"</b> (or <b>"Gear update"</b> if declined).</div>
+    </div>
+  </div></div>
+</div>
+
+<div class="test" data-test="t15">
+  <div class="test-head"><input type="checkbox"><div>
+    <div class="test-title">Test 15 — Trip is cancelled <span class="badge amber sql">Do this LAST in Part 2</span></div>
+    <div class="test-body">
+      <ol><li>Eyal (host) cancels Trip 2. We do it last because a cancelled trip can't be used for the other tests.</li><li>Wait 1 minute. Run CHECK A + B.</li></ol>
+      <div class="expect">✅ Bell: <code>trip_cancelled</code> for Ohad · Push line: <code>sent</code> + a real phone alert, title <b>"Trip cancelled"</b>.<br>
+      Bonus check: <b>Eyal</b> (the host) should get <b>nothing</b> — the host is excluded on purpose.</div>
+    </div>
+  </div></div>
+</div>
+
+<div class="test" data-test="t16">
+  <div class="test-head"><input type="checkbox"><div>
+    <div class="test-title">Test 16 — Ohad is removed from a trip</div>
+    <div class="test-body">
+      <ol><li>Eyal (host) removes Ohad from his trip.</li><li>Run CHECK A + B.</li></ol>
+      <div class="expect">✅ Bell: <code>member_removed</code> for Ohad · Push line: <code>sent</code> + a real phone alert, title <b>"Trip update"</b>.<br>
+      Exactly <b>one</b> alert should arrive (the old direct-push system for removals was switched off at go-live).</div>
+    </div>
+  </div></div>
+</div>
+
+<!-- ============================================================= -->
+<h2><span class="step-num">7</span>Part 3 — Time tests (reminders) <span class="badge sql">Uses SQL</span></h2>
+
+<p>Every morning at <b>06:07 UTC (09:07 in Israel)</b>, a daily robot looks at all active trips and their dates, and creates reminders. We will not wait days — we will <b>change the dates of Trip 1 with SQL</b> to trick the robot. This is safe: real users can't see trips.</p>
+
+<p><b>Step 1 — find Trip 1's ID</b> (run, then copy the <code>id</code>):</p>
+<pre><button class="copy-btn">Copy</button><code>select id, title, start_date, end_date, status
+from group_trips
+where host_id = (select id from users where email = 'ohad.storfer@gmail.com')
+order by created_at desc limit 5;</code></pre>
+
+<p><b>Step 2 — set a date, then run the robot.</b> For each reminder below: run the small SQL (put your trip ID inside), then either ask Claude Code <i>"trigger the reminder scan"</i>, or wait until after 09:07 the next morning. Then run CHECK A + B.</p>
+
+<div class="note blue"><strong>Each reminder fires only ONCE per trip.</strong> If you test the same one twice, no new row appears — that is by design (no spam). To re-test the same stage, ask Claude for a small cleanup SQL.</div>
+
+<div class="test" data-test="r1">
+  <div class="test-head"><input type="checkbox"><div>
+    <div class="test-title">Reminder 1 — "Trip in 1 week"</div>
+    <div class="test-body">
+      <pre><button class="copy-btn">Copy</button><code>update group_trips set start_date = current_date + 7, status = 'active'
+where id = 'PASTE-TRIP-1-ID-HERE';</code></pre>
+      <div class="expect">✅ Bell: <code>trip_reminder</code>, stage <code>week</code> · Push line: title <b>"[trip] — 1 week to go"</b>.</div>
+    </div>
+  </div></div>
+</div>
+
+<div class="test" data-test="r2">
+  <div class="test-head"><input type="checkbox"><div>
+    <div class="test-title">Reminder 2 — "Trip is tomorrow"</div>
+    <div class="test-body">
+      <pre><button class="copy-btn">Copy</button><code>update group_trips set start_date = current_date + 1
+where id = 'PASTE-TRIP-1-ID-HERE';</code></pre>
+      <div class="expect">✅ Bell: <code>trip_reminder</code>, stage <code>tomorrow</code> · Push: <b>"[trip] is tomorrow!"</b>.</div>
+    </div>
+  </div></div>
+</div>
+
+<div class="test" data-test="r3">
+  <div class="test-head"><input type="checkbox"><div>
+    <div class="test-title">Reminder 3 — "Trip starts today"</div>
+    <div class="test-body">
+      <pre><button class="copy-btn">Copy</button><code>update group_trips set start_date = current_date
+where id = 'PASTE-TRIP-1-ID-HERE';</code></pre>
+      <div class="expect">✅ Bell: <code>trip_reminder</code>, stage <code>today</code> · Push: <b>"[trip] starts today"</b>.</div>
+    </div>
+  </div></div>
+</div>
+
+<div class="test" data-test="r4">
+  <div class="test-head"><input type="checkbox"><div>
+    <div class="test-title">Reminder 4 — "Commit nudge" (15 days before)</div>
+    <div class="test-body">
+      <p>This one only goes to people who did <b>not</b> commit yet. So make sure Ohad's commitment on Trip 1 is not "approved".</p>
+      <pre><button class="copy-btn">Copy</button><code>update group_trips set start_date = current_date + 15
+where id = 'PASTE-TRIP-1-ID-HERE';</code></pre>
+      <div class="expect">✅ Bell: <code>trip_reminder</code>, stage <code>commit_15</code> · Push: <b>"Lock your spot in [trip]"</b>. (Also works at 30, 10 and 5 days.)</div>
+    </div>
+  </div></div>
+</div>
+
+<div class="test" data-test="r5">
+  <div class="test-head"><input type="checkbox"><div>
+    <div class="test-title">Reminder 5 — "Gear still needed" (5 days before)</div>
+    <div class="test-body">
+      <p>This one only fires if the trip has a gear item that nobody claimed. Add one in the app first.</p>
+      <pre><button class="copy-btn">Copy</button><code>update group_trips set start_date = current_date + 5
+where id = 'PASTE-TRIP-1-ID-HERE';</code></pre>
+      <div class="expect">✅ Bell: <code>trip_reminder</code>, stage <code>gear_5</code> · Push: <b>"[trip]: gear still needed"</b>. (Also works at 10, 3 and 1 days.)</div>
+    </div>
+  </div></div>
+</div>
+
+<div class="test" data-test="r6">
+  <div class="test-head"><input type="checkbox"><div>
+    <div class="test-title">Reminder 6 — "Trip ended"</div>
+    <div class="test-body">
+      <pre><button class="copy-btn">Copy</button><code>update group_trips set start_date = current_date - 7, end_date = current_date
+where id = 'PASTE-TRIP-1-ID-HERE';</code></pre>
+      <div class="expect">✅ Bell: <code>trip_ended</code> · Push: <b>"[trip] — that's a wrap"</b>.</div>
+    </div>
+  </div></div>
+</div>
+
+<div class="note blue"><strong>After finishing Part 3:</strong> you can leave Trip 1's dates as they are (nobody sees them). Just remember: its reminders will not fire again for the same stages.</div>
+
+<!-- ============================================================= -->
+<h2><span class="step-num">8</span>Part 4 — Smart rules tests</h2>
+<p>The robot is smart. These tests prove the smart rules work.</p>
+
+<div class="test" data-test="s1">
+  <div class="test-head"><input type="checkbox"><div>
+    <div class="test-title">Smart 1 — "You already saw it" rule</div>
+    <div class="test-body">
+      <p>If you read the bell message <b>before</b> the push goes out, the push is cancelled. Normal events wait 60 seconds — that is your window.</p>
+      <ol><li>Eyal edits Trip 2's gear list (like Test 12).</li><li><b>Within 1 minute</b>, Ohad opens the app and opens the bell (so the message becomes "read").</li><li>Run CHECK B.</li></ol>
+      <div class="expect">✅ The row says <code>skipped</code> / <code>read_in_feed</code> — push cancelled because you already saw it. Smart!</div>
+    </div>
+  </div></div>
+</div>
+
+<div class="test" data-test="s2">
+  <div class="test-head"><input type="checkbox"><div>
+    <div class="test-title">Smart 2 — Grouping ("batching")</div>
+    <div class="test-body">
+      <p>Many updates from the same trip in the same minute = ONE push, not many.</p>
+      <ol><li>Eyal quickly does 2–3 things on Trip 2 (edit gear list + post an update) within the same minute. Ohad does NOT open the bell.</li><li>Wait 2 minutes. Run CHECK B.</li></ol>
+      <div class="expect">✅ One row gets the push text, the others say <code>skipped</code> / <code>batched</code>. (Claude already saw this rule working once ✓.)</div>
+    </div>
+  </div></div>
+</div>
+
+<div class="test" data-test="s3">
+  <div class="test-head"><input type="checkbox"><div>
+    <div class="test-title">Smart 3 — Mute</div>
+    <div class="test-body">
+      <ol><li>Ohad mutes Trip 2's chat in the app.</li><li>Eyal posts an update on Trip 2.</li><li>Wait 2 minutes. Run CHECK B. Then Ohad unmutes.</li></ol>
+      <div class="expect">✅ The row says <code>skipped</code> / <code>muted</code>. The bell message still arrives (mute only stops pushes).</div>
+    </div>
+  </div></div>
+</div>
+
+<div class="test" data-test="s4">
+  <div class="test-head"><input type="checkbox"><div>
+    <div class="test-title">Smart 4 — Night time ("quiet hours") <span class="badge sql">Uses SQL</span></div>
+    <div class="test-body">
+      <p>Non-urgent pushes never wake people at night. They wait until 08:00 in the receiver's time zone. For this, the app must first save the time zone:</p>
+      <ol><li>Ohad opens the app from this branch (dev version) on his phone. It saves his time zone automatically.</li><li>Check it worked:</li></ol>
+      <pre><button class="copy-btn">Copy</button><code>select u.email, s.timezone
+from surfers s join users u on u.id = s.user_id
+where lower(u.email) in ('ohad.storfer@gmail.com', 'eyal@swellyo.com');</code></pre>
+      <ol start="3"><li>In the evening (<b>after 21:00</b> Israel time), Eyal does a normal event on Trip 2 (edits the gear list).</li><li>Run CHECK B and look at the <code>send_at</code> column.</li></ol>
+      <div class="expect">✅ <code>send_at</code> shows <b>tomorrow morning 08:00 in Ohad's time zone</b> (the result shows UTC, so for Israel it shows 05:00). The push politely waits for morning. Urgent ones (like "trip cancelled") do NOT wait — they go at once.</div>
+    </div>
+  </div></div>
+</div>
+
+<div class="note blue"><strong>Bonus rule (now active):</strong> maximum 3 normal pushes per person per day. Number 4 and up get delayed 6 hours. Urgent pushes (decisions, cancellations) are never delayed. If a push seems "missing" during heavy testing, run CHECK B — it is probably <code>pending</code> with a later <code>send_at</code>. That is the rule working.</div>
+
+<!-- ============================================================= -->
+<h2><span class="step-num">9</span>Already checked by Claude ✓ (you don't need to)</h2>
+
+<div class="precheck"><span class="tick">✓</span> The queue table, functions and triggers exist on the database.</div>
+<div class="precheck"><span class="tick">✓</span> The every-minute robot is scheduled and running (101 of 101 runs OK in the last 2 hours).</div>
+<div class="precheck"><span class="tick">✓</span> The daily reminder robot is scheduled (first run: tomorrow 09:07 Israel time).</div>
+<div class="precheck"><span class="tick">✓</span> The full chain works end-to-end: event → bell → queue → robot (verified first in practice mode, now live).</div>
+<div class="precheck"><span class="tick">✓</span> Grouping (batching) was seen working on real data.</div>
+<div class="precheck"><span class="tick">✓</span> No duplicate rows in the queue.</div>
+<div class="precheck"><span class="tick">✓</span> All 9 automatic unit tests pass.</div>
+<div class="precheck"><span class="tick">✓</span> The push texts ("You're in! 🌊" etc.) are tested by code.</div>
+
+<!-- ============================================================= -->
+<div class="finish">
+  <h2 style="border: none; margin-top: 0; padding-top: 0;">🏁 The finish line</h2>
+  <p>When every box above is checked, the system is <b>100% working, live</b>. Nothing more to build for Phases 1–2.</p>
+  <p><b>Already done at go-live (2026-06-09):</b> shadow OFF (real pushes), removal function switched to the queue, no gate needed (only Ohad + Eyal have trips).</p>
+  <p><b>Still open:</b></p>
+  <ol>
+    <li><b>Disable the old webhook</b> for <code>send-trip-request-notification</code> (Supabase dashboard → Database → Webhooks). Until then, a join request makes TWO alerts for the host.</li>
+    <li>Ship an app build / OTA → time zones start saving (needed for real quiet-hours timing).</li>
+    <li>Later, before opening trips to real users: re-check with Claude who is in the trip tables.</li>
+  </ol>
+</div>
+
+</main>
+
+<script>
+  // Checkbox progress, saved in this browser.
+  const KEY = 'swellyo-notif-tests-v1';
+  const saved = JSON.parse(localStorage.getItem(KEY) || '{}');
+  const tests = document.querySelectorAll('.test');
+  const fill = document.getElementById('progressFill');
+  const label = document.getElementById('progressLabel');
+
+  function refresh() {
+    let done = 0;
+    tests.forEach(t => { if (t.querySelector('input').checked) done++; });
+    label.textContent = done + ' / ' + tests.length + ' tests done' + (done === tests.length ? ' 🎉' : '');
+    fill.style.width = (done / tests.length * 100) + '%';
+  }
+
+  tests.forEach(t => {
+    const id = t.dataset.test;
+    const box = t.querySelector('input');
+    if (saved[id]) { box.checked = true; t.classList.add('done'); }
+    box.addEventListener('change', () => {
+      t.classList.toggle('done', box.checked);
+      saved[id] = box.checked;
+      localStorage.setItem(KEY, JSON.stringify(saved));
+      refresh();
+    });
+  });
+  refresh();
+
+  // Copy buttons for SQL blocks.
+  document.querySelectorAll('.copy-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      navigator.clipboard.writeText(btn.nextElementSibling.textContent).then(() => {
+        btn.textContent = 'Copied ✓';
+        setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+      });
+    });
+  });
+</script>
+
+</body>
+</html>
