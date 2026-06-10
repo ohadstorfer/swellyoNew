@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -17,6 +17,8 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { BlurView } from 'expo-blur';
+const NOISE_TEXTURE = require('../../../assets/textures/noise.png');
 const FONT_INTER = Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter';
 const FONT_MONTSERRAT = Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat';
 import { useOnboarding } from '../../context/OnboardingContext';
@@ -26,7 +28,8 @@ import {
   MyTripsBuckets,
   TripCardMeta,
 } from '../../services/trips/groupTripsService';
-import { TRIP_CHOOSER, TRIP_TYPE_PILL } from '../../services/trips/tripVocabulary';
+import { TRIP_CHOOSER, TRIP_TYPE_PILL, TRIP_TYPE_GRADIENT } from '../../services/trips/tripVocabulary';
+import { COUNTRY_NAMES } from '../../data/countryNames';
 import { useQueryClient } from '@tanstack/react-query';
 import { useExploreTrips, useMyTrips, tripsKeys } from '../../hooks/trips/useTripQueries';
 import CreateTripWizard from './CreateTripWizard';
@@ -123,7 +126,7 @@ const formatTripDates = (trip: GroupTrip): string => {
     const fmt = (d: string) =>
       new Date(d).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
     const setInStone = trip.dates_set_in_stone ? '' : ' (flexible)';
-    return `${fmt(trip.start_date)} – ${fmt(trip.end_date)}${setInStone}`;
+    return `${fmt(trip.start_date)} - ${fmt(trip.end_date)}${setInStone}`;
   }
   if (trip.date_months && trip.date_months.length > 0) {
     return trip.date_months
@@ -137,11 +140,28 @@ const formatTripDates = (trip: GroupTrip): string => {
   return 'Dates TBD';
 };
 
-const formatDestination = (trip: GroupTrip): string =>
-  trip.destination?.short_label ||
-  trip.destination?.name ||
-  trip.destination?.country ||
-  'Destination TBD';
+// ISO-2 code → country name via an offline static map (Hermes has no
+// Intl.DisplayNames). Falls back to the raw code only for unknown codes.
+const countryName = (code: string | null | undefined): string | null => {
+  if (!code) return null;
+  const c = code.trim().toUpperCase();
+  if (!c) return null;
+  return COUNTRY_NAMES[c] || c;
+};
+
+// Location label. Rule: <spot/area>, <country> — and always keep the country
+// visible (state is only a fallback when no country is set). Drops the geocoded
+// "spot, area" short_label, which hid the country.
+const formatDestination = (trip: GroupTrip): string => {
+  const d = trip.destination;
+  if (!d) return 'Destination TBD';
+  const region = countryName(d.country) || d.admin_level_1?.trim() || '';
+  const place = d.name?.trim() || '';
+  if (place && place.toLowerCase() !== region.toLowerCase()) {
+    return region ? `${place}, ${region}` : place;
+  }
+  return region || place || 'Destination TBD';
+};
 
 // Status drives the colored badge under the card image (mirrors the Figma
 // Upcoming / Requested / Completed variants).
@@ -189,7 +209,7 @@ const TripCard: React.FC<{
             <Image source={{ uri: meta.hostAvatar }} style={styles.hostAvatar} />
           ) : (
             <View style={[styles.hostAvatar, styles.hostAvatarPlaceholder]}>
-              <Ionicons name="person" size={18} color="#FFFFFF" />
+              <Ionicons name="person" size={24} color="#FFFFFF" />
             </View>
           )}
           {!!meta?.hostName && (
@@ -199,33 +219,40 @@ const TripCard: React.FC<{
           )}
         </View>
 
-        {/* Bottom darkening so the title/description stay legible on any photo */}
-        <LinearGradient
-          colors={['transparent', 'rgba(0,0,0,0.55)']}
-          style={styles.cardGradient}
-          pointerEvents="none"
-        />
-
+        {/* Noise-glass panel behind the title/location (Figma: blur 3.5px +
+            black 0.2 tint + fractalNoise grain). Parent clips the rounded corners. */}
         <View style={styles.cardTextBlock}>
-          <Text style={styles.cardTitle} numberOfLines={1}>
-            {formatDestination(trip)}
-          </Text>
-          {!!trip.description && (
-            <Text style={styles.cardDesc} numberOfLines={2}>
-              {trip.description}
+          <BlurView intensity={20} tint="dark" style={StyleSheet.absoluteFill} />
+          <View style={styles.cardGlassTint} pointerEvents="none" />
+          <Image
+            source={NOISE_TEXTURE}
+            style={styles.cardNoise}
+            resizeMode="repeat"
+            pointerEvents="none"
+          />
+          <View style={styles.cardTextContent}>
+            <Text style={styles.cardTitle} numberOfLines={1}>
+              {trip.title?.trim() || formatDestination(trip)}
             </Text>
-          )}
+            <Text style={styles.cardDesc} numberOfLines={1}>
+              {formatDestination(trip)}
+            </Text>
+          </View>
         </View>
 
         {/* Participant cluster (bottom-right). Falls back to an icon + count when
             no avatars are available (e.g. Explore trips the viewer isn't in). */}
         {avatars.length > 0 ? (
-          <View style={styles.avatarCluster}>
+          <View style={[styles.avatarCluster, overflow <= 0 && styles.avatarClusterTight]}>
             {avatars.map((uri, i) => (
               <Image
                 key={`${uri}-${i}`}
                 source={{ uri }}
-                style={[styles.clusterAvatar, i > 0 && styles.clusterAvatarOverlap]}
+                style={[
+                  styles.clusterAvatar,
+                  i > 0 && styles.clusterAvatarOverlap,
+                  { zIndex: avatars.length - i },
+                ]}
               />
             ))}
             {overflow > 0 && <Text style={styles.clusterMore}>+{overflow}</Text>}
@@ -269,11 +296,7 @@ const TripFilterBar: React.FC<{
     { key: 'completed', label: `Completed (${counts.completed})` },
   ];
   return (
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      contentContainerStyle={styles.filterRow}
-    >
+    <View style={styles.filterRow}>
       {items.map(it => {
         const isActive = active === it.key;
         return (
@@ -285,13 +308,16 @@ const TripFilterBar: React.FC<{
             accessibilityRole="button"
             accessibilityState={{ selected: isActive }}
           >
-            <Text style={[styles.filterText, isActive ? styles.filterTextActive : styles.filterTextInactive]}>
+            <Text
+              numberOfLines={1}
+              style={[styles.filterText, isActive ? styles.filterTextActive : styles.filterTextInactive]}
+            >
               {it.label}
             </Text>
           </TouchableOpacity>
         );
       })}
-    </ScrollView>
+    </View>
   );
 };
 
@@ -322,6 +348,7 @@ const ExploreTripCard: React.FC<{
   onPress?: () => void;
 }> = ({ trip, meta, onPress }) => {
   const type = TRIP_TYPE[trip.hosting_style] ?? TRIP_TYPE.A;
+  const typeGradient = TRIP_TYPE_GRADIENT[trip.hosting_style] ?? TRIP_TYPE_GRADIENT.A;
   const avatars = meta?.memberAvatars ?? [];
   const count = meta?.totalCount ?? trip.participant_count ?? 0;
   const max = trip.max_participants;
@@ -364,56 +391,74 @@ const ExploreTripCard: React.FC<{
         )}
       </View>
 
-      {/* Trip-type pill (top-right) */}
-      <View style={styles.tripTypePill}>
-        <Ionicons name={type.icon} size={14} color="#333333" />
-        <Text style={styles.tripTypeLabel}>{type.label}</Text>
-      </View>
-
+      {/* Trip-type pill (top-right) — coloured per hosting style, matching the
+          gradient tag in the trip Overview (Crew=blue, Captain=purple, Operator=gold). */}
       <LinearGradient
-        colors={['transparent', 'rgba(0,0,0,0.6)']}
-        style={styles.exGradient}
-        pointerEvents="none"
-      />
+        colors={typeGradient}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.tripTypePill}
+      >
+        <Ionicons name={type.icon} size={14} color="#FFFFFF" />
+        <Text style={styles.tripTypeLabel}>{type.label}</Text>
+      </LinearGradient>
 
+      {/* Noise-glass panel — same layers as the My Trips card (blur 3.5px +
+          black tint + fractalNoise grain). Parent clips the rounded corners. */}
       <View style={styles.exBottom}>
-        <Text style={styles.cardTitle} numberOfLines={2}>
-          {headline}
-        </Text>
-        {showLocation && (
-          <Text style={styles.cardDesc} numberOfLines={1}>
-            {location}
-          </Text>
-        )}
-
-        <View style={styles.exInfoRow}>
-          <View style={styles.exInfoLeft}>
-            {!!price && <Text style={styles.exPrice}>{price}</Text>}
-            <Text style={styles.exDates}>{formatTripDates(trip)}</Text>
-          </View>
-
-          <View style={styles.exInfoRight}>
-            {spotsLeft != null && (
-              <Text style={styles.exSpots}>
-                {spotsLeft} spot{spotsLeft === 1 ? '' : 's'} left
+        <BlurView intensity={20} tint="dark" style={StyleSheet.absoluteFill} />
+        <View style={styles.cardGlassTint} pointerEvents="none" />
+        <Image
+          source={NOISE_TEXTURE}
+          style={styles.cardNoise}
+          resizeMode="repeat"
+          pointerEvents="none"
+        />
+        <View style={styles.exContent}>
+          <View style={styles.exHeadings}>
+            <Text style={styles.cardTitle} numberOfLines={2}>
+              {headline}
+            </Text>
+            {showLocation && (
+              <Text style={styles.cardDesc} numberOfLines={1}>
+                {location}
               </Text>
             )}
-            {(avatars.length > 0 || count > 0) && (
-              <View style={styles.exCluster}>
-                {avatars.length > 0 ? (
-                  avatars.map((uri, i) => (
-                    <Image
-                      key={`${uri}-${i}`}
-                      source={{ uri }}
-                      style={[styles.clusterAvatar, i > 0 && styles.clusterAvatarOverlap]}
-                    />
-                  ))
-                ) : (
-                  <Ionicons name="people" size={16} color="#7B7B7B" style={{ marginLeft: 6 }} />
-                )}
-                <Text style={styles.clusterMore}>{occupancy}</Text>
-              </View>
-            )}
+          </View>
+
+          <View style={styles.exInfoRow}>
+            <View style={styles.exInfoLeft}>
+              {!!price && <Text style={styles.exPrice}>{price}</Text>}
+              <Text style={styles.exDates}>{formatTripDates(trip)}</Text>
+            </View>
+
+            <View style={styles.exInfoRight}>
+              {spotsLeft != null && (
+                <Text style={styles.exSpots}>
+                  {spotsLeft} spot{spotsLeft === 1 ? '' : 's'} left
+                </Text>
+              )}
+              {(avatars.length > 0 || count > 0) && (
+                <View style={styles.exCluster}>
+                  {avatars.length > 0 ? (
+                    avatars.map((uri, i) => (
+                      <Image
+                        key={`${uri}-${i}`}
+                        source={{ uri }}
+                        style={[
+                          styles.clusterAvatar,
+                          i > 0 && styles.clusterAvatarOverlap,
+                          { zIndex: avatars.length - i },
+                        ]}
+                      />
+                    ))
+                  ) : (
+                    <Ionicons name="people" size={16} color="#7B7B7B" style={{ marginLeft: 6 }} />
+                  )}
+                  <Text style={styles.clusterMore}>{occupancy}</Text>
+                </View>
+              )}
+            </View>
           </View>
         </View>
       </View>
@@ -430,13 +475,28 @@ const ExploreTripCard: React.FC<{
 // unchanged — only its placement + the animation.
 // ---------------------------------------------------------------------------
 const { width: DECK_SCREEN_W } = Dimensions.get('window');
-const DECK_CARD_W = Math.min(330, DECK_SCREEN_W - 64);
-const DECK_CARD_H = Math.round((DECK_CARD_W * 384) / 328); // card aspect ratio
-const DECK_ITEM_W = DECK_CARD_W; // per-card scroll step (no gap)
-const DECK_SIDE_PAD = Math.max(0, (DECK_SCREEN_W - DECK_CARD_W) / 2); // centers ends
 const DECK_SIDE_SCALE = 0.85; // neighbour cards shrink to this
+// The card width is DERIVED from the gap + peek we want, so both survive on any
+// width: narrow screens just get a slightly smaller card. Capped at 366 so it
+// doesn't balloon on tablets/web (there the peek is simply larger).
+//   • DECK_GAP  — gap between the centred card and the tip. Must exceed the
+//     tilt's corner reach (~16px at 5°) or the rotated corner overlaps.
+//   • DECK_PEEK — guaranteed visible width of the neighbour tip.
+const DECK_GAP = 28;
+const DECK_PEEK = 12;
+const DECK_CARD_W = Math.min(366, DECK_SCREEN_W - 2 * (DECK_GAP + DECK_PEEK));
+const DECK_CARD_H = Math.round((DECK_CARD_W * 384) / 328); // card aspect ratio
+const DECK_ITEM_W = DECK_CARD_W + DECK_GAP; // per-card scroll step (card + gap)
+const DECK_SIDE_PAD = Math.max(0, (DECK_SCREEN_W - DECK_ITEM_W) / 2); // centers ends
+// Centre-pivot scaling pulls a neighbour's inner edge inward by half the width
+// it loses; shift it back so the tip peeks by the layout margin, not less.
+const DECK_SIDE_SHIFT = Math.round(((1 - DECK_SIDE_SCALE) * DECK_CARD_W) / 2);
 const DECK_SIDE_OPACITY = 0.6; // neighbour cards dim to this
-const DECK_SIDE_ROTATION = 4; // deg — neighbours tilt out, straightening into center (Figma rotate-4)
+const DECK_SIDE_ROTATION = 5; // deg — neighbours tilt out, straightening into center (Figma rotate-4)
+// Scaling shrinks neighbours about their centre, which lifts their bottom edge.
+// Drop them by half the height lost so their lower edge stays level with the
+// centred card's lower edge.
+const DECK_SIDE_DROP = Math.round((DECK_CARD_H * (1 - DECK_SIDE_SCALE)) / 2) + 6;
 
 const TripDeck: React.FC<{
   trips: GroupTrip[];
@@ -477,10 +537,25 @@ const TripDeck: React.FC<{
         outputRange: [`${DECK_SIDE_ROTATION}deg`, '0deg', `-${DECK_SIDE_ROTATION}deg`],
         extrapolate: 'clamp',
       });
+      // Compensate for the centre-pivot scale so neighbour bottoms stay aligned
+      // with the centred card's bottom edge.
+      const translateY = scrollX.interpolate({
+        inputRange,
+        outputRange: [DECK_SIDE_DROP, 0, DECK_SIDE_DROP],
+        extrapolate: 'clamp',
+      });
+      // Re-expose the scaled neighbour's inner edge: the right-side neighbour
+      // shifts left, the left-side neighbour shifts right, so each peeks by the
+      // full layout margin (the tip stays visible on any screen width).
+      const translateX = scrollX.interpolate({
+        inputRange,
+        outputRange: [-DECK_SIDE_SHIFT, 0, DECK_SIDE_SHIFT],
+        extrapolate: 'clamp',
+      });
 
       return (
         <View style={styles.deckSlot}>
-          <Animated.View style={[styles.deckCard, { transform: [{ scale }, { rotate }], opacity }]}>
+          <Animated.View style={[styles.deckCard, { transform: [{ translateX }, { translateY }, { scale }, { rotate }], opacity }]}>
             <ExploreTripCard
               trip={item}
               meta={meta.get(item.id)}
@@ -506,7 +581,11 @@ const TripDeck: React.FC<{
         snapToAlignment="start"
         decelerationRate="fast"
         disableIntervalMomentum
-        scrollEventThrottle={16}
+        // 1 (not 16) so the card transform gets every display frame. At 16 the
+        // scroll-event stream is capped to ~60/s while a ProMotion screen runs at
+        // 120 — fine during fast motion, but at the slow tail of the snap the
+        // transform steps at half the display rate and clips into its final state.
+        scrollEventThrottle={1}
         getItemLayout={(_, index) => ({
           length: DECK_ITEM_W,
           offset: index * DECK_ITEM_W,
@@ -529,6 +608,137 @@ const TripDeck: React.FC<{
 };
 
 // ---------------------------------------------------------------------------
+// Explore filters (Figma 11966:32392) — month + budget chips, all client-side.
+// Chips toggle independently. Within a group (months / budget) the matches are
+// OR'd; across groups they're AND'd. "All" clears every selection.
+// ---------------------------------------------------------------------------
+const BUDGET_THRESHOLD = 1000; // $ — the below/above split point (boundary inclusive)
+
+type ExploreChipKind = 'month' | 'budget';
+interface ExploreChip {
+  id: string;
+  label: string;
+  kind: ExploreChipKind;
+  value: string; // month → "YYYY-MM"; budget → "below" | "above"
+}
+
+// Three rolling month chips derived from the device clock, so the labels move
+// forward on their own every month. First two read "This/Next Month"; the third
+// shows the literal month name (e.g. "August").
+const buildExploreChips = (now: Date): ExploreChip[] => {
+  const ymOffset = (offset: number) => {
+    const d = new Date(now.getFullYear(), now.getMonth() + offset, 1);
+    const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    const name = d.toLocaleDateString(undefined, { month: 'long' });
+    return { ym, name };
+  };
+  const m0 = ymOffset(0);
+  const m1 = ymOffset(1);
+  const m2 = ymOffset(2);
+  return [
+    { id: `m:${m0.ym}`, label: 'This Month', kind: 'month', value: m0.ym },
+    { id: `m:${m1.ym}`, label: 'Next Month', kind: 'month', value: m1.ym },
+    { id: `m:${m2.ym}`, label: m2.name, kind: 'month', value: m2.ym },
+    { id: 'b:below', label: `Below $${BUDGET_THRESHOLD / 1000}k`, kind: 'budget', value: 'below' },
+    { id: 'b:above', label: `Above $${BUDGET_THRESHOLD / 1000}k`, kind: 'budget', value: 'above' },
+  ];
+};
+
+// A trip happens in month "YYYY-MM" if its loose months list includes it, or if
+// the month falls within the firm start..end range (so a Jun–Jul trip matches
+// both June and July). Trips with no dates ("TBD") match no month filter.
+const tripInMonth = (trip: GroupTrip, ym: string): boolean => {
+  if (trip.date_months?.some(m => m === ym)) return true;
+  if (trip.start_date && trip.end_date) {
+    return ym >= trip.start_date.slice(0, 7) && ym <= trip.end_date.slice(0, 7);
+  }
+  return false;
+};
+
+// Collapse the three possible budget shapes into one [min, max] band: a flat
+// per-person price is a zero-width band; otherwise the min/max pair.
+const tripBudgetBand = (trip: GroupTrip): [number, number] | null => {
+  if (trip.cost_per_person != null) return [trip.cost_per_person, trip.cost_per_person];
+  const lo = trip.budget_min;
+  const hi = trip.budget_max;
+  if (lo != null || hi != null) {
+    const min = lo ?? hi!;
+    const max = hi ?? lo!;
+    return [min, max];
+  }
+  return null;
+};
+
+// "Below" = the band dips to/under the threshold; "Above" = it reaches/over it.
+// Boundary is inclusive both ways, so a trip priced exactly at the threshold
+// matches both chips.
+const tripInBudget = (trip: GroupTrip, value: string): boolean => {
+  const band = tripBudgetBand(trip);
+  if (!band) return false;
+  return value === 'below' ? band[0] <= BUDGET_THRESHOLD : band[1] >= BUDGET_THRESHOLD;
+};
+
+const applyExploreFilters = (
+  trips: GroupTrip[],
+  chips: ExploreChip[],
+  selected: Set<string>,
+): GroupTrip[] => {
+  if (selected.size === 0) return trips;
+  const months = chips.filter(c => c.kind === 'month' && selected.has(c.id)).map(c => c.value);
+  const budgets = chips.filter(c => c.kind === 'budget' && selected.has(c.id)).map(c => c.value);
+  return trips.filter(t => {
+    const monthOk = months.length === 0 || months.some(ym => tripInMonth(t, ym));
+    const budgetOk = budgets.length === 0 || budgets.some(v => tripInBudget(t, v));
+    return monthOk && budgetOk;
+  });
+};
+
+const ExploreHeader: React.FC<{
+  chips: ExploreChip[];
+  selected: Set<string>;
+  onToggle: (id: string) => void;
+  onClear: () => void;
+}> = ({ chips, selected, onToggle, onClear }) => {
+  const allActive = selected.size === 0;
+  return (
+    <View style={styles.exHeader}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.exFilterRow}
+      >
+        <TouchableOpacity
+          style={[styles.exFilterPill, allActive ? styles.exFilterPillActive : styles.exFilterPillInactive]}
+          onPress={onClear}
+          activeOpacity={0.8}
+          accessibilityRole="button"
+          accessibilityState={{ selected: allActive }}
+        >
+          <Text style={allActive ? styles.exFilterTextActive : styles.exFilterTextInactive}>All</Text>
+        </TouchableOpacity>
+        {chips.map(chip => {
+          const active = selected.has(chip.id);
+          return (
+            <TouchableOpacity
+              key={chip.id}
+              style={[styles.exFilterPill, active ? styles.exFilterPillActive : styles.exFilterPillInactive]}
+              onPress={() => onToggle(chip.id)}
+              activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityState={{ selected: active }}
+            >
+              <Text style={active ? styles.exFilterTextActive : styles.exFilterTextInactive}>
+                {chip.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+    </View>
+  );
+};
+
+// ---------------------------------------------------------------------------
 // Explore view
 // ---------------------------------------------------------------------------
 // Stable empty fallbacks so a loading/disabled query doesn't hand a fresh
@@ -544,6 +754,23 @@ const ExploreTripsView: React.FC<{ onOpenTrip: (tripId: string) => void }> = ({ 
   const trips = data?.trips ?? [];
   const meta = data?.meta ?? EMPTY_META;
 
+  // Month chips roll off the device clock; built once per mount.
+  const chips = useMemo(() => buildExploreChips(new Date()), []);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const toggleChip = useCallback((id: string) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }, []);
+  const clearChips = useCallback(() => setSelected(new Set()), []);
+
+  const filtered = useMemo(
+    () => applyExploreFilters(trips, chips, selected),
+    [trips, chips, selected],
+  );
+
   if (isLoading) {
     return <ExploreDeckSkeleton />;
   }
@@ -557,12 +784,39 @@ const ExploreTripsView: React.FC<{ onOpenTrip: (tripId: string) => void }> = ({ 
     );
   }
 
-  // Horizontal swipe-deck carousel (replaces the old vertical list). Pull-to-
-  // refresh no longer applies to a horizontal deck; the list still loads on mount.
-  // Fade the loaded deck in (replaces the skeleton).
+  // Vertical scroll of horizontal swipe-deck carousels. "Popular" shows the
+  // filtered set; "Trip Operators" narrows that to operator-run trips (style 'C').
+  const operatorTrips = filtered.filter(t => t.hosting_style === 'C');
   return (
     <FadeInView style={styles.fillFlex}>
-      <TripDeck trips={trips} meta={meta} onOpenTrip={onOpenTrip} />
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.exScrollContent}
+      >
+        <Text style={styles.exploreTitle}>Discover the world{'\n'}with Swellyo</Text>
+        <ExploreHeader
+          chips={chips}
+          selected={selected}
+          onToggle={toggleChip}
+          onClear={clearChips}
+        />
+        {filtered.length === 0 ? (
+          <View style={styles.filterEmpty}>
+            <Text style={styles.emptyText}>No trips match these filters.</Text>
+          </View>
+        ) : (
+          <>
+            <Text style={styles.exSectionTitle}>Popular</Text>
+            <TripDeck trips={filtered} meta={meta} onOpenTrip={onOpenTrip} />
+            {operatorTrips.length > 0 && (
+              <>
+                <Text style={[styles.exSectionTitle, styles.exSectionTitleStacked]}>Trip Operators</Text>
+                <TripDeck trips={operatorTrips} meta={meta} onOpenTrip={onOpenTrip} />
+              </>
+            )}
+          </>
+        )}
+      </ScrollView>
     </FadeInView>
   );
 };
@@ -929,7 +1183,7 @@ export default function TripsScreen({ onBack, initialTripId, onOpenGroupChat, on
             <Logo size={40} iconOnly />
             <Text style={styles.tripsHeaderTitle}>Trips</Text>
           </View>
-          <NotificationCenter userId={currentUserId} />
+          <NotificationCenter userId={currentUserId} bare />
         </View>
 
         <TripsHeaderTabs active={activeTab} onChange={goToTab} />
@@ -953,7 +1207,6 @@ export default function TripsScreen({ onBack, initialTripId, onOpenGroupChat, on
 
           {/* index 1 — Explore */}
           <TabPane index={1} width={bodyW} tx={tx} reduceMotion={reduceMotion}>
-            <Text style={styles.exploreTitle}>Discover the world with Swellyo</Text>
             {visited.explore ? <ExploreTripsView onOpenTrip={setSelectedTripId} /> : null}
           </TabPane>
 
@@ -1067,7 +1320,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingLeft: 12,
-    paddingRight: 8,
+    paddingRight: 18,
     paddingVertical: 10,
   },
   headerLeft: {
@@ -1090,22 +1343,23 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 12,
+    paddingTop: 12,
+    paddingBottom: 18,
     paddingHorizontal: 8,
   },
   tabBtnActive: {
-    borderBottomWidth: 3,
+    borderBottomWidth: 4,
     borderBottomColor: '#05BCD3',
   },
   tabBtnInactive: {
     borderBottomWidth: 2,
     borderBottomColor: '#7B7B7B',
   },
-  tabLabel: { fontFamily: FONT_INTER, fontSize: 14, lineHeight: 18, fontWeight: '400' },
+  tabLabel: { fontFamily: FONT_INTER, fontSize: 17, lineHeight: 21, fontWeight: '400', letterSpacing: 0.3 },
   tabLabelActive: { color: '#05BCD3' },
   tabLabelInactive: { color: '#FFFFFF' },
 
-  body: { flex: 1, backgroundColor: '#FFFFFF', paddingTop: 16, overflow: 'hidden' },
+  body: { flex: 1, backgroundColor: '#FFFFFF', paddingTop: 0, overflow: 'hidden' },
   // Horizontal pager row: three full-width panes laid side by side; translateX
   // slides between them. Width is set inline once the viewport is measured.
   pagerRow: { flex: 1, flexDirection: 'row' },
@@ -1113,23 +1367,78 @@ const styles = StyleSheet.create({
   // Explore section title (Figma — Montserrat 24/600, 140% line-height).
   exploreTitle: {
     fontFamily: FONT_MONTSERRAT,
-    fontSize: 24,
+    fontSize: 31,
     fontWeight: '600',
-    lineHeight: 33.6,
+    lineHeight: 40,
     color: '#333',
     paddingHorizontal: 16,
+    marginTop: 24,
     marginBottom: 16,
+  },
+
+  // Explore body scroll (stacked carousels) + header.
+  exScrollContent: { paddingBottom: 40 },
+  exHeader: { paddingTop: 14 },
+  // "Popular" section label above the trips carousel (Figma 11966:32390).
+  exSectionTitle: {
+    fontFamily: FONT_MONTSERRAT,
+    fontSize: 22,
+    fontWeight: '700',
+    lineHeight: 28,
+    color: '#333333',
+    paddingLeft: 16,
+    marginTop: 14,
+    marginBottom: 26,
+  },
+  exSectionTitleStacked: { marginTop: 24 },
+  exFilterRow: {
+    flexDirection: 'row',
+    gap: 11,
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+  },
+  exFilterPill: {
+    minWidth: 38,
+    borderRadius: 11,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  exFilterPillActive: { backgroundColor: '#212121' },
+  exFilterPillInactive: {
+    backgroundColor: '#F7F7F7',
+    borderWidth: 1,
+    borderColor: '#EEEEEE',
+  },
+  exFilterTextActive: {
+    fontFamily: FONT_INTER,
+    fontSize: 12,
+    lineHeight: 16,
+    color: '#FFFFFF',
+  },
+  exFilterTextInactive: {
+    fontFamily: FONT_INTER,
+    fontSize: 12,
+    lineHeight: 16,
+    color: '#333333',
   },
 
   listContent: { paddingHorizontal: 16, paddingBottom: 24, flexGrow: 1 },
 
   // Filter pills (My Trips).
-  filterRow: { flexDirection: 'row', gap: 11, paddingBottom: 12, alignItems: 'center' },
+  filterRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 22,
+    marginBottom: 28,
+    marginHorizontal: 6,
+    alignItems: 'center',
+  },
   filterPill: {
-    minWidth: 42,
     borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 11,
+    paddingVertical: 13,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1139,7 +1448,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#EEEEEE',
   },
-  filterText: { fontFamily: FONT_INTER, fontSize: 10, lineHeight: 20, textAlign: 'center' },
+  filterText: { fontFamily: FONT_INTER, fontSize: 13, lineHeight: 18, textAlign: 'center' },
   filterTextActive: { color: '#FFFFFF' },
   filterTextInactive: { color: '#333333' },
   filterEmpty: { alignItems: 'center', justifyContent: 'center', paddingVertical: 48 },
@@ -1178,10 +1487,10 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   hostAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    borderWidth: 1,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    borderWidth: 1.5,
     borderColor: '#FFFFFF',
     backgroundColor: '#3A3A3A',
   },
@@ -1189,39 +1498,47 @@ const styles = StyleSheet.create({
   hostName: {
     flex: 1,
     color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '500',
+    fontSize: 17,
+    fontWeight: '600',
     textShadowColor: 'rgba(0,0,0,0.4)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 3,
   },
 
-  cardGradient: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: 130,
-  },
   cardTextBlock: {
     position: 'absolute',
     left: 0,
     right: 0,
     bottom: 0,
-    height: 120,
+    height: 96,
+    justifyContent: 'flex-end',
+    overflow: 'hidden',
+  },
+  // Black tint over the blur (Figma glass: rgba(0,0,0,0.2) + the blur's 0.1).
+  cardGlassTint: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.28)',
+  },
+  // Tiled fractal-noise grain (baked PNG already carries the low alpha).
+  cardNoise: {
+    ...StyleSheet.absoluteFillObject,
+    width: '100%',
+    height: '100%',
+    opacity: 0.65,
+  },
+  cardTextContent: {
     justifyContent: 'flex-end',
     paddingTop: 8,
     paddingRight: 16,
     paddingBottom: 24,
     paddingLeft: 16,
-    gap: 10,
-    backgroundColor: 'rgba(0, 0, 0, 0.20)',
+    gap: 4,
   },
   cardTitle: {
     fontFamily: FONT_MONTSERRAT,
     color: '#FFFFFF',
-    fontSize: 22,
-    lineHeight: 32,
+    fontSize: 25,
+    lineHeight: 34,
     fontWeight: '700',
     textShadowColor: 'rgba(0,0,0,0.4)',
     textShadowOffset: { width: 0, height: 1 },
@@ -1230,8 +1547,8 @@ const styles = StyleSheet.create({
   cardDesc: {
     fontFamily: FONT_INTER,
     color: '#FFFFFF',
-    fontSize: 14,
-    lineHeight: 18,
+    fontSize: 15,
+    lineHeight: 20,
     // Reserve room for the bottom-right participant cluster so the description
     // truncates a touch earlier instead of running behind the badge. The title
     // sits above the cluster, so only the description needs the inset.
@@ -1248,26 +1565,32 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#F7F7F7',
-    borderWidth: 1,
-    borderColor: '#CFCFCF',
     borderRadius: 56,
-    paddingVertical: 2,
-    paddingLeft: 2,
-    paddingRight: 8,
+    paddingVertical: 0,
+    paddingLeft: 0,
+    paddingRight: 7,
   },
   clusterAvatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: '#DDDDDD',
+    borderWidth: 1,
+    borderColor: '#FFFFFF',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.18,
+    shadowRadius: 2.5,
+    elevation: 3,
   },
-  clusterAvatarOverlap: { marginLeft: -16 },
+  clusterAvatarOverlap: { marginLeft: -20 },
+  avatarClusterTight: { paddingRight: 0 },
   avatarClusterCount: { gap: 4, paddingLeft: 8 },
   clusterMore: {
-    marginLeft: 6,
+    marginLeft: 1,
     fontFamily: FONT_MONTSERRAT,
-    fontSize: 16,
-    lineHeight: 20,
+    fontSize: 14,
+    lineHeight: 18,
     color: '#7B7B7B',
     fontWeight: '400',
   },
@@ -1295,16 +1618,16 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingRight: 8,
   },
-  statusLabel: { fontFamily: FONT_INTER, color: '#0A0A0A', fontSize: 12, lineHeight: 18 },
-  statusDate: { fontFamily: FONT_INTER, color: '#4A5565', fontSize: 12, lineHeight: 18 },
+  statusLabel: { fontFamily: FONT_INTER, color: '#0A0A0A', fontSize: 13, lineHeight: 19, fontWeight: '500' },
+  statusDate: { fontFamily: FONT_INTER, color: '#4A5565', fontSize: 13, lineHeight: 19, fontWeight: '500' },
 
   // Explore snap-carousel (Figma 11966:32391) — centered card, peeking neighbours.
   deckRoot: {
-    flex: 1,
-    justifyContent: 'center',
+    height: DECK_CARD_H + 12,
+    justifyContent: 'flex-start',
   },
   deckContent: {
-    alignItems: 'center',
+    alignItems: 'flex-start',
   },
   deckSlot: {
     width: DECK_ITEM_W,
@@ -1333,49 +1656,44 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    borderRadius: 9,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
   },
-  tripTypeLabel: { color: '#333333', fontSize: 13, fontWeight: '500' },
-  exGradient: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: 220,
-  },
+  tripTypeLabel: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
   exBottom: {
     position: 'absolute',
     left: 0,
     right: 0,
     bottom: 0,
+    overflow: 'hidden',
+  },
+  exContent: {
     paddingTop: 8,
     paddingRight: 16,
     paddingBottom: 24,
     paddingLeft: 16,
-    gap: 10,
-    backgroundColor: 'rgba(0, 0, 0, 0.20)',
+    gap: 12,
   },
+  exHeadings: { gap: 1 },
   exInfoRow: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
     gap: 12,
   },
-  exInfoLeft: { gap: 4, flexShrink: 1 },
-  exPrice: { color: '#FFFFFF', fontSize: 20, fontWeight: '600' },
-  exDates: { color: '#FFFFFF', fontSize: 16 },
+  exInfoLeft: { gap: 8, flexShrink: 1, marginTop: 6 },
+  exPrice: { color: '#FFFFFF', fontSize: 22, lineHeight: 26, fontWeight: '600' },
+  exDates: { color: '#FFFFFF', fontSize: 17, lineHeight: 24 },
   exInfoRight: { alignItems: 'flex-end', gap: 8 },
-  exSpots: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
+  exSpots: { color: '#FFFFFF', fontSize: 15, lineHeight: 20, fontWeight: '400' },
   exCluster: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#F7F7F7',
     borderRadius: 56,
-    paddingVertical: 2,
-    paddingLeft: 2,
+    paddingVertical: 0,
+    paddingLeft: 0,
     paddingRight: 8,
   },
 

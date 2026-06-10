@@ -267,10 +267,10 @@ export const NotificationCenter: React.FC<Props> = ({ userId, bare = false }) =>
         accessibilityLabel="Notifications"
         accessibilityRole="button"
       >
-        <Ionicons name="notifications-outline" size={bare ? 24 : 20} color="#FFFFFF" />
+        <Ionicons name="notifications-outline" size={bare ? 30 : 20} color="#FFFFFF" />
         {unread > 0 && (
           <View style={styles.badge}>
-            {unread > 1 ? <Text style={styles.badgeText}>{unread > 9 ? '9+' : unread}</Text> : null}
+            <Text style={styles.badgeText}>{unread > 9 ? '9+' : unread}</Text>
           </View>
         )}
       </TouchableOpacity>
@@ -462,23 +462,23 @@ const styles = StyleSheet.create({
   },
   badge: {
     position: 'absolute',
-    top: 6,
-    right: 6,
-    minWidth: 8,
-    height: 8,
-    paddingHorizontal: 2,
-    borderRadius: 8,
+    top: 2,
+    right: 2,
+    minWidth: 18,
+    height: 18,
+    paddingHorizontal: 4,
+    borderRadius: 9,
     backgroundColor: '#FF3B30',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1.5,
-    borderColor: '#333333',
+    borderColor: '#212121',
   },
   badgeText: {
     color: '#FFFFFF',
-    fontSize: 8,
+    fontSize: 11,
     fontWeight: '700',
-    lineHeight: 9,
+    lineHeight: 13,
   },
   modalRoot: {
     flex: 1,
