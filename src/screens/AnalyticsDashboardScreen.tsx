@@ -15,16 +15,17 @@ import {
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Svg, { Polyline } from 'react-native-svg';
 import {
   fetchDashboard,
   DashboardData,
   DashboardCounter,
   EventName,
 } from '../services/analytics/analyticsDashboardService';
-import { C, CARD_SHADOW, HIT, TILE_W, Sparkline, DeltaPill, StatTile, deltaPct, IoniconName } from './analytics/analyticsTokens';
-import { TripsAnalyticsView, TRIP_METRIC_INFO, TRIP_METRIC_LABELS } from './analytics/TripsAnalyticsView';
 
 const SCREEN_H = Dimensions.get('window').height;
+// Two-column KPI grid: (screen − scroll padding 16×2 − gap 10) / 2.
+const TILE_W = (Dimensions.get('window').width - 32 - 10) / 2;
 
 type PresetKey = 'all' | 'today' | '7d' | '30d' | '90d' | '1y' | 'custom';
 // Info-sheet keys: every analytics event, plus the non-event metrics.
@@ -76,6 +77,14 @@ function fmtShortDate(iso: string): string {
   const d = new Date(iso);
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
 }
+
+function deltaPct(total: number, prev: number): { value: number; up: boolean; flat: boolean } | null {
+  if (prev <= 0) return null;
+  const v = ((total - prev) / prev) * 100;
+  return { value: Math.abs(v), up: v >= 0, flat: Math.abs(v) < 0.1 };
+}
+
+type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
 
 // Event groups
 const ONBOARDING_FUNNEL_EVENTS: EventName[] = [
@@ -207,9 +216,6 @@ export function AnalyticsDashboardScreen({ onBack }: AnalyticsDashboardScreenPro
   const [customFrom, setCustomFrom] = useState<Date>(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
   const [customTo, setCustomTo] = useState<Date>(new Date());
   const [infoEvent, setInfoEvent] = useState<InfoKey | null>(null);
-  const [tab, setTab] = useState<'users' | 'trips'>('users');
-  const [reloadToken, setReloadToken] = useState(0);
-  const [tripInfoKey, setTripInfoKey] = useState<string | null>(null);
 
   const rangeShort = PRESETS.find(p => p.key === range.preset)?.shortLabel
     ?? (range.from && range.to ? `${fmtShortDate(range.from)} → ${fmtShortDate(range.to)}` : 'all time');
@@ -312,21 +318,6 @@ export function AnalyticsDashboardScreen({ onBack }: AnalyticsDashboardScreenPro
         </ScrollView>
       </View>
 
-      <View style={styles.segmentWrap}>
-        {(['users', 'trips'] as const).map(t => (
-          <TouchableOpacity
-            key={t}
-            style={[styles.segment, tab === t && styles.segmentActive]}
-            activeOpacity={0.8}
-            onPress={() => setTab(t)}
-          >
-            <Text style={[styles.segmentText, tab === t && styles.segmentTextActive]}>
-              {t === 'users' ? 'Users' : 'Trips'}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-
       {/* ============ Body ============ */}
       <ScrollView
         contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 40 }]}
@@ -334,27 +325,27 @@ export function AnalyticsDashboardScreen({ onBack }: AnalyticsDashboardScreenPro
         refreshControl={
           <RefreshControl
             refreshing={loading && !!data}
-            onRefresh={() => { if (tab === 'users') { load(range); } else { setReloadToken(x => x + 1); } }}
+            onRefresh={() => load(range)}
             tintColor={C.accent}
             colors={[C.accent]}
           />
         }
       >
-        {tab === 'users' && loading && !data && (
+        {loading && !data && (
           <View style={styles.firstLoad}>
             <ActivityIndicator size="large" color={C.accent} />
             <Text style={styles.firstLoadText}>Loading analytics…</Text>
           </View>
         )}
 
-        {tab === 'users' && error && (
+        {error && (
           <View style={styles.errorBanner}>
             <Ionicons name="alert-circle" size={18} color={C.down} />
             <Text style={styles.errorText}>{error}</Text>
           </View>
         )}
 
-        {tab === 'users' && data && (
+        {data && (
           <>
             {isAllEmpty && <EmptyBanner />}
 
@@ -367,7 +358,7 @@ export function AnalyticsDashboardScreen({ onBack }: AnalyticsDashboardScreenPro
                   icon={t.icon}
                   counter={data.metrics[t.key]}
                   eventKey={t.key}
-                  onInfo={setInfoEvent as (e: string) => void}
+                  onInfo={setInfoEvent}
                 />
               ))}
               <StatTile
@@ -375,7 +366,7 @@ export function AnalyticsDashboardScreen({ onBack }: AnalyticsDashboardScreenPro
                 icon="chatbubbles-outline"
                 counter={data.active_conversations ?? EMPTY_COUNTER}
                 eventKey="active_conversations"
-                onInfo={setInfoEvent as (e: string) => void}
+                onInfo={setInfoEvent}
               />
             </View>
 
@@ -399,44 +390,9 @@ export function AnalyticsDashboardScreen({ onBack }: AnalyticsDashboardScreenPro
             />
           </>
         )}
-
-        {tab === 'trips' && (
-          <TripsAnalyticsView
-            range={{ from: range.from, to: range.to }}
-            onInfo={(k) => { if (TRIP_METRIC_INFO[k]) setTripInfoKey(k); }}
-            reloadToken={reloadToken}
-          />
-        )}
       </ScrollView>
 
       <InfoSheet event={infoEvent} onClose={() => setInfoEvent(null)} />
-
-      <BottomSheet visible={tripInfoKey !== null} onClose={() => setTripInfoKey(null)}>
-        {tripInfoKey && TRIP_METRIC_INFO[tripInfoKey] && (
-          <>
-            <View style={styles.sheetHeader}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.sheetTitle}>{TRIP_METRIC_LABELS[tripInfoKey] ?? tripInfoKey}</Text>
-                <Text style={styles.infoEventName}>{tripInfoKey}</Text>
-              </View>
-              <TouchableOpacity style={styles.sheetCloseBtn} onPress={() => setTripInfoKey(null)} hitSlop={HIT} activeOpacity={0.7}>
-                <Ionicons name="close" size={18} color={C.label} />
-              </TouchableOpacity>
-            </View>
-            <View style={styles.sheetBody}>
-              <Text style={styles.infoSectionLabel}>WHAT IT COUNTS</Text>
-              <Text style={styles.infoText}>{TRIP_METRIC_INFO[tripInfoKey].what}</Text>
-              <Text style={[styles.infoSectionLabel, { marginTop: 18 }]}>WHEN IT'S RECORDED</Text>
-              <Text style={styles.infoText}>{TRIP_METRIC_INFO[tripInfoKey].when}</Text>
-            </View>
-            <View style={[styles.sheetFooter, { paddingBottom: insets.bottom + 14 }]}>
-              <TouchableOpacity style={[styles.btnPrimary, { flex: 1 }]} onPress={() => setTripInfoKey(null)} activeOpacity={0.85}>
-                <Text style={styles.btnPrimaryText}>Got it</Text>
-              </TouchableOpacity>
-            </View>
-          </>
-        )}
-      </BottomSheet>
 
       <CustomRangeSheet
         visible={customOpen}
@@ -639,6 +595,65 @@ function EmptyBanner() {
   );
 }
 
+// ============== Delta pill ==============
+
+function DeltaPill({ counter }: { counter: DashboardCounter }) {
+  const delta = deltaPct(counter.total, counter.prev);
+  const isEmpty = counter.total === 0 && counter.series.every(v => v === 0);
+  if (!delta) {
+    return (
+      <Text style={styles.deltaPlaceholder}>
+        {isEmpty ? 'No events yet' : 'No prior data'}
+      </Text>
+    );
+  }
+  return (
+    <View style={[styles.deltaPill, delta.up ? styles.deltaPillUp : styles.deltaPillDown]}>
+      <Text style={[styles.deltaText, delta.up ? styles.deltaUp : styles.deltaDown]}>
+        {delta.flat ? '— flat' : `${delta.up ? '▲' : '▼'} ${delta.value.toFixed(0)}%`}
+      </Text>
+    </View>
+  );
+}
+
+// ============== Stat tile (KPI grid) ==============
+
+interface StatTileProps {
+  label: string;
+  icon: IoniconName;
+  counter: DashboardCounter;
+  eventKey: InfoKey;
+  onInfo: (e: InfoKey) => void;
+}
+
+function StatTile({ label, icon, counter, eventKey, onInfo }: StatTileProps) {
+  const isEmpty = counter.total === 0 && counter.series.every(v => v === 0);
+  return (
+    <TouchableOpacity style={styles.tile} activeOpacity={0.7} onPress={() => onInfo(eventKey)}>
+      <View style={styles.tileHeader}>
+        <View style={styles.tileIconWrap}>
+          <Ionicons name={icon} size={15} color={C.accent} />
+        </View>
+        <Ionicons name="information-circle-outline" size={15} color={C.faint} />
+      </View>
+
+      <Text style={styles.tileNumber} numberOfLines={1}>
+        {counter.total.toLocaleString()}
+      </Text>
+      <Text style={styles.tileLabel} numberOfLines={2}>{label}</Text>
+
+      <View style={styles.tileFooter}>
+        <DeltaPill counter={counter} />
+        {!isEmpty && (
+          <View style={styles.tileSpark}>
+            <Sparkline data={counter.series} height={22} />
+          </View>
+        )}
+      </View>
+    </TouchableOpacity>
+  );
+}
+
 // ============== Funnel section (with view toggle) ==============
 
 interface FunnelSectionProps {
@@ -755,7 +770,85 @@ function FunnelBars({ events, counts, max, metrics, onInfo }: FunnelViewProps & 
   );
 }
 
-// ============== Styles ==============
+// ============== Sparkline ==============
+
+interface SparklineProps {
+  data: number[];
+  height: number;
+}
+
+function Sparkline({ data, height }: SparklineProps) {
+  const [width, setWidth] = useState(0);
+  if (!data || data.length === 0) return <View style={{ height }} />;
+  const max = Math.max(...data);
+  const min = Math.min(...data);
+  const range = Math.max(max - min, 1);
+  const stepX = data.length > 1 && width > 0 ? width / (data.length - 1) : 0;
+  const padY = 3;
+  const usableH = height - padY * 2;
+  const points = data
+    .map((v, i) => {
+      const x = i * stepX;
+      const y = padY + usableH - ((v - min) / range) * usableH;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(' ');
+  return (
+    <View
+      style={{ height, width: '100%' }}
+      onLayout={e => setWidth(e.nativeEvent.layout.width)}
+    >
+      {width > 0 && (
+        <Svg width={width} height={height}>
+          <Polyline
+            points={points}
+            fill="none"
+            stroke={C.accent}
+            strokeWidth={1.75}
+            strokeLinejoin="round"
+            strokeLinecap="round"
+          />
+        </Svg>
+      )}
+    </View>
+  );
+}
+
+// ============== Tokens & styles ==============
+
+const HIT = { top: 10, bottom: 10, left: 10, right: 10 };
+
+// Palette aligned with the app design system (src/styles/theme.ts).
+const C = {
+  bg: '#F4F5F7',
+  card: '#FFFFFF',
+  text: '#222B30',
+  textSecondary: '#7B7B7B',
+  label: '#4A5565',
+  faint: '#AEB4BC',
+  border: '#E5E7EB',
+  divider: '#ECECEC',
+  track: '#EEF0F2',
+  accent: '#0788B0',
+  accentSoft: '#E6F4F8',
+  accentBg: '#F0F8FB',
+  up: '#1B9E5A',
+  upSoft: '#E7F6EE',
+  down: '#C0392B',
+  downSoft: '#FBE9E7',
+  backdrop: 'rgba(0,0,0,0.45)',
+};
+
+const CARD_SHADOW = Platform.select({
+  ios: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+  },
+  android: { elevation: 2 },
+  default: {},
+});
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
@@ -796,13 +889,6 @@ const styles = StyleSheet.create({
   chipText: { fontSize: 13, fontWeight: '600', color: C.text },
   chipTextActive: { color: '#FFFFFF' },
 
-  // ----- Segmented control -----
-  segmentWrap: { flexDirection: 'row', backgroundColor: C.track, borderRadius: 10, padding: 3, marginHorizontal: 16, marginTop: 12, gap: 3 },
-  segment: { flex: 1, paddingVertical: 9, borderRadius: 8, alignItems: 'center' },
-  segmentActive: { backgroundColor: C.card, ...CARD_SHADOW },
-  segmentText: { fontSize: 13.5, fontWeight: '700', color: C.textSecondary },
-  segmentTextActive: { color: C.accent },
-
   // ----- Scroll body -----
   scrollContent: { paddingHorizontal: 16, paddingTop: 18 },
 
@@ -835,10 +921,41 @@ const styles = StyleSheet.create({
 
   // ----- KPI tile grid -----
   gridWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 22 },
+  tile: {
+    width: TILE_W,
+    backgroundColor: C.card,
+    borderRadius: 14,
+    padding: 14,
+    minHeight: 150,
+    borderWidth: 1,
+    borderColor: C.border,
+    ...CARD_SHADOW,
+  },
+  tileHeader: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  tileIconWrap: {
+    width: 28, height: 28, borderRadius: 8,
+    backgroundColor: C.accentSoft,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  tileNumber: { fontSize: 28, fontWeight: '800', color: C.text, letterSpacing: -0.6 },
+  tileLabel: {
+    fontSize: 12, fontWeight: '600', color: C.textSecondary,
+    lineHeight: 16, marginTop: 2, minHeight: 32,
+  },
+  tileFooter: { marginTop: 'auto', paddingTop: 8 },
+  tileSpark: { marginTop: 8 },
 
-  // ----- Delta colors (used by funnel rows) -----
+  // ----- Delta pill -----
+  deltaPill: { alignSelf: 'flex-start', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 6 },
+  deltaPillUp: { backgroundColor: C.upSoft },
+  deltaPillDown: { backgroundColor: C.downSoft },
+  deltaText: { fontSize: 11, fontWeight: '700' },
   deltaUp: { color: C.up },
   deltaDown: { color: C.down },
+  deltaPlaceholder: { fontSize: 10.5, fontWeight: '500', color: C.faint, fontStyle: 'italic' },
 
   // ----- Section cards -----
   sectionCard: {
