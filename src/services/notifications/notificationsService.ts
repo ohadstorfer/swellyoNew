@@ -57,6 +57,57 @@ export interface RenderedNotification {
 
 const TABLE = 'notifications';
 
+// ---------------------------------------------------------------------------
+// Editable bell texts — loaded once per session from notification_templates.
+// Missing table/row/field → the hardcoded defaults below render as before.
+// ---------------------------------------------------------------------------
+type BellTemplate = { bell_title: string | null; bell_body: string | null };
+let bellTemplates: Record<string, BellTemplate> | null = null;
+let bellTemplatesLoading = false;
+
+async function loadBellTemplates(): Promise<void> {
+  if (bellTemplates || bellTemplatesLoading) return;
+  bellTemplatesLoading = true;
+  try {
+    const { data, error } = await supabase
+      .from('notification_templates')
+      .select('key, bell_title, bell_body');
+    if (!error && data) {
+      const map: Record<string, BellTemplate> = {};
+      for (const row of data as any[]) map[row.key] = row;
+      bellTemplates = map;
+    }
+  } catch (e) {
+    console.warn('[notificationsService] templates load failed (using defaults):', e);
+  } finally {
+    bellTemplatesLoading = false;
+  }
+}
+
+/** Template row key: type, or type:variant for decision/stage splits. */
+function bellTemplateKey(n: NotificationRow): string {
+  const d = n.data ?? {};
+  if (n.type === 'join_request_decided' || n.type === 'commitment_decided' || n.type === 'gear_request_decided') {
+    return `${n.type}:${d.decision === 'approved' ? 'approved' : 'declined'}`;
+  }
+  if (n.type === 'trip_reminder') {
+    const s = d.stage || '';
+    if (s === 'tomorrow' || s === 'today') return `trip_reminder:${s}`;
+    if (s.startsWith('commit_')) return 'trip_reminder:commit';
+    if (s.startsWith('gear_')) return 'trip_reminder:gear';
+    return 'trip_reminder:week';
+  }
+  return n.type;
+}
+
+/** Replace {placeholders}; unknown ones stay as-is; extra spaces collapse. */
+function fillTemplate(template: string, vars: Record<string, string>): string {
+  return template
+    .replace(/\{(\w+)\}/g, (m, k) => (vars[k] !== undefined ? vars[k] : m))
+    .replace(/ {2,}/g, ' ')
+    .trim();
+}
+
 /** Quietly swallow "table doesn't exist yet" (migration not applied) and similar. */
 function isMissingTableError(error: any): boolean {
   const msg = (error?.message || '').toLowerCase();
@@ -70,6 +121,7 @@ function isMissingTableError(error: any): boolean {
 export const notificationsService = {
   /** Latest notifications for the current user, newest first. */
   async fetch(limit = 50): Promise<NotificationRow[]> {
+    void loadBellTemplates(); // fire-and-forget; ready by the time the bell renders
     try {
       const { data, error } = await supabase
         .from(TABLE)
@@ -209,8 +261,31 @@ export const notificationsService = {
   },
 };
 
-/** Turn a notification row into display text + icon, using its frozen snapshot. */
+/** Turn a notification row into display text + icon, using its frozen snapshot.
+ *  Texts come from notification_templates when loaded; defaults otherwise.
+ *  Icons always come from the defaults (not editable). */
 export function renderNotification(n: NotificationRow): RenderedNotification {
+  const base = renderNotificationDefault(n);
+  const tpl = bellTemplates?.[bellTemplateKey(n)];
+  if (tpl?.bell_title && tpl?.bell_body) {
+    const d = n.data ?? {};
+    const trip = d.trip_title ? `“${d.trip_title}”` : 'the trip';
+    const stage = d.stage || '';
+    const vars: Record<string, string> = {
+      trip,
+      actor: d.actor_name || 'Someone',
+      item: d.item_name ?? d.gear_name ?? 'gear',
+      qty: d.qty != null ? String(d.qty) : '',
+      preview: d.preview || `New update in ${trip}.`,
+      days: stage.includes('_') ? stage.split('_')[1] : '',
+    };
+    return { ...base, title: fillTemplate(tpl.bell_title, vars), body: fillTemplate(tpl.bell_body, vars) };
+  }
+  return base;
+}
+
+/** The hardcoded default rendering (also the fallback when templates are absent). */
+function renderNotificationDefault(n: NotificationRow): RenderedNotification {
   const d = n.data ?? {};
   const who = d.actor_name || 'Someone';
   const trip = d.trip_title ? `“${d.trip_title}”` : 'the trip';

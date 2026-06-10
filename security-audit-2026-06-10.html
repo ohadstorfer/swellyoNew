@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Swellyo Security Audit — June 10, 2026</title>
+<style>
+  :root {
+    --bg: #f6f8fa;
+    --surface: #ffffff;
+    --surface2: #f0f2f5;
+    --border: #d0d7de;
+    --text: #1f2328;
+    --muted: #57606a;
+    --critical: #cf222e;
+    --high: #bc4c00;
+    --medium: #9a6700;
+    --low: #0969da;
+    --clean: #1a7f37;
+    --accent: #0969da;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    padding: 40px 20px;
+  }
+  .container { max-width: 900px; margin: 0 auto; }
+  header {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 24px;
+    margin-bottom: 32px;
+  }
+  h1 { font-size: 28px; font-weight: 700; }
+  .subtitle { color: var(--muted); margin-top: 6px; font-size: 15px; }
+  .scope {
+    display: flex; gap: 12px; margin-top: 16px; flex-wrap: wrap;
+  }
+  .scope span {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 20px; padding: 4px 14px; font-size: 13px; color: var(--muted);
+  }
+  .summary-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px; margin-bottom: 40px;
+  }
+  .stat {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; padding: 16px; text-align: center;
+  }
+  .stat .num { font-size: 32px; font-weight: 700; }
+  .stat .label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px; }
+  .stat.critical .num { color: var(--critical); }
+  .stat.high .num { color: var(--high); }
+  .stat.medium .num { color: var(--medium); }
+  .stat.clean .num { color: var(--clean); }
+  h2 {
+    font-size: 20px; margin: 40px 0 16px;
+    padding-bottom: 8px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 10px;
+  }
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-left: 4px solid var(--border);
+    border-radius: 8px; padding: 18px 20px; margin-bottom: 14px;
+  }
+  .card.critical { border-left-color: var(--critical); }
+  .card.done { border-left-color: var(--clean); opacity: 0.75; }
+  .card.done h3 .strike { text-decoration: line-through; color: var(--muted); }
+  .badge.done { background: rgba(26,127,55,0.12); color: var(--clean); }
+  .resolution {
+    font-size: 13.5px; background: rgba(26,127,55,0.07);
+    border: 1px solid rgba(26,127,55,0.3); border-radius: 6px;
+    padding: 10px 14px; margin-top: 8px;
+  }
+  .resolution strong { color: var(--clean); }
+  .priority-list li.done { text-decoration: line-through; color: var(--muted); }
+  .priority-list li.done::before { content: "✓"; color: var(--clean); border-color: rgba(26,127,55,0.4); }
+  .card.high { border-left-color: var(--high); }
+  .card.medium { border-left-color: var(--medium); }
+  .card.low { border-left-color: var(--low); }
+  .card h3 { font-size: 16px; margin-bottom: 6px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .badge {
+    font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 4px;
+    text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .badge.critical { background: rgba(207,34,46,0.12); color: var(--critical); }
+  .badge.high { background: rgba(188,76,0,0.12); color: var(--high); }
+  .badge.medium { background: rgba(154,103,0,0.12); color: var(--medium); }
+  .badge.low { background: rgba(9,105,218,0.12); color: var(--low); }
+  .card p { font-size: 14px; color: #424a53; margin-bottom: 8px; }
+  .card .fix {
+    font-size: 13.5px; background: var(--surface2); border-radius: 6px;
+    padding: 10px 14px; margin-top: 8px;
+  }
+  .card .fix strong { color: var(--clean); }
+  code {
+    font-family: "SF Mono", SFMono-Regular, Consolas, monospace;
+    font-size: 12.5px; background: var(--surface2);
+    padding: 2px 6px; border-radius: 4px; color: #953800;
+  }
+  .fix code { background: rgba(0,0,0,0.06); }
+  .loc { font-size: 12.5px; color: var(--muted); font-family: "SF Mono", SFMono-Regular, Consolas, monospace; margin-bottom: 8px; }
+  ul.clean-list { list-style: none; }
+  ul.clean-list li {
+    padding: 8px 0 8px 28px; position: relative; font-size: 14px;
+    border-bottom: 1px solid rgba(208,215,222,0.7); color: #424a53;
+  }
+  ul.clean-list li:last-child { border-bottom: none; }
+  ul.clean-list li::before { content: "✓"; position: absolute; left: 4px; color: var(--clean); font-weight: 700; }
+  .priority-list { counter-reset: prio; list-style: none; }
+  .priority-list li {
+    counter-increment: prio; position: relative;
+    padding: 10px 0 10px 44px; font-size: 14.5px;
+    border-bottom: 1px solid rgba(208,215,222,0.7);
+  }
+  .priority-list li:last-child { border-bottom: none; }
+  .priority-list li::before {
+    content: counter(prio); position: absolute; left: 0; top: 10px;
+    width: 28px; height: 28px; border-radius: 50%;
+    background: var(--surface2); border: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 700; color: var(--accent);
+  }
+  .callout {
+    background: rgba(154,103,0,0.07); border: 1px solid rgba(154,103,0,0.35);
+    border-radius: 8px; padding: 14px 18px; margin: 20px 0; font-size: 14px;
+  }
+  .callout strong { color: var(--medium); }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; margin-top: 8px; }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+  footer { margin-top: 48px; padding-top: 20px; border-top: 1px solid var(--border); color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<header>
+  <h1>🔒 Swellyo Security Audit</h1>
+  <div class="subtitle">June 10, 2026 · React Native + Expo client · Supabase backend · Edge Functions</div>
+  <div class="scope">
+    <span>📱 Code audit (OWASP Mobile Top 10)</span>
+    <span>📦 Dependency scan (npm audit)</span>
+    <span>🗄️ Live Supabase config (201 advisor lints)</span>
+  </div>
+</header>
+
+<div class="summary-grid">
+  <div class="stat clean"><div class="num">7</div><div class="label">Fixed</div></div>
+  <div class="stat critical"><div class="num">0</div><div class="label">Critical</div></div>
+  <div class="stat high"><div class="num">1</div><div class="label">High</div></div>
+  <div class="stat medium"><div class="num">6</div><div class="label">Medium</div></div>
+  <div class="stat clean"><div class="num">12</div><div class="label">Verified Clean</div></div>
+</div>
+
+<h2>🔴 Critical — act this week</h2>
+
+<div class="card critical done">
+  <h3><span class="badge done">✅ Done — not a real exposure</span> <span class="strike">Google OAuth client secret in <code>.env</code> with <code>EXPO_PUBLIC_</code> prefix</span></h3>
+  <div class="loc">.env line 3 — EXPO_PUBLIC_GOOGLE_CLIENT_SECRET (also in EAS production + development env)</div>
+  <div class="resolution"><strong>Resolved 2026-06-10 — severity downgraded after verification.</strong> Expo only inlines <code>EXPO_PUBLIC_*</code> vars at the point where code references them; zero references exist anywhere in the codebase, so <strong>no shipped bundle ever contained the secret</strong>. <code>.env</code> was never committed to git. No rotation needed. As hygiene, the unused variable was deleted from <code>.env</code> and from both EAS environments (production, development) so it can never become a problem later. Bonus: verified <code>DEV_MODE=false</code> / <code>LOCAL_MODE=false</code> are already pinned in EAS production env.</div>
+</div>
+
+<div class="card critical done">
+  <h3><span class="badge done">✅ Done — applied to prod &amp; verified</span> <span class="strike">57 SECURITY DEFINER functions executable by <code>anon</code></span></h3>
+  <div class="loc">Live database — fixed via supabase/migrations/revoke_security_definer_execute_hardening.sql</div>
+  <div class="resolution"><strong>Resolved 2026-06-10.</strong> Revoked EXECUTE from <code>PUBLIC</code>, <code>anon</code>, and <code>authenticated</code> on all 60 SECURITY DEFINER functions, then re-granted to <code>authenticated</code> only the 13 RPCs the client actually calls + the 4 helpers used inside RLS policies (EXECUTE is checked in policy expressions). <code>anon</code> kept <strong>zero</strong> grants — verified no pre-auth code path or anon-role policy needs any. <code>service_role</code> grants untouched (edge functions unaffected); triggers fire regardless of EXECUTE (checked only at CREATE TRIGGER time); cron jobs only call edge fns over HTTP. <strong>Verified live:</strong> anon → <code>permission denied</code> on revoked fns; authenticated → all RLS-gated tables (conversations, messages, users, surfers) query without error and policy helpers work. Advisor count for this lint: 57 → 0.</div>
+</div>
+
+<div class="card critical done">
+  <h3><span class="badge done">✅ Done — deployed &amp; verified</span> <span class="strike"><code>report-user</code> / <code>report-bug</code> Edge Functions accept unauthenticated calls</span></h3>
+  <div class="loc">supabase/functions/report-user/index.ts · report-bug/index.ts — deployed to prod 2026-06-10</div>
+  <div class="resolution"><strong>Resolved 2026-06-10.</strong> Added the standard <code>supabaseAdmin.auth.getUser(token)</code> auth guard (same pattern as the 12 already-hardened functions) — missing/invalid token now returns 401. Reporter name + email are now derived from the <strong>verified token</strong>, not the caller-supplied body, so forged-identity reports are impossible. <strong>Verified safely (no live attack):</strong> downloaded the deployed code back and diffed — matches the hardened source exactly; auth guard confirmed present in both live functions. Functionality preserved 100% — both call sites (Report User screen, Report Bug overlay) are only reachable while logged in and already send <code>session.access_token</code>, so the legit path is unchanged; only the anonymous <code>|| anonKey</code> fallback (the vuln) is now rejected.</div>
+</div>
+
+<h2>🟠 High</h2>
+
+<div class="card high done">
+  <h3><span class="badge done">✅ Done — code fixed</span> <span class="strike">PII logged unconditionally in production builds</span></h3>
+  <div class="loc">src/services/auth/authService.ts · src/context/OnboardingContext.tsx · src/services/analytics/analyticsService.ts</div>
+  <div class="resolution"><strong>Resolved 2026-06-10 (uncommitted, client-only).</strong> Gated every PII-bearing log behind <code>if (__DEV__)</code>: the Google sign-in response + decoded JWT payload + saved-user logs (both web GIS and mobile expo-auth-session paths) in authService; the "Loading saved data / Parsed data / Setting form data / Saving data to local storage / Updating form data" logs in OnboardingContext; and the two PostHog "User identified" logs (userId + properties) in analyticsService. These now emit only in dev builds — production logcat/Sentry breadcrumbs no longer carry emails, DOB, or tokens. <em>Note:</em> took the surgical <code>__DEV__</code> route rather than <code>babel-plugin-transform-remove-console</code> to avoid blanket-stripping intentional error logs.</div>
+</div>
+
+<div class="card high">
+  <h3><span class="badge high">High</span> Google Places + Pexels API keys bundled client-side with no restrictions</h3>
+  <div class="loc">HomeBreakSearchSheet.tsx:156 · MultiPlaceAutocompleteInput.tsx:78 · imageService.ts:183 + 4 more sites</div>
+  <p>Both keys are extractable from the bundle and currently unrestricted — anyone can run up billing against the Swellyo account. The Places key is the dangerous one (can cost hundreds of dollars/day).</p>
+  <div class="fix"><strong>Fix:</strong> In Google Cloud Console, restrict the Places key by iOS bundle ID, Android package + SHA, and HTTP referrer for web. Proxy Pexels through an Edge Function or restrict it in the Pexels dashboard.</div>
+</div>
+
+<div class="card high done">
+  <h3><span class="badge done">✅ Done — code fixed</span> <span class="strike">WebView <code>originWhitelist={['*']}</code> + unvalidated message origins</span></h3>
+  <div class="loc">src/components/MapPickerModal.tsx (both WebViews + InlineMapView web handler)</div>
+  <div class="resolution"><strong>Resolved 2026-06-10 (uncommitted, client-only).</strong> Changed both <code>originWhitelist={['*']}</code> → <code>['https://*']</code>, which blocks <code>javascript:</code> / <code>data:</code> scheme navigation while leaving all legitimate https traffic intact (the Google Maps JS loads as a subresource, unaffected by the whitelist — so the map still renders). Added the same-origin guard to the <code>InlineMapView</code> web <code>message</code> handler that the <code>MapPopover</code> already had (rejects cross-origin <code>postMessage</code>). <strong>Covers L3.</strong> No functional change — verified the message contract (srcDoc iframe with <code>allow-same-origin</code> inherits the parent origin, so messages still match).</div>
+</div>
+
+<div class="card high done">
+  <h3><span class="badge done">✅ Done — applied to prod &amp; verified</span> <span class="strike">46 DB functions with mutable <code>search_path</code></span></h3>
+  <div class="loc">Live database — fixed via supabase/migrations/pin_function_search_path_hardening.sql</div>
+  <div class="resolution"><strong>Resolved 2026-06-10.</strong> Pinned <code>search_path = public, extensions, pg_temp</code> on all 46 functions that had none (<code>pg_temp</code> listed <em>last</em> — the secure position that stops Postgres searching temp first, the SECURITY DEFINER hijack vector). <strong>Verified safe before applying:</strong> scanned every function body — none make unqualified extension calls, none reference <code>net</code>/<code>vault</code>/<code>cron</code>/<code>storage</code>, and all <code>auth.*</code> refs are schema-qualified; since those schemas are never in a default path, nothing that resolves today fails after pinning. <strong>Verified after:</strong> 0 mutable functions remain, all 46 carry the intended value, sample functions execute correctly (<code>calculate_age_from_dob</code>→36), and the authenticated RLS path returns identical counts to baseline. (<code>handle_new_auth_user</code> signup trigger was already pinned previously — untouched.)</div>
+</div>
+
+<div class="card high done">
+  <h3><span class="badge done">✅ Done — deployed &amp; verified</span> <span class="strike">Rate limiting on AI Edge Functions is per-isolate (ineffective)</span></h3>
+  <div class="loc">DB: supabase/migrations/distributed_rate_limiter.sql · swelly-chat + swelly-trip-planning deployed 2026-06-10</div>
+  <div class="resolution"><strong>Resolved 2026-06-10.</strong> Built a Postgres-backed distributed limiter: <code>rate_limit_counters</code> table + atomic <code>check_rate_limit(bucket, max, window)</code> function (fixed-window, INSERT…ON CONFLICT increment, bucket-scoped self-cleanup, search_path pinned, EXECUTE revoked from anon/authenticated). Both edge functions now call it via the service-role client — the limit is global across all isolates. <strong>Notable:</strong> the drift check revealed live <code>swelly-trip-planning</code> had <em>no</em> limiter at all (was fully unprotected); it does now. To respect drift, both functions were patched off their <em>live</em> versions and deployed from a scratch dir — so no undeployed repo work was shipped and no live work reverted. <strong>Verified:</strong> limiter logic correct (3 allowed→4th denied), <code>service_role</code> can execute / anon+authenticated cannot, deployed code matches patches byte-for-byte, and both functions boot + return 401 on bad token (safe probe, no side effects). Fails OPEN on DB error so a hiccup never blocks real users. Repo files also updated (minimal limiter-only diffs) so future deploys keep it.</div>
+</div>
+
+<h2>🟡 Medium</h2>
+
+<div class="card medium" style="border-left-color: var(--high);">
+  <h3><span class="badge high">⏸ Blocked — deploy risk</span> Full chat conversations logged to Edge Function logs</h3>
+  <div class="loc">supabase/functions/swelly-chat/index.ts</div>
+  <p>Entire OpenAI request/response bodies — every message users type to Swelly — are retained in Supabase logs, readable by anyone with project admin access.</p>
+  <div class="fix" style="background: rgba(188,76,0,0.08); border: 1px solid rgba(188,76,0,0.3);"><strong style="color: var(--high);">Not fixed — held back on purpose.</strong> Redacting these logs requires redeploying <code>swelly-chat</code>. On 2026-06-10 a drift check (download live + diff) found the <strong>repo is ahead of the live function by ~150 lines</strong>: the repo contains a reworked lifestyle-image-matching path (<code>matchLifestyleKeywordsToImages</code> + new canonical keyword list) that is <strong>not deployed</strong>. Deploying the repo file to fix logging would also ship that unreviewed feature work to prod. <strong>Needs an owner decision first:</strong> (a) confirm the repo's lifestyle rework is intended for prod and deploy the whole thing, or (b) reconcile the drift, then redact logs. Low-ish urgency — logs are admin-only.</div>
+</div>
+
+<div class="card medium">
+  <h3><span class="badge medium">Medium</span> DM messages + full profile (DOB, location) cached plaintext in AsyncStorage</h3>
+  <div class="loc">userProfileCache.ts · OnboardingContext.tsx:396 · chatHistoryCache.ts · conversationListCache.ts</div>
+  <p>AsyncStorage is unencrypted (plain SQLite on Android). Up to 100 DM messages per conversation plus the full surfer profile sit at rest in plaintext.</p>
+  <div class="fix"><strong>Fix:</strong> Move sensitive profile fields to <code>expo-secure-store</code> (the <code>ageGateService</code> already shows the correct pattern on native). Evaluate whether caching DM text is worth the risk.</div>
+</div>
+
+<div class="card medium">
+  <h3><span class="badge medium">Medium</span> Raw date of birth in localStorage on web</h3>
+  <div class="loc">src/services/ageGate/ageGateService.ts:39–41</div>
+  <p>Mobile correctly uses secure store; web falls back to plain <code>localStorage</code> with the raw <code>YYYY-MM-DD</code> birthdate — readable by any script in the origin (XSS, compromised third-party).</p>
+  <div class="fix"><strong>Fix:</strong> Store only a computed boolean / unblock date on web, never the raw DOB.</div>
+</div>
+
+<div class="card medium">
+  <h3><span class="badge medium">Medium</span> 6 public storage buckets allow file listing</h3>
+  <div class="loc">Countries, lifestyle-images, profile-images, profile-surf-videos, surftrip-images, trip-images</div>
+  <p>Anyone can enumerate every file in these buckets — including all user profile photos and surf videos — without knowing any URLs.</p>
+  <div class="fix"><strong>Fix:</strong> Disable public listing on each bucket in the Supabase dashboard; objects stay fetchable by direct URL.</div>
+</div>
+
+<div class="card medium">
+  <h3><span class="badge medium">Medium</span> Leaked-password protection disabled in Supabase Auth</h3>
+  <div class="loc">Supabase Auth settings</div>
+  <p>Compromised-password checking (HaveIBeenPwned) is off.</p>
+  <div class="fix"><strong>Fix:</strong> One toggle in the Supabase dashboard → Auth → Security.</div>
+</div>
+
+<div class="card medium">
+  <h3><span class="badge medium">Medium</span> 29 RLS policies apply to anonymous users</h3>
+  <div class="loc">Live database — includes users, messages, surfers, conversations, notifications</div>
+  <p>Relevant because the demo button uses anonymous sign-in. Worth verifying anon sessions can't read <code>messages</code> / <code>surfers</code> beyond what demo mode needs. Also: PostHog logging of identified users (<code>analyticsService.ts:74</code>) and session replay input-masking should be reviewed.</p>
+  <div class="fix"><strong>Fix:</strong> Audit each policy's <code>TO</code> clause; scope to <code>authenticated</code> where anon access isn't intentional.</div>
+</div>
+
+<h2>🔵 Low</h2>
+
+<div class="card low">
+  <h3><span class="badge low">Low</span> Dev flags could ship to production</h3>
+  <div class="loc">.env lines 12–13 · eas.json production profile</div>
+  <p><code>EXPO_PUBLIC_DEV_MODE=true</code> / <code>LOCAL_MODE=true</code> are set locally and the EAS production profile doesn't explicitly override them. A 5-second logo long-press also exposes the anonymous demo sign-in path in production builds.</p>
+  <div class="fix"><strong>Fix:</strong> Pin both flags to <code>false</code> in the eas.json production profile; consider removing the long-press backdoor.</div>
+</div>
+
+<div class="card low">
+  <h3><span class="badge low">Low</span> Other low-severity items</h3>
+  <p>• Legacy client-side OAuth token exchange path in <code>authService.ts:226–250</code> (appears dead — delete or mark)<br>
+  • Deep-link invite token persisted in AsyncStorage with no expiry (<code>AppContent.tsx:128–191</code>) — add a 24h <code>storedAt</code> check<br>
+  • <s><code>postMessage(json, '*')</code> in <code>mapPickerHtml.ts</code></s> — ✅ <strong>fixed</strong> 2026-06-10, both <code>send()</code> fns now target <code>window.origin</code> (see Medium section)<br>
+  • 4 tables with RLS enabled but no policies (deny-all — safe, just noise)</p>
+</div>
+
+<h2>📦 Dependencies (npm audit)</h2>
+<div class="card medium">
+  <h3><span class="badge medium">31 vulns</span> 2 critical · 6 high · 23 moderate — all have fixes available</h3>
+  <table>
+    <tr><th>Severity</th><th>Package</th><th>Issue</th></tr>
+    <tr><td>Critical</td><td><code>next</code> (transitive)</td><td>RCE in React flight protocol + 20 others</td></tr>
+    <tr><td>Critical</td><td><code>shell-quote</code></td><td>Newline escaping bypass in quote()</td></tr>
+    <tr><td>High</td><td><code>tar</code>, <code>undici</code>, <code>minimatch</code>, <code>picomatch</code>, <code>fast-uri</code>, <code>@xmldom/xmldom</code></td><td>Path traversal, ReDoS, request smuggling</td></tr>
+  </table>
+  <div class="fix"><strong>Fix:</strong> <code>npm audit fix</code> covers all of them. These are mostly build-chain transitive deps (low runtime risk for the shipped bundle) but worth cleaning before the next build.</div>
+</div>
+
+<h2>✅ Verified clean</h2>
+<div class="card" style="border-left-color: var(--clean);">
+  <ul class="clean-list">
+    <li>Previous hardening held up: RLS, edge-function auth on 12 functions, IDOR fixes, swelly-shaper column injection, admin RPC revokes</li>
+    <li>Service-role key never referenced in client code</li>
+    <li>No <code>.env</code> in git history; <code>.gitignore</code> correct</li>
+    <li>All production traffic over HTTPS (the http:// refs are Expo Go dev-server only)</li>
+    <li>Deep-link invite tokens validated server-side via authenticated RPC — no auth bypass</li>
+    <li>Presigned DM video URLs authorized against conversation membership, never logged</li>
+    <li>Supabase anon key public-by-design — RLS is the protection layer</li>
+    <li>Age gate uses <code>expo-secure-store</code> correctly on native</li>
+    <li>Supabase session storage follows the standard RN pattern</li>
+  </ul>
+</div>
+
+<h2>🎯 Remediation order</h2>
+<ol class="priority-list">
+  <li class="done"><strong>Google client secret</strong> — verified never bundled (no code references); unused var deleted from .env + EAS. No rotation needed.</li>
+  <li class="done"><strong>REVOKE EXECUTE</strong> — applied to prod; anon grants now zero, 17 authenticated grants kept (13 client RPCs + 4 RLS helpers), functionality verified live</li>
+  <li class="done"><strong>Auth checks added</strong> to <code>report-user</code> + <code>report-bug</code> — deployed to prod, verified, reporter identity now from token</li>
+  <li class="done"><strong>PII logs gated</strong> behind <code>__DEV__</code> in authService + OnboardingContext + analyticsService (uncommitted)</li>
+  <li><strong>Restrict the Google Places API key</strong> (bundle ID / SHA / referrer)</li>
+  <li class="done"><strong>WebView whitelist fixed</strong> (<code>https://*</code>) + InlineMapView origin check + postMessage target origin (uncommitted)</li>
+  <li class="done"><strong>search_path pinned</strong> on all 46 DB functions — applied to prod, verified, RLS path unbroken</li>
+  <li><strong>Pin dev flags to false</strong> in eas.json production profile</li>
+  <li><strong>npm audit fix</strong> before next build</li>
+  <li><strong>Secure-store migration</strong> for cached profile data + web DOB fix</li>
+</ol>
+
+<div class="callout">
+  ⚠️ <strong>Deployment cautions</strong> (from past incidents): live edge functions (<code>swelly-trip-planning</code>, <code>swelly-shaper</code>) are <em>ahead</em> of the repo — always download + diff before deploying. All DB changes go through the SQL editor manually — never <code>supabase db push</code>.
+</div>
+
+<footer>
+  Generated June 10, 2026 · Swellyo security audit · Sources: codebase audit (OWASP Mobile Top 10), <code>npm audit</code>, Supabase security advisors (201 lints)
+</footer>
+
+</div>
+</body>
+</html>

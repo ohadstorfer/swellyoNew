@@ -31,6 +31,8 @@ pg_cron (every ~1 min) → dispatch-notification-queue edge fn:
 pg_cron (daily 06:07 UTC) → scan-trip-reminders edge fn: inserts trip_reminder/trip_ended feed rows
 ```
 
+> ⚠️ **PRIORITIES FLATTENED (2026-06-10, Ohad's decision):** every push type now returns priority **0** (urgent) — see `supabase/migrations/20260611000000_all_pushes_urgent.sql`. Effect: SR1 batch, SR2 freq cap, SR3 quiet hours are **dormant** (dispatcher code untouched; its P1 branches just never run). Feed-only types (-1) unchanged. **Re-apply the mapping in `20260610000050` to restore polite behavior before opening trips to real users.** The smart-rule list below describes the system as designed, not current behavior.
+
 **Smart rules (the "engine"), where each lives:**
 - SR8 priority — `priority` col (0=urgent send-now / 1=normal). In the mapping fn `notification_push_priority`.
 - SR4 dedup-vs-feed — dispatcher: if the linked feed row is already `read_at`, drop the push.

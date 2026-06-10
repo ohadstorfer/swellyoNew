@@ -11,37 +11,36 @@ const RATE_LIMIT_CONFIG = {
   windowMs: parseInt(Deno.env.get('RATE_LIMIT_WINDOW_MS') || '60000', 10),
 }
 
-interface RateLimitEntry {
-  count: number
-  resetTime: number
-}
-
-const rateLimitStore = new Map<string, RateLimitEntry>()
-
-function checkRateLimit(userId: string): { allowed: boolean; remaining: number; resetTime: number } {
-  const now = Date.now()
-  const entry = rateLimitStore.get(userId)
-  
-  if (Math.random() < 0.01) {
-    for (const [key, value] of rateLimitStore.entries()) {
-      if (value.resetTime < now) {
-        rateLimitStore.delete(key)
-      }
+/**
+ * Distributed rate limiter backed by Postgres (public.check_rate_limit).
+ * Global across all Edge Function isolates (replaces the old per-isolate Map).
+ * Fails OPEN on error so a DB hiccup never blocks legitimate users
+ * (this is cost-control, not authentication).
+ */
+async function checkRateLimit(
+  supabaseAdmin: ReturnType<typeof createClient>,
+  userId: string,
+  bucketPrefix: string,
+): Promise<{ allowed: boolean; remaining: number; resetTime: number }> {
+  const windowSeconds = Math.max(1, Math.floor(RATE_LIMIT_CONFIG.windowMs / 1000))
+  try {
+    const { data, error } = await supabaseAdmin.rpc('check_rate_limit', {
+      p_bucket: `${bucketPrefix}:${userId}`,
+      p_max: RATE_LIMIT_CONFIG.maxRequests,
+      p_window_seconds: windowSeconds,
+    })
+    if (error) throw error
+    const row = Array.isArray(data) ? data[0] : data
+    if (!row) throw new Error('empty rate-limit response')
+    return {
+      allowed: row.allowed,
+      remaining: row.remaining,
+      resetTime: new Date(row.reset_at).getTime(),
     }
+  } catch (e) {
+    console.error('[rate-limit] DB limiter failed, allowing request (fail-open):', e)
+    return { allowed: true, remaining: RATE_LIMIT_CONFIG.maxRequests, resetTime: Date.now() + RATE_LIMIT_CONFIG.windowMs }
   }
-  
-  if (!entry || entry.resetTime < now) {
-    const resetTime = now + RATE_LIMIT_CONFIG.windowMs
-    rateLimitStore.set(userId, { count: 1, resetTime })
-    return { allowed: true, remaining: RATE_LIMIT_CONFIG.maxRequests - 1, resetTime }
-  }
-  
-  if (entry.count >= RATE_LIMIT_CONFIG.maxRequests) {
-    return { allowed: false, remaining: 0, resetTime: entry.resetTime }
-  }
-  
-  entry.count++
-  return { allowed: true, remaining: RATE_LIMIT_CONFIG.maxRequests - entry.count, resetTime: entry.resetTime }
 }
 
 interface ChatRequest {
@@ -1402,8 +1401,8 @@ serve(async (req: Request) => {
       )
     }
 
-    // Rate limiting check
-    const rateLimit = checkRateLimit(user.id)
+    // Rate limiting check (distributed; global across isolates)
+    const rateLimit = await checkRateLimit(supabaseAdmin, user.id, 'swelly-trip-planning')
     if (!rateLimit.allowed) {
       const retryAfter = Math.ceil((rateLimit.resetTime - Date.now()) / 1000)
       return new Response(

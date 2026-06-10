@@ -96,7 +96,9 @@ export function getMapPickerHtml(apiKey: string, destinationCountry?: string): s
         if (window.ReactNativeWebView) {
           window.ReactNativeWebView.postMessage(json);
         } else if (window.parent !== window) {
-          window.parent.postMessage(json, '*');
+          // Target the parent origin explicitly; '*' only for opaque-origin fallback
+          var target = (window.origin && window.origin !== 'null') ? window.origin : '*';
+          window.parent.postMessage(json, target);
         }
       }
 
@@ -260,7 +262,9 @@ export function getMapPickerInlineHtml(
         if (window.ReactNativeWebView) {
           window.ReactNativeWebView.postMessage(json);
         } else if (window.parent !== window) {
-          window.parent.postMessage(json, '*');
+          // Target the parent origin explicitly; '*' only for opaque-origin fallback
+          var target = (window.origin && window.origin !== 'null') ? window.origin : '*';
+          window.parent.postMessage(json, target);
         }
       }
 

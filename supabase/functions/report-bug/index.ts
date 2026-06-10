@@ -1,5 +1,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY')
 const EMAIL_FROM = Deno.env.get('EMAIL_FROM') || 'Swellyo <onboarding@resend.dev>'
 const NOTIFY_EMAIL = 'app@swellyo.com'
@@ -88,7 +91,33 @@ serve(async (req) => {
   }
 
   try {
-    const { userName, userEmail, description, platform } = await req.json();
+    // Require a valid authenticated user (same pattern as the other hardened functions)
+    const authHeader = req.headers.get('Authorization')
+    if (!authHeader) {
+      return new Response(JSON.stringify({ error: 'Missing authorization header' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+      });
+    }
+
+    const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    })
+
+    const token = authHeader.replace('Bearer ', '')
+    const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token)
+    if (userError || !user) {
+      return new Response(JSON.stringify({ error: 'Invalid authentication token' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+      });
+    }
+
+    const { userName: bodyUserName, description, platform } = await req.json();
+
+    // Reporter identity comes from the verified token, not the request body
+    const userName = user.user_metadata?.full_name || user.user_metadata?.name || bodyUserName || 'Unknown';
+    const userEmail = user.email || 'Unknown';
 
     if (!description) {
       return new Response(JSON.stringify({ error: 'Missing required field: description' }), {
@@ -97,7 +126,7 @@ serve(async (req) => {
       });
     }
 
-    console.log(`[Bug Report] Received from ${userName} (${userEmail})`);
+    console.log(`[Bug Report] Received from ${userName} (${user.id})`);
 
     if (!RESEND_API_KEY) {
       console.error('[Bug Report] RESEND_API_KEY not set');
@@ -108,13 +137,13 @@ serve(async (req) => {
     }
 
     const emailHtml = generateEmailHtml(
-      userName || 'Unknown',
-      userEmail || 'Unknown',
+      userName,
+      userEmail,
       description,
       platform || 'Unknown',
     );
 
-    const emailText = `Bug Report\n\nFrom: ${userName || 'Unknown'} (${userEmail || 'Unknown'})\nPlatform: ${platform || 'Unknown'}\n\nDescription:\n${description}`;
+    const emailText = `Bug Report\n\nFrom: ${userName} (${userEmail})\nPlatform: ${platform || 'Unknown'}\n\nDescription:\n${description}`;
 
     // emails disabled — push only, see 2026-05-12
     console.log('[Bug Report] Email send short-circuited (emails disabled).');
