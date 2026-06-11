@@ -50,8 +50,16 @@
   ConversationLoadingScreen, WelcomeToLineupOverlay, ProfileEditPanel, JoinDecisionOverlay.
 - Phase 5 cleanup list grew: viewingUserId always-null now, profileFrom* flags mostly dead,
   react-native-screen-transitions package removal, ConversationsStack fold-in.
-- NEXT: Eyal full regression (checklist below in chat), then Phase 5.
-- tsc baseline now 253 (shrinks as dead code dies). iOS export verified after each commit.
+- Batch regression PASSED by Eyal ("all works").
+- Phase 5 DONE (38b5c68): dead flags/states swept (verified-dead only),
+  react-native-screen-transitions UNINSTALLED, ConversationsStack plain wrapper.
+  Eyal UX call: own-profile root shows gear TOP-LEFT instead of a back button.
+- MIGRATION FUNCTIONALLY COMPLETE on iOS. Still open: (a) Eyal sanity-pass on
+  phase-5 build (gear placement + nothing regressed), (b) Android hardware-back
+  sweep when an Android device is available, (c) merge plan with Ohad —
+  nav-migration is ~20 commits ahead of main, his branch will conflict in
+  AppContent/TripsScreen; he must rebase AFTER this merges.
+- tsc baseline 253. iOS export verified after every commit.
 - NEXT after Phase 2 green: Phase 3 — STARTS WITH KEYBOARD SPIKE on device (DM in native-stack
   card; fallback JS sub-stack), then unify 3 DM paths, profile/Settings cards. See
   docs/nav-migration/phases-2-5-outline.md.

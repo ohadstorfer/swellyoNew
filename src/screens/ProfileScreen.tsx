@@ -1692,11 +1692,21 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
             null
           ) : (
             <>
-              <TouchableOpacity style={styles.backButton} onPress={handleBackPress}>
-                <View style={styles.backButtonContainer}>
-                  <BackButtonIcon />
-                </View>
-              </TouchableOpacity>
+              {/* Same header rule as the loaded state: own-profile ROOT shows
+                  the gear top-left (no back) — including while LOADING. */}
+              {isViewingOwnProfile && onSettings ? (
+                <TouchableOpacity style={styles.backButton} onPress={onSettings}>
+                  <View style={styles.backButtonContainer}>
+                    <Ionicons name="settings-outline" size={24} color="#333" />
+                  </View>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity style={styles.backButton} onPress={handleBackPress}>
+                  <View style={styles.backButtonContainer}>
+                    <BackButtonIcon />
+                  </View>
+                </TouchableOpacity>
+              )}
               {isViewingOwnProfile && onEdit ? (
                 <TouchableOpacity style={styles.editButton} onPress={onEdit}>
                   <View style={styles.editButtonContainer}>
@@ -2281,6 +2291,12 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
             ((!isViewingOwnProfile && !!userId && !!onMessage) ||
               (fromOnboardingChat && isViewingOwnProfile)) && {
               paddingBottom: Math.max(insets.bottom, 16) + 24 + 56 + 24,
+            },
+            // Own-profile ROOT: clear the floating bottom nav (66px bar +
+            // 44px bottom offset + breathing room) so the last rows scroll
+            // out from behind it.
+            isViewingOwnProfile && onSettings && {
+              paddingBottom: Math.max(insets.bottom, 16) + 66 + 44 + 24,
             },
           ]}
           showsVerticalScrollIndicator={false}
