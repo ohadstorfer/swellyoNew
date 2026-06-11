@@ -15,7 +15,8 @@ import {
   AccessibilityInfo,
   useWindowDimensions,
 } from 'react-native';
-import { useNavigation, useFocusEffect, StackActions } from '@react-navigation/native';
+import { useFocusEffect } from '@react-navigation/native';
+import { pushRootCard } from '../../navigation/navigationRef';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -80,7 +81,6 @@ type Decision = 'approved' | 'declined';
  * inside a navigator screen (all headers are).
  */
 export const NotificationCenter: React.FC<Props> = ({ userId, bare = false }) => {
-  const navigation = useNavigation();
   const [unread, setUnread] = useState(0);
 
   // Badge count: on mount, on every focus regain (the panel marks rows read
@@ -109,8 +109,10 @@ export const NotificationCenter: React.FC<Props> = ({ userId, bare = false }) =>
   }, [userId]);
 
   const openPanel = useCallback(() => {
-    navigation.dispatch(StackActions.push('NotificationsPanel', { userId }));
-  }, [navigation, userId]);
+    // Via the root ref — this bell renders inside the `independent`
+    // ConversationsStack too, where local dispatches can't reach the root.
+    pushRootCard('NotificationsPanel', { userId });
+  }, [userId]);
 
   return (
     <TouchableOpacity

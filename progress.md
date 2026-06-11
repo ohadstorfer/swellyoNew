@@ -14,4 +14,15 @@
 - Phase 1 DONE (c7e657d + 166ad31 review fixes): RootStack→HomeTabs skeleton, TripsBottomNav as
   tabBar, showTrips deleted, requestTab mechanism, Swelly z-order fix. tsc 268 baseline held;
   iOS export verified; code-reviewer audit passed (2 should-fixes applied).
-- NEXT: Eyal device-tests Phase 1 (checklist in docs/nav-migration/phase-1.md) → Phase 2 spec
+- Phase 1 device-tested by Eyal: caught blank-Profile bug (slide-out on kept-mounted tab —
+  fixed dcd085c) + PostHog useNavigationState noise (captureScreens off — ba3c034).
+  Locked rule: ROOTS SNAP, CARDS SLIDE. Chat-slide expectations = Phase 3.
+- Phase 2 DONE (ed7b797 + 3063bf3 + af59681): TripDetail/EditTrip = root-stack cards;
+  NotificationsPanel = transparentModal route IN back history (original bug fixed);
+  pendingTripDetailId state machine deleted; NotificationCenter split bell/panel.
+  Review: no criticals; fixes applied. NOTE: reviewer's dep-array suggestion caused a real
+  TDZ bug — reverted; dep arrays evaluate during render, late-declared callbacks can't go in.
+- KNOWN pre-existing (Phase 3 fixes structurally): join-decision approve while a DM is open
+  pushes the trip card invisibly under the DM overlay.
+- NEXT: Eyal device-tests Phase 2 (checklist in docs/nav-migration/phase-2.md) → Phase 3
+  (keyboard spike first!)

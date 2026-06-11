@@ -1,4 +1,4 @@
-import { createNavigationContainerRef } from '@react-navigation/native';
+import { createNavigationContainerRef, StackActions } from '@react-navigation/native';
 import type { TripDetailFocus } from '../services/notifications/notificationsService';
 import type { GroupTrip } from '../services/trips/groupTripsService';
 
@@ -32,3 +32,17 @@ export type RootStackParamList = {
  * AppContent, which is mount-safe.
  */
 export const navigationRef = createNavigationContainerRef<RootStackParamList>();
+
+/**
+ * Push a card on the ROOT stack from anywhere — including inside the
+ * `independent` ConversationsStack, whose actions don't bubble to the root
+ * (dispatching via useNavigation there dies with "not handled by any
+ * navigator"). The ref targets the root container directly.
+ */
+export function pushRootCard<RouteName extends Exclude<keyof RootStackParamList, 'HomeTabs'>>(
+  name: RouteName,
+  params: RootStackParamList[RouteName],
+) {
+  if (!navigationRef.isReady()) return;
+  navigationRef.dispatch(StackActions.push(name, params));
+}
