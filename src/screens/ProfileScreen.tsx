@@ -77,6 +77,7 @@ interface ProfileScreenProps {
   onMessage?: (userId: string, name?: string, avatar?: string | null) => void; // Callback when message button is clicked
   onContinueEdit?: () => void; // Callback when "continue edit" button is clicked
   onEdit?: () => void; // Callback when edit button is clicked
+  onSettings?: () => void; // Gear icon (own profile only) — opens the Settings card
   fromOnboardingChat?: boolean; // When true, hide all header buttons (back/edit) and show the "Got it!" floating button at the bottom
   onSaveAndGoToConversations?: () => void; // Tap handler for the "Got it!" button on the post-onboarding profile: navigates to the conversations home
   noTransition?: boolean; // When true, skip the slide-in/slide-out animations (e.g. when layered under a modal that handles its own fade)
@@ -791,7 +792,7 @@ const SWIPE_DISMISS_DISTANCE = SWIPE_SCREEN_WIDTH * 0.3;
 const SWIPE_DISMISS_VELOCITY = 800;
 const SWIPE_ANIMATION_DURATION = 220;
 
-export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, onMessage, onContinueEdit, onEdit, fromOnboardingChat = false, onSaveAndGoToConversations, noTransition = false, suppressConnectAnalytics = false, swipeBackDisabled = false }) => {
+export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, onMessage, onContinueEdit, onEdit, onSettings, fromOnboardingChat = false, onSaveAndGoToConversations, noTransition = false, suppressConnectAnalytics = false, swipeBackDisabled = false }) => {
   const insets = useSafeAreaInsets();
   // Get onboarding context for logout
   const { resetOnboarding, setUser, setCurrentStep, setIsDemoUser } = useOnboarding();
@@ -2323,6 +2324,16 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
               </TouchableOpacity>
             ) : null}
 
+            {/* Settings (gear) — own profile only; Settings moved here from
+                the Lineup menu (nav migration B3) */}
+            {isViewingOwnProfile && onSettings ? (
+              <TouchableOpacity style={styles.settingsButton} onPress={onSettings}>
+                <View style={styles.editButtonContainer}>
+                  <Ionicons name="settings-outline" size={24} color="#333" />
+                </View>
+              </TouchableOpacity>
+            ) : null}
+
             {/* Three-dot menu - Only visible when viewing another user's profile */}
             {!isViewingOwnProfile && userId && (
               <>
@@ -3080,6 +3091,12 @@ const styles = StyleSheet.create({
   editButton: {
     position: 'absolute',
     right: spacing.md, // 16px gap from right edge
+    top: 54,
+    zIndex: 10,
+  },
+  settingsButton: {
+    position: 'absolute',
+    right: spacing.md + 44 + 10, // left of the edit pencil (44px button + 10px gap)
     top: 54,
     zIndex: 10,
   },

@@ -37,6 +37,11 @@ export type RootStackParamList = {
   SwellyChat: { service?: 'copy' | 'copy-copy' };
   /** Surftrip detail card (was dual-rendered: AppContent overlay + inner stack). */
   SurftripCard: { groupId: string };
+  /** OTHER-user profile card (own profile is the Profile tab root).
+   *  fromWelcomeOverlay: back un-hides the welcome celebration overlay. */
+  ProfileCard: { userId: string; suppressConnectAnalytics?: boolean; fromWelcomeOverlay?: boolean };
+  /** Settings card — opened from the gear icon on the own-profile root. */
+  Settings: undefined;
 };
 
 /**

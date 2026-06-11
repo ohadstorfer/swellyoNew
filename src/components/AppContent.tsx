@@ -914,7 +914,7 @@ export const AppContent: React.FC = () => {
   // mounted, and conversation state is persisted here (tripPlanningChatId &
   // friends) so a re-opened card is warm.
   const [showSwellyShaper, setShowSwellyShaper] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
+  // Settings is a CARD now (gear icon on own profile + Lineup menu) — B3.
   // showTrips is GONE — Trips is a tab root inside RootNavigator (Phase 1).
   // The ONE floating bottom nav, persistent above Lineup / Trips / Profile —
   // it never remounts on page switches, so the pill animation plays across
@@ -1342,12 +1342,9 @@ export const AppContent: React.FC = () => {
     // Start preload immediately (non-blocking)
     preloadUserProfileVideo(userId);
     
-    // The profile overlay renders above whatever chat card is open — nothing
-    // to close (the card stays in the stack beneath it).
-    console.log('[AppContent] Setting viewingUserId to:', userId);
-    setViewingUserId(userId);
-    console.log('[AppContent] Setting showProfile to true');
-    setShowProfile(true);
+    // Other-user profiles are CARDS (nav migration B3) — they stack above
+    // whatever chat/trip/Swelly card opened them; back pops to it.
+    pushRootCard('ProfileCard', { userId });
     console.log('[AppContent] handleViewUserProfile completed');
   };
 
@@ -1703,7 +1700,6 @@ export const AppContent: React.FC = () => {
       activeTab === 'lineup' &&
       !showConversationLoading &&
       !showProfile &&
-      !showSettings &&
       !showSwellyShaper &&
       !showWelcomeToLineupOverlay &&
       !showProfileEditor;
@@ -1715,7 +1711,6 @@ export const AppContent: React.FC = () => {
       tripsInnerOverlayOpen ||
       lineupInnerScreenOpen ||
       showConversationLoading ||
-      showSettings ||
       showSwellyShaper ||
       showProfile ||
       showProfileEditor ||
@@ -1725,16 +1720,7 @@ export const AppContent: React.FC = () => {
     // Remaining legacy overlays: Settings, SwellyShaper, Profile, the
     // conversation-loading animation. Priority order preserved.
     let activeOverlay: React.ReactNode = null;
-    if (showSettings) {
-      activeOverlay = (
-        <SettingsScreen
-          onBack={() => setShowSettings(false)}
-          userName={currentUserName}
-          userAvatar={currentUserAvatar}
-          userEmail={user?.email}
-        />
-      );
-    } else if (showSwellyShaper) {
+    if (showSwellyShaper) {
       console.log('[AppContent] Rendering SwellyShaperScreen');
       console.log('[AppContent] Passing onViewProfile:', typeof handleSwellyShaperViewProfile);
       activeOverlay = (
@@ -1798,6 +1784,19 @@ export const AppContent: React.FC = () => {
         onOpenTripDetail: handleOpenTripDetailFromChat,
         onOpenSurftripDetail: handleOpenSurftripDetail,
       },
+      profileCard: {
+        onMessage: handleStartConversation,
+        onWelcomeOverlayProfileClosed: () => {
+          // Un-hide the celebration overlay as the profile card slides away.
+          setWelcomeOverlayHiddenByProfile(false);
+          setProfileFromWelcomeOverlay(false);
+        },
+      },
+      settings: {
+        userName: currentUserName,
+        userAvatar: currentUserAvatar,
+        userEmail: user?.email,
+      },
       swellyChat: {
         persistedChatId: tripPlanningChatId,
         persistedMatchedUsers: tripPlanningMatchedUsers,
@@ -1819,7 +1818,7 @@ export const AppContent: React.FC = () => {
         onSwellyPress: handleSwellyPress,
         onSwellyPressCopy: handleSwellyPressCopy,
         onProfilePress: handleProfilePress,
-        onSettingsPress: () => setShowSettings(true),
+        onSettingsPress: () => pushRootCard('Settings', undefined),
         onTripsPress: () => requestTab('trips'),
         onOpenTripDetail: handleOpenTripDetailFromChat,
         onOpenSurftripDetail: handleOpenSurftripDetail,
@@ -1835,6 +1834,7 @@ export const AppContent: React.FC = () => {
         onBack: () => requestTab(prevTabRef.current),
         onMessage: handleStartConversation,
         onEdit: () => setShowProfileEditor(true),
+        onSettings: () => pushRootCard('Settings', undefined),
         // Tab root: snaps into place (no slide-in) and never animates itself
         // off-screen — it stays mounted, so a slide-out would park it there.
         noTransition: true,
@@ -1932,10 +1932,15 @@ export const AppContent: React.FC = () => {
             });
           }}
           onViewProfile={(userId) => {
-            // Keep overlay state so it re-appears on back; hide modal so profile shows in front
+            // Keep overlay state so it re-appears on back; hide it so the
+            // profile CARD shows in front (back un-hides via the card route).
             setProfileFromWelcomeOverlay(true);
             setWelcomeOverlayHiddenByProfile(true);
-            handleViewUserProfile(userId);
+            pushRootCard('ProfileCard', {
+              userId,
+              suppressConnectAnalytics: true,
+              fromWelcomeOverlay: true,
+            });
           }}
           onMoreMatches={() => {
             markWelcomeLineupDismissed();

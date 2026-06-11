@@ -10,6 +10,7 @@ import { DirectMessageScreen } from '../screens/DirectMessageScreen';
 import { DirectGroupChat } from '../screens/DirectGroupChat';
 import { TripPlanningChatScreen } from '../screens/TripPlanningChatScreen';
 import SurftripDetailScreen from '../screens/surftrips/SurftripDetailScreen';
+import { SettingsScreen } from '../screens/SettingsScreen';
 import { swellyServiceCopy, swellyServiceCopyCopy } from '../services/swelly/swellyServiceCopy';
 import { useMessaging } from '../context/MessagingProvider';
 import TripsScreen from '../screens/trips/TripsScreen';
@@ -191,6 +192,37 @@ function SwellyChatCardScreen({ route, navigation }: NativeStackScreenProps<Root
   );
 }
 
+function ProfileCardScreen({ route, navigation }: NativeStackScreenProps<RootStackParamList, 'ProfileCard'>) {
+  const { profileCard } = useMainNav();
+  const { userId, suppressConnectAnalytics, fromWelcomeOverlay } = route.params;
+  return (
+    <ProfileScreen
+      userId={userId}
+      onBack={() => {
+        if (fromWelcomeOverlay) profileCard.onWelcomeOverlayProfileClosed();
+        navigation.goBack();
+      }}
+      onMessage={profileCard.onMessage}
+      suppressConnectAnalytics={suppressConnectAnalytics}
+      // Card: the navigator owns slide-in and swipe-back.
+      noTransition={true}
+      swipeBackDisabled={true}
+    />
+  );
+}
+
+function SettingsCardScreen({ navigation }: NativeStackScreenProps<RootStackParamList, 'Settings'>) {
+  const { settings } = useMainNav();
+  return (
+    <SettingsScreen
+      onBack={() => navigation.goBack()}
+      userName={settings.userName}
+      userAvatar={settings.userAvatar}
+      userEmail={settings.userEmail}
+    />
+  );
+}
+
 function NotificationsPanelScreen({ route, navigation }: NativeStackScreenProps<RootStackParamList, 'NotificationsPanel'>) {
   return (
     <NotificationsPanel
@@ -345,6 +377,8 @@ export default function RootNavigator() {
       <RootStack.Screen name="ChatCard" component={ChatCardScreen} options={{ presentation: 'card' }} />
       <RootStack.Screen name="SwellyChat" component={SwellyChatCardScreen} options={{ presentation: 'card' }} />
       <RootStack.Screen name="SurftripCard" component={SurftripCardScreen} options={{ presentation: 'card' }} />
+      <RootStack.Screen name="ProfileCard" component={ProfileCardScreen} options={{ presentation: 'card' }} />
+      <RootStack.Screen name="Settings" component={SettingsCardScreen} options={{ presentation: 'card' }} />
       {/* Plain card. The panel is full-screen and opaque, so transparency
           bought nothing and modal presentations broke z-order/gestures
           (two strikes: native modal context → sheets+crashes; contained →

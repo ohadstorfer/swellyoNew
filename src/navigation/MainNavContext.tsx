@@ -56,6 +56,18 @@ export interface MainNavContextValue {
     onOpenTripDetail: (tripId: string) => void;
     onOpenSurftripDetail: (groupId: string) => void;
   };
+  /** ProfileCard (other users): message + welcome-overlay back choreography. */
+  profileCard: {
+    onMessage: (userId: string, otherUserName?: string, otherUserAvatar?: string | null) => void;
+    /** Called when a fromWelcomeOverlay profile card pops — un-hides the overlay. */
+    onWelcomeOverlayProfileClosed: () => void;
+  };
+  /** Settings card header data. */
+  settings: {
+    userName: string;
+    userAvatar: string | null;
+    userEmail?: string;
+  };
   /** Callbacks the TripDetail card needs from AppContent (legacy overlays). */
   tripCard: {
     onOpenGroupChat: (params: {
@@ -74,7 +86,7 @@ export interface MainNavContextValue {
   >;
   profileProps: Pick<
     ComponentProps<typeof ProfileScreen>,
-    'onBack' | 'onMessage' | 'onEdit' | 'noTransition' | 'swipeBackDisabled'
+    'onBack' | 'onMessage' | 'onEdit' | 'onSettings' | 'noTransition' | 'swipeBackDisabled'
   >;
 }
 
