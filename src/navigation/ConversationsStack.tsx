@@ -68,7 +68,14 @@ const slideFromRightOptions = {
   },
 };
 
-export default function ConversationsStack(props: ConversationsScreenProps) {
+export default function ConversationsStack({
+  onInnerScreenChange,
+  ...props
+}: ConversationsScreenProps & {
+  /** True while a DM / surftrip detail is pushed over the list — the
+   *  app-level floating nav bar hides then (it belongs to roots only). */
+  onInnerScreenChange?: (open: boolean) => void;
+}) {
   if (Platform.OS === 'web') {
     // No inner stack on web — the list never blurs at the stack level.
     return <ConversationsScreen {...props} stackScreenFocused />;
@@ -78,6 +85,13 @@ export default function ConversationsStack(props: ConversationsScreenProps) {
       initialRouteName="ConversationsList"
       enableNativeScreens={false}
       independent
+      screenListeners={{
+        state: (e: any) => {
+          const routes = e?.data?.state?.routes;
+          if (!routes?.length) return;
+          onInnerScreenChange?.(routes[routes.length - 1].name !== 'ConversationsList');
+        },
+      }}
     >
       <Stack.Screen name="ConversationsList">
         {() => <ConversationsListRoute {...props} />}

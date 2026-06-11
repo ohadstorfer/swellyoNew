@@ -1136,12 +1136,9 @@ export default function ConversationsScreen({
     <Container style={styles.container} {...(Platform.OS !== 'web' && { edges: ['top'] as const })}>
       {/* Header - Dark background */}
       <View style={styles.header}>
-        <TouchableOpacity
-          testID="conversations-profile-button"
-          style={styles.headerLeft}
-          onPress={onProfilePress}
-          activeOpacity={0.7}
-        >
+        {/* Avatar + greeting are display-only — own profile opens from the
+            bottom nav's Profile root, not from here (nav migration). */}
+        <View testID="conversations-profile-button" style={styles.headerLeft}>
           <LinearGradient
             colors={['#05BCD3', '#DBCDBC']}
             locations={[0, 0.7]}
@@ -1160,7 +1157,7 @@ export default function ConversationsScreen({
             <Text style={styles.headerTitleMain}>The Lineup</Text>
             <Text style={styles.headerTitleSub}>Yo {headerDisplayName}!</Text>
           </View>
-        </TouchableOpacity>
+        </View>
 
         <View style={styles.headerRight}>
           {/* Notification center — bell + unread badge; opens the panel route */}

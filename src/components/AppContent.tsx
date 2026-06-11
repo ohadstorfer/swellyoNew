@@ -938,6 +938,10 @@ export const AppContent: React.FC = () => {
   // True while TripsScreen shows an internal full-screen overlay (trip detail
   // or edit wizard) — the bar hides then.
   const [tripsInnerOverlayOpen, setTripsInnerOverlayOpen] = useState(false);
+  // True while a DM / surftrip detail is pushed INSIDE ConversationsStack
+  // (Lineup-list chats use the inner stack, not the AppContent overlay) —
+  // the bar belongs to roots only.
+  const [lineupInnerScreenOpen, setLineupInnerScreenOpen] = useState(false);
   // --- Tab navigator bridge (nav migration Phase 1) ----------------------
   // The 3 roots live in RootNavigator now. activeTab mirrors the navigator
   // state for the legacy reads that still branch on "which page is showing"
@@ -1701,6 +1705,8 @@ export const AppContent: React.FC = () => {
       setActiveTab('lineup');
       prevTabRef.current = 'lineup';
       setRequestedTab(null);
+      setLineupInnerScreenOpen(false);
+      setTripsInnerOverlayOpen(false);
     }
   }, [shouldShowConversations]);
 
@@ -1821,6 +1827,7 @@ export const AppContent: React.FC = () => {
     // showBottomNav, inverted.
     const barSuppressed =
       tripsInnerOverlayOpen ||
+      lineupInnerScreenOpen ||
       !!activeSurftripDetailId ||
       !!selectedConversation ||
       showConversationLoading ||
@@ -1946,6 +1953,7 @@ export const AppContent: React.FC = () => {
         onViewUserProfile: handleViewUserProfileFromTrip,
       },
       lineupProps: {
+        onInnerScreenChange: setLineupInnerScreenOpen,
         isListFrontmost,
         onConversationPress: handleConversationPress,
         onSwellyPress: handleSwellyPress,
