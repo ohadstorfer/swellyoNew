@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Swellyo — Navigation Migration Plan</title>
+<style>
+  :root {
+    --teal: #0E7C7B;
+    --teal-dark: #0A5958;
+    --teal-soft: #E6F2F2;
+    --ink: #1F2A2E;
+    --ink-soft: #5A6B70;
+    --line: #E3E9EA;
+    --bg: #FAFCFC;
+    --card: #FFFFFF;
+    --warn-bg: #FDF6EC;
+    --warn-edge: #E0A93E;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg); color: var(--ink); line-height: 1.55;
+    padding: 48px 20px 80px;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; }
+  header { margin-bottom: 36px; }
+  .kicker {
+    color: var(--teal); font-weight: 700; font-size: 13px;
+    letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 6px;
+  }
+  h1 { font-size: 30px; letter-spacing: -0.02em; margin-bottom: 8px; }
+  .sub { color: var(--ink-soft); font-size: 15px; max-width: 640px; }
+  h2 {
+    font-size: 19px; margin: 40px 0 14px; padding-top: 28px;
+    border-top: 1px solid var(--line); letter-spacing: -0.01em;
+  }
+  h2 .num { color: var(--teal); margin-right: 8px; font-variant-numeric: tabular-nums; }
+  p { margin-bottom: 10px; font-size: 15px; }
+  .muted { color: var(--ink-soft); }
+
+  /* Architecture diagram */
+  .diagram { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 26px; }
+  .deck {
+    border: 2px dashed var(--teal); border-radius: 12px; padding: 18px;
+    background: var(--teal-soft); margin-bottom: 14px;
+  }
+  .deck-label { font-weight: 700; color: var(--teal-dark); font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 10px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    background: #fff; border: 1px solid var(--teal); color: var(--teal-dark);
+    border-radius: 999px; padding: 4px 12px; font-size: 13px; font-weight: 600;
+  }
+  .chip.sheet { border-style: dashed; font-weight: 500; }
+  .chip.modal { background: var(--teal); color: #fff; }
+  .roots { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+  .root {
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+    padding: 14px; text-align: center;
+  }
+  .root b { display: block; font-size: 15px; margin-bottom: 3px; }
+  .root span { font-size: 12.5px; color: var(--ink-soft); }
+  .navbar-note {
+    text-align: center; font-size: 13px; color: var(--ink-soft); margin-top: 12px;
+    padding-top: 10px; border-top: 1px solid var(--line);
+  }
+
+  /* Rules */
+  ul.rules { list-style: none; }
+  ul.rules li {
+    padding: 9px 0 9px 26px; position: relative; font-size: 15px;
+    border-bottom: 1px solid var(--line);
+  }
+  ul.rules li:last-child { border-bottom: none; }
+  ul.rules li::before {
+    content: ""; position: absolute; left: 4px; top: 17px;
+    width: 8px; height: 8px; border-radius: 50%; background: var(--teal);
+  }
+
+  /* Phases */
+  .phase {
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 18px 20px; margin-bottom: 12px; display: grid;
+    grid-template-columns: 56px 1fr 110px; gap: 16px; align-items: start;
+  }
+  .phase .pnum {
+    background: var(--teal-soft); color: var(--teal-dark); font-weight: 800;
+    border-radius: 10px; width: 44px; height: 44px; display: flex;
+    align-items: center; justify-content: center; font-size: 17px;
+  }
+  .phase h3 { font-size: 15.5px; margin-bottom: 4px; }
+  .phase p { font-size: 14px; color: var(--ink-soft); margin-bottom: 4px; }
+  .phase .test { font-size: 13px; color: var(--teal-dark); }
+  .phase .test b { font-weight: 700; }
+  .effort { text-align: right; font-size: 13px; color: var(--ink-soft); font-weight: 600; padding-top: 2px; }
+
+  /* Landmines */
+  .mine {
+    background: var(--warn-bg); border-left: 3px solid var(--warn-edge);
+    border-radius: 0 10px 10px 0; padding: 12px 16px; margin-bottom: 10px; font-size: 14px;
+  }
+  .mine b { display: block; margin-bottom: 2px; }
+
+  /* Ohad */
+  .ohad { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; }
+  .ohad li { margin-left: 20px; font-size: 14.5px; margin-bottom: 6px; }
+
+  .approve {
+    margin-top: 40px; background: var(--teal); color: #fff; border-radius: 14px;
+    padding: 22px 24px;
+  }
+  .approve h2 { border: none; color: #fff; margin: 0 0 8px; padding: 0; }
+  .approve p { color: #DCEEEE; font-size: 14.5px; margin: 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="kicker">Swellyo · June 2026</div>
+  <h1>Navigation Migration Plan</h1>
+  <div class="sub">From the hand-rolled boolean router in <code>AppContent.tsx</code> to a real card-stack system (react-navigation v7) — the same architecture Bluesky, WhatsApp and Instagram use. Based on 6 research streams + a full codebase audit.</div>
+</header>
+
+<h2><span class="num">1</span>The model — one deck above three roots</h2>
+<div class="diagram">
+  <div class="deck">
+    <div class="deck-label">The card deck — anything can open anything, back always pops one card</div>
+    <div class="chips" style="margin-bottom:10px;">
+      <span class="chip">Trip overview</span>
+      <span class="chip">Surftrip detail</span>
+      <span class="chip">User profile (other surfers)</span>
+      <span class="chip">DM chat</span>
+      <span class="chip">Group chat</span>
+      <span class="chip">Conversation loading</span>
+      <span class="chip">Edit trip</span>
+      <span class="chip">Settings</span>
+      <span class="chip">Swelly Shaper</span>
+      <span class="chip">Swelly trip-planning chat (+ Copy variant)</span>
+    </div>
+    <div class="chips">
+      <span class="chip sheet">Notifications panel</span>
+      <span class="chip sheet">Trips filters (month · budget)</span>
+      <span class="chip sheet">When-picker / calendar range</span>
+      <span class="chip sheet">Map picker</span>
+      <span class="chip sheet">Profile editor (pencil)</span>
+      <span class="chip sheet">Join-decision popup</span>
+      <span class="chip sheet">Welcome-to-Lineup overlay</span>
+      <span class="chip modal">Create-trip wizard (modal, "save draft?" guard)</span>
+    </div>
+  </div>
+  <p class="muted" style="font-size:13px; margin:10px 0 0;">Staying <b>outside</b> the deck: the onboarding flow (steps −1…7, its own world before the main app) and the age-block overlay (hard gate above everything). Each phase starts by listing its exact screens — anything discovered mid-phase gets added to this page, not improvised.</p>
+  <div class="roots">
+    <div class="root"><b>Lineup</b><span>conversations home</span></div>
+    <div class="root"><b>Trips</b><span>my · explore · create toggle = internal state</span></div>
+    <div class="root"><b>Profile</b><span>pencil = edit, gear = Settings (new)</span></div>
+  </div>
+  <div class="navbar-note">Floating bottom nav lives on the roots only — every card covers it. Notifications bell on all 3 roots, top right.</div>
+</div>
+
+<h2><span class="num">2</span>Rules of the system</h2>
+<ul class="rules">
+  <li><b>Cards stack infinitely</b> — trip → host profile → another trip → chat. Back always returns to the exact previous card, scroll position intact (the stack keeps covered screens alive for free — this replaces all our <code>display:'none'</code> hacks).</li>
+  <li><b>Sheets are cards too</b> — notifications panel, filters: they're in back history, Android back closes them. Open a trip from the notifications panel → back returns to the open panel. <span class="muted">(This fixes the original bug.)</span></li>
+  <li><b>Roots keep internal state</b> — switch Lineup → Trips → back to Lineup: same scroll, same toggle pane. Re-tap the current root: pop to top + scroll to top (free, platform convention).</li>
+  <li><b>All 6 "where did you come from" flags get deleted</b> — <code>profileFromTripDetail</code>, <code>profileFromWelcomeOverlay</code>, etc. The deck IS the memory.</li>
+  <li><b>Push notifications</b> deep-link by pushing the right card; back pops home. Realtime stays in <code>MessagingProvider</code> above navigation (already correct today).</li>
+</ul>
+
+<h2><span class="num">3</span>Phases — each one ships and gets tested on your iPhone before the next</h2>
+
+<div class="phase">
+  <div class="pnum">0</div>
+  <div>
+    <h3>Prep (no visible change)</h3>
+    <p>Branch <code>nav-migration</code> off main. Native patches: MainActivity Android-crash workaround, predictive-back off. "No new showX flags" comment in AppContent. Sync with Ohad.</p>
+    <div class="test"><b>Test:</b> app builds and runs identically.</div>
+  </div>
+  <div class="effort">½ day</div>
+</div>
+
+<div class="phase">
+  <div class="pnum">1</div>
+  <div>
+    <h3>Skeleton — roots + bottom nav move into the navigator</h3>
+    <p>Root stack with the 3 roots as tabs; our existing animated TripsBottomNav plugs in as the custom tab bar. All overlays still work the old way on top.</p>
+    <div class="test"><b>Test:</b> root switching, pill animation, hide-on-scroll, scroll preservation.</div>
+  </div>
+  <div class="effort">1–2 days</div>
+</div>
+
+<div class="phase">
+  <div class="pnum">2</div>
+  <div>
+    <h3>Trips deck — trip overview, edit, notifications sheet</h3>
+    <p>Trip overview becomes a pushed card; notifications panel becomes a sheet in back history; push-notification deep links rewired through the navigator.</p>
+    <div class="test"><b>Test:</b> notification → trip → back → panel reopens. Trip → edit → back. Deep link from a push.</div>
+  </div>
+  <div class="effort">1–2 days</div>
+</div>
+
+<div class="phase">
+  <div class="pnum">3</div>
+  <div>
+    <h3>People &amp; chat cards — profile, DM, Settings</h3>
+    <p>User profile and DM/group chat become shared cards (pushable from anywhere); Settings becomes a card opened from the profile gear icon. Delete the origin-tracking flags.</p>
+    <div class="test"><b>Test:</b> trip → participant profile → chat → back → back → trip. Profile → Settings → back.</div>
+  </div>
+  <div class="effort">2 days</div>
+</div>
+
+<div class="phase">
+  <div class="pnum">4</div>
+  <div>
+    <h3>Modals &amp; Swelly — create wizard, sheets, AI chat</h3>
+    <p>Create-trip wizard as full-screen modal with the "save draft?" guard. Filters/when-picker as sheets. Swelly chat becomes a card; its conversation state lifts to a provider so it reopens warm.</p>
+    <div class="test"><b>Test:</b> wizard exit guard, Swelly chat survives navigating away and back.</div>
+  </div>
+  <div class="effort">2 days</div>
+</div>
+
+<div class="phase">
+  <div class="pnum">5</div>
+  <div>
+    <h3>Cleanup &amp; hardening</h3>
+    <p>Delete the boolean router, <code>display:'none'</code> keep-alives, dead flags. Android hardware-back sweep. Maestro test for the critical back-paths.</p>
+    <div class="test"><b>Test:</b> full manual back-path matrix on iPhone + one Android device.</div>
+  </div>
+  <div class="effort">1–2 days</div>
+</div>
+
+<p class="muted">Total: roughly 8–10 focused days, spread over sessions. After phase 2 the original notification-back bug is dead; phases 3–5 are when the codebase actually gets simpler.</p>
+
+<h2><span class="num">4</span>Known landmines (from the war-stories research — all have fixes)</h2>
+<div class="mine"><b>Never the big-bang switch.</b> Teams that flag-flipped between old and new routers hit a silent state-corruption bug and took 2–4× longer. We go root-first, screen by screen — each phase independently shippable.</div>
+<div class="mine"><b>push() not navigate().</b> navigate() reuses an existing card — breaks profile → trip → profile chains and has a crash race on iOS. Every card open uses push().</div>
+<div class="mine"><b>iOS swipe-back vs carousels.</b> The explore deck's horizontal swipe will fight the new edge-swipe-back gesture. Known fix (gesture coordination), tested in phase 2.</div>
+<div class="mine"><b>Android needs a 1-line native patch</b> before the next store build (screen-fragment restore crash on RN 0.80+), and physical-Android testing for sheets — these bugs don't show on iOS.</div>
+<div class="mine"><b>Stay on react-navigation v7.</b> v8 needs Expo SDK 55 — revisit after we upgrade.</div>
+
+<h2><span class="num">5</span>Coordination with Ohad</h2>
+<div class="ohad">
+  <ul>
+    <li>This rewires <code>AppContent.tsx</code> — the one file we never parallelize. While a phase is in flight, Ohad shouldn't land AppContent / TripsScreen changes without a heads-up.</li>
+    <li>Branch: <code>nav-migration</code> off <code>main</code>, one PR per phase into main, so his branch rebases cleanly after each phase.</li>
+    <li>His realtime + notification deep-link work is untouched in spirit — it actually gets <i>simpler</i> (the navigator replaces the pending-id plumbing).</li>
+    <li>Rule for both of us from day one: no new <code>showX</code> boolean flags. New screens use the navigator.</li>
+  </ul>
+</div>
+
+<div class="approve">
+  <h2>Your call</h2>
+  <p>Approve the model + phases and I start with Phase 0–1. Anything you'd change — the deck contents, what's a sheet vs a card, the phase order — say it and I'll revise this page.</p>
+</div>
+
+</div>
+</body>
+</html>

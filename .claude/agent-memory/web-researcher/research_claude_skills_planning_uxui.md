@@ -51,10 +51,60 @@ Researched for a "fast-urls" workspace that converts a non-technical founder's 2
 - **Known gap (from Justin Wetch's analysis):** "Never converge across generations" is unactionable since Claude has no cross-session memory. Fix: replace with "Never settle on the first obvious choice; if a font/color/layout feels common, deliberately explore alternatives."
 
 ### Runner-up: nextlevelbuilder/ui-ux-pro-max
-- **Stars:** 29,636 (per Snyk — repo page shows 89k which appears inflated; contributor section errors out)
-- **MIT license**
-- **Different strength:** Massive database approach — 50+ styles, 97 color palettes, 57 font pairings, 99 UX guidelines across 10 tech stacks. More systematic/encyclopedic vs Anthropic's more opinionated/creative approach.
-- **Legitimacy flag:** Star count discrepancy (29k vs reported 89k), contributor section load errors. Treat as lower-confidence than Anthropic official.
+- **Repo:** https://github.com/nextlevelbuilder/ui-ux-pro-max-skill
+- **Stars:** ~90k on repo page (as of June 2026), but growth chart shows sudden vertical spike from near-zero, not organic growth. Created Nov 30, 2025 — 90k in ~6 months is a red flag. Snyk cites 29,636 independently. Treat the star count as suspicious.
+- **License:** MIT
+- **Last update:** v2.5.0 on March 10, 2026
+- **Primary language:** Python (78.5%), JS/TS (18%)
+
+#### What it actually is (deep audit, June 2026)
+It is a data-driven design intelligence system with a Python search engine at its core. NOT just a SKILL.md prompt file.
+
+**Internal architecture:**
+- `src/ui-ux-pro-max/data/` — 14 CSV databases: products.csv, styles.csv, colors.csv, typography.csv, ui-reasoning.csv, ux-guidelines.csv, charts.csv, google-fonts.csv, landing.csv, react-performance.csv, icons.csv, design.csv, draft.csv + `stacks/` subdir
+- `src/ui-ux-pro-max/scripts/` — Python search engine: `search.py` (CLI), `core.py` (BM25 + regex hybrid search), `design_system.py` (design system generation)
+- `.claude/skills/ui-ux-pro-max/` — SKILL.md + symlinks back to src/
+- 7 sub-skills total: `ui-ux-pro-max`, `design`, `design-system`, `ui-styling`, `brand`, `banner-design`, `slides`
+
+**How it works mechanically:**
+Claude (or the user) runs `python3 .claude/skills/ui-ux-pro-max/scripts/search.py "<query>" --domain <domain>` to query the CSVs. The BM25+regex hybrid search returns ranked design recommendations. The `--design-system` flag generates a complete design system. Results can be persisted as markdown files. Claude's SKILL.md instructs it to call this script when any UI task is requested.
+
+**Requires Python 3.x** on the machine. Not pure prompt injection.
+
+**Content databases:**
+- 67 UI styles (glassmorphism, neumorphism, brutalism, AI-native, etc.)
+- 161 color palettes (industry-aligned)
+- 57 font pairings (Google Fonts)
+- 99 UX guidelines (accessibility, touch targets, animation durations, etc.)
+- 161 industry reasoning rules (product types: SaaS, fintech, healthcare, e-commerce, etc.)
+- 25 chart types
+- 15 tech stacks (React, Next.js, Vue, Svelte, SwiftUI, React Native, Flutter, Tailwind, shadcn/ui, HTML/CSS, others)
+
+**Mobile/React Native support:** Listed as a supported stack. Mobile pre-delivery checklist covers safe areas, accessibility labels, modal scrim opacity. However no RN/Expo-specific community feedback found validating this. Web (Tailwind/React) is clearly the primary use case.
+
+**Token footprint:** Not documented officially. SKILL.md alone is modest (~medium prompt size), but the Python search engine + CSV databases are not in-context — they're executed externally and results injected.
+
+**Install methods:**
+1. CLI: `npm install -g uipro-cli` then `uipro init --ai claude` in project root
+2. Global: `uipro init --ai claude --global` (installs to `~/.claude/skills/`)
+3. Plugin marketplace: `/plugin marketplace add nextlevelbuilder/ui-ux-pro-max-skill`
+- Files land in `.claude/skills/ui-ux-pro-max/` (known broken path in early versions — Issue #123 documented that Claude Code expected root `skills/` not `.claude/skills/`, fixed in later CLI versions)
+
+**Invocation:** Auto-activates on any UI request. No explicit slash command needed for Claude Code.
+
+**Community red flags (June 2026):**
+- Issue #161: User claims premium subscription disappeared, support unresponsive, called it a "scam" (closed as not planned, no response from maintainer visible)
+- Issue #304: "messed up my opencode client" on uninstall
+- Issue #333: "Claude tags [skill] as malicious" — Claude flagging the injected system prompt
+- Issue #335: "tags as prompt injection" — security concern about skill contents
+- Multiple "can't install" / "can't uninstall" open issues
+- No community comments on promotional articles — no verified user success stories found
+
+**Freemium model:** The skill has a paid subscription tier ("Polar" payment platform). Free tier is the open-source SKILL.md + CSVs. What the paid tier adds is unclear from docs — one user complaint suggests "credits" model.
+
+**Verdict vs Anthropic frontend-design:**
+- Anthropic skill = opinionated creative direction (what to avoid, what to mandate). Pure SKILL.md, no deps, no Python, no install friction.
+- ui-ux-pro-max = encyclopedic searchable database. More systematic, more moving parts, suspicious star count, active community complaints about install/uninstall/security flags, possible freemium friction.
 
 ---
 

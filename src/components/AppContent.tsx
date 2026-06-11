@@ -1,3 +1,6 @@
+// ⚠ NAV MIGRATION IN PROGRESS (branch nav-migration — see task_plan.md + docs/nav-migration/).
+// Do NOT add new showX boolean flags or origin-tracking back flags here.
+// New screens go through the navigator (navigation.push). Routing changes: talk to Eyal first.
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Alert, AppState, Keyboard, Linking, Platform, Pressable, StyleSheet, View, TouchableOpacity, Text as RNText } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
