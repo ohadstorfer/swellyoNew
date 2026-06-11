@@ -290,7 +290,11 @@ export const AppContent: React.FC = () => {
       AsyncStorage.removeItem('pendingGroupTripInvite').catch(() => {});
       tripInviteResolverRef.current = false;
     }
-  }, [pendingTripInviteId, user, isComplete, isDemoUser, openTripCard]);
+    // openTripCard is stable (useCallback []) and declared later in the
+    // component — putting it in this dep array would evaluate it during
+    // render, before initialization (TDZ crash). Safe to omit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingTripInviteId, user, isComplete, isDemoUser]);
 
   // Validate session whenever a user is signed in (regardless of onboarding
   // completion). This unblocks mid-onboarding users who would otherwise be
@@ -403,7 +407,9 @@ export const AppContent: React.FC = () => {
         }
       }
     );
-  }, [getCurrentConversationId, openTripCard]);
+    // openTripCard intentionally omitted — see TDZ note on the invite resolver.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [getCurrentConversationId]);
 
   // Check if MVP and dev modes are enabled
   const isMVPMode = process.env.EXPO_PUBLIC_MVP_MODE === 'true';
