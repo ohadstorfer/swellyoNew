@@ -106,6 +106,12 @@ export default Sentry.wrap(function App() {
         {isNavigationReady ? (
           <PostHogProvider
             apiKey={POSTHOG_API_KEY}
+            // Screen autocapture calls useNavigationState from OUTSIDE the
+            // navigator and logs "useNavigationState error … couldn't get the
+            // navigation state" on every app open. It has never produced
+            // screen events here (no navigator wraps this provider). Off until
+            // we wire real screen analytics via navigationRef (nav migration).
+            autocapture={{ captureScreens: false }}
             options={{
               host: POSTHOG_HOST,
               enableSessionReplay: Platform.OS === 'web',
