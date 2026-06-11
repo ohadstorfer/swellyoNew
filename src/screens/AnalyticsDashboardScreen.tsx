@@ -22,12 +22,20 @@ import {
   DashboardCounter,
   EventName,
 } from '../services/analytics/analyticsDashboardService';
+import {
+  fetchTripsAnalytics,
+  TripsAnalyticsData,
+} from '../services/analytics/analyticsTripsService';
+import { RetentionCurveCard } from '../components/analytics/RetentionCurveCard';
+import { FeatureAdoptionCard } from '../components/analytics/FeatureAdoptionCard';
+import { TripHealthCard } from '../components/analytics/TripHealthCard';
 
 const SCREEN_H = Dimensions.get('window').height;
 // Two-column KPI grid: (screen − scroll padding 16×2 − gap 10) / 2.
 const TILE_W = (Dimensions.get('window').width - 32 - 10) / 2;
 
 type PresetKey = 'all' | 'today' | '7d' | '30d' | '90d' | '1y' | 'custom';
+type DashTab = 'overview' | 'trips';
 // Info-sheet keys: every analytics event, plus the non-event metrics.
 type InfoKey = EventName | 'active_conversations';
 
@@ -210,8 +218,11 @@ export function AnalyticsDashboardScreen({ onBack }: AnalyticsDashboardScreenPro
   const insets = useSafeAreaInsets();
   const [range, setRange] = useState<RangeState>({ preset: 'all', from: null, to: null });
   const [data, setData] = useState<DashboardData | null>(null);
+  const [tripsData, setTripsData] = useState<TripsAnalyticsData | null>(null);
+  const [tripsError, setTripsError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [tab, setTab] = useState<DashTab>('overview');
   const [customOpen, setCustomOpen] = useState(false);
   const [customFrom, setCustomFrom] = useState<Date>(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
   const [customTo, setCustomTo] = useState<Date>(new Date());
@@ -223,12 +234,19 @@ export function AnalyticsDashboardScreen({ onBack }: AnalyticsDashboardScreenPro
   const load = async (r: RangeState) => {
     setLoading(true);
     setError(null);
+    setTripsError(null);
+    // Trips analytics loads in parallel but fails independently — a missing /
+    // not-yet-deployed analytics-trips function must not blank the whole screen.
+    const tripsPromise = fetchTripsAnalytics({ from: r.from, to: r.to })
+      .then(setTripsData)
+      .catch((e: any) => setTripsError(e?.message ?? 'Failed to load trips analytics'));
     try {
       const d = await fetchDashboard({ from: r.from ?? undefined, to: r.to ?? undefined });
       setData(d);
     } catch (e: any) {
       setError(e?.message ?? 'Failed to load');
     } finally {
+      await tripsPromise;
       setLoading(false);
     }
   };
@@ -284,6 +302,27 @@ export function AnalyticsDashboardScreen({ onBack }: AnalyticsDashboardScreenPro
         <TouchableOpacity style={styles.headerSide} activeOpacity={0.7} onPress={() => load(range)} hitSlop={HIT}>
           <Ionicons name="refresh" size={20} color={C.accent} />
         </TouchableOpacity>
+      </View>
+
+      {/* ============ Tabs ============ */}
+      <View style={styles.tabBar}>
+        {([
+          { key: 'overview', label: 'Overview', icon: 'stats-chart-outline' },
+          { key: 'trips', label: 'Group trips', icon: 'airplane-outline' },
+        ] as { key: DashTab; label: string; icon: IoniconName }[]).map(t => {
+          const active = tab === t.key;
+          return (
+            <TouchableOpacity
+              key={t.key}
+              style={[styles.tabBtn, active && styles.tabBtnActive]}
+              activeOpacity={0.7}
+              onPress={() => setTab(t.key)}
+            >
+              <Ionicons name={t.icon} size={15} color={active ? C.accent : C.textSecondary} />
+              <Text style={[styles.tabText, active && styles.tabTextActive]}>{t.label}</Text>
+            </TouchableOpacity>
+          );
+        })}
       </View>
 
       {/* ============ Range selector (sticky) ============ */}
@@ -345,7 +384,7 @@ export function AnalyticsDashboardScreen({ onBack }: AnalyticsDashboardScreenPro
           </View>
         )}
 
-        {data && (
+        {data && tab === 'overview' && (
           <>
             {isAllEmpty && <EmptyBanner />}
 
@@ -388,6 +427,24 @@ export function AnalyticsDashboardScreen({ onBack }: AnalyticsDashboardScreenPro
               metrics={data.metrics}
               onInfo={setInfoEvent}
             />
+          </>
+        )}
+
+        {tab === 'trips' && !loading && (
+          <>
+            {tripsError && (
+              <View style={styles.errorBanner}>
+                <Ionicons name="alert-circle" size={18} color={C.down} />
+                <Text style={styles.errorText}>Trips analytics: {tripsError}</Text>
+              </View>
+            )}
+            {tripsData && (
+              <>
+                <RetentionCurveCard data={tripsData.retention} />
+                <FeatureAdoptionCard features={tripsData.adoption.features} />
+                <TripHealthCard buckets={tripsData.health.buckets} trips={tripsData.health.trips} />
+              </>
+            )}
           </>
         )}
       </ScrollView>
@@ -866,6 +923,33 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 18, fontWeight: '700', color: C.text },
   headerSubRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 },
   headerSub: { fontSize: 11.5, fontWeight: '500', color: C.textSecondary },
+
+  // ----- Tab bar -----
+  tabBar: {
+    flexDirection: 'row',
+    backgroundColor: C.card,
+    paddingHorizontal: 16,
+    gap: 8,
+    paddingBottom: 10,
+  },
+  tabBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 9,
+    borderRadius: 10,
+    backgroundColor: C.bg,
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  tabBtnActive: {
+    backgroundColor: C.accentSoft,
+    borderColor: C.accent,
+  },
+  tabText: { fontSize: 13, fontWeight: '600', color: C.textSecondary },
+  tabTextActive: { color: C.accent, fontWeight: '700' },
 
   // ----- Range bar -----
   rangeBar: {

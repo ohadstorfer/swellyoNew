@@ -81,6 +81,7 @@ import {
   type AccommodationInitial,
 } from '../../components/trips/TripEditSheets';
 import { uploadTripImage } from '../../services/storage/storageService';
+import { logEvent, logEventThrottled } from '../../services/analytics/eventLogger';
 import { TripTabToggle, type TripTab } from '../../components/trips/TripTabToggle';
 import { NotificationCenter } from '../../components/notifications/NotificationCenter';
 import type { TripDetailFocus } from '../../services/notifications/notificationsService';
@@ -448,6 +449,11 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   );
   useEffect(() => {
     sectionYs.current = {}; // stale Ys from another trip must not be scroll targets
+  }, [tripId]);
+
+  // Analytics: "active in this trip today" (chart C). Throttled per (user, trip).
+  useEffect(() => {
+    logEventThrottled('trip_opened', { tripId });
   }, [tripId]);
 
   useEffect(() => {
@@ -835,6 +841,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     try {
       const message = `${trip.title || 'Surftrip'} — ${formatDestination(trip)} · ${formatDates(trip)}`;
       await Share.share({ message });
+      logEvent('trip_invite_shared', { tripId: trip.id });
     } catch {
       // user cancelled or platform unavailable — silently no-op
     }
@@ -1571,6 +1578,12 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         )}
         </>
         )}
+
+        {/* Share — bottom of the page, both tabs (restored from the
+            pre-PlanSections layout). */}
+        <View style={[styles.actionRow, { marginTop: 20, paddingHorizontal: 16 }]}>
+          <ActionButton icon="share-outline" label="Share" onPress={handleShare} />
+        </View>
 
         {/* Clearance for the floating sticky footer (Trip Chat / Join a Trip)
             so the last content isn't hidden behind it; smaller otherwise. */}

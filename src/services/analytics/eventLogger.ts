@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../../config/supabase';
 import { analyticsService } from './analyticsService';
 
@@ -25,6 +26,7 @@ const ONE_SHOT_EVENTS = new Set<string>([
 export interface LogEventOptions {
   userId?: string;
   conversationId?: string;
+  tripId?: string;
   properties?: Record<string, unknown>;
 }
 
@@ -49,10 +51,23 @@ export async function logEvent(
     return;
   }
 
+  // RLS requires user_id = auth.uid(), so derive it when the caller didn't
+  // pass one (most service-layer call sites don't have it handy).
+  let userId = opts.userId ?? null;
+  if (!userId) {
+    try {
+      const { data } = await supabase.auth.getUser();
+      userId = data?.user?.id ?? null;
+    } catch {
+      // fall through — insert will fail RLS and be swallowed below
+    }
+  }
+
   const row = {
     event_name: eventName,
-    user_id: opts.userId ?? null,
+    user_id: userId,
     conversation_id: opts.conversationId ?? null,
+    trip_id: opts.tripId ?? null,
     occurred_at: new Date().toISOString(),
     properties: opts.properties ?? null,
   };
@@ -90,5 +105,37 @@ export async function logEvent(
     }
   } catch (err) {
     console.warn(`[analytics] logEvent(${eventName}) threw:`, err);
+  }
+}
+
+const THROTTLE_KEY_PREFIX = 'analytics_throttle_';
+const DEFAULT_THROTTLE_MS = 30 * 60 * 1000; // mirrors app_opened's 30-min window
+
+/**
+ * logEvent, but at most once per 30 min per (event, trip, user) on this device.
+ * For high-frequency "presence" events (trip_opened, trip_chat_opened) where
+ * the dashboard only cares about "was active that day", not how many times.
+ */
+export async function logEventThrottled(
+  eventName: string,
+  opts: LogEventOptions = {},
+  throttleMs: number = DEFAULT_THROTTLE_MS
+): Promise<void> {
+  try {
+    let userId = opts.userId ?? null;
+    if (!userId) {
+      const { data } = await supabase.auth.getUser();
+      userId = data?.user?.id ?? null;
+    }
+    if (!userId) return; // not signed in — nothing to log
+
+    const key = `${THROTTLE_KEY_PREFIX}${eventName}_${opts.tripId ?? 'global'}_${userId}`;
+    const last = await AsyncStorage.getItem(key);
+    const now = Date.now();
+    if (last && now - parseInt(last, 10) <= throttleMs) return;
+    await AsyncStorage.setItem(key, String(now));
+    await logEvent(eventName, { ...opts, userId });
+  } catch (err) {
+    console.warn(`[analytics] logEventThrottled(${eventName}) threw:`, err);
   }
 }

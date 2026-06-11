@@ -131,6 +131,12 @@ serve(async (req) => {
       .from("surfers").select("expo_push_token").eq("user_id", row.recipient_id).maybeSingle();
     const token = surfer?.expo_push_token;
     if (!token) { await mark(supabase, row.id, "skipped", "no_token"); skipped++; continue; }
+    // Self-heal: a raw APNs/FCM hex (not ExponentPushToken[...]) can't be sent
+    // through the Expo API — clear it like a dead token so the app re-registers.
+    if (!token.startsWith("ExponentPushToken[")) {
+      await supabase.from("surfers").update({ expo_push_token: null }).eq("user_id", row.recipient_id);
+      await mark(supabase, row.id, "skipped", "invalid_token"); skipped++; continue;
+    }
 
     // SR5 collapse: one live push per trip.
     const headers: Record<string, string> = { "Content-Type": "application/json" };

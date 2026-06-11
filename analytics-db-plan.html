@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Analytics — Charts A·B·C Plan (real data)</title>
+<style>
+  :root{
+    --bg:#f6f8f9; --card:#fff; --line:#e7eced; --ink:#16282b; --muted:#6c7d81;
+    --accent:#05BCD3; --accent-dark:#067a8a; --host:#6639ba; --joiner:#0788B0; --ok:#1a7f37;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    color:var(--ink);background:var(--bg);line-height:1.5;font-size:15px;}
+  .wrap{max-width:900px;margin:0 auto;padding:40px 22px 80px;}
+  h1{font-size:26px;margin:0 0 4px;letter-spacing:-0.3px;}
+  .top p{color:var(--muted);margin:0;font-size:14px;}
+
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:22px 24px;margin-top:20px;}
+  h2{font-size:16px;margin:0 0 14px;display:flex;align-items:center;gap:9px;}
+  h2 .n{background:var(--accent);color:#fff;width:24px;height:24px;border-radius:7px;display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex:none;}
+  h3{font-size:13px;margin:14px 0 8px;color:var(--accent-dark);}
+
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th,td{padding:8px 11px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top;}
+  th{font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:var(--muted);font-weight:600;}
+  tr:last-child td{border-bottom:none;}
+  code{background:#eef6f7;color:var(--accent-dark);padding:2px 7px;border-radius:6px;font-size:12px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;}
+  code.file{background:#f3f0fa;color:var(--host);}
+
+  .tag{font-size:10.5px;font-weight:700;padding:2px 9px;border-radius:20px;white-space:nowrap;}
+  .tg-a{background:#e4f8fb;color:#067a8a;}
+  .tg-b{background:#0788B015;color:#0788B0;}
+  .tg-c{background:#6639ba15;color:#6639ba;}
+  .tg-all{background:#1a7f3715;color:#1a7f37;}
+  .tg-host{background:#6639ba15;color:#6639ba;}
+  .tg-done{background:#1a7f3715;color:#1a7f37;}
+  .tg-new{background:#fdf2da;color:#a9750a;}
+
+  .note{font-size:12.5px;color:var(--muted);margin-top:10px;}
+  .simple{background:#e4f8fb;border:1px solid #c7eef3;border-radius:10px;padding:11px 14px;font-size:13px;color:#0a6b78;margin-top:14px;}
+  .simple b{color:#067a8a;}
+  .warn{background:#fdf2da;border:1px solid #f3e1b6;border-radius:10px;padding:11px 14px;font-size:13px;color:#7a5e12;margin-top:14px;}
+  footer{color:var(--muted);font-size:12px;text-align:center;margin-top:32px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <h1>Analytics — Charts A·B·C Plan</h1>
+    <p>Real tables, real files. Good news: half of this already exists on prod.</p>
+  </header>
+
+  <!-- WHAT EXISTS -->
+  <section>
+    <h2><span class="n">1</span> Already live — we reuse it <span class="tag tg-done">exists</span></h2>
+    <table>
+      <tbody>
+        <tr><td><b>Table</b> <code>analytics_events</code></td><td>523 rows on prod. Columns: <code>event_name</code>, <code>user_id</code>, <code>occurred_at</code>, <code>properties</code> (jsonb), <code>is_demo_user</code>, <code>is_admin</code> (set by DB trigger — client can't fake them).</td></tr>
+        <tr><td><b>Logger</b> <code class="file">src/services/analytics/eventLogger.ts</code></td><td><code>logEvent(name, opts)</code> — fire &amp; forget, respects opt-out. Used today for <code>app_opened</code>, signup, onboarding steps.</td></tr>
+        <tr><td><b>Chart A's event</b> <code>app_opened</code></td><td>Already firing from <code class="file">AppContent.tsx:326</code>, throttled 30 min per user. 264 rows already collected.</td></tr>
+        <tr><td><b>Dashboard</b> <code class="file">src/screens/AnalyticsDashboardScreen.tsx</code></td><td>Admin analytics screen already exists — the 3 new charts go here.</td></tr>
+      </tbody>
+    </table>
+    <div class="simple"><b>En criollo 🧉:</b> el cuaderno YA existe y ya tiene 523 renglones. El lápiz ya existe. "Abrió la app" ya se anota hace tiempo. Solo falta anotar las cosas de los viajes, y dibujar los 3 gráficos en la pantalla de admin que ya existe.</div>
+  </section>
+
+  <!-- DB CHANGES -->
+  <section>
+    <h2><span class="n">2</span> DB changes — tiny <span class="tag tg-new">new</span></h2>
+    <table>
+      <tbody>
+        <tr><td><b>1 column</b></td><td><code>alter table analytics_events add column trip_id uuid</code> — null for non-trip events.</td></tr>
+        <tr><td><b>1 index</b></td><td>on <code>(trip_id, occurred_at)</code> where trip_id is not null — chart C reads by trip.</td></tr>
+        <tr><td><b>No new table, no RPC</b></td><td>direct insert already works (RLS + trigger in place). Applied manually via SQL editor, as always.</td></tr>
+      </tbody>
+    </table>
+    <div class="simple"><b>En criollo 🧉:</b> al cuaderno le agregamos una columna más: "¿de qué viaje fue esto?". Nada más.</div>
+  </section>
+
+  <!-- NEW EVENTS -->
+  <section>
+    <h2><span class="n">3</span> 11 new events — where each one fires (real files)</h2>
+    <table>
+      <thead><tr><th style="width:24%;">Event</th><th style="width:30%;">Trigger</th><th>Fires in (file → function)</th><th style="width:9%;">Chart</th></tr></thead>
+      <tbody>
+        <tr><td><code>trip_opened</code></td><td>opened a trip page</td><td><code class="file">TripDetailScreen.tsx</code> → on mount (useTripCore)</td><td><span class="tag tg-c">C</span></td></tr>
+        <tr><td><code>trip_chat_opened</code></td><td>opened the trip group chat</td><td><code class="file">DirectGroupChat.tsx</code> → on mount, when conversation has <code>trip_id</code></td><td><span class="tag tg-b">B</span> <span class="tag tg-c">C</span></td></tr>
+        <tr><td><code>trip_commit</code></td><td>traveler commits · host approves / declines</td><td><code class="file">groupTripsService.ts</code> → <code>submitCommitment</code> · <code>approveCommitment</code> · <code>declineCommitment</code></td><td><span class="tag tg-b">B</span></td></tr>
+        <tr><td><code>trip_gear_claim</code></td><td>mark / unmark "I'll bring it"</td><td><code class="file">groupTripsService.ts</code> → <code>setMyGearClaim</code></td><td><span class="tag tg-b">B</span></td></tr>
+        <tr><td><code>trip_personal_gear</code></td><td>add / check / uncheck personal gear</td><td><code class="file">groupTripsService.ts</code> → <code>setMyPersonalGearList</code> · <code>setMyGroupGear</code></td><td><span class="tag tg-b">B</span></td></tr>
+        <tr><td><code>trip_gear_request</code></td><td>traveler suggests item · host approves / declines</td><td><code class="file">groupTripsService.ts</code> → <code>createGearRequest</code> · <code>approveGearRequest</code> · <code>declineGearRequest</code></td><td><span class="tag tg-b">B</span></td></tr>
+        <tr><td><code>trip_invite_shared</code></td><td>shared the trip</td><td><code class="file">TripPublishedScreen.tsx</code> → <code>handleShare</code> · <code class="file">TripDetailScreen.tsx</code> → <code>handleShare</code></td><td><span class="tag tg-b">B</span></td></tr>
+        <tr><td><code>trip_admin_update</code></td><td>host posts an update</td><td><code class="file">groupTripsService.ts</code> → <code>addAdminUpdate</code></td><td><span class="tag tg-b">B</span></td></tr>
+        <tr><td><code>trip_gear_added</code></td><td>host adds / removes group gear</td><td><code class="file">groupTripsService.ts</code> → <code>addGearItem</code> · <code>deleteGearItem</code></td><td><span class="tag tg-b">B</span></td></tr>
+        <tr><td><code>trip_gear_suggestion</code></td><td>host edits suggested-gear list</td><td><code class="file">groupTripsService.ts</code> → <code>setTripGroupGear</code></td><td><span class="tag tg-b">B</span></td></tr>
+        <tr><td><code>trip_join_decision</code></td><td>host accepts / rejects join request</td><td><code class="file">groupTripsService.ts</code> → <code>approveJoinRequest</code> · <code>declineJoinRequest</code></td><td><span class="tag tg-b">B</span></td></tr>
+      </tbody>
+    </table>
+    <p class="note">Almost everything logs inside <code class="file">groupTripsService.ts</code> — one file, ~10 one-line calls. Host vs traveler is NOT stored: we know it from <code>group_trip_participants.role</code>.</p>
+    <p class="note"><code>trip_opened</code> / <code>trip_chat_opened</code> get the same 30-min throttle as <code>app_opened</code> so we don't spam rows.</p>
+    <div class="simple"><b>En criollo 🧉:</b> 11 cosas nuevas para anotar. Casi todas se anotan en UN solo archivo (el servicio de viajes), una línea por acción. Listo.</div>
+  </section>
+
+  <!-- CHART A -->
+  <section>
+    <h2><span class="n">A</span> Chart A — Retention curve</h2>
+    <table>
+      <tbody>
+        <tr><td style="width:24%;"><b>Active</b></td><td>has an <code>app_opened</code> row that day <span class="tag tg-done">already collected</span></td></tr>
+        <tr><td><b>Cohort</b></td><td>everyone in <code>group_trip_participants</code> (13 trips, 22 members today)</td></tr>
+        <tr><td><b>Day 0</b></td><td><code>group_trip_participants.joined_at</code> — hosts have a row too (<code>role='host'</code>)</td></tr>
+        <tr><td><b>Host / Joiner toggle</b></td><td>split by <code>role</code>. If someone is both, their first membership decides.</td></tr>
+        <tr><td><b>Buckets</b></td><td>D0 · D1 · D3 · D7 · D14 · D30 — "eligible" = users who existed that long</td></tr>
+        <tr><td><b>Excluded</b></td><td><code>is_demo_user</code> / <code>is_admin</code> rows (automatic, set by trigger)</td></tr>
+      </tbody>
+    </table>
+    <div class="warn"><b>One gap:</b> <code>app_opened</code> only fires on cold start / session restore — not when the app comes back from background. Good enough for v1. If we want exact: add one line to the AppState listener at <code class="file">AppContent.tsx:1670</code>.</div>
+    <div class="simple"><b>En criollo 🧉:</b> este gráfico sale GRATIS — la data ya se está juntando. Solo hay que escribir la query que cuenta: de los que entraron a un viaje hace X días, ¿cuántos abrieron la app hoy?</div>
+  </section>
+
+  <!-- CHART B -->
+  <section>
+    <h2><span class="n">B</span> Chart B — Feature adoption</h2>
+    <table>
+      <tbody>
+        <tr><td style="width:24%;"><b>Bars</b></td><td>the 9 feature events from section 3 (all except <code>trip_opened</code>)</td></tr>
+        <tr><td><b>Number shown</b></td><td>% of trip members with ≥1 row of that event in the time window ("ever used", yes/no)</td></tr>
+        <tr><td><b>Denominator</b></td><td>distinct users in <code>group_trip_participants</code> — split by <code>role</code> for the Host/Joiner toggle</td></tr>
+        <tr><td><b>Time filter</b></td><td><code>occurred_at &gt;= window start</code> — 7d / 30d / all time</td></tr>
+      </tbody>
+    </table>
+    <div class="simple"><b>En criollo 🧉:</b> por cada feature, una sola pregunta: ¿qué porcentaje de la gente la tocó al menos una vez? Una query simple por barra, todas sobre la misma tabla.</div>
+  </section>
+
+  <!-- CHART C -->
+  <section>
+    <h2><span class="n">C</span> Chart C — Trip health heatmap</h2>
+    <table>
+      <tbody>
+        <tr><td style="width:24%;"><b>Active in a trip</b></td><td><code>trip_opened</code> OR <code>trip_chat_opened</code> with that <code>trip_id</code> that day</td></tr>
+        <tr><td><b>Rows</b></td><td>one per trip in <code>group_trips</code> where <code>status='active'</code> and <code>end_date</code> not passed</td></tr>
+        <tr><td><b>Crew size</b></td><td><code>group_trips.participant_count</code> (trigger-maintained, already exists)</td></tr>
+        <tr><td><b>Day columns</b></td><td>D0…D30 from <code>group_trips.created_at</code></td></tr>
+      </tbody>
+    </table>
+    <h3>Health tag — last 7 days</h3>
+    <table>
+      <tbody>
+        <tr><td style="width:24%;"><span class="tag tg-all">Alive</span></td><td>≥ 40% of crew active at least once</td></tr>
+        <tr><td><span class="tag" style="background:#9a670020;color:#9a6700;">Cooling</span></td><td>≥ 1 person active, &lt; 40%</td></tr>
+        <tr><td><span class="tag" style="background:#cf222e18;color:#cf222e;">Dead</span></td><td>0 active</td></tr>
+        <tr><td><span class="tag" style="background:#eef2f3;color:#6c7d81;">Completed</span></td><td><code>status='completed'</code> or <code>end_date</code> passed — shown separately, not "dead"</td></tr>
+      </tbody>
+    </table>
+    <div class="simple"><b>En criollo 🧉:</b> este es el único gráfico que necesita data nueva (los 2 eventos de "entró al viaje"). Por eso empieza a mostrar cosas recién unos días después de que lo deployemos — no hay historia para atrás.</div>
+  </section>
+
+  <!-- ORDER OF WORK -->
+  <section>
+    <h2><span class="n">4</span> Order of work</h2>
+    <table>
+      <tbody>
+        <tr><td style="width:8%;"><b>1</b></td><td>SQL: add <code>trip_id</code> column + index <span style="color:var(--muted);">(5 min, SQL editor)</span></td></tr>
+        <tr><td><b>2</b></td><td>Add ~12 <code>logEvent()</code> calls (mostly in <code class="file">groupTripsService.ts</code>) — data starts collecting</td></tr>
+        <tr><td><b>3</b></td><td>Chart A in the dashboard — works on day one (history exists)</td></tr>
+        <tr><td><b>4</b></td><td>Chart B — bars fill up as new events arrive</td></tr>
+        <tr><td><b>5</b></td><td>Chart C — wait ~1 week of data, then build</td></tr>
+      </tbody>
+    </table>
+    <div class="simple"><b>En criollo 🧉:</b> primero el anotador (pasos 1–2), porque cada día que pasa sin anotar es data perdida. Los gráficos vienen después, tranquilos.</div>
+  </section>
+
+  <footer>Charts A·B·C plan · real tables &amp; files · for discussion</footer>
+
+</div>
+</body>
+</html>

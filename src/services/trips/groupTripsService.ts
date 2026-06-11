@@ -1,5 +1,6 @@
 import { supabase } from '../../config/supabase';
 import { messagingService } from '../messaging/messagingService';
+import { logEvent } from '../analytics/eventLogger';
 import type { PriceInclusions } from './priceInclusions';
 
 export type HostingStyle = 'A' | 'B' | 'C';
@@ -763,6 +764,7 @@ export async function setTripGroupGear(
     console.error('[groupTripsService] setTripGroupGear error:', error);
     throw new Error(error.message);
   }
+  logEvent('trip_gear_suggestion', { tripId });
 }
 
 /**
@@ -785,6 +787,7 @@ export async function setMyGroupGear(
     console.error('[groupTripsService] setMyGroupGear error:', error);
     throw new Error(error.message);
   }
+  logEvent('trip_personal_gear', { userId, tripId });
 }
 
 /**
@@ -812,6 +815,7 @@ export async function setMyPersonalGearList(
     console.error('[groupTripsService] setMyPersonalGearList error:', error);
     throw new Error(error.message);
   }
+  logEvent('trip_personal_gear', { userId, tripId });
 }
 
 /**
@@ -942,6 +946,7 @@ export async function submitCommitment(
     console.warn('[groupTripsService] submitCommitment: participant update failed', partErr);
   }
 
+  logEvent('trip_commit', { userId, tripId, properties: { action: 'submit' } });
   return { requestId, messageId };
 }
 
@@ -1028,6 +1033,12 @@ export async function approveCommitment(
   } catch (bannerErr) {
     console.warn('[groupTripsService] approveCommitment: banner post failed', bannerErr);
   }
+
+  logEvent('trip_commit', {
+    userId: approverUserId,
+    tripId: req.trip_id,
+    properties: { action: 'approve' },
+  });
 }
 
 /**
@@ -1109,6 +1120,12 @@ export async function declineCommitment(
   } catch (bannerErr) {
     console.warn('[groupTripsService] declineCommitment: banner post failed', bannerErr);
   }
+
+  logEvent('trip_commit', {
+    userId: declinerUserId,
+    tripId: req.trip_id,
+    properties: { action: 'decline' },
+  });
 }
 
 /**
@@ -1688,6 +1705,11 @@ export async function approveJoinRequest(requestId: string): Promise<void> {
       console.warn('[groupTripsService] add to trip group chat failed:', chatError);
     }
   }
+
+  logEvent('trip_join_decision', {
+    tripId: updated?.trip_id ?? undefined,
+    properties: { action: 'approve' },
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1845,6 +1867,7 @@ export async function addGearItem(
     console.error('[groupTripsService] addGearItem error:', error);
     throw new Error(error?.message || 'Failed to add item');
   }
+  logEvent('trip_gear_added', { userId: hostId, tripId, properties: { action: 'add' } });
   return data as GearItem;
 }
 
@@ -1878,11 +1901,19 @@ export async function updateGearItem(
 }
 
 export async function deleteGearItem(itemId: string): Promise<void> {
-  const { error } = await supabase.from('group_trip_gear_items').delete().eq('id', itemId);
+  const { data: deleted, error } = await supabase
+    .from('group_trip_gear_items')
+    .delete()
+    .eq('id', itemId)
+    .select('trip_id');
   if (error) {
     console.error('[groupTripsService] deleteGearItem error:', error);
     throw new Error(error.message);
   }
+  logEvent('trip_gear_added', {
+    tripId: deleted?.[0]?.trip_id ?? undefined,
+    properties: { action: 'remove' },
+  });
 }
 
 /**
@@ -1906,6 +1937,7 @@ export async function setMyGearClaim(
       console.error('[groupTripsService] setMyGearClaim delete error:', error);
       throw new Error(error.message);
     }
+    logEvent('trip_gear_claim', { userId, properties: { item_id: itemId, action: 'unclaim' } });
     return null;
   }
 
@@ -1923,6 +1955,7 @@ export async function setMyGearClaim(
     console.error('[groupTripsService] setMyGearClaim upsert error:', error);
     throw new Error(error?.message || 'Failed to update claim');
   }
+  logEvent('trip_gear_claim', { userId, properties: { item_id: itemId, action: 'claim' } });
   return data as GearClaim;
 }
 
@@ -2001,6 +2034,7 @@ export async function createGearRequest(
     console.error('[groupTripsService] createGearRequest error:', error);
     throw new Error(error?.message || 'Failed to send request');
   }
+  logEvent('trip_gear_request', { userId: requesterId, tripId, properties: { action: 'request' } });
   return data as GearRequest;
 }
 
@@ -2046,24 +2080,31 @@ export async function approveGearRequest(
     // Best-effort: the item was created; surface the partial failure.
     throw new Error(updateError.message);
   }
+  logEvent('trip_gear_request', { userId: hostId, tripId: req.trip_id, properties: { action: 'approve' } });
   return item;
 }
 
 export async function declineGearRequest(requestId: string): Promise<void> {
   const { data: { user } } = await supabase.auth.getUser();
-  const { error } = await supabase
+  const { data: updated, error } = await supabase
     .from('group_trip_gear_requests')
     .update({
       status: 'declined',
       reviewed_at: new Date().toISOString(),
       reviewed_by: user?.id ?? null,
     })
-    .eq('id', requestId);
+    .eq('id', requestId)
+    .select('trip_id');
 
   if (error) {
     console.error('[groupTripsService] declineGearRequest error:', error);
     throw new Error(error.message);
   }
+
+  logEvent('trip_gear_request', {
+    tripId: updated?.[0]?.trip_id ?? undefined,
+    properties: { action: 'decline' },
+  });
 }
 
 export async function withdrawGearRequest(requestId: string): Promise<void> {
@@ -2122,6 +2163,7 @@ export async function addAdminUpdate(
     console.error('[groupTripsService] addAdminUpdate error:', error);
     throw new Error(error?.message || 'Failed to add update');
   }
+  logEvent('trip_admin_update', { userId: authorId, tripId });
   return data as AdminUpdate;
 }
 
@@ -2160,19 +2202,25 @@ export async function deleteAdminUpdate(updateId: string): Promise<void> {
 
 export async function declineJoinRequest(requestId: string): Promise<void> {
   const { data: { user } } = await supabase.auth.getUser();
-  const { error } = await supabase
+  const { data: updated, error } = await supabase
     .from('group_trip_join_requests')
     .update({
       status: 'declined',
       reviewed_at: new Date().toISOString(),
       reviewed_by: user?.id ?? null,
     })
-    .eq('id', requestId);
+    .eq('id', requestId)
+    .select('trip_id');
 
   if (error) {
     console.error('[groupTripsService] declineJoinRequest error:', error);
     throw new Error(error.message);
   }
+
+  logEvent('trip_join_decision', {
+    tripId: updated?.[0]?.trip_id ?? undefined,
+    properties: { action: 'decline' },
+  });
 }
 
 /**

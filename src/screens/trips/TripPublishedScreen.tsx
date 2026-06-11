@@ -17,6 +17,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { getGroupTripInviteUrl } from '../../services/trips/groupTripsService';
+import { logEvent } from '../../services/analytics/eventLogger';
 
 const FONT_INTER = Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter';
 const FONT_MONTSERRAT = Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat';
@@ -63,6 +64,7 @@ export const TripPublishedScreen: React.FC<TripPublishedScreenProps> = ({
         message: `Join ${name} on Swellyo 🌊\n${url}`,
         url,
       });
+      logEvent('trip_invite_shared', { tripId });
     } catch (e: any) {
       // Share sheet dismissed is not an error; only surface real failures.
       if (e?.message && !/cancel/i.test(e.message)) {
