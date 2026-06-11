@@ -60,6 +60,7 @@ import { WelcomeIntroMessage } from '../components/WelcomeIntroMessage';
 import { useChatKeyboardScroll } from '../hooks/useChatKeyboardScroll';
 import { useDismissKeyboardOnBlur } from '../hooks/useDismissKeyboardOnBlur';
 import { BlockUserOverlay } from '../components/BlockUserOverlay';
+import { logEventThrottled } from '../services/analytics/eventLogger';
 import { ReportUserScreen } from './ReportUserScreen';
 
 // WhatsApp-style read receipts for own messages.
@@ -448,6 +449,12 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
   useEffect(() => {
     hasMoreMessagesRef.current = hasMoreMessages;
   }, [hasMoreMessages]);
+
+  // Analytics: opening a trip's group chat = "active in this trip today"
+  // (charts B + C). Throttled per (user, trip); DMs (no tripId) don't log.
+  useEffect(() => {
+    if (tripId) logEventThrottled('trip_chat_opened', { tripId });
+  }, [tripId]);
 
   // Clean up file input and fallback timeout if user navigates away while picker is open (web only)
   useEffect(() => {
