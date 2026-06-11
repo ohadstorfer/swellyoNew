@@ -289,10 +289,10 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       }
 
       const savedData = await AsyncStorage.getItem(STORAGE_KEY);
-      console.log('Loading saved data:', savedData);
+      if (__DEV__) console.log('Loading saved data:', savedData);
       if (savedData) {
         const parsed = JSON.parse(savedData);
-        console.log('Parsed data:', parsed);
+        if (__DEV__) console.log('Parsed data:', parsed);
         
         // Only override the current step if we're not on the swelly_chat route
         const isOnSwellyChatRoute = Platform.OS === 'web' && typeof window !== 'undefined' && window.location &&
@@ -370,7 +370,7 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           formData.travelExperience = 0;
         }
         
-        console.log('Setting form data:', formData);
+        if (__DEV__) console.log('Setting form data:', formData);
         setFormData(formData);
       }
     } catch (error) {
@@ -392,7 +392,7 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         isComplete,
         timestamp: Date.now(),
       };
-      console.log('Saving data to local storage:', dataToSave);
+      if (__DEV__) console.log('Saving data to local storage:', dataToSave);
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave));
     } catch (error) {
       console.log('Error saving onboarding data to local storage:', error);
@@ -426,7 +426,7 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const updateFormData = (newData: Partial<OnboardingData>) => {
-    console.log('Updating form data with:', newData);
+    if (__DEV__) console.log('Updating form data with:', newData);
     setFormData(prev => {
       const updated = { ...prev, ...newData };
       return updated;

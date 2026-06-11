@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -12,8 +12,10 @@ import {
   TextInput,
   KeyboardAvoidingView,
   Share,
+  type LayoutChangeEvent,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import Reanimated, { FadeInUp } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useOnboarding } from '../../context/OnboardingContext';
@@ -81,6 +83,7 @@ import {
 import { uploadTripImage } from '../../services/storage/storageService';
 import { TripTabToggle, type TripTab } from '../../components/trips/TripTabToggle';
 import { NotificationCenter } from '../../components/notifications/NotificationCenter';
+import type { TripDetailFocus } from '../../services/notifications/notificationsService';
 import { HostTag } from '../../components/trips/HostTag';
 import { AdminUpdateSheet } from '../../components/trips/updates/AdminUpdateSheet';
 import { AddPersonalGearSheet } from '../../components/trips/gear/AddPersonalGearSheet';
@@ -112,6 +115,7 @@ import {
   useTripRequests,
   useTripGearRequests,
 } from '../../hooks/trips/useTripDetail';
+import { useTripRealtime } from '../../hooks/trips/useTripRealtime';
 import { TripDetailSkeleton } from '../../components/skeletons';
 
 interface TripDetailScreenProps {
@@ -124,6 +128,15 @@ interface TripDetailScreenProps {
   /** Optional — wires the header notification bell (Figma). Bell is hidden when
    *  not provided, since a non-functional bell is worse than none. */
   onOpenNotifications?: () => void;
+  /** Tap on a bell notification deep-links to its trip (may be another trip). */
+  onOpenTrip?: (tripId: string, focus?: TripDetailFocus) => void;
+  /**
+   * Deep-link landing spot (from a notification tap). Switches to the Plan tab
+   * and scrolls to the section once data + layout are ready. Silently falls
+   * back to Overview when the viewer can't see Plan (non-member, locked trip)
+   * or the target section isn't rendered.
+   */
+  initialFocus?: TripDetailFocus | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -319,7 +332,7 @@ const DangerRow: React.FC<{
 );
 
 // ---------------------------------------------------------------------------
-export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEditTrip, onViewUserProfile, onOpenNotifications }: TripDetailScreenProps) {
+export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEditTrip, onViewUserProfile, onOpenNotifications, onOpenTrip, initialFocus }: TripDetailScreenProps) {
   const { user: contextUser } = useOnboarding();
   const insets = useSafeAreaInsets();
   const currentUserId = contextUser?.id?.toString() ?? null;
@@ -330,6 +343,12 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   const trip = coreQuery.data?.trip ?? null;
   const participants = coreQuery.data?.participants ?? [];
   const myRequest = coreQuery.data?.myRequest ?? null;
+  // placeholderData seeds the trip from the list cache with participants: []
+  // and myRequest: null, so until the real fetch lands we DON'T know whether
+  // the viewer is a member. Member-dependent chrome (join CTA, deep-link
+  // fallback) must wait for this — otherwise members see a "Request to Join"
+  // flash on every open.
+  const membershipKnown = !!coreQuery.data && !coreQuery.isPlaceholderData;
 
   // isHostDerived must be derived before any hook that depends on it so hook
   // call order stays stable across renders (no conditional hooks).
@@ -347,6 +366,10 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
 
   const gearRequestsQuery = useTripGearRequests(tripId, isHostDerived);
   const gearRequests = gearRequestsQuery.data ?? [];
+
+  // Live refresh while the screen is open — other users' approvals, joins,
+  // leaves, trip edits and admin updates invalidate the queries above.
+  useTripRealtime(tripId);
 
   const [submitting, setSubmitting] = useState(false);
   const [processingRequestId, setProcessingRequestId] = useState<string | null>(null);
@@ -409,6 +432,65 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     () => participants.some(p => p.role !== 'host'),
     [participants]
   );
+
+  // ── Notification deep-link: land on the right tab + section ───────────────
+  // Plan sections register their content-relative Y here as they lay out; the
+  // focus effect scrolls once the target exists. 'your-gear' is nested inside
+  // the 'gear' section, so its absolute Y is the sum of both.
+  const scrollRef = useRef<ScrollView>(null);
+  const sectionYs = useRef<Record<string, number>>({});
+  const appliedFocusRef = useRef<string | null>(null);
+  const registerSection = useCallback(
+    (key: string) => (e: LayoutChangeEvent) => {
+      sectionYs.current[key] = e.nativeEvent.layout.y;
+    },
+    []
+  );
+  useEffect(() => {
+    sectionYs.current = {}; // stale Ys from another trip must not be scroll targets
+  }, [tripId]);
+
+  useEffect(() => {
+    // membershipKnown: placeholder-seeded data has participants: [] — deciding
+    // the Plan-vs-Overview fallback on it would dump members on Overview.
+    if (!trip || !initialFocus || !membershipKnown) return;
+    const token = `${tripId}:${initialFocus}`;
+    if (appliedFocusRef.current === token) return; // once per (trip, focus)
+    appliedFocusRef.current = token;
+
+    const locked = trip.status === 'cancelled' || trip.status === 'completed' || isTripPast(trip);
+    const canSeePlanNow = (isHost || isApprovedMember) && !locked;
+    if (initialFocus === 'overview' || !canSeePlanNow) return; // fallback: Overview
+
+    setActiveTab('plan');
+    if (initialFocus === 'gear-requests' && isHost) setRequestsSheetVisible(true);
+
+    // Scroll once the Plan sections have mounted and reported layout. If the
+    // target never renders (e.g. no commit pill for hosts, no pending
+    // requests), give up quietly — the user is at the top of Plan, which is
+    // the right fallback.
+    let attempts = 0;
+    let cancelled = false;
+    const tryScroll = () => {
+      if (cancelled) return;
+      const ys = sectionYs.current;
+      const y =
+        initialFocus === 'your-gear'
+          ? ys['gear'] != null && ys['your-gear'] != null
+            ? ys['gear'] + ys['your-gear']
+            : undefined
+          : ys[initialFocus];
+      if (y != null) {
+        scrollRef.current?.scrollTo({ y: Math.max(y - 12, 0), animated: true });
+      } else if (attempts++ < 30) {
+        requestAnimationFrame(tryScroll);
+      }
+    };
+    requestAnimationFrame(tryScroll);
+    return () => {
+      cancelled = true;
+    };
+  }, [trip, tripId, initialFocus, isHost, isApprovedMember, membershipKnown]);
   const meParticipant = useMemo(
     () => participants.find(p => p.user_id === currentUserId),
     [participants, currentUserId]
@@ -1137,9 +1219,15 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
 
   // Whether a floating sticky CTA (join request / trip chat) is showing — drives
   // the extra scroll bottom padding so content clears the floating button.
+  // Both CTAs wait for membershipKnown: with placeholder data every viewer
+  // looks like a non-member, and members would see "Request to Join" flash.
+  // A short blank beats a wrong button.
   const showJoinCta =
+    membershipKnown &&
     !isHost && !isCancelled && !isApprovedMember && myRequest?.status !== 'approved';
-  const showChatCta = (isHost || isApprovedMember) && !isCancelled;
+  // isHost derives from trip.host_id, which the placeholder DOES carry — hosts
+  // get their chat CTA immediately; members wait one fetch.
+  const showChatCta = (isHost || (membershipKnown && isApprovedMember)) && !isCancelled;
   const stickyCtaVisible = showJoinCta || showChatCta;
 
   // Has the trip started yet? Gates "Mark as completed" — a host can close a
@@ -1194,7 +1282,9 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
             ) : null}
             {/* Notifications — self-contained bell + slide-in panel + unread
                 badge (same component the other headers use). */}
-            {currentUserId ? <NotificationCenter userId={currentUserId} bare /> : null}
+            {currentUserId ? (
+              <NotificationCenter userId={currentUserId} bare onOpenTrip={onOpenTrip} />
+            ) : null}
           </View>
         }
       />
@@ -1204,6 +1294,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
       <ScrollView
+        ref={scrollRef}
         contentContainerStyle={[
           styles.scrollContent,
           stickyCtaVisible && { paddingBottom: Math.max(insets.bottom, 16) + 100 },
@@ -1314,23 +1405,27 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
 
         {/* 1) Commit pill — approved members only (host can't commit). */}
         {isApprovedMember && (
-          <CommitPill status={myCommitmentStatus} onPress={handleOpenCommitSheet} />
+          <View onLayout={registerSection('commit')}>
+            <CommitPill status={myCommitmentStatus} onPress={handleOpenCommitSheet} />
+          </View>
         )}
 
         {/* 2) Recent admin updates */}
         {(adminUpdates.length > 0 || isHost) && (
-          <AdminUpdatesCard
-            updates={adminUpdates}
-            isHost={isHost}
-            formatTime={formatRelativeTime}
-            onAddUpdate={handleStartAddUpdate}
-            onEditUpdate={handleEditUpdate}
-            onLongPressUpdate={handleLongPressUpdate}
-          />
+          <View onLayout={registerSection('updates')}>
+            <AdminUpdatesCard
+              updates={adminUpdates}
+              isHost={isHost}
+              formatTime={formatRelativeTime}
+              onAddUpdate={handleStartAddUpdate}
+              onEditUpdate={handleEditUpdate}
+              onLongPressUpdate={handleLongPressUpdate}
+            />
+          </View>
         )}
 
         {/* 3) Packing & Gear — Group Gear + Your Gear */}
-        <View style={styles.planSection}>
+        <View style={styles.planSection} onLayout={registerSection('gear')}>
           <Text style={styles.planSectionHeading}>Packing & Gear</Text>
           <GroupGearCard
             items={gearItems}
@@ -1340,25 +1435,27 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
             onManage={() => setManageSheetVisible(true)}
             onRequestItem={() => setRequestSheetVisible(true)}
           />
-          <YourGearCard
-            rows={gearAllRows}
-            totalCount={gearTotalCount}
-            isHost={isHost}
-            onOpen={() => setPersonalGearSheetOpen(true)}
-            onEditSuggested={() => setEditSuggestedSheetOpen(true)}
-            onToggleItem={row =>
-              row.kind === 'host'
-                ? handleToggleGroupGearItem(row.name)
-                : handleTogglePersonalItem(row.name)
-            }
-          />
+          <View onLayout={registerSection('your-gear')}>
+            <YourGearCard
+              rows={gearAllRows}
+              totalCount={gearTotalCount}
+              isHost={isHost}
+              onOpen={() => setPersonalGearSheetOpen(true)}
+              onEditSuggested={() => setEditSuggestedSheetOpen(true)}
+              onToggleItem={row =>
+                row.kind === 'host'
+                  ? handleToggleGroupGearItem(row.name)
+                  : handleTogglePersonalItem(row.name)
+              }
+            />
+          </View>
         </View>
 
         {/* ---- Operational sections (kept at the bottom of Plan; not in Figma) ---- */}
 
         {/* Gear requests (host) — review members' "request item" submissions. */}
         {isHost && (
-          <View style={styles.planSection}>
+          <View style={styles.planSection} onLayout={registerSection('gear-requests')}>
             <TouchableOpacity
               style={styles.gearReqsBadge}
               onPress={() => setRequestsSheetVisible(true)}
@@ -1377,17 +1474,19 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
 
         {/* Pending requests (host only) */}
         {isHost && pendingRequests.length > 0 && (
-          <Section title={`Pending requests (${pendingRequests.length})`}>
-            {pendingRequests.map(r => (
-              <PendingRequestCard
-                key={r.id}
-                request={r}
-                onApprove={handleApprove}
-                onDecline={handleDecline}
-                isProcessing={processingRequestId === r.id}
-              />
-            ))}
-          </Section>
+          <View onLayout={registerSection('requests')}>
+            <Section title={`Pending requests (${pendingRequests.length})`}>
+              {pendingRequests.map(r => (
+                <PendingRequestCard
+                  key={r.id}
+                  request={r}
+                  onApprove={handleApprove}
+                  onDecline={handleDecline}
+                  isProcessing={processingRequestId === r.id}
+                />
+              ))}
+            </Section>
+          </View>
         )}
 
         {/* Declined requests (host only) — lets the host reverse a decision. */}
@@ -1430,9 +1529,11 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
 
         {/* Group breakdown — only when there's at least one member besides the host */}
         {hasNonHostMembers && (
-          <Section title="Group breakdown">
-            <TripParticipantsBreakdown participants={participants} />
-          </Section>
+          <View onLayout={registerSection('breakdown')}>
+            <Section title="Group breakdown">
+              <TripParticipantsBreakdown participants={participants} />
+            </Section>
+          </View>
         )}
 
         {/* Bottom destructive — Exit (member) / Cancel (host), WhatsApp-style red rows */}
@@ -1491,21 +1592,28 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         </View>
       )}
 
-      {/* Join flow (non-host, non-member, active trip) */}
+      {/* Join flow (non-host, non-member, active trip). Fades in because it
+          mounts only after membership resolves — a pop would read as a glitch. */}
       {showJoinCta && (
-        <View style={[styles.ctaFloat, { bottom: Math.max(insets.bottom, 16) + 12 }]}>
+        <Reanimated.View
+          entering={FadeInUp.duration(220)}
+          style={[styles.ctaFloat, { bottom: Math.max(insets.bottom, 16) + 12 }]}
+        >
           <CtaButton
             myRequest={myRequest}
             submitting={submitting}
             onRequest={handleOpenJoinSheet}
             onWithdraw={handleWithdraw}
           />
-        </View>
+        </Reanimated.View>
       )}
 
       {/* Members get quick access to the group chat (Figma "Trip Chat", accent). */}
       {showChatCta && (
-        <View style={[styles.ctaFloat, { bottom: Math.max(insets.bottom, 16) + 12 }]}>
+        <Reanimated.View
+          entering={FadeInUp.duration(220)}
+          style={[styles.ctaFloat, { bottom: Math.max(insets.bottom, 16) + 12 }]}
+        >
           <TouchableOpacity
             style={[styles.ctaBtn, styles.ctaChat]}
             onPress={handleOpenGroupChat}
@@ -1521,7 +1629,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
               </>
             )}
           </TouchableOpacity>
-        </View>
+        </Reanimated.View>
       )}
 
       {/* Gear bottom sheets */}

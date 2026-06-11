@@ -46,6 +46,69 @@ export interface NotificationRow {
   created_at: string;
 }
 
+/**
+ * Deep-link target inside TripDetailScreen. 'overview' = just open the trip;
+ * everything else switches to the Plan tab and scrolls to that section
+ * (falling back to overview/top when the user can't see Plan or the section
+ * isn't rendered — e.g. a declined requester, or a locked trip).
+ */
+export type TripDetailFocus =
+  | 'overview'
+  | 'commit'        // Plan → commit pill (members) / top of Plan (host)
+  | 'updates'       // Plan → admin updates card
+  | 'gear'          // Plan → Packing & Gear section
+  | 'your-gear'     // Plan → Packing & Gear → Your Gear card
+  | 'requests'      // Plan → pending join requests (host)
+  | 'gear-requests' // Plan → gear requests badge + auto-open the sheet (host)
+  | 'breakdown';    // Plan → group breakdown
+
+/**
+ * Where tapping a notification should land. Single source of truth for both
+ * tap surfaces: the bell feed (full row data) and native pushes (the
+ * dispatcher mirrors `stage`/`decision` into the push data payload).
+ */
+export function tripFocusForNotification(
+  type: string | undefined,
+  data?: Record<string, any> | null
+): TripDetailFocus {
+  switch (type) {
+    case 'join_request_received':
+    case 'trip_join_request': // legacy push type (pre-queue webhook)
+      return 'requests';
+    case 'join_request_decided':
+      // Approved → next step is committing. Declined → can't see Plan anyway.
+      return data?.decision === 'approved' ? 'commit' : 'overview';
+    case 'commitment_request_received': // host: action lives in the bell buttons
+    case 'commitment_decided':
+      return 'commit';
+    case 'member_committed':
+      return 'breakdown';
+    case 'gear_request_received':
+      return 'gear-requests';
+    case 'gear_request_decided':
+    case 'gear_claimed':
+    case 'group_gear_updated':
+      return 'gear';
+    case 'personal_gear_updated':
+      return 'your-gear';
+    case 'admin_update_posted':
+      return 'updates';
+    case 'trip_reminder':
+      switch (data?.stage) {
+        case 'commit':
+          return 'commit';
+        case 'week':
+        case 'gear':
+          return 'gear'; // "packing list inside"
+        default:
+          return 'overview'; // tomorrow / today → trip details
+      }
+    // member_joined, member_left, member_removed, trip_cancelled, trip_ended
+    default:
+      return 'overview';
+  }
+}
+
 /** Ionicons name used for the row icon. */
 type IoniconName = string;
 
@@ -56,6 +119,57 @@ export interface RenderedNotification {
 }
 
 const TABLE = 'notifications';
+
+// ---------------------------------------------------------------------------
+// Editable bell texts — loaded once per session from notification_templates.
+// Missing table/row/field → the hardcoded defaults below render as before.
+// ---------------------------------------------------------------------------
+type BellTemplate = { bell_title: string | null; bell_body: string | null };
+let bellTemplates: Record<string, BellTemplate> | null = null;
+let bellTemplatesLoading = false;
+
+async function loadBellTemplates(): Promise<void> {
+  if (bellTemplates || bellTemplatesLoading) return;
+  bellTemplatesLoading = true;
+  try {
+    const { data, error } = await supabase
+      .from('notification_templates')
+      .select('key, bell_title, bell_body');
+    if (!error && data) {
+      const map: Record<string, BellTemplate> = {};
+      for (const row of data as any[]) map[row.key] = row;
+      bellTemplates = map;
+    }
+  } catch (e) {
+    console.warn('[notificationsService] templates load failed (using defaults):', e);
+  } finally {
+    bellTemplatesLoading = false;
+  }
+}
+
+/** Template row key: type, or type:variant for decision/stage splits. */
+function bellTemplateKey(n: NotificationRow): string {
+  const d = n.data ?? {};
+  if (n.type === 'join_request_decided' || n.type === 'commitment_decided' || n.type === 'gear_request_decided') {
+    return `${n.type}:${d.decision === 'approved' ? 'approved' : 'declined'}`;
+  }
+  if (n.type === 'trip_reminder') {
+    const s = d.stage || '';
+    if (s === 'tomorrow' || s === 'today') return `trip_reminder:${s}`;
+    if (s.startsWith('commit_')) return 'trip_reminder:commit';
+    if (s.startsWith('gear_')) return 'trip_reminder:gear';
+    return 'trip_reminder:week';
+  }
+  return n.type;
+}
+
+/** Replace {placeholders}; unknown ones stay as-is; extra spaces collapse. */
+function fillTemplate(template: string, vars: Record<string, string>): string {
+  return template
+    .replace(/\{(\w+)\}/g, (m, k) => (vars[k] !== undefined ? vars[k] : m))
+    .replace(/ {2,}/g, ' ')
+    .trim();
+}
 
 /** Quietly swallow "table doesn't exist yet" (migration not applied) and similar. */
 function isMissingTableError(error: any): boolean {
@@ -70,6 +184,7 @@ function isMissingTableError(error: any): boolean {
 export const notificationsService = {
   /** Latest notifications for the current user, newest first. */
   async fetch(limit = 50): Promise<NotificationRow[]> {
+    void loadBellTemplates(); // fire-and-forget; ready by the time the bell renders
     try {
       const { data, error } = await supabase
         .from(TABLE)
@@ -209,8 +324,31 @@ export const notificationsService = {
   },
 };
 
-/** Turn a notification row into display text + icon, using its frozen snapshot. */
+/** Turn a notification row into display text + icon, using its frozen snapshot.
+ *  Texts come from notification_templates when loaded; defaults otherwise.
+ *  Icons always come from the defaults (not editable). */
 export function renderNotification(n: NotificationRow): RenderedNotification {
+  const base = renderNotificationDefault(n);
+  const tpl = bellTemplates?.[bellTemplateKey(n)];
+  if (tpl?.bell_title && tpl?.bell_body) {
+    const d = n.data ?? {};
+    const trip = d.trip_title ? `“${d.trip_title}”` : 'the trip';
+    const stage = d.stage || '';
+    const vars: Record<string, string> = {
+      trip,
+      actor: d.actor_name || 'Someone',
+      item: d.item_name ?? d.gear_name ?? 'gear',
+      qty: d.qty != null ? String(d.qty) : '',
+      preview: d.preview || `New update in ${trip}.`,
+      days: stage.includes('_') ? stage.split('_')[1] : '',
+    };
+    return { ...base, title: fillTemplate(tpl.bell_title, vars), body: fillTemplate(tpl.bell_body, vars) };
+  }
+  return base;
+}
+
+/** The hardcoded default rendering (also the fallback when templates are absent). */
+function renderNotificationDefault(n: NotificationRow): RenderedNotification {
   const d = n.data ?? {};
   const who = d.actor_name || 'Someone';
   const trip = d.trip_title ? `“${d.trip_title}”` : 'the trip';

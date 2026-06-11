@@ -54,6 +54,12 @@ export function InlineMapView({ htmlContent, width, height, onMessage }: InlineM
     if (Platform.OS !== 'web') return;
     const handler = (event: MessageEvent) => {
       if (typeof event.data !== 'string') return;
+      // Only accept messages from our own (same-origin) iframe.
+      const origin = event.origin;
+      const allowed =
+        typeof window !== 'undefined' &&
+        (origin === window.location.origin || origin === 'null' || origin === '');
+      if (!allowed) return;
       handleMessage(event.data);
     };
     window.addEventListener('message', handler);
@@ -96,7 +102,9 @@ export function InlineMapView({ htmlContent, width, height, onMessage }: InlineM
           source={{ html: htmlContent, baseUrl: 'https://swellyo.com' }}
           style={[styles.inlineWebView, { width, height }]}
           onMessage={(e: { nativeEvent: { data: string } }) => handleMessage(e.nativeEvent.data)}
-          originWhitelist={['*']}
+          // https-only: blocks javascript:/data: scheme navigation. Map JS loads
+          // as a subresource so it is unaffected.
+          originWhitelist={['https://*']}
           javaScriptEnabled
           domStorageEnabled
           nestedScrollEnabled
@@ -290,7 +298,9 @@ export function MapPickerModal({
               source={{ html: htmlContent, baseUrl: 'https://swellyo.com' }}
               style={styles.webView}
               onMessage={(e: { nativeEvent: { data: string } }) => handleMessage(e.nativeEvent.data)}
-              originWhitelist={['*']}
+              // https-only: blocks javascript:/data: scheme navigation. Map JS loads
+              // as a subresource so it is unaffected.
+              originWhitelist={['https://*']}
               javaScriptEnabled
               domStorageEnabled
             />

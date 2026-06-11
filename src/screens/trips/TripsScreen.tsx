@@ -38,6 +38,7 @@ import { TRIP_CHOOSER, TRIP_TYPE_PILL, TRIP_TYPE_GRADIENT } from '../../services
 import { COUNTRY_NAMES } from '../../data/countryNames';
 import { useQueryClient } from '@tanstack/react-query';
 import { useExploreTrips, useMyTrips, tripsKeys } from '../../hooks/trips/useTripQueries';
+import { useTripsListRealtime } from '../../hooks/trips/useTripsListRealtime';
 import CreateTripWizard from './CreateTripWizard';
 import { MyTripsSkeleton, ExploreDeckSkeleton } from '../../components/skeletons';
 import { FadeInView } from '../../components/FadeInView';
@@ -51,6 +52,7 @@ import { useTripsBottomNavControl, type TripsBottomNavControl } from '../../comp
 import { Images } from '../../assets/images';
 import { Logo } from '../../components/Logo';
 import { NotificationCenter } from '../../components/notifications/NotificationCenter';
+import type { TripDetailFocus } from '../../services/notifications/notificationsService';
 import Reanimated, {
   Easing,
   Extrapolation,
@@ -83,6 +85,8 @@ interface TripsScreenProps {
   onBack: () => void;
   /** When provided (e.g. from a push tap), open the detail screen for this trip on mount. */
   initialTripId?: string | null;
+  /** Landing spot inside the trip detail (notification deep-link), see TripDetailFocus. */
+  initialTripFocus?: TripDetailFocus | null;
   /** Open the group chat linked to a trip. Lifted to AppContent so it can swap to the DM overlay. */
   onOpenGroupChat?: (params: { conversationId: string; title: string; heroImageUrl?: string | null; tripId?: string }) => void;
   /** Tap on a participant inside a trip detail opens their profile. AppContent
@@ -1028,13 +1032,18 @@ const TabPane: React.FC<{
 // ---------------------------------------------------------------------------
 // Wrapper screen
 // ---------------------------------------------------------------------------
-export default function TripsScreen({ onBack, initialTripId, onOpenGroupChat, onViewUserProfile, navControl: navControlProp, onInnerOverlayChange }: TripsScreenProps) {
+export default function TripsScreen({ onBack, initialTripId, initialTripFocus, onOpenGroupChat, onViewUserProfile, navControl: navControlProp, onInnerOverlayChange }: TripsScreenProps) {
   const insets = useSafeAreaInsets();
   const { user: contextUser } = useOnboarding();
   const currentUserId = contextUser?.id?.toString() ?? null;
 
   const queryClient = useQueryClient();
   const reduceMotion = useReducedMotion();
+
+  // Keep Explore + My Trips live while this screen is mounted — new trips,
+  // card edits, member counts. Per-trip realtime is useTripRealtime in detail.
+  useTripsListRealtime();
+
   const [activeTab, setActiveTab] = useState<TripsTab>('explore');
   // Tabs are lazily mounted on first visit, then kept mounted (translated
   // off-screen in the pager row) so switching back is instant and scroll
@@ -1101,6 +1110,15 @@ export default function TripsScreen({ onBack, initialTripId, onOpenGroupChat, on
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bodyW]);
   const [selectedTripId, setSelectedTripId] = useState<string | null>(initialTripId ?? null);
+  // Section the detail screen should land on (notification deep-links only;
+  // manual opens leave it null). Cleared on back so it never re-applies.
+  const [selectedTripFocus, setSelectedTripFocus] = useState<TripDetailFocus | null>(
+    initialTripId ? initialTripFocus ?? null : null
+  );
+  const openTripFromNotification = useCallback((tripId: string, focus?: TripDetailFocus) => {
+    setSelectedTripFocus(focus ?? null);
+    setSelectedTripId(tripId);
+  }, []);
   const [editingTrip, setEditingTrip] = useState<GroupTrip | null>(null);
   // Tell AppContent when a full-screen inner overlay (trip detail / edit) is
   // up, so the app-level floating nav bar hides instead of floating over it.
@@ -1161,10 +1179,15 @@ export default function TripsScreen({ onBack, initialTripId, onOpenGroupChat, on
     );
   };
 
-  // Deep-link into a trip from a push tap: when initialTripId changes, open it.
+  // Deep-link into a trip from a push tap: when the target changes, open it.
+  // initialTripFocus is in the deps so a second push for the SAME trip but a
+  // different section still re-applies (initialTripId alone wouldn't change).
   useEffect(() => {
-    if (initialTripId) setSelectedTripId(initialTripId);
-  }, [initialTripId]);
+    if (initialTripId) {
+      setSelectedTripFocus(initialTripFocus ?? null);
+      setSelectedTripId(initialTripId);
+    }
+  }, [initialTripId, initialTripFocus]);
 
   const closeCreateModal = () => {
     setPendingStyle(null);
@@ -1220,7 +1243,7 @@ export default function TripsScreen({ onBack, initialTripId, onOpenGroupChat, on
             <Logo size={40} iconOnly />
             <Text style={styles.tripsHeaderTitle}>Trips</Text>
           </View>
-          <NotificationCenter userId={currentUserId} bare />
+          <NotificationCenter userId={currentUserId} bare onOpenTrip={openTripFromNotification} />
         </View>
 
         <TripsHeaderTabs active={activeTab} onChange={goToTab} />
@@ -1325,9 +1348,14 @@ export default function TripsScreen({ onBack, initialTripId, onOpenGroupChat, on
         >
           <TripDetailScreen
             tripId={selectedTripId}
-            onBack={() => setSelectedTripId(null)}
+            initialFocus={selectedTripFocus}
+            onBack={() => {
+              setSelectedTripId(null);
+              setSelectedTripFocus(null);
+            }}
             onOpenGroupChat={onOpenGroupChat}
             onEditTrip={setEditingTrip}
+            onOpenTrip={openTripFromNotification}
             onViewUserProfile={
               onViewUserProfile
                 ? (userId: string) => onViewUserProfile(userId, selectedTripId)

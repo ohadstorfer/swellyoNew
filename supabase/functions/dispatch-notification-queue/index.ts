@@ -5,7 +5,7 @@
 // skipped:'shadow' WITHOUT calling Expo (legacy push path still serves users).
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { renderPush } from "./render.ts";
+import { renderPush, type PushTemplateMap } from "./render.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -64,6 +64,14 @@ serve(async (req) => {
     return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { "Content-Type": "application/json" } });
   }
 
+  // Editable texts: one fetch per run; missing table/rows → hardcoded defaults.
+  const templates: PushTemplateMap = {};
+  try {
+    const { data: tplRows } = await supabase
+      .from("notification_templates").select("key, push_title, push_body");
+    for (const t of tplRows ?? []) templates[t.key] = t;
+  } catch (_) { /* fall back to defaults */ }
+
   // SR1 batch: non-urgent rows for the same (recipient, trip) collapse into one digest push.
   const groups: Record<string, any[]> = {};
   for (const r of rows ?? []) {
@@ -114,7 +122,7 @@ serve(async (req) => {
     const batchCount = batchLeader.get(row.id);
     const text = batchCount
       ? { title: tripTitle || "Your trip", body: `${batchCount} updates in ${tripTitle || "your trip"}` }
-      : renderPush(row.type, feedData, tripTitle);
+      : renderPush(row.type, feedData, tripTitle, templates);
 
     if (SHADOW) { await mark(supabase, row.id, "skipped", "shadow", text); skipped++; continue; }
 
@@ -132,7 +140,12 @@ serve(async (req) => {
       body: JSON.stringify({
         to: token, title: text.title, body: text.body, sound: "default",
         collapseId: row.trip_id || undefined,
-        data: { type: row.type, tripId: row.trip_id, notificationId: row.notification_id },
+        // stage/decision let the app deep-link to the right section on tap
+        // (e.g. trip_reminder:gear → Plan tab → Packing & Gear).
+        data: {
+          type: row.type, tripId: row.trip_id, notificationId: row.notification_id,
+          stage: feedData.stage ?? undefined, decision: feedData.decision ?? undefined,
+        },
       }),
     });
     if (!resp.ok) {

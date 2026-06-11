@@ -116,11 +116,11 @@ class AuthService {
         client_id: clientId,
         callback: async (response: any) => {
           try {
-            console.log('Google Sign-In response received:', response);
-            
+            if (__DEV__) console.log('Google Sign-In response received:', response);
+
             // Decode the JWT token to get user info
             const payload = JSON.parse(atob(response.credential.split('.')[1]));
-            console.log('Decoded payload:', payload);
+            if (__DEV__) console.log('Decoded payload:', payload);
 
             const googleUser: GoogleUser = {
               id: payload.sub,
@@ -129,7 +129,7 @@ class AuthService {
               photo: payload.picture || undefined,
             };
 
-            console.log('Saving user to database:', googleUser);
+            if (__DEV__) console.log('Saving user to database:', googleUser);
             // Save user to database
             const user = await databaseService.saveUser({
               email: googleUser.email,
@@ -137,7 +137,7 @@ class AuthService {
               googleId: googleUser.id,
             });
 
-            console.log('User signed in successfully:', user);
+            if (__DEV__) console.log('User signed in successfully:', user);
             resolve(user);
           } catch (error) {
             console.error('Error processing Google Sign-In response:', error);
@@ -262,7 +262,7 @@ class AuthService {
       }
 
       const userInfo = await userInfoResponse.json();
-      console.log('Google user info:', userInfo);
+      if (__DEV__) console.log('Google user info:', userInfo);
 
       const googleUser: GoogleUser = {
         id: userInfo.id,
@@ -271,7 +271,7 @@ class AuthService {
         photo: userInfo.picture || undefined,
       };
 
-      console.log('Saving user to database:', googleUser);
+      if (__DEV__) console.log('Saving user to database:', googleUser);
       // Save user to database
       const user = await databaseService.saveUser({
         email: googleUser.email,
@@ -279,7 +279,7 @@ class AuthService {
         googleId: googleUser.id,
       });
 
-      console.log('User signed in successfully:', user);
+      if (__DEV__) console.log('User signed in successfully:', user);
       return user;
     } catch (error: any) {
       console.error('Error signing in with Google:', error);

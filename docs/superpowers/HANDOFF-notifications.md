@@ -5,6 +5,22 @@ Date of handoff: 2026-06-09. Branch: `ohad`. Everything below is **uncommitted**
 
 ---
 
+## 0.5 LATEST STATE (2026-06-10 — read this first, supersedes anything below)
+
+The system is **LIVE on prod** and verified end-to-end with real pushes. Current facts:
+
+- **Live, no shadow, no gate.** All push types are **priority 0 (urgent)** — Ohad flattened priorities (`20260611000000_all_pushes_urgent.sql`, applied). SR1 batch / SR2 cap / SR3 quiet hours are **dormant** (dispatcher code intact; P1 branches never run). Restore the `20260610000050` mapping before opening trips to real users.
+- **Verified working with real pushes:** join declined ✓, commit approved ✓, admin update ✓, trip_reminder week stage via the daily scan ✓ (scan cron was temporarily moved, reminder arrived, cron reverted to `7 6 * * *`). SR4 read_in_feed observed ✓. Timezone capture works (Ohad = America/Argentina/Buenos_Aires — he's in Argentina).
+- **Bug found & fixed in testing:** double "Your packing list" pushes — legacy `trg_personal_gear` (on group_trip_participants.personal_gear_by_host) duplicated the new shared trigger AND self-notified members on their own checkbox toggles. **Dropped** (`20260611000100_drop_legacy_personal_gear_trigger.sql`, applied).
+- **Legacy join-request webhook deleted** by Ohad (verified gone from pg_trigger). `send-trip-removed-notification` deployed with direct Expo send REMOVED — the queue is the sole sender for everything except chat/reactions.
+- **Editable notification texts:** new `notification_templates` table (`20260611000200_notification_templates.sql` — ⚠️ **PENDING apply by Ohad**; everything falls back to hardcoded defaults until then). Dispatcher (deployed) + app bell renderer (`notificationsService.ts`) both read it with fallback. Editor UI: **`notification-texts-editor.html`** (project root) — edit texts → Copy SQL → paste/run. Push texts apply in ~1 min; bell texts on next app open.
+- **Git:** Phases 1+2 committed & pushed to main (`d6155ab` → merge `1f00219`). **Uncommitted in tree:** the 3 new migrations (`20260611000000/000100/000200`), dispatcher template support (`render.ts`/`index.ts`), bell template support (`notificationsService.ts`), `notification-texts-editor.html`, testing-guide updates.
+- **Testing guide:** `notifications-testing-guide.html` (live-mode expectations; Ohad+Eyal by name; Smart 2/4 marked OFF).
+- **Tap deep-links (2026-06-10, uncommitted):** tapping a notification (push OR bell row) now opens the right trip AND lands on the right tab/section. Single mapping fn `tripFocusForNotification(type, data)` in `notificationsService.ts` → focus values `overview|commit|updates|gear|your-gear|requests|gear-requests|breakdown`. `TripDetailScreen` got `initialFocus` (switches to Plan, scrolls via onLayout-registered section Ys, auto-opens the gear-requests sheet; falls back to Overview when the viewer can't see Plan). Plumbing: AppContent `pendingTripFocus` → TripsScreen `initialTripFocus` → TripDetail; bell rows pass focus via `onOpenTrip(tripId, focus)`. Dispatcher now mirrors `stage`/`decision` into the push data payload (redeployed). Client code needs the dev app / next build.
+- **Still open:** apply templates migration (one paste); app build/OTA so all users' timezones populate; Phase 3 (re-engagement, SR7 prefs UI); re-enable smart rules + re-audit trip-table membership before public launch.
+
+---
+
 ## 0. TL;DR
 
 We built a complete group-trip **notification system** in two phases, both **deployed to prod but running in SHADOW mode** (the push dispatcher renders + logs but sends nothing).
@@ -30,6 +46,8 @@ pg_cron (every ~1 min) → dispatch-notification-queue edge fn:
    drains due rows, applies smart rules, sends to Expo (or, in SHADOW, just marks skipped:'shadow')
 pg_cron (daily 06:07 UTC) → scan-trip-reminders edge fn: inserts trip_reminder/trip_ended feed rows
 ```
+
+> ⚠️ **PRIORITIES FLATTENED (2026-06-10, Ohad's decision):** every push type now returns priority **0** (urgent) — see `supabase/migrations/20260611000000_all_pushes_urgent.sql`. Effect: SR1 batch, SR2 freq cap, SR3 quiet hours are **dormant** (dispatcher code untouched; its P1 branches just never run). Feed-only types (-1) unchanged. **Re-apply the mapping in `20260610000050` to restore polite behavior before opening trips to real users.** The smart-rule list below describes the system as designed, not current behavior.
 
 **Smart rules (the "engine"), where each lives:**
 - SR8 priority — `priority` col (0=urgent send-now / 1=normal). In the mapping fn `notification_push_priority`.

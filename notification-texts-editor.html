@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Swellyo — Notification Texts Editor</title>
+<style>
+  :root {
+    --ink: #0f172a; --ink-soft: #475569; --ink-faint: #94a3b8;
+    --bg: #ffffff; --bg-soft: #f8fafc; --line: #e2e8f0;
+    --accent: #0284c7; --accent-soft: #e0f2fe;
+    --green: #15803d; --green-soft: #dcfce7;
+    --amber: #b45309; --amber-soft: #fef3c7;
+    --changed: #fff7ed; --changed-line: #fdba74;
+    --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: var(--ink); background: var(--bg); line-height: 1.55; font-size: 15px;
+  }
+  main { max-width: 820px; margin: 0 auto; padding: 32px 20px 140px; }
+  h1 { font-size: 26px; letter-spacing: -0.02em; margin: 8px 0 4px; }
+  .subtitle { color: var(--ink-soft); margin: 0 0 20px; }
+  h2 { font-size: 17px; margin: 36px 0 10px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--ink-soft); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; }
+  .note { border-radius: 12px; padding: 12px 16px; margin: 12px 0; font-size: 14.5px; border: 1px solid; }
+  .note.blue  { background: var(--accent-soft); border-color: #bae6fd; color: #075985; }
+  .note.amber { background: var(--amber-soft); border-color: #fde68a; color: var(--amber); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+  .chip { font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; background: var(--bg-soft); border: 1px solid var(--line); border-radius: 99px; padding: 2px 10px; color: var(--ink-soft); }
+  .chip b { color: var(--accent); font-weight: 600; }
+  .card { border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; margin: 12px 0; background: #fff; }
+  .card.dirty { background: var(--changed); border-color: var(--changed-line); }
+  .card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+  .card-title { font-weight: 700; font-size: 15.5px; }
+  .card-desc { font-size: 13px; color: var(--ink-faint); margin: 1px 0 10px; }
+  .reset-btn {
+    border: 1px solid var(--line); background: #fff; color: var(--ink-faint);
+    font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 8px; cursor: pointer;
+    transition: transform 160ms var(--ease-out); flex-shrink: 0; display: none;
+  }
+  .card.dirty .reset-btn { display: inline-block; color: var(--amber); }
+  .reset-btn:active { transform: scale(0.96); }
+  .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; }
+  @media (max-width: 640px) { .fields { grid-template-columns: 1fr; } }
+  .field label { display: block; font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-faint); margin-bottom: 3px; }
+  .field input {
+    width: 100%; border: 1px solid var(--line); border-radius: 9px; padding: 8px 11px;
+    font-size: 14px; font-family: inherit; color: var(--ink); background: var(--bg-soft);
+    transition: border-color 160ms ease, background 160ms ease;
+  }
+  .field input:focus { outline: none; border-color: var(--accent); background: #fff; }
+  .field input.edited { border-color: var(--changed-line); background: #fff; }
+  .preview { grid-column: 1 / -1; font-size: 13px; color: var(--ink-soft); background: var(--bg-soft); border: 1px solid var(--line); border-radius: 9px; padding: 7px 11px; }
+  .preview b { color: var(--ink); }
+  .preview .tag { font-size: 10.5px; font-weight: 800; letter-spacing: 0.05em; color: var(--ink-faint); margin-right: 6px; }
+  .bell-only-badge { font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; background: #e2e8f0; color: #334155; border-radius: 99px; padding: 2px 9px; }
+  .savebar {
+    position: fixed; bottom: 0; left: 0; right: 0; z-index: 10;
+    background: rgba(255,255,255,0.95); backdrop-filter: blur(8px);
+    border-top: 1px solid var(--line); padding: 12px 20px;
+    display: flex; align-items: center; justify-content: center; gap: 14px;
+  }
+  .savebar .count { font-size: 14px; font-weight: 600; color: var(--ink-soft); }
+  .savebar button {
+    border: none; background: var(--accent); color: #fff; font-size: 15px; font-weight: 700;
+    padding: 10px 22px; border-radius: 11px; cursor: pointer;
+    transition: transform 160ms var(--ease-out), opacity 160ms ease;
+  }
+  .savebar button:active { transform: scale(0.97); }
+  .savebar button:disabled { opacity: 0.4; cursor: default; }
+  @media (prefers-reduced-motion: reduce) { .reset-btn, .savebar button { transition: none; } }
+</style>
+</head>
+<body>
+<main>
+
+<h1>✏️ Notification Texts Editor</h1>
+<p class="subtitle">Every notification text in one place — the 📱 phone push and the 🔔 in-app bell. Edit any field, then press the button at the bottom to get the SQL that saves your changes to Supabase.</p>
+
+<div class="note blue"><strong>How to apply changes:</strong> edit the texts → press <b>"Copy SQL"</b> at the bottom → paste in the Supabase SQL Editor and Run (or tell Claude "run it"). Push texts go live within ~1 minute. Bell texts apply the next time the app is opened.</div>
+
+<div class="note amber"><strong>Placeholders</strong> — write these inside any text and the system replaces them with the real value:</div>
+<div class="chips">
+  <span class="chip"><b>{trip}</b> trip name</span>
+  <span class="chip"><b>{actor}</b> who did it</span>
+  <span class="chip"><b>{item}</b> gear item</span>
+  <span class="chip"><b>{qty}</b> quantity</span>
+  <span class="chip"><b>{preview}</b> update message</span>
+  <span class="chip"><b>{days}</b> days before trip</span>
+</div>
+<p style="font-size:13.5px;color:var(--ink-faint)">Your edits are also saved in this browser, so you can close the page and continue later. The gray line under each pair shows a live example (trip = "Costa Rica Camp", actor = "Johnny").</p>
+
+<div id="sections"></div>
+
+</main>
+
+<div class="savebar">
+  <span class="count" id="changeCount">No changes yet</span>
+  <button id="copyBtn" disabled>Copy SQL</button>
+</div>
+
+<script>
+// ============================================================================
+// Defaults — MUST match supabase/migrations/20260611000200_notification_templates.sql
+// ============================================================================
+const SECTIONS = [
+  { name: '📨 Requests & answers', items: [
+    { key: 'join_request_received',         name: 'Someone asks to join',        desc: 'To the host, when a surfer requests to join the trip.',
+      push_title: 'New trip request', push_body: '{actor} wants to join {trip}', bell_title: 'New join request', bell_body: '{actor} asked to join {trip}.' },
+    { key: 'join_request_decided:approved', name: 'Join request APPROVED',       desc: 'To the requester, when the host says yes.',
+      push_title: "You're in! 🌊", push_body: 'Your request to join {trip} was approved', bell_title: 'Request approved', bell_body: 'Your request to join {trip} was approved.' },
+    { key: 'join_request_decided:declined', name: 'Join request DECLINED',       desc: 'To the requester, when the host says no.',
+      push_title: 'Trip request update', push_body: "Your request for {trip} wasn't accepted this time", bell_title: 'Request declined', bell_body: 'Your request to join {trip} was declined.' },
+    { key: 'commitment_request_received',   name: 'Someone asks to commit',      desc: 'To the host, when a member requests a committed spot.',
+      push_title: 'Commit request', push_body: '{actor} wants to commit to {trip}', bell_title: 'New commitment request', bell_body: '{actor} wants to commit to {trip}.' },
+    { key: 'commitment_decided:approved',   name: 'Commit APPROVED',             desc: 'To the member, when the host approves the commitment.',
+      push_title: "You're locked in 🤙", push_body: 'Your commitment to {trip} was approved', bell_title: 'Commitment approved', bell_body: 'Your commitment was approved.' },
+    { key: 'commitment_decided:declined',   name: 'Commit DECLINED',             desc: 'To the member. Bell only — no push, on purpose (softer).', bellOnly: true,
+      push_title: null, push_body: null, bell_title: 'Commitment declined', bell_body: 'Your commitment was declined.' },
+    { key: 'gear_request_received',         name: 'Someone proposes gear',       desc: 'To the host, when a member proposes a group gear item.',
+      push_title: 'Gear request', push_body: '{actor} proposed "{item}" for {trip}', bell_title: 'New gear request', bell_body: '{actor} requested {item}.' },
+    { key: 'gear_request_decided:approved', name: 'Gear proposal APPROVED',      desc: 'To the proposer, when the host adds the item.',
+      push_title: 'Gear approved', push_body: '"{item}" was added — claim it in {trip}', bell_title: 'Gear request approved', bell_body: 'Your request for {item} was approved.' },
+    { key: 'gear_request_decided:declined', name: 'Gear proposal DECLINED',      desc: 'To the proposer, when the host says no.',
+      push_title: 'Gear update', push_body: '"{item}" wasn\'t added to {trip}', bell_title: 'Gear request declined', bell_body: 'Your request for {item} was declined.' },
+  ]},
+  { name: '🏄 Trip activity', items: [
+    { key: 'member_committed',    name: 'A member committed',           desc: 'To the other members — group momentum.',
+      push_title: '{trip}', push_body: '{actor} just committed — the group is filling up', bell_title: 'New commitment', bell_body: '{actor} committed to {trip}.' },
+    { key: 'admin_update_posted', name: 'Host posts an update',         desc: 'To all members. {preview} = the update message itself.',
+      push_title: 'Update in {trip}', push_body: '{preview}', bell_title: 'New trip update', bell_body: '{preview}' },
+    { key: 'group_gear_updated',  name: 'Group gear list changed',      desc: 'To all members, when the host edits the shared gear list.',
+      push_title: 'Gear list updated', push_body: 'The group gear list changed in {trip}', bell_title: 'Group gear updated', bell_body: 'The group gear list for {trip} changed.' },
+    { key: 'personal_gear_updated', name: 'Packing checklist changed',  desc: 'To all members, when the host edits the packing checklist.',
+      push_title: 'Your packing list', push_body: 'Your packing list for {trip} was updated', bell_title: 'Your gear updated', bell_body: 'Your gear list for {trip} was updated.' },
+    { key: 'member_left',         name: 'A member left',                desc: 'To the host — a spot opened.',
+      push_title: 'A spot opened', push_body: '{actor} left {trip} — invite or refill', bell_title: 'A member left', bell_body: '{actor} left {trip}.' },
+    { key: 'trip_cancelled',      name: 'Trip cancelled',               desc: 'To members + pending requesters (not the host).',
+      push_title: 'Trip cancelled', push_body: '{trip} was cancelled — see why', bell_title: 'Trip cancelled', bell_body: '{trip} was cancelled.' },
+    { key: 'member_removed',      name: 'Removed from trip',            desc: 'To the removed person.',
+      push_title: 'Trip update', push_body: "You're no longer part of {trip}", bell_title: 'Removed from trip', bell_body: "You're no longer part of {trip}." },
+  ]},
+  { name: '⏰ Time reminders (daily robot)', items: [
+    { key: 'trip_reminder:week',     name: 'Trip in 1 week',            desc: 'To all members, 7 days before the start date.',
+      push_title: '{trip} — 1 week to go', push_body: 'Get ready — packing list inside', bell_title: 'Trip reminder', bell_body: '{trip} is coming up.' },
+    { key: 'trip_reminder:tomorrow', name: 'Trip is tomorrow',          desc: 'To all members, 1 day before.',
+      push_title: '{trip} is tomorrow!', push_body: 'Final details + meeting point inside', bell_title: 'Trip tomorrow', bell_body: '{trip} starts tomorrow.' },
+    { key: 'trip_reminder:today',    name: 'Trip starts today',         desc: 'To all members, on the start date.',
+      push_title: '{trip} starts today', push_body: 'Have a great trip', bell_title: 'Trip today', bell_body: '{trip} starts today.' },
+    { key: 'trip_reminder:commit',   name: 'Commit nudge',              desc: 'To uncommitted members, 30/15/10/5 days before. {days} = the number.',
+      push_title: 'Lock your spot in {trip}', push_body: '{days} days out — commit now', bell_title: 'Lock your spot', bell_body: 'Commit to {trip} before it fills up.' },
+    { key: 'trip_reminder:gear',     name: 'Gear still unclaimed nudge', desc: 'To members, 10/5/3/1 days before, if gear has no owner.',
+      push_title: '{trip}: gear still needed', push_body: 'Some items still need an owner', bell_title: 'Gear still needed', bell_body: 'Some gear for {trip} still needs an owner.' },
+    { key: 'trip_ended',             name: 'Trip ended',                desc: 'To all members, the day after the end date.',
+      push_title: "{trip} — that's a wrap", push_body: 'Share your photos & memories', bell_title: 'Trip ended', bell_body: 'Share your photos & memories from {trip}.' },
+  ]},
+  { name: '🔕 Bell-only (no push, on purpose)', items: [
+    { key: 'member_joined', name: 'A new member joined', desc: 'To members + host. Bell only.', bellOnly: true,
+      push_title: null, push_body: null, bell_title: 'New member', bell_body: '{actor} joined {trip}.' },
+    { key: 'gear_claimed',  name: 'Someone claimed gear', desc: 'To the host. Bell only.', bellOnly: true,
+      push_title: null, push_body: null, bell_title: 'Gear claimed', bell_body: '{actor} claimed {qty} {item}.' },
+  ]},
+];
+
+const FIELDS = ['push_title', 'push_body', 'bell_title', 'bell_body'];
+const STORE = 'swellyo-notif-texts-v1';
+const SAMPLE = { trip: 'Costa Rica Camp', actor: 'Johnny', item: 'Tent', qty: '2', preview: 'Meeting at the beach at 9am', days: '15' };
+
+const saved = JSON.parse(localStorage.getItem(STORE) || '{}');
+const ALL = SECTIONS.flatMap(s => s.items);
+const byKey = Object.fromEntries(ALL.map(i => [i.key, i]));
+
+function cur(key, field) {
+  const o = saved[key];
+  return (o && o[field] !== undefined) ? o[field] : byKey[key][field];
+}
+function fillSample(s) { return (s || '').replace(/\{(\w+)\}/g, (m, k) => SAMPLE[k] ?? m); }
+function esc(s) { return s.replace(/'/g, "''"); }
+
+// ---- build UI ----
+const root = document.getElementById('sections');
+for (const sec of SECTIONS) {
+  const h = document.createElement('h2'); h.textContent = sec.name; root.appendChild(h);
+  for (const item of sec.items) {
+    const card = document.createElement('div');
+    card.className = 'card'; card.dataset.key = item.key;
+    const fieldsHtml = FIELDS
+      .filter(f => !(item.bellOnly && f.startsWith('push')))
+      .map(f => `
+        <div class="field">
+          <label>${f.startsWith('push') ? '📱 push' : '🔔 bell'} ${f.endsWith('title') ? 'title' : 'text'}</label>
+          <input type="text" data-field="${f}" value="">
+        </div>`).join('');
+    card.innerHTML = `
+      <div class="card-head">
+        <div><span class="card-title">${item.name}</span> ${item.bellOnly ? '<span class="bell-only-badge">bell only</span>' : ''}
+          <div class="card-desc">${item.desc}</div></div>
+        <button class="reset-btn">Reset</button>
+      </div>
+      <div class="fields">
+        ${fieldsHtml}
+        <div class="preview" data-preview></div>
+      </div>`;
+    root.appendChild(card);
+
+    const inputs = card.querySelectorAll('input');
+    inputs.forEach(inp => {
+      inp.value = cur(item.key, inp.dataset.field) ?? '';
+      inp.addEventListener('input', () => {
+        saved[item.key] = saved[item.key] || {};
+        saved[item.key][inp.dataset.field] = inp.value;
+        localStorage.setItem(STORE, JSON.stringify(saved));
+        refreshCard(card);
+        refreshBar();
+      });
+    });
+    card.querySelector('.reset-btn').addEventListener('click', () => {
+      delete saved[item.key];
+      localStorage.setItem(STORE, JSON.stringify(saved));
+      inputs.forEach(inp => { inp.value = byKey[item.key][inp.dataset.field] ?? ''; });
+      refreshCard(card); refreshBar();
+    });
+    refreshCard(card);
+  }
+}
+
+function isDirty(key) {
+  const o = saved[key]; if (!o) return false;
+  return FIELDS.some(f => o[f] !== undefined && o[f] !== (byKey[key][f] ?? ''));
+}
+function refreshCard(card) {
+  const key = card.dataset.key, item = byKey[key];
+  card.classList.toggle('dirty', isDirty(key));
+  card.querySelectorAll('input').forEach(inp => {
+    inp.classList.toggle('edited', inp.value !== (item[inp.dataset.field] ?? ''));
+  });
+  const pv = card.querySelector('[data-preview]');
+  const parts = [];
+  if (!item.bellOnly) parts.push(`<span class="tag">📱 PUSH</span><b>${fillSample(cur(key,'push_title'))}</b> — ${fillSample(cur(key,'push_body'))}`);
+  parts.push(`<span class="tag">🔔 BELL</span><b>${fillSample(cur(key,'bell_title'))}</b> — ${fillSample(cur(key,'bell_body'))}`);
+  pv.innerHTML = parts.join('<br>');
+}
+function changedKeys() { return ALL.map(i => i.key).filter(isDirty); }
+function refreshBar() {
+  const n = changedKeys().length;
+  document.getElementById('changeCount').textContent = n ? `${n} notification${n > 1 ? 's' : ''} changed` : 'No changes yet';
+  document.getElementById('copyBtn').disabled = n === 0;
+}
+document.getElementById('copyBtn').addEventListener('click', () => {
+  const lines = ['-- Notification text changes (generated by notification-texts-editor.html)'];
+  for (const key of changedKeys()) {
+    const sets = FIELDS
+      .filter(f => !(byKey[key].bellOnly && f.startsWith('push')))
+      .filter(f => cur(key, f) !== (byKey[key][f] ?? ''))
+      .map(f => `${f} = '${esc(cur(key, f))}'`);
+    if (sets.length) lines.push(`update public.notification_templates set ${sets.join(', ')}, updated_at = now() where key = '${key}';`);
+  }
+  navigator.clipboard.writeText(lines.join('\n')).then(() => {
+    const btn = document.getElementById('copyBtn');
+    btn.textContent = 'Copied ✓ — paste in SQL editor';
+    setTimeout(() => { btn.textContent = 'Copy SQL'; }, 2500);
+  });
+});
+refreshBar();
+</script>
+</body>
+</html>

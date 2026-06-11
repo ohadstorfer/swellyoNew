@@ -192,10 +192,10 @@ limit 8;</code></pre>
   <tr><th>status / reason</th><th>Meaning</th></tr>
   <tr><td><code>sent</code></td><td>✅ <b>PERFECT.</b> The push was really sent — the phone should have buzzed with this title + text.</td></tr>
   <tr><td><code>skipped</code> / <code>no_token</code></td><td>The receiver's phone never registered for pushes (or logged out). The bell message still works.</td></tr>
-  <tr><td><code>skipped</code> / <code>batched</code></td><td>✅ Good. Several updates were grouped into one push (smart rule).</td></tr>
+  <tr><td><code>skipped</code> / <code>batched</code></td><td>Old rows only — grouping is turned off now (everything sends immediately).</td></tr>
   <tr><td><code>skipped</code> / <code>read_in_feed</code></td><td>✅ Good. You already read it in the bell, so no push is needed (smart rule).</td></tr>
   <tr><td><code>skipped</code> / <code>muted</code></td><td>✅ Good. You muted this trip, so no push (smart rule).</td></tr>
-  <tr><td><code>pending</code></td><td>⏳ Waiting. Check again in 1–2 minutes (or it is waiting for morning — see <code>send_at</code>).</td></tr>
+  <tr><td><code>pending</code></td><td>⏳ Waiting for the robot's next run. Check again in 1–2 minutes.</td></tr>
   <tr><td><code>skipped</code> / <code>shadow</code></td><td>Old rows from before go-live (practice mode). New rows should never say this.</td></tr>
 </table>
 
@@ -286,7 +286,7 @@ The "member leaves" notification uses NEW app code that is not in any released b
   <div class="test-head"><input type="checkbox"><div>
     <div class="test-title">Test 7 — Your join request is DECLINED</div>
     <div class="test-body">
-      <ol><li>Ohad requests to join Trip 2.</li><li>Eyal (host) declines.</li><li>Wait 1–2 minutes (this one is "normal", it waits 60s). Run CHECK A + B.</li></ol>
+      <ol><li>Ohad requests to join Trip 2.</li><li>Eyal (host) declines.</li><li>Wait 1 minute. Run CHECK A + B.</li></ol>
       <div class="expect">✅ Bell: <code>join_request_decided</code> · Push line: <code>sent</code> + a real phone alert, title <b>"Trip request update"</b>.</div>
     </div>
   </div></div>
@@ -477,20 +477,18 @@ where id = 'PASTE-TRIP-1-ID-HERE';</code></pre>
   <div class="test-head"><input type="checkbox"><div>
     <div class="test-title">Smart 1 — "You already saw it" rule</div>
     <div class="test-body">
-      <p>If you read the bell message <b>before</b> the push goes out, the push is cancelled. Normal events wait 60 seconds — that is your window.</p>
-      <ol><li>Eyal edits Trip 2's gear list (like Test 12).</li><li><b>Within 1 minute</b>, Ohad opens the app and opens the bell (so the message becomes "read").</li><li>Run CHECK B.</li></ol>
-      <div class="expect">✅ The row says <code>skipped</code> / <code>read_in_feed</code> — push cancelled because you already saw it. Smart!</div>
+      <p>If you read the bell message <b>before</b> the push goes out, the push is cancelled. The window is small now (pushes go out within ~1 minute), so you must be quick.</p>
+      <ol><li>Eyal edits Trip 2's gear list (like Test 12).</li><li><b>Immediately</b>, Ohad opens the app and opens the bell (so the message becomes "read").</li><li>Run CHECK B.</li></ol>
+      <div class="expect">✅ The row says <code>skipped</code> / <code>read_in_feed</code> — push cancelled because you already saw it. If you were too slow and it says <code>sent</code>, that is also fine — the rule just didn't get a chance.</div>
     </div>
   </div></div>
 </div>
 
 <div class="test" data-test="s2">
   <div class="test-head"><input type="checkbox"><div>
-    <div class="test-title">Smart 2 — Grouping ("batching")</div>
+    <div class="test-title">Smart 2 — Grouping ("batching") <span class="badge feed">OFF — skip</span></div>
     <div class="test-body">
-      <p>Many updates from the same trip in the same minute = ONE push, not many.</p>
-      <ol><li>Eyal quickly does 2–3 things on Trip 2 (edit gear list + post an update) within the same minute. Ohad does NOT open the bell.</li><li>Wait 2 minutes. Run CHECK B.</li></ol>
-      <div class="expect">✅ One row gets the push text, the others say <code>skipped</code> / <code>batched</code>. (Claude already saw this rule working once ✓.)</div>
+      <p>This rule grouped several updates into one push. <b>It is turned off</b> since 2026-06-10 (Ohad's decision: everything sends immediately). Nothing to test — tick the box and move on. (It was verified working before it was turned off ✓.)</p>
     </div>
   </div></div>
 </div>
@@ -507,20 +505,19 @@ where id = 'PASTE-TRIP-1-ID-HERE';</code></pre>
 
 <div class="test" data-test="s4">
   <div class="test-head"><input type="checkbox"><div>
-    <div class="test-title">Smart 4 — Night time ("quiet hours") <span class="badge sql">Uses SQL</span></div>
+    <div class="test-title">Smart 4 — Night time ("quiet hours") <span class="badge feed">OFF — only check the time zone</span></div>
     <div class="test-body">
-      <p>Non-urgent pushes never wake people at night. They wait until 08:00 in the receiver's time zone. For this, the app must first save the time zone:</p>
-      <ol><li>Ohad opens the app from this branch (dev version) on his phone. It saves his time zone automatically.</li><li>Check it worked:</li></ol>
+      <p>Quiet hours (waiting until 08:00 local before pushing) is <b>turned off</b> since 2026-06-10 — pushes now go out at any hour. The only thing still worth checking is that the app saves the time zone (it will matter when the rule comes back before real launch):</p>
+      <ol><li>Open the dev app on the phone (logged in).</li><li>Check it saved:</li></ol>
       <pre><button class="copy-btn">Copy</button><code>select u.email, s.timezone
 from surfers s join users u on u.id = s.user_id
 where lower(u.email) in ('ohad.storfer@gmail.com', 'eyal@swellyo.com');</code></pre>
-      <ol start="3"><li>In the evening (<b>after 21:00</b> Israel time), Eyal does a normal event on Trip 2 (edits the gear list).</li><li>Run CHECK B and look at the <code>send_at</code> column.</li></ol>
-      <div class="expect">✅ <code>send_at</code> shows <b>tomorrow morning 08:00 in Ohad's time zone</b> (the result shows UTC, so for Israel it shows 05:00). The push politely waits for morning. Urgent ones (like "trip cancelled") do NOT wait — they go at once.</div>
+      <div class="expect">✅ The <code>timezone</code> column shows a real value (Ohad's already verified: <code>America/Argentina/Buenos_Aires</code> ✓).</div>
     </div>
   </div></div>
 </div>
 
-<div class="note blue"><strong>Bonus rule (now active):</strong> maximum 3 normal pushes per person per day. Number 4 and up get delayed 6 hours. Urgent pushes (decisions, cancellations) are never delayed. If a push seems "missing" during heavy testing, run CHECK B — it is probably <code>pending</code> with a later <code>send_at</code>. That is the rule working.</div>
+<div class="note amber"><strong>Rules turned OFF (2026-06-10, Ohad's decision):</strong> quiet hours, the 3-per-day limit, and grouping are all disabled — every push sends immediately, at any hour. This is fine while only Ohad + Eyal receive pushes. <b>Before opening trips to real users</b>, re-enable them by re-applying the mapping from <code>supabase/migrations/20260610000050_phase2_quiethours_enqueue.sql</code> (one paste in the SQL editor).</div>
 
 <!-- ============================================================= -->
 <h2><span class="step-num">9</span>Already checked by Claude ✓ (you don't need to)</h2>

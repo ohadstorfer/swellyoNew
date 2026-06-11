@@ -71,7 +71,7 @@ class AnalyticsService {
 
       if (userId) {
         this.posthogInstance.identify(userId, userProperties);
-        console.log('[Analytics] 👤 User identified:', userId, userProperties);
+        if (__DEV__) console.log('[Analytics] 👤 User identified:', userId, userProperties);
       }
 
       this.isInitialized = true;
@@ -147,7 +147,7 @@ class AnalyticsService {
     
     try {
       this.posthogInstance.identify(userId, properties);
-      console.log('[Analytics] 👤 User identified:', {
+      if (__DEV__) console.log('[Analytics] 👤 User identified:', {
         userId,
         properties: properties || {},
         timestamp: new Date().toISOString(),

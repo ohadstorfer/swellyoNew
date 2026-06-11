@@ -33,6 +33,9 @@ import {
   type UnseenJoinDecision,
 } from '../services/trips/groupTripsService';
 import { supabase } from '../config/supabase';
+import { queryClient } from '../lib/queryClient';
+import { tripsKeys } from '../hooks/trips/useTripQueries';
+import { userTripsTopic } from '../services/trips/tripsRealtime';
 import { ProfileEditPanel } from './ProfileEditPanel/ProfileEditPanel';
 import { useUserProfile } from '../context/UserProfileContext';
 import { useTutorial } from '../context/TutorialContext';
@@ -53,6 +56,10 @@ import { ageGateService } from '../services/ageGate/ageGateService';
 import { swellyServiceCopy, swellyServiceCopyCopy } from '../services/swelly/swellyServiceCopy';
 import { findAndConnectMatches, OnboardingMatchResult } from '../services/matching/onboardingMatchingService';
 import { pushNotificationService } from '../services/notifications/pushNotificationService';
+import {
+  tripFocusForNotification,
+  type TripDetailFocus,
+} from '../services/notifications/notificationsService';
 import { syncDeviceTimezone } from '../services/notifications/deviceTimezone';
 import { useMessaging } from '../context/MessagingProvider';
 
@@ -85,6 +92,8 @@ export const AppContent: React.FC = () => {
   const [pendingNotificationConversationId, setPendingNotificationConversationId] = useState<string | null>(null);
   // Push notification: pending trip detail to open (from a trip_join_request notification)
   const [pendingTripDetailId, setPendingTripDetailId] = useState<string | null>(null);
+  // Section of the trip detail to land on (notification deep-links only).
+  const [pendingTripFocus, setPendingTripFocus] = useState<TripDetailFocus | null>(null);
   const { getCurrentConversationId, conversations: messagingConversations, refreshConversations } = useMessaging();
   
   // State to track session validation
@@ -269,6 +278,7 @@ export const AppContent: React.FC = () => {
     try {
       setSelectedConversation(null);
       setActiveSurftripDetailId(null);
+      setPendingTripFocus(null);
       setPendingTripDetailId(pendingTripInviteId);
       setShowTrips(true);
     } finally {
@@ -369,11 +379,22 @@ export const AppContent: React.FC = () => {
     pushNotificationService.setupNotificationHandlers(
       getCurrentConversationId,
       (payload) => {
-        if (payload.type === 'trip_join_request' && payload.tripId) {
+        // Every group-trip push (queue dispatcher + legacy trip_join_request)
+        // carries tripId — deep-link to that trip, landing on the tab/section
+        // that matches the notification type (stage/decision refine it).
+        if (payload.tripId) {
+          setSelectedConversation(null);
+          setPendingTripFocus(
+            tripFocusForNotification(payload.type, {
+              stage: payload.stage,
+              decision: payload.decision,
+            })
+          );
           setPendingTripDetailId(payload.tripId);
           setShowTrips(true);
           return;
         }
+        // Chat-message pushes carry conversationId instead.
         if (payload.conversationId) {
           setPendingNotificationConversationId(payload.conversationId);
         }
@@ -983,27 +1004,35 @@ export const AppContent: React.FC = () => {
   // the overlay fires immediately instead of waiting for the next cold open.
   // Deduped by request_id against the queue so the boot fetch + live event can
   // race without showing twice.
+  // Private per-user Broadcast topic fed by the broadcast_trip_change DB
+  // trigger (replaces the per-user postgres_changes listener, which cost an
+  // RLS evaluation per event per subscriber with every signed-in user holding
+  // one open).
   useEffect(() => {
     const userId = user?.id ? String(user.id) : null;
     if (!userId) return;
     const channel = supabase
-      .channel(`join-decisions:${userId}`)
+      .channel(userTripsTopic(userId), { config: { private: true } })
       .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'group_trip_join_requests',
-          filter: `requester_id=eq.${userId}`,
-        },
-        async (payload) => {
-          const row = (payload as { new?: Record<string, unknown> }).new;
+        'broadcast',
+        { event: 'join_request_changed' },
+        async ({ payload }: any) => {
+          if (payload?.op !== 'UPDATE') return; // decisions are status UPDATEs
+          const row = payload?.request as Record<string, unknown> | undefined;
           if (!row) return;
           const status = row.status;
           if (status !== 'approved' && status !== 'declined') return;
-          if (row.seen_decision_at) return; // host or another tab already marked
           const requestId = row.id as string;
           const tripId = row.trip_id as string;
+
+          // The decision changed this user's standing on the trip — bust every
+          // cached view of it so the My Trips buckets and an already-open
+          // detail screen refetch. Must run before the seen_decision_at guard:
+          // the cache is stale either way, the overlay is what's deduped.
+          queryClient.invalidateQueries({ queryKey: tripsKeys.detail(tripId) });
+          queryClient.invalidateQueries({ queryKey: ['trips', 'my'] });
+
+          if (row.seen_decision_at) return; // host or another tab already marked
 
           const { data: trip } = await supabase
             .from('group_trips')
@@ -1056,7 +1085,9 @@ export const AppContent: React.FC = () => {
     (decision: UnseenJoinDecision) => {
       advanceJoinDecisionQueue(decision);
       if (decision.status === 'approved') {
-        // Open this specific trip's detail screen.
+        // Open this specific trip's detail screen — landing on the commit
+        // pill, the new member's next step (same focus as the notification).
+        setPendingTripFocus('commit');
         setPendingTripDetailId(decision.trip.id);
         setShowTrips(true);
       } else {
@@ -1350,11 +1381,15 @@ export const AppContent: React.FC = () => {
     });
   }, []);
 
-  const handleOpenTripDetailFromChat = useCallback((tripId: string) => {
-    setSelectedConversation(null);
-    setPendingTripDetailId(tripId);
-    setShowTrips(true);
-  }, []);
+  const handleOpenTripDetailFromChat = useCallback(
+    (tripId: string, focus?: TripDetailFocus) => {
+      setSelectedConversation(null);
+      setPendingTripFocus(focus ?? null);
+      setPendingTripDetailId(tripId);
+      setShowTrips(true);
+    },
+    []
+  );
 
   // Wrap handleViewUserProfile for taps coming from inside TripDetailScreen.
   // The render cascade prioritises showTrips over showProfile, so we have to
@@ -1362,6 +1397,7 @@ export const AppContent: React.FC = () => {
   // pendingTripDetailId restores the trip detail in TripsScreen on remount.
   const handleViewUserProfileFromTrip = useCallback(
     (userId: string, fromTripId: string) => {
+      setPendingTripFocus(null); // restore the trip plainly — no section re-scroll
       setPendingTripDetailId(fromTripId);
       setProfileFromTripDetail(true);
       setShowTrips(false);
@@ -1773,8 +1809,10 @@ export const AppContent: React.FC = () => {
           onBack={() => {
             setShowTrips(false);
             setPendingTripDetailId(null);
+            setPendingTripFocus(null);
           }}
           initialTripId={pendingTripDetailId}
+          initialTripFocus={pendingTripFocus}
           onOpenGroupChat={handleOpenGroupChat}
           onViewUserProfile={handleViewUserProfileFromTrip}
           navControl={bottomNavControl}

@@ -9,6 +9,10 @@ export interface NotificationTapPayload {
   conversationId?: string;
   tripId?: string;
   requestId?: string;
+  /** trip_reminder stage (week/tomorrow/today/commit/gear) — refines the deep-link. */
+  stage?: string;
+  /** approved/declined on *_decided types — refines the deep-link. */
+  decision?: string;
 }
 
 class PushNotificationService {
@@ -202,6 +206,8 @@ class PushNotificationService {
           conversationId: typeof data.conversationId === 'string' ? (data.conversationId as string) : undefined,
           tripId: typeof data.tripId === 'string' ? (data.tripId as string) : undefined,
           requestId: typeof data.requestId === 'string' ? (data.requestId as string) : undefined,
+          stage: typeof data.stage === 'string' ? (data.stage as string) : undefined,
+          decision: typeof data.decision === 'string' ? (data.decision as string) : undefined,
         });
       }
     });

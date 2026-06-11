@@ -22,7 +22,9 @@ import {
   notificationsService,
   renderNotification,
   formatNotificationTime,
+  tripFocusForNotification,
   NotificationRow,
+  type TripDetailFocus,
 } from '../../services/notifications/notificationsService';
 import {
   approveJoinRequest,
@@ -32,12 +34,20 @@ import {
   approveCommitment,
   declineCommitment,
 } from '../../services/trips/groupTripsService';
+import { queryClient } from '../../lib/queryClient';
+import { tripsKeys } from '../../hooks/trips/useTripQueries';
 
 interface Props {
   /** Current user id — used for the realtime filter. Null while logged out. */
   userId: string | null;
   /** Render a bare bell (no dark circle) to sit next to other plain header icons. */
   bare?: boolean;
+  /**
+   * Deep-link: called when a notification row tied to a trip is tapped.
+   * The panel closes itself first; the host screen navigates to the trip,
+   * landing on the tab/section that matches the notification (focus).
+   */
+  onOpenTrip?: (tripId: string, focus?: TripDetailFocus) => void;
 }
 
 // Strong ease-out (emil): starts fast, feels responsive.
@@ -66,7 +76,7 @@ type Decision = 'approved' | 'declined';
  * Self-contained: owns its fetch, realtime subscription, unread badge and panel.
  * Drop `<NotificationCenter userId={...} />` into the header and that's it.
  */
-export const NotificationCenter: React.FC<Props> = ({ userId, bare = false }) => {
+export const NotificationCenter: React.FC<Props> = ({ userId, bare = false, onOpenTrip }) => {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   // Full-screen panel — slides in from the right edge over the whole screen.
@@ -218,6 +228,19 @@ export const NotificationCenter: React.FC<Props> = ({ userId, bare = false }) =>
     [translateX, panelWidth, closePanel]
   );
 
+  // ── Tap a row → jump to its trip ─────────────────────────────────────────
+  // Close the panel instantly (no exit slide): the trip screen appearing
+  // underneath masks the dismissal, and an animated close would just delay it.
+  const handleRowPress = useCallback(
+    (n: NotificationRow) => {
+      if (!onOpenTrip || !n.trip_id) return;
+      setOpen(false);
+      unreadAtOpen.current = new Set();
+      onOpenTrip(n.trip_id, tripFocusForNotification(n.type, n.data));
+    },
+    [onOpenTrip]
+  );
+
   // ── Inline Approve / Decline for actionable requests ───────────────────────
   const handleDecision = useCallback(
     async (n: NotificationRow, decision: Decision) => {
@@ -244,6 +267,16 @@ export const NotificationCenter: React.FC<Props> = ({ userId, bare = false }) =>
           else await declineCommitment(n.entity_id, userId);
         }
         notificationsService.markHandled(n.id);
+        // The decision just changed trip state behind react-query's back —
+        // refresh any mounted trip screens (e.g. the host approving from the
+        // bell while their own TripDetailScreen sits underneath).
+        if (n.trip_id) {
+          queryClient.invalidateQueries({ queryKey: tripsKeys.detail(n.trip_id) });
+          queryClient.invalidateQueries({ queryKey: tripsKeys.detailRequests(n.trip_id) });
+          queryClient.invalidateQueries({ queryKey: tripsKeys.detailGear(n.trip_id) });
+          queryClient.invalidateQueries({ queryKey: tripsKeys.detailGearRequests(n.trip_id) });
+          queryClient.invalidateQueries({ queryKey: ['trips', 'my'] });
+        }
       } catch (e: any) {
         // Revert the optimistic stamp so the buttons come back.
         setItems((prev) =>
@@ -337,6 +370,7 @@ export const NotificationCenter: React.FC<Props> = ({ userId, bare = false }) =>
                     acting={acting === n.id}
                     disabled={!!acting && acting !== n.id}
                     onDecision={handleDecision}
+                    onPress={onOpenTrip && n.trip_id ? handleRowPress : undefined}
                   />
                 ))}
               </ScrollView>
@@ -355,9 +389,11 @@ interface ItemProps {
   acting: boolean;
   disabled: boolean;
   onDecision: (n: NotificationRow, decision: Decision) => void;
+  /** When set, the whole row is tappable and deep-links to its trip. */
+  onPress?: (n: NotificationRow) => void;
 }
 
-const NotificationItem: React.FC<ItemProps> = ({ n, isUnread, acting, disabled, onDecision }) => {
+const NotificationItem: React.FC<ItemProps> = ({ n, isUnread, acting, disabled, onDecision, onPress }) => {
   const r = renderNotification(n);
   const d = n.data ?? {};
   const initial = String(d.actor_name ?? '').trim().charAt(0).toUpperCase();
@@ -373,7 +409,17 @@ const NotificationItem: React.FC<ItemProps> = ({ n, isUnread, acting, disabled, 
       : null;
 
   return (
-    <View style={[styles.row, isUnread && styles.rowUnread]}>
+    <Pressable
+      onPress={onPress ? () => onPress(n) : undefined}
+      disabled={!onPress}
+      style={({ pressed }) => [
+        styles.row,
+        isUnread && styles.rowUnread,
+        pressed && !!onPress && styles.rowPressed,
+      ]}
+      accessibilityRole={onPress ? 'button' : undefined}
+      accessibilityLabel={onPress ? `Open trip — ${r.title}` : undefined}
+    >
       <View style={styles.avatar}>
         {initial ? (
           <Text style={styles.avatarInitial}>{initial}</Text>
@@ -443,7 +489,7 @@ const NotificationItem: React.FC<ItemProps> = ({ n, isUnread, acting, disabled, 
         )}
       </View>
       {isUnread && <View style={styles.unreadDot} />}
-    </View>
+    </Pressable>
   );
 };
 
@@ -550,6 +596,10 @@ const styles = StyleSheet.create({
   },
   rowUnread: {
     backgroundColor: '#F4F7FF',
+  },
+  // Tap feedback — the row should feel like it heard the press (emil).
+  rowPressed: {
+    backgroundColor: '#EFF2F5',
   },
   avatar: {
     width: 40,
