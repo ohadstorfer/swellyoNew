@@ -90,13 +90,21 @@ class PushNotificationService {
         this.currentToken = token;
       }
 
-      // Listen for token refresh
+      // Listen for token refresh.
+      // NOTE: the listener payload is the RAW native device token (APNs/FCM
+      // hex), NOT an ExponentPushToken — saving it as-is breaks Expo sends
+      // (seen in prod: a 64-char hex stored over a valid Expo token). On
+      // refresh, exchange it for a fresh Expo token and save that instead.
       if (!this.tokenSubscription) {
-        this.tokenSubscription = Notifications.addPushTokenListener(async (newToken) => {
-          const newExpoPushToken = newToken.data as string;
-          if (newExpoPushToken !== this.currentToken) {
-            await this.saveTokenToSupabase(newExpoPushToken);
-            this.currentToken = newExpoPushToken;
+        this.tokenSubscription = Notifications.addPushTokenListener(async () => {
+          try {
+            const refreshed = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
+            if (refreshed && refreshed !== this.currentToken) {
+              await this.saveTokenToSupabase(refreshed);
+              this.currentToken = refreshed;
+            }
+          } catch (e) {
+            console.warn('[PushNotificationService] Token refresh exchange failed:', e);
           }
         });
       }
@@ -111,6 +119,12 @@ class PushNotificationService {
   }
 
   private async saveTokenToSupabase(token: string): Promise<void> {
+    // Only ExponentPushToken[...] values are sendable through the Expo push
+    // API — refuse anything else (e.g. a raw APNs/FCM hex) at the door.
+    if (!token.startsWith('ExponentPushToken[')) {
+      console.warn('[PushNotificationService] Refusing to save non-Expo token format');
+      return;
+    }
     try {
       const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
       if (authError || !authUser) {
