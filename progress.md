@@ -35,7 +35,11 @@
   - 51ff89d: bar is roots-only (ConversationsStack reports inner DM pushes via
     screenListeners → lineupInnerScreenOpen); Lineup top-left profile entry removed
     (display-only — profile via bottom nav).
-- OPEN: Eyal to confirm crashes/shivering gone after panel-as-card; full phase-2.md checklist.
+- Phase 2 ACCEPTED by Eyal (full 10-point checklist green, crashes/shivering gone).
+- KEYBOARD SPIKE PASSED (114bb0c): chat keyboard fine inside native-stack cards → all
+  chat/profile screens go native-card, no JS fallback.
+- Agreed workflow change: Phases 3+4 as ONE batch, Eyal tests once at the end
+  (plus the spike, already done). Batch plan: docs/nav-migration/phase-3-4-batch.md.
 - NEXT after Phase 2 green: Phase 3 — STARTS WITH KEYBOARD SPIKE on device (DM in native-stack
   card; fallback JS sub-stack), then unify 3 DM paths, profile/Settings cards. See
   docs/nav-migration/phases-2-5-outline.md.

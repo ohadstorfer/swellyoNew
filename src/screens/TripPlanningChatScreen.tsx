@@ -33,17 +33,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../components/Text';
 import { colors, spacing } from '../styles/theme';
 import { swellyServiceCopy, SwellyChatResponse, UIMessage, type SwellyService as SwellyServiceType } from '../services/swelly/swellyServiceCopy';
-import { findMatchingUsersRpc } from '../services/matching/matchSurfersRpc';
 import { useOnboarding } from '../context/OnboardingContext';
-
-// Matching-engine gate (this NON-COPY screen = production path).
-//   web      -> in-DB match_surfers RPC (scalable; requires the match_surfers
-//               Postgres fn to be applied in prod).
-//   iOS/Android -> findMatchingUsersServer (the swelly-trip-planning-copy edge
-//               function) — the existing "old" flow, kept until we ship a mobile
-//               build that intentionally flips this on for native.
-// To move mobile onto the RPC later: change this to `true` and cut a mobile build.
-const USE_MATCH_SURFERS_RPC = Platform.OS === 'web';
 import { logEvent } from '../services/analytics/eventLogger';
 import { getImageUrl } from '../services/media/imageService';
 import { Images } from '../assets/images';
@@ -274,10 +264,14 @@ interface TripPlanningChatScreenProps {
   service?: SwellyServiceType;
   /** Optional: onboarding matches to display before starting a new conversation. */
   onboardingMatches?: import('../services/matching/onboardingMatchingService').OnboardingMatch[];
-  /** True when this layer is the foreground screen. The component is kept
-   *  mounted across visibility toggles (display:'none' in AppContent), so
-   *  this prop drives the entry-animation re-trigger on each show. */
+  /** Legacy prop from the display:'none' keep-alive era — gated the entry
+   *  animation and tutorial trigger. As a native-stack card the screen mounts
+   *  when shown, so it defaults to true. Kept for compatibility. */
   visible?: boolean;
+  /** When true, skip the internal 450ms slide-in/fade entry animation — the
+   *  native stack navigator animates the card itself, so running both would
+   *  double-animate. Shared values initialize at their resting pose. */
+  noTransition?: boolean;
 }
 
 export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
@@ -290,7 +284,8 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   onChatStateChange,
   service,
   onboardingMatches,
-  visible,
+  visible = true,
+  noTransition = false,
 }) => {
   const svc = service ?? swellyServiceCopy;
   const { formData, isDemoUser, user } = useOnboarding();
@@ -320,12 +315,19 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   // After a swipe-to-dismiss, swipeTranslateX is left at SWIPE_SCREEN_WIDTH
   // (off-screen). When the screen becomes visible again, this effect resets
   // it to off-screen-right + opacity 0 and runs the slide-in.
-  const swipeTranslateX = useSharedValue(SWIPE_SCREEN_WIDTH);
-  const swipeOpacity = useSharedValue(0);
+  const swipeTranslateX = useSharedValue(noTransition ? 0 : SWIPE_SCREEN_WIDTH);
+  const swipeOpacity = useSharedValue(noTransition ? 1 : 0);
   const touchStartX = useSharedValue(0);
   const touchStartY = useSharedValue(0);
 
   useEffect(() => {
+    if (noTransition) {
+      // Native-stack card: the navigator animates the slide-in. Pin the
+      // shared values at rest and skip the internal entry animation.
+      swipeTranslateX.value = 0;
+      swipeOpacity.value = 1;
+      return;
+    }
     if (!visible) return;
     // Snap to off-screen-right + invisible, then animate in. setValue is
     // synchronous on the UI thread so the worklet style picks it up before
@@ -338,7 +340,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     });
     swipeOpacity.value = withTiming(1, { duration: 450 });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible]);
+  }, [visible, noTransition]);
 
   const handleSwipeDismiss = useCallback(() => {
     Keyboard.dismiss();
@@ -348,7 +350,10 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   const swipeGesture = useMemo(
     () =>
       Gesture.Pan()
-        .enabled(Platform.OS !== 'web')
+        // native-stack card: navigator owns swipe-back (nav migration B2).
+        // The custom right-swipe dismiss is hard-disabled — it would conflict
+        // with the native stack's edge-swipe-back gesture.
+        .enabled(false)
         .manualActivation(true)
         .onTouchesDown((event) => {
           'worklet';
@@ -412,10 +417,6 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   const tutorial = useTutorial();
   const filtersButtonRef = useRef<View>(null);
   const filtersChipsRowRef = useRef<View>(null);
-  // Tracks already-shown match user_ids so the RPC "show more" path can exclude them
-  // (the edge function does this server-side via matching_users; for local testing we
-  // accumulate in memory). Reset at the start of each fresh search.
-  const shownMatchUserIdsRef = useRef<string[]>([]);
   const [filtersButtonRect, setFiltersButtonRect] = useState<AnchorRect | null>(null);
   const [filtersChipsRect, setFiltersChipsRect] = useState<AnchorRect | null>(null);
   const [trashZoneRect, setTrashZoneRect] = useState<AnchorRect | null>(null);
@@ -1129,8 +1130,6 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
 
   const runFindMatches = async (currentChatId: string, tripPlanningData: any, excludePrevious: boolean = false) => {
     if (!currentChatId) return;
-    // Fresh search (not "show more") resets the in-memory exclusion list used by the RPC path.
-    if (USE_MATCH_SURFERS_RPC && !excludePrevious) shownMatchUserIdsRef.current = [];
     startLoadingWithTimeout();
     // Analytics v1 (legacy): first-ever Swelly search — idempotent timestamp column on surfers.
     if (!isDemoUser) {
@@ -1152,23 +1151,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     };
 
     try {
-      let rawMatches: MatchedUser[];
-      let totalCount: number;
-      let backendMsgIndex: number | undefined;
-      if (USE_MATCH_SURFERS_RPC) {
-        // In-DB match_surfers RPC (local testing). No server-side message index.
-        const excludedIds = excludePrevious ? shownMatchUserIdsRef.current : [];
-        const payload = tripPlanningData && typeof tripPlanningData === 'object'
-          ? { ...tripPlanningData, queryFilters: tripPlanningData.queryFilters ?? tripPlanningData.query_filters ?? null }
-          : tripPlanningData;
-        const rpcRes = await findMatchingUsersRpc(payload, user?.id as string, excludedIds);
-        rawMatches = rpcRes.matches;
-        totalCount = rpcRes.totalCount;
-        backendMsgIndex = undefined;
-        shownMatchUserIdsRef.current = [...shownMatchUserIdsRef.current, ...rpcRes.matches.map(m => m.user_id)];
-      } else {
-        ({ matches: rawMatches, totalCount, messageIndex: backendMsgIndex } = await svc.findMatchingUsersServer(currentChatId, tripPlanningData, excludePrevious));
-      }
+      const { matches: rawMatches, totalCount, messageIndex: backendMsgIndex } = await svc.findMatchingUsersServer(currentChatId, tripPlanningData, excludePrevious);
       // Filter out blocked users from match results (both directions)
       const blockedSet = blockingService.getAllHiddenIdsSet();
       const matchedUsers = blockedSet.size > 0 ? rawMatches.filter(u => !blockedSet.has(u.user_id)) : rawMatches;
@@ -2244,8 +2227,9 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         { flex: 1 },
         // Frame-0 fallback before the worklet kicks in: keeps the screen
         // off-screen and invisible so there's no flash of the un-animated
-        // background while mounting.
-        { opacity: 0, transform: [{ translateX: SWIPE_SCREEN_WIDTH }] },
+        // background while mounting. Skipped with noTransition — the screen
+        // must render at rest immediately (navigator owns the entry slide).
+        noTransition ? null : { opacity: 0, transform: [{ translateX: SWIPE_SCREEN_WIDTH }] },
         animatedSwipeStyle,
       ]}
     >

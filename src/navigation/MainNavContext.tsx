@@ -38,6 +38,18 @@ export interface MainNavContextValue {
    */
   requestedTripCard: { tripId: string; focus?: TripDetailFocus | null } | null;
   onRequestedTripCardConsumed: () => void;
+  /** Swelly chat card: persisted conversation state + callbacks (AppContent
+   *  owns the state so a re-opened card is warm). */
+  swellyChat: {
+    persistedChatId: string | null;
+    persistedMatchedUsers: any[];
+    persistedDestination: string;
+    onChatStateChange: (chatId: string | null, matchedUsers: any[], destination: string) => void;
+    onViewUserProfile: (userId: string, fromTripPlanningChat?: boolean) => void;
+    onStartConversation: (userId: string, otherUserName?: string, otherUserAvatar?: string | null) => void;
+    onboardingMatches: any[] | null;
+    onChatComplete: () => void;
+  };
   /** Callbacks the ChatCard route needs from AppContent (legacy overlays). */
   chatCard: {
     onViewProfile: (userId: string) => void;

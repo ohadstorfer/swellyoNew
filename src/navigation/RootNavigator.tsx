@@ -8,6 +8,8 @@ import { createBottomTabNavigator, BottomTabBarProps } from '@react-navigation/b
 import ConversationsStack from './ConversationsStack';
 import { DirectMessageScreen } from '../screens/DirectMessageScreen';
 import { DirectGroupChat } from '../screens/DirectGroupChat';
+import { TripPlanningChatScreen } from '../screens/TripPlanningChatScreen';
+import { swellyServiceCopy, swellyServiceCopyCopy } from '../services/swelly/swellyServiceCopy';
 import { useMessaging } from '../context/MessagingProvider';
 import TripsScreen from '../screens/trips/TripsScreen';
 import TripDetailScreen from '../screens/trips/TripDetailScreen';
@@ -138,6 +140,29 @@ function ChatCardScreen({ route, navigation }: NativeStackScreenProps<RootStackP
         if (conversationId) setCurrentConversationId(conversationId);
         navigation.setParams({ conversationId });
       }}
+    />
+  );
+}
+
+function SwellyChatCardScreen({ route, navigation }: NativeStackScreenProps<RootStackParamList, 'SwellyChat'>) {
+  const { swellyChat } = useMainNav();
+  return (
+    <TripPlanningChatScreen
+      onChatComplete={() => {
+        swellyChat.onChatComplete();
+        navigation.goBack();
+      }}
+      onViewUserProfile={swellyChat.onViewUserProfile}
+      onStartConversation={swellyChat.onStartConversation}
+      persistedChatId={swellyChat.persistedChatId}
+      persistedMatchedUsers={swellyChat.persistedMatchedUsers}
+      persistedDestination={swellyChat.persistedDestination}
+      onChatStateChange={swellyChat.onChatStateChange}
+      service={route.params?.service === 'copy-copy' ? swellyServiceCopyCopy : swellyServiceCopy}
+      onboardingMatches={swellyChat.onboardingMatches || undefined}
+      visible={true}
+      // The navigator animates the card — skip the screen's own entry slide.
+      noTransition={true}
     />
   );
 }
@@ -294,6 +319,7 @@ export default function RootNavigator() {
       <RootStack.Screen name="TripDetail" component={TripDetailCardScreen} options={{ presentation: 'card' }} />
       <RootStack.Screen name="EditTrip" component={EditTripCardScreen} options={{ presentation: 'card' }} />
       <RootStack.Screen name="ChatCard" component={ChatCardScreen} options={{ presentation: 'card' }} />
+      <RootStack.Screen name="SwellyChat" component={SwellyChatCardScreen} options={{ presentation: 'card' }} />
       {/* Plain card. The panel is full-screen and opaque, so transparency
           bought nothing and modal presentations broke z-order/gestures
           (two strikes: native modal context → sheets+crashes; contained →

@@ -33,6 +33,8 @@ export type RootStackParamList = {
     tripId?: string;
     surftripId?: string;
   };
+  /** Swelly AI chat card. service picks the edge-function variant (dev). */
+  SwellyChat: { service?: 'copy' | 'copy-copy' };
 };
 
 /**

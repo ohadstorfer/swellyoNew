@@ -15,8 +15,7 @@ import { OnboardingStep5BudgetScreen } from '../screens/OnboardingStep5BudgetScr
 import { OnboardingStep6LifestyleScreen } from '../screens/OnboardingStep6LifestyleScreen';
 import { OnboardingVideoUploadScreen } from '../screens/OnboardingVideoUploadScreen';
 import { OnboardingScaffold } from './onboarding/OnboardingScaffold';
-import { TripPlanningChatScreen } from '../screens/TripPlanningChatScreen';
-import { TripPlanningChatScreen as TripPlanningChatScreenCopy } from '../screens/TripPlanningChatScreenCopy';
+// TripPlanningChatScreen (Swelly) renders as the SwellyChat card in RootNavigator now.
 import RootNavigator from '../navigation/RootNavigator';
 import { pushRootCard } from '../navigation/navigationRef';
 import { MainNavProvider, type MainNavContextValue } from '../navigation/MainNavContext';
@@ -57,7 +56,7 @@ import { useAuthGuard } from '../hooks/useAuthGuard';
 import { isFirstVideoReadyForBoardType } from '../services/media/videoPreloadService';
 import { STEP_WELCOME, STEP_ONBOARDING_WELCOME } from '../constants/onboardingSteps';
 import { ageGateService } from '../services/ageGate/ageGateService';
-import { swellyServiceCopy, swellyServiceCopyCopy } from '../services/swelly/swellyServiceCopy';
+import { swellyServiceCopy } from '../services/swelly/swellyServiceCopy';
 import { findAndConnectMatches, OnboardingMatchResult } from '../services/matching/onboardingMatchingService';
 import { pushNotificationService } from '../services/notifications/pushNotificationService';
 import {
@@ -914,21 +913,10 @@ export const AppContent: React.FC = () => {
     if (!currentUserSurfer) return;
     setSurftripsTipSeenFromProfile(currentUserSurfer.surftrips_tip_seen_at != null);
   }, [currentUserSurfer?.surftrips_tip_seen_at, currentUserSurfer?.user_id, setSurftripsTipSeenFromProfile]);
-  const [showTripPlanningChat, setShowTripPlanningChat] = useState(false);
-  const [showTripPlanningChatCopy, setShowTripPlanningChatCopy] = useState(false);
-  // "Ever shown" flags so we mount TripPlanningChat / -Copy lazily on first
-  // open, then keep them mounted thereafter and toggle visibility via
-  // `display: 'none'`. Lets ProfileScreen slide in over a live, mounted chat
-  // without remounting it (which used to cause a white flash + replay of the
-  // chat's enter animation when transitioning Swelly chat → Profile).
-  const [tripPlanningChatEverShown, setTripPlanningChatEverShown] = useState(false);
-  const [tripPlanningChatCopyEverShown, setTripPlanningChatCopyEverShown] = useState(false);
-  useEffect(() => {
-    if (showTripPlanningChat && !tripPlanningChatEverShown) setTripPlanningChatEverShown(true);
-  }, [showTripPlanningChat, tripPlanningChatEverShown]);
-  useEffect(() => {
-    if (showTripPlanningChatCopy && !tripPlanningChatCopyEverShown) setTripPlanningChatCopyEverShown(true);
-  }, [showTripPlanningChatCopy, tripPlanningChatCopyEverShown]);
+  // Swelly chat is a CARD on the root stack now (nav migration B2). The old
+  // display:'none' keep-alive layers are gone — the stack keeps covered cards
+  // mounted, and conversation state is persisted here (tripPlanningChatId &
+  // friends) so a re-opened card is warm.
   const [showSwellyShaper, setShowSwellyShaper] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   // showTrips is GONE — Trips is a tab root inside RootNavigator (Phase 1).
@@ -952,20 +940,13 @@ export const AppContent: React.FC = () => {
   const prevTabRef = useRef<NavKey>('lineup');
   const [requestedTab, setRequestedTab] = useState<NavKey | null>(null);
   // Programmatic "take the user to tab X" (deep links, join decisions,
-  // chat→trip taps). The Swelly keep-alive layers render ABOVE the tabs, so
-  // landing on a tab implies dismissing them — otherwise the user would
-  // arrive "behind" an open chat. Manual bar presses don't pass through here
-  // (the bar is hidden while a Swelly chat is open).
+  // chat→trip taps).
   const requestTab = useCallback((tab: NavKey) => {
-    setShowTripPlanningChat(false);
-    setShowTripPlanningChatCopy(false);
     setRequestedTab(tab);
   }, []);
   // Open a trip as a card: land on the Trips tab (so back from the card ends
   // up there) and push the TripDetail card on the root stack.
   const openTripCard = useCallback((tripId: string, focus?: TripDetailFocus | null) => {
-    setShowTripPlanningChat(false);
-    setShowTripPlanningChatCopy(false);
     setRequestedTab('trips');
     setRequestedTripCard({ tripId, focus: focus ?? null });
   }, []);
@@ -1173,13 +1154,13 @@ export const AppContent: React.FC = () => {
       return;
     }
 
-    // If profile was opened from trip planning chat, return to chat
+    // If profile was opened from the Swelly chat card: the card stayed
+    // mounted underneath the overlay — closing the overlay is enough.
     if (profileFromTripPlanningChat) {
       console.log('[AppContent] Returning to trip planning chat');
       setShowProfile(false);
       setViewingUserId(null);
-      setProfileFromTripPlanningChat(false); // Reset flag
-      setShowTripPlanningChat(true); // Return to chat
+      setProfileFromTripPlanningChat(false);
       return;
     }
 
@@ -1265,24 +1246,14 @@ export const AppContent: React.FC = () => {
     }
   };
 
-  // Track which service instance the copy screen should use
-  const [activeCopyService, setActiveCopyService] = useState<'copy' | 'copy-copy'>('copy');
-
   const handleSwellyPress = () => {
-    setActiveCopyService('copy');
-    setShowTripPlanningChatCopy(true);
+    pushRootCard('SwellyChat', { service: 'copy' });
   };
 
   const handleSwellyPressCopy = async () => {
     // Dev card: uses swelly-trip-planning-copy-copy edge
     await restoreLatestChatIfNeeded();
-    setActiveCopyService('copy-copy');
-    setShowTripPlanningChatCopy(true);
-  };
-
-  const handleTripPlanningChatBack = () => {
-    // Navigate back to conversations from trip planning chat
-    setShowTripPlanningChat(false);
+    pushRootCard('SwellyChat', { service: 'copy-copy' });
   };
 
   const handleProfilePress = () => {
@@ -1298,12 +1269,6 @@ export const AppContent: React.FC = () => {
     // Reset flags
     setProfileFromSwellyShaper(false);
     setProfileFromTripPlanningChat(fromTripPlanningChat || false);
-    
-    // If coming from trip planning chat, don't close it - we'll return to it on back
-    if (!fromTripPlanningChat) {
-      // Close trip planning chat if open (only if not coming from it)
-      setShowTripPlanningChat(false);
-    }
     
     // Preload surf level video early (non-blocking) before navigation
     const preloadUserProfileVideo = async (targetUserId: string) => {
@@ -1469,16 +1434,16 @@ export const AppContent: React.FC = () => {
   const handleStartConversation = async (userId: string, otherUserName?: string, otherUserAvatar?: string | null) => {
     console.log('[AppContent] ========== handleStartConversation START ==========');
     console.log('[AppContent] handleStartConversation called with userId:', userId);
-    console.log('[AppContent] Current state - showTripPlanningChat:', showTripPlanningChat);
     console.log('[AppContent] Current state - profileFromTripPlanningChat:', profileFromTripPlanningChat);
     console.log('[AppContent] Current state - showConversationLoading:', showConversationLoading);
     console.log('[AppContent] Current state - pendingConversation:', pendingConversation);
     console.log('[AppContent] Current state - selectedConversation:', selectedConversation);
     
     try {
-      // Check if we're in trip planning chat context (either from profile or directly from chat)
-      const isFromTripPlanning = profileFromTripPlanningChat || showTripPlanningChat || false;
-      console.log('[AppContent] isFromTripPlanning determined as:', isFromTripPlanning, '(profileFromTripPlanningChat:', profileFromTripPlanningChat, ', showTripPlanningChat:', showTripPlanningChat, ')');
+      // Swelly-origin chats: the Swelly CARD stays mounted in the stack
+      // beneath whatever opens next, so "return to chat" is automatic — the
+      // flag only still matters for conversation metadata.
+      const isFromTripPlanning = profileFromTripPlanningChat || false;
       
       // Check if conversation already exists using in-memory context (already loaded)
       console.log('[AppContent] Checking if conversation exists for userId:', userId);
@@ -1499,7 +1464,6 @@ export const AppContent: React.FC = () => {
           otherUserName: existingConv.other_user.name || 'User',
           otherUserAvatar: existingConv.other_user.profile_image_url || null,
           fromTripPlanning: isFromTripPlanning,
-          fromTripPlanningCopy: isFromTripPlanning && showTripPlanningChatCopy,
         });
         console.log('[AppContent] selectedConversation state updated');
       } else {
@@ -1512,7 +1476,6 @@ export const AppContent: React.FC = () => {
           otherUserName: otherUserName || 'User',
           otherUserAvatar: otherUserAvatar || null,
           fromTripPlanning: isFromTripPlanning,
-          fromTripPlanningCopy: isFromTripPlanning && showTripPlanningChatCopy,
           fromWelcomeOverlay: profileFromWelcomeOverlay || false,
         });
         console.log('[AppContent] pendingConversation state updated');
@@ -1553,9 +1516,6 @@ export const AppContent: React.FC = () => {
       setProfileFromTripDetail(false);
       console.log('[AppContent] Profile screen closed');
       
-      // Note: We keep showTripPlanningChat true so back button works correctly
-      // The loading screen will be rendered on top due to rendering order
-      
       console.log('[AppContent] ========== handleStartConversation COMPLETE ==========');
       console.log('[AppContent] Final state - showConversationLoading:', showConversationLoading);
       console.log('[AppContent] Final state - pendingConversation:', pendingConversation ? 'exists' : 'null');
@@ -1593,20 +1553,10 @@ export const AppContent: React.FC = () => {
     // Make sure the keyboard goes down with us — otherwise it stays floating
     // over the home screen until the user taps something else.
     Keyboard.dismiss();
-    // If user came from trip planning, return there
-    if (selectedConversation?.fromTripPlanning) {
-      const goBackToCopy = selectedConversation?.fromTripPlanningCopy;
-      setSelectedConversation(null);
-      if (goBackToCopy) {
-        setShowTripPlanningChatCopy(true);
-      } else {
-        setShowTripPlanningChat(true);
-      }
-      // Reset profile flag since we're going back to trip planning
-      setProfileFromTripPlanningChat(false);
-    } else {
-      setSelectedConversation(null);
-    }
+    // Whatever the chat opened over (Swelly card, trip card, the roots) is
+    // still mounted underneath — closing the overlay is all there is to do.
+    setSelectedConversation(null);
+    setProfileFromTripPlanningChat(false);
   };
 
   const handleStep1Back = () => {
@@ -1801,20 +1751,16 @@ export const AppContent: React.FC = () => {
   if (shouldShowConversations) {
     console.log('[AppContent] Rendering check - showProfile:', showProfile, 'viewingUserId:', viewingUserId);
     console.log('[AppContent] Rendering check - selectedConversation:', selectedConversation ? 'exists' : 'null');
-    console.log('[AppContent] Rendering check - showTripPlanningChat:', showTripPlanningChat, 'showTripPlanningChatCopy:', showTripPlanningChatCopy);
     console.log('[AppContent] Rendering check - showConversationLoading:', showConversationLoading, 'pendingConversation:', !!pendingConversation);
 
     // True only when the conversations list is the topmost visible layer.
-    // Used to gate the welcome-guide tutorial trigger inside ConversationsScreen
-    // — the screen never blurs (overlays render on top, no navigation push), so
-    // its useFocusEffect would otherwise fire while the user is inside a DM or
-    // Swelly chat.
+    // Used to gate the welcome-guide tutorial trigger inside ConversationsScreen.
+    // (Cards — Swelly chat, trips, notifications — blur the tab natively now;
+    // these terms cover the remaining legacy overlays only.)
     const isListFrontmost =
       activeTab === 'lineup' &&
       !selectedConversation &&
       !showConversationLoading &&
-      !showTripPlanningChat &&
-      !showTripPlanningChatCopy &&
       !showProfile &&
       !showSettings &&
       !activeSurftripDetailId &&
@@ -1822,19 +1768,15 @@ export const AppContent: React.FC = () => {
       !showWelcomeToLineupOverlay &&
       !showProfileEditor;
 
-    // The floating bottom nav lives INSIDE the tab navigator now (custom
-    // tabBar). It hides whenever anything covers the roots: an overlay above
-    // the navigator, a Swelly keep-alive layer, the trips inner detail/edit
-    // overlay, or the welcome celebration. Same conditions as the old
-    // showBottomNav, inverted.
+    // The floating bottom nav lives INSIDE the tab navigator (custom tabBar).
+    // Cards cover it natively; this list is the legacy overlays that render
+    // ABOVE the navigator and would otherwise float over the bar.
     const barSuppressed =
       tripsInnerOverlayOpen ||
       lineupInnerScreenOpen ||
       !!activeSurftripDetailId ||
       !!selectedConversation ||
       showConversationLoading ||
-      showTripPlanningChat ||
-      showTripPlanningChatCopy ||
       showSettings ||
       showSwellyShaper ||
       showProfile ||
@@ -1959,6 +1901,20 @@ export const AppContent: React.FC = () => {
         onOpenTripDetail: handleOpenTripDetailFromChat,
         onOpenSurftripDetail: handleOpenSurftripDetail,
       },
+      swellyChat: {
+        persistedChatId: tripPlanningChatId,
+        persistedMatchedUsers: tripPlanningMatchedUsers,
+        persistedDestination: tripPlanningDestination,
+        onChatStateChange: (chatId: string | null, matchedUsers: any[], destination: string) => {
+          setTripPlanningChatId(chatId);
+          setTripPlanningMatchedUsers(matchedUsers);
+          setTripPlanningDestination(destination);
+        },
+        onViewUserProfile: handleViewUserProfile,
+        onStartConversation: handleStartConversation,
+        onboardingMatches: pendingOnboardingMatches,
+        onChatComplete: () => setPendingOnboardingMatches(null),
+      },
       lineupProps: {
         onInnerScreenChange: setLineupInnerScreenOpen,
         isListFrontmost,
@@ -1999,59 +1955,8 @@ export const AppContent: React.FC = () => {
         <View style={styles.fill}>
           <RootNavigator />
         </View>
-        {/* Persistent Swelly chat layer (regular). Mounted on first open, then
-            kept alive with display:'none' when not the front-most layer. This
-            way ProfileScreen / ConversationLoadingScreen slide in OVER the
-            live chat (no remount, no enter-animation replay, no home flash). */}
-        {tripPlanningChatEverShown && (
-          <View
-            style={[StyleSheet.absoluteFill, { backgroundColor: '#F5F5F5' }, !showTripPlanningChat && { display: 'none' }]}
-            pointerEvents={showTripPlanningChat && !showProfile && !showConversationLoading && !selectedConversation && !showSettings && !showSwellyShaper ? 'auto' : 'none'}
-          >
-            <TripPlanningChatScreen
-              onChatComplete={handleTripPlanningChatBack}
-              onViewUserProfile={handleViewUserProfile}
-              onStartConversation={handleStartConversation}
-              persistedChatId={tripPlanningChatId}
-              persistedMatchedUsers={tripPlanningMatchedUsers}
-              persistedDestination={tripPlanningDestination}
-              onChatStateChange={(chatId: string | null, matchedUsers: any[], destination: string) => {
-                setTripPlanningChatId(chatId);
-                setTripPlanningMatchedUsers(matchedUsers);
-                setTripPlanningDestination(destination);
-              }}
-            />
-          </View>
-        )}
-        {/* Persistent Swelly chat layer (-Copy variant). Same lazy-mount + display
-            toggle pattern as the regular variant above. */}
-        {tripPlanningChatCopyEverShown && (
-          <View
-            // No backgroundColor — the swelly screen has its own (white
-            // SafeAreaView + chatBackground image), and a transparent parent
-            // lets the home screen behind show through during the
-            // slide/fade entry & swipe-back exit animations.
-            style={[StyleSheet.absoluteFill, !showTripPlanningChatCopy && { display: 'none' }]}
-            pointerEvents={showTripPlanningChatCopy && !showProfile && !showConversationLoading && !selectedConversation && !showSettings && !showSwellyShaper ? 'auto' : 'none'}
-          >
-            <TripPlanningChatScreenCopy
-              onChatComplete={() => { setShowTripPlanningChatCopy(false); setShowTripPlanningChat(false); setPendingOnboardingMatches(null); }}
-              onViewUserProfile={handleViewUserProfile}
-              onStartConversation={handleStartConversation}
-              persistedChatId={tripPlanningChatId}
-              persistedMatchedUsers={tripPlanningMatchedUsers}
-              persistedDestination={tripPlanningDestination}
-              onChatStateChange={(chatId: string | null, matchedUsers: any[], destination: string) => {
-                setTripPlanningChatId(chatId);
-                setTripPlanningMatchedUsers(matchedUsers);
-                setTripPlanningDestination(destination);
-              }}
-              service={activeCopyService === 'copy-copy' ? swellyServiceCopyCopy : swellyServiceCopy}
-              onboardingMatches={pendingOnboardingMatches || undefined}
-              visible={showTripPlanningChatCopy}
-            />
-          </View>
-        )}
+        {/* Swelly chat is the SwellyChat CARD in RootNavigator now (nav
+            migration B2) — the display:'none' keep-alive layers are gone. */}
         {activeOverlay && <View style={StyleSheet.absoluteFill}>{activeOverlay}</View>}
         {/* The floating bottom nav renders INSIDE RootNavigator as the
             custom tabBar (one persistent instance — pill animation plays
@@ -2140,7 +2045,7 @@ export const AppContent: React.FC = () => {
             setShowWelcomeToLineupOverlay(false);
             setPendingOnboardingMatches(onboardingMatchResult?.matches || null);
             setTripPlanningChatId(null); // Start fresh chat, not restore
-            setShowTripPlanningChatCopy(true);
+            pushRootCard('SwellyChat', { service: 'copy' });
           }}
         />
         <ProfileEditPanel
