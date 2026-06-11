@@ -38,6 +38,12 @@ export interface MainNavContextValue {
    */
   requestedTripCard: { tripId: string; focus?: TripDetailFocus | null } | null;
   onRequestedTripCardConsumed: () => void;
+  /** Callbacks the ChatCard route needs from AppContent (legacy overlays). */
+  chatCard: {
+    onViewProfile: (userId: string) => void;
+    onOpenTripDetail: (tripId: string) => void;
+    onOpenSurftripDetail: (groupId: string) => void;
+  };
   /** Callbacks the TripDetail card needs from AppContent (legacy overlays). */
   tripCard: {
     onOpenGroupChat: (params: {

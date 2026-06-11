@@ -18,6 +18,7 @@ import { OnboardingScaffold } from './onboarding/OnboardingScaffold';
 import { TripPlanningChatScreen } from '../screens/TripPlanningChatScreen';
 import { TripPlanningChatScreen as TripPlanningChatScreenCopy } from '../screens/TripPlanningChatScreenCopy';
 import RootNavigator from '../navigation/RootNavigator';
+import { pushRootCard } from '../navigation/navigationRef';
 import { MainNavProvider, type MainNavContextValue } from '../navigation/MainNavContext';
 import { useTripsBottomNavControl, type NavKey } from './trips/TripsBottomNav';
 import SurftripDetailScreen from '../screens/surftrips/SurftripDetailScreen';
@@ -1412,10 +1413,11 @@ export const AppContent: React.FC = () => {
     heroImageUrl?: string | null;
     tripId?: string;
   }) => {
-    // The trip card stays mounted underneath the chat overlay — backing out
-    // of the chat lands on the trip exactly as the user left it.
-    setSelectedConversation({
-      id: params.conversationId,
+    // KEYBOARD SPIKE (Phase 3): trip group chats push as a CARD on the root
+    // stack — verifying the chat keyboard system inside native-stack before
+    // migrating the remaining DM paths. The trip card stays underneath.
+    pushRootCard('ChatCard', {
+      conversationId: params.conversationId,
       otherUserId: '',
       otherUserName: params.title,
       otherUserAvatar: params.heroImageUrl ?? null,
@@ -1951,6 +1953,11 @@ export const AppContent: React.FC = () => {
       tripCard: {
         onOpenGroupChat: handleOpenGroupChat,
         onViewUserProfile: handleViewUserProfileFromTrip,
+      },
+      chatCard: {
+        onViewProfile: handleViewUserProfile,
+        onOpenTripDetail: handleOpenTripDetailFromChat,
+        onOpenSurftripDetail: handleOpenSurftripDetail,
       },
       lineupProps: {
         onInnerScreenChange: setLineupInnerScreenOpen,

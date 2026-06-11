@@ -6,6 +6,9 @@ import { StackActions } from '@react-navigation/native';
 import { createNativeStackNavigator, NativeStackScreenProps } from '@react-navigation/native-stack';
 import { createBottomTabNavigator, BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import ConversationsStack from './ConversationsStack';
+import { DirectMessageScreen } from '../screens/DirectMessageScreen';
+import { DirectGroupChat } from '../screens/DirectGroupChat';
+import { useMessaging } from '../context/MessagingProvider';
 import TripsScreen from '../screens/trips/TripsScreen';
 import TripDetailScreen from '../screens/trips/TripDetailScreen';
 import CreateTripWizard from '../screens/trips/CreateTripWizard';
@@ -102,6 +105,40 @@ function EditTripCardScreen({ route, navigation }: NativeStackScreenProps<RootSt
         onCancel={() => navigation.goBack()}
       />
     </SafeAreaView>
+  );
+}
+
+function ChatCardScreen({ route, navigation }: NativeStackScreenProps<RootStackParamList, 'ChatCard'>) {
+  const { chatCard } = useMainNav();
+  const { setCurrentConversationId } = useMessaging();
+  const params = route.params;
+
+  // Suppress unread increments while this conversation is on screen (same
+  // two-phase pattern as the ConversationsStack DM route).
+  useEffect(() => {
+    if (params.conversationId) setCurrentConversationId(params.conversationId);
+    return () => setCurrentConversationId(null);
+  }, [params.conversationId, setCurrentConversationId]);
+
+  const Chat = params.isDirect === false ? DirectGroupChat : DirectMessageScreen;
+  return (
+    <Chat
+      conversationId={params.conversationId}
+      otherUserId={params.otherUserId}
+      otherUserName={params.otherUserName}
+      otherUserAvatar={params.otherUserAvatar}
+      isDirect={params.isDirect ?? true}
+      tripId={params.tripId}
+      surftripId={params.surftripId}
+      onBack={() => navigation.goBack()}
+      onViewProfile={chatCard.onViewProfile}
+      onOpenTripDetail={chatCard.onOpenTripDetail}
+      onOpenSurftripDetail={chatCard.onOpenSurftripDetail}
+      onConversationCreated={(conversationId: string) => {
+        if (conversationId) setCurrentConversationId(conversationId);
+        navigation.setParams({ conversationId });
+      }}
+    />
   );
 }
 
@@ -256,6 +293,7 @@ export default function RootNavigator() {
       <RootStack.Screen name="HomeTabs" component={HomeTabs} />
       <RootStack.Screen name="TripDetail" component={TripDetailCardScreen} options={{ presentation: 'card' }} />
       <RootStack.Screen name="EditTrip" component={EditTripCardScreen} options={{ presentation: 'card' }} />
+      <RootStack.Screen name="ChatCard" component={ChatCardScreen} options={{ presentation: 'card' }} />
       {/* Plain card. The panel is full-screen and opaque, so transparency
           bought nothing and modal presentations broke z-order/gestures
           (two strikes: native modal context → sheets+crashes; contained →

@@ -21,6 +21,18 @@ export type RootStackParamList = {
   /** Right-side notifications drawer as a transparent route — lives in back
    *  history, so back from a notification-opened trip returns TO the panel. */
   NotificationsPanel: { userId: string | null };
+  /** Chat card (Phase 3). SPIKE: currently only trip group chats route here —
+   *  verifying the keyboard system inside a native-stack card before
+   *  migrating all three DM paths. */
+  ChatCard: {
+    conversationId?: string;
+    otherUserId: string;
+    otherUserName: string;
+    otherUserAvatar: string | null;
+    isDirect?: boolean;
+    tripId?: string;
+    surftripId?: string;
+  };
 };
 
 /**

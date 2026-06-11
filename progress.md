@@ -24,5 +24,19 @@
   TDZ bug — reverted; dep arrays evaluate during render, late-declared callbacks can't go in.
 - KNOWN pre-existing (Phase 3 fixes structurally): join-decision approve while a DM is open
   pushes the trip card invisibly under the DM overlay.
-- NEXT: Eyal device-tests Phase 2 (checklist in docs/nav-migration/phase-2.md) → Phase 3
-  (keyboard spike first!)
+- Phase 2 device-testing saga (IMPORTANT lessons):
+  - Bell from Lineup failed: ConversationsStack is `independent` — local dispatches don't
+    reach root. Fixed with pushRootCard via navigationRef (2813e39).
+  - transparentModal panel → iOS native modal context: cards-on-top presented as SHEETS,
+    plus shivering/stuck-scroll/2 hard crashes (suspected same root). containedTransparentModal
+    → cards rendered UNDERNEATH. Final fix 37d56d7: panel is a PLAIN CARD (it's opaque
+    full-screen anyway); all self-animation machinery deleted. RULE: avoid modal-presentation
+    routes for anything that gets cards pushed on top.
+  - 51ff89d: bar is roots-only (ConversationsStack reports inner DM pushes via
+    screenListeners → lineupInnerScreenOpen); Lineup top-left profile entry removed
+    (display-only — profile via bottom nav).
+- OPEN: Eyal to confirm crashes/shivering gone after panel-as-card; full phase-2.md checklist.
+- NEXT after Phase 2 green: Phase 3 — STARTS WITH KEYBOARD SPIKE on device (DM in native-stack
+  card; fallback JS sub-stack), then unify 3 DM paths, profile/Settings cards. See
+  docs/nav-migration/phases-2-5-outline.md.
+- Branch state: nav-migration, 12 commits ahead of main, NOT pushed. Eyal reviews before merge.
