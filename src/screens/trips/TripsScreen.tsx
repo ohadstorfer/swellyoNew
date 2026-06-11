@@ -13,8 +13,14 @@ import {
   Platform,
   Dimensions,
   Animated,
+  NativeSyntheticEvent,
+  NativeScrollEvent,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+// Remote user-content images (trip covers, avatars) render through expo-image
+// for its disk cache — URLs are immutable (timestamped filenames), so cached
+// copies never go stale. Local bundled assets keep using RN's Image.
+import { Image as CachedImage } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
@@ -42,6 +48,7 @@ import {
   clearTripWizardDraft,
 } from '../../hooks/useTripWizardDraft';
 import TripDetailScreen from './TripDetailScreen';
+import { useTripsBottomNavControl, type TripsBottomNavControl } from '../../components/trips/TripsBottomNav';
 import { Images } from '../../assets/images';
 import { Logo } from '../../components/Logo';
 import { NotificationCenter } from '../../components/notifications/NotificationCenter';
@@ -85,6 +92,12 @@ interface TripsScreenProps {
   /** Tap on a participant inside a trip detail opens their profile. AppContent
    *  records the current trip so the profile back returns here. */
   onViewUserProfile?: (userId: string, fromTripId: string) => void;
+  /** Shared control for the app-level floating nav bar — the tab lists pipe
+   *  their scroll events into it so the bar collapses/restores. */
+  navControl?: TripsBottomNavControl;
+  /** Reports when an internal full-screen overlay (trip detail / edit wizard)
+   *  opens, so AppContent can hide the floating nav bar. */
+  onInnerOverlayChange?: (open: boolean) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -200,7 +213,13 @@ const TripCard: React.FC<{
     >
       <View style={styles.cardImageWrap}>
         {trip.hero_image_url ? (
-          <Image source={{ uri: trip.hero_image_url }} style={styles.cardImageBg} />
+          <CachedImage
+            source={{ uri: trip.hero_image_url }}
+            style={styles.cardImageBg}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+            transition={150}
+          />
         ) : (
           <View style={[styles.cardImageBg, styles.cardImagePlaceholder]}>
             <Ionicons name="image-outline" size={32} color="#B0B0B0" />
@@ -210,7 +229,12 @@ const TripCard: React.FC<{
         {/* Host row (top-left) */}
         <View style={styles.hostRow}>
           {meta?.hostAvatar ? (
-            <Image source={{ uri: meta.hostAvatar }} style={styles.hostAvatar} />
+            <CachedImage
+              source={{ uri: meta.hostAvatar }}
+              style={styles.hostAvatar}
+              contentFit="cover"
+              cachePolicy="memory-disk"
+            />
           ) : (
             <View style={[styles.hostAvatar, styles.hostAvatarPlaceholder]}>
               <Ionicons name="person" size={24} color="#FFFFFF" />
@@ -372,7 +396,13 @@ const ExploreTripCard: React.FC<{
       disabled={!onPress}
     >
       {trip.hero_image_url ? (
-        <Image source={{ uri: trip.hero_image_url }} style={styles.cardImageBg} />
+        <CachedImage
+          source={{ uri: trip.hero_image_url }}
+          style={styles.cardImageBg}
+          contentFit="cover"
+          cachePolicy="memory-disk"
+          transition={150}
+        />
       ) : (
         <View style={[styles.cardImageBg, styles.cardImagePlaceholder]}>
           <Ionicons name="image-outline" size={32} color="#B0B0B0" />
@@ -382,7 +412,12 @@ const ExploreTripCard: React.FC<{
       {/* Host row (top-left) */}
       <View style={styles.hostRow}>
         {meta?.hostAvatar ? (
-          <Image source={{ uri: meta.hostAvatar }} style={styles.hostAvatar} />
+          <CachedImage
+            source={{ uri: meta.hostAvatar }}
+            style={styles.hostAvatar}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+          />
         ) : (
           <View style={[styles.hostAvatar, styles.hostAvatarPlaceholder]}>
             <Ionicons name="person" size={18} color="#FFFFFF" />
@@ -506,10 +541,15 @@ const TripDeck: React.FC<{
   trips: GroupTrip[];
   meta: Map<string, TripCardMeta>;
   onOpenTrip: (tripId: string) => void;
-}> = ({ trips, meta, onOpenTrip }) => {
+  /** Fires (throttled) while the user swipes the deck sideways. */
+  onUserScroll?: () => void;
+}> = ({ trips, meta, onOpenTrip, onUserScroll }) => {
   const listRef = useRef<FlatList<GroupTrip>>(null);
   // Drives the per-card scale/opacity interpolation.
   const scrollX = useRef(new Animated.Value(0)).current;
+  // Last offset at which we notified the parent — keeps the JS callback off
+  // the per-frame scroll path (we only re-fire every 24px of travel).
+  const lastReportedX = useRef(0);
 
   // Reset to the first card if the deck contents change (e.g. after a reload).
   useEffect(() => {
@@ -596,7 +636,12 @@ const TripDeck: React.FC<{
           index,
         })}
         onScroll={e => {
-          scrollX.setValue(e.nativeEvent.contentOffset.x);
+          const x = e.nativeEvent.contentOffset.x;
+          scrollX.setValue(x);
+          if (onUserScroll && Math.abs(x - lastReportedX.current) > 24) {
+            lastReportedX.current = x;
+            onUserScroll();
+          }
         }}
         contentContainerStyle={[styles.deckContent, { paddingHorizontal: DECK_SIDE_PAD }]}
         {...(Platform.OS === 'web' && {
@@ -750,7 +795,15 @@ const ExploreHeader: React.FC<{
 const EMPTY_META: Map<string, TripCardMeta> = new Map();
 const EMPTY_BUCKETS: MyTripsBuckets = { approved: [], pending: [], past: [] };
 
-const ExploreTripsView: React.FC<{ onOpenTrip: (tripId: string) => void }> = ({ onOpenTrip }) => {
+// Views pipe their raw vertical scroll events to the bar's controller
+// (useTripsBottomNavControl), which maps them to the collapse scroll-linked.
+type NavScrollHandler = (e: NativeSyntheticEvent<NativeScrollEvent>) => void;
+
+const ExploreTripsView: React.FC<{
+  onOpenTrip: (tripId: string) => void;
+  onNavScroll?: NavScrollHandler;
+  onDeckScroll?: () => void;
+}> = ({ onOpenTrip, onNavScroll, onDeckScroll }) => {
   // Cached + stale-while-revalidate. The data survives tab switches and
   // leaving/re-entering Trips, so re-entry is instant (no skeleton) and only
   // revalidates silently in the background when stale.
@@ -796,6 +849,8 @@ const ExploreTripsView: React.FC<{ onOpenTrip: (tripId: string) => void }> = ({ 
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.exScrollContent}
+        onScroll={onNavScroll}
+        scrollEventThrottle={16}
       >
         <Text style={styles.exploreTitle}>Discover the world{'\n'}with Swellyo</Text>
         <ExploreHeader
@@ -811,11 +866,11 @@ const ExploreTripsView: React.FC<{ onOpenTrip: (tripId: string) => void }> = ({ 
         ) : (
           <>
             <Text style={styles.exSectionTitle}>Popular</Text>
-            <TripDeck trips={filtered} meta={meta} onOpenTrip={onOpenTrip} />
+            <TripDeck trips={filtered} meta={meta} onOpenTrip={onOpenTrip} onUserScroll={onDeckScroll} />
             {operatorTrips.length > 0 && (
               <>
                 <Text style={[styles.exSectionTitle, styles.exSectionTitleStacked]}>Trip Operators</Text>
-                <TripDeck trips={operatorTrips} meta={meta} onOpenTrip={onOpenTrip} />
+                <TripDeck trips={operatorTrips} meta={meta} onOpenTrip={onOpenTrip} onUserScroll={onDeckScroll} />
               </>
             )}
           </>
@@ -846,7 +901,8 @@ const MyTripsView: React.FC<{
   userId: string | null;
   onGoCreate: () => void;
   onOpenTrip: (tripId: string) => void;
-}> = ({ userId, onGoCreate, onOpenTrip }) => {
+  onNavScroll?: NavScrollHandler;
+}> = ({ userId, onGoCreate, onOpenTrip, onNavScroll }) => {
   // Cached + stale-while-revalidate (see useExploreTrips). Re-entry is instant;
   // pull-to-refresh and post-create/edit invalidation drive background updates.
   const { data, isLoading, isFetching, refetch } = useMyTrips(userId);
@@ -901,6 +957,8 @@ const MyTripsView: React.FC<{
     <FlatList
       data={visible}
       keyExtractor={x => x.trip.id}
+      onScroll={onNavScroll}
+      scrollEventThrottle={16}
       ListHeaderComponent={
         <FadeInView>
           <TripFilterBar active={filter} counts={counts} onChange={setFilter} />
@@ -974,7 +1032,7 @@ const TabPane: React.FC<{
 // ---------------------------------------------------------------------------
 // Wrapper screen
 // ---------------------------------------------------------------------------
-export default function TripsScreen({ onBack, initialTripId, initialTripFocus, onOpenGroupChat, onViewUserProfile }: TripsScreenProps) {
+export default function TripsScreen({ onBack, initialTripId, initialTripFocus, onOpenGroupChat, onViewUserProfile, navControl: navControlProp, onInnerOverlayChange }: TripsScreenProps) {
   const insets = useSafeAreaInsets();
   const { user: contextUser } = useOnboarding();
   const currentUserId = contextUser?.id?.toString() ?? null;
@@ -1003,6 +1061,26 @@ export default function TripsScreen({ onBack, initialTripId, initialTripFocus, o
   const tx = useSharedValue(-TAB_ORDER.indexOf('explore') * Dimensions.get('window').width);
   const rowStyle = useAnimatedStyle(() => ({ transform: [{ translateX: tx.value }] }));
   const firstSlide = useRef(true);
+
+  // --- Bottom nav -----------------------------------------------------------
+  // The floating bar lives at AppContent level; we receive its shared control
+  // and pipe the tab lists' scroll events into it (scroll down collapses,
+  // scroll up restores, sideways deck swipes collapse). The local instance is
+  // only a fallback for renders without the prop.
+  const ownNavControl = useTripsBottomNavControl();
+  const navControl = navControlProp ?? ownNavControl;
+  const handleMyNavScroll = useCallback<NavScrollHandler>(
+    e => navControl.onVerticalScroll('my', e),
+    [navControl],
+  );
+  const handleExploreNavScroll = useCallback<NavScrollHandler>(
+    e => navControl.onVerticalScroll('explore', e),
+    [navControl],
+  );
+  const handleCreateNavScroll = useCallback<NavScrollHandler>(
+    e => navControl.onVerticalScroll('create', e),
+    [navControl],
+  );
 
   // Switch tabs: mark visited synchronously (so the incoming pane has content as
   // it slides in — no empty-cell flash) and set the active tab.
@@ -1042,6 +1120,12 @@ export default function TripsScreen({ onBack, initialTripId, initialTripFocus, o
     setSelectedTripId(tripId);
   }, []);
   const [editingTrip, setEditingTrip] = useState<GroupTrip | null>(null);
+  // Tell AppContent when a full-screen inner overlay (trip detail / edit) is
+  // up, so the app-level floating nav bar hides instead of floating over it.
+  useEffect(() => {
+    onInnerOverlayChange?.(!!(selectedTripId || editingTrip));
+    return () => onInnerOverlayChange?.(false);
+  }, [selectedTripId, editingTrip, onInnerOverlayChange]);
   // Which hosting style the user picked from the inline chooser on the Create
   // tab. null = chooser visible; non-null = wizard open in the create modal.
   const [pendingStyle, setPendingStyle] = useState<HostingStyle | null>(null);
@@ -1143,58 +1227,6 @@ export default function TripsScreen({ onBack, initialTripId, initialTripFocus, o
     // Stay on detail screen so the host sees the updated trip immediately.
   };
 
-  if (editingTrip) {
-    return (
-      <SafeAreaView style={styles.root} edges={['top']}>
-        <View style={[styles.header, { paddingTop: 8 }]}>
-          <TouchableOpacity
-            onPress={() => setEditingTrip(null)}
-            style={styles.backBtn}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          >
-            <Ionicons name="chevron-back" size={28} color="#222B30" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Edit trip</Text>
-          <View style={{ width: 28 }} />
-        </View>
-        <CreateTripWizard
-          hostId={currentUserId}
-          hostingStyle={editingTrip.hosting_style}
-          initialTrip={editingTrip}
-          onCreated={handleSavedEdit}
-          onCancel={() => setEditingTrip(null)}
-        />
-      </SafeAreaView>
-    );
-  }
-
-  if (selectedTripId) {
-    return (
-      <Reanimated.View
-        style={{ flex: 1 }}
-        entering={reduceMotion ? undefined : SlideInRight.duration(280).easing(Easing.out(Easing.cubic))}
-        exiting={reduceMotion ? undefined : SlideOutRight.duration(220).easing(Easing.in(Easing.cubic))}
-      >
-        <TripDetailScreen
-          tripId={selectedTripId}
-          initialFocus={selectedTripFocus}
-          onBack={() => {
-            setSelectedTripId(null);
-            setSelectedTripFocus(null);
-          }}
-          onOpenGroupChat={onOpenGroupChat}
-          onEditTrip={setEditingTrip}
-          onOpenTrip={openTripFromNotification}
-          onViewUserProfile={
-            onViewUserProfile
-              ? (userId: string) => onViewUserProfile(userId, selectedTripId)
-              : undefined
-          }
-        />
-      </Reanimated.View>
-    );
-  }
-
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
       <View style={styles.tripsHeader}>
@@ -1229,42 +1261,51 @@ export default function TripsScreen({ onBack, initialTripId, initialTripFocus, o
                 userId={currentUserId}
                 onGoCreate={() => goToTab('create')}
                 onOpenTrip={setSelectedTripId}
+                onNavScroll={handleMyNavScroll}
               />
             ) : null}
           </TabPane>
 
           {/* index 1 — Explore */}
           <TabPane index={1} width={bodyW} tx={tx} reduceMotion={reduceMotion}>
-            {visited.explore ? <ExploreTripsView onOpenTrip={setSelectedTripId} /> : null}
+            {visited.explore ? (
+              <ExploreTripsView
+                onOpenTrip={setSelectedTripId}
+                onNavScroll={handleExploreNavScroll}
+                onDeckScroll={navControl.collapse}
+              />
+            ) : null}
           </TabPane>
 
           {/* index 2 — Create */}
           <TabPane index={2} width={bodyW} tx={tx} reduceMotion={reduceMotion}>
             {visited.create ? (
               <View style={styles.createRoot}>
-                {/* Full-bleed beach photo (Figma): spans the whole area with the
-                    foreground (van + people) at the bottom, white fade over the top
-                    so the cards read on white. */}
+                {/* Background photo (Frame 2511): height exactly fills the area
+                    between the header and the bottom of the screen. */}
                 <View style={styles.createBgWrap} pointerEvents="none">
                   <Image
                     source={Images.createTrip.background}
-                    style={StyleSheet.absoluteFill}
+                    style={styles.createBgImage}
                     resizeMode="cover"
-                  />
-                  <LinearGradient
-                    colors={['#FFFFFF', '#FFFFFF', 'rgba(255,255,255,0)']}
-                    locations={[0, 0.58, 0.82]}
-                    style={styles.createBgFade}
                   />
                 </View>
 
                 <ScrollView
                   contentContainerStyle={styles.chooserScroll}
                   showsVerticalScrollIndicator={false}
+                  onScroll={handleCreateNavScroll}
+                  scrollEventThrottle={16}
                 >
-                  <Text style={styles.chooserHeading}>Create a surf trip</Text>
+                  <Text
+                    style={styles.chooserHeading}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                  >
+                    Create a surf trip
+                  </Text>
                   <Text style={styles.chooserSubheading}>
-                    Plan your next adventure and invite surfers to join you
+                    Plan your next adventure and invite{'\n'}surfers to join you
                   </Text>
                   {HOSTING_STYLE_OPTIONS.map(opt => (
                     <TouchableOpacity
@@ -1294,6 +1335,62 @@ export default function TripsScreen({ onBack, initialTripId, initialTripFocus, o
           </TabPane>
         </Reanimated.View>
       </View>
+
+      {/* Trip overview as an OVERLAY (not a replacement): the tab lists stay
+          mounted underneath, so going back lands on the exact scroll position
+          — vertical lists and deck positions alike. TripDetailScreen manages
+          its own top safe area. */}
+      {selectedTripId && (
+        <Reanimated.View
+          style={styles.screenOverlay}
+          entering={reduceMotion ? undefined : SlideInRight.duration(280).easing(Easing.out(Easing.cubic))}
+          exiting={reduceMotion ? undefined : SlideOutRight.duration(220).easing(Easing.in(Easing.cubic))}
+        >
+          <TripDetailScreen
+            tripId={selectedTripId}
+            initialFocus={selectedTripFocus}
+            onBack={() => {
+              setSelectedTripId(null);
+              setSelectedTripFocus(null);
+            }}
+            onOpenGroupChat={onOpenGroupChat}
+            onEditTrip={setEditingTrip}
+            onOpenTrip={openTripFromNotification}
+            onViewUserProfile={
+              onViewUserProfile
+                ? (userId: string) => onViewUserProfile(userId, selectedTripId)
+                : undefined
+            }
+          />
+        </Reanimated.View>
+      )}
+
+      {/* Edit-trip wizard stacks above the overview the same way, so closing
+          it returns to the detail screen (and the lists beneath) untouched. */}
+      {editingTrip && (
+        <View style={styles.screenOverlay}>
+          <SafeAreaView style={styles.root} edges={['top']}>
+            <View style={[styles.header, { paddingTop: 8 }]}>
+              <TouchableOpacity
+                onPress={() => setEditingTrip(null)}
+                style={styles.backBtn}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Ionicons name="chevron-back" size={28} color="#222B30" />
+              </TouchableOpacity>
+              <Text style={styles.headerTitle}>Edit trip</Text>
+              <View style={{ width: 28 }} />
+            </View>
+            <CreateTripWizard
+              hostId={currentUserId}
+              hostingStyle={editingTrip.hosting_style}
+              initialTrip={editingTrip}
+              onCreated={handleSavedEdit}
+              onCancel={() => setEditingTrip(null)}
+            />
+          </SafeAreaView>
+        </View>
+      )}
 
       <Modal
         visible={createModalVisible}
@@ -1405,7 +1502,9 @@ const styles = StyleSheet.create({
   },
 
   // Explore body scroll (stacked carousels) + header.
-  exScrollContent: { paddingBottom: 40 },
+  // Bottom padding clears the floating nav bar (bar ~82 + 44 bottom gap),
+  // so the last deck/card scrolls fully above it.
+  exScrollContent: { paddingBottom: 150 },
   exHeader: { paddingTop: 14 },
   // "Popular" section label above the trips carousel (Figma 11966:32390).
   exSectionTitle: {
@@ -1452,7 +1551,8 @@ const styles = StyleSheet.create({
     color: '#333333',
   },
 
-  listContent: { paddingHorizontal: 16, paddingBottom: 24, flexGrow: 1 },
+  // paddingBottom clears the floating nav bar (see exScrollContent)
+  listContent: { paddingHorizontal: 16, paddingBottom: 150, flexGrow: 1 },
 
   // Filter pills (My Trips).
   filterRow: {
@@ -1739,15 +1839,25 @@ const styles = StyleSheet.create({
 
   // Inline hosting-style chooser (moved out of CreateTripWizard).
   createRoot: { flex: 1 },
-  createBgWrap: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    top: 0,
-    bottom: 0,
-  },
-  createBgFade: {
+  // Full-screen pushed-page overlay (trip overview / edit wizard). Solid
+  // background so the lists underneath never bleed through.
+  screenOverlay: {
     ...StyleSheet.absoluteFillObject,
+    zIndex: 20,
+    backgroundColor: '#FFFFFF',
+  },
+  createBgWrap: {
+    ...StyleSheet.absoluteFillObject,
+    overflow: 'hidden',
+    alignItems: 'center',
+  },
+  // Fills the area between the header and the screen bottom edge-to-edge;
+  // the photo's ratio is nearly identical to the phone's content area, so
+  // `cover` crops imperceptibly.
+  createBgImage: {
+    width: '100%',
+    height: '100%',
+    transform: [{ translateY: 20 }],
   },
   chooserScroll: {
     paddingHorizontal: 16,
@@ -1756,16 +1866,20 @@ const styles = StyleSheet.create({
   },
   chooserHeading: {
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
-    fontSize: 30,
-    lineHeight: 39,
+    // Native: big starting size; adjustsFontSizeToFit shrinks it so the single
+    // line always spans the 60%-width container. Web has no font auto-fit, so
+    // it gets a fixed size that fits one line on typical widths.
+    fontSize: Platform.OS === 'web' ? 36 : 64,
     fontWeight: '600',
     color: '#333333',
+    width: '64%',
+    marginTop: 24,
     marginBottom: 16,
   },
   chooserSubheading: {
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
-    fontSize: 14,
-    lineHeight: 18,
+    fontSize: 15,
+    lineHeight: 20,
     fontWeight: '400',
     color: '#333333',
     marginBottom: 32,

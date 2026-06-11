@@ -480,6 +480,10 @@ export interface TripDetailViewProps {
     surfLevelLabel?: string | null;
     boardLabel?: string | null;
     surfTrips?: number | null;
+    /** How well the host knows the destination / the stay — surfaced as a short
+     *  "local knowledge" paragraph in the About block (Captain + Operator). */
+    destinationFamiliarityLabel?: string | null;
+    stayFamiliarityLabel?: string | null;
   } | null;
   /** Host taps "Edit cover" → open the cover-image edit sheet. */
   onEditCover?: () => void;

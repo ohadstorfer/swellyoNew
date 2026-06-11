@@ -312,7 +312,7 @@ const styles = StyleSheet.create({
     color: '#222B30',
     fontFamily: FONT_INTER,
   },
-  cellTextMid: { color: '#05BCD3', fontWeight: '600' },
+  cellTextMid: { color: '#7B7B7B', fontWeight: '600' },
   cellTextEndpoint: { color: '#FFF', fontWeight: '700' },
   cellTextDisabled: { color: '#D0D0D0' },
 });
