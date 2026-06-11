@@ -940,7 +940,16 @@ export const AppContent: React.FC = () => {
   const [activeTab, setActiveTab] = useState<NavKey>('lineup');
   const prevTabRef = useRef<NavKey>('lineup');
   const [requestedTab, setRequestedTab] = useState<NavKey | null>(null);
-  const requestTab = useCallback((tab: NavKey) => setRequestedTab(tab), []);
+  // Programmatic "take the user to tab X" (deep links, join decisions,
+  // chat→trip taps). The Swelly keep-alive layers render ABOVE the tabs, so
+  // landing on a tab implies dismissing them — otherwise the user would
+  // arrive "behind" an open chat. Manual bar presses don't pass through here
+  // (the bar is hidden while a Swelly chat is open).
+  const requestTab = useCallback((tab: NavKey) => {
+    setShowTripPlanningChat(false);
+    setShowTripPlanningChatCopy(false);
+    setRequestedTab(tab);
+  }, []);
   const handleTabChange = useCallback((tab: NavKey) => {
     setActiveTab(prev => {
       if (prev !== tab) prevTabRef.current = prev;
@@ -953,8 +962,8 @@ export const AppContent: React.FC = () => {
   const [profileFromSwellyShaper, setProfileFromSwellyShaper] = useState(false); // Track if profile was opened from Swelly Shaper
   const [profileFromTripPlanningChat, setProfileFromTripPlanningChat] = useState(false); // Track if profile was opened from trip planning chat
   // True while a participant profile is open from inside a TripDetailScreen.
-  // Lets handleProfileBack keep showTrips=true so the trip detail re-renders
-  // (with pendingTripDetailId restoring the selected trip) on close.
+  // The Trips tab stays mounted under the profile overlay, so closing the
+  // overlay lands back on the open trip (see handleProfileBack).
   const [profileFromTripDetail, setProfileFromTripDetail] = useState(false);
   const [profileFromOnboardingChat, setProfileFromOnboardingChat] = useState(false); // Track if profile was opened right after Swelly onboarding chat (special header)
   const [profileFromWelcomeOverlay, setProfileFromWelcomeOverlay] = useState(false); // Track if profile was opened from WelcomeToLineupOverlay
@@ -1972,7 +1981,7 @@ export const AppContent: React.FC = () => {
         {tripPlanningChatEverShown && (
           <View
             style={[StyleSheet.absoluteFill, { backgroundColor: '#F5F5F5' }, !showTripPlanningChat && { display: 'none' }]}
-            pointerEvents={showTripPlanningChat && !showProfile && !showConversationLoading && !selectedConversation && !showSettings && activeTab !== 'trips' && !showSwellyShaper ? 'auto' : 'none'}
+            pointerEvents={showTripPlanningChat && !showProfile && !showConversationLoading && !selectedConversation && !showSettings && !showSwellyShaper ? 'auto' : 'none'}
           >
             <TripPlanningChatScreen
               onChatComplete={handleTripPlanningChatBack}
@@ -1998,7 +2007,7 @@ export const AppContent: React.FC = () => {
             // lets the home screen behind show through during the
             // slide/fade entry & swipe-back exit animations.
             style={[StyleSheet.absoluteFill, !showTripPlanningChatCopy && { display: 'none' }]}
-            pointerEvents={showTripPlanningChatCopy && !showProfile && !showConversationLoading && !selectedConversation && !showSettings && activeTab !== 'trips' && !showSwellyShaper ? 'auto' : 'none'}
+            pointerEvents={showTripPlanningChatCopy && !showProfile && !showConversationLoading && !selectedConversation && !showSettings && !showSwellyShaper ? 'auto' : 'none'}
           >
             <TripPlanningChatScreenCopy
               onChatComplete={() => { setShowTripPlanningChatCopy(false); setShowTripPlanningChat(false); setPendingOnboardingMatches(null); }}

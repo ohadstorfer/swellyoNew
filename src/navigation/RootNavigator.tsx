@@ -96,6 +96,8 @@ function FloatingTabBar({ state, navigation }: BottomTabBarProps) {
     }
   };
 
+  // ⚠ Keep ALL hooks above this line — this early return runs every render
+  // while an overlay covers the roots (Rules of Hooks).
   if (barSuppressed) return null;
 
   return (
