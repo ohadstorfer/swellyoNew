@@ -47,14 +47,8 @@ function LineupTabScreen() {
 }
 
 function TripsTabScreen() {
-  const { tripsProps, navControl, setTripsInnerOverlayOpen } = useMainNav();
-  return (
-    <TripsScreen
-      {...tripsProps}
-      navControl={navControl}
-      onInnerOverlayChange={setTripsInnerOverlayOpen}
-    />
-  );
+  const { tripsProps, navControl } = useMainNav();
+  return <TripsScreen {...tripsProps} navControl={navControl} />;
 }
 
 function ProfileTabScreen() {

@@ -916,13 +916,6 @@ export const AppContent: React.FC = () => {
   // it never remounts on page switches, so the pill animation plays across
   // them. Screens pipe scroll events into this shared control.
   const bottomNavControl = useTripsBottomNavControl();
-  // True while TripsScreen shows an internal full-screen overlay (trip detail
-  // or edit wizard) — the bar hides then.
-  const [tripsInnerOverlayOpen, setTripsInnerOverlayOpen] = useState(false);
-  // True while a DM / surftrip detail is pushed INSIDE ConversationsStack
-  // (Lineup-list chats use the inner stack, not the AppContent overlay) —
-  // the bar belongs to roots only.
-  const [lineupInnerScreenOpen, setLineupInnerScreenOpen] = useState(false);
   // --- Tab navigator bridge (nav migration Phase 1) ----------------------
   // The 3 roots live in RootNavigator now. activeTab mirrors the navigator
   // state for the legacy reads that still branch on "which page is showing"
@@ -951,13 +944,8 @@ export const AppContent: React.FC = () => {
   }, []);
   const handleRequestedTabConsumed = useCallback(() => setRequestedTab(null), []);
   // Surftrip detail + all chats are root-stack CARDS now (nav migration B1).
-  const [viewingUserId, setViewingUserId] = useState<string | null>(null);
-  const [profileFromSwellyShaper, setProfileFromSwellyShaper] = useState(false); // Track if profile was opened from Swelly Shaper
-  const [profileFromTripPlanningChat, setProfileFromTripPlanningChat] = useState(false); // Track if profile was opened from trip planning chat
-  // True while a participant profile is open from inside a TripDetailScreen.
-  // The Trips tab stays mounted under the profile overlay, so closing the
-  // overlay lands back on the open trip (see handleProfileBack).
-  const [profileFromTripDetail, setProfileFromTripDetail] = useState(false);
+  // The legacy ProfileScreen overlay is OWN-PROFILE ONLY now (post-onboarding
+  // + SwellyShaper flows) — other users' profiles are ProfileCard routes.
   const [profileFromOnboardingChat, setProfileFromOnboardingChat] = useState(false); // Track if profile was opened right after Swelly onboarding chat (special header)
   const [profileFromWelcomeOverlay, setProfileFromWelcomeOverlay] = useState(false); // Track if profile was opened from WelcomeToLineupOverlay
 
@@ -972,8 +960,6 @@ export const AppContent: React.FC = () => {
     otherUserId: string;
     otherUserName: string;
     otherUserAvatar: string | null;
-    fromTripPlanning: boolean;
-    fromTripPlanningCopy?: boolean;
     fromWelcomeOverlay?: boolean;
     conversationId?: string;
   } | null>(null);
@@ -1113,7 +1099,6 @@ export const AppContent: React.FC = () => {
 
   const handleProfileBack = () => {
     console.log('[AppContent] handleProfileBack called');
-    console.log('[AppContent] profileFromTripPlanningChat:', profileFromTripPlanningChat);
 
     // If profile was opened from WelcomeToLineupOverlay, return to overlay.
     // Start the modal fade-in immediately, but keep the profile mounted under it
@@ -1125,37 +1110,13 @@ export const AppContent: React.FC = () => {
       setWelcomeOverlayHiddenByProfile(false); // overlay starts fading back in
       setTimeout(() => {
         setShowProfile(false);
-        setViewingUserId(null);
       }, 350); // matches RN Modal fade duration
-      return;
-    }
-
-    // If profile was opened from the Swelly chat card: the card stayed
-    // mounted underneath the overlay — closing the overlay is enough.
-    if (profileFromTripPlanningChat) {
-      console.log('[AppContent] Returning to trip planning chat');
-      setShowProfile(false);
-      setViewingUserId(null);
-      setProfileFromTripPlanningChat(false);
-      return;
-    }
-
-    // If profile was opened from a participant card inside TripDetailScreen:
-    // the Trips tab (and its open trip detail) stayed MOUNTED underneath the
-    // profile overlay — closing the overlay is enough, no restore dance.
-    if (profileFromTripDetail) {
-      console.log('[AppContent] Returning to trip detail');
-      setShowProfile(false);
-      setViewingUserId(null);
-      setProfileFromTripDetail(false);
       return;
     }
 
     // Otherwise, navigate back to conversations/home (homepage)
     console.log('[AppContent] Navigating to conversations/home');
     setShowProfile(false);
-    setViewingUserId(null);
-    setProfileFromSwellyShaper(false); // Reset flag if it was set
     setProfileFromOnboardingChat(false); // Reset so next profile open uses normal header
   };
 
@@ -1178,8 +1139,6 @@ export const AppContent: React.FC = () => {
 
   const handleSwellyShaperBack = () => {
     // Navigate back from Swelly Shaper to profile
-    // Set flag so back button knows to return to Swelly Shaper
-    setProfileFromSwellyShaper(true);
     setShowSwellyShaper(false);
     setShowProfile(true);
   };
@@ -1189,7 +1148,6 @@ export const AppContent: React.FC = () => {
     console.log('[AppContent] Current state - showSwellyShaper:', showSwellyShaper, 'showProfile:', showProfile);
     // Navigate from Swelly Shaper to profile - set flag so user sees Edit/Save header and can save or go back to Swelly Shaper
     setProfileFromOnboardingChat(true);
-    setViewingUserId(null); // Ensure viewing own profile
     setShowSwellyShaper(false);
     setShowProfile(true);
     console.log('[AppContent] After state update - should show profile now');
@@ -1245,18 +1203,13 @@ export const AppContent: React.FC = () => {
 
   const handleProfilePress = () => {
     // Own profile is a tab root now — switch tabs instead of opening the overlay.
-    setProfileFromSwellyShaper(false);
-    setViewingUserId(null);
     requestTab('profile');
   };
 
-  const handleViewUserProfile = (userId: string, fromTripPlanningChat?: boolean) => {
-    console.log('[AppContent] handleViewUserProfile called with userId:', userId, 'fromTripPlanningChat:', fromTripPlanningChat);
+  const handleViewUserProfile = (userId: string) => {
+    console.log('[AppContent] handleViewUserProfile called with userId:', userId);
     // Navigate to another user's profile
-    // Reset flags
-    setProfileFromSwellyShaper(false);
-    setProfileFromTripPlanningChat(fromTripPlanningChat || false);
-    
+
     // Preload surf level video early (non-blocking) before navigation
     const preloadUserProfileVideo = async (targetUserId: string) => {
       try {
@@ -1393,16 +1346,10 @@ export const AppContent: React.FC = () => {
   const handleStartConversation = async (userId: string, otherUserName?: string, otherUserAvatar?: string | null) => {
     console.log('[AppContent] ========== handleStartConversation START ==========');
     console.log('[AppContent] handleStartConversation called with userId:', userId);
-    console.log('[AppContent] Current state - profileFromTripPlanningChat:', profileFromTripPlanningChat);
     console.log('[AppContent] Current state - showConversationLoading:', showConversationLoading);
     console.log('[AppContent] Current state - pendingConversation:', pendingConversation);
 
     try {
-      // Swelly-origin chats: the Swelly CARD stays mounted in the stack
-      // beneath whatever opens next, so "return to chat" is automatic — the
-      // flag only still matters for conversation metadata.
-      const isFromTripPlanning = profileFromTripPlanningChat || false;
-      
       // Check if conversation already exists using in-memory context (already loaded)
       console.log('[AppContent] Checking if conversation exists for userId:', userId);
       const existingConv = messagingConversations.find(conv =>
@@ -1430,7 +1377,6 @@ export const AppContent: React.FC = () => {
           otherUserId: userId,
           otherUserName: otherUserName || 'User',
           otherUserAvatar: otherUserAvatar || null,
-          fromTripPlanning: isFromTripPlanning,
           fromWelcomeOverlay: profileFromWelcomeOverlay || false,
         });
         console.log('[AppContent] pendingConversation state updated');
@@ -1468,7 +1414,6 @@ export const AppContent: React.FC = () => {
       // flow); card-origin calls leave state untouched (no spurious re-render).
       if (showProfile) {
         setShowProfile(false);
-        setViewingUserId(null);
       }
       
       console.log('[AppContent] ========== handleStartConversation COMPLETE ==========');
@@ -1603,8 +1548,6 @@ export const AppContent: React.FC = () => {
       setActiveTab('lineup');
       prevTabRef.current = 'lineup';
       setRequestedTab(null);
-      setLineupInnerScreenOpen(false);
-      setTripsInnerOverlayOpen(false);
     }
   }, [shouldShowConversations]);
 
@@ -1695,7 +1638,7 @@ export const AppContent: React.FC = () => {
   // The auth guard now handles all authentication redirects after session restoration completes
 
   if (shouldShowConversations) {
-    console.log('[AppContent] Rendering check - showProfile:', showProfile, 'viewingUserId:', viewingUserId);
+    console.log('[AppContent] Rendering check - showProfile:', showProfile);
     console.log('[AppContent] Rendering check - showConversationLoading:', showConversationLoading, 'pendingConversation:', !!pendingConversation);
 
     // True only when the conversations list is the topmost visible layer.
@@ -1714,8 +1657,6 @@ export const AppContent: React.FC = () => {
     // Cards cover it natively; this list is the legacy overlays that render
     // ABOVE the navigator and would otherwise float over the bar.
     const barSuppressed =
-      tripsInnerOverlayOpen ||
-      lineupInnerScreenOpen ||
       showConversationLoading ||
       showSwellyShaper ||
       showProfile ||
@@ -1736,12 +1677,10 @@ export const AppContent: React.FC = () => {
         />
       );
     } else if (showProfile) {
-      console.log('[AppContent] Rendering ProfileScreen for userId:', viewingUserId);
-      console.log('[AppContent] profileFromSwellyShaper flag:', profileFromSwellyShaper);
+      console.log('[AppContent] Rendering ProfileScreen (own profile overlay)');
       activeOverlay = (
         <ProfileScreen
           onBack={handleProfileBack}
-          userId={viewingUserId ?? undefined}
           onMessage={handleStartConversation}
           fromOnboardingChat={profileFromOnboardingChat}
           onSaveAndGoToConversations={handleSaveAndGoToConversations}
@@ -1775,7 +1714,6 @@ export const AppContent: React.FC = () => {
     const mainNavValue: MainNavContextValue = {
       navControl: bottomNavControl,
       barSuppressed,
-      setTripsInnerOverlayOpen,
       onTabChange: handleTabChange,
       requestedTab,
       onRequestedTabConsumed: handleRequestedTabConsumed,
@@ -1814,7 +1752,6 @@ export const AppContent: React.FC = () => {
         onChatComplete: () => setPendingOnboardingMatches(null),
       },
       lineupProps: {
-        onInnerScreenChange: setLineupInnerScreenOpen,
         isListFrontmost,
         onConversationPress: handleConversationPress,
         onSwellyPress: handleSwellyPress,
@@ -1905,7 +1842,6 @@ export const AppContent: React.FC = () => {
               otherUserId: match.user_id,
               otherUserName: match.name || 'User',
               otherUserAvatar: match.profile_image_url || null,
-              fromTripPlanning: false,
               fromWelcomeOverlay: true,
             });
             setShowConversationLoading(true);

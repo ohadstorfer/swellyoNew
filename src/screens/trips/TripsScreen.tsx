@@ -84,9 +84,6 @@ interface TripsScreenProps {
   /** Shared control for the app-level floating nav bar — the tab lists pipe
    *  their scroll events into it so the bar collapses/restores. */
   navControl?: TripsBottomNavControl;
-  /** Legacy (Phase 2): trip detail/edit are root-stack cards now, so no inner
-   *  overlay exists anymore. Kept until Phase 5 cleanup. */
-  onInnerOverlayChange?: (open: boolean) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -1021,7 +1018,7 @@ const TabPane: React.FC<{
 // ---------------------------------------------------------------------------
 // Wrapper screen
 // ---------------------------------------------------------------------------
-export default function TripsScreen({ onBack, navControl: navControlProp, onInnerOverlayChange }: TripsScreenProps) {
+export default function TripsScreen({ onBack, navControl: navControlProp }: TripsScreenProps) {
   const insets = useSafeAreaInsets();
   const { user: contextUser } = useOnboarding();
   const currentUserId = contextUser?.id?.toString() ?? null;

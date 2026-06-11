@@ -21,8 +21,6 @@ export interface MainNavContextValue {
   navControl: TripsBottomNavControl;
   /** Hide the floating bar (trip detail open, Swelly chat open, overlays…). */
   barSuppressed: boolean;
-  /** TripsScreen reports its internal detail/edit overlay state here. */
-  setTripsInnerOverlayOpen: (open: boolean) => void;
   /** Mirror of the active tab back into AppContent (legacy reads only). */
   onTabChange: (tab: NavKey) => void;
   /**
@@ -45,7 +43,7 @@ export interface MainNavContextValue {
     persistedMatchedUsers: any[];
     persistedDestination: string;
     onChatStateChange: (chatId: string | null, matchedUsers: any[], destination: string) => void;
-    onViewUserProfile: (userId: string, fromTripPlanningChat?: boolean) => void;
+    onViewUserProfile: (userId: string) => void;
     onStartConversation: (userId: string, otherUserName?: string, otherUserAvatar?: string | null) => void;
     onboardingMatches: any[] | null;
     onChatComplete: () => void;
@@ -80,10 +78,7 @@ export interface MainNavContextValue {
   };
 
   lineupProps: ComponentProps<typeof ConversationsStack>;
-  tripsProps: Omit<
-    ComponentProps<typeof TripsScreen>,
-    'navControl' | 'onInnerOverlayChange'
-  >;
+  tripsProps: Omit<ComponentProps<typeof TripsScreen>, 'navControl'>;
   profileProps: Pick<
     ComponentProps<typeof ProfileScreen>,
     'onBack' | 'onMessage' | 'onEdit' | 'onSettings' | 'noTransition' | 'swipeBackDisabled'

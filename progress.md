@@ -40,6 +40,18 @@
   chat/profile screens go native-card, no JS fallback.
 - Agreed workflow change: Phases 3+4 as ONE batch, Eyal tests once at the end
   (plus the spike, already done). Batch plan: docs/nav-migration/phase-3-4-batch.md.
+- BATCH BUILT (commits 114bb0c..27ba8d7): B2 Swelly card + Copy merge (B2 FIRST — z-order),
+  B1 all chats + surftrips as cards (ConversationsStack → thin wrapper, 3 DM paths unified),
+  B3 ProfileCard + Settings card + gear icon. B4 (wizard modal route) SKIPPED deliberately —
+  RN Modal already native+correct, conversion = risk for no gain.
+- Batch code review: z-order fix on loading→chat handoff (overlay commit before push —
+  setTimeout 0), stale-closure + dead-flag fixes applied (27ba8d7).
+- Remaining legacy overlays (intentional): SwellyShaper, own-profile fromOnboardingChat flow,
+  ConversationLoadingScreen, WelcomeToLineupOverlay, ProfileEditPanel, JoinDecisionOverlay.
+- Phase 5 cleanup list grew: viewingUserId always-null now, profileFrom* flags mostly dead,
+  react-native-screen-transitions package removal, ConversationsStack fold-in.
+- NEXT: Eyal full regression (checklist below in chat), then Phase 5.
+- tsc baseline now 253 (shrinks as dead code dies). iOS export verified after each commit.
 - NEXT after Phase 2 green: Phase 3 — STARTS WITH KEYBOARD SPIKE on device (DM in native-stack
   card; fallback JS sub-stack), then unify 3 DM paths, profile/Settings cards. See
   docs/nav-migration/phases-2-5-outline.md.

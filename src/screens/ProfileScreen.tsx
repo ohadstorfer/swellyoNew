@@ -2308,28 +2308,28 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
           null
         ) : (
           <>
-            {/* Back Button - Always visible, goes to ConversationsScreen (home) */}
-            <TouchableOpacity style={styles.backButton} onPress={handleBackPress}>
-              <View style={styles.backButtonContainer}>
-                <BackButtonIcon />
-              </View>
-            </TouchableOpacity>
+            {/* Top-left: on the own-profile ROOT the gear (Settings) lives
+                here INSTEAD of a back button — roots have no back. Cards and
+                other-user profiles keep the back button. */}
+            {isViewingOwnProfile && onSettings ? (
+              <TouchableOpacity style={styles.backButton} onPress={onSettings}>
+                <View style={styles.backButtonContainer}>
+                  <Ionicons name="settings-outline" size={24} color="#333" />
+                </View>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity style={styles.backButton} onPress={handleBackPress}>
+                <View style={styles.backButtonContainer}>
+                  <BackButtonIcon />
+                </View>
+              </TouchableOpacity>
+            )}
 
             {/* Edit Button - Only visible when viewing own profile */}
             {isViewingOwnProfile && onEdit ? (
               <TouchableOpacity style={styles.editButton} onPress={onEdit}>
                 <View style={styles.editButtonContainer}>
                   <EditButtonIcon />
-                </View>
-              </TouchableOpacity>
-            ) : null}
-
-            {/* Settings (gear) — own profile only; Settings moved here from
-                the Lineup menu (nav migration B3) */}
-            {isViewingOwnProfile && onSettings ? (
-              <TouchableOpacity style={styles.settingsButton} onPress={onSettings}>
-                <View style={styles.editButtonContainer}>
-                  <Ionicons name="settings-outline" size={24} color="#333" />
                 </View>
               </TouchableOpacity>
             ) : null}
@@ -3091,12 +3091,6 @@ const styles = StyleSheet.create({
   editButton: {
     position: 'absolute',
     right: spacing.md, // 16px gap from right edge
-    top: 54,
-    zIndex: 10,
-  },
-  settingsButton: {
-    position: 'absolute',
-    right: spacing.md + 44 + 10, // left of the edit pencil (44px button + 10px gap)
     top: 54,
     zIndex: 10,
   },

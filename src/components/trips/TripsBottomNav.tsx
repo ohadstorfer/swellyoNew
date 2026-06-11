@@ -193,10 +193,11 @@ interface TripsBottomNavProps {
 
 /**
  * Floating bottom nav bar (Figma nodes 12268:32990 / 12279:78439).
- * The white pill slides to the pressed item (The Lineup / Trips / Profile) —
- * visual state only for now, no page navigation. Rendered once at the bottom
- * of TripsScreen so it overlays all three tabs. Collapse state persists
- * across tab switches.
+ * The white pill slides to the pressed item (The Lineup / Trips / Profile).
+ * Rendered as the custom tabBar inside RootNavigator — one persistent
+ * instance above all three tab roots, so the pill animation and collapse
+ * state persist across tab switches. Cards pushed on the root stack cover
+ * it natively.
  */
 export default function TripsBottomNav({
   control,
