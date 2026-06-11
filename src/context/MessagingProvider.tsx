@@ -37,6 +37,7 @@ type ConversationAction =
   | { type: 'MARK_AS_READ'; payload: { conversationId: string } }
   | { type: 'INCREMENT_UNREAD'; payload: { conversationId: string } }
   | { type: 'SET_UNREAD_COUNT'; payload: { conversationId: string; count: number } }
+  | { type: 'SET_UNREAD_COUNTS'; payload: { counts: Record<string, number> } }
   | { type: 'REPLACE_ALL'; payload: { conversations: Conversation[] } }
   | { type: 'APPEND_CONVERSATIONS'; payload: { conversations: Conversation[] } }
   | { type: 'SYNC_FROM_SERVER'; payload: { conversations: Conversation[] } }
@@ -182,13 +183,32 @@ const conversationReducer = (state: Conversation[], action: ConversationAction):
       const { conversationId, count } = action.payload;
       const index = state.findIndex(c => c.id === conversationId);
       if (index === -1) return state;
-      
+      // Bail out when nothing changes — a new array identity re-renders every
+      // consumer of the context (AppContent downward), so no-op dispatches
+      // must not produce new state.
+      if (state[index].unread_count === count) return state;
+
       const updated = [...state];
       updated[index] = {
         ...updated[index],
         unread_count: count,
       };
       return updated;
+    }
+
+    case 'SET_UNREAD_COUNTS': {
+      // Batched form: one dispatch (= one re-render) for a whole sync pass,
+      // instead of one per conversation. Bails out when every count already
+      // matches.
+      const { counts } = action.payload;
+      let changed = false;
+      const updated = state.map(c => {
+        const count = counts[c.id];
+        if (count === undefined || c.unread_count === count) return c;
+        changed = true;
+        return { ...c, unread_count: count };
+      });
+      return changed ? updated : state;
     }
     
     case 'UPDATE_CONVERSATION': {
@@ -1037,15 +1057,18 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
       
       if (updated.length > 0) {
         dispatch({ type: 'SYNC_FROM_SERVER', payload: { conversations: updated } });
-        
-        // AUTHORITATIVE: Recalculate all unread counts after reconnect
-        for (const conv of updated) {
-          const unreadCount = await messagingService.getUnreadCount(conv.id);
-          dispatch({ 
-            type: 'SET_UNREAD_COUNT', 
-            payload: { conversationId: conv.id, count: unreadCount } 
-          });
-        }
+
+        // AUTHORITATIVE: Recalculate all unread counts after reconnect.
+        // Fetched in parallel and applied as ONE dispatch — the old
+        // one-dispatch-per-conversation loop re-rendered the whole app once
+        // per conversation (85 convs = 85 full re-renders per sync).
+        const counts: Record<string, number> = {};
+        await Promise.all(
+          updated.map(async (conv) => {
+            counts[conv.id] = await messagingService.getUnreadCount(conv.id);
+          })
+        );
+        dispatch({ type: 'SET_UNREAD_COUNTS', payload: { counts } });
       }
       
       await updateLastSyncTimestamp();
@@ -1097,13 +1120,15 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
       const updated = await messagingService.getConversationsUpdatedSince(0, conversationIds);
       if (updated.length > 0) {
         dispatch({ type: 'SYNC_FROM_SERVER', payload: { conversations: updated } });
-        for (const conv of updated) {
-          const unreadCount = await messagingService.getUnreadCount(conv.id);
-          dispatch({
-            type: 'SET_UNREAD_COUNT',
-            payload: { conversationId: conv.id, count: unreadCount },
-          });
-        }
+        // Parallel fetch + single batched dispatch (one re-render, not one per
+        // conversation — see handleReconnect for the same pattern).
+        const counts: Record<string, number> = {};
+        await Promise.all(
+          updated.map(async (conv) => {
+            counts[conv.id] = await messagingService.getUnreadCount(conv.id);
+          })
+        );
+        dispatch({ type: 'SET_UNREAD_COUNTS', payload: { counts } });
       }
     } catch (error) {
       console.error('[MessagingProvider] Error syncing on inbox change:', error);

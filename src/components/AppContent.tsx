@@ -32,6 +32,9 @@ import {
   type UnseenJoinDecision,
 } from '../services/trips/groupTripsService';
 import { supabase } from '../config/supabase';
+import { queryClient } from '../lib/queryClient';
+import { tripsKeys } from '../hooks/trips/useTripQueries';
+import { userTripsTopic } from '../services/trips/tripsRealtime';
 import { ProfileEditPanel } from './ProfileEditPanel/ProfileEditPanel';
 import { useUserProfile } from '../context/UserProfileContext';
 import { useTutorial } from '../context/TutorialContext';
@@ -993,27 +996,35 @@ export const AppContent: React.FC = () => {
   // the overlay fires immediately instead of waiting for the next cold open.
   // Deduped by request_id against the queue so the boot fetch + live event can
   // race without showing twice.
+  // Private per-user Broadcast topic fed by the broadcast_trip_change DB
+  // trigger (replaces the per-user postgres_changes listener, which cost an
+  // RLS evaluation per event per subscriber with every signed-in user holding
+  // one open).
   useEffect(() => {
     const userId = user?.id ? String(user.id) : null;
     if (!userId) return;
     const channel = supabase
-      .channel(`join-decisions:${userId}`)
+      .channel(userTripsTopic(userId), { config: { private: true } })
       .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'group_trip_join_requests',
-          filter: `requester_id=eq.${userId}`,
-        },
-        async (payload) => {
-          const row = (payload as { new?: Record<string, unknown> }).new;
+        'broadcast',
+        { event: 'join_request_changed' },
+        async ({ payload }: any) => {
+          if (payload?.op !== 'UPDATE') return; // decisions are status UPDATEs
+          const row = payload?.request as Record<string, unknown> | undefined;
           if (!row) return;
           const status = row.status;
           if (status !== 'approved' && status !== 'declined') return;
-          if (row.seen_decision_at) return; // host or another tab already marked
           const requestId = row.id as string;
           const tripId = row.trip_id as string;
+
+          // The decision changed this user's standing on the trip — bust every
+          // cached view of it so the My Trips buckets and an already-open
+          // detail screen refetch. Must run before the seen_decision_at guard:
+          // the cache is stale either way, the overlay is what's deduped.
+          queryClient.invalidateQueries({ queryKey: tripsKeys.detail(tripId) });
+          queryClient.invalidateQueries({ queryKey: ['trips', 'my'] });
+
+          if (row.seen_decision_at) return; // host or another tab already marked
 
           const { data: trip } = await supabase
             .from('group_trips')

@@ -312,6 +312,15 @@ class MessagingService {
     }
 
     try {
+      const tStart = Date.now();
+      let tPrev = tStart;
+      const stageTimes: string[] = [];
+      const markStage = (label: string) => {
+        const now = Date.now();
+        stageTimes.push(`${label}=${now - tPrev}ms`);
+        tPrev = now;
+      };
+
       // Ensure we have a valid session
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
       if (sessionError || !session) {
@@ -324,6 +333,7 @@ class MessagingService {
         console.log('[messagingService] No user in getConversations - auth guard will handle redirect');
         return { conversations: [], hasMore: false }; // Return empty array, auth guard will redirect
       }
+      markStage('auth');
 
       // Get ALL conversation IDs the user is a member of. We can't paginate on
       // conversation_members directly because its natural sort (joined_at) does
@@ -336,6 +346,7 @@ class MessagingService {
         .eq('user_id', user.id);
 
       if (membershipError) throw membershipError;
+      markStage('memberships');
 
       const allMemberConversationIds = (membershipData || []).map(m => m.conversation_id);
 
@@ -353,6 +364,7 @@ class MessagingService {
         .range(offset, offset + limit); // inclusive-inclusive → up to limit+1
 
       if (conversationsError) throw conversationsError;
+      markStage('page');
 
       const receivedCount = pagedConversations?.length || 0;
       const hasMore = receivedCount > limit;
@@ -363,15 +375,35 @@ class MessagingService {
         return { conversations: [], hasMore: false };
       }
 
-      // OPTIMIZATION 2: Fetch all last messages using PostgreSQL DISTINCT ON via RPC
-      // This guarantees exactly one message per conversation (the most recent)
+      // Queries 5, 6, 7 each depend only on conversationIds — run them
+      // concurrently. Supabase builders resolve {data, error} and never
+      // reject, so Promise.all cannot short-circuit and each error keeps
+      // its original non-fatal handling below. Array order intentionally
+      // matches the old sequential order (conversation_members is queried
+      // twice; relative order is observable).
+      const [lastMessagesRes, allMembersRes, userMemberRes] = await Promise.all([
+        supabase
+          .rpc('get_last_messages_per_conversation', {
+            conv_ids: conversationIds
+          }),
+        supabase
+          .from('conversation_members')
+          .select('conversation_id, user_id, role, joined_at, last_read_message_id, last_read_at, preferences')
+          .in('conversation_id', conversationIds),
+        supabase
+          .from('conversation_members')
+          .select('conversation_id, last_read_at')
+          .eq('user_id', user.id)
+          .in('conversation_id', conversationIds),
+      ]);
+      const { data: lastMessages, error: messagesError } = lastMessagesRes;
+      const { data: allMembersData, error: allMembersError } = allMembersRes;
+      const { data: userMemberData, error: userMemberError } = userMemberRes;
+      markStage('lastMessages+members+readState');
+
+      // OPTIMIZATION 2 (processing): one last message per conversation (the most recent)
       // Much more efficient and reliable than fetching many messages and filtering in JavaScript
       // Solves the issue where only the first few conversations show last message text
-      const { data: lastMessages, error: messagesError } = await supabase
-        .rpc('get_last_messages_per_conversation', {
-          conv_ids: conversationIds
-        });
-
       if (messagesError) {
         console.error('Error fetching last messages:', messagesError);
       }
@@ -385,12 +417,7 @@ class MessagingService {
       });
       }
 
-      // OPTIMIZATION 3: Batch fetch all member data for all conversations
-      const { data: allMembersData, error: allMembersError } = await supabase
-        .from('conversation_members')
-        .select('conversation_id, user_id, role, joined_at, last_read_message_id, last_read_at, preferences')
-        .in('conversation_id', conversationIds);
-
+      // OPTIMIZATION 3 (processing): member data for all conversations
       if (allMembersError) {
         console.error('Error fetching all members:', allMembersError);
       }
@@ -402,13 +429,7 @@ class MessagingService {
       });
       const userIdsArray = Array.from(allUserIds);
 
-      // OPTIMIZATION 4: Get current user's read status for all conversations in one query
-      const { data: userMemberData, error: userMemberError } = await supabase
-        .from('conversation_members')
-        .select('conversation_id, last_read_at')
-        .eq('user_id', user.id)
-        .in('conversation_id', conversationIds);
-
+      // OPTIMIZATION 4 (processing): current user's read status
       if (userMemberError) {
         console.error('Error fetching user member data:', userMemberError);
       }
@@ -416,35 +437,6 @@ class MessagingService {
       const userReadMap = new Map<string, string | null>();
       (userMemberData || []).forEach(member => {
         userReadMap.set(member.conversation_id, member.last_read_at);
-      });
-
-      // OPTIMIZATION 5: Fetch user names EARLY and in parallel with unread counts
-      // This allows names to be available immediately
-      const [usersResult, surfersResult] = await Promise.all([
-        supabase
-          .from('users')
-          .select('id, email')
-          .in('id', userIdsArray),
-        supabase
-          .from('surfers')
-          .select('user_id, name, profile_image_url')
-          .in('user_id', userIdsArray)
-      ]);
-
-      const usersData = usersResult.data || [];
-      const surfersData = surfersResult.data || [];
-
-      // Create lookup maps early (before unread counts calculation)
-      const usersMap = new Map(usersData.map(u => [u.id, u]));
-      const surfersMap = new Map(surfersData.map(s => [s.user_id, s]));
-
-      // OPTIMIZATION 6: Calculate unread counts in a SINGLE query (instead of N queries)
-      // Fetch all unread messages for all conversations, then count per conversation in JavaScript
-      const unreadCountMap = new Map<string, number>();
-      
-      // Initialize all conversations with 0 unread
-      conversations.forEach(conv => {
-        unreadCountMap.set(conv.id, 0);
       });
 
       // Fetch all unread messages for all conversations in one query
@@ -458,20 +450,51 @@ class MessagingService {
 
       // Fetch all messages that could potentially be unread
       // Use oldest last_read_at as the lower bound (or epoch if none exist)
-      const cutoffDate = oldestLastReadAt > 0 
+      const cutoffDate = oldestLastReadAt > 0
         ? new Date(oldestLastReadAt).toISOString()
         : new Date(0).toISOString(); // Epoch if no last_read_at
 
       // CRITICAL: Add limit to prevent fetching thousands of unread messages
       const UNREAD_MESSAGES_LIMIT = 1000;
-      const { data: unreadMessages, error: unreadError } = await supabase
+
+      // Queries 8 (profiles, needs userIds from q6) and 9 (unreads, needs
+      // cutoff from q7) are independent of each other — run concurrently.
+      const [usersResult, surfersResult, unreadResult] = await Promise.all([
+        supabase
+          .from('users')
+          .select('id, email')
+          .in('id', userIdsArray),
+        supabase
+          .from('surfers')
+          .select('user_id, name, profile_image_url')
+          .in('user_id', userIdsArray),
+        supabase
           .from('messages')
-        .select('id, conversation_id, sender_id, created_at')
-        .in('conversation_id', conversationIds)
+          .select('id, conversation_id, sender_id, created_at')
+          .in('conversation_id', conversationIds)
           .eq('deleted', false)
-        .neq('sender_id', user.id)
-        .gt('created_at', cutoffDate)
-        .limit(UNREAD_MESSAGES_LIMIT);
+          .neq('sender_id', user.id)
+          .gt('created_at', cutoffDate)
+          .limit(UNREAD_MESSAGES_LIMIT),
+      ]);
+      const { data: unreadMessages, error: unreadError } = unreadResult;
+      markStage('profiles+unread');
+
+      const usersData = usersResult.data || [];
+      const surfersData = surfersResult.data || [];
+
+      // Create lookup maps early (before unread counts calculation)
+      const usersMap = new Map(usersData.map(u => [u.id, u]));
+      const surfersMap = new Map(surfersData.map(s => [s.user_id, s]));
+
+      // OPTIMIZATION 6 (processing): count unread messages per conversation in
+      // JavaScript (fetched above in a SINGLE query instead of N queries)
+      const unreadCountMap = new Map<string, number>();
+      
+      // Initialize all conversations with 0 unread
+      conversations.forEach(conv => {
+        unreadCountMap.set(conv.id, 0);
+      });
 
       // Track if we hit the limit (indicates there may be more unread messages)
       const hitUnreadLimit = unreadMessages && unreadMessages.length === UNREAD_MESSAGES_LIMIT;
@@ -482,7 +505,7 @@ class MessagingService {
         unreadMessages.forEach(msg => {
           const lastReadAt = userReadMap.get(msg.conversation_id);
           const msgTime = new Date(msg.created_at).getTime();
-          
+
           if (lastReadAt) {
             const lastReadTime = new Date(lastReadAt).getTime();
             if (msgTime > lastReadTime) {
@@ -562,6 +585,10 @@ class MessagingService {
           members: enrichedMembers,
         };
       });
+
+      if (__DEV__) {
+        console.log(`[messagingService] getConversations stages: total=${Date.now() - tStart}ms :: ${stageTimes.join(' ')}`);
+      }
 
       return { conversations: enrichedConversations, hasMore };
     } catch (error) {
