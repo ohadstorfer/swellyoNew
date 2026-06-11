@@ -290,7 +290,7 @@ export const AppContent: React.FC = () => {
       AsyncStorage.removeItem('pendingGroupTripInvite').catch(() => {});
       tripInviteResolverRef.current = false;
     }
-  }, [pendingTripInviteId, user, isComplete, isDemoUser]);
+  }, [pendingTripInviteId, user, isComplete, isDemoUser, openTripCard]);
 
   // Validate session whenever a user is signed in (regardless of onboarding
   // completion). This unblocks mid-onboarding users who would otherwise be
@@ -403,7 +403,7 @@ export const AppContent: React.FC = () => {
         }
       }
     );
-  }, [getCurrentConversationId]);
+  }, [getCurrentConversationId, openTripCard]);
 
   // Check if MVP and dev modes are enabled
   const isMVPMode = process.env.EXPO_PUBLIC_MVP_MODE === 'true';

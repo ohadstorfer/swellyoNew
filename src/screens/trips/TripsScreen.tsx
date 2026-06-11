@@ -62,8 +62,6 @@ import Reanimated, {
   useSharedValue,
   withTiming,
   type SharedValue,
-  SlideInRight,
-  SlideOutRight,
 } from 'react-native-reanimated';
 
 // Hosting-style chooser content. Lifted out of CreateTripWizard so the chooser
@@ -1753,13 +1751,6 @@ const styles = StyleSheet.create({
 
   // Inline hosting-style chooser (moved out of CreateTripWizard).
   createRoot: { flex: 1 },
-  // Full-screen pushed-page overlay (trip overview / edit wizard). Solid
-  // background so the lists underneath never bleed through.
-  screenOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 20,
-    backgroundColor: '#FFFFFF',
-  },
   createBgWrap: {
     ...StyleSheet.absoluteFillObject,
     overflow: 'hidden',

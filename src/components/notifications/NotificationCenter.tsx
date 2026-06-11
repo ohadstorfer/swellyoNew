@@ -154,8 +154,9 @@ export const NotificationsPanel: React.FC<PanelProps> = ({ userId, onClose, onOp
   // duration of this viewing even after we mark them read.
   const unreadAtOpen = useRef<Set<string>>(new Set());
 
-  // Drawer position: 0 = fully open, `panelWidth` = fully off-screen to the right.
-  const translateX = useRef(new Animated.Value(0)).current;
+  // Drawer position: 0 = fully open, `panelWidth` = fully off-screen to the
+  // right. Starts off-screen so the first frame has no opaque-backdrop flash.
+  const translateX = useRef(new Animated.Value(panelWidth)).current;
   const dragStartedAt = useRef(0);
 
   // Backdrop dims in as the panel slides in.
