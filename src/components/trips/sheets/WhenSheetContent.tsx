@@ -385,12 +385,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   monthCubeMid: {
-    backgroundColor: C.brandTealTint,
-    borderColor: C.brandTeal,
+    backgroundColor: '#F2F2F2',
+    borderColor: '#212121',
   },
   monthCubeEndpoint: {
-    backgroundColor: C.brandTeal,
-    borderColor: C.brandTeal,
+    backgroundColor: '#212121',
+    borderColor: '#212121',
   },
   monthCubeText: {
     fontFamily: FONT_INTER,
@@ -401,7 +401,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   monthCubeTextMid: {
-    color: C.brandTealText,
+    color: '#212121',
   },
   monthCubeTextEndpoint: {
     color: '#FFFFFF',
@@ -447,7 +447,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    backgroundColor: C.brandTeal,
+    backgroundColor: '#212121',
   },
   unitPillText: {
     fontFamily: FONT_INTER,

@@ -15,6 +15,7 @@ import { OnboardingScaffold } from './onboarding/OnboardingScaffold';
 import { TripPlanningChatScreen } from '../screens/TripPlanningChatScreen';
 import { TripPlanningChatScreen as TripPlanningChatScreenCopy } from '../screens/TripPlanningChatScreenCopy';
 import ConversationsStack from '../navigation/ConversationsStack';
+import TripsBottomNav, { useTripsBottomNavControl, type NavKey } from './trips/TripsBottomNav';
 import TripsScreen from '../screens/trips/TripsScreen';
 import SurftripDetailScreen from '../screens/surftrips/SurftripDetailScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
@@ -900,6 +901,13 @@ export const AppContent: React.FC = () => {
   const [showSwellyShaper, setShowSwellyShaper] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showTrips, setShowTrips] = useState(false);
+  // The ONE floating bottom nav, persistent above Lineup / Trips / Profile —
+  // it never remounts on page switches, so the pill animation plays across
+  // them. Screens pipe scroll events into this shared control.
+  const bottomNavControl = useTripsBottomNavControl();
+  // True while TripsScreen shows an internal full-screen overlay (trip detail
+  // or edit wizard) — the bar hides then.
+  const [tripsInnerOverlayOpen, setTripsInnerOverlayOpen] = useState(false);
   const [activeSurftripDetailId, setActiveSurftripDetailId] = useState<string | null>(null);
   const [viewingUserId, setViewingUserId] = useState<string | null>(null);
   const [profileFromSwellyShaper, setProfileFromSwellyShaper] = useState(false); // Track if profile was opened from Swelly Shaper
@@ -1727,6 +1735,24 @@ export const AppContent: React.FC = () => {
       !showWelcomeToLineupOverlay &&
       !showProfileEditor;
 
+    // The floating bottom nav shows on its three home surfaces: the Lineup
+    // list, the Trips tabs (not its inner detail/edit overlays), and the
+    // user's OWN profile. It's ONE persistent component rendered above the
+    // overlay stack, so the pill animation plays across page switches.
+    const showBottomNav =
+      isListFrontmost ||
+      (showTrips && !activeSurftripDetailId && !tripsInnerOverlayOpen) ||
+      (showProfile &&
+        !viewingUserId && // own profile only
+        !activeSurftripDetailId &&
+        !showTrips &&
+        !showSettings &&
+        !showSwellyShaper &&
+        !profileFromOnboardingChat && // post-onboarding profile has its own flow
+        !showProfileEditor &&
+        !showWelcomeToLineupOverlay);
+    const bottomNavActive: NavKey = showTrips ? 'trips' : showProfile ? 'profile' : 'lineup';
+
     // Determine which overlay screen (if any) should cover ConversationsStack.
     // ConversationsStack stays mounted underneath so scroll position and UI state
     // survive navigation to Profile/Settings/Trips/DM/etc. Priority order matches
@@ -1751,6 +1777,8 @@ export const AppContent: React.FC = () => {
           initialTripId={pendingTripDetailId}
           onOpenGroupChat={handleOpenGroupChat}
           onViewUserProfile={handleViewUserProfileFromTrip}
+          navControl={bottomNavControl}
+          onInnerOverlayChange={setTripsInnerOverlayOpen}
         />
       );
     } else if (showSettings) {
@@ -1912,6 +1940,38 @@ export const AppContent: React.FC = () => {
           </View>
         )}
         {activeOverlay && <View style={StyleSheet.absoluteFill}>{activeOverlay}</View>}
+        {/* THE floating bottom nav — one persistent instance above all pages,
+            so the pill animation plays across instant page switches. */}
+        {showBottomNav && (
+          <TripsBottomNav
+            control={bottomNavControl}
+            active={bottomNavActive}
+            onLineupPress={() => {
+              setPendingTripDetailId(null);
+              setShowTrips(false);
+              setShowProfile(false);
+              setViewingUserId(null);
+            }}
+            onTripsPress={() => {
+              setShowProfile(false);
+              setViewingUserId(null);
+              setShowTrips(true);
+            }}
+            onProfilePress={() => {
+              // From Trips, the profile back button should return to Trips
+              // (profileFromTripDetail reuses that path); from the Lineup it
+              // falls through to home.
+              if (showTrips) {
+                setProfileFromTripDetail(true);
+                setPendingTripDetailId(null);
+                setShowTrips(false);
+              }
+              setProfileFromSwellyShaper(false);
+              setViewingUserId(null); // own profile
+              setShowProfile(true);
+            }}
+          />
+        )}
         {process.env.EXPO_PUBLIC_LOCAL_MODE === 'true' && (
           <TouchableOpacity
             style={{ position: 'absolute', top: 60, right: 10, backgroundColor: '#333', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, zIndex: 999, opacity: 0.7, display: 'none' }}

@@ -18,6 +18,9 @@
 //   • Accommodation is a rounded-32 card with an info pill.
 
 import React, { useEffect, useState } from 'react';
+// Remote user-content images (hero, avatars, stay photo) go through expo-image
+// for its disk cache — upload URLs are immutable, so cached copies never stale.
+import { Image as CachedImage } from 'expo-image';
 import {
   View,
   Text,
@@ -407,13 +410,13 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
   // mirroring the create-trip "About you" stats (age, origin, level, board, trips).
   // Two lines of badges (mirrors the create-flow "About you" card): top =
   // trips + board, bottom = level, age, origin.
-  const hostBadgesTop: string[] = isOperator && aboutHost
+  const hostBadgesTop: string[] = aboutHost
     ? ([
         aboutHost.surfTrips != null ? `${aboutHost.surfTrips} Surf Trips` : null,
         aboutHost.boardLabel,
       ].filter(Boolean) as string[])
     : [];
-  const hostBadgesBottom: string[] = isOperator && aboutHost
+  const hostBadgesBottom: string[] = aboutHost
     ? ([
         aboutHost.surfLevelLabel,
         aboutHost.age != null ? `${aboutHost.age} yrs` : null,
@@ -421,6 +424,24 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
       ].filter(Boolean) as string[])
     : [];
   const hasHostBadges = hostBadgesTop.length > 0 || hostBadgesBottom.length > 0;
+
+  // "Local knowledge" lines for the About block — the host's familiarity with the
+  // destination and the stay (Captain + Operator). Names come from the trip VM.
+  const hostFamiliarity: { icon: keyof typeof Ionicons.glyphMap; place: string; label: string }[] = [];
+  if (aboutHost?.destinationFamiliarityLabel && vm.destinationLabel) {
+    hostFamiliarity.push({
+      icon: 'navigate-outline',
+      place: vm.destinationLabel,
+      label: aboutHost.destinationFamiliarityLabel,
+    });
+  }
+  if (aboutHost?.stayFamiliarityLabel && vm.accommodationName) {
+    hostFamiliarity.push({
+      icon: 'home-outline',
+      place: vm.accommodationName,
+      label: aboutHost.stayFamiliarityLabel,
+    });
+  }
 
   return (
     <View style={styles.root}>
@@ -430,7 +451,13 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
       {/* ---- Hero + overlapping card with countdown ---- */}
       <View style={styles.heroWrap}>
         {vm.heroImageUri ? (
-          <Image source={{ uri: vm.heroImageUri }} style={styles.hero} resizeMode="cover" />
+          <CachedImage
+            source={{ uri: vm.heroImageUri }}
+            style={styles.hero}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+            transition={150}
+          />
         ) : (
           <View style={[styles.hero, styles.heroPlaceholder]}>
             <Ionicons name="image-outline" size={40} color="#B0B0B0" />
@@ -531,11 +558,18 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
           {/* ---- About <host> (organizer self-intro) — host_lead_note. Shown
                   when the host wrote one, or always to the host so they can add
                   one via "Edit Profile". ---- */}
-          {!isPlannedTogether && aboutHost && (aboutHost.bio || isHost || hasHostBadges) ? (
+          {!isPlannedTogether &&
+          aboutHost &&
+          (aboutHost.bio || isHost || hasHostBadges || hostFamiliarity.length > 0) ? (
             <View style={styles.section}>
               <View style={styles.aboutHostHeader}>
                 {aboutHost.avatarUrl ? (
-                  <Image source={{ uri: aboutHost.avatarUrl }} style={styles.aboutHostAvatar} />
+                  <CachedImage
+                    source={{ uri: aboutHost.avatarUrl }}
+                    style={styles.aboutHostAvatar}
+                    contentFit="cover"
+                    cachePolicy="memory-disk"
+                  />
                 ) : (
                   <View style={[styles.aboutHostAvatar, styles.aboutHostAvatarEmpty]}>
                     <Ionicons name="person" size={22} color="#FFFFFF" />
@@ -574,6 +608,19 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
                       ))}
                     </View>
                   ) : null}
+                </View>
+              ) : null}
+              {hostFamiliarity.length > 0 ? (
+                <View style={styles.hostFamiliarity}>
+                  {hostFamiliarity.map((f, i) => (
+                    <View key={`fam-${i}`} style={styles.hostFamRow}>
+                      <Ionicons name={f.icon} size={16} color={C.brandTeal} />
+                      <Text style={styles.hostFamText}>
+                        <Text style={styles.hostFamPlace}>{f.place}</Text>
+                        {` · ${f.label}`}
+                      </Text>
+                    </View>
+                  ))}
                 </View>
               ) : null}
               {aboutHost.bio ? (
@@ -683,78 +730,6 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
             </View>
           ) : null}
 
-          {/* ---- Meet your Captain (Flow B) ---- */}
-          {vm.leader ? (
-            <View style={styles.section}>
-              <SectionTitle title="Meet your Captain" />
-              <View style={styles.leaderBlock}>
-                <TouchableOpacity
-                  activeOpacity={onLeaderPress ? 0.8 : 1}
-                  onPress={onLeaderPress}
-                  disabled={!onLeaderPress}
-                  style={styles.leaderTop}
-                  accessibilityRole={onLeaderPress ? 'button' : undefined}
-                  accessibilityLabel={onLeaderPress ? "Open leader's profile" : undefined}
-                >
-                  {vm.leader.avatarUrl ? (
-                    <Image source={{ uri: vm.leader.avatarUrl }} style={styles.leaderAvatar} />
-                  ) : (
-                    <View style={[styles.leaderAvatar, styles.leaderAvatarEmpty]}>
-                      <Ionicons name="person" size={22} color="#FFFFFF" />
-                    </View>
-                  )}
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.leaderName} numberOfLines={1}>
-                      {vm.leader.name || 'The Captain'}
-                      {vm.leader.age != null ? (
-                        <Text style={styles.leaderMeta}>{`  ·  ${vm.leader.age}${
-                          vm.leader.countryFrom ? ` from ${vm.leader.countryFrom}` : ''
-                        }`}</Text>
-                      ) : null}
-                    </Text>
-                    {(vm.leader.surfLevelLabel || vm.leader.tripsCount != null) && (
-                      <Text style={styles.leaderMeta}>
-                        {[
-                          vm.leader.surfLevelLabel,
-                          vm.leader.tripsCount != null
-                            ? `${vm.leader.tripsCount} Surf Trips`
-                            : null,
-                        ]
-                          .filter(Boolean)
-                          .join('  ·  ')}
-                      </Text>
-                    )}
-                  </View>
-                  {onLeaderPress ? (
-                    <Ionicons name="chevron-forward" size={18} color={C.textMuted} />
-                  ) : null}
-                </TouchableOpacity>
-
-                <View style={styles.leaderCreds}>
-                  {vm.leader.destinationFamiliarityLabel ? (
-                    <View style={styles.leaderCredRow}>
-                      <Ionicons name="navigate-outline" size={16} color={C.brandTeal} />
-                      <Text style={styles.leaderCredText}>
-                        {vm.leader.destinationFamiliarityLabel}
-                      </Text>
-                    </View>
-                  ) : null}
-                  {vm.leader.stayFamiliarityLabel ? (
-                    <View style={styles.leaderCredRow}>
-                      <Ionicons name="home-outline" size={16} color={C.brandTeal} />
-                      <Text style={styles.leaderCredText}>{vm.leader.stayFamiliarityLabel}</Text>
-                    </View>
-                  ) : null}
-                  {/* When the "About <host>" block above already shows this note
-                      (same host_lead_note), skip it here to avoid duplication. */}
-                  {vm.leader.leadNote && !aboutHost?.bio ? (
-                    <Text style={styles.leaderNote}>“{vm.leader.leadNote}”</Text>
-                  ) : null}
-                </View>
-              </View>
-            </View>
-          ) : null}
-
           {/* ---- Participants — tappable avatars, scroll right for more ---- */}
           <View style={styles.section}>
             <View style={styles.sectionTitleRow}>
@@ -782,7 +757,12 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
                     accessibilityLabel={p.name ? `Open ${p.name}'s profile` : 'Open profile'}
                   >
                     {p.avatarUrl ? (
-                      <Image source={{ uri: p.avatarUrl }} style={styles.avatar} />
+                      <CachedImage
+                        source={{ uri: p.avatarUrl }}
+                        style={styles.avatar}
+                        contentFit="cover"
+                        cachePolicy="memory-disk"
+                      />
                     ) : (
                       <View style={[styles.avatar, styles.avatarPlaceholder]}>
                         <Ionicons name="person" size={24} color="#FFFFFF" />
@@ -846,10 +826,11 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
                   accessibilityLabel={stayUrl ? `Open ${vm.accommodationName}` : undefined}
                 >
                   {vm.accommodationImageUri ? (
-                    <Image
+                    <CachedImage
                       source={{ uri: vm.accommodationImageUri }}
                       style={styles.stayImage}
-                      resizeMode="cover"
+                      contentFit="cover"
+                      cachePolicy="memory-disk"
                     />
                   ) : (
                     <View style={[styles.stayImage, styles.stayImagePlaceholder]}>
@@ -1359,6 +1340,26 @@ const styles = StyleSheet.create({
     lineHeight: 16,
     fontWeight: '600',
     color: C.inkBody,
+  },
+  // "Local knowledge" rows in the About block — destination + stay familiarity.
+  hostFamiliarity: {
+    gap: 8,
+    marginBottom: 16,
+  },
+  hostFamRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  hostFamText: {
+    flex: 1,
+    fontFamily: FONT_INTER,
+    fontSize: 14,
+    lineHeight: 20,
+    color: C.inkBody,
+  },
+  hostFamPlace: {
+    fontWeight: '700',
   },
   seeMore: {
     marginTop: 8,

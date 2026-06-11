@@ -59,14 +59,14 @@ export const TRIP_ROLE_NOUN: Record<HostingStyle, string> = {
 export const TRIP_CHOOSER: Record<HostingStyle, { title: string; desc: string }> = {
   A: {
     title: 'Crew',
-    desc: 'Planned together.\nThe crew votes on key calls — you approve what moves forward.',
+    desc: 'A trip with friends.\nIt’s the crew’s trip - you plan it together and vote on the key calls.',
   },
   B: {
     title: 'Captain',
-    desc: 'You lead the way.\nYou set the plan, surfers join and support it.',
+    desc: 'You lead the way.\nYou’ve got a plan in mind - surfers hop on, join the ride, and help bring it to life.',
   },
   C: {
     title: 'Operator',
-    desc: 'Run like a business.\nEverything’s set — surfers join knowing exactly what to expect.',
+    desc: 'For surf trip operating businesses.\nEverything’s set - surfers join knowing exactly what to expect.',
   },
 };

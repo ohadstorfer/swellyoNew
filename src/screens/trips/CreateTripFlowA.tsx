@@ -78,7 +78,8 @@ import { SpecificStaySheetContent } from '../../components/trips/sheets/Specific
 
 // Existing dependencies still used (preview card)
 import { TripPreviewCard } from '../../components/trips/TripPreviewCard';
-import { TripDetailView, type TripDetailVM } from '../../components/trips/TripDetailView';
+import { type TripDetailVM } from '../../components/trips/TripDetailView';
+import { TripDetailViewRedesigned } from '../../components/trips/TripDetailViewRedesigned';
 import { TripPublishedScreen } from './TripPublishedScreen';
 import { TripTagPicker } from '../../components/trips/TripTagPicker';
 import {
@@ -1005,7 +1006,12 @@ const DestinationMapPreview: React.FC<DestinationMapPreviewProps> = ({ geo, onPr
           accessibilityLabel="Change destination"
         >
           <View style={mapStyles.changePill}>
-            <Ionicons name="pencil" size={12} color="#FFFFFF" />
+            <Image
+              source={Images.tripDeets.pencil}
+              style={mapStyles.changePillIcon}
+              tintColor="#FFFFFF"
+              resizeMode="contain"
+            />
             <Text style={mapStyles.changePillText}>Change</Text>
           </View>
         </TouchableOpacity>
@@ -1033,6 +1039,10 @@ const mapStyles = StyleSheet.create({
     paddingVertical: 5,
     borderRadius: 999,
     backgroundColor: 'rgba(0,0,0,0.55)',
+  },
+  changePillIcon: {
+    width: 14,
+    height: 14,
   },
   changePillText: {
     color: '#FFFFFF',
@@ -1318,9 +1328,12 @@ export default function CreateTripFlowA({
     if (data) setHostSurfer(data);
   }, [hostId]);
 
+  // Load the host's surfer profile for every flow — the preview renders the real
+  // visitor overview, which shows the host as a participant (and, for operator
+  // trips, the "About <host>" block).
   useEffect(() => {
-    if (hasAboutYou) void loadHostSurfer();
-  }, [hasAboutYou, loadHostSurfer]);
+    void loadHostSurfer();
+  }, [loadHostSurfer]);
 
   // Flow C is exact-dates only — pin datesMode to 'exact' (covers initial mount
   // and any restored draft that carried 'months').
@@ -2174,7 +2187,7 @@ export default function CreateTripFlowA({
 
         {/* Cover photo (inline) */}
         <Text style={[localStyles.fieldLabel, localStyles.fieldTopGap]}>Cover photo</Text>
-        <Text style={[localStyles.helper, localStyles.coverHelper]}>Landscape looks best</Text>
+        <Text style={[localStyles.helper, localStyles.coverHelper]}>Keep your subject centered</Text>
         <TouchableOpacity
           activeOpacity={0.85}
           accessibilityRole="button"
@@ -2191,7 +2204,7 @@ export default function CreateTripFlowA({
             ]);
           }}
           onPress={async () => {
-            const uri = await pickImage([12, 5]);
+            const uri = await pickImage([1, 1]);
             if (uri) {
               update('heroImageUri', uri);
               if (errors.heroImage) setError('heroImage', null);
@@ -2199,6 +2212,9 @@ export default function CreateTripFlowA({
           }}
           style={[
             localStyles.photoZone,
+            // Filled cover renders 1:1 (matches the crop + the trip pages); the
+            // empty dashed frame keeps its original wide size.
+            !!state.heroImageUri && localStyles.photoZoneFilled,
             !state.heroImageUri && localStyles.photoZoneEmpty,
             !!errors.heroImage && localStyles.photoZoneError,
           ]}
@@ -2700,9 +2716,12 @@ export default function CreateTripFlowA({
     if (budgetLoading || !budgetEstimate) {
       return (
         <View style={localStyles.budgetLoading}>
-          <View style={localStyles.budgetLoadingIconWrap}>
-            <Ionicons name="sparkles" size={28} color="#05BCD3" />
-          </View>
+          <Ionicons
+            name="sparkles"
+            size={36}
+            color="#212121"
+            style={localStyles.budgetLoadingIcon}
+          />
           <Text style={localStyles.budgetLoadingTitle}>Estimating your budget…</Text>
           <Text style={localStyles.budgetLoadingSub}>
             Crunching your destination, dates and stay.
@@ -2884,7 +2903,7 @@ export default function CreateTripFlowA({
   };
 
   // -----------------------------------------------------------------------
-  // STEP 5 — PREVIEW (rich trip-detail layout via shared TripDetailView)
+  // STEP 5 — PREVIEW (identical to the live non-member view: TripDetailViewRedesigned)
   // -----------------------------------------------------------------------
   const renderPreviewStep = () => {
     const previewVM: TripDetailVM = {
@@ -2959,7 +2978,54 @@ export default function CreateTripFlowA({
         : null,
     };
 
-    return <TripDetailView vm={previewVM} />;
+    // Render the EXACT component a non-member sees on the live trip screen
+    // (TripDetailViewRedesigned), in visitor configuration: no host edit pills,
+    // no Overview/Plan toggle. The "Request to join" CTA lives on TripDetailScreen
+    // (not this component), so it never appears here — the wizard footer keeps the
+    // "Publish" button instead.
+    return (
+      <TripDetailViewRedesigned
+        vm={previewVM}
+        participants={
+          hostSurfer
+            ? [
+                {
+                  id: hostId ?? 'host',
+                  avatarUrl: hostSurfer.profile_image_url ?? null,
+                  name: hostSurfer.name ?? null,
+                },
+              ]
+            : []
+        }
+        isHost={false}
+        aboutHost={{
+          name: hostSurfer?.name ?? null,
+          avatarUrl: hostSurfer?.profile_image_url ?? null,
+          bio: state.hostLeadNote.trim() || null,
+          age: hostSurfer?.date_of_birth ? ageFromDob(hostSurfer.date_of_birth) : null,
+          countryFrom: hostSurfer?.country_from ?? null,
+          surfLevelLabel: hostSurfer?.surf_level_category
+            ? capitalizeFirst(String(hostSurfer.surf_level_category))
+            : null,
+          boardLabel: hostSurfer?.surfboard_type
+            ? BOARD_TYPE_OPTIONS.find(o => o.key === hostSurfer.surfboard_type)?.label ??
+              capitalizeFirst(String(hostSurfer.surfboard_type))
+            : null,
+          surfTrips:
+            typeof hostSurfer?.travel_experience === 'number'
+              ? hostSurfer.travel_experience
+              : null,
+          destinationFamiliarityLabel: state.hostDestFamiliarity
+            ? DESTINATION_FAMILIARITY_OPTIONS.find(o => o.slug === state.hostDestFamiliarity)
+                ?.label ?? null
+            : null,
+          stayFamiliarityLabel: state.hostStayFamiliarity
+            ? STAY_FAMILIARITY_OPTIONS.find(o => o.slug === state.hostStayFamiliarity)?.label ??
+              null
+            : null,
+        }}
+      />
+    );
   };
 
   // Suppress unused-variable warning while keeping the read for future use.
@@ -3152,11 +3218,11 @@ export default function CreateTripFlowA({
           <TouchableOpacity
             onPress={closeSheet}
             activeOpacity={0.85}
-            style={localStyles.sheetSetBtn}
+            style={localStyles.sheetSelectBtn}
             accessibilityRole="button"
             accessibilityLabel="Set dates and close"
           >
-            <Text style={localStyles.sheetSetBtnText}>Set</Text>
+            <Text style={localStyles.sheetSelectBtnText}>Set</Text>
           </TouchableOpacity>
         }
       >
@@ -3821,6 +3887,11 @@ const localStyles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  // Once a cover is picked, the frame becomes square to match the 1:1 crop and
+  // how it renders on the trip pages.
+  photoZoneFilled: {
+    aspectRatio: 1,
+  },
   photoZoneEmpty: {
     borderWidth: 1.5,
     borderStyle: 'dashed',
@@ -3833,7 +3904,6 @@ const localStyles = StyleSheet.create({
   photoFilled: {
     width: '100%',
     height: '100%',
-    aspectRatio: 12 / 5,
   },
   photoEmptyInner: {
     alignItems: 'center',
@@ -4231,13 +4301,7 @@ const localStyles = StyleSheet.create({
     paddingTop: 72,
     paddingHorizontal: 24,
   },
-  budgetLoadingIconWrap: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: '#E6F8FB',
-    alignItems: 'center',
-    justifyContent: 'center',
+  budgetLoadingIcon: {
     marginBottom: 18,
   },
   budgetLoadingTitle: {

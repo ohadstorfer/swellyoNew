@@ -1283,6 +1283,17 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
                 : null,
               surfTrips:
                 typeof hostP?.travel_experience === 'number' ? hostP.travel_experience : null,
+              // Local-knowledge lines (Captain + Operator): how well the host
+              // knows the destination + the stay.
+              destinationFamiliarityLabel: trip.host_destination_familiarity
+                ? DESTINATION_FAMILIARITY_OPTIONS.find(
+                    o => o.slug === trip.host_destination_familiarity,
+                  )?.label ?? null
+                : null,
+              stayFamiliarityLabel: trip.host_stay_familiarity
+                ? STAY_FAMILIARITY_OPTIONS.find(o => o.slug === trip.host_stay_familiarity)
+                    ?.label ?? null
+                : null,
             };
           })()}
           onEditCover={() => setEditSheet('cover')}
@@ -1393,6 +1404,27 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
                 approveLabel="Approve anyway"
               />
             ))}
+          </Section>
+        )}
+
+        {/* Manage members (host only) — remove a member from the trip. */}
+        {isHost && hasNonHostMembers && (
+          <Section title="Members">
+            {participants
+              .filter(p => p.role !== 'host')
+              .map(p => (
+                <ParticipantCard
+                  key={p.user_id}
+                  participant={p}
+                  onPress={onViewUserProfile}
+                  onRemove={removingUserId === p.user_id ? undefined : handleRemoveParticipant}
+                  rightSlot={
+                    removingUserId === p.user_id ? (
+                      <ActivityIndicator size="small" color="#C0392B" />
+                    ) : undefined
+                  }
+                />
+              ))}
           </Section>
         )}
 

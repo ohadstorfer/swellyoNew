@@ -71,11 +71,16 @@ export const Images = {
     wally: require('./wave-shapes/wally.png'),
     barrel: require('./wave-shapes/barrel.png'),
   },
+  nav: {
+    theLineup: require('./nav/the-lineup-icon.png'),
+    trips: require('./nav/trips-icon.png'),
+    profile: require('./nav/profile-icon.png'),
+  },
   createTrip: {
     plannedTogether: require('./create-trip/planned-together.png'),
     hosted: require('./create-trip/hosted.png'),
     tripOperator: require('./create-trip/trip-operator.png'),
-    background: require('./create-trip/create-trip-bg.png'),
+    background: require('./create-trip/create-bg.png'),
   },
   levels: {
     beginner: require('./levels/beginner.png'),
