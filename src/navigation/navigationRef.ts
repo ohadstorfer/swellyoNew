@@ -35,6 +35,8 @@ export type RootStackParamList = {
   };
   /** Swelly AI chat card. service picks the edge-function variant (dev). */
   SwellyChat: { service?: 'copy' | 'copy-copy' };
+  /** Surftrip detail card (was dual-rendered: AppContent overlay + inner stack). */
+  SurftripCard: { groupId: string };
 };
 
 /**

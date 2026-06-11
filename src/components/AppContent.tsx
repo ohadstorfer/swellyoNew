@@ -222,9 +222,8 @@ export const AppContent: React.FC = () => {
         if (pendingInviteToken) {
           const result = await acceptSurftripInvite(pendingInviteToken);
           if (result.outcome === 'joined' || result.outcome === 'already_member') {
-            setActiveSurftripDetailId(null);
-            setSelectedConversation({
-              id: result.conversation_id,
+            pushRootCard('ChatCard', {
+              conversationId: result.conversation_id,
               otherUserId: '',
               otherUserName: '',
               otherUserAvatar: null,
@@ -232,7 +231,7 @@ export const AppContent: React.FC = () => {
               surftripId: result.group_id,
             });
           } else if (result.outcome === 'open_detail') {
-            setActiveSurftripDetailId(result.group_id);
+            pushRootCard('SurftripCard', { groupId: result.group_id });
           } else if (result.outcome === 'group_full') {
             Alert.alert('Surftrip is full', 'This group has reached its member limit.');
           } else {
@@ -240,7 +239,7 @@ export const AppContent: React.FC = () => {
           }
         } else if (pendingInviteGroupId) {
           // Tokenless legacy link — just open the detail screen.
-          setActiveSurftripDetailId(pendingInviteGroupId);
+          pushRootCard('SurftripCard', { groupId: pendingInviteGroupId });
         }
       } catch (e: any) {
         console.warn('[AppContent] acceptSurftripInvite failed:', e);
@@ -282,8 +281,6 @@ export const AppContent: React.FC = () => {
 
     tripInviteResolverRef.current = true;
     try {
-      setSelectedConversation(null);
-      setActiveSurftripDetailId(null);
       openTripCard(pendingTripInviteId);
     } finally {
       setPendingTripInviteId(null);
@@ -391,7 +388,6 @@ export const AppContent: React.FC = () => {
         // carries tripId — deep-link to that trip, landing on the tab/section
         // that matches the notification type (stage/decision refine it).
         if (payload.tripId) {
-          setSelectedConversation(null);
           openTripCard(
             payload.tripId,
             tripFocusForNotification(payload.type, {
@@ -958,7 +954,7 @@ export const AppContent: React.FC = () => {
     });
   }, []);
   const handleRequestedTabConsumed = useCallback(() => setRequestedTab(null), []);
-  const [activeSurftripDetailId, setActiveSurftripDetailId] = useState<string | null>(null);
+  // Surftrip detail + all chats are root-stack CARDS now (nav migration B1).
   const [viewingUserId, setViewingUserId] = useState<string | null>(null);
   const [profileFromSwellyShaper, setProfileFromSwellyShaper] = useState(false); // Track if profile was opened from Swelly Shaper
   const [profileFromTripPlanningChat, setProfileFromTripPlanningChat] = useState(false); // Track if profile was opened from trip planning chat
@@ -973,19 +969,6 @@ export const AppContent: React.FC = () => {
   const [tripPlanningChatId, setTripPlanningChatId] = useState<string | null>(null);
   const [tripPlanningMatchedUsers, setTripPlanningMatchedUsers] = useState<any[]>([]);
   const [tripPlanningDestination, setTripPlanningDestination] = useState<string>('');
-  
-  const [selectedConversation, setSelectedConversation] = useState<{
-    id?: string; // Optional: undefined for pending conversations
-    otherUserId: string; // Required: the user ID we're messaging (empty string for groups)
-    otherUserName: string;
-    otherUserAvatar: string | null;
-    isDirect?: boolean; // false for group chats; defaults to true (1-on-1)
-    tripId?: string; // Legacy: for group_trips-linked group chats, tapping header opens the trip
-    surftripId?: string; // For surftrip group chats: tapping header opens the surftrip detail
-    fromTripPlanning?: boolean; // If true, conversation was created from trip planning recommendations
-    fromTripPlanningCopy?: boolean; // If true, conversation was created from the Copy variant of trip planning
-    fromWelcomeOverlay?: boolean; // If true, conversation was created from WelcomeToLineupOverlay
-  } | null>(null);
   
   // State for conversation loading screen
   const [showConversationLoading, setShowConversationLoading] = useState(false);
@@ -1135,9 +1118,6 @@ export const AppContent: React.FC = () => {
   const handleProfileBack = () => {
     console.log('[AppContent] handleProfileBack called');
     console.log('[AppContent] profileFromTripPlanningChat:', profileFromTripPlanningChat);
-
-    // Clear any selected conversation to prevent it from showing when profile closes
-    setSelectedConversation(null);
 
     // If profile was opened from WelcomeToLineupOverlay, return to overlay.
     // Start the modal fade-in immediately, but keep the profile mounted under it
@@ -1362,9 +1342,8 @@ export const AppContent: React.FC = () => {
     // Start preload immediately (non-blocking)
     preloadUserProfileVideo(userId);
     
-    // Close conversation to show profile screen
-    console.log('[AppContent] Closing conversation, setting selectedConversation to null');
-    setSelectedConversation(null);
+    // The profile overlay renders above whatever chat card is open — nothing
+    // to close (the card stays in the stack beneath it).
     console.log('[AppContent] Setting viewingUserId to:', userId);
     setViewingUserId(userId);
     console.log('[AppContent] Setting showProfile to true');
@@ -1378,9 +1357,7 @@ export const AppContent: React.FC = () => {
     heroImageUrl?: string | null;
     tripId?: string;
   }) => {
-    // KEYBOARD SPIKE (Phase 3): trip group chats push as a CARD on the root
-    // stack — verifying the chat keyboard system inside native-stack before
-    // migrating the remaining DM paths. The trip card stays underneath.
+    // Trip group chats are cards — the trip card stays underneath.
     pushRootCard('ChatCard', {
       conversationId: params.conversationId,
       otherUserId: '',
@@ -1393,7 +1370,6 @@ export const AppContent: React.FC = () => {
 
   const handleOpenTripDetailFromChat = useCallback(
     (tripId: string, focus?: TripDetailFocus) => {
-      setSelectedConversation(null);
       openTripCard(tripId, focus ?? null);
     },
     [openTripCard]
@@ -1411,25 +1387,8 @@ export const AppContent: React.FC = () => {
   );
 
   const handleOpenSurftripDetail = useCallback((groupId: string) => {
-    setSelectedConversation(null);
-    setActiveSurftripDetailId(groupId);
+    pushRootCard('SurftripCard', { groupId });
   }, []);
-
-  const handleOpenSurftripChat = useCallback(
-    (conversationId: string, title: string) => {
-      const surftripId = activeSurftripDetailId; // capture before clearing
-      setActiveSurftripDetailId(null);
-      setSelectedConversation({
-        id: conversationId,
-        otherUserId: '',
-        otherUserName: title,
-        otherUserAvatar: null,
-        isDirect: false,
-        surftripId: surftripId ?? undefined,
-      });
-    },
-    [activeSurftripDetailId]
-  );
 
   const handleStartConversation = async (userId: string, otherUserName?: string, otherUserAvatar?: string | null) => {
     console.log('[AppContent] ========== handleStartConversation START ==========');
@@ -1437,8 +1396,7 @@ export const AppContent: React.FC = () => {
     console.log('[AppContent] Current state - profileFromTripPlanningChat:', profileFromTripPlanningChat);
     console.log('[AppContent] Current state - showConversationLoading:', showConversationLoading);
     console.log('[AppContent] Current state - pendingConversation:', pendingConversation);
-    console.log('[AppContent] Current state - selectedConversation:', selectedConversation);
-    
+
     try {
       // Swelly-origin chats: the Swelly CARD stays mounted in the stack
       // beneath whatever opens next, so "return to chat" is automatic — the
@@ -1454,18 +1412,15 @@ export const AppContent: React.FC = () => {
       console.log('[AppContent] Conversation exists:', !!existingConv);
       
       if (existingConv && existingConv.other_user) {
-        // Conversation exists, use it immediately (no loading screen)
-        console.log('[AppContent] ✓ Conversation exists, navigating directly to conversation');
-        console.log('[AppContent] Conversation ID:', existingConv.id);
-        console.log('[AppContent] Other user name:', existingConv.other_user.name);
-        setSelectedConversation({
-          id: existingConv.id,
+        // Conversation exists, open the chat card immediately (no loading screen)
+        console.log('[AppContent] ✓ Conversation exists, pushing chat card');
+        pushRootCard('ChatCard', {
+          conversationId: existingConv.id,
           otherUserId: userId,
           otherUserName: existingConv.other_user.name || 'User',
           otherUserAvatar: existingConv.other_user.profile_image_url || null,
-          fromTripPlanning: isFromTripPlanning,
+          isDirect: true,
         });
-        console.log('[AppContent] selectedConversation state updated');
       } else {
         // No conversation exists yet — use data passed from ProfileScreen (already loaded)
         console.log('[AppContent] ✗ No conversation exists, showing loading screen');
@@ -1529,17 +1484,15 @@ export const AppContent: React.FC = () => {
     console.log('[AppContent] handleConversationLoadingComplete called');
     console.log('[AppContent] pendingConversation:', pendingConversation);
     
-    // After loading screen completes, navigate to conversation
+    // After loading screen completes, open the chat card
     if (pendingConversation) {
-      console.log('[AppContent] Navigating to conversation after loading screen');
-      setSelectedConversation({
-        id: pendingConversation.conversationId,
+      console.log('[AppContent] Pushing chat card after loading screen');
+      pushRootCard('ChatCard', {
+        conversationId: pendingConversation.conversationId,
         otherUserId: pendingConversation.otherUserId,
         otherUserName: pendingConversation.otherUserName,
         otherUserAvatar: pendingConversation.otherUserAvatar,
-        fromTripPlanning: pendingConversation.fromTripPlanning,
-        fromTripPlanningCopy: pendingConversation.fromTripPlanningCopy,
-        fromWelcomeOverlay: pendingConversation.fromWelcomeOverlay,
+        isDirect: true,
       });
       setShowConversationLoading(false);
       setPendingConversation(null);
@@ -1547,16 +1500,6 @@ export const AppContent: React.FC = () => {
     } else {
       console.warn('[AppContent] handleConversationLoadingComplete called but no pendingConversation');
     }
-  };
-
-  const handleBackFromChat = () => {
-    // Make sure the keyboard goes down with us — otherwise it stays floating
-    // over the home screen until the user taps something else.
-    Keyboard.dismiss();
-    // Whatever the chat opened over (Swelly card, trip card, the roots) is
-    // still mounted underneath — closing the overlay is all there is to do.
-    setSelectedConversation(null);
-    setProfileFromTripPlanningChat(false);
   };
 
   const handleStep1Back = () => {
@@ -1750,20 +1693,17 @@ export const AppContent: React.FC = () => {
 
   if (shouldShowConversations) {
     console.log('[AppContent] Rendering check - showProfile:', showProfile, 'viewingUserId:', viewingUserId);
-    console.log('[AppContent] Rendering check - selectedConversation:', selectedConversation ? 'exists' : 'null');
     console.log('[AppContent] Rendering check - showConversationLoading:', showConversationLoading, 'pendingConversation:', !!pendingConversation);
 
     // True only when the conversations list is the topmost visible layer.
     // Used to gate the welcome-guide tutorial trigger inside ConversationsScreen.
-    // (Cards — Swelly chat, trips, notifications — blur the tab natively now;
+    // (Cards — chats, Swelly, trips, notifications — blur the tab natively now;
     // these terms cover the remaining legacy overlays only.)
     const isListFrontmost =
       activeTab === 'lineup' &&
-      !selectedConversation &&
       !showConversationLoading &&
       !showProfile &&
       !showSettings &&
-      !activeSurftripDetailId &&
       !showSwellyShaper &&
       !showWelcomeToLineupOverlay &&
       !showProfileEditor;
@@ -1774,8 +1714,6 @@ export const AppContent: React.FC = () => {
     const barSuppressed =
       tripsInnerOverlayOpen ||
       lineupInnerScreenOpen ||
-      !!activeSurftripDetailId ||
-      !!selectedConversation ||
       showConversationLoading ||
       showSettings ||
       showSwellyShaper ||
@@ -1783,21 +1721,11 @@ export const AppContent: React.FC = () => {
       showProfileEditor ||
       showWelcomeToLineupOverlay;
 
-    // Determine which overlay screen (if any) should cover ConversationsStack.
-    // ConversationsStack stays mounted underneath so scroll position and UI state
-    // survive navigation to Profile/Settings/Trips/DM/etc. Priority order matches
-    // the original early-return cascade — first match wins.
+    // Determine which overlay screen (if any) should cover the navigator.
+    // Remaining legacy overlays: Settings, SwellyShaper, Profile, the
+    // conversation-loading animation. Priority order preserved.
     let activeOverlay: React.ReactNode = null;
-    if (activeSurftripDetailId) {
-      activeOverlay = (
-        <SurftripDetailScreen
-          groupId={activeSurftripDetailId}
-          currentUserId={user?.id ? String(user.id) : null}
-          onBack={() => setActiveSurftripDetailId(null)}
-          onOpenChat={handleOpenSurftripChat}
-        />
-      );
-    } else if (showSettings) {
+    if (showSettings) {
       activeOverlay = (
         <SettingsScreen
           onBack={() => setShowSettings(false)}
@@ -1845,40 +1773,9 @@ export const AppContent: React.FC = () => {
           onComplete={handleConversationLoadingComplete}
         />
       );
-    } else if (selectedConversation) {
-      console.log('[AppContent] Rendering DirectMessageScreen');
-      console.log('[AppContent] Passing onViewProfile prop:', handleViewUserProfile);
-      const ChatScreen = selectedConversation.isDirect === false ? DirectGroupChat : DirectMessageScreen;
-      activeOverlay = (
-        <ChatScreen
-          conversationId={selectedConversation.id}
-          otherUserId={selectedConversation.otherUserId}
-          otherUserName={selectedConversation.otherUserName}
-          otherUserAvatar={selectedConversation.otherUserAvatar}
-          isDirect={selectedConversation.isDirect !== false}
-          fromTripPlanning={selectedConversation.fromTripPlanning || false}
-          tripId={selectedConversation.tripId}
-          surftripId={selectedConversation.surftripId}
-          onBack={handleBackFromChat}
-          onViewProfile={handleViewUserProfile}
-          onOpenTripDetail={handleOpenTripDetailFromChat}
-          onOpenSurftripDetail={handleOpenSurftripDetail}
-          onConversationCreated={(conversationId) => {
-            setSelectedConversation({
-              ...selectedConversation,
-              id: conversationId,
-              fromTripPlanning: selectedConversation?.fromTripPlanning || false,
-            });
-          }}
-        />
-      );
     }
-    // NOTE: TripPlanningChatScreen and TripPlanningChatScreenCopy used to live
-    // here as activeOverlay branches. They've been moved to root-level
-    // persistent layers (see render section below) so ProfileScreen and
-    // ConversationLoadingScreen can slide in over them without remounting the
-    // chat — preserving its messages, scroll position, and websocket
-    // subscriptions across Profile open/close cycles.
+    // Chats (DMs, group chats, surftrip chats) and Swelly are all CARDS on
+    // the root stack now — no overlay branches for them.
 
     // Everything the three tab roots need from AppContent travels through
     // this context (navigator screens must be stable module-level components,

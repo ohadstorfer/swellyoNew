@@ -40,7 +40,7 @@ import { SwellyShaperScreen } from './SwellyShaperScreen';
 import { SwellyoTeamWelcome } from './SwellyoTeamWelcome';
 import { ProfileImage } from '../components/ProfileImage';
 import { ConversationListSkeleton } from '../components/skeletons';
-import { useConversationsStack } from '../navigation/ConversationsStack';
+import { pushRootCard } from '../navigation/navigationRef';
 import { useTutorial } from '../context/TutorialContext';
 import { NotificationCenter } from '../components/notifications/NotificationCenter';
 
@@ -184,8 +184,8 @@ export default function ConversationsScreen({
   // reused across navigations, so the header renders instantly on return.
   const { profile: myProfile, refresh: refreshMyProfile } = useUserProfile();
 
-  // When wrapped by ConversationsStack (native only), push DM via navigation instead of local state.
-  const stackCtx = useConversationsStack();
+  // Every chat is a ChatCard on the root stack (nav migration B1) — one path
+  // for list taps on every platform.
   const openConversation = (sel: {
     id?: string;
     otherUserId: string;
@@ -195,20 +195,16 @@ export default function ConversationsScreen({
     tripId?: string;
     surftripId?: string;
   }) => {
-    if (stackCtx) {
-      stackCtx.navigateToDM({
-        conversationId: sel.id,
-        otherUserId: sel.otherUserId,
-        otherUserName: sel.otherUserName,
-        otherUserAvatar: sel.otherUserAvatar,
-        isDirect: sel.isDirect,
-        tripId: sel.tripId,
-        surftripId: sel.surftripId,
-      });
-    } else {
-      if (sel.id) setCurrentConversationId(sel.id);
-      setSelectedConversation(sel);
-    }
+    if (sel.id) setCurrentConversationId(sel.id);
+    pushRootCard('ChatCard', {
+      conversationId: sel.id,
+      otherUserId: sel.otherUserId,
+      otherUserName: sel.otherUserName,
+      otherUserAvatar: sel.otherUserAvatar,
+      isDirect: sel.isDirect,
+      tripId: sel.tripId,
+      surftripId: sel.surftripId,
+    });
   };
 
   // Filter out conversations with blocked users (both directions)
@@ -236,15 +232,6 @@ export default function ConversationsScreen({
   const [surftripsReloadKey, setSurftripsReloadKey] = useState(0);
   // Surftrip cover photos for group-chat avatars, keyed by conversation id.
   const [surftripHeroImages, setSurftripHeroImages] = useState<Record<string, string | null>>({});
-  const [selectedConversation, setSelectedConversation] = useState<{
-    id?: string; // Optional: undefined for pending conversations
-    otherUserId: string; // Required: the user ID we're messaging
-    otherUserName: string;
-    otherUserAvatar: string | null;
-    isDirect?: boolean;
-    tripId?: string; // For trip-linked group chats; tapping the header opens the trip
-    surftripId?: string; // For surftrip group chats; tapping the header opens the surftrip detail
-  } | null>(null);
   const [showSwellyShaper, setShowSwellyShaper] = useState(false);
   const [showSwellyoTeamWelcome, setShowSwellyoTeamWelcome] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
@@ -525,12 +512,6 @@ export default function ConversationsScreen({
       console.error('Error starting conversation:', error);
       Alert.alert('Error', 'Failed to start conversation');
     }
-  };
-
-  const handleBackFromChat = () => {
-    setCurrentConversationId(null);
-    setSelectedConversation(null);
-    loadConversations();
   };
 
   const handleLogout = async () => {
@@ -1101,34 +1082,8 @@ export default function ConversationsScreen({
     );
   }
 
-  // Early return for DirectMessageScreen - must come AFTER all hooks
-  if (selectedConversation) {
-    const ChatScreen = selectedConversation.isDirect === false ? DirectGroupChat : DirectMessageScreen;
-    return (
-      <ChatScreen
-        conversationId={selectedConversation.id} // May be undefined for pending conversations
-        otherUserId={selectedConversation.otherUserId}
-        otherUserName={selectedConversation.otherUserName}
-        otherUserAvatar={selectedConversation.otherUserAvatar}
-        isDirect={selectedConversation.isDirect ?? true}
-        tripId={selectedConversation.tripId}
-        onBack={handleBackFromChat}
-        onViewProfile={onViewUserProfile}
-        onOpenTripDetail={onOpenTripDetail}
-        onConversationCreated={(conversationId) => {
-          // Update selectedConversation with the created conversation ID
-          // Set current conversation in MessagingProvider for unread logic
-        if (conversationId) {
-          setCurrentConversationId(conversationId);
-        }
-        setSelectedConversation({
-            ...selectedConversation,
-            id: conversationId,
-          });
-        }}
-      />
-    );
-  }
+  // (Chats render as ChatCard routes on the root stack now — the old
+  // selectedConversation early-return is gone; nav migration B1.)
 
   const Container = Platform.OS === 'web' ? View : SafeAreaView;
 
@@ -1220,11 +1175,7 @@ export default function ConversationsScreen({
                   });
                 }}
                 onOpenGroupDetail={(groupId) => {
-                  if (stackCtx) {
-                    stackCtx.navigateToSurftripDetail(groupId);
-                  } else if (onOpenSurftripDetail) {
-                    onOpenSurftripDetail(groupId);
-                  }
+                  pushRootCard('SurftripCard', { groupId });
                 }}
               />
             </View>
@@ -1633,11 +1584,7 @@ export default function ConversationsScreen({
         onCreated={(group) => {
           setShowCreateSurftripModal(false);
           setSurftripsReloadKey(k => k + 1);
-          if (stackCtx) {
-            stackCtx.navigateToSurftripDetail(group.id);
-          } else if (onOpenSurftripDetail) {
-            onOpenSurftripDetail(group.id);
-          }
+          pushRootCard('SurftripCard', { groupId: group.id });
         }}
       />
 

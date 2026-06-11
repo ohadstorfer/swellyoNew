@@ -9,6 +9,7 @@ import ConversationsStack from './ConversationsStack';
 import { DirectMessageScreen } from '../screens/DirectMessageScreen';
 import { DirectGroupChat } from '../screens/DirectGroupChat';
 import { TripPlanningChatScreen } from '../screens/TripPlanningChatScreen';
+import SurftripDetailScreen from '../screens/surftrips/SurftripDetailScreen';
 import { swellyServiceCopy, swellyServiceCopyCopy } from '../services/swelly/swellyServiceCopy';
 import { useMessaging } from '../context/MessagingProvider';
 import TripsScreen from '../screens/trips/TripsScreen';
@@ -140,6 +141,29 @@ function ChatCardScreen({ route, navigation }: NativeStackScreenProps<RootStackP
         if (conversationId) setCurrentConversationId(conversationId);
         navigation.setParams({ conversationId });
       }}
+    />
+  );
+}
+
+function SurftripCardScreen({ route, navigation }: NativeStackScreenProps<RootStackParamList, 'SurftripCard'>) {
+  const { chatCard } = useMainNav();
+  const { user } = useOnboarding();
+  return (
+    <SurftripDetailScreen
+      groupId={route.params.groupId}
+      currentUserId={user?.id ? String(user.id) : null}
+      onBack={() => navigation.goBack()}
+      onOpenChat={(conversationId: string, title: string) =>
+        navigation.dispatch(StackActions.push('ChatCard', {
+          conversationId,
+          otherUserId: '',
+          otherUserName: title,
+          otherUserAvatar: null,
+          isDirect: false,
+          surftripId: route.params.groupId,
+        }))
+      }
+      onViewProfile={chatCard.onViewProfile}
     />
   );
 }
@@ -320,6 +344,7 @@ export default function RootNavigator() {
       <RootStack.Screen name="EditTrip" component={EditTripCardScreen} options={{ presentation: 'card' }} />
       <RootStack.Screen name="ChatCard" component={ChatCardScreen} options={{ presentation: 'card' }} />
       <RootStack.Screen name="SwellyChat" component={SwellyChatCardScreen} options={{ presentation: 'card' }} />
+      <RootStack.Screen name="SurftripCard" component={SurftripCardScreen} options={{ presentation: 'card' }} />
       {/* Plain card. The panel is full-screen and opaque, so transparency
           bought nothing and modal presentations broke z-order/gestures
           (two strikes: native modal context → sheets+crashes; contained →
