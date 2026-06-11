@@ -254,15 +254,18 @@ export default function RootNavigator() {
   return (
     <RootStack.Navigator screenOptions={{ headerShown: false }}>
       <RootStack.Screen name="HomeTabs" component={HomeTabs} />
-      <RootStack.Screen name="TripDetail" component={TripDetailCardScreen} />
-      <RootStack.Screen name="EditTrip" component={EditTripCardScreen} />
+      <RootStack.Screen name="TripDetail" component={TripDetailCardScreen} options={{ presentation: 'card' }} />
+      <RootStack.Screen name="EditTrip" component={EditTripCardScreen} options={{ presentation: 'card' }} />
       <RootStack.Screen
         name="NotificationsPanel"
         component={NotificationsPanelScreen}
         options={{
-          // Transparent route: the screen underneath stays visible; the panel
-          // animates ITSELF (slide drawer + backdrop fade), so no nav animation.
-          presentation: 'transparentModal',
+          // CONTAINED transparent overlay: stays inside our navigator instead
+          // of opening an iOS native-modal context. A native modal here made
+          // every screen pushed on top present as a sheet, and the modal
+          // context fought gestures/layout (stuck scroll, shiver, crashes).
+          // The panel still animates itself (slide drawer + backdrop fade).
+          presentation: 'containedTransparentModal',
           animation: 'none',
         }}
       />
