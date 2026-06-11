@@ -17,9 +17,9 @@ import { OnboardingVideoUploadScreen } from '../screens/OnboardingVideoUploadScr
 import { OnboardingScaffold } from './onboarding/OnboardingScaffold';
 import { TripPlanningChatScreen } from '../screens/TripPlanningChatScreen';
 import { TripPlanningChatScreen as TripPlanningChatScreenCopy } from '../screens/TripPlanningChatScreenCopy';
-import ConversationsStack from '../navigation/ConversationsStack';
-import TripsBottomNav, { useTripsBottomNavControl, type NavKey } from './trips/TripsBottomNav';
-import TripsScreen from '../screens/trips/TripsScreen';
+import RootNavigator from '../navigation/RootNavigator';
+import { MainNavProvider, type MainNavContextValue } from '../navigation/MainNavContext';
+import { useTripsBottomNavControl, type NavKey } from './trips/TripsBottomNav';
 import SurftripDetailScreen from '../screens/surftrips/SurftripDetailScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
 import { DirectMessageScreen } from '../screens/DirectMessageScreen';
@@ -283,7 +283,7 @@ export const AppContent: React.FC = () => {
       setActiveSurftripDetailId(null);
       setPendingTripFocus(null);
       setPendingTripDetailId(pendingTripInviteId);
-      setShowTrips(true);
+      requestTab('trips');
     } finally {
       setPendingTripInviteId(null);
       AsyncStorage.removeItem('pendingGroupTripInvite').catch(() => {});
@@ -394,7 +394,7 @@ export const AppContent: React.FC = () => {
             })
           );
           setPendingTripDetailId(payload.tripId);
-          setShowTrips(true);
+          requestTab('trips');
           return;
         }
         // Chat-message pushes carry conversationId instead.
@@ -924,7 +924,7 @@ export const AppContent: React.FC = () => {
   }, [showTripPlanningChatCopy, tripPlanningChatCopyEverShown]);
   const [showSwellyShaper, setShowSwellyShaper] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [showTrips, setShowTrips] = useState(false);
+  // showTrips is GONE — Trips is a tab root inside RootNavigator (Phase 1).
   // The ONE floating bottom nav, persistent above Lineup / Trips / Profile —
   // it never remounts on page switches, so the pill animation plays across
   // them. Screens pipe scroll events into this shared control.
@@ -932,6 +932,22 @@ export const AppContent: React.FC = () => {
   // True while TripsScreen shows an internal full-screen overlay (trip detail
   // or edit wizard) — the bar hides then.
   const [tripsInnerOverlayOpen, setTripsInnerOverlayOpen] = useState(false);
+  // --- Tab navigator bridge (nav migration Phase 1) ----------------------
+  // The 3 roots live in RootNavigator now. activeTab mirrors the navigator
+  // state for the legacy reads that still branch on "which page is showing"
+  // (deleted in Phase 5). requestedTab is the mount-safe programmatic switch:
+  // set here, consumed by the tab bar adapter once the navigator exists.
+  const [activeTab, setActiveTab] = useState<NavKey>('lineup');
+  const prevTabRef = useRef<NavKey>('lineup');
+  const [requestedTab, setRequestedTab] = useState<NavKey | null>(null);
+  const requestTab = useCallback((tab: NavKey) => setRequestedTab(tab), []);
+  const handleTabChange = useCallback((tab: NavKey) => {
+    setActiveTab(prev => {
+      if (prev !== tab) prevTabRef.current = prev;
+      return tab;
+    });
+  }, []);
+  const handleRequestedTabConsumed = useCallback(() => setRequestedTab(null), []);
   const [activeSurftripDetailId, setActiveSurftripDetailId] = useState<string | null>(null);
   const [viewingUserId, setViewingUserId] = useState<string | null>(null);
   const [profileFromSwellyShaper, setProfileFromSwellyShaper] = useState(false); // Track if profile was opened from Swelly Shaper
@@ -1092,13 +1108,13 @@ export const AppContent: React.FC = () => {
         // pill, the new member's next step (same focus as the notification).
         setPendingTripFocus('commit');
         setPendingTripDetailId(decision.trip.id);
-        setShowTrips(true);
+        requestTab('trips');
       } else {
         // Declined → land on the trips/explore list.
-        setShowTrips(true);
+        requestTab('trips');
       }
     },
-    [advanceJoinDecisionQueue]
+    [advanceJoinDecisionQueue, requestTab]
   );
 
   const handleJoinDecisionDismiss = useCallback(
@@ -1140,15 +1156,14 @@ export const AppContent: React.FC = () => {
       return;
     }
 
-    // If profile was opened from a participant card inside TripDetailScreen,
-    // close the profile and bring TripsScreen back. pendingTripDetailId is
-    // still set so TripsScreen's initialTripId restores the trip detail.
+    // If profile was opened from a participant card inside TripDetailScreen:
+    // the Trips tab (and its open trip detail) stayed MOUNTED underneath the
+    // profile overlay — closing the overlay is enough, no restore dance.
     if (profileFromTripDetail) {
       console.log('[AppContent] Returning to trip detail');
       setShowProfile(false);
       setViewingUserId(null);
       setProfileFromTripDetail(false);
-      setShowTrips(true);
       return;
     }
 
@@ -1244,11 +1259,10 @@ export const AppContent: React.FC = () => {
   };
 
   const handleProfilePress = () => {
-    // Navigate to profile page from conversations page
-    // Reset flag since this is normal navigation (not from Swelly Shaper)
+    // Own profile is a tab root now — switch tabs instead of opening the overlay.
     setProfileFromSwellyShaper(false);
-    setShowProfile(true);
-    setViewingUserId(null); // View own profile
+    setViewingUserId(null);
+    requestTab('profile');
   };
 
   const handleViewUserProfile = (userId: string, fromTripPlanningChat?: boolean) => {
@@ -1372,7 +1386,8 @@ export const AppContent: React.FC = () => {
     heroImageUrl?: string | null;
     tripId?: string;
   }) => {
-    setShowTrips(false);
+    // The Trips tab stays mounted underneath the chat overlay — backing out
+    // of the chat lands on the trip exactly as the user left it.
     setPendingTripDetailId(null);
     setSelectedConversation({
       id: params.conversationId,
@@ -1389,21 +1404,19 @@ export const AppContent: React.FC = () => {
       setSelectedConversation(null);
       setPendingTripFocus(focus ?? null);
       setPendingTripDetailId(tripId);
-      setShowTrips(true);
+      requestTab('trips');
     },
-    []
+    [requestTab]
   );
 
   // Wrap handleViewUserProfile for taps coming from inside TripDetailScreen.
-  // The render cascade prioritises showTrips over showProfile, so we have to
-  // toggle showTrips off here — handleProfileBack flips it back on, and
-  // pendingTripDetailId restores the trip detail in TripsScreen on remount.
+  // The profile renders as an overlay ABOVE the Trips tab, which stays
+  // mounted — back just closes the overlay (see handleProfileBack).
   const handleViewUserProfileFromTrip = useCallback(
     (userId: string, fromTripId: string) => {
-      setPendingTripFocus(null); // restore the trip plainly — no section re-scroll
-      setPendingTripDetailId(fromTripId);
+      setPendingTripFocus(null);
+      setPendingTripDetailId(fromTripId); // kept as a safety net for trip restore
       setProfileFromTripDetail(true);
-      setShowTrips(false);
       handleViewUserProfile(userId);
     },
     []
@@ -1664,6 +1677,16 @@ export const AppContent: React.FC = () => {
     !sessionValidationRef.current && // Don't show while validating
     (isDemoUser || isSupabaseConfigured === false || hasValidatedSession); // Show if demo user, Supabase not configured, or session validated
 
+  // Reset the tab mirror when leaving the main app (logout) — the navigator
+  // unmounts with this branch and remounts fresh on Lineup at next login.
+  useEffect(() => {
+    if (!shouldShowConversations) {
+      setActiveTab('lineup');
+      prevTabRef.current = 'lineup';
+      setRequestedTab(null);
+    }
+  }, [shouldShowConversations]);
+
   // Register for push notifications once user reaches home screen
   useEffect(() => {
     if (shouldShowConversations) {
@@ -1762,35 +1785,35 @@ export const AppContent: React.FC = () => {
     // its useFocusEffect would otherwise fire while the user is inside a DM or
     // Swelly chat.
     const isListFrontmost =
+      activeTab === 'lineup' &&
       !selectedConversation &&
       !showConversationLoading &&
       !showTripPlanningChat &&
       !showTripPlanningChatCopy &&
       !showProfile &&
       !showSettings &&
-      !showTrips &&
       !activeSurftripDetailId &&
       !showSwellyShaper &&
       !showWelcomeToLineupOverlay &&
       !showProfileEditor;
 
-    // The floating bottom nav shows on its three home surfaces: the Lineup
-    // list, the Trips tabs (not its inner detail/edit overlays), and the
-    // user's OWN profile. It's ONE persistent component rendered above the
-    // overlay stack, so the pill animation plays across page switches.
-    const showBottomNav =
-      isListFrontmost ||
-      (showTrips && !activeSurftripDetailId && !tripsInnerOverlayOpen) ||
-      (showProfile &&
-        !viewingUserId && // own profile only
-        !activeSurftripDetailId &&
-        !showTrips &&
-        !showSettings &&
-        !showSwellyShaper &&
-        !profileFromOnboardingChat && // post-onboarding profile has its own flow
-        !showProfileEditor &&
-        !showWelcomeToLineupOverlay);
-    const bottomNavActive: NavKey = showTrips ? 'trips' : showProfile ? 'profile' : 'lineup';
+    // The floating bottom nav lives INSIDE the tab navigator now (custom
+    // tabBar). It hides whenever anything covers the roots: an overlay above
+    // the navigator, a Swelly keep-alive layer, the trips inner detail/edit
+    // overlay, or the welcome celebration. Same conditions as the old
+    // showBottomNav, inverted.
+    const barSuppressed =
+      tripsInnerOverlayOpen ||
+      !!activeSurftripDetailId ||
+      !!selectedConversation ||
+      showConversationLoading ||
+      showTripPlanningChat ||
+      showTripPlanningChatCopy ||
+      showSettings ||
+      showSwellyShaper ||
+      showProfile ||
+      showProfileEditor ||
+      showWelcomeToLineupOverlay;
 
     // Determine which overlay screen (if any) should cover ConversationsStack.
     // ConversationsStack stays mounted underneath so scroll position and UI state
@@ -1804,22 +1827,6 @@ export const AppContent: React.FC = () => {
           currentUserId={user?.id ? String(user.id) : null}
           onBack={() => setActiveSurftripDetailId(null)}
           onOpenChat={handleOpenSurftripChat}
-        />
-      );
-    } else if (showTrips) {
-      activeOverlay = (
-        <TripsScreen
-          onBack={() => {
-            setShowTrips(false);
-            setPendingTripDetailId(null);
-            setPendingTripFocus(null);
-          }}
-          initialTripId={pendingTripDetailId}
-          initialTripFocus={pendingTripFocus}
-          onOpenGroupChat={handleOpenGroupChat}
-          onViewUserProfile={handleViewUserProfileFromTrip}
-          navControl={bottomNavControl}
-          onInnerOverlayChange={setTripsInnerOverlayOpen}
         />
       );
     } else if (showSettings) {
@@ -1905,27 +1912,58 @@ export const AppContent: React.FC = () => {
     // chat — preserving its messages, scroll position, and websocket
     // subscriptions across Profile open/close cycles.
 
+    // Everything the three tab roots need from AppContent travels through
+    // this context (navigator screens must be stable module-level components,
+    // so direct prop threading is no longer possible). Shrinks per phase.
+    const mainNavValue: MainNavContextValue = {
+      navControl: bottomNavControl,
+      barSuppressed,
+      setTripsInnerOverlayOpen,
+      onTabChange: handleTabChange,
+      requestedTab,
+      onRequestedTabConsumed: handleRequestedTabConsumed,
+      lineupProps: {
+        isListFrontmost,
+        onConversationPress: handleConversationPress,
+        onSwellyPress: handleSwellyPress,
+        onSwellyPressCopy: handleSwellyPressCopy,
+        onProfilePress: handleProfilePress,
+        onSettingsPress: () => setShowSettings(true),
+        onTripsPress: () => requestTab('trips'),
+        onOpenTripDetail: handleOpenTripDetailFromChat,
+        onOpenSurftripDetail: handleOpenSurftripDetail,
+        onViewUserProfile: handleViewUserProfile,
+        onSwellyShaperViewProfile: handleSwellyShaperViewProfile,
+        pendingNotificationConversationId,
+        onPendingNotificationHandled: () => setPendingNotificationConversationId(null),
+      },
+      tripsProps: {
+        onBack: () => {
+          requestTab('lineup');
+          setPendingTripDetailId(null);
+          setPendingTripFocus(null);
+        },
+        initialTripId: pendingTripDetailId,
+        initialTripFocus: pendingTripFocus,
+        onOpenGroupChat: handleOpenGroupChat,
+        onViewUserProfile: handleViewUserProfileFromTrip,
+      },
+      profileProps: {
+        onBack: () => requestTab(prevTabRef.current),
+        onMessage: handleStartConversation,
+        onEdit: () => setShowProfileEditor(true),
+      },
+    };
+
     return (
+      <MainNavProvider value={mainNavValue}>
       <View style={styles.fill}>
-        {/* ConversationsStack is always mounted; hidden when an overlay is active
-            so its internal navigation state, scroll position, and subscriptions
-            persist across Profile/Settings/DM/etc. visits. */}
+        {/* The tab navigator (Lineup / Trips / Profile + floating bottom nav)
+            is the always-mounted base layer; visited tabs stay mounted so
+            scroll positions and realtime subscriptions persist. Overlays
+            below still cover it absolutely, exactly as before. */}
         <View style={styles.fill}>
-          <ConversationsStack
-            isListFrontmost={isListFrontmost}
-            onConversationPress={handleConversationPress}
-            onSwellyPress={handleSwellyPress}
-            onSwellyPressCopy={handleSwellyPressCopy}
-            onProfilePress={handleProfilePress}
-            onSettingsPress={() => setShowSettings(true)}
-            onTripsPress={() => setShowTrips(true)}
-            onOpenTripDetail={handleOpenTripDetailFromChat}
-            onOpenSurftripDetail={handleOpenSurftripDetail}
-            onViewUserProfile={handleViewUserProfile}
-            onSwellyShaperViewProfile={handleSwellyShaperViewProfile}
-            pendingNotificationConversationId={pendingNotificationConversationId}
-            onPendingNotificationHandled={() => setPendingNotificationConversationId(null)}
-          />
+          <RootNavigator />
         </View>
         {/* Persistent Swelly chat layer (regular). Mounted on first open, then
             kept alive with display:'none' when not the front-most layer. This
@@ -1934,7 +1972,7 @@ export const AppContent: React.FC = () => {
         {tripPlanningChatEverShown && (
           <View
             style={[StyleSheet.absoluteFill, { backgroundColor: '#F5F5F5' }, !showTripPlanningChat && { display: 'none' }]}
-            pointerEvents={showTripPlanningChat && !showProfile && !showConversationLoading && !selectedConversation && !showSettings && !showTrips && !showSwellyShaper ? 'auto' : 'none'}
+            pointerEvents={showTripPlanningChat && !showProfile && !showConversationLoading && !selectedConversation && !showSettings && activeTab !== 'trips' && !showSwellyShaper ? 'auto' : 'none'}
           >
             <TripPlanningChatScreen
               onChatComplete={handleTripPlanningChatBack}
@@ -1960,7 +1998,7 @@ export const AppContent: React.FC = () => {
             // lets the home screen behind show through during the
             // slide/fade entry & swipe-back exit animations.
             style={[StyleSheet.absoluteFill, !showTripPlanningChatCopy && { display: 'none' }]}
-            pointerEvents={showTripPlanningChatCopy && !showProfile && !showConversationLoading && !selectedConversation && !showSettings && !showTrips && !showSwellyShaper ? 'auto' : 'none'}
+            pointerEvents={showTripPlanningChatCopy && !showProfile && !showConversationLoading && !selectedConversation && !showSettings && activeTab !== 'trips' && !showSwellyShaper ? 'auto' : 'none'}
           >
             <TripPlanningChatScreenCopy
               onChatComplete={() => { setShowTripPlanningChatCopy(false); setShowTripPlanningChat(false); setPendingOnboardingMatches(null); }}
@@ -1981,38 +2019,9 @@ export const AppContent: React.FC = () => {
           </View>
         )}
         {activeOverlay && <View style={StyleSheet.absoluteFill}>{activeOverlay}</View>}
-        {/* THE floating bottom nav — one persistent instance above all pages,
-            so the pill animation plays across instant page switches. */}
-        {showBottomNav && (
-          <TripsBottomNav
-            control={bottomNavControl}
-            active={bottomNavActive}
-            onLineupPress={() => {
-              setPendingTripDetailId(null);
-              setShowTrips(false);
-              setShowProfile(false);
-              setViewingUserId(null);
-            }}
-            onTripsPress={() => {
-              setShowProfile(false);
-              setViewingUserId(null);
-              setShowTrips(true);
-            }}
-            onProfilePress={() => {
-              // From Trips, the profile back button should return to Trips
-              // (profileFromTripDetail reuses that path); from the Lineup it
-              // falls through to home.
-              if (showTrips) {
-                setProfileFromTripDetail(true);
-                setPendingTripDetailId(null);
-                setShowTrips(false);
-              }
-              setProfileFromSwellyShaper(false);
-              setViewingUserId(null); // own profile
-              setShowProfile(true);
-            }}
-          />
-        )}
+        {/* The floating bottom nav renders INSIDE RootNavigator as the
+            custom tabBar (one persistent instance — pill animation plays
+            across tab switches). barSuppressed hides it under overlays. */}
         {process.env.EXPO_PUBLIC_LOCAL_MODE === 'true' && (
           <TouchableOpacity
             style={{ position: 'absolute', top: 60, right: 10, backgroundColor: '#333', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, zIndex: 999, opacity: 0.7, display: 'none' }}
@@ -2112,6 +2121,7 @@ export const AppContent: React.FC = () => {
           onDismiss={handleJoinDecisionDismiss}
         />
       </View>
+      </MainNavProvider>
     );
   }
 

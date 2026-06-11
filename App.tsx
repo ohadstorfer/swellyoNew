@@ -3,6 +3,7 @@ import { Platform, I18nManager, AppState } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { PostHogProvider, PostHogSurveyProvider } from 'posthog-react-native';
 import { NavigationContainer } from '@react-navigation/native';
+import { navigationRef } from './src/navigation/navigationRef';
 import { OnboardingProvider } from './src/context/OnboardingContext';
 import { UserProfileProvider } from './src/context/UserProfileContext';
 import { MessagingProvider } from './src/context/MessagingProvider';
@@ -99,7 +100,7 @@ export default Sentry.wrap(function App() {
     <GestureHandlerRootView style={{ flex: 1 }}>
     <MaybeKeyboardProvider>
     <SafeAreaProvider>
-    <NavigationContainer independent={true} onReady={handleNavigationReady}>
+    <NavigationContainer independent={true} ref={navigationRef} onReady={handleNavigationReady}>
       <PostHogErrorBoundary>
         <QueryClientProvider client={queryClient}>
         {isNavigationReady ? (
