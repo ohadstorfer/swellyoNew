@@ -256,18 +256,14 @@ export default function RootNavigator() {
       <RootStack.Screen name="HomeTabs" component={HomeTabs} />
       <RootStack.Screen name="TripDetail" component={TripDetailCardScreen} options={{ presentation: 'card' }} />
       <RootStack.Screen name="EditTrip" component={EditTripCardScreen} options={{ presentation: 'card' }} />
+      {/* Plain card. The panel is full-screen and opaque, so transparency
+          bought nothing and modal presentations broke z-order/gestures
+          (two strikes: native modal context → sheets+crashes; contained →
+          cards rendering underneath). Native slide + edge-swipe back. */}
       <RootStack.Screen
         name="NotificationsPanel"
         component={NotificationsPanelScreen}
-        options={{
-          // CONTAINED transparent overlay: stays inside our navigator instead
-          // of opening an iOS native-modal context. A native modal here made
-          // every screen pushed on top present as a sheet, and the modal
-          // context fought gestures/layout (stuck scroll, shiver, crashes).
-          // The panel still animates itself (slide drawer + backdrop fade).
-          presentation: 'containedTransparentModal',
-          animation: 'none',
-        }}
+        options={{ presentation: 'card' }}
       />
     </RootStack.Navigator>
   );

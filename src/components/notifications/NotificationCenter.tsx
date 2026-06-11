@@ -134,55 +134,23 @@ export const NotificationCenter: React.FC<Props> = ({ userId, bare = false }) =>
 };
 
 /**
- * The notifications drawer, rendered as a transparentModal ROUTE (see
- * RootNavigator). Slides itself in from the right over a dimmed backdrop;
- * dismissed by backdrop tap, the back chevron, a rightward swipe, or
- * hardware back (route pop). Actionable notifications carry inline
- * Approve / Decline wired to groupTripsService.
+ * The notifications screen, rendered as a plain CARD route (see
+ * RootNavigator). The navigator owns the slide-in/out and the edge-swipe
+ * back gesture. Actionable notifications carry inline Approve / Decline
+ * wired to groupTripsService. Trips opened from rows push ON TOP — back
+ * returns here.
  */
 export const NotificationsPanel: React.FC<PanelProps> = ({ userId, onClose, onOpenTrip }) => {
   const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
-  // Full-screen panel — slides in from the right edge over the whole screen.
-  const panelWidth = width;
 
   const [items, setItems] = useState<NotificationRow[]>([]);
   const [loading, setLoading] = useState(false);
   // Id of the notification whose Approve/Decline is currently in flight.
   const [acting, setActing] = useState<string | null>(null);
-  const [reduceMotion, setReduceMotion] = useState(false);
 
   // Rows that were unread the moment the panel opened — kept highlighted for the
   // duration of this viewing even after we mark them read.
   const unreadAtOpen = useRef<Set<string>>(new Set());
-
-  // Drawer position: 0 = fully open, `panelWidth` = fully off-screen to the
-  // right. Starts off-screen so the first frame has no opaque-backdrop flash.
-  const translateX = useRef(new Animated.Value(panelWidth)).current;
-  const dragStartedAt = useRef(0);
-
-  // Backdrop dims in as the panel slides in.
-  const backdropOpacity = translateX.interpolate({
-    inputRange: [0, panelWidth],
-    outputRange: [1, 0],
-    extrapolate: 'clamp',
-  });
-
-  // ── Respect reduce-motion (emil/a11y): keep the panel, drop the movement ────
-  useEffect(() => {
-    let mounted = true;
-    AccessibilityInfo.isReduceMotionEnabled?.()
-      .then((v) => mounted && setReduceMotion(!!v))
-      .catch(() => {});
-    const sub = AccessibilityInfo.addEventListener?.('reduceMotionChanged', (v) =>
-      setReduceMotion(!!v)
-    );
-    return () => {
-      mounted = false;
-      // @ts-ignore older RN returns void; newer returns a subscription
-      sub?.remove?.();
-    };
-  }, []);
 
   // ── Live inserts/updates while the panel is open ─────────────────────────
   useEffect(() => {
@@ -213,64 +181,14 @@ export const NotificationsPanel: React.FC<PanelProps> = ({ userId, onClose, onOp
     }
   }, []);
 
-  // Slide in on mount (the route itself has no nav animation).
+  // Load on mount; the navigator animates the screen in.
   useEffect(() => {
-    translateX.setValue(panelWidth);
-    Animated.timing(translateX, {
-      toValue: 0,
-      duration: reduceMotion ? 0 : 300,
-      easing: EASE_DRAWER,
-      useNativeDriver: true,
-    }).start();
     loadList();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const closePanel = useCallback(() => {
-    // Exit a touch faster than enter (emil: the system responds quickly).
-    Animated.timing(translateX, {
-      toValue: panelWidth,
-      duration: reduceMotion ? 0 : 240,
-      easing: EASE_DRAWER,
-      useNativeDriver: true,
-    }).start(({ finished }) => {
-      if (finished) onClose();
-    });
-  }, [translateX, panelWidth, reduceMotion, onClose]);
-
-  // ── Swipe-to-dismiss: drag the panel out to the right ──────────────────────
-  const panResponder = useMemo(
-    () =>
-      PanResponder.create({
-        // Only claim clearly-horizontal drags so the inner ScrollView keeps vertical scroll.
-        onMoveShouldSetPanResponder: (_, g) =>
-          Math.abs(g.dx) > 12 && Math.abs(g.dx) > Math.abs(g.dy) * 1.4,
-        onPanResponderGrant: () => {
-          dragStartedAt.current = Date.now();
-        },
-        onPanResponderMove: (_, g) => {
-          // Rightward drags track 1:1; leftward over-drag gets heavy friction (no hard wall).
-          const dx = g.dx >= 0 ? g.dx : g.dx / 4;
-          translateX.setValue(Math.max(dx, -24));
-        },
-        onPanResponderRelease: (_, g) => {
-          const elapsed = Math.max(1, Date.now() - dragStartedAt.current);
-          const velocity = g.dx / elapsed; // px/ms, positive = flicking right
-          // A far drag OR a quick flick dismisses; otherwise spring back open.
-          if (g.dx > panelWidth * 0.4 || velocity > 0.4) {
-            closePanel();
-          } else {
-            Animated.timing(translateX, {
-              toValue: 0,
-              duration: 200,
-              easing: EASE_OUT,
-              useNativeDriver: true,
-            }).start();
-          }
-        },
-      }),
-    [translateX, panelWidth, closePanel]
-  );
+  // The route pop animates the slide-out natively.
+  const closePanel = onClose;
 
   // ── Tap a row → push its trip card ON TOP of the panel ──────────────────
   // The panel stays mounted in the stack underneath; backing out of the trip
@@ -333,31 +251,7 @@ export const NotificationsPanel: React.FC<PanelProps> = ({ userId, onClose, onOp
   );
 
   return (
-    <View style={styles.modalRoot}>
-      {/* Dimmed backdrop (fades with the slide); taps handled by the layer below. */}
-      <Animated.View
-        style={[styles.backdrop, { opacity: backdropOpacity }]}
-        pointerEvents="none"
-      />
-      {/* Full-screen tap-catcher; the panel renders on top, so only the
-          exposed left strip closes on tap. */}
-      <Pressable
-        style={StyleSheet.absoluteFill}
-        onPress={closePanel}
-        accessibilityLabel="Close notifications"
-      />
-
-      <Animated.View
-            style={[
-              styles.panel,
-              {
-                width: panelWidth,
-                paddingTop: insets.top,
-                transform: [{ translateX }],
-              },
-            ]}
-            {...panResponder.panHandlers}
-          >
+    <View style={[styles.panelScreen, { paddingTop: insets.top }]}>
             <View style={styles.panelHeader}>
               <TouchableOpacity
                 onPress={closePanel}
@@ -399,7 +293,6 @@ export const NotificationsPanel: React.FC<PanelProps> = ({ userId, onClose, onOp
                 ))}
               </ScrollView>
             )}
-          </Animated.View>
     </View>
   );
 };
@@ -550,6 +443,11 @@ const styles = StyleSheet.create({
   },
   modalRoot: {
     flex: 1,
+  },
+  // Full-screen card route (white, navigator owns slide + swipe-back).
+  panelScreen: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
   },
   backdrop: {
     ...StyleSheet.absoluteFillObject,
