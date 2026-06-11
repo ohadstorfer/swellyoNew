@@ -81,6 +81,7 @@ interface ProfileScreenProps {
   onSaveAndGoToConversations?: () => void; // Tap handler for the "Got it!" button on the post-onboarding profile: navigates to the conversations home
   noTransition?: boolean; // When true, skip the slide-in/slide-out animations (e.g. when layered under a modal that handles its own fade)
   suppressConnectAnalytics?: boolean; // When true, the Connect button does NOT log swelly_connect_clicked (e.g. opened from the post-onboarding matches overlay)
+  swipeBackDisabled?: boolean; // When the screen is a kept-mounted tab root: no swipe-dismiss, no slide-out (it would park the mounted screen off-screen)
 }
 
 // Board type mapping
@@ -790,7 +791,7 @@ const SWIPE_DISMISS_DISTANCE = SWIPE_SCREEN_WIDTH * 0.3;
 const SWIPE_DISMISS_VELOCITY = 800;
 const SWIPE_ANIMATION_DURATION = 220;
 
-export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, onMessage, onContinueEdit, onEdit, fromOnboardingChat = false, onSaveAndGoToConversations, noTransition = false, suppressConnectAnalytics = false }) => {
+export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, onMessage, onContinueEdit, onEdit, fromOnboardingChat = false, onSaveAndGoToConversations, noTransition = false, suppressConnectAnalytics = false, swipeBackDisabled = false }) => {
   const insets = useSafeAreaInsets();
   // Get onboarding context for logout
   const { resetOnboarding, setUser, setCurrentStep, setIsDemoUser } = useOnboarding();
@@ -926,7 +927,9 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
   // Used by tappable back buttons so they match the swipe-to-dismiss feel.
   const handleBackPress = useCallback(() => {
     Keyboard.dismiss();
-    if (noTransition) {
+    // No slide-out when the screen stays mounted (tab root) — animating
+    // translateX off-screen would park the mounted screen there forever.
+    if (noTransition || swipeBackDisabled) {
       handleSwipeDismiss();
       return;
     }
@@ -937,9 +940,10 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
         if (finished) runOnJS(handleSwipeDismiss)();
       },
     );
-  }, [swipeTranslateX, handleSwipeDismiss, noTransition]);
+  }, [swipeTranslateX, handleSwipeDismiss, noTransition, swipeBackDisabled]);
 
   const isSwipeDisabled =
+    swipeBackDisabled ||
     Platform.OS === 'web' ||
     // Android: the swipe-to-dismiss Pan + simultaneousWithExternalGesture
     // composition that works on iOS holds the touch in BEGAN state on

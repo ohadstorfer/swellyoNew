@@ -1961,6 +1961,10 @@ export const AppContent: React.FC = () => {
         onBack: () => requestTab(prevTabRef.current),
         onMessage: handleStartConversation,
         onEdit: () => setShowProfileEditor(true),
+        // Tab root: snaps into place (no slide-in) and never animates itself
+        // off-screen — it stays mounted, so a slide-out would park it there.
+        noTransition: true,
+        swipeBackDisabled: true,
       },
     };
 

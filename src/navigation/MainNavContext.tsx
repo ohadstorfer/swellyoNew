@@ -38,7 +38,7 @@ export interface MainNavContextValue {
   >;
   profileProps: Pick<
     ComponentProps<typeof ProfileScreen>,
-    'onBack' | 'onMessage' | 'onEdit'
+    'onBack' | 'onMessage' | 'onEdit' | 'noTransition' | 'swipeBackDisabled'
   >;
 }
 
