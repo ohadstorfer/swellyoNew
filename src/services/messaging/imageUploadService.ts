@@ -417,6 +417,9 @@ export async function uploadImageToStorage(
       .upload(storagePath, uploadBody, {
         contentType,
         upsert: false,
+        // Message media is immutable (path is keyed by message id), so it's
+        // safe to cache long. Seconds only — supabase-js prefixes "max-age=".
+        cacheControl: '31536000',
       });
 
     if (error) {

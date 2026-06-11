@@ -189,6 +189,11 @@ export const uploadProfileImage = async (
       .upload(fileName, uploadBody, {
         contentType,
         upsert: true,
+        // Filenames are timestamped (new URL per upload), so the content at a
+        // URL never changes — cache for a year. Seconds only: supabase-js
+        // prefixes "max-age=" itself. Without this, Supabase serves no-cache
+        // and the web app re-fetches every image on every visit.
+        cacheControl: '31536000',
       });
 
     if (error) {
@@ -282,6 +287,9 @@ export const uploadCoverImage = async (
       .upload(fileName, uploadBody, {
         contentType,
         upsert: true,
+        // Timestamped filename → immutable URL → safe to cache long (see
+        // uploadProfileImage).
+        cacheControl: '31536000',
       });
 
     if (error) {
@@ -343,6 +351,9 @@ export const uploadProfileVideoThumbnail = async (
       .upload(fileName, uploadBody, {
         contentType,
         upsert: true,
+        // Timestamped filename → immutable URL → safe to cache long (see
+        // uploadProfileImage).
+        cacheControl: '31536000',
       });
 
     if (error) {
@@ -425,6 +436,9 @@ const uploadToBucket = async (
       .upload(fileName, uploadBody, {
         contentType,
         upsert: true,
+        // Timestamped filename → immutable URL → safe to cache long (see
+        // uploadProfileImage).
+        cacheControl: '31536000',
       });
 
     if (error) {
