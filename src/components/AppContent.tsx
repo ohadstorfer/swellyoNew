@@ -1327,9 +1327,14 @@ export const AppContent: React.FC = () => {
 
   const handleOpenTripDetailFromChat = useCallback(
     (tripId: string, focus?: TripDetailFocus) => {
-      openTripCard(tripId, focus ?? null);
+      // Mid-stack open (chat header tap): push ON TOP of the chat card —
+      // back returns to the chat. Do NOT switch the tab underneath:
+      // switching tabs pops every card above HomeTabs, which destroyed the
+      // chat the user came from. openTripCard (with its tab switch) is for
+      // DEEP LINKS only, where there's no stack context to preserve.
+      pushRootCard('TripDetail', { tripId, focus: focus ?? null });
     },
-    [openTripCard]
+    []
   );
 
   // Taps from inside a TripDetail card: the ProfileCard stacks above the trip
