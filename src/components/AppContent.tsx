@@ -20,12 +20,8 @@ import RootNavigator from '../navigation/RootNavigator';
 import { pushRootCard } from '../navigation/navigationRef';
 import { MainNavProvider, type MainNavContextValue } from '../navigation/MainNavContext';
 import { useTripsBottomNavControl, type NavKey } from './trips/TripsBottomNav';
-import SurftripDetailScreen from '../screens/surftrips/SurftripDetailScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
-import { DirectMessageScreen } from '../screens/DirectMessageScreen';
-import { DirectGroupChat } from '../screens/DirectGroupChat';
 import { SwellyShaperScreen } from '../screens/SwellyShaperScreen';
-import { SettingsScreen } from '../screens/SettingsScreen';
 import { ConversationLoadingScreen } from '../components/ConversationLoadingScreen';
 import { WelcomeToLineupOverlay } from '../components/WelcomeToLineupOverlay';
 import { JoinDecisionOverlay } from '../components/trips/joinRequest/JoinDecisionOverlay';
@@ -1226,6 +1222,17 @@ export const AppContent: React.FC = () => {
     }
   };
 
+  // Stable identity — the Swelly screen receives this through context; a
+  // fresh lambda every render risks effect re-fires inside the screen.
+  const handleSwellyChatStateChange = useCallback(
+    (chatId: string | null, matchedUsers: any[], destination: string) => {
+      setTripPlanningChatId(chatId);
+      setTripPlanningMatchedUsers(matchedUsers);
+      setTripPlanningDestination(destination);
+    },
+    []
+  );
+
   const handleSwellyPress = () => {
     pushRootCard('SwellyChat', { service: 'copy' });
   };
@@ -1372,16 +1379,12 @@ export const AppContent: React.FC = () => {
     [openTripCard]
   );
 
-  // Wrap handleViewUserProfile for taps coming from inside a TripDetail card.
-  // The profile renders as an overlay ABOVE the card, which stays mounted —
-  // back just closes the overlay (see handleProfileBack).
-  const handleViewUserProfileFromTrip = useCallback(
-    (userId: string, _fromTripId: string) => {
-      setProfileFromTripDetail(true);
-      handleViewUserProfile(userId);
-    },
-    []
-  );
+  // Taps from inside a TripDetail card: the ProfileCard stacks above the trip
+  // card, back pops to it. Plain function (not useCallback) so it never holds
+  // a stale handleViewUserProfile.
+  const handleViewUserProfileFromTrip = (userId: string, _fromTripId: string) => {
+    handleViewUserProfile(userId);
+  };
 
   const handleOpenSurftripDetail = useCallback((groupId: string) => {
     pushRootCard('SurftripCard', { groupId });
@@ -1461,12 +1464,12 @@ export const AppContent: React.FC = () => {
         setProfileFromWelcomeOverlay(false);
       }
 
-      // Close profile screen to show conversation
-      console.log('[AppContent] Closing profile screen...');
-      setShowProfile(false);
-      setViewingUserId(null);
-      setProfileFromTripDetail(false);
-      console.log('[AppContent] Profile screen closed');
+      // Close the legacy profile overlay if it's the caller (post-onboarding
+      // flow); card-origin calls leave state untouched (no spurious re-render).
+      if (showProfile) {
+        setShowProfile(false);
+        setViewingUserId(null);
+      }
       
       console.log('[AppContent] ========== handleStartConversation COMPLETE ==========');
       console.log('[AppContent] Final state - showConversationLoading:', showConversationLoading);
@@ -1481,19 +1484,22 @@ export const AppContent: React.FC = () => {
     console.log('[AppContent] handleConversationLoadingComplete called');
     console.log('[AppContent] pendingConversation:', pendingConversation);
     
-    // After loading screen completes, open the chat card
+    // After loading screen completes, open the chat card.
     if (pendingConversation) {
-      console.log('[AppContent] Pushing chat card after loading screen');
-      pushRootCard('ChatCard', {
+      const params = {
         conversationId: pendingConversation.conversationId,
         otherUserId: pendingConversation.otherUserId,
         otherUserName: pendingConversation.otherUserName,
         otherUserAvatar: pendingConversation.otherUserAvatar,
-        isDirect: true,
-      });
+        isDirect: true as const,
+      };
+      // Z-ORDER: the loading overlay renders ABOVE the navigator. Commit its
+      // unmount FIRST, then push — otherwise the card slides in invisibly
+      // behind the overlay for a frame (the navigation dispatch reaches the
+      // native layer before React commits the overlay removal).
       setShowConversationLoading(false);
       setPendingConversation(null);
-      console.log('[AppContent] Navigation complete, loading screen hidden');
+      setTimeout(() => pushRootCard('ChatCard', params), 0);
     } else {
       console.warn('[AppContent] handleConversationLoadingComplete called but no pendingConversation');
     }
@@ -1801,11 +1807,7 @@ export const AppContent: React.FC = () => {
         persistedChatId: tripPlanningChatId,
         persistedMatchedUsers: tripPlanningMatchedUsers,
         persistedDestination: tripPlanningDestination,
-        onChatStateChange: (chatId: string | null, matchedUsers: any[], destination: string) => {
-          setTripPlanningChatId(chatId);
-          setTripPlanningMatchedUsers(matchedUsers);
-          setTripPlanningDestination(destination);
-        },
+        onChatStateChange: handleSwellyChatStateChange,
         onViewUserProfile: handleViewUserProfile,
         onStartConversation: handleStartConversation,
         onboardingMatches: pendingOnboardingMatches,
