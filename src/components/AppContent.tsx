@@ -52,6 +52,10 @@ import { ageGateService } from '../services/ageGate/ageGateService';
 import { swellyServiceCopy, swellyServiceCopyCopy } from '../services/swelly/swellyServiceCopy';
 import { findAndConnectMatches, OnboardingMatchResult } from '../services/matching/onboardingMatchingService';
 import { pushNotificationService } from '../services/notifications/pushNotificationService';
+import {
+  tripFocusForNotification,
+  type TripDetailFocus,
+} from '../services/notifications/notificationsService';
 import { syncDeviceTimezone } from '../services/notifications/deviceTimezone';
 import { useMessaging } from '../context/MessagingProvider';
 
@@ -84,6 +88,8 @@ export const AppContent: React.FC = () => {
   const [pendingNotificationConversationId, setPendingNotificationConversationId] = useState<string | null>(null);
   // Push notification: pending trip detail to open (from a trip_join_request notification)
   const [pendingTripDetailId, setPendingTripDetailId] = useState<string | null>(null);
+  // Section of the trip detail to land on (notification deep-links only).
+  const [pendingTripFocus, setPendingTripFocus] = useState<TripDetailFocus | null>(null);
   const { getCurrentConversationId, conversations: messagingConversations, refreshConversations } = useMessaging();
   
   // State to track session validation
@@ -268,6 +274,7 @@ export const AppContent: React.FC = () => {
     try {
       setSelectedConversation(null);
       setActiveSurftripDetailId(null);
+      setPendingTripFocus(null);
       setPendingTripDetailId(pendingTripInviteId);
       setShowTrips(true);
     } finally {
@@ -368,11 +375,22 @@ export const AppContent: React.FC = () => {
     pushNotificationService.setupNotificationHandlers(
       getCurrentConversationId,
       (payload) => {
-        if (payload.type === 'trip_join_request' && payload.tripId) {
+        // Every group-trip push (queue dispatcher + legacy trip_join_request)
+        // carries tripId — deep-link to that trip, landing on the tab/section
+        // that matches the notification type (stage/decision refine it).
+        if (payload.tripId) {
+          setSelectedConversation(null);
+          setPendingTripFocus(
+            tripFocusForNotification(payload.type, {
+              stage: payload.stage,
+              decision: payload.decision,
+            })
+          );
           setPendingTripDetailId(payload.tripId);
           setShowTrips(true);
           return;
         }
+        // Chat-message pushes carry conversationId instead.
         if (payload.conversationId) {
           setPendingNotificationConversationId(payload.conversationId);
         }
@@ -1048,7 +1066,9 @@ export const AppContent: React.FC = () => {
     (decision: UnseenJoinDecision) => {
       advanceJoinDecisionQueue(decision);
       if (decision.status === 'approved') {
-        // Open this specific trip's detail screen.
+        // Open this specific trip's detail screen — landing on the commit
+        // pill, the new member's next step (same focus as the notification).
+        setPendingTripFocus('commit');
         setPendingTripDetailId(decision.trip.id);
         setShowTrips(true);
       } else {
@@ -1342,11 +1362,15 @@ export const AppContent: React.FC = () => {
     });
   }, []);
 
-  const handleOpenTripDetailFromChat = useCallback((tripId: string) => {
-    setSelectedConversation(null);
-    setPendingTripDetailId(tripId);
-    setShowTrips(true);
-  }, []);
+  const handleOpenTripDetailFromChat = useCallback(
+    (tripId: string, focus?: TripDetailFocus) => {
+      setSelectedConversation(null);
+      setPendingTripFocus(focus ?? null);
+      setPendingTripDetailId(tripId);
+      setShowTrips(true);
+    },
+    []
+  );
 
   // Wrap handleViewUserProfile for taps coming from inside TripDetailScreen.
   // The render cascade prioritises showTrips over showProfile, so we have to
@@ -1354,6 +1378,7 @@ export const AppContent: React.FC = () => {
   // pendingTripDetailId restores the trip detail in TripsScreen on remount.
   const handleViewUserProfileFromTrip = useCallback(
     (userId: string, fromTripId: string) => {
+      setPendingTripFocus(null); // restore the trip plainly — no section re-scroll
       setPendingTripDetailId(fromTripId);
       setProfileFromTripDetail(true);
       setShowTrips(false);
@@ -1747,8 +1772,10 @@ export const AppContent: React.FC = () => {
           onBack={() => {
             setShowTrips(false);
             setPendingTripDetailId(null);
+            setPendingTripFocus(null);
           }}
           initialTripId={pendingTripDetailId}
+          initialTripFocus={pendingTripFocus}
           onOpenGroupChat={handleOpenGroupChat}
           onViewUserProfile={handleViewUserProfileFromTrip}
         />

@@ -140,7 +140,12 @@ serve(async (req) => {
       body: JSON.stringify({
         to: token, title: text.title, body: text.body, sound: "default",
         collapseId: row.trip_id || undefined,
-        data: { type: row.type, tripId: row.trip_id, notificationId: row.notification_id },
+        // stage/decision let the app deep-link to the right section on tap
+        // (e.g. trip_reminder:gear → Plan tab → Packing & Gear).
+        data: {
+          type: row.type, tripId: row.trip_id, notificationId: row.notification_id,
+          stage: feedData.stage ?? undefined, decision: feedData.decision ?? undefined,
+        },
       }),
     });
     if (!resp.ok) {

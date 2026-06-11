@@ -53,7 +53,7 @@ interface ConversationsScreenProps {
   onSwellyShaperViewProfile?: () => void; // Callback for viewing profile from Swelly Shaper
   onSettingsPress?: () => void;
   onTripsPress?: () => void;
-  onOpenTripDetail?: (tripId: string) => void;
+  onOpenTripDetail?: (tripId: string, focus?: import('../services/notifications/notificationsService').TripDetailFocus) => void;
   onOpenSurftripDetail?: (surftripId: string) => void;
   pendingNotificationConversationId?: string | null;
   onPendingNotificationHandled?: () => void;
@@ -1164,7 +1164,7 @@ export default function ConversationsScreen({
 
         <View style={styles.headerRight}>
           {/* Notification center — bell + realtime overlay */}
-          <NotificationCenter userId={currentUserId} />
+          <NotificationCenter userId={currentUserId} onOpenTrip={onOpenTripDetail} />
 
           <TouchableOpacity
             testID="conversations-menu-button"

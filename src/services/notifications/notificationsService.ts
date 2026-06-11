@@ -46,6 +46,69 @@ export interface NotificationRow {
   created_at: string;
 }
 
+/**
+ * Deep-link target inside TripDetailScreen. 'overview' = just open the trip;
+ * everything else switches to the Plan tab and scrolls to that section
+ * (falling back to overview/top when the user can't see Plan or the section
+ * isn't rendered — e.g. a declined requester, or a locked trip).
+ */
+export type TripDetailFocus =
+  | 'overview'
+  | 'commit'        // Plan → commit pill (members) / top of Plan (host)
+  | 'updates'       // Plan → admin updates card
+  | 'gear'          // Plan → Packing & Gear section
+  | 'your-gear'     // Plan → Packing & Gear → Your Gear card
+  | 'requests'      // Plan → pending join requests (host)
+  | 'gear-requests' // Plan → gear requests badge + auto-open the sheet (host)
+  | 'breakdown';    // Plan → group breakdown
+
+/**
+ * Where tapping a notification should land. Single source of truth for both
+ * tap surfaces: the bell feed (full row data) and native pushes (the
+ * dispatcher mirrors `stage`/`decision` into the push data payload).
+ */
+export function tripFocusForNotification(
+  type: string | undefined,
+  data?: Record<string, any> | null
+): TripDetailFocus {
+  switch (type) {
+    case 'join_request_received':
+    case 'trip_join_request': // legacy push type (pre-queue webhook)
+      return 'requests';
+    case 'join_request_decided':
+      // Approved → next step is committing. Declined → can't see Plan anyway.
+      return data?.decision === 'approved' ? 'commit' : 'overview';
+    case 'commitment_request_received': // host: action lives in the bell buttons
+    case 'commitment_decided':
+      return 'commit';
+    case 'member_committed':
+      return 'breakdown';
+    case 'gear_request_received':
+      return 'gear-requests';
+    case 'gear_request_decided':
+    case 'gear_claimed':
+    case 'group_gear_updated':
+      return 'gear';
+    case 'personal_gear_updated':
+      return 'your-gear';
+    case 'admin_update_posted':
+      return 'updates';
+    case 'trip_reminder':
+      switch (data?.stage) {
+        case 'commit':
+          return 'commit';
+        case 'week':
+        case 'gear':
+          return 'gear'; // "packing list inside"
+        default:
+          return 'overview'; // tomorrow / today → trip details
+      }
+    // member_joined, member_left, member_removed, trip_cancelled, trip_ended
+    default:
+      return 'overview';
+  }
+}
+
 /** Ionicons name used for the row icon. */
 type IoniconName = string;
 
