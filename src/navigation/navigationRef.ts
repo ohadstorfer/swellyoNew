@@ -1,8 +1,10 @@
 import { createNavigationContainerRef } from '@react-navigation/native';
+import type { TripDetailFocus } from '../services/notifications/notificationsService';
+import type { GroupTrip } from '../services/trips/groupTripsService';
 
 /**
  * Root navigation param list. Grows as the migration converts overlays to
- * cards (see docs/nav-migration/). Phase 1: only the tabs screen exists.
+ * cards (see docs/nav-migration/). Phase 2: trips cards + notifications panel.
  */
 export type MainTabsParamList = {
   Lineup: undefined;
@@ -12,6 +14,13 @@ export type MainTabsParamList = {
 
 export type RootStackParamList = {
   HomeTabs: { screen?: keyof MainTabsParamList } | undefined;
+  /** Trip detail card — push() so trip→profile→trip chains stack. */
+  TripDetail: { tripId: string; focus?: TripDetailFocus | null };
+  /** Host edit wizard, card above the trip detail. */
+  EditTrip: { trip: GroupTrip };
+  /** Right-side notifications drawer as a transparent route — lives in back
+   *  history, so back from a notification-opened trip returns TO the panel. */
+  NotificationsPanel: { userId: string | null };
 };
 
 /**

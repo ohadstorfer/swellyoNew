@@ -47,7 +47,7 @@ import {
   peekTripWizardDraft,
   clearTripWizardDraft,
 } from '../../hooks/useTripWizardDraft';
-import TripDetailScreen from './TripDetailScreen';
+import { useNavigation, StackActions } from '@react-navigation/native';
 import { useTripsBottomNavControl, type TripsBottomNavControl } from '../../components/trips/TripsBottomNav';
 import { Images } from '../../assets/images';
 import { Logo } from '../../components/Logo';
@@ -83,20 +83,11 @@ export type TripsTab = 'explore' | 'my' | 'create';
 
 interface TripsScreenProps {
   onBack: () => void;
-  /** When provided (e.g. from a push tap), open the detail screen for this trip on mount. */
-  initialTripId?: string | null;
-  /** Landing spot inside the trip detail (notification deep-link), see TripDetailFocus. */
-  initialTripFocus?: TripDetailFocus | null;
-  /** Open the group chat linked to a trip. Lifted to AppContent so it can swap to the DM overlay. */
-  onOpenGroupChat?: (params: { conversationId: string; title: string; heroImageUrl?: string | null; tripId?: string }) => void;
-  /** Tap on a participant inside a trip detail opens their profile. AppContent
-   *  records the current trip so the profile back returns here. */
-  onViewUserProfile?: (userId: string, fromTripId: string) => void;
   /** Shared control for the app-level floating nav bar — the tab lists pipe
    *  their scroll events into it so the bar collapses/restores. */
   navControl?: TripsBottomNavControl;
-  /** Reports when an internal full-screen overlay (trip detail / edit wizard)
-   *  opens, so AppContent can hide the floating nav bar. */
+  /** Legacy (Phase 2): trip detail/edit are root-stack cards now, so no inner
+   *  overlay exists anymore. Kept until Phase 5 cleanup. */
   onInnerOverlayChange?: (open: boolean) => void;
 }
 
@@ -1032,10 +1023,19 @@ const TabPane: React.FC<{
 // ---------------------------------------------------------------------------
 // Wrapper screen
 // ---------------------------------------------------------------------------
-export default function TripsScreen({ onBack, initialTripId, initialTripFocus, onOpenGroupChat, onViewUserProfile, navControl: navControlProp, onInnerOverlayChange }: TripsScreenProps) {
+export default function TripsScreen({ onBack, navControl: navControlProp, onInnerOverlayChange }: TripsScreenProps) {
   const insets = useSafeAreaInsets();
   const { user: contextUser } = useOnboarding();
   const currentUserId = contextUser?.id?.toString() ?? null;
+  const navigation = useNavigation();
+  // Trip detail + edit are CARDS on the root stack now (nav migration Phase 2):
+  // push bubbles up from this tab screen to the root navigator.
+  const openTrip = useCallback(
+    (tripId: string, focus?: TripDetailFocus | null) => {
+      navigation.dispatch(StackActions.push('TripDetail', { tripId, focus: focus ?? null }));
+    },
+    [navigation],
+  );
 
   const queryClient = useQueryClient();
   const reduceMotion = useReducedMotion();
@@ -1109,23 +1109,6 @@ export default function TripsScreen({ onBack, initialTripId, initialTripFocus, o
     tx.value = -activeIndex * bodyW;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bodyW]);
-  const [selectedTripId, setSelectedTripId] = useState<string | null>(initialTripId ?? null);
-  // Section the detail screen should land on (notification deep-links only;
-  // manual opens leave it null). Cleared on back so it never re-applies.
-  const [selectedTripFocus, setSelectedTripFocus] = useState<TripDetailFocus | null>(
-    initialTripId ? initialTripFocus ?? null : null
-  );
-  const openTripFromNotification = useCallback((tripId: string, focus?: TripDetailFocus) => {
-    setSelectedTripFocus(focus ?? null);
-    setSelectedTripId(tripId);
-  }, []);
-  const [editingTrip, setEditingTrip] = useState<GroupTrip | null>(null);
-  // Tell AppContent when a full-screen inner overlay (trip detail / edit) is
-  // up, so the app-level floating nav bar hides instead of floating over it.
-  useEffect(() => {
-    onInnerOverlayChange?.(!!(selectedTripId || editingTrip));
-    return () => onInnerOverlayChange?.(false);
-  }, [selectedTripId, editingTrip, onInnerOverlayChange]);
   // Which hosting style the user picked from the inline chooser on the Create
   // tab. null = chooser visible; non-null = wizard open in the create modal.
   const [pendingStyle, setPendingStyle] = useState<HostingStyle | null>(null);
@@ -1179,16 +1162,6 @@ export default function TripsScreen({ onBack, initialTripId, initialTripFocus, o
     );
   };
 
-  // Deep-link into a trip from a push tap: when the target changes, open it.
-  // initialTripFocus is in the deps so a second push for the SAME trip but a
-  // different section still re-applies (initialTripId alone wouldn't change).
-  useEffect(() => {
-    if (initialTripId) {
-      setSelectedTripFocus(initialTripFocus ?? null);
-      setSelectedTripId(initialTripId);
-    }
-  }, [initialTripId, initialTripFocus]);
-
   const closeCreateModal = () => {
     setPendingStyle(null);
     setWizardStarted(false);
@@ -1221,12 +1194,6 @@ export default function TripsScreen({ onBack, initialTripId, initialTripFocus, o
     goToTab('my');
   };
 
-  const handleSavedEdit = () => {
-    queryClient.invalidateQueries({ queryKey: ['trips', 'my'] });
-    setEditingTrip(null);
-    // Stay on detail screen so the host sees the updated trip immediately.
-  };
-
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
       <View style={styles.tripsHeader}>
@@ -1243,7 +1210,7 @@ export default function TripsScreen({ onBack, initialTripId, initialTripFocus, o
             <Logo size={40} iconOnly />
             <Text style={styles.tripsHeaderTitle}>Trips</Text>
           </View>
-          <NotificationCenter userId={currentUserId} bare onOpenTrip={openTripFromNotification} />
+          <NotificationCenter userId={currentUserId} bare />
         </View>
 
         <TripsHeaderTabs active={activeTab} onChange={goToTab} />
@@ -1260,7 +1227,7 @@ export default function TripsScreen({ onBack, initialTripId, initialTripFocus, o
               <MyTripsView
                 userId={currentUserId}
                 onGoCreate={() => goToTab('create')}
-                onOpenTrip={setSelectedTripId}
+                onOpenTrip={openTrip}
                 onNavScroll={handleMyNavScroll}
               />
             ) : null}
@@ -1270,7 +1237,7 @@ export default function TripsScreen({ onBack, initialTripId, initialTripFocus, o
           <TabPane index={1} width={bodyW} tx={tx} reduceMotion={reduceMotion}>
             {visited.explore ? (
               <ExploreTripsView
-                onOpenTrip={setSelectedTripId}
+                onOpenTrip={openTrip}
                 onNavScroll={handleExploreNavScroll}
                 onDeckScroll={navControl.collapse}
               />
@@ -1336,61 +1303,8 @@ export default function TripsScreen({ onBack, initialTripId, initialTripFocus, o
         </Reanimated.View>
       </View>
 
-      {/* Trip overview as an OVERLAY (not a replacement): the tab lists stay
-          mounted underneath, so going back lands on the exact scroll position
-          — vertical lists and deck positions alike. TripDetailScreen manages
-          its own top safe area. */}
-      {selectedTripId && (
-        <Reanimated.View
-          style={styles.screenOverlay}
-          entering={reduceMotion ? undefined : SlideInRight.duration(280).easing(Easing.out(Easing.cubic))}
-          exiting={reduceMotion ? undefined : SlideOutRight.duration(220).easing(Easing.in(Easing.cubic))}
-        >
-          <TripDetailScreen
-            tripId={selectedTripId}
-            initialFocus={selectedTripFocus}
-            onBack={() => {
-              setSelectedTripId(null);
-              setSelectedTripFocus(null);
-            }}
-            onOpenGroupChat={onOpenGroupChat}
-            onEditTrip={setEditingTrip}
-            onOpenTrip={openTripFromNotification}
-            onViewUserProfile={
-              onViewUserProfile
-                ? (userId: string) => onViewUserProfile(userId, selectedTripId)
-                : undefined
-            }
-          />
-        </Reanimated.View>
-      )}
-
-      {/* Edit-trip wizard stacks above the overview the same way, so closing
-          it returns to the detail screen (and the lists beneath) untouched. */}
-      {editingTrip && (
-        <View style={styles.screenOverlay}>
-          <SafeAreaView style={styles.root} edges={['top']}>
-            <View style={[styles.header, { paddingTop: 8 }]}>
-              <TouchableOpacity
-                onPress={() => setEditingTrip(null)}
-                style={styles.backBtn}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              >
-                <Ionicons name="chevron-back" size={28} color="#222B30" />
-              </TouchableOpacity>
-              <Text style={styles.headerTitle}>Edit trip</Text>
-              <View style={{ width: 28 }} />
-            </View>
-            <CreateTripWizard
-              hostId={currentUserId}
-              hostingStyle={editingTrip.hosting_style}
-              initialTrip={editingTrip}
-              onCreated={handleSavedEdit}
-              onCancel={() => setEditingTrip(null)}
-            />
-          </SafeAreaView>
-        </View>
-      )}
+      {/* Trip detail + edit are CARDS on the root stack now (Phase 2) —
+          pushed via openTrip; this screen stays mounted underneath them. */}
 
       <Modal
         visible={createModalVisible}

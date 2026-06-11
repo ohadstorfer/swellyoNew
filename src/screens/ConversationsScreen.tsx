@@ -1163,8 +1163,8 @@ export default function ConversationsScreen({
         </TouchableOpacity>
 
         <View style={styles.headerRight}>
-          {/* Notification center — bell + realtime overlay */}
-          <NotificationCenter userId={currentUserId} onOpenTrip={onOpenTripDetail} />
+          {/* Notification center — bell + unread badge; opens the panel route */}
+          <NotificationCenter userId={currentUserId} />
 
           <TouchableOpacity
             testID="conversations-menu-button"

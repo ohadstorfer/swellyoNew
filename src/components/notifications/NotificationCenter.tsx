@@ -5,7 +5,6 @@ import {
   StyleSheet,
   TouchableOpacity,
   Pressable,
-  Modal,
   ScrollView,
   Animated,
   Easing,
@@ -16,6 +15,7 @@ import {
   AccessibilityInfo,
   useWindowDimensions,
 } from 'react-native';
+import { useNavigation, useFocusEffect, StackActions } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -42,10 +42,16 @@ interface Props {
   userId: string | null;
   /** Render a bare bell (no dark circle) to sit next to other plain header icons. */
   bare?: boolean;
+}
+
+interface PanelProps {
+  userId: string | null;
+  /** Pop the panel route (after the slide-out animation). */
+  onClose: () => void;
   /**
-   * Deep-link: called when a notification row tied to a trip is tapped.
-   * The panel closes itself first; the host screen navigates to the trip,
-   * landing on the tab/section that matches the notification (focus).
+   * Tap on a trip notification. The panel does NOT close — it stays in the
+   * navigation stack beneath the pushed trip card, so backing out of the
+   * trip lands on the still-open panel.
    */
   onOpenTrip?: (tripId: string, focus?: TripDetailFocus) => void;
 }
@@ -65,26 +71,80 @@ const ACTIONABLE_TYPES = new Set<NotificationRow['type']>([
 type Decision = 'approved' | 'declined';
 
 /**
- * Bell button for the conversations header + the notification panel it opens.
+ * Bell button for screen headers. Shows the unread badge and OPENS the
+ * notifications panel as a navigation route (`NotificationsPanel` on the
+ * root stack) — the panel participates in back history, so a trip opened
+ * from a notification returns to the panel on back.
  *
- * The panel is a right-side drawer: it slides in from the right edge over a
- * dimmed backdrop and can be dismissed by tapping the backdrop, the back
- * chevron, or swiping it back out to the right. Actionable notifications
- * (join / gear / commitment requests an admin received) carry inline
- * Approve / Decline buttons wired to groupTripsService.
- *
- * Self-contained: owns its fetch, realtime subscription, unread badge and panel.
- * Drop `<NotificationCenter userId={...} />` into the header and that's it.
+ * Self-contained: owns its badge fetch + realtime subscription. Must render
+ * inside a navigator screen (all headers are).
  */
-export const NotificationCenter: React.FC<Props> = ({ userId, bare = false, onOpenTrip }) => {
+export const NotificationCenter: React.FC<Props> = ({ userId, bare = false }) => {
+  const navigation = useNavigation();
+  const [unread, setUnread] = useState(0);
+
+  // Badge count: on mount, on every focus regain (the panel marks rows read
+  // while this screen is blurred beneath it), and +1 on realtime inserts.
+  useFocusEffect(
+    useCallback(() => {
+      if (!userId) {
+        setUnread(0);
+        return;
+      }
+      let active = true;
+      notificationsService.unreadCount().then((c) => active && setUnread(c));
+      return () => {
+        active = false;
+      };
+    }, [userId])
+  );
+
+  useEffect(() => {
+    if (!userId) return;
+    const unsubscribe = notificationsService.subscribe(userId, {
+      onInsert: () => setUnread((u) => u + 1),
+      onUpdate: () => {},
+    });
+    return unsubscribe;
+  }, [userId]);
+
+  const openPanel = useCallback(() => {
+    navigation.dispatch(StackActions.push('NotificationsPanel', { userId }));
+  }, [navigation, userId]);
+
+  return (
+    <TouchableOpacity
+      testID="notifications-bell-button"
+      style={[styles.bellButton, bare && styles.bellButtonBare]}
+      onPress={openPanel}
+      activeOpacity={0.7}
+      accessibilityLabel="Notifications"
+      accessibilityRole="button"
+    >
+      <Ionicons name="notifications-outline" size={bare ? 30 : 20} color="#FFFFFF" />
+      {unread > 0 && (
+        <View style={styles.badge}>
+          <Text style={styles.badgeText}>{unread > 9 ? '9+' : unread}</Text>
+        </View>
+      )}
+    </TouchableOpacity>
+  );
+};
+
+/**
+ * The notifications drawer, rendered as a transparentModal ROUTE (see
+ * RootNavigator). Slides itself in from the right over a dimmed backdrop;
+ * dismissed by backdrop tap, the back chevron, a rightward swipe, or
+ * hardware back (route pop). Actionable notifications carry inline
+ * Approve / Decline wired to groupTripsService.
+ */
+export const NotificationsPanel: React.FC<PanelProps> = ({ userId, onClose, onOpenTrip }) => {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   // Full-screen panel — slides in from the right edge over the whole screen.
   const panelWidth = width;
 
-  const [open, setOpen] = useState(false);
   const [items, setItems] = useState<NotificationRow[]>([]);
-  const [unread, setUnread] = useState(0);
   const [loading, setLoading] = useState(false);
   // Id of the notification whose Approve/Decline is currently in flight.
   const [acting, setActing] = useState<string | null>(null);
@@ -93,11 +153,6 @@ export const NotificationCenter: React.FC<Props> = ({ userId, bare = false, onOp
   // Rows that were unread the moment the panel opened — kept highlighted for the
   // duration of this viewing even after we mark them read.
   const unreadAtOpen = useRef<Set<string>>(new Set());
-  // Mirror of `open` for use inside the realtime callback without re-subscribing.
-  const openRef = useRef(false);
-  useEffect(() => {
-    openRef.current = open;
-  }, [open]);
 
   // Drawer position: 0 = fully open, `panelWidth` = fully off-screen to the right.
   const translateX = useRef(new Animated.Value(0)).current;
@@ -126,33 +181,22 @@ export const NotificationCenter: React.FC<Props> = ({ userId, bare = false, onOp
     };
   }, []);
 
-  // ── Badge count on mount + realtime subscription ───────────────────────────
+  // ── Live inserts/updates while the panel is open ─────────────────────────
   useEffect(() => {
     if (!userId) {
       setItems([]);
-      setUnread(0);
       return;
     }
-    let active = true;
-    notificationsService.unreadCount().then((c) => active && setUnread(c));
-
     const unsubscribe = notificationsService.subscribe(userId, {
       onInsert: (row) => {
         setItems((prev) => (prev.some((r) => r.id === row.id) ? prev : [row, ...prev]));
-        if (openRef.current) {
-          notificationsService.markRead(row.id); // panel open → treat as seen
-        } else {
-          setUnread((u) => u + 1);
-        }
+        notificationsService.markRead(row.id); // panel open → treat as seen
       },
       onUpdate: (row) => {
         setItems((prev) => prev.map((r) => (r.id === row.id ? row : r)));
       },
     });
-    return () => {
-      active = false;
-      unsubscribe();
-    };
+    return unsubscribe;
   }, [userId]);
 
   const loadList = useCallback(async () => {
@@ -162,13 +206,12 @@ export const NotificationCenter: React.FC<Props> = ({ userId, bare = false, onOp
     setLoading(false);
     unreadAtOpen.current = new Set(rows.filter((r) => !r.read_at).map((r) => r.id));
     if (unreadAtOpen.current.size > 0) {
-      setUnread(0);
       notificationsService.markAllRead();
     }
   }, []);
 
-  const openPanel = useCallback(() => {
-    setOpen(true);
+  // Slide in on mount (the route itself has no nav animation).
+  useEffect(() => {
     translateX.setValue(panelWidth);
     Animated.timing(translateX, {
       toValue: 0,
@@ -177,7 +220,8 @@ export const NotificationCenter: React.FC<Props> = ({ userId, bare = false, onOp
       useNativeDriver: true,
     }).start();
     loadList();
-  }, [translateX, panelWidth, reduceMotion, loadList]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const closePanel = useCallback(() => {
     // Exit a touch faster than enter (emil: the system responds quickly).
@@ -187,12 +231,9 @@ export const NotificationCenter: React.FC<Props> = ({ userId, bare = false, onOp
       easing: EASE_DRAWER,
       useNativeDriver: true,
     }).start(({ finished }) => {
-      if (finished) {
-        setOpen(false);
-        unreadAtOpen.current = new Set();
-      }
+      if (finished) onClose();
     });
-  }, [translateX, panelWidth, reduceMotion]);
+  }, [translateX, panelWidth, reduceMotion, onClose]);
 
   // ── Swipe-to-dismiss: drag the panel out to the right ──────────────────────
   const panResponder = useMemo(
@@ -228,14 +269,12 @@ export const NotificationCenter: React.FC<Props> = ({ userId, bare = false, onOp
     [translateX, panelWidth, closePanel]
   );
 
-  // ── Tap a row → jump to its trip ─────────────────────────────────────────
-  // Close the panel instantly (no exit slide): the trip screen appearing
-  // underneath masks the dismissal, and an animated close would just delay it.
+  // ── Tap a row → push its trip card ON TOP of the panel ──────────────────
+  // The panel stays mounted in the stack underneath; backing out of the trip
+  // returns to it exactly as left.
   const handleRowPress = useCallback(
     (n: NotificationRow) => {
       if (!onOpenTrip || !n.trip_id) return;
-      setOpen(false);
-      unreadAtOpen.current = new Set();
       onOpenTrip(n.trip_id, tripFocusForNotification(n.type, n.data));
     },
     [onOpenTrip]
@@ -291,39 +330,21 @@ export const NotificationCenter: React.FC<Props> = ({ userId, bare = false, onOp
   );
 
   return (
-    <>
-      <TouchableOpacity
-        testID="notifications-bell-button"
-        style={[styles.bellButton, bare && styles.bellButtonBare]}
-        onPress={openPanel}
-        activeOpacity={0.7}
-        accessibilityLabel="Notifications"
-        accessibilityRole="button"
-      >
-        <Ionicons name="notifications-outline" size={bare ? 30 : 20} color="#FFFFFF" />
-        {unread > 0 && (
-          <View style={styles.badge}>
-            <Text style={styles.badgeText}>{unread > 9 ? '9+' : unread}</Text>
-          </View>
-        )}
-      </TouchableOpacity>
+    <View style={styles.modalRoot}>
+      {/* Dimmed backdrop (fades with the slide); taps handled by the layer below. */}
+      <Animated.View
+        style={[styles.backdrop, { opacity: backdropOpacity }]}
+        pointerEvents="none"
+      />
+      {/* Full-screen tap-catcher; the panel renders on top, so only the
+          exposed left strip closes on tap. */}
+      <Pressable
+        style={StyleSheet.absoluteFill}
+        onPress={closePanel}
+        accessibilityLabel="Close notifications"
+      />
 
-      <Modal visible={open} transparent animationType="none" onRequestClose={closePanel}>
-        <View style={styles.modalRoot}>
-          {/* Dimmed backdrop (fades with the slide); taps handled by the layer below. */}
-          <Animated.View
-            style={[styles.backdrop, { opacity: backdropOpacity }]}
-            pointerEvents="none"
-          />
-          {/* Full-screen tap-catcher; the panel renders on top, so only the
-              exposed left strip closes on tap. */}
-          <Pressable
-            style={StyleSheet.absoluteFill}
-            onPress={closePanel}
-            accessibilityLabel="Close notifications"
-          />
-
-          <Animated.View
+      <Animated.View
             style={[
               styles.panel,
               {
@@ -376,9 +397,7 @@ export const NotificationCenter: React.FC<Props> = ({ userId, bare = false, onOp
               </ScrollView>
             )}
           </Animated.View>
-        </View>
-      </Modal>
-    </>
+    </View>
   );
 };
 

@@ -93,10 +93,13 @@ export const AppContent: React.FC = () => {
 
   // Push notification: pending conversation to open from notification tap
   const [pendingNotificationConversationId, setPendingNotificationConversationId] = useState<string | null>(null);
-  // Push notification: pending trip detail to open (from a trip_join_request notification)
-  const [pendingTripDetailId, setPendingTripDetailId] = useState<string | null>(null);
-  // Section of the trip detail to land on (notification deep-links only).
-  const [pendingTripFocus, setPendingTripFocus] = useState<TripDetailFocus | null>(null);
+  // Programmatic trip-card open (push taps, invites, join decisions, chat
+  // headers) — consumed mount-safely inside the navigator, which pushes a
+  // TripDetail card. Replaces the old pendingTripDetailId state machine.
+  const [requestedTripCard, setRequestedTripCard] = useState<{
+    tripId: string;
+    focus?: TripDetailFocus | null;
+  } | null>(null);
   const { getCurrentConversationId, conversations: messagingConversations, refreshConversations } = useMessaging();
   
   // State to track session validation
@@ -281,9 +284,7 @@ export const AppContent: React.FC = () => {
     try {
       setSelectedConversation(null);
       setActiveSurftripDetailId(null);
-      setPendingTripFocus(null);
-      setPendingTripDetailId(pendingTripInviteId);
-      requestTab('trips');
+      openTripCard(pendingTripInviteId);
     } finally {
       setPendingTripInviteId(null);
       AsyncStorage.removeItem('pendingGroupTripInvite').catch(() => {});
@@ -387,14 +388,13 @@ export const AppContent: React.FC = () => {
         // that matches the notification type (stage/decision refine it).
         if (payload.tripId) {
           setSelectedConversation(null);
-          setPendingTripFocus(
+          openTripCard(
+            payload.tripId,
             tripFocusForNotification(payload.type, {
               stage: payload.stage,
               decision: payload.decision,
             })
           );
-          setPendingTripDetailId(payload.tripId);
-          requestTab('trips');
           return;
         }
         // Chat-message pushes carry conversationId instead.
@@ -950,6 +950,15 @@ export const AppContent: React.FC = () => {
     setShowTripPlanningChatCopy(false);
     setRequestedTab(tab);
   }, []);
+  // Open a trip as a card: land on the Trips tab (so back from the card ends
+  // up there) and push the TripDetail card on the root stack.
+  const openTripCard = useCallback((tripId: string, focus?: TripDetailFocus | null) => {
+    setShowTripPlanningChat(false);
+    setShowTripPlanningChatCopy(false);
+    setRequestedTab('trips');
+    setRequestedTripCard({ tripId, focus: focus ?? null });
+  }, []);
+  const handleRequestedTripCardConsumed = useCallback(() => setRequestedTripCard(null), []);
   const handleTabChange = useCallback((tab: NavKey) => {
     setActiveTab(prev => {
       if (prev !== tab) prevTabRef.current = prev;
@@ -1113,17 +1122,15 @@ export const AppContent: React.FC = () => {
     (decision: UnseenJoinDecision) => {
       advanceJoinDecisionQueue(decision);
       if (decision.status === 'approved') {
-        // Open this specific trip's detail screen — landing on the commit
-        // pill, the new member's next step (same focus as the notification).
-        setPendingTripFocus('commit');
-        setPendingTripDetailId(decision.trip.id);
-        requestTab('trips');
+        // Open this specific trip's card — landing on the commit pill, the
+        // new member's next step (same focus as the notification).
+        openTripCard(decision.trip.id, 'commit');
       } else {
         // Declined → land on the trips/explore list.
         requestTab('trips');
       }
     },
-    [advanceJoinDecisionQueue, requestTab]
+    [advanceJoinDecisionQueue, requestTab, openTripCard]
   );
 
   const handleJoinDecisionDismiss = useCallback(
@@ -1395,9 +1402,8 @@ export const AppContent: React.FC = () => {
     heroImageUrl?: string | null;
     tripId?: string;
   }) => {
-    // The Trips tab stays mounted underneath the chat overlay — backing out
+    // The trip card stays mounted underneath the chat overlay — backing out
     // of the chat lands on the trip exactly as the user left it.
-    setPendingTripDetailId(null);
     setSelectedConversation({
       id: params.conversationId,
       otherUserId: '',
@@ -1411,20 +1417,16 @@ export const AppContent: React.FC = () => {
   const handleOpenTripDetailFromChat = useCallback(
     (tripId: string, focus?: TripDetailFocus) => {
       setSelectedConversation(null);
-      setPendingTripFocus(focus ?? null);
-      setPendingTripDetailId(tripId);
-      requestTab('trips');
+      openTripCard(tripId, focus ?? null);
     },
-    [requestTab]
+    [openTripCard]
   );
 
-  // Wrap handleViewUserProfile for taps coming from inside TripDetailScreen.
-  // The profile renders as an overlay ABOVE the Trips tab, which stays
-  // mounted — back just closes the overlay (see handleProfileBack).
+  // Wrap handleViewUserProfile for taps coming from inside a TripDetail card.
+  // The profile renders as an overlay ABOVE the card, which stays mounted —
+  // back just closes the overlay (see handleProfileBack).
   const handleViewUserProfileFromTrip = useCallback(
-    (userId: string, fromTripId: string) => {
-      setPendingTripFocus(null);
-      setPendingTripDetailId(fromTripId); // kept as a safety net for trip restore
+    (userId: string, _fromTripId: string) => {
       setProfileFromTripDetail(true);
       handleViewUserProfile(userId);
     },
@@ -1931,6 +1933,12 @@ export const AppContent: React.FC = () => {
       onTabChange: handleTabChange,
       requestedTab,
       onRequestedTabConsumed: handleRequestedTabConsumed,
+      requestedTripCard,
+      onRequestedTripCardConsumed: handleRequestedTripCardConsumed,
+      tripCard: {
+        onOpenGroupChat: handleOpenGroupChat,
+        onViewUserProfile: handleViewUserProfileFromTrip,
+      },
       lineupProps: {
         isListFrontmost,
         onConversationPress: handleConversationPress,
@@ -1947,15 +1955,7 @@ export const AppContent: React.FC = () => {
         onPendingNotificationHandled: () => setPendingNotificationConversationId(null),
       },
       tripsProps: {
-        onBack: () => {
-          requestTab('lineup');
-          setPendingTripDetailId(null);
-          setPendingTripFocus(null);
-        },
-        initialTripId: pendingTripDetailId,
-        initialTripFocus: pendingTripFocus,
-        onOpenGroupChat: handleOpenGroupChat,
-        onViewUserProfile: handleViewUserProfileFromTrip,
+        onBack: () => requestTab('lineup'),
       },
       profileProps: {
         onBack: () => requestTab(prevTabRef.current),

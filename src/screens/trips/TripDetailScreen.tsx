@@ -1280,10 +1280,10 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
                 )}
               </TouchableOpacity>
             ) : null}
-            {/* Notifications — self-contained bell + slide-in panel + unread
-                badge (same component the other headers use). */}
+            {/* Notifications — self-contained bell + unread badge; opens the
+                panel ROUTE (same component the other headers use). */}
             {currentUserId ? (
-              <NotificationCenter userId={currentUserId} bare onOpenTrip={onOpenTrip} />
+              <NotificationCenter userId={currentUserId} bare />
             ) : null}
           </View>
         }

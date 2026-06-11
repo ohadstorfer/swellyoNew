@@ -1,11 +1,21 @@
 import React, { useEffect } from 'react';
-import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import { StackActions } from '@react-navigation/native';
+import { createNativeStackNavigator, NativeStackScreenProps } from '@react-navigation/native-stack';
 import { createBottomTabNavigator, BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import ConversationsStack from './ConversationsStack';
 import TripsScreen from '../screens/trips/TripsScreen';
+import TripDetailScreen from '../screens/trips/TripDetailScreen';
+import CreateTripWizard from '../screens/trips/CreateTripWizard';
+import { NotificationsPanel } from '../components/notifications/NotificationCenter';
 import { ProfileScreen } from '../screens/ProfileScreen';
 import TripsBottomNav, { NavKey } from '../components/trips/TripsBottomNav';
 import { useMainNav } from './MainNavContext';
+import { useOnboarding } from '../context/OnboardingContext';
+import { queryClient } from '../lib/queryClient';
+import { tripsKeys } from '../hooks/trips/useTripQueries';
 import type { MainTabsParamList, RootStackParamList } from './navigationRef';
 
 /**
@@ -45,6 +55,89 @@ function ProfileTabScreen() {
   return <ProfileScreen {...profileProps} />;
 }
 
+// --- Cards (Phase 2) --------------------------------------------------------
+
+function TripDetailCardScreen({ route, navigation }: NativeStackScreenProps<RootStackParamList, 'TripDetail'>) {
+  const { tripCard } = useMainNav();
+  const { tripId, focus } = route.params;
+  return (
+    <TripDetailScreen
+      tripId={tripId}
+      initialFocus={focus ?? null}
+      onBack={() => navigation.goBack()}
+      onOpenGroupChat={tripCard.onOpenGroupChat}
+      onEditTrip={trip => navigation.dispatch(StackActions.push('EditTrip', { trip }))}
+      onViewUserProfile={userId => tripCard.onViewUserProfile(userId, tripId)}
+    />
+  );
+}
+
+function EditTripCardScreen({ route, navigation }: NativeStackScreenProps<RootStackParamList, 'EditTrip'>) {
+  const { user } = useOnboarding();
+  const currentUserId = user?.id?.toString() ?? null;
+  const trip = route.params.trip;
+  return (
+    <SafeAreaView style={editStyles.root} edges={['top']}>
+      <View style={editStyles.header}>
+        <TouchableOpacity
+          onPress={() => navigation.goBack()}
+          style={editStyles.backBtn}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <Ionicons name="chevron-back" size={28} color="#222B30" />
+        </TouchableOpacity>
+        <Text style={editStyles.headerTitle}>Edit trip</Text>
+        <View style={{ width: 28 }} />
+      </View>
+      <CreateTripWizard
+        hostId={currentUserId}
+        hostingStyle={trip.hosting_style}
+        initialTrip={trip}
+        onCreated={() => {
+          queryClient.invalidateQueries({ queryKey: ['trips', 'my'] });
+          queryClient.invalidateQueries({ queryKey: tripsKeys.detail(trip.id) });
+          // Back to the detail card so the host sees the updated trip immediately.
+          navigation.goBack();
+        }}
+        onCancel={() => navigation.goBack()}
+      />
+    </SafeAreaView>
+  );
+}
+
+function NotificationsPanelScreen({ route, navigation }: NativeStackScreenProps<RootStackParamList, 'NotificationsPanel'>) {
+  return (
+    <NotificationsPanel
+      userId={route.params.userId}
+      onClose={() => navigation.goBack()}
+      // The panel STAYS in the stack under the trip card — backing out of the
+      // trip lands on the open panel (the bug this migration started from).
+      onOpenTrip={(tripId, focus) =>
+        navigation.dispatch(StackActions.push('TripDetail', { tripId, focus: focus ?? null }))
+      }
+    />
+  );
+}
+
+const editStyles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: '#FFFFFF' },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    paddingBottom: 10,
+  },
+  backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  headerTitle: {
+    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat-Bold',
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#222B30',
+  },
+});
+
 const ROUTE_FOR_KEY: Record<NavKey, keyof MainTabsParamList> = {
   lineup: 'Lineup',
   trips: 'Trips',
@@ -62,7 +155,11 @@ const KEY_FOR_ROUTE: Record<string, NavKey> = {
  * popToTop manually (react-navigation issue #9424 — wrong-stack bug).
  */
 function FloatingTabBar({ state, navigation }: BottomTabBarProps) {
-  const { navControl, barSuppressed, onTabChange, requestedTab, onRequestedTabConsumed } = useMainNav();
+  const {
+    navControl, barSuppressed, onTabChange,
+    requestedTab, onRequestedTabConsumed,
+    requestedTripCard, onRequestedTripCardConsumed,
+  } = useMainNav();
   const active = KEY_FOR_ROUTE[state.routes[state.index].name] ?? 'lineup';
 
   // Mirror the active tab into AppContent for the legacy reads that still
@@ -81,6 +178,19 @@ function FloatingTabBar({ state, navigation }: BottomTabBarProps) {
     }
     onRequestedTabConsumed();
   }, [requestedTab, active, navigation, onRequestedTabConsumed]);
+
+  // Programmatic trip-card opens (deep links). Pushed on the PARENT root
+  // stack — the card covers the tabs and the bar.
+  useEffect(() => {
+    if (!requestedTripCard) return;
+    navigation
+      .getParent()
+      ?.dispatch(StackActions.push('TripDetail', {
+        tripId: requestedTripCard.tripId,
+        focus: requestedTripCard.focus ?? null,
+      }));
+    onRequestedTripCardConsumed();
+  }, [requestedTripCard, navigation, onRequestedTripCardConsumed]);
 
   const pressTab = (key: NavKey) => {
     const index = state.routes.findIndex(r => r.name === ROUTE_FOR_KEY[key]);
@@ -144,6 +254,18 @@ export default function RootNavigator() {
   return (
     <RootStack.Navigator screenOptions={{ headerShown: false }}>
       <RootStack.Screen name="HomeTabs" component={HomeTabs} />
+      <RootStack.Screen name="TripDetail" component={TripDetailCardScreen} />
+      <RootStack.Screen name="EditTrip" component={EditTripCardScreen} />
+      <RootStack.Screen
+        name="NotificationsPanel"
+        component={NotificationsPanelScreen}
+        options={{
+          // Transparent route: the screen underneath stays visible; the panel
+          // animates ITSELF (slide drawer + backdrop fade), so no nav animation.
+          presentation: 'transparentModal',
+          animation: 'none',
+        }}
+      />
     </RootStack.Navigator>
   );
 }

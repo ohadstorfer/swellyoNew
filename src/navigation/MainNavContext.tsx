@@ -1,6 +1,7 @@
 import React, { createContext, useContext } from 'react';
 import type { ComponentProps } from 'react';
 import type { TripsBottomNavControl, NavKey } from '../components/trips/TripsBottomNav';
+import type { TripDetailFocus } from '../services/notifications/notificationsService';
 import type ConversationsStack from './ConversationsStack';
 import type TripsScreen from '../screens/trips/TripsScreen';
 import type { ProfileScreen } from '../screens/ProfileScreen';
@@ -30,6 +31,23 @@ export interface MainNavContextValue {
    */
   requestedTab: NavKey | null;
   onRequestedTabConsumed: () => void;
+  /**
+   * Programmatic trip-card open (push notifications, invite links, join
+   * decisions, chat-header taps). Same mount-safe consumption pattern as
+   * requestedTab; pushed as a TripDetail card on the root stack.
+   */
+  requestedTripCard: { tripId: string; focus?: TripDetailFocus | null } | null;
+  onRequestedTripCardConsumed: () => void;
+  /** Callbacks the TripDetail card needs from AppContent (legacy overlays). */
+  tripCard: {
+    onOpenGroupChat: (params: {
+      conversationId: string;
+      title: string;
+      heroImageUrl?: string | null;
+      tripId?: string;
+    }) => void;
+    onViewUserProfile: (userId: string, fromTripId: string) => void;
+  };
 
   lineupProps: ComponentProps<typeof ConversationsStack>;
   tripsProps: Omit<
