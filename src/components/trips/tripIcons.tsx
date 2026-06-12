@@ -4,7 +4,7 @@
 // `color` prop on the stroke.
 
 import React from 'react';
-import Svg, { Path } from 'react-native-svg';
+import Svg, { Path, Circle } from 'react-native-svg';
 
 export type TripIconName =
   | 'award-01'
@@ -95,3 +95,27 @@ export const TripIcon: React.FC<TripIconProps> = ({
 };
 
 export default TripIcon;
+
+// DragHandleIcon — the Figma "dots-vertical" drag grip (node 12919:32671): three
+// stacked dots, each filled #212121 with a #333 hairline. Used as the reorder
+// handle on gear rows. (Filled + stroked, so it can't ride the TripIcon path set.)
+export const DragHandleIcon: React.FC<{ size?: number; strokeWidth?: number }> = ({
+  size = 22,
+  strokeWidth = 1,
+}) => (
+  <Svg width={size} height={size} viewBox="0 0 22 22" fill="none">
+    {[4.5834, 11.0001, 17.4167].map(cy => (
+      <Circle
+        key={cy}
+        cx={10.9987}
+        cy={cy}
+        r={0.9167}
+        fill="#212121"
+        stroke="#333333"
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    ))}
+  </Svg>
+);

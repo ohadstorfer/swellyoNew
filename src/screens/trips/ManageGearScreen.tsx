@@ -16,6 +16,7 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { DragHandleIcon } from '../../components/trips/tripIcons';
 import { useQueryClient } from '@tanstack/react-query';
 import DraggableFlatList, {
   type RenderItemParams,
@@ -122,7 +123,7 @@ export default function ManageGearScreen({ tripId, onBack }: Props) {
         hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
         accessibilityLabel={`Reorder ${item.name}`}
       >
-        <Ionicons name="reorder-three-outline" size={22} color={T.handle} />
+        <DragHandleIcon size={22} />
       </TouchableOpacity>
       <View style={styles.cardText}>
         <Text style={styles.itemName} numberOfLines={1}>

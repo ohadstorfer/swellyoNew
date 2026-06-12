@@ -143,7 +143,7 @@ export default function PackingAndGearScreen({ tripId, onBack, onEdit }: Props) 
                 activeOpacity={0.85}
                 accessibilityLabel="Edit group gear"
               >
-                <TripIcon name="edit-02" size={16} color="#FFFFFF" />
+                <TripIcon name="edit-02" size={16} color="#FFFFFF" strokeWidth={1} />
                 <Text style={styles.editBtnText}>Edit</Text>
               </TouchableOpacity>
             ) : null}
@@ -255,8 +255,8 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   listHeaderText: { flex: 1, gap: 4 },
-  listTitle: { fontFamily: ff('Inter', '700'), fontSize: 18, lineHeight: 22, fontWeight: '700', color: T.title },
-  listCount: { fontFamily: ff('Inter', '400'), fontSize: 16, lineHeight: 18, color: T.count },
+  listTitle: { fontFamily: ff('Inter', '700'), fontSize: 14, lineHeight: 18, fontWeight: '700', color: T.title },
+  listCount: { fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 18, color: T.count },
   // Dark "Edit" pill (Figma 13179-8187) — pencil + white label, host only.
   editBtn: {
     flexDirection: 'row',
@@ -265,9 +265,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 9,
     borderRadius: 10,
-    backgroundColor: T.ink,
+    backgroundColor: '#333333',
   },
-  editBtnText: { fontFamily: ff('Inter', '700'), fontSize: 14, lineHeight: 18, fontWeight: '700', color: '#FFFFFF' },
+  editBtnText: { fontFamily: ff('Inter', '400'), fontSize: 14, lineHeight: 18, fontWeight: '400', color: '#FFFFFF' },
 
   list: { gap: 8 },
   empty: { fontFamily: ff('Inter', '400'), fontSize: 14, color: T.count },
