@@ -1757,6 +1757,8 @@ export interface GearRequest {
   trip_id: string;
   requester_id: string;
   item_name: string;
+  /** Quantity the requester asked for (host sees it pre-filled at approval). */
+  needed_qty: number;
   note: string | null;
   status: GearRequestStatus;
   created_at: string;
@@ -2014,7 +2016,8 @@ export async function createGearRequest(
   tripId: string,
   requesterId: string,
   itemName: string,
-  note?: string
+  note?: string,
+  neededQty: number = 1
 ): Promise<GearRequest> {
   const trimmedName = itemName.trim();
   if (!trimmedName) throw new Error('Item name is required');
@@ -2025,6 +2028,7 @@ export async function createGearRequest(
       trip_id: tripId,
       requester_id: requesterId,
       item_name: trimmedName,
+      needed_qty: Math.max(1, Math.round(neededQty)),
       note: note?.trim() || null,
     })
     .select()

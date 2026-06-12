@@ -26,7 +26,6 @@ import {
   Text,
   Image,
   StyleSheet,
-  Platform,
   ScrollView,
   TouchableOpacity,
   Dimensions,
@@ -59,7 +58,7 @@ const STRUCTURE_ICON: Record<string, TripIconName> = {
 };
 import {
   type TripDetailViewProps,
-  BOARD_IMAGE,
+  BOARD_IMAGE_EVEN,
   BOARD_SHORT,
   STRUCTURE_DISPLAY,
   BUDGET_VIBE,
@@ -71,9 +70,7 @@ import {
   computeCountdownTarget,
 } from './TripDetailView';
 import { TRIP_TYPE_WORD, TRIP_TYPE_GRADIENT } from '../../services/trips/tripVocabulary';
-
-const FONT_INTER = Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter';
-const FONT_MONTSERRAT = Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat';
+import { ff } from '../../theme/fonts';
 
 // Open the accommodation booking/listing link, tolerating URLs typed without a
 // scheme (e.g. "airbnb.com/...").
@@ -218,7 +215,7 @@ const EditPill: React.FC<{ label: string; onPress?: () => void }> = ({ label, on
     accessibilityRole="button"
     accessibilityLabel={label}
   >
-    <Ionicons name="create-outline" size={14} color={C.ink} />
+    <TripIcon name="edit-02" size={14} color={C.ink} />
     <Text style={styles.editPillText}>{label}</Text>
   </TouchableOpacity>
 );
@@ -278,7 +275,19 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
     ? TRIP_VIBE_OPTIONS.find(v => v.slug === vm.vibeSlug)?.label ?? null
     : null;
 
-  const surfStyles = vm.surfStyles.filter(s => s !== 'all');
+  // Canonical board order (Figma node 12558-4901): Shortboard, Mid-Length,
+  // Longboard, Soft-Top — drives BOTH the pills and the boards illustration so
+  // they always read in this order regardless of how the data is stored.
+  const BOARD_H = 70; // Figma board height (node 12558-3543)
+  const BOARD_ORDER = ['shortboard', 'midlength', 'longboard', 'softtop'];
+  const boardRank = (s: string) => {
+    const i = BOARD_ORDER.indexOf(s);
+    return i === -1 ? 99 : i;
+  };
+  const surfStyles = vm.surfStyles
+    .filter(s => s !== 'all')
+    .slice()
+    .sort((a, b) => boardRank(a) - boardRank(b));
   // Pill font scales with how much room the boards illustration leaves: with all
   // 4 boards it eats ~half the row, so drop to 10px to keep the pills in 2 lines.
   // 3 or fewer boards → narrower illustration → 14px still fits in 2 lines.
@@ -698,10 +707,18 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
                 </View>
                 <View style={styles.boardsRow}>
                   {surfStyles.map(s => {
-                    const img = BOARD_IMAGE[s];
-                    if (!img) return null;
+                    const board = BOARD_IMAGE_EVEN[s];
+                    if (!board) return null;
+                    // Explicit width + height (Figma: all boards ~70px tall, widths
+                    // 25/21/16/19). Explicit dims are far more reliable than
+                    // aspectRatio on RN <Image>.
                     return (
-                      <Image key={s} source={img} style={styles.boardImg} resizeMode="contain" />
+                      <Image
+                        key={s}
+                        source={board.src}
+                        style={{ width: Math.round(BOARD_H * board.aspect), height: BOARD_H }}
+                        resizeMode="contain"
+                      />
                     );
                   })}
                 </View>
@@ -1090,8 +1107,8 @@ const styles = StyleSheet.create({
     borderRadius: 9,
   },
   typeTagText: {
-    fontFamily: FONT_INTER,
-    fontSize: 13,
+    fontFamily: ff('Inter', '700'),
+    fontSize: 10,
     fontWeight: '700',
     color: '#FFFFFF',
   },
@@ -1102,7 +1119,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   heroDate: {
-    fontFamily: FONT_INTER,
+    fontFamily: ff('Inter', '400'),
     fontSize: 12,
     fontWeight: '400',
     lineHeight: 18,
@@ -1111,8 +1128,8 @@ const styles = StyleSheet.create({
   },
   heroTitle: {
     marginTop: 2,
-    fontFamily: FONT_INTER,
-    fontSize: 20,
+    fontFamily: ff('Inter', '700'),
+    fontSize: 16,
     lineHeight: 24,
     fontWeight: '700',
     color: C.ink,
@@ -1138,14 +1155,14 @@ const styles = StyleSheet.create({
     gap: 1,
   },
   countdownValue: {
-    fontFamily: FONT_MONTSERRAT,
+    fontFamily: ff('Montserrat', '700'),
     fontSize: 22,
     lineHeight: 26,
     fontWeight: '800',
     color: C.accent,
   },
   countdownLabel: {
-    fontFamily: FONT_INTER,
+    fontFamily: ff('Inter', '400'),
     fontSize: 12,
     lineHeight: 16,
     fontWeight: '400',
@@ -1191,16 +1208,16 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   chipLabel: {
-    fontFamily: FONT_INTER,
-    fontSize: 14,
+    fontFamily: ff('Inter', '400'),
+    fontSize: 10,
     lineHeight: 20,
     fontWeight: '400',
     color: C.textFaint,
   },
   chipValue: {
-    fontFamily: FONT_INTER,
-    fontSize: 17,
-    lineHeight: 20,
+    fontFamily: ff('Inter', '700'),
+    fontSize: 12,
+    lineHeight: 18,
     fontWeight: '700',
     color: C.ink,
   },
@@ -1211,8 +1228,8 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
   chipFooter: {
-    fontFamily: FONT_INTER,
-    fontSize: 13,
+    fontFamily: ff('Inter', '600'),
+    fontSize: 12,
     fontWeight: '600',
     color: C.brandTeal,
   },
@@ -1236,24 +1253,24 @@ const styles = StyleSheet.create({
     paddingBottom: 16,
   },
   sectionTitle: {
-    fontFamily: FONT_INTER,
-    fontSize: 20,
+    fontFamily: ff('Inter', '700'),
+    fontSize: 16,
     lineHeight: 24,
     fontWeight: '700',
     color: C.ink,
   },
   body: {
-    fontFamily: FONT_INTER,
-    fontSize: 14,
-    lineHeight: 20,
+    fontFamily: ff('Inter', '400'),
+    fontSize: 12,
+    lineHeight: 18,
     color: C.textMuted,
     // Wrap the description earlier so it doesn't run to the right edge.
     marginRight: 44,
   },
   bodyPlaceholder: {
-    fontFamily: FONT_INTER,
-    fontSize: 14,
-    lineHeight: 20,
+    fontFamily: ff('Inter', '400'),
+    fontSize: 12,
+    lineHeight: 18,
     fontStyle: 'italic',
     color: C.textFaint,
   },
@@ -1271,9 +1288,9 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   editPillText: {
-    fontFamily: FONT_INTER,
-    fontSize: 12,
-    lineHeight: 16,
+    fontFamily: ff('Inter', '400'),
+    fontSize: 10,
+    lineHeight: 20,
     fontWeight: '400',
     color: C.ink,
   },
@@ -1305,8 +1322,8 @@ const styles = StyleSheet.create({
   },
   aboutHostName: {
     flex: 1,
-    fontFamily: FONT_INTER,
-    fontSize: 20,
+    fontFamily: ff('Inter', '700'),
+    fontSize: 16,
     lineHeight: 24,
     fontWeight: '700',
     color: C.ink,
@@ -1335,7 +1352,7 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   hostBadgeText: {
-    fontFamily: FONT_INTER,
+    fontFamily: ff('Inter', '600'),
     fontSize: 13,
     lineHeight: 16,
     fontWeight: '600',
@@ -1353,7 +1370,7 @@ const styles = StyleSheet.create({
   },
   hostFamText: {
     flex: 1,
-    fontFamily: FONT_INTER,
+    fontFamily: ff('Inter', '400'),
     fontSize: 14,
     lineHeight: 20,
     color: C.inkBody,
@@ -1363,14 +1380,14 @@ const styles = StyleSheet.create({
   },
   seeMore: {
     marginTop: 8,
-    fontFamily: FONT_INTER,
-    fontSize: 15,
+    fontFamily: ff('Inter', '400'),
+    fontSize: 12,
     fontWeight: '400',
     color: C.brandTeal,
   },
   seeAll: {
-    fontFamily: FONT_INTER,
-    fontSize: 15,
+    fontFamily: ff('Inter', '400'),
+    fontSize: 12,
     fontWeight: '400',
     color: C.brandTeal,
   },
@@ -1404,10 +1421,12 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   surfPillText: {
-    fontFamily: FONT_INTER,
-    // Base size comes from surfPillFontSize (16, or 12 with 4 boards) — set inline.
-    fontSize: 16,
-    lineHeight: 22,
+    fontFamily: ff('Inter', '400'),
+    // Size is set inline via surfPillFontSize (count-based: 18 / 14 / 10). NOTE:
+    // Figma spec is a flat 14px (Body/M B-2) regardless of count — the count
+    // scaling is our own anti-overflow tweak that diverges from the design.
+    fontSize: 14,
+    lineHeight: 18,
     fontWeight: '400',
     color: C.ink,
     textAlign: 'center',
@@ -1415,12 +1434,14 @@ const styles = StyleSheet.create({
   boardsRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    gap: 10,
-    height: 112,
+    gap: 16, // Figma board spacing
+    height: 70,
   },
   boardImg: {
-    width: 28,
-    height: 112,
+    // Figma boards are ~70px tall (node 12558-3543). Width comes from the
+    // per-board aspectRatio (set inline) so all boards share this one height
+    // and line up evenly — short 25, mid 21, long 16, soft 19 at h70.
+    height: 70,
   },
 
   // How it works
@@ -1430,16 +1451,16 @@ const styles = StyleSheet.create({
     gap: 14,
   },
   howTitle: {
-    fontFamily: FONT_INTER,
-    fontSize: 14,
+    fontFamily: ff('Inter', '700'),
+    fontSize: 10,
     fontWeight: '700',
     color: '#0A0A0A',
   },
   howDesc: {
     marginTop: 2,
-    fontFamily: FONT_INTER,
+    fontFamily: ff('Inter', '400'),
     fontSize: 12,
-    lineHeight: 17,
+    lineHeight: 18,
     color: C.textHowDesc,
   },
 
@@ -1472,16 +1493,16 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   iconCellLabel: {
-    fontFamily: FONT_INTER,
-    fontSize: 14,
-    lineHeight: 20,
+    fontFamily: ff('Inter', '400'),
+    fontSize: 12,
+    lineHeight: 18,
     fontWeight: '400',
     color: C.textMuted,
   },
   iconCellValue: {
     marginTop: 3,
-    fontFamily: FONT_INTER,
-    fontSize: 14,
+    fontFamily: ff('Inter', '700'),
+    fontSize: 12,
     fontWeight: '700',
     color: C.ink,
   },
@@ -1493,7 +1514,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   participantsCount: {
-    fontFamily: FONT_INTER,
+    fontFamily: ff('Inter', '400'),
     fontSize: 14,
     fontWeight: '400',
     color: C.textMuted,
@@ -1530,13 +1551,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   avatarExtraText: {
-    fontFamily: FONT_MONTSERRAT,
+    fontFamily: ff('Montserrat', '700'),
     fontSize: 14,
     fontWeight: '700',
     color: '#FFFFFF',
   },
   mutedSmall: {
-    fontFamily: FONT_INTER,
+    fontFamily: ff('Inter', '400'),
     fontSize: 13,
     color: C.textMuted,
   },
@@ -1582,17 +1603,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   stayName: {
-    fontFamily: FONT_INTER,
-    fontSize: 16,
+    fontFamily: ff('Inter', '700'),
+    fontSize: 12,
     lineHeight: 18,
     fontWeight: '700',
     color: '#0A0A0A',
   },
   stayMeta: {
     marginTop: 2,
-    fontFamily: FONT_INTER,
-    fontSize: 13,
-    lineHeight: 18,
+    fontFamily: ff('Inter', '400'),
+    fontSize: 10,
+    lineHeight: 20,
     color: C.textHowDesc,
   },
 
@@ -1616,7 +1637,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   priceHeroValue: {
-    fontFamily: FONT_MONTSERRAT,
+    fontFamily: ff('Montserrat', '700'),
     fontSize: 30,
     lineHeight: 34,
     fontWeight: '800',
@@ -1624,7 +1645,7 @@ const styles = StyleSheet.create({
   },
   priceHeroPer: {
     marginTop: 2,
-    fontFamily: FONT_INTER,
+    fontFamily: ff('Inter', '500'),
     fontSize: 13,
     fontWeight: '500',
     color: C.textMuted,
@@ -1640,14 +1661,14 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   priceHeroTagText: {
-    fontFamily: FONT_INTER,
+    fontFamily: ff('Inter', '700'),
     fontSize: 12,
     fontWeight: '700',
     color: '#FFFFFF',
   },
   sheetIntro: {
     marginTop: 16,
-    fontFamily: FONT_INTER,
+    fontFamily: ff('Inter', '400'),
     fontSize: 14,
     lineHeight: 20,
     fontWeight: '400',
@@ -1656,7 +1677,7 @@ const styles = StyleSheet.create({
   sheetSectionLabel: {
     marginTop: 24,
     marginBottom: 12,
-    fontFamily: FONT_INTER,
+    fontFamily: ff('Inter', '700'),
     fontSize: 15,
     lineHeight: 20,
     fontWeight: '700',
@@ -1686,7 +1707,7 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   addOnsTitle: {
-    fontFamily: FONT_MONTSERRAT,
+    fontFamily: ff('Montserrat', '700'),
     fontSize: 18,
     lineHeight: 24,
     fontWeight: '700',
@@ -1694,7 +1715,7 @@ const styles = StyleSheet.create({
   },
   addOnsHint: {
     marginTop: 4,
-    fontFamily: FONT_INTER,
+    fontFamily: ff('Inter', '400'),
     fontSize: 13,
     lineHeight: 18,
     fontWeight: '400',
@@ -1713,7 +1734,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   addOnTagText: {
-    fontFamily: FONT_INTER,
+    fontFamily: ff('Inter', '600'),
     fontSize: 13,
     lineHeight: 18,
     fontWeight: '600',
@@ -1738,7 +1759,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   sheetRowTitle: {
-    fontFamily: FONT_INTER,
+    fontFamily: ff('Inter', '600'),
     fontSize: 15,
     lineHeight: 20,
     fontWeight: '600',
@@ -1749,7 +1770,7 @@ const styles = StyleSheet.create({
   },
   sheetRowItem: {
     marginTop: 3,
-    fontFamily: FONT_INTER,
+    fontFamily: ff('Inter', '400'),
     fontSize: 13,
     lineHeight: 18,
     fontWeight: '400',
@@ -1767,7 +1788,7 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
   },
   basedOnChipText: {
-    fontFamily: FONT_INTER,
+    fontFamily: ff('Inter', '500'),
     fontSize: 13,
     fontWeight: '500',
     color: C.inkBody,
@@ -1784,7 +1805,7 @@ const styles = StyleSheet.create({
   },
   calloutText: {
     flex: 1,
-    fontFamily: FONT_INTER,
+    fontFamily: ff('Inter', '400'),
     fontSize: 13,
     lineHeight: 18,
     fontWeight: '400',
@@ -1816,13 +1837,13 @@ const styles = StyleSheet.create({
     backgroundColor: C.avatarBg,
   },
   leaderName: {
-    fontFamily: FONT_MONTSERRAT,
+    fontFamily: ff('Montserrat', '700'),
     fontSize: 16,
     fontWeight: '700',
     color: C.inkBody,
   },
   leaderMeta: {
-    fontFamily: FONT_INTER,
+    fontFamily: ff('Inter', '400'),
     fontSize: 13,
     fontWeight: '400',
     color: C.textMuted,
@@ -1840,12 +1861,12 @@ const styles = StyleSheet.create({
   },
   leaderCredText: {
     flex: 1,
-    fontFamily: FONT_INTER,
+    fontFamily: ff('Inter', '400'),
     fontSize: 13,
     color: C.inkBody,
   },
   leaderNote: {
-    fontFamily: FONT_INTER,
+    fontFamily: ff('Inter', '400'),
     fontSize: 13,
     fontStyle: 'italic',
     color: C.textMuted,

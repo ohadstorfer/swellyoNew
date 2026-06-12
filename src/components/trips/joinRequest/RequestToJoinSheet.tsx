@@ -13,10 +13,13 @@ import {
   Platform,
   Dimensions,
   Image,
+  Animated,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSheetTransition } from '../../../hooks/useSheetTransition';
 
 const SHEET_MAX_HEIGHT = Dimensions.get('window').height * 0.88;
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 const SURF_LEVEL_LABEL: Record<string, string> = {
   beginner: 'Beginner surfer',
@@ -72,14 +75,23 @@ export const RequestToJoinSheet: React.FC<Props> = ({
   const displayName = profile?.name?.trim() || 'You';
   const initial = displayName.charAt(0).toUpperCase();
 
+  const { mounted, backdropOpacity, translateY, onSheetLayout } = useSheetTransition(visible);
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={close}>
+    <Modal visible={mounted} transparent animationType="none" onRequestClose={close}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.kavRoot}
       >
-      <Pressable style={styles.backdrop} onPress={close}>
-        <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
+      <Pressable style={styles.container} onPress={close}>
+        <Animated.View
+          pointerEvents="none"
+          style={[styles.backdrop, { opacity: backdropOpacity }]}
+        />
+        <Animated.View
+          style={{ transform: [{ translateY }] }}
+          onLayout={onSheetLayout}
+        >
+          <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
           <View style={styles.header}>
             <TouchableOpacity style={styles.closeBtn} onPress={close} hitSlop={8}>
               <Ionicons name="chevron-back" size={18} color="#222B30" />
@@ -143,7 +155,8 @@ export const RequestToJoinSheet: React.FC<Props> = ({
               </TouchableOpacity>
             </View>
           </>
-        </Pressable>
+          </Pressable>
+        </Animated.View>
       </Pressable>
       </KeyboardAvoidingView>
     </Modal>
@@ -151,7 +164,8 @@ export const RequestToJoinSheet: React.FC<Props> = ({
 };
 
 const styles = StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
+  container: { flex: 1, justifyContent: 'flex-end' },
+  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)' },
   sheet: {
     backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 16,

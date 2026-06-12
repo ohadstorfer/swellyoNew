@@ -20,8 +20,10 @@ import {
   KeyboardAvoidingView,
   Platform,
   Dimensions,
+  Animated,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSheetTransition } from '../../hooks/useSheetTransition';
 
 const SHEET_MAX_HEIGHT = Dimensions.get('window').height * 0.9;
 
@@ -73,16 +75,26 @@ export const TripBottomSheet: React.FC<Props> = ({
   scroll = true,
   children,
 }) => {
+  // Backdrop fades in; the sheet itself slides up (separate animations).
+  const { mounted, backdropOpacity, translateY, onSheetLayout } = useSheetTransition(visible);
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal visible={mounted} transparent animationType="none" onRequestClose={onClose}>
       {/* KAV wraps the whole bottom-anchored sheet so the ENTIRE sheet (incl. the
           footer) rises above the keyboard, not just the body. */}
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.kavRoot}
       >
-        <Pressable style={styles.backdrop} onPress={onClose}>
-          <Pressable style={styles.sheet} onPress={e => e.stopPropagation()}>
+        <Pressable style={styles.container} onPress={onClose}>
+          <Animated.View
+            pointerEvents="none"
+            style={[styles.backdrop, { opacity: backdropOpacity }]}
+          />
+          <Animated.View
+            style={{ transform: [{ translateY }] }}
+            onLayout={onSheetLayout}
+          >
+            <Pressable style={styles.sheet} onPress={e => e.stopPropagation()}>
             <View style={styles.header}>
               <View style={styles.headerLeft}>
                 {onBack ? (
@@ -116,7 +128,8 @@ export const TripBottomSheet: React.FC<Props> = ({
             )}
 
             {footer ? <View style={styles.footer}>{footer}</View> : null}
-          </Pressable>
+            </Pressable>
+          </Animated.View>
         </Pressable>
       </KeyboardAvoidingView>
     </Modal>
@@ -127,11 +140,9 @@ export default TripBottomSheet;
 
 const styles = StyleSheet.create({
   kavRoot: { flex: 1 },
-  backdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    justifyContent: 'flex-end',
-  },
+  container: { flex: 1, justifyContent: 'flex-end' },
+  // Fades in (opacity-animated); fills the whole screen behind the sheet.
+  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.45)' },
   sheet: {
     backgroundColor: SHEET.surface,
     borderTopLeftRadius: 22,

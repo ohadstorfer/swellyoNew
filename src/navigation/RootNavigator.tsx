@@ -15,6 +15,11 @@ import { swellyServiceCopy, swellyServiceCopyCopy } from '../services/swelly/swe
 import { useMessaging } from '../context/MessagingProvider';
 import TripsScreen from '../screens/trips/TripsScreen';
 import TripDetailScreen from '../screens/trips/TripDetailScreen';
+import TripUpdatesScreen from '../screens/trips/TripUpdatesScreen';
+import PackingAndGearScreen from '../screens/trips/PackingAndGearScreen';
+import YourGearScreen from '../screens/trips/YourGearScreen';
+import ManageSuggestedGearScreen from '../screens/trips/ManageSuggestedGearScreen';
+import ManageGearScreen from '../screens/trips/ManageGearScreen';
 import CreateTripWizard from '../screens/trips/CreateTripWizard';
 import { NotificationsPanel } from '../components/notifications/NotificationCenter';
 import { ProfileScreen } from '../screens/ProfileScreen';
@@ -69,6 +74,43 @@ function TripDetailCardScreen({ route, navigation }: NativeStackScreenProps<Root
       onOpenGroupChat={tripCard.onOpenGroupChat}
       onEditTrip={trip => navigation.dispatch(StackActions.push('EditTrip', { trip }))}
       onViewUserProfile={userId => tripCard.onViewUserProfile(userId, tripId)}
+      onViewAllUpdates={() => navigation.dispatch(StackActions.push('TripUpdates', { tripId }))}
+      onViewAllGroupGear={() => navigation.dispatch(StackActions.push('PackingAndGear', { tripId }))}
+      onViewAllYourGear={() => navigation.dispatch(StackActions.push('YourGear', { tripId }))}
+      onManageSuggestedGear={() => navigation.dispatch(StackActions.push('ManageSuggestedGear', { tripId }))}
+      onManageGroupGear={() => navigation.dispatch(StackActions.push('ManageGear', { tripId }))}
+    />
+  );
+}
+
+function PackingAndGearCardScreen({ route, navigation }: NativeStackScreenProps<RootStackParamList, 'PackingAndGear'>) {
+  const { tripId } = route.params;
+  return <PackingAndGearScreen tripId={tripId} onBack={() => navigation.goBack()} />;
+}
+
+function YourGearCardScreen({ route, navigation }: NativeStackScreenProps<RootStackParamList, 'YourGear'>) {
+  const { tripId } = route.params;
+  return <YourGearScreen tripId={tripId} onBack={() => navigation.goBack()} />;
+}
+
+function ManageSuggestedGearCardScreen({ route, navigation }: NativeStackScreenProps<RootStackParamList, 'ManageSuggestedGear'>) {
+  const { tripId } = route.params;
+  return <ManageSuggestedGearScreen tripId={tripId} onBack={() => navigation.goBack()} />;
+}
+
+function ManageGearCardScreen({ route, navigation }: NativeStackScreenProps<RootStackParamList, 'ManageGear'>) {
+  const { tripId } = route.params;
+  return <ManageGearScreen tripId={tripId} onBack={() => navigation.goBack()} />;
+}
+
+function TripUpdatesCardScreen({ route, navigation }: NativeStackScreenProps<RootStackParamList, 'TripUpdates'>) {
+  const { tripCard } = useMainNav();
+  const { tripId } = route.params;
+  return (
+    <TripUpdatesScreen
+      tripId={tripId}
+      onBack={() => navigation.goBack()}
+      onOpenGroupChat={tripCard.onOpenGroupChat}
     />
   );
 }
@@ -368,6 +410,11 @@ export default function RootNavigator() {
       <RootStack.Screen name="HomeTabs" component={HomeTabs} />
       <RootStack.Screen name="TripDetail" component={TripDetailCardScreen} options={{ presentation: 'card' }} />
       <RootStack.Screen name="EditTrip" component={EditTripCardScreen} options={{ presentation: 'card' }} />
+      <RootStack.Screen name="TripUpdates" component={TripUpdatesCardScreen} options={{ presentation: 'card' }} />
+      <RootStack.Screen name="PackingAndGear" component={PackingAndGearCardScreen} options={{ presentation: 'card' }} />
+      <RootStack.Screen name="YourGear" component={YourGearCardScreen} options={{ presentation: 'card' }} />
+      <RootStack.Screen name="ManageSuggestedGear" component={ManageSuggestedGearCardScreen} options={{ presentation: 'card' }} />
+      <RootStack.Screen name="ManageGear" component={ManageGearCardScreen} options={{ presentation: 'card' }} />
       <RootStack.Screen name="ChatCard" component={ChatCardScreen} options={{ presentation: 'card' }} />
       <RootStack.Screen name="SwellyChat" component={SwellyChatCardScreen} options={{ presentation: 'card' }} />
       <RootStack.Screen name="SurftripCard" component={SurftripCardScreen} options={{ presentation: 'card' }} />

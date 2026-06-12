@@ -18,6 +18,17 @@ export type RootStackParamList = {
   TripDetail: { tripId: string; focus?: TripDetailFocus | null };
   /** Host edit wizard, card above the trip detail. */
   EditTrip: { trip: GroupTrip };
+  /** Full "Updates" list — "View all" target of the Plan-tab admin updates. */
+  TripUpdates: { tripId: string };
+  /** Full "Packing & Gear" list — "View all" target of the Plan-tab Group Gear. */
+  PackingAndGear: { tripId: string };
+  /** Full-screen host "Manage Gear" editor — "Manage" target of the Group Gear card. */
+  ManageGear: { tripId: string };
+  /** Full "Your Gear" checklist — "View all" target of the Plan-tab Your Gear. */
+  YourGear: { tripId: string };
+  /** Full "Members pack suggestion" editor — host "Manage" target of the Plan-tab
+   *  "What should members pack for themselves?" section. */
+  ManageSuggestedGear: { tripId: string };
   /** Right-side notifications drawer as a transparent route — lives in back
    *  history, so back from a notification-opened trip returns TO the panel. */
   NotificationsPanel: { userId: string | null };

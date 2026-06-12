@@ -5,14 +5,13 @@
 // members (host + approved); non-members never see it.
 
 import React, { useEffect } from 'react';
-import { View, TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import { View, TouchableOpacity, StyleSheet } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withTiming,
 } from 'react-native-reanimated';
-
-const FONT_INTER = Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter';
+import { ff } from '../../theme/fonts';
 
 export type TripTab = 'overview' | 'plan';
 
@@ -107,8 +106,9 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   label: {
-    fontFamily: FONT_INTER,
-    fontSize: 16,
+    fontFamily: ff('Inter', '400'),
+    fontSize: 14,
+    lineHeight: 18,
     color: '#333333',
     textAlign: 'center',
   },

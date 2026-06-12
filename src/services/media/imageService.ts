@@ -554,6 +554,25 @@ export const getLifestyleImageBucketUrlForFilename = (
 };
 
 /**
+ * Rewrite a public Supabase Storage URL (`/storage/v1/object/public/...`) into a
+ * square, server-resized thumbnail (`/render/image/public/...?width=...`).
+ *
+ * Why: a full profile/hero JPG is ~300 KB; the transform endpoint serves a
+ * ~3 KB thumbnail at the size we actually render AND sends `cache-control:
+ * max-age` (the raw `/object/` route is `no-cache`), so small avatars load near
+ * instantly and stay cached. Non-Supabase URLs (e.g. Google avatars) and
+ * already-transformed URLs are returned unchanged.
+ */
+export const getStorageThumbUrl = (url?: string | null, size = 96): string | null => {
+  if (!url) return null;
+  const marker = '/storage/v1/object/public/';
+  if (!url.includes(marker)) return url; // not a Supabase public object — leave as-is
+  const rendered = url.replace(marker, '/storage/v1/render/image/public/');
+  const sep = rendered.includes('?') ? '&' : '?';
+  return `${rendered}${sep}width=${size}&height=${size}&resize=cover&quality=70`;
+};
+
+/**
  * Resolve a lifestyle keyword to an image URL via Pexels fallback.
  * Returns the Pexels URL directly (no upload to bucket).
  */

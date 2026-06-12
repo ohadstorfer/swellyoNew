@@ -88,7 +88,6 @@ import type { TripDetailFocus } from '../../services/notifications/notifications
 import { HostTag } from '../../components/trips/HostTag';
 import { AdminUpdateSheet } from '../../components/trips/updates/AdminUpdateSheet';
 import { AddPersonalGearSheet } from '../../components/trips/gear/AddPersonalGearSheet';
-import { EditSuggestedGearSheet } from '../../components/trips/gear/EditSuggestedGearSheet';
 import { PersonalGearSheet } from '../../components/trips/gear/PersonalGearSheet';
 import ParticipantCard from '../../components/trips/ParticipantCard';
 import PendingRequestCard from '../../components/trips/PendingRequestCard';
@@ -104,6 +103,7 @@ import {
   GroupGearCard,
   YourGearCard,
 } from '../../components/trips/plan/PlanSections';
+import { ff } from '../../theme/fonts';
 import { RequestToJoinSheet } from '../../components/trips/joinRequest/RequestToJoinSheet';
 import { supabase } from '../../config/supabase';
 import { messagingService } from '../../services/messaging/messagingService';
@@ -138,6 +138,15 @@ interface TripDetailScreenProps {
    * or the target section isn't rendered.
    */
   initialFocus?: TripDetailFocus | null;
+  /** "View all" on the admin-updates preview pushes the full Updates list. */
+  onViewAllUpdates?: () => void;
+  /** "View all" on the Group Gear preview pushes the full Packing & Gear list. */
+  onViewAllGroupGear?: () => void;
+  onViewAllYourGear?: () => void;
+  /** Host "Manage" on the Your Gear section pushes the full suggested-gear editor. */
+  onManageSuggestedGear?: () => void;
+  /** Host "Manage" on the Group Gear card pushes the full-screen Manage Gear editor. */
+  onManageGroupGear?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -333,7 +342,7 @@ const DangerRow: React.FC<{
 );
 
 // ---------------------------------------------------------------------------
-export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEditTrip, onViewUserProfile, onOpenNotifications, onOpenTrip, initialFocus }: TripDetailScreenProps) {
+export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEditTrip, onViewUserProfile, onOpenNotifications, onOpenTrip, initialFocus, onViewAllUpdates, onViewAllGroupGear, onViewAllYourGear, onManageSuggestedGear, onManageGroupGear }: TripDetailScreenProps) {
   const { user: contextUser } = useOnboarding();
   const insets = useSafeAreaInsets();
   const currentUserId = contextUser?.id?.toString() ?? null;
@@ -412,7 +421,6 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   // New gear/update sheets (Plan tab redesign)
   const [personalGearSheetOpen, setPersonalGearSheetOpen] = useState(false);
   const [addPersonalSheetOpen, setAddPersonalSheetOpen] = useState(false);
-  const [editSuggestedSheetOpen, setEditSuggestedSheetOpen] = useState(false);
   const [processingGearRequestId, setProcessingGearRequestId] = useState<string | null>(null);
 
   // Admin updates — host-posted free-text lines, visible to all members.
@@ -1007,10 +1015,10 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     }
   };
 
-  const handleSubmitGearRequest = async (itemName: string, note: string) => {
+  const handleSubmitGearRequest = async (itemName: string, note: string, neededQty: number) => {
     if (!currentUserId) return;
     try {
-      await createGearRequest(tripId, currentUserId, itemName, note || undefined);
+      await createGearRequest(tripId, currentUserId, itemName, note || undefined, neededQty);
       Alert.alert('Request sent', 'The host will review your request.');
     } catch (e: any) {
       Alert.alert('Could not send request', e?.message || 'Please try again.');
@@ -1167,16 +1175,6 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
 
   // Host edits the suggested gear list — called with the full new array after
   // each add/edit/delete. Persists then refetches so member copies stay in sync.
-  const handleSaveSuggestedGear = async (names: string[]) => {
-    if (!trip) return;
-    const cleaned = names.map(n => n.trim()).filter(Boolean);
-    try {
-      await setTripGroupGear(tripId, cleaned);
-      queryClient.invalidateQueries({ queryKey: tripsKeys.detail(tripId) });
-    } catch (e: any) {
-      Alert.alert('Could not save list', e?.message || 'Please try again.');
-    }
-  };
 
   const handleAddPersonalSubmit = async (name: string) => {
     if (!currentUserId) return;
@@ -1427,6 +1425,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
               onAddUpdate={handleStartAddUpdate}
               onEditUpdate={handleEditUpdate}
               onLongPressUpdate={handleLongPressUpdate}
+              onViewAll={onViewAllUpdates}
             />
           </View>
         )}
@@ -1438,21 +1437,28 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
             items={gearItems}
             isHost={isHost}
             isApprovedMember={isApprovedMember}
+            currentUserId={currentUserId}
             onPressItem={item => setGearItemSheetItem(item)}
-            onManage={() => setManageSheetVisible(true)}
+            onManage={onManageGroupGear ?? (() => setManageSheetVisible(true))}
             onRequestItem={() => setRequestSheetVisible(true)}
+            onViewAll={onViewAllGroupGear}
           />
           <View onLayout={registerSection('your-gear')}>
             <YourGearCard
               rows={gearAllRows}
               totalCount={gearTotalCount}
               isHost={isHost}
-              onOpen={() => setPersonalGearSheetOpen(true)}
-              onEditSuggested={() => setEditSuggestedSheetOpen(true)}
+              onOpen={onViewAllYourGear ?? (() => setPersonalGearSheetOpen(true))}
+              onEditSuggested={onManageSuggestedGear ?? (() => {})}
               onToggleItem={row =>
                 row.kind === 'host'
                   ? handleToggleGroupGearItem(row.name)
                   : handleTogglePersonalItem(row.name)
+              }
+              onAddItem={
+                (isHost || isApprovedMember) && !isCancelled
+                  ? () => setAddPersonalSheetOpen(true)
+                  : undefined
               }
             />
           </View>
@@ -1696,6 +1702,14 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         saving={savingUpdate}
         onClose={handleCancelUpdateDraft}
         onSubmit={handleSubmitUpdateBody}
+        onDelete={
+          editingUpdateId
+            ? () => {
+                const u = adminUpdates.find(x => x.id === editingUpdateId);
+                if (u) handleDeleteUpdate(u);
+              }
+            : undefined
+        }
       />
 
       {/* Your gear — full personal list (check / remove), opens Add from here. */}
@@ -1725,14 +1739,6 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         ]}
         saving={savingPersonalItem}
         onSubmit={handleAddPersonalSubmit}
-      />
-
-      {/* Host edits the suggested gear list (everyone's checklist). */}
-      <EditSuggestedGearSheet
-        visible={editSuggestedSheetOpen}
-        onClose={() => setEditSuggestedSheetOpen(false)}
-        items={trip.personal_gear_host_suggestion ?? []}
-        onSave={handleSaveSuggestedGear}
       />
 
       {/* Host-only inline edit sheets (Figma admin view). */}
@@ -1907,7 +1913,7 @@ const styles = StyleSheet.create({
     flex: 1,
     textAlign: 'left',
     marginLeft: 8,
-    ...(Platform.OS === 'web' ? { fontFamily: 'Montserrat, sans-serif' } : { fontFamily: 'Montserrat' }),
+    fontFamily: ff('Montserrat', '700'),
   },
   headerRight: { minWidth: 28, alignItems: 'flex-end' },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: 18 },
@@ -1918,13 +1924,16 @@ const styles = StyleSheet.create({
   scrollContent: { paddingBottom: 24 },
 
   // Redesigned Plan tab (Figma) — light wrappers around the PlanSections cards.
-  planSection: { paddingHorizontal: 16, marginTop: 24 },
+  planSection: { paddingHorizontal: 16, paddingTop: 20 },
   planSectionHeading: {
-    fontSize: 20,
+    // Inter Bold 20 (Figma) — was Montserrat, which rendered oversized. 16px gap
+    // down to "Group Gear" matches the section's internal spacing.
+    fontSize: 16,
+    lineHeight: 24,
     fontWeight: '700',
     color: '#222B30',
-    marginBottom: 8,
-    ...(Platform.OS === 'web' ? { fontFamily: 'Montserrat, sans-serif' } : { fontFamily: 'Montserrat' }),
+    marginBottom: 16,
+    fontFamily: ff('Inter', '700'),
   },
 
   // Top card — hero, title, action row (WhatsApp group header)
@@ -2096,7 +2105,7 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontWeight: '600',
     fontSize: 16,
-    ...(Platform.OS === 'web' ? { fontFamily: 'Montserrat, sans-serif' } : { fontFamily: 'Montserrat' }),
+    fontFamily: ff('Montserrat', '600'),
   },
   ctaPendingRow: { flexDirection: 'row', gap: 10 },
   ctaPending: { backgroundColor: '#F2F2F2' },

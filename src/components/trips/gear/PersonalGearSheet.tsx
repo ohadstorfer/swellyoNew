@@ -9,6 +9,7 @@ import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { TripBottomSheet, SHEET } from '../TripBottomSheet';
 import { HostTag } from '../HostTag';
+import { TripIcon } from '../tripIcons';
 import type { GroupGearItem, PersonalGearItem } from '../../../services/trips/groupTripsService';
 
 interface Props {
@@ -110,7 +111,7 @@ export const PersonalGearSheet: React.FC<Props> = ({
                     hitSlop={10}
                     style={styles.trashBtn}
                   >
-                    <Ionicons name="trash-outline" size={18} color={SHEET.danger} />
+                    <TripIcon name="trash-01" size={18} color={SHEET.danger} strokeWidth={1} />
                   </TouchableOpacity>
                 ) : null}
               </View>

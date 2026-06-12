@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Platform, I18nManager, AppState } from 'react-native';
+import { Platform, I18nManager, AppState, Text as RNText, TextInput as RNTextInput } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { PostHogProvider, PostHogSurveyProvider } from 'posthog-react-native';
 import { NavigationContainer } from '@react-navigation/native';
@@ -16,6 +16,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { QueryClientProvider, focusManager } from '@tanstack/react-query';
 import { queryClient } from './src/lib/queryClient';
+import { useAppFonts } from './src/theme/fonts';
 import Constants from 'expo-constants';
 import * as Sentry from '@sentry/react-native';
 
@@ -73,8 +74,25 @@ if (I18nManager.isRTL) {
   I18nManager.forceRTL(false);
 }
 
+// Lock text to the design's pixel sizes: by default RN multiplies every
+// fontSize by the OS "text size" accessibility setting, so on a device with
+// Larger Text ON, EVERY label renders bigger than Figma (which is at 1.0).
+// Disabling it app-wide makes Figma px == rendered px. Tradeoff: Dynamic Type
+// no longer enlarges text for low-vision users — revisit with a capped
+// maxFontSizeMultiplier if accessibility becomes a requirement.
+(RNText as any).defaultProps = (RNText as any).defaultProps || {};
+(RNText as any).defaultProps.allowFontScaling = false;
+(RNTextInput as any).defaultProps = (RNTextInput as any).defaultProps || {};
+(RNTextInput as any).defaultProps.allowFontScaling = false;
+
 export default Sentry.wrap(function App() {
   const [isNavigationReady, setIsNavigationReady] = useState(false);
+
+  // Load Inter + Montserrat before rendering so native shows the real typefaces
+  // (not the system-font fallback). Fail-open: if loading errors, render anyway
+  // with the system font (same as before). Web never blocks (browser has fonts).
+  const [fontsLoaded, fontError] = useAppFonts();
+  const fontsReady = Platform.OS === 'web' || fontsLoaded || !!fontError;
 
   useEffect(() => {
     // Initialize PostHog analytics (instance-based for tracking)
@@ -95,6 +113,9 @@ export default Sentry.wrap(function App() {
   const handleNavigationReady = () => {
     setIsNavigationReady(true);
   };
+
+  // Hold render until fonts are ready (native only) to avoid a system-font flash.
+  if (!fontsReady) return null;
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>

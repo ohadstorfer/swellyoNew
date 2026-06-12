@@ -19,7 +19,8 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { TripBottomSheet, SHEET } from '../TripBottomSheet';
-import { HostTag } from '../HostTag';
+import { TripIcon } from '../tripIcons';
+import { ff } from '../../../theme/fonts';
 
 interface Props {
   visible: boolean;
@@ -74,7 +75,9 @@ export const EditSuggestedGearSheet: React.FC<Props> = ({
     onSave(next);
   };
 
-  const handleDelete = (index: number) => {
+  // Delete lives in the edit form now (the design's rows only carry "Edit"), so
+  // removing returns to the list afterwards.
+  const removeAt = (index: number) => {
     const target = draft[index];
     Alert.alert(
       'Remove item',
@@ -84,7 +87,10 @@ export const EditSuggestedGearSheet: React.FC<Props> = ({
         {
           text: 'Delete',
           style: 'destructive',
-          onPress: () => commit(draft.filter((_, i) => i !== index)),
+          onPress: () => {
+            commit(draft.filter((_, i) => i !== index));
+            setView({ mode: 'list' });
+          },
         },
       ]
     );
@@ -119,6 +125,7 @@ export const EditSuggestedGearSheet: React.FC<Props> = ({
   // ----- FORM VIEW (add / edit) -----
   if (view.mode === 'add' || view.mode === 'edit') {
     const isAdd = view.mode === 'add';
+    const editIndex = view.mode === 'edit' ? view.index : -1;
     return (
       <TripBottomSheet
         visible={visible}
@@ -151,56 +158,61 @@ export const EditSuggestedGearSheet: React.FC<Props> = ({
           onSubmitEditing={handleSubmitForm}
         />
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
+        {!isAdd ? (
+          <TouchableOpacity
+            style={styles.removeBtn}
+            onPress={() => removeAt(editIndex)}
+            activeOpacity={0.7}
+          >
+            <TripIcon name="trash-01" size={16} color={SHEET.danger} strokeWidth={1} />
+            <Text style={styles.removeBtnText}>Remove item</Text>
+          </TouchableOpacity>
+        ) : null}
       </TripBottomSheet>
     );
   }
 
-  // ----- LIST VIEW -----
+  // ----- LIST VIEW (Figma node 12933-36310) -----
   return (
     <TripBottomSheet
       visible={visible}
       onClose={onClose}
-      title="Suggested gear"
-      subtitle="Items you suggest everyone packs"
-      headerRight={<HostTag />}
+      title="Members pack suggestion"
+      headerRight={
+        <Text style={styles.countText}>
+          {draft.length} item{draft.length === 1 ? '' : 's'}
+        </Text>
+      }
       footer={
-        <TouchableOpacity
-          style={styles.primaryBtn}
-          onPress={() => setView({ mode: 'add' })}
-          activeOpacity={0.85}
-        >
-          <Text style={styles.primaryBtnText}>Add item</Text>
+        <TouchableOpacity style={styles.saveBtn} onPress={onClose} activeOpacity={0.85}>
+          <Text style={styles.saveBtnText}>Save</Text>
         </TouchableOpacity>
       }
     >
-      {draft.length === 0 ? (
-        <Text style={styles.empty}>
-          No suggested items yet. Add the gear you want everyone to pack.
-        </Text>
-      ) : (
-        draft.map((item, index) => (
-          <View key={`${item}-${index}`} style={styles.row}>
-            <Text style={styles.itemName} numberOfLines={2}>
-              {item}
-            </Text>
-            <TouchableOpacity
-              style={styles.editPill}
-              onPress={() => setView({ mode: 'edit', index })}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.editPillText}>Edit</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={() => handleDelete(index)}
-              hitSlop={8}
-              style={styles.trashBtn}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="trash-outline" size={18} color={SHEET.danger} />
-            </TouchableOpacity>
-          </View>
-        ))
-      )}
+      {draft.map((item, index) => (
+        <View key={`${item}-${index}`} style={styles.itemCard}>
+          {/* Left drag handle (visual — reorder not wired yet). */}
+          <Ionicons name="ellipsis-vertical" size={20} color="#333333" />
+          <Text style={styles.itemName} numberOfLines={2}>
+            {item}
+          </Text>
+          <TouchableOpacity
+            onPress={() => setView({ mode: 'edit', index })}
+            hitSlop={8}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.editLink}>Edit</Text>
+          </TouchableOpacity>
+        </View>
+      ))}
+
+      <TouchableOpacity
+        style={styles.addCard}
+        onPress={() => setView({ mode: 'add' })}
+        activeOpacity={0.85}
+      >
+        <Text style={styles.addCardText}>+ Add Item</Text>
+      </TouchableOpacity>
     </TripBottomSheet>
   );
 };
@@ -208,50 +220,52 @@ export const EditSuggestedGearSheet: React.FC<Props> = ({
 export default EditSuggestedGearSheet;
 
 const styles = StyleSheet.create({
-  // List rows
-  row: {
+  // Header count ("N items")
+  countText: { fontFamily: ff('Inter', '400'), fontSize: 16, lineHeight: 18, color: SHEET.textMuted, marginRight: 4 },
+
+  // Item cards (Figma 12933-36310): white, #EEE border, radius 20, dots + name + Edit.
+  itemCard: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 8,
+    backgroundColor: SHEET.surface,
     borderWidth: 1,
-    borderColor: SHEET.border,
+    borderColor: SHEET.hairline,
+    borderRadius: 20,
+    paddingLeft: 8,
+    paddingRight: 16,
+    paddingVertical: 18,
+    marginBottom: 8,
+  },
+  itemName: { flex: 1, fontFamily: ff('Inter', '700'), fontSize: 18, lineHeight: 22, color: '#333333' },
+  editLink: { fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 18, color: '#05BCD3' },
+  // "+ Add Item" card
+  addCard: {
+    minHeight: 76,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: SHEET.surface,
+    borderWidth: 1,
+    borderColor: SHEET.hairline,
+    borderRadius: 20,
+    paddingVertical: 23,
+    marginBottom: 8,
+  },
+  addCardText: { fontFamily: ff('Inter', '700'), fontSize: 18, lineHeight: 22, color: '#333333' },
+
+  // Dark sticky "Save" (Figma surface/M-07 #212121, radius 12).
+  saveBtn: {
+    height: 56,
     borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    marginBottom: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#212121',
   },
-  itemName: {
-    flex: 1,
-    fontFamily: SHEET.fontHead,
-    fontSize: 15,
-    fontWeight: '700',
-    color: SHEET.inkBody,
-  },
-  editPill: {
-    borderWidth: 1,
-    borderColor: SHEET.brandTeal,
-    borderRadius: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    marginLeft: 10,
-  },
-  editPillText: {
-    fontFamily: SHEET.fontBody,
-    fontSize: 13,
-    fontWeight: '700',
-    color: SHEET.brandTeal,
-  },
-  trashBtn: {
-    marginLeft: 12,
-    padding: 2,
-  },
-  empty: {
-    fontFamily: SHEET.fontBody,
-    fontSize: 14,
-    color: SHEET.textMuted,
-    textAlign: 'center',
-    paddingVertical: 24,
-    lineHeight: 20,
-  },
+  saveBtnText: { fontFamily: ff('Montserrat', '600'), fontSize: 16, color: '#FFFFFF' },
+
+  // "Remove item" (edit form only)
+  removeBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 16, alignSelf: 'flex-start' },
+  removeBtnText: { fontFamily: ff('Inter', '600'), fontSize: 13, color: SHEET.danger },
 
   // Form
   fieldLabel: {

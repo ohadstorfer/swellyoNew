@@ -28,11 +28,11 @@ export const GearRequestsSheet: React.FC<Props> = ({
   onApprove,
   onDecline,
 }) => {
-  // Per-request "how many needed" the host sets before approving. Defaults to 1.
+  // Per-request "how many needed" the host can adjust before approving. Defaults
+  // to the quantity the requester asked for (needed_qty), not 1.
   const [qtys, setQtys] = useState<Record<string, number>>({});
-  const getQty = (id: string) => qtys[id] ?? 1;
-  const bumpQty = (id: string, delta: number) =>
-    setQtys(prev => ({ ...prev, [id]: Math.max(1, (prev[id] ?? 1) + delta) }));
+  const bumpQty = (id: string, delta: number, base: number) =>
+    setQtys(prev => ({ ...prev, [id]: Math.max(1, (prev[id] ?? base) + delta) }));
 
   // Reset the staged quantities whenever the sheet (re)opens.
   useEffect(() => {
@@ -52,7 +52,7 @@ export const GearRequestsSheet: React.FC<Props> = ({
       ) : (
         requests.map(r => {
           const isProcessing = processingId === r.id;
-          const qty = getQty(r.id);
+          const qty = qtys[r.id] ?? r.needed_qty ?? 1;
           return (
             <View key={r.id} style={styles.row}>
               <View style={styles.requesterRow}>
@@ -71,7 +71,7 @@ export const GearRequestsSheet: React.FC<Props> = ({
                 <View style={styles.counter}>
                   <TouchableOpacity
                     style={[styles.counterBtn, qty <= 1 && styles.counterBtnDisabled]}
-                    onPress={() => bumpQty(r.id, -1)}
+                    onPress={() => bumpQty(r.id, -1, r.needed_qty ?? 1)}
                     disabled={qty <= 1 || isProcessing}
                     hitSlop={6}
                   >
@@ -80,7 +80,7 @@ export const GearRequestsSheet: React.FC<Props> = ({
                   <Text style={styles.counterValue}>{qty}</Text>
                   <TouchableOpacity
                     style={styles.counterBtn}
-                    onPress={() => bumpQty(r.id, 1)}
+                    onPress={() => bumpQty(r.id, 1, r.needed_qty ?? 1)}
                     disabled={isProcessing}
                     hitSlop={6}
                   >

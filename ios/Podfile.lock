@@ -230,6 +230,8 @@ PODS:
     - ExpoModulesCore
   - ExpoAsset (12.0.9):
     - ExpoModulesCore
+  - ExpoBlur (15.0.8):
+    - ExpoModulesCore
   - ExpoClipboard (8.0.8):
     - ExpoModulesCore
   - ExpoCrypto (15.0.7):
@@ -258,6 +260,8 @@ PODS:
   - ExpoLinearGradient (15.0.7):
     - ExpoModulesCore
   - ExpoLinking (8.0.8):
+    - ExpoModulesCore
+  - ExpoLocalization (17.0.9):
     - ExpoModulesCore
   - ExpoModulesCore (3.0.24):
     - hermes-engine
@@ -2627,6 +2631,7 @@ DEPENDENCIES:
   - "ExpoAdapterGoogleSignIn (from `../node_modules/@react-native-google-signin/google-signin/expo/ios`)"
   - ExpoAppleAuthentication (from `../node_modules/expo-apple-authentication/ios`)
   - ExpoAsset (from `../node_modules/expo-asset/ios`)
+  - ExpoBlur (from `../node_modules/expo-blur/ios`)
   - ExpoClipboard (from `../node_modules/expo-clipboard/ios`)
   - ExpoCrypto (from `../node_modules/expo-crypto/ios`)
   - ExpoDevice (from `../node_modules/expo-device/ios`)
@@ -2638,6 +2643,7 @@ DEPENDENCIES:
   - ExpoKeepAwake (from `../node_modules/expo-keep-awake/ios`)
   - ExpoLinearGradient (from `../node_modules/expo-linear-gradient/ios`)
   - ExpoLinking (from `../node_modules/expo-linking/ios`)
+  - ExpoLocalization (from `../node_modules/expo-localization/ios`)
   - ExpoModulesCore (from `../node_modules/expo-modules-core`)
   - ExpoSecureStore (from `../node_modules/expo-secure-store/ios`)
   - ExpoVideo (from `../node_modules/expo-video/ios`)
@@ -2785,6 +2791,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/expo-apple-authentication/ios"
   ExpoAsset:
     :path: "../node_modules/expo-asset/ios"
+  ExpoBlur:
+    :path: "../node_modules/expo-blur/ios"
   ExpoClipboard:
     :path: "../node_modules/expo-clipboard/ios"
   ExpoCrypto:
@@ -2807,6 +2815,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/expo-linear-gradient/ios"
   ExpoLinking:
     :path: "../node_modules/expo-linking/ios"
+  ExpoLocalization:
+    :path: "../node_modules/expo-localization/ios"
   ExpoModulesCore:
     :path: "../node_modules/expo-modules-core"
   ExpoSecureStore:
@@ -3010,6 +3020,7 @@ SPEC CHECKSUMS:
   ExpoAdapterGoogleSignIn: bf36536501f7d1472951f2e227492435c7add98b
   ExpoAppleAuthentication: 31bb6cdc57d7169e5d994fff7ec4b97c62423534
   ExpoAsset: 3c3b7dd9b1318846a02ef05ce420e63d542aeb9f
+  ExpoBlur: 688c53d5d26575cbb6c72e7fbd4caef8d8cfadf6
   ExpoClipboard: 50fa3332136758be7ca2ea912bae585f74bb93c3
   ExpoCrypto: 4c50a152f5939e16a2ca10be77b002a3a391c4d3
   ExpoDevice: 0773c782b055558ca9b40b74aa4a8133a66cd0d2
@@ -3021,6 +3032,7 @@ SPEC CHECKSUMS:
   ExpoKeepAwake: 3f5e3ac53627849174f3603271df8e08f174ed4a
   ExpoLinearGradient: f9e7182e5253d53b2de4134b69d70bbfc2d50588
   ExpoLinking: f5c171877e118e792cb9a77e5ade0b080d899b14
+  ExpoLocalization: 7c29dc7a5193c732f6eae1da42b427ac15507ae1
   ExpoModulesCore: 5ef9a58f0cd1f10dd42391496cf5f6cf7039cc95
   ExpoSecureStore: decd2943fa19fa6f02c5ef3689f9ba5012ad6a6d
   ExpoVideo: 9e7f39ff824ee2c087e60908fea77013e7edeb1c

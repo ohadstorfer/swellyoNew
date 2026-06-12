@@ -43,6 +43,18 @@ export const BOARD_IMAGE: Partial<Record<SurfStyle, ReturnType<typeof require>>>
   longboard: Images.boards.longboard,
 };
 
+// Even-height board renders (boards-even/*) — all share the same canvas height,
+// so rendered at a fixed height with their own aspect ratio they line up at one
+// uniform height (Figma "Surf style" card). `aspect` = source pixelWidth/Height.
+export const BOARD_IMAGE_EVEN: Partial<
+  Record<SurfStyle, { src: ReturnType<typeof require>; aspect: number }>
+> = {
+  shortboard: { src: Images.boardsEven.shortboard, aspect: 100 / 280 },
+  midlength: { src: Images.boardsEven.midlength, aspect: 84 / 280 },
+  longboard: { src: Images.boardsEven.longboard, aspect: 64 / 280 },
+  softtop: { src: Images.boardsEven.softtop, aspect: 76 / 287 },
+};
+
 const FONT_INTER = Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter';
 const FONT_MONTSERRAT = Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat';
 

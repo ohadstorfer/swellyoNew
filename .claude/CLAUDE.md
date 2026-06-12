@@ -29,6 +29,13 @@ There are two GitHub repos with the same code: `swellyoNew` (primary) and `Swell
 
 The `love` remote is already configured: `https://github.com/ohadstorfer/SwellyoLove.git`. The `--force` is needed because the repos have different git histories. Netlify will auto-deploy on push.
 
+## Figma — always read text sizes with `get_variable_defs`
+
+When reading font sizes / line heights from a Figma file, **always use `mcp__figma__get_variable_defs`** — never trust the px values flattened by `get_design_context`.
+
+- **Why:** sizes are bound to mode-dependent variables (e.g. `Size/md`, `Size/xl`). `get_design_context` flattens them in the wrong typography mode (a larger breakpoint), so every size comes out inflated. `get_variable_defs` resolves them in the mode actually applied to the node (e.g. `Auto (Mobile - 800)`), matching the Figma Inspect panel.
+- **How:** `get_metadata` → find text node IDs → `get_variable_defs` on them → map tokens to px. A literal value (not a token) is mode-independent — either tool is fine.
+
 ## Commands
 
 - `npm start` — Expo dev server

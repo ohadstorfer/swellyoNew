@@ -8,16 +8,18 @@ import {
   ScrollView,
   Animated,
   Easing,
-  Platform,
   ActivityIndicator,
   PanResponder,
   Alert,
   AccessibilityInfo,
   useWindowDimensions,
+  PixelRatio,
 } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import { useFocusEffect } from '@react-navigation/native';
 import { pushRootCard } from '../../navigation/navigationRef';
 import { Ionicons } from '@expo/vector-icons';
+import { getStorageThumbUrl } from '../../services/media/imageService';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   notificationsService,
@@ -37,6 +39,7 @@ import {
 } from '../../services/trips/groupTripsService';
 import { queryClient } from '../../lib/queryClient';
 import { tripsKeys } from '../../hooks/trips/useTripQueries';
+import { ff } from '../../theme/fonts';
 
 interface Props {
   /** Current user id — used for the realtime filter. Null while logged out. */
@@ -160,6 +163,8 @@ export const NotificationsPanel: React.FC<PanelProps> = ({ userId, onClose, onOp
     }
     const unsubscribe = notificationsService.subscribe(userId, {
       onInsert: (row) => {
+        const thumbs = avatarThumbsFor([row]);
+        if (thumbs.length) ExpoImage.prefetch(thumbs).catch(() => {});
         setItems((prev) => (prev.some((r) => r.id === row.id) ? prev : [row, ...prev]));
         notificationsService.markRead(row.id); // panel open → treat as seen
       },
@@ -173,6 +178,9 @@ export const NotificationsPanel: React.FC<PanelProps> = ({ userId, onClose, onOp
   const loadList = useCallback(async () => {
     setLoading(true);
     const rows = await notificationsService.fetch(50);
+    // Warm avatar/trip thumbnails into cache before first paint (near-instant render).
+    const thumbs = avatarThumbsFor(rows);
+    if (thumbs.length) ExpoImage.prefetch(thumbs).catch(() => {});
     setItems(rows);
     setLoading(false);
     unreadAtOpen.current = new Set(rows.filter((r) => !r.read_at).map((r) => r.id));
@@ -251,8 +259,8 @@ export const NotificationsPanel: React.FC<PanelProps> = ({ userId, onClose, onOp
   );
 
   return (
-    <View style={[styles.panelScreen, { paddingTop: insets.top }]}>
-            <View style={styles.panelHeader}>
+    <View style={styles.panelScreen}>
+            <View style={[styles.panelHeader, { paddingTop: insets.top + 8 }]}>
               <TouchableOpacity
                 onPress={closePanel}
                 style={styles.backButton}
@@ -260,9 +268,15 @@ export const NotificationsPanel: React.FC<PanelProps> = ({ userId, onClose, onOp
                 accessibilityLabel="Close notifications"
                 accessibilityRole="button"
               >
-                <Ionicons name="chevron-back" size={24} color="#222B30" />
+                <Ionicons name="chevron-back" size={24} color="#FFFFFF" />
               </TouchableOpacity>
               <Text style={styles.panelTitle}>Notifications</Text>
+              <View style={styles.headerSpacer} />
+              {/* Decorative — mirrors the bell that opened this panel (matches Figma). */}
+              <View style={styles.headerBell} pointerEvents="none">
+                <Ionicons name="notifications-outline" size={24} color="#FFFFFF" />
+                <View style={styles.headerBellDot} />
+              </View>
             </View>
 
             {loading ? (
@@ -295,6 +309,88 @@ export const NotificationsPanel: React.FC<PanelProps> = ({ userId, onClose, onOp
             )}
     </View>
   );
+};
+
+// ── Avatar (real photos, stacked) ────────────────────────────────────────────
+// Rendered circle size, and the pixel size we request from Supabase's image
+// transform endpoint (@2x/@3x, capped) — a ~3 KB thumbnail instead of the
+// ~300 KB original, so avatars paint near-instantly and stay disk-cached.
+const AVATAR = 52;
+const AVATAR_PEEK = 28; // how far the back (trip) circle peeks out behind the actor
+const THUMB_PX = Math.min(150, Math.round(AVATAR * PixelRatio.get()));
+
+/** Build the list of thumbnail URLs to warm into cache for a set of rows. */
+function avatarThumbsFor(rows: NotificationRow[]): string[] {
+  const out: string[] = [];
+  for (const r of rows) {
+    const a = getStorageThumbUrl(r.data?.actor_avatar_url, THUMB_PX);
+    const t = getStorageThumbUrl(r.data?.trip_image_url, THUMB_PX);
+    if (a) out.push(a);
+    if (t) out.push(t);
+  }
+  return out;
+}
+
+/** One circular remote image (expo-image: memory+disk cache, fade-in). Falls
+ *  back to `fallback` (initial/icon) or a plain gray circle on load error. */
+const RemoteCircle: React.FC<{ uri: string; style?: any; fallback?: React.ReactNode }> = ({
+  uri,
+  style,
+  fallback,
+}) => {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return <View style={[styles.avatarCircle, style]}>{fallback}</View>;
+  }
+  return (
+    <ExpoImage
+      source={{ uri }}
+      style={[styles.avatarCircle, style]}
+      contentFit="cover"
+      cachePolicy="memory-disk"
+      transition={150}
+      recyclingKey={uri}
+      onError={() => setFailed(true)}
+    />
+  );
+};
+
+/** Actor avatar in front, trip cover peeking behind. Degrades to a single photo,
+ *  then to the initial/icon when no photo is available. */
+const NotificationAvatar: React.FC<{
+  actorUrl?: string | null;
+  tripUrl?: string | null;
+  initial: string;
+  icon: string;
+}> = ({ actorUrl, tripUrl, initial, icon }) => {
+  const actorThumb = getStorageThumbUrl(actorUrl, THUMB_PX);
+  const tripThumb = getStorageThumbUrl(tripUrl, THUMB_PX);
+
+  const fallbackNode = initial ? (
+    <Text style={styles.avatarInitial}>{initial}</Text>
+  ) : (
+    <Ionicons name={icon as any} size={24} color="#596E7C" />
+  );
+
+  // Both → stacked cluster (actor in front-left, trip behind-right).
+  if (actorThumb && tripThumb) {
+    return (
+      <View style={styles.avatarCluster}>
+        <RemoteCircle uri={tripThumb} style={styles.clusterBack} />
+        <RemoteCircle uri={actorThumb} style={styles.clusterFront} fallback={fallbackNode} />
+      </View>
+    );
+  }
+
+  // Single photo (actor preferred). The actor falls back to the initial/icon;
+  // a lone trip image just shows the gray circle if it ever fails.
+  const single = actorThumb ?? tripThumb;
+  if (single) {
+    return <RemoteCircle uri={single} fallback={actorThumb ? fallbackNode : null} />;
+  }
+
+  // No photo at all (system notifications) → initial / icon.
+  return <View style={styles.avatar}>{fallbackNode}</View>;
 };
 
 // ── Single notification row ──────────────────────────────────────────────────
@@ -335,22 +431,24 @@ const NotificationItem: React.FC<ItemProps> = ({ n, isUnread, acting, disabled, 
       accessibilityRole={onPress ? 'button' : undefined}
       accessibilityLabel={onPress ? `Open trip — ${r.title}` : undefined}
     >
-      <View style={styles.avatar}>
-        {initial ? (
-          <Text style={styles.avatarInitial}>{initial}</Text>
-        ) : (
-          <Ionicons name={r.icon as any} size={18} color="#222B30" />
-        )}
-      </View>
+      <NotificationAvatar
+        actorUrl={d.actor_avatar_url}
+        tripUrl={d.trip_image_url}
+        initial={initial}
+        icon={r.icon}
+      />
       <View style={styles.rowBody}>
         <View style={styles.rowTitleLine}>
           <Text style={styles.rowTitle} numberOfLines={2}>
             {r.title}
           </Text>
-          <Text style={styles.rowTime}>{formatNotificationTime(n.created_at)}</Text>
+          <View style={styles.timeContainer}>
+            <Text style={styles.rowTime}>{formatNotificationTime(n.created_at)}</Text>
+            {isUnread && <View style={styles.unreadDot} />}
+          </View>
         </View>
         {!!r.body && (
-          <Text style={styles.rowText} numberOfLines={2}>
+          <Text style={[styles.rowText, isUnread && styles.rowTextUnread]} numberOfLines={2}>
             {r.body}
           </Text>
         )}
@@ -399,11 +497,10 @@ const NotificationItem: React.FC<ItemProps> = ({ n, isUnread, acting, disabled, 
               resolvedDecision === 'approved' ? styles.statusApproved : styles.statusDeclined,
             ]}
           >
-            {resolvedDecision === 'approved' ? 'Approved' : 'Declined'}
+            {resolvedDecision === 'approved' ? 'Approved!' : 'Declined'}
           </Text>
         )}
       </View>
-      {isUnread && <View style={styles.unreadDot} />}
     </Pressable>
   );
 };
@@ -441,38 +538,18 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     lineHeight: 13,
   },
-  modalRoot: {
-    flex: 1,
-  },
   // Full-screen card route (white, navigator owns slide + swipe-back).
   panelScreen: {
     flex: 1,
     backgroundColor: '#FFFFFF',
   },
-  backdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-  },
-  panel: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: '#FFFFFF',
-    shadowColor: '#596E7C',
-    shadowOffset: { width: -4, height: 0 },
-    shadowOpacity: 0.18,
-    shadowRadius: 20,
-    elevation: 16,
-  },
+  // Dark header bleeds up through the status bar (Figma: Surface/M 07).
   panelHeader: {
     flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: '#212121',
     paddingHorizontal: 8,
-    paddingTop: 8,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#EEF0F2',
+    paddingBottom: 14,
     gap: 4,
   },
   backButton: {
@@ -482,10 +559,28 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   panelTitle: {
-    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat-Bold',
+    fontFamily: ff('Montserrat', '700'),
     fontSize: 18,
     fontWeight: '700',
-    color: '#222B30',
+    color: '#FFFFFF',
+  },
+  headerSpacer: {
+    flex: 1,
+  },
+  headerBell: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerBellDot: {
+    position: 'absolute',
+    top: 8,
+    right: 9,
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: '#FF3B30',
   },
   center: {
     flex: 1,
@@ -495,7 +590,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   emptyText: {
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    fontFamily: ff('Inter', '400'),
     fontSize: 13,
     color: '#7B7B7B',
   },
@@ -503,77 +598,120 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   listContent: {
-    paddingVertical: 4,
+    paddingVertical: 0,
   },
   row: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    gap: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 16,
+    gap: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#F2F4F6',
+    borderBottomColor: '#EEEEEE',
   },
+  // Unread rows read as a soft fill, not a blue tint (Figma: Surface/M 02).
   rowUnread: {
-    backgroundColor: '#F4F7FF',
+    backgroundColor: '#F7F7F7',
   },
   // Tap feedback — the row should feel like it heard the press (emil).
   rowPressed: {
-    backgroundColor: '#EFF2F5',
+    backgroundColor: '#EFEFEF',
   },
   avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: AVATAR,
+    height: AVATAR,
+    borderRadius: AVATAR / 2,
     backgroundColor: '#E6E9ED',
+    borderWidth: 1.5,
+    borderColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
   },
+  // Base for a single remote photo circle (gray bg shows under the fade-in).
+  avatarCircle: {
+    width: AVATAR,
+    height: AVATAR,
+    borderRadius: AVATAR / 2,
+    backgroundColor: '#E6E9ED',
+    borderWidth: 1.5,
+    borderColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  // Two overlapping circles: actor in front-left, trip cover peeking behind.
+  avatarCluster: {
+    width: AVATAR + AVATAR_PEEK,
+    height: AVATAR,
+  },
+  clusterFront: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    zIndex: 2,
+  },
+  clusterBack: {
+    position: 'absolute',
+    left: AVATAR_PEEK,
+    top: 0,
+    zIndex: 1,
+  },
   avatarInitial: {
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
-    fontSize: 16,
-    fontWeight: '700',
+    fontFamily: ff('Inter', '600'),
+    fontSize: 20,
+    fontWeight: '600',
     color: '#596E7C',
   },
   rowBody: {
     flex: 1,
+    gap: 4,
   },
   rowTitleLine: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     justifyContent: 'space-between',
-    gap: 8,
+    gap: 16,
   },
   rowTitle: {
     flex: 1,
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    fontFamily: ff('Inter', '600'),
     fontSize: 14,
     fontWeight: '600',
-    color: '#222B30',
-    lineHeight: 19,
+    color: '#333333',
+    lineHeight: 18,
+  },
+  timeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 1,
   },
   rowTime: {
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
-    fontSize: 11,
-    color: '#9AA3B2',
-    marginTop: 2,
+    fontFamily: ff('Inter', '400'),
+    fontSize: 12,
+    fontWeight: '400',
+    color: '#7B7B7B',
   },
   rowText: {
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
-    fontSize: 13,
-    color: '#596E7C',
-    marginTop: 2,
-    lineHeight: 17,
+    fontFamily: ff('Inter', '400'),
+    fontSize: 12,
+    fontWeight: '400',
+    color: '#A0A0A0',
+    lineHeight: 16,
+  },
+  // Unread bodies are slightly darker than read ones (Figma: Text/M 02 vs 03).
+  rowTextUnread: {
+    color: '#7B7B7B',
   },
   actions: {
     flexDirection: 'row',
-    gap: 10,
-    marginTop: 10,
+    gap: 16,
+    marginTop: 8,
   },
   actionBtn: {
     flex: 1,
-    height: 38,
-    borderRadius: 8,
+    height: 40,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -582,8 +720,8 @@ const styles = StyleSheet.create({
   },
   declineBtn: {
     backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#C9CED4',
+    borderWidth: 1.5,
+    borderColor: '#CFCFCF',
   },
   // Press feedback — buttons should feel like they heard the tap (emil).
   btnPressed: {
@@ -594,35 +732,34 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   approveText: {
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    fontFamily: ff('Inter', '600'),
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '600',
     color: '#FFFFFF',
   },
   declineText: {
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    fontFamily: ff('Inter', '600'),
     fontSize: 14,
-    fontWeight: '700',
-    color: '#222B30',
+    fontWeight: '600',
+    color: '#333333',
   },
   statusText: {
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
-    fontSize: 13,
+    fontFamily: ff('Inter', '700'),
+    fontSize: 14,
     fontWeight: '700',
-    marginTop: 8,
+    marginTop: 4,
   },
   statusApproved: {
-    color: '#1E9E5A',
+    color: '#05BCD3',
   },
   statusDeclined: {
     color: '#8A93A0',
   },
   unreadDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
     backgroundColor: '#05BCD3',
-    marginTop: 6,
   },
 });
 
