@@ -20,13 +20,15 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useOnboarding } from '../../context/OnboardingContext';
 import { useTripCore, useTripGear } from '../../hooks/trips/useTripDetail';
 import { tripsKeys } from '../../hooks/trips/useTripQueries';
-import { setMyGearClaim, createGearRequest } from '../../services/trips/groupTripsService';
+import { setMyGearClaim, createGearRequest, addGearItem } from '../../services/trips/groupTripsService';
 import type { EnrichedGearItem } from '../../services/trips/groupTripsService';
 import { ff } from '../../theme/fonts';
 import { NotificationCenter } from '../../components/notifications/NotificationCenter';
 import { GearRow, StickyGradientFooter } from '../../components/trips/plan/PlanSections';
+import { TripIcon } from '../../components/trips/tripIcons';
 import { GearItemSheet } from '../../components/trips/gear/GearItemSheet';
 import { RequestGearSheet } from '../../components/trips/gear/RequestGearSheet';
+import { ManageGearSheet } from '../../components/trips/gear/ManageGearSheet';
 
 // Tokens mirror the Figma frame (accent #05BCD3, dark #212121, muted greys).
 const T = {
@@ -40,9 +42,11 @@ const T = {
 interface Props {
   tripId: string;
   onBack: () => void;
+  /** Host only — opens the "Edit Group Gear" screen (reorder/edit items). */
+  onEdit?: () => void;
 }
 
-export default function PackingAndGearScreen({ tripId, onBack }: Props) {
+export default function PackingAndGearScreen({ tripId, onBack, onEdit }: Props) {
   const { user: contextUser } = useOnboarding();
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
@@ -66,6 +70,15 @@ export default function PackingAndGearScreen({ tripId, onBack }: Props) {
 
   const [gearItemSheetItem, setGearItemSheetItem] = useState<EnrichedGearItem | null>(null);
   const [requestSheetVisible, setRequestSheetVisible] = useState(false);
+  const [addSheetVisible, setAddSheetVisible] = useState(false);
+
+  // Host adds a group gear item directly (Figma 12919-32232) — reuses the
+  // "Edit Gear" sheet in add mode; goes straight into group_trip_gear_items.
+  const handleAddItem = async (patch: { name: string; needed_qty: number }) => {
+    if (!currentUserId) return;
+    await addGearItem(tripId, currentUserId, patch.name, patch.needed_qty);
+    queryClient.invalidateQueries({ queryKey: tripsKeys.detailGear(tripId) });
+  };
 
   const handleSetGearClaim = async (itemId: string, quantity: number) => {
     if (!currentUserId) return;
@@ -81,7 +94,7 @@ export default function PackingAndGearScreen({ tripId, onBack }: Props) {
     if (!currentUserId) return;
     try {
       await createGearRequest(tripId, currentUserId, itemName, note || undefined, neededQty);
-      Alert.alert('Request sent', 'The host will review your request.');
+      Alert.alert('Request sent', 'The host will review your suggestion.');
     } catch (e: any) {
       Alert.alert('Could not send request', e?.message || 'Please try again.');
       throw e;
@@ -116,10 +129,24 @@ export default function PackingAndGearScreen({ tripId, onBack }: Props) {
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.listHeader}>
-            <Text style={styles.listTitle}>Group Gear</Text>
-            <Text style={styles.listCount}>
-              {gearItems.length} item{gearItems.length === 1 ? '' : 's'}
-            </Text>
+            <View style={styles.listHeaderText}>
+              <Text style={styles.listTitle}>Group Gear</Text>
+              <Text style={styles.listCount}>
+                {gearItems.length} item{gearItems.length === 1 ? '' : 's'}
+              </Text>
+            </View>
+            {/* Edit — host only — opens "Edit Group Gear" (reorder/edit). */}
+            {isHost && onEdit ? (
+              <TouchableOpacity
+                style={styles.editBtn}
+                onPress={onEdit}
+                activeOpacity={0.85}
+                accessibilityLabel="Edit group gear"
+              >
+                <TripIcon name="edit-02" size={16} color="#FFFFFF" />
+                <Text style={styles.editBtnText}>Edit</Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
 
           {gearItems.length === 0 ? (
@@ -139,17 +166,28 @@ export default function PackingAndGearScreen({ tripId, onBack }: Props) {
           )}
         </ScrollView>
 
-        {/* Sticky "Request" button — approved members ask the host for a missing
-            item (host manages gear from the trip card instead). */}
-        {isApprovedMember && !isHost ? (
+        {/* Sticky CTA — host adds a group gear item ("+ Add item"); approved
+            members instead ask the host for a missing item. */}
+        {isHost ? (
+          <StickyGradientFooter bottomInset={insets.bottom}>
+            <TouchableOpacity
+              style={styles.requestBtn}
+              activeOpacity={0.85}
+              onPress={() => setAddSheetVisible(true)}
+              accessibilityLabel="Add an item"
+            >
+              <Text style={styles.requestBtnText}>+ Add item</Text>
+            </TouchableOpacity>
+          </StickyGradientFooter>
+        ) : isApprovedMember ? (
           <StickyGradientFooter bottomInset={insets.bottom}>
             <TouchableOpacity
               style={styles.requestBtn}
               activeOpacity={0.85}
               onPress={() => setRequestSheetVisible(true)}
-              accessibilityLabel="Request an item"
+              accessibilityLabel="Suggest an item"
             >
-              <Text style={styles.requestBtnText}>Request</Text>
+              <Text style={styles.requestBtnText}>Suggest item</Text>
             </TouchableOpacity>
           </StickyGradientFooter>
         ) : null}
@@ -167,6 +205,16 @@ export default function PackingAndGearScreen({ tripId, onBack }: Props) {
         visible={requestSheetVisible}
         onClose={() => setRequestSheetVisible(false)}
         onSubmit={handleSubmitGearRequest}
+      />
+      {/* Host "+ Add item" — the "Edit Gear" sheet in add mode (Figma 12919-32232). */}
+      <ManageGearSheet
+        visible={addSheetVisible}
+        items={gearItems}
+        formOnly
+        editItem={null}
+        onClose={() => setAddSheetVisible(false)}
+        onSave={handleAddItem}
+        onDelete={async () => {}}
       />
     </SafeAreaView>
   );
@@ -199,15 +247,27 @@ const styles = StyleSheet.create({
   body: { flex: 1, backgroundColor: T.bg },
   scrollContent: { paddingHorizontal: 16, paddingTop: 24 },
 
-  // "Group Gear" + "N items"
+  // "Group Gear" + "N items" (stacked) with a host "Edit" button on the right.
   listHeader: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
+    alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 24,
   },
-  listTitle: { flex: 1, fontFamily: ff('Inter', '700'), fontSize: 18, lineHeight: 22, fontWeight: '700', color: T.title },
+  listHeaderText: { flex: 1, gap: 4 },
+  listTitle: { fontFamily: ff('Inter', '700'), fontSize: 18, lineHeight: 22, fontWeight: '700', color: T.title },
   listCount: { fontFamily: ff('Inter', '400'), fontSize: 16, lineHeight: 18, color: T.count },
+  // Dark "Edit" pill (Figma 13179-8187) — pencil + white label, host only.
+  editBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 10,
+    backgroundColor: T.ink,
+  },
+  editBtnText: { fontFamily: ff('Inter', '700'), fontSize: 14, lineHeight: 18, fontWeight: '700', color: '#FFFFFF' },
 
   list: { gap: 8 },
   empty: { fontFamily: ff('Inter', '400'), fontSize: 14, color: T.count },
@@ -222,9 +282,9 @@ const styles = StyleSheet.create({
     backgroundColor: T.ink,
   },
   requestBtnText: {
-    fontFamily: ff('Montserrat', '600'),
+    fontFamily: ff('Montserrat', '700'),
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '700',
     color: '#FFFFFF',
   },
 });

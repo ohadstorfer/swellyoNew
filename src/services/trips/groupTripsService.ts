@@ -1726,6 +1726,8 @@ export interface GearItem {
   created_at: string;
   updated_at: string;
   source_gear_request_id?: string | null;
+  /** Manual drag-reorder position within the trip (lower = higher in list). */
+  sort_order?: number | null;
 }
 
 export interface GearClaim {
@@ -1783,6 +1785,9 @@ export async function listGearItems(
     .from('group_trip_gear_items')
     .select('*')
     .eq('trip_id', tripId)
+    // Saved drag order first; created_at breaks ties (and orders any rows whose
+    // sort_order hasn't been backfilled — those fall last via nullsFirst:false).
+    .order('sort_order', { ascending: true, nullsFirst: false })
     .order('created_at', { ascending: true });
 
   if (itemsError) {
@@ -1853,6 +1858,23 @@ export async function addGearItem(
   if (!trimmed) throw new Error('Item name is required');
   if (neededQty < 1) throw new Error('Quantity must be at least 1');
 
+  // New items go to the end of the drag-ordered list: max(sort_order)+1 for this
+  // trip. Resilient — if the lookup fails we fall back to 0 (the migration's
+  // nullsFirst:false ordering still keeps things sane).
+  let nextSortOrder = 0;
+  const { data: maxRow, error: maxError } = await supabase
+    .from('group_trip_gear_items')
+    .select('sort_order')
+    .eq('trip_id', tripId)
+    .order('sort_order', { ascending: false, nullsFirst: false })
+    .limit(1)
+    .maybeSingle();
+  if (maxError) {
+    console.error('[groupTripsService] addGearItem max sort_order error:', maxError);
+  } else if (maxRow && typeof maxRow.sort_order === 'number') {
+    nextSortOrder = maxRow.sort_order + 1;
+  }
+
   const { data, error } = await supabase
     .from('group_trip_gear_items')
     .insert({
@@ -1861,6 +1883,7 @@ export async function addGearItem(
       needed_qty: neededQty,
       created_by: hostId,
       source_gear_request_id: sourceGearRequestId ?? null,
+      sort_order: nextSortOrder,
     })
     .select()
     .single();
@@ -1916,6 +1939,41 @@ export async function deleteGearItem(itemId: string): Promise<void> {
     tripId: deleted?.[0]?.trip_id ?? undefined,
     properties: { action: 'remove' },
   });
+}
+
+/**
+ * Persists a manual drag-reorder: each id in `orderedIds` gets its index as its
+ * sort_order (0-based, first = top). Updates are scoped to the trip so a stale
+ * client can't shuffle another trip's items. Tolerant of partial failure — it
+ * runs every update, collects errors, and throws once at the end if any failed
+ * (so the caller can refetch / surface the issue), matching the file's
+ * console.error + throw convention.
+ */
+export async function reorderGearItems(
+  tripId: string,
+  orderedIds: string[]
+): Promise<void> {
+  if (!orderedIds.length) return;
+
+  const results = await Promise.all(
+    orderedIds.map((id, index) =>
+      supabase
+        .from('group_trip_gear_items')
+        .update({ sort_order: index })
+        .eq('id', id)
+        .eq('trip_id', tripId)
+    )
+  );
+
+  const failures = results.filter(r => r.error);
+  if (failures.length) {
+    failures.forEach(f =>
+      console.error('[groupTripsService] reorderGearItems update error:', f.error)
+    );
+    throw new Error(
+      failures[0].error?.message || 'Failed to reorder gear items'
+    );
+  }
 }
 
 /**

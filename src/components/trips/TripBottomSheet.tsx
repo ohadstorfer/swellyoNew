@@ -59,6 +59,8 @@ interface Props {
   headerRight?: React.ReactNode;
   /** Sticky footer pinned to the bottom (e.g. primary action button). */
   footer?: React.ReactNode;
+  /** Hairline divider above the footer (default true). */
+  footerDivider?: boolean;
   /** Wrap children in a scroll view (default true). Set false for custom bodies. */
   scroll?: boolean;
   children: React.ReactNode;
@@ -72,6 +74,7 @@ export const TripBottomSheet: React.FC<Props> = ({
   onBack,
   headerRight,
   footer,
+  footerDivider = true,
   scroll = true,
   children,
 }) => {
@@ -127,7 +130,9 @@ export const TripBottomSheet: React.FC<Props> = ({
               <View style={styles.body}>{children}</View>
             )}
 
-            {footer ? <View style={styles.footer}>{footer}</View> : null}
+            {footer ? (
+              <View style={[styles.footer, !footerDivider && styles.footerNoDivider]}>{footer}</View>
+            ) : null}
             </Pressable>
           </Animated.View>
         </Pressable>
@@ -165,7 +170,8 @@ const styles = StyleSheet.create({
   headerTitles: { flex: 1 },
   title: {
     fontFamily: FONT_HEAD,
-    fontSize: 18,
+    fontSize: 16,
+    lineHeight: 24,
     fontWeight: '800',
     color: SHEET.inkDark,
   },
@@ -197,4 +203,5 @@ const styles = StyleSheet.create({
     paddingTop: 14,
     paddingBottom: 22,
   },
+  footerNoDivider: { borderTopWidth: 0 },
 });

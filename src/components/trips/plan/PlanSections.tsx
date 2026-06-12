@@ -18,8 +18,9 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import Svg, { Path } from 'react-native-svg';
 import { LinearGradient } from 'expo-linear-gradient';
-import { AdminUpdateRow, UpdateDetailModal } from '../AdminUpdateUI';
+import { AdminUpdateRow, UpdateDetailModal, AnnouncementIcon } from '../AdminUpdateUI';
 import { TripIcon } from '../tripIcons';
 import { ff } from '../../../theme/fonts';
 import type {
@@ -172,10 +173,23 @@ const SectionHeader: React.FC<{
   </View>
 );
 
-const LinkText: React.FC<{ label: string; onPress?: () => void }> = ({ label, onPress }) => (
+const LinkText: React.FC<{ label: string; onPress?: () => void; size?: 'sm' | 'md' }> = ({ label, onPress, size = 'md' }) => (
   <Pressable onPress={onPress} hitSlop={8}>
-    <Text style={styles.link}>{label}</Text>
+    <Text style={size === 'sm' ? styles.linkSmall : styles.link}>{label}</Text>
   </Pressable>
+);
+
+// Verified-badge (scalloped) check icon used in the committed state.
+const BadgeCheckIcon: React.FC<{ size?: number; color?: string }> = ({ size = 24, color = '#FFFFFF' }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Path
+      d="M9 12L11 14L15.5 9.5M17.9012 4.99851C18.1071 5.49653 18.5024 5.8924 19.0001 6.09907L20.7452 6.82198C21.2433 7.02828 21.639 7.42399 21.8453 7.92206C22.0516 8.42012 22.0516 8.97974 21.8453 9.47781L21.1229 11.2218C20.9165 11.7201 20.9162 12.2803 21.1236 12.7783L21.8447 14.5218C21.9469 14.7685 21.9996 15.0329 21.9996 15.2999C21.9997 15.567 21.9471 15.8314 21.8449 16.0781C21.7427 16.3249 21.5929 16.549 21.4041 16.7378C21.2152 16.9266 20.991 17.0764 20.7443 17.1785L19.0004 17.9009C18.5023 18.1068 18.1065 18.5021 17.8998 18.9998L17.1769 20.745C16.9706 21.2431 16.575 21.6388 16.0769 21.8451C15.5789 22.0514 15.0193 22.0514 14.5212 21.8451L12.7773 21.1227C12.2792 20.9169 11.7198 20.9173 11.2221 21.1239L9.47689 21.8458C8.97912 22.0516 8.42001 22.0514 7.92237 21.8453C7.42473 21.6391 7.02925 21.2439 6.82281 20.7464L6.09972 19.0006C5.8938 18.5026 5.49854 18.1067 5.00085 17.9L3.25566 17.1771C2.75783 16.9709 2.36226 16.5754 2.15588 16.0777C1.94951 15.5799 1.94923 15.0205 2.1551 14.5225L2.87746 12.7786C3.08325 12.2805 3.08283 11.7211 2.8763 11.2233L2.15497 9.47678C2.0527 9.2301 2.00004 8.96568 2 8.69863C1.99996 8.43159 2.05253 8.16715 2.15472 7.92043C2.25691 7.67372 2.40671 7.44955 2.59557 7.26075C2.78442 7.07195 3.00862 6.92222 3.25537 6.8201L4.9993 6.09772C5.49687 5.89197 5.89248 5.4972 6.0993 5.00006L6.82218 3.25481C7.02848 2.75674 7.42418 2.36103 7.92222 2.15473C8.42027 1.94842 8.97987 1.94842 9.47792 2.15473L11.2218 2.87712C11.7199 3.08291 12.2793 3.08249 12.7771 2.87595L14.523 2.15585C15.021 1.94966 15.5804 1.9497 16.0784 2.15597C16.5763 2.36223 16.972 2.75783 17.1783 3.25576L17.9014 5.00153L17.9012 4.99851Z"
+      stroke={color}
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </Svg>
 );
 
 // ===========================================================================
@@ -190,21 +204,21 @@ export const CommitPill: React.FC<{
     <View style={styles.commitWrap}>
       <PressableScale
         onPress={onPress}
-        style={[styles.commitPill, approved && styles.commitPillApproved, pending && styles.commitPillPending]}
+        style={[styles.commitPill, pending && styles.commitPillPending]}
         accessibilityLabel="Commitment"
       >
-        {approved ? <Ionicons name="checkmark-circle" size={18} color="#FFFFFF" /> : null}
+        {approved ? <BadgeCheckIcon size={24} color="#FFFFFF" /> : null}
         <Text style={styles.commitText}>
-          {approved ? 'Committed' : pending ? 'Commitment Pending…' : 'Committed to this trip'}
+          {approved ? 'Committed to this trip' : pending ? 'Commitment Pending…' : 'Commit to this trip'}
         </Text>
+        {!approved && !pending ? <Ionicons name="chevron-forward" size={20} color="#FFFFFF" /> : null}
       </PressableScale>
-      <Text style={styles.commitCaption}>
-        {approved
-          ? "You're locked in. Tap to update your details."
-          : pending
-          ? 'Waiting for the host to approve. Tap to update.'
-          : "Let the host know how you're committed"}
-      </Text>
+      {/* Committed state has no caption (Image #2). */}
+      {!approved ? (
+        <Text style={styles.commitCaption}>
+          {pending ? 'Waiting for the host to approve. Tap to update.' : "Let the host know how you're committed"}
+        </Text>
+      ) : null}
     </View>
   );
 };
@@ -240,33 +254,45 @@ export const AdminUpdatesCard: React.FC<{
         right={
           hasMore ? (
             onViewAll ? (
-              <LinkText label="View all" onPress={onViewAll} />
+              <LinkText label={`View all (${updates.length})`} onPress={onViewAll} />
             ) : (
               <LinkText label={expanded ? 'Show less' : 'View all'} onPress={() => setExpanded(e => !e)} />
             )
           ) : null
         }
       />
-      {visible.length === 0 && !isHost ? (
-        <SectionCard>
-          <Text style={styles.empty}>No updates yet.</Text>
-        </SectionCard>
-      ) : (
-        <View style={styles.updateList}>
-          {visible.map(u => (
+      {(
+        <View style={styles.updatesCard}>
+          {/* Empty state (any role) — a placeholder row (megaphone + "No updates
+              yet") so the card reads like a real update before any exist (Figma
+              13179-7024). The host additionally gets a "+ Add update" row beneath
+              it; the divider only shows when that row follows. */}
+          {visible.length === 0 ? (
+            <View style={[styles.updateEmptyRow, isHost && styles.updateEmptyDivider]}>
+              <View style={styles.updateEmptyIcon}>
+                <AnnouncementIcon size={18} color={T.inkBody} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.updateEmptyTitle}>No updates yet</Text>
+                <Text style={styles.updateEmptyTime}>0 minutes ago</Text>
+              </View>
+            </View>
+          ) : null}
+          {visible.map((u, i) => (
             <AdminUpdateRow
               key={u.id}
               update={u}
+              connected
+              showDivider={isHost || i < visible.length - 1}
               formatTime={formatTime}
               onOpenDetail={setDetail}
               onLongPress={isHost ? () => onLongPressUpdate(u) : undefined}
-              right={isHost ? <LinkText label="Edit" onPress={() => onEditUpdate(u)} /> : undefined}
+              right={isHost ? <LinkText label="Edit" size="sm" onPress={() => onEditUpdate(u)} /> : undefined}
             />
           ))}
           {isHost ? (
-            <PressableScale onPress={onAddUpdate} style={styles.addCard} scaleTo={0.98}>
-              <Ionicons name="add" size={16} color={T.inkBody} />
-              <Text style={styles.addRowText}>Add update</Text>
+            <PressableScale onPress={onAddUpdate} style={styles.addRow} scaleTo={0.98}>
+              <Text style={styles.addRowText}>+ Add update</Text>
             </PressableScale>
           ) : null}
         </View>
@@ -330,10 +356,13 @@ export const GroupGearCard: React.FC<{
   onPressItem: (item: EnrichedGearItem) => void;
   onManage: () => void;
   onRequestItem: () => void;
+  /** Host "+ Add item" — opens the add-item bottom sheet in place (NOT the full
+   *  "Edit Group Gear" screen). Falls back to onManage when not provided. */
+  onAddItem?: () => void;
   /** When provided, "View all" pushes the full Packing & Gear screen instead
    *  of expanding inline (Figma node 12919-32700). */
   onViewAll?: () => void;
-}> = ({ items, isHost, isApprovedMember, currentUserId, onPressItem, onManage, onRequestItem, onViewAll }) => {
+}> = ({ items, isHost, isApprovedMember, currentUserId, onPressItem, onManage, onRequestItem, onAddItem, onViewAll }) => {
   const [expanded, setExpanded] = useState(false);
   const PREVIEW = 3;
   // When "View all" navigates to a dedicated screen we always show the 3-item
@@ -350,24 +379,24 @@ export const GroupGearCard: React.FC<{
           <Text style={styles.ygTitle}>Group Gear</Text>
           <Text style={styles.ygSub}>Shared items for the trip</Text>
         </View>
-        <View style={[styles.ygHeaderRight, isHost && styles.ygHeaderRightHost]}>
-          {isHost ? (
-            <PressableScale onPress={onManage} style={styles.managePill} scaleTo={0.96}>
-              <TripIcon name="edit-02" size={14} color="#333333" />
-              <Text style={styles.managePillText}>Manage</Text>
-            </PressableScale>
+        <View style={styles.ygHeaderRight}>
+          {items.length > 0 ? (
+            <Pressable onPress={handleViewAll} hitSlop={8}>
+              <Text style={styles.ygViewAll}>View all</Text>
+            </Pressable>
           ) : null}
-          <Pressable onPress={handleViewAll} hitSlop={8}>
-            <Text style={styles.ygViewAll}>View all</Text>
-          </Pressable>
         </View>
       </View>
       {items.length === 0 ? (
-        <SectionCard>
-          <Text style={styles.empty}>
-            {isHost ? 'No items yet — tap Manage to add some.' : 'No items yet.'}
-          </Text>
-        </SectionCard>
+        // Empty — a card shaped like a real gear card (Figma 13179-7024): bold
+        // title, "Suggest below" hint, and the empty contributor chip ("+ 0").
+        <View style={styles.gearEmptyCard}>
+          <Text style={styles.gearName}>No group gear yet</Text>
+          <Text style={styles.gearStatus}>Suggest below</Text>
+          <View style={{ marginTop: 8 }}>
+            <AvatarStack contributors={[]} currentUserId={currentUserId} />
+          </View>
+        </View>
       ) : (
         <View style={styles.gearList}>
           {visible.map(item => (
@@ -375,9 +404,15 @@ export const GroupGearCard: React.FC<{
           ))}
         </View>
       )}
-      {isApprovedMember ? (
+      {/* Host adds group gear directly ("+ Add item"); approved members request
+          an item instead. Both render as the same teal link beneath the card. */}
+      {isHost ? (
+        <Pressable onPress={onManage} hitSlop={8} style={styles.requestRow}>
+          <Text style={styles.requestLink}>+ Add item</Text>
+        </Pressable>
+      ) : isApprovedMember ? (
         <Pressable onPress={onRequestItem} hitSlop={8} style={styles.requestRow}>
-          <Text style={styles.requestLink}>Missing something? Request item</Text>
+          <Text style={styles.requestLink}>Missing something? Suggest item</Text>
         </Pressable>
       ) : null}
     </View>
@@ -405,74 +440,82 @@ const HostSuggestionTag: React.FC = () => (
   </View>
 );
 
+// Three layouts share one card. 'member' = the viewer's full checklist (host
+// suggestions + their own items, all checkable). 'personal' = the host's OWN
+// gear, kept SEPARATE from the suggestions they curate (kind 'mine', checkable).
+// 'suggestions' = the host curating what members should pack (kind 'host', no
+// checkbox, "Host suggestion" badge). Admin sees 'personal' + 'suggestions' as
+// two distinct sections; members see one 'member' card.
+export type YourGearMode = 'member' | 'personal' | 'suggestions';
+
 export const YourGearCard: React.FC<{
   rows: YourGearRow[];
   totalCount: number;
-  isHost: boolean;
+  mode: YourGearMode;
   onOpen: () => void;
-  onEditSuggested: () => void;
   /** Toggle an item's "packed" state inline — no overlay (Figma 12716-7051). */
   onToggleItem: (row: YourGearRow) => void;
-  /** Add a personal item — opens the AddPersonalGearSheet. Only passed when the
-   *  viewer can edit their own list (Figma node 12919-33766 "+ Add item" row). */
+  /** Add a row — a personal item ('member'/'personal') or a suggestion
+   *  ('suggestions'). Renders the "+ Add item" row; omit to hide it (e.g. a
+   *  cancelled trip or a viewer who can't edit). */
   onAddItem?: () => void;
-}> = ({ rows, totalCount, isHost, onOpen, onEditSuggested, onToggleItem }) => {
+}> = ({ rows, totalCount, mode, onOpen, onToggleItem, onAddItem }) => {
   const PREVIEW = 3;
-  // Host sees "what members should pack" — host suggestions only, no checkboxes
-  // (the host isn't packing them, just curating the list). Members see their full
-  // checklist (host suggestions + their own items) with toggle checkboxes.
-  const displayRows = isHost ? rows.filter(r => r.kind === 'host') : rows;
-  const total = isHost ? displayRows.length : totalCount;
+  const isSuggestions = mode === 'suggestions';
+  const displayRows =
+    mode === 'personal'
+      ? rows.filter(r => r.kind === 'mine')
+      : mode === 'suggestions'
+      ? rows.filter(r => r.kind === 'host')
+      : rows;
+  const total = displayRows.length;
   const preview = displayRows.slice(0, PREVIEW);
-  const moreCount = Math.max(0, total - preview.length);
+
+  const title = isSuggestions ? 'What should members pack?' : 'Your Gear';
+  const subtitle = isSuggestions ? 'Things they should bring for themselves' : 'Things you want to bring';
+  const emptyText = isSuggestions ? 'No gear yet' : 'No personal gear yet';
 
   return (
     <View style={styles.ygBlock}>
-      {/* Header (Figma 12557-5898). Member: title + subtitle + "View all".
-          Host: title + "Manage" pill, with "View all" beneath it. */}
+      {/* Header (Figma 12557-5898). Every mode keeps a single "View all" link
+          that opens the full list (suggestions are curated from there too). */}
       <View style={styles.ygHeader}>
         <View style={styles.ygHeaderText}>
-          <Text style={styles.ygTitle}>
-            {isHost ? 'What should members pack for themselves?' : 'Your Gear'}
-          </Text>
-          <Text style={styles.ygSub}>Things you want to bring</Text>
+          <Text style={styles.ygTitle}>{title}</Text>
+          <Text style={styles.ygSub}>{subtitle}</Text>
         </View>
-        <View style={[styles.ygHeaderRight, isHost && styles.ygHeaderRightHost]}>
-          {isHost ? (
-            <PressableScale onPress={onEditSuggested} style={styles.managePill} scaleTo={0.96}>
-              <TripIcon name="edit-02" size={14} color="#333333" />
-              <Text style={styles.managePillText}>Manage</Text>
-            </PressableScale>
+        <View style={styles.ygHeaderRight}>
+          {total > 0 ? (
+            <Pressable onPress={onOpen} hitSlop={8}>
+              <Text style={styles.ygViewAll}>View all ({total})</Text>
+            </Pressable>
           ) : null}
-          <Pressable onPress={onOpen} hitSlop={8}>
-            <Text style={styles.ygViewAll}>View all</Text>
-          </Pressable>
         </View>
       </View>
 
-      {total === 0 ? (
-        <View style={styles.ygCard}>
-          <View style={[styles.ygRow, styles.ygRowCenter, styles.ygRowLast]}>
-            <Text style={styles.ygEmpty}>
-              {isHost ? 'No suggestions yet — tap Manage to add some.' : 'No gear yet — tap View all to start.'}
-            </Text>
+      <View style={styles.ygCard}>
+        {total === 0 ? (
+          // Empty placeholder — same row height as a real item (Figma 13179-7024).
+          // Personal/member: an unchecked checkbox. Suggestions: the badge.
+          <View style={[styles.ygRow, !onAddItem && styles.ygRowLast]}>
+            {isSuggestions ? null : <GearCheckbox checked={false} />}
+            <Text style={styles.ygItem} numberOfLines={1}>{emptyText}</Text>
+            {isSuggestions ? <HostSuggestionTag /> : null}
           </View>
-        </View>
-      ) : (
-        <View style={styles.ygCard}>
-          {preview.map((row, i) => {
+        ) : (
+          preview.map((row, i) => {
             // Last visual row drops its divider so the collapsing 1px borders read
-            // as one card; when "+N more" is present, IT is the real last row.
-            const isLast = moreCount === 0 && i === preview.length - 1;
+            // as one card; a trailing "+ Add item" becomes the real last when shown.
+            const isLast = !onAddItem && i === preview.length - 1;
             return (
               <Pressable
                 key={`${row.kind}-${row.name}`}
-                onPress={isHost ? undefined : () => onToggleItem(row)}
+                onPress={isSuggestions ? undefined : () => onToggleItem(row)}
                 style={[styles.ygRow, isLast && styles.ygRowLast]}
               >
-                {isHost ? null : <GearCheckbox checked={row.done} />}
+                {isSuggestions ? null : <GearCheckbox checked={row.done} />}
                 <Text
-                  style={[styles.ygItem, !isHost && row.done && styles.ygItemDone]}
+                  style={[styles.ygItem, !isSuggestions && row.done && styles.ygItemDone]}
                   numberOfLines={1}
                 >
                   {row.name}
@@ -480,15 +523,15 @@ export const YourGearCard: React.FC<{
                 {row.kind === 'host' ? <HostSuggestionTag /> : null}
               </Pressable>
             );
-          })}
+          })
+        )}
 
-          {moreCount > 0 ? (
-            <Pressable onPress={onOpen} style={[styles.ygRow, styles.ygRowCenter, styles.ygRowLast]}>
-              <Text style={styles.ygMore}>+{moreCount} more</Text>
-            </Pressable>
-          ) : null}
-        </View>
-      )}
+        {onAddItem ? (
+          <Pressable onPress={onAddItem} style={[styles.ygRow, styles.ygRowCenter, styles.ygRowLast]}>
+            <Text style={styles.addRowText}>+ Add item</Text>
+          </Pressable>
+        ) : null}
+      </View>
     </View>
   );
 };
@@ -564,9 +607,12 @@ const styles = StyleSheet.create({
   // get_variable_defs): Group Gear/Your Gear/Recent admin updates 14px (Body/M
   // B-2), Packing & Gear 16px (Body/M B-1).
   sectionTitle: { fontFamily: ff('Inter', '700'), fontSize: 14, lineHeight: 18, fontWeight: '700', color: T.inkBody },
-  sectionTitleLarge: { fontSize: 16, lineHeight: 24 },
+  sectionTitleLarge: { fontSize: 16, lineHeight: 24, color: '#333333' },
   sectionSub: { fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 18, color: T.muted, marginTop: 2 },
+  // get_variable_defs (per node): View all = Body/M B-2 (Size/md 14 / Size/xl 18);
+  // Edit = Body/B-4 (Size/xs 10 / 20).
   link: { fontFamily: ff('Inter', '400'), fontSize: 14, lineHeight: 18, fontWeight: '400', color: T.accent },
+  linkSmall: { fontFamily: ff('Inter', '400'), fontSize: 10, lineHeight: 20, fontWeight: '400', color: T.accent },
   empty: { fontFamily: ff('Inter', '400'), fontSize: 14, color: T.muted, paddingVertical: 6 },
 
   rowDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: T.hairline },
@@ -583,43 +629,44 @@ const styles = StyleSheet.create({
     backgroundColor: T.ink,
   },
   commitPillPending: { backgroundColor: '#6B7280' },
-  commitPillApproved: { backgroundColor: '#16A34A' },
   commitText: { fontFamily: ff('Montserrat', '700'), fontSize: 16, lineHeight: 24, fontWeight: '700', color: '#FFFFFF' },
   commitCaption: { fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 18, color: T.muted, textAlign: 'center', marginTop: 10 },
 
-  // Admin updates — rows live in AdminUpdateUI (shared with the full Updates
-  // page so both read as one component). Only the list gap + "Add update" card
-  // are owned here.
-  updateList: { gap: 8 },
-  addCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 16,
+  // Admin updates — rows live in AdminUpdateUI. The Plan card connects them into
+  // one rounded card (Figma 12716:6935): a single border, hairline dividers
+  // between rows, and "+ Add update" as the last connected row.
+  updatesCard: {
     backgroundColor: T.surface,
     borderWidth: 1,
     borderColor: T.cardBorder,
-    borderRadius: 20,
+    borderRadius: 16,
+    overflow: 'hidden',
   },
-  addRowText: { fontFamily: ff('Inter', '600'), fontSize: 14, fontWeight: '600', color: T.inkBody },
-
-  // Group gear
-  // Unified "Manage" button (Figma node 12933-35761): white surface, #CFCFCF
-  // border, radius 9, pencil + Body/B-3 label in #333. Used by every section.
-  managePill: {
-    flexDirection: 'row',
+  addRow: {
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 4,
+    paddingVertical: 16,
     paddingHorizontal: 8,
-    paddingVertical: 6,
-    borderRadius: 9,
-    borderWidth: 1,
-    borderColor: '#CFCFCF',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: T.surface,
   },
-  managePillText: { fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 18, color: '#333333', textAlign: 'center' },
+  addRowText: { fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 18, fontWeight: '400', color: T.inkBody },
+  // Empty admin-updates placeholder — mirrors AdminUpdateUI's connected row
+  // (icon box + title + time) so the empty card reads like a real update.
+  updateEmptyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingLeft: 8,
+    paddingRight: 16,
+    paddingVertical: 16,
+    backgroundColor: T.surface,
+  },
+  updateEmptyDivider: { borderBottomWidth: 1, borderBottomColor: T.cardBorder },
+  updateEmptyIcon: { padding: 10, borderRadius: 8, backgroundColor: '#F7F7F7', alignItems: 'center', justifyContent: 'center' },
+  updateEmptyTitle: { fontFamily: ff('Inter', '700'), fontSize: 12, lineHeight: 18, fontWeight: '700', color: '#333333', marginBottom: -2 },
+  updateEmptyTime: { fontFamily: ff('Inter', '400'), fontSize: 10, lineHeight: 20, color: '#6A7282' },
+
+  // Group gear
   gearRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14, paddingHorizontal: 2 },
   // Standalone card (PackingAndGearScreen) — Figma rounded-20 white card.
   gearCard: {
@@ -634,9 +681,20 @@ const styles = StyleSheet.create({
     borderColor: '#EEEEEE',
     borderRadius: 20,
   },
+  // Empty Group Gear card — same shell as gearCard but stacked (title, hint,
+  // contributor chip) instead of a single row (Figma 13179-7024).
+  gearEmptyCard: {
+    paddingLeft: 16,
+    paddingRight: 12,
+    paddingVertical: 14,
+    backgroundColor: T.surface,
+    borderWidth: 1,
+    borderColor: '#EEEEEE',
+    borderRadius: 20,
+  },
   // Inline preview list — each item is its own rounded card, gapped (Figma).
   gearList: { gap: 12 },
-  // Centred "Missing something? Request item" link, spaced from the cards above.
+  // Centred "Missing something? Suggest item" link, spaced from the cards above.
   requestRow: { alignItems: 'center', marginTop: 16 },
   requestLink: { fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 18, fontWeight: '400', color: T.accent },
   // "All set" badge — solid teal circle with a white check (Figma: 20px, radius
@@ -709,7 +767,6 @@ const styles = StyleSheet.create({
   ygHeader: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 16 },
   ygHeaderText: { flex: 1, gap: 4, paddingRight: 12 },
   ygHeaderRight: { alignSelf: 'stretch', alignItems: 'flex-end', justifyContent: 'flex-end' },
-  ygHeaderRightHost: { justifyContent: 'space-between' },
   ygTitle: { fontFamily: ff('Inter', '700'), fontSize: 14, lineHeight: 18, fontWeight: '700', color: '#333333' },
   ygSub: { fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 18, color: '#6a7282' },
   ygViewAll: { fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 18, color: T.accent },
@@ -733,7 +790,6 @@ const styles = StyleSheet.create({
   ygRowLast: { borderBottomWidth: 0 },
   ygItem: { flex: 1, fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 18, color: '#333333' },
   ygItemDone: { textDecorationLine: 'line-through', color: '#a0a0a0' },
-  ygMore: { fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 18, color: '#333333' },
   // "Host suggestion" — purple text + award ribbon (Figma size/xs 10, #B72DF2).
   hostSugg: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   hostSuggText: { fontFamily: ff('Inter', '400'), fontSize: 10, lineHeight: 14, color: '#B72DF2' },

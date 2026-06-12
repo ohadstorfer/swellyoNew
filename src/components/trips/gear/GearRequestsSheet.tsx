@@ -1,3 +1,9 @@
+// GearRequestsSheet — host reviews members' "request item" submissions.
+//
+// Matches the other gear bottom sheets (AddPersonalGearSheet, ManageGearSheet
+// "Edit Gear"): a custom Modal with a grabber, a title/subtitle row over a
+// hairline (Host badge on the right), and the request list below. Motion is the
+// shared sheet transition — backdrop FADES while the sheet SLIDES up.
 import React, { useEffect, useState } from 'react';
 import {
   View,
@@ -6,10 +12,20 @@ import {
   StyleSheet,
   Image,
   ActivityIndicator,
+  Modal,
+  Pressable,
+  KeyboardAvoidingView,
+  Platform,
+  Animated,
+  ScrollView,
+  Dimensions,
 } from 'react-native';
-import { TripBottomSheet, SHEET } from '../TripBottomSheet';
-import { HostTag } from '../HostTag';
+import { SHEET } from '../TripBottomSheet';
+import { ff } from '../../../theme/fonts';
+import { useSheetTransition } from '../../../hooks/useSheetTransition';
 import type { EnrichedGearRequest } from '../../../services/trips/groupTripsService';
+
+const SCREEN_H = Dimensions.get('window').height;
 
 interface Props {
   visible: boolean;
@@ -34,92 +50,149 @@ export const GearRequestsSheet: React.FC<Props> = ({
   const bumpQty = (id: string, delta: number, base: number) =>
     setQtys(prev => ({ ...prev, [id]: Math.max(1, (prev[id] ?? base) + delta) }));
 
+  // Fade the backdrop, slide the sheet (matches the other bottom sheets).
+  const { mounted, backdropOpacity, translateY, onSheetLayout } = useSheetTransition(visible);
+
   // Reset the staged quantities whenever the sheet (re)opens.
   useEffect(() => {
     if (visible) setQtys({});
   }, [visible]);
 
   return (
-    <TripBottomSheet
-      visible={visible}
-      onClose={onClose}
-      title="Gear requests"
-      subtitle="Approve or decline what members asked for"
-      headerRight={<HostTag />}
-    >
-      {requests.length === 0 ? (
-        <Text style={styles.empty}>No pending requests.</Text>
-      ) : (
-        requests.map(r => {
-          const isProcessing = processingId === r.id;
-          const qty = qtys[r.id] ?? r.needed_qty ?? 1;
-          return (
-            <View key={r.id} style={styles.row}>
-              <View style={styles.requesterRow}>
-                {r.requester.profile_image_url ? (
-                  <Image source={{ uri: r.requester.profile_image_url }} style={styles.avatar} />
-                ) : (
-                  <View style={[styles.avatar, styles.avatarPlaceholder]} />
-                )}
-                <Text style={styles.requesterName}>{r.requester.name || 'Someone'}</Text>
+    <Modal visible={mounted} transparent animationType="none" onRequestClose={onClose}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={s.kavRoot}
+      >
+        <Pressable style={s.container} onPress={onClose}>
+          <Animated.View pointerEvents="none" style={[s.backdrop, { opacity: backdropOpacity }]} />
+          <Animated.View style={{ transform: [{ translateY }] }} onLayout={onSheetLayout}>
+            <Pressable style={s.sheet} onPress={e => e.stopPropagation()}>
+              {/* Grabber */}
+              <View style={s.grabberRow}>
+                <View style={s.grabber} />
               </View>
-              <Text style={styles.itemName}>{r.item_name}</Text>
-              {r.note ? <Text style={styles.note}>"{r.note}"</Text> : null}
 
-              <View style={styles.qtyRow}>
-                <Text style={styles.qtyLabel}>How many needed?</Text>
-                <View style={styles.counter}>
-                  <TouchableOpacity
-                    style={[styles.counterBtn, qty <= 1 && styles.counterBtnDisabled]}
-                    onPress={() => bumpQty(r.id, -1, r.needed_qty ?? 1)}
-                    disabled={qty <= 1 || isProcessing}
-                    hitSlop={6}
-                  >
-                    <Text style={styles.counterBtnText}>−</Text>
-                  </TouchableOpacity>
-                  <Text style={styles.counterValue}>{qty}</Text>
-                  <TouchableOpacity
-                    style={styles.counterBtn}
-                    onPress={() => bumpQty(r.id, 1, r.needed_qty ?? 1)}
-                    disabled={isProcessing}
-                    hitSlop={6}
-                  >
-                    <Text style={styles.counterBtnText}>+</Text>
-                  </TouchableOpacity>
+              {/* Title + subtitle, hairline underneath. */}
+              <View style={s.titleRow}>
+                <View style={s.titleCol}>
+                  <Text style={s.title}>Gear requests</Text>
+                  <Text style={s.subtitle}>Approve or decline what members asked for</Text>
                 </View>
               </View>
 
-              <View style={styles.actions}>
-                <TouchableOpacity
-                  style={[styles.btn, styles.declineBtn, isProcessing && styles.btnDisabled]}
-                  onPress={() => onDecline(r)}
-                  disabled={isProcessing}
+              {requests.length === 0 ? (
+                <Text style={s.empty}>No pending requests.</Text>
+              ) : (
+                <ScrollView
+                  style={s.body}
+                  contentContainerStyle={s.bodyContent}
+                  showsVerticalScrollIndicator={false}
                 >
-                  <Text style={styles.declineText}>Decline</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.btn, styles.approveBtn, isProcessing && styles.btnDisabled]}
-                  onPress={() => onApprove(r, qty)}
-                  disabled={isProcessing}
-                >
-                  {isProcessing ? (
-                    <ActivityIndicator size="small" color="#FFFFFF" />
-                  ) : (
-                    <Text style={styles.approveText}>Approve</Text>
-                  )}
-                </TouchableOpacity>
-              </View>
-            </View>
-          );
-        })
-      )}
-    </TripBottomSheet>
+                  {requests.map(r => {
+                    const isProcessing = processingId === r.id;
+                    const qty = qtys[r.id] ?? r.needed_qty ?? 1;
+                    return (
+                      <View key={r.id} style={s.row}>
+                        <View style={s.requesterRow}>
+                          {r.requester.profile_image_url ? (
+                            <Image source={{ uri: r.requester.profile_image_url }} style={s.avatar} />
+                          ) : (
+                            <View style={[s.avatar, s.avatarPlaceholder]} />
+                          )}
+                          <Text style={s.requesterName}>{r.requester.name || 'Someone'}</Text>
+                        </View>
+                        <Text style={s.itemName}>{r.item_name}</Text>
+                        {r.note ? <Text style={s.note}>"{r.note}"</Text> : null}
+
+                        <View style={s.qtyRow}>
+                          <Text style={s.qtyLabel}>How many needed?</Text>
+                          <View style={s.counter}>
+                            <TouchableOpacity
+                              style={[s.counterBtn, qty <= 1 && s.counterBtnDisabled]}
+                              onPress={() => bumpQty(r.id, -1, r.needed_qty ?? 1)}
+                              disabled={qty <= 1 || isProcessing}
+                              hitSlop={6}
+                            >
+                              <Text style={s.counterBtnText}>−</Text>
+                            </TouchableOpacity>
+                            <Text style={s.counterValue}>{qty}</Text>
+                            <TouchableOpacity
+                              style={s.counterBtn}
+                              onPress={() => bumpQty(r.id, 1, r.needed_qty ?? 1)}
+                              disabled={isProcessing}
+                              hitSlop={6}
+                            >
+                              <Text style={s.counterBtnText}>+</Text>
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+
+                        <View style={s.actions}>
+                          <TouchableOpacity
+                            style={[s.btn, s.declineBtn, isProcessing && s.btnDisabled]}
+                            onPress={() => onDecline(r)}
+                            disabled={isProcessing}
+                          >
+                            <Text style={s.declineText}>Decline</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={[s.btn, s.approveBtn, isProcessing && s.btnDisabled]}
+                            onPress={() => onApprove(r, qty)}
+                            disabled={isProcessing}
+                          >
+                            {isProcessing ? (
+                              <ActivityIndicator size="small" color="#FFFFFF" />
+                            ) : (
+                              <Text style={s.approveText}>Approve</Text>
+                            )}
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    );
+                  })}
+                </ScrollView>
+              )}
+            </Pressable>
+          </Animated.View>
+        </Pressable>
+      </KeyboardAvoidingView>
+    </Modal>
   );
 };
 
 export default GearRequestsSheet;
 
-const styles = StyleSheet.create({
+// Chrome mirrors AddPersonalGearSheet / ManageGearSheet "Edit Gear"; the request
+// rows keep the SHEET design tokens they already used.
+const s = StyleSheet.create({
+  kavRoot: { flex: 1 },
+  container: { flex: 1, justifyContent: 'flex-end' },
+  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(33,33,33,0.7)' },
+  sheet: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingTop: 2,
+    paddingBottom: 24,
+    paddingHorizontal: 16,
+  },
+  grabberRow: { alignItems: 'center', paddingTop: 8, paddingBottom: 16 },
+  grabber: { width: 80, height: 4, borderRadius: 20, backgroundColor: '#7B7B7B' },
+
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 24,
+    borderBottomWidth: 1,
+    borderBottomColor: '#EEEEEE',
+  },
+  titleCol: { flex: 1, justifyContent: 'center', gap: 4, paddingBottom: 16 },
+  title: { fontFamily: ff('Inter', '700'), fontSize: 18, lineHeight: 24, color: '#333333' },
+  subtitle: { fontFamily: ff('Inter', '400'), fontSize: 14, lineHeight: 18, color: '#4A5565' },
+
+  body: { maxHeight: SCREEN_H * 0.6, marginTop: 16 },
+  bodyContent: { paddingBottom: 8 },
   empty: {
     color: SHEET.textMuted,
     fontFamily: SHEET.fontBody,
@@ -169,7 +242,7 @@ const styles = StyleSheet.create({
   actions: { flexDirection: 'row', gap: 10, marginTop: 12 },
   btn: { flex: 1, paddingVertical: 12, borderRadius: 8, alignItems: 'center' },
   btnDisabled: { opacity: 0.4 },
-  approveBtn: { backgroundColor: SHEET.brandTeal },
+  approveBtn: { backgroundColor: '#212121' },
   approveText: { fontFamily: SHEET.fontBody, color: '#FFFFFF', fontWeight: '700', fontSize: 14 },
   declineBtn: { borderWidth: 1, borderColor: SHEET.danger },
   declineText: { fontFamily: SHEET.fontBody, color: SHEET.danger, fontWeight: '700', fontSize: 14 },

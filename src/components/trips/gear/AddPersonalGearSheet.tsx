@@ -1,9 +1,10 @@
 // AddPersonalGearSheet — lets a user add a private item to their personal gear list.
 //
-// Uses the shared TripBottomSheet shell (Modal + keyboard avoidance handled there).
-// This sheet only describes its body (a single labelled text input) and footer
-// (the primary "Add" action). Duplicate checking is case-insensitive against the
-// user's existing combined gear list.
+// Matches the other gear bottom sheets (ManageGearSheet "Add item", AdminUpdateSheet):
+// a custom Modal with a grabber, a title/subtitle row over a hairline, a single
+// labelled input, and a dark #212121 primary action. Motion is the shared sheet
+// transition — the backdrop FADES while the sheet SLIDES up (useSheetTransition).
+// Duplicate checking is case-insensitive against the user's existing gear list.
 
 import React, { useEffect, useState } from 'react';
 import {
@@ -13,8 +14,15 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   StyleSheet,
+  Modal,
+  Pressable,
+  KeyboardAvoidingView,
+  Platform,
+  Animated,
 } from 'react-native';
-import { TripBottomSheet, SHEET } from '../TripBottomSheet';
+import { ff } from '../../../theme/fonts';
+import { useSheetTransition } from '../../../hooks/useSheetTransition';
+import { TripIcon } from '../tripIcons';
 
 interface Props {
   visible: boolean;
@@ -34,6 +42,9 @@ export const AddPersonalGearSheet: React.FC<Props> = ({
   const [name, setName] = useState('');
   const [error, setError] = useState('');
 
+  // Fade the backdrop, slide the sheet (matches the other bottom sheets).
+  const { mounted, backdropOpacity, translateY, onSheetLayout } = useSheetTransition(visible);
+
   // Reset input + error each time the sheet opens.
   useEffect(() => {
     if (visible) {
@@ -49,7 +60,7 @@ export const AddPersonalGearSheet: React.FC<Props> = ({
 
   const attemptAdd = () => {
     const trimmed = name.trim();
-    if (!trimmed) return;
+    if (!trimmed || saving) return;
     const isDupe = existingNames.some(
       n => n.trim().toLowerCase() === trimmed.toLowerCase()
     );
@@ -62,88 +73,135 @@ export const AddPersonalGearSheet: React.FC<Props> = ({
 
   const disabled = name.trim().length === 0 || saving;
 
-  const footer = (
-    <TouchableOpacity
-      style={[styles.button, disabled && styles.buttonDisabled]}
-      onPress={attemptAdd}
-      disabled={disabled}
-      activeOpacity={0.85}
-    >
-      {saving ? (
-        <ActivityIndicator color="#FFFFFF" />
-      ) : (
-        <Text style={styles.buttonText}>Add</Text>
-      )}
-    </TouchableOpacity>
-  );
-
   return (
-    <TripBottomSheet
-      visible={visible}
-      onClose={onClose}
-      title="Add to my gear"
-      subtitle="Only you see your personal items"
-      footer={footer}
-    >
-      <Text style={styles.label}>ITEM</Text>
-      <TextInput
-        style={styles.input}
-        value={name}
-        onChangeText={handleChangeText}
-        placeholder="e.g. Passport, phone charger"
-        placeholderTextColor={SHEET.textMuted}
-        autoFocus
-        returnKeyType="done"
-        onSubmitEditing={attemptAdd}
-      />
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-    </TripBottomSheet>
+    <Modal visible={mounted} transparent animationType="none" onRequestClose={onClose}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={s.kavRoot}
+      >
+        <Pressable style={s.container} onPress={onClose}>
+          <Animated.View pointerEvents="none" style={[s.backdrop, { opacity: backdropOpacity }]} />
+          <Animated.View style={{ transform: [{ translateY }] }} onLayout={onSheetLayout}>
+            <Pressable style={s.sheet} onPress={e => e.stopPropagation()}>
+              {/* Grabber */}
+              <View style={s.grabberRow}>
+                <View style={s.grabber} />
+              </View>
+
+              {/* Title + subtitle, hairline underneath. */}
+              <View style={s.titleRow}>
+                <View style={s.titleCol}>
+                  <Text style={s.title}>Add to my gear</Text>
+                  <Text style={s.subtitle}>Only you see your personal items</Text>
+                </View>
+              </View>
+
+              {/* Item field */}
+              <View style={s.block}>
+                <Text style={s.fieldLabel}>Item</Text>
+                <View style={s.field}>
+                  <TripIcon name="edit-03" size={20} color="#333333" />
+                  <TextInput
+                    style={s.input}
+                    value={name}
+                    onChangeText={handleChangeText}
+                    placeholder="e.g. Passport, phone charger"
+                    placeholderTextColor="#9CA3AF"
+                    autoFocus
+                    editable={!saving}
+                    returnKeyType="done"
+                    onSubmitEditing={attemptAdd}
+                  />
+                </View>
+                {error ? <Text style={s.error}>{error}</Text> : null}
+              </View>
+
+              {/* Dark CTA */}
+              <View style={s.buttonsRow}>
+                <TouchableOpacity
+                  style={[s.primaryBtn, disabled && s.primaryBtnDisabled]}
+                  onPress={attemptAdd}
+                  disabled={disabled}
+                  activeOpacity={0.85}
+                >
+                  {saving ? (
+                    <ActivityIndicator color="#FFFFFF" />
+                  ) : (
+                    <Text style={s.primaryBtnText}>Add</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </Pressable>
+          </Animated.View>
+        </Pressable>
+      </KeyboardAvoidingView>
+    </Modal>
   );
 };
 
 export default AddPersonalGearSheet;
 
-const styles = StyleSheet.create({
-  label: {
-    fontFamily: SHEET.fontBody,
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-    color: SHEET.textMuted,
+// Mirrors ManageGearSheet's "Add item" sheet (Figma 12919:32232) so the two read
+// as the same component.
+const s = StyleSheet.create({
+  kavRoot: { flex: 1 },
+  container: { flex: 1, justifyContent: 'flex-end' },
+  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(33,33,33,0.7)' },
+  sheet: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingTop: 2,
+    paddingBottom: 24,
+    paddingHorizontal: 16,
+  },
+  grabberRow: { alignItems: 'center', paddingTop: 8, paddingBottom: 16 },
+  grabber: { width: 80, height: 4, borderRadius: 20, backgroundColor: '#7B7B7B' },
+
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 24,
+    borderBottomWidth: 1,
+    borderBottomColor: '#EEEEEE',
+  },
+  titleCol: { flex: 1, justifyContent: 'center', gap: 4, paddingBottom: 16 },
+  title: { fontFamily: ff('Inter', '700'), fontSize: 18, lineHeight: 24, color: '#333333' },
+  subtitle: { fontFamily: ff('Inter', '400'), fontSize: 14, lineHeight: 18, color: '#4A5565' },
+
+  block: { marginTop: 24, gap: 8 },
+  fieldLabel: { fontFamily: ff('Inter', '700'), fontSize: 16, lineHeight: 24, color: '#333333' },
+  // Icon + input row (mirrors RequestGearSheet's field).
+  field: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    height: 56,
+    borderWidth: 1,
+    borderColor: '#EEEEEE',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    backgroundColor: '#FFFFFF',
   },
   input: {
-    borderWidth: 1,
-    borderColor: SHEET.border,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 13,
-    marginTop: 8,
-    backgroundColor: SHEET.surfaceMuted,
-    fontFamily: SHEET.fontBody,
-    fontSize: 15,
-    color: SHEET.inkBody,
+    flex: 1,
+    fontFamily: ff('Inter', '400'),
+    fontSize: 14,
+    color: '#333333',
+    // Strip the default min height so the 56px field height holds on Android.
+    paddingVertical: 0,
   },
-  error: {
-    color: SHEET.danger,
-    fontSize: 12,
-    marginTop: 6,
-    fontFamily: SHEET.fontBody,
-  },
-  button: {
-    width: '100%',
-    backgroundColor: SHEET.brandTeal,
+  error: { fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 18, color: '#FF5367' },
+
+  buttonsRow: { flexDirection: 'row', marginTop: 24, paddingTop: 8, paddingHorizontal: 16 },
+  primaryBtn: {
+    flex: 1,
+    height: 56,
     borderRadius: 12,
-    paddingVertical: 16,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: '#212121',
   },
-  buttonDisabled: {
-    opacity: 0.4,
-  },
-  buttonText: {
-    color: '#FFFFFF',
-    fontFamily: SHEET.fontBody,
-    fontSize: 15,
-    fontWeight: '700',
-  },
+  primaryBtnDisabled: { opacity: 0.4 },
+  primaryBtnText: { fontFamily: ff('Montserrat', '600'), fontSize: 16, lineHeight: 24, color: '#FFFFFF' },
 });

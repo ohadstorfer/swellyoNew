@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { TripBottomSheet, SHEET } from '../TripBottomSheet';
+import { TripIcon } from '../tripIcons';
 import { ff } from '../../../theme/fonts';
 
 const NAME_MAX = 21;
@@ -54,8 +55,9 @@ export const RequestGearSheet: React.FC<Props> = ({ visible, onClose, onSubmit }
     <TripBottomSheet
       visible={visible}
       onClose={close}
-      title="Add item"
-      subtitle="Host will review your request"
+      title="Suggest item"
+      subtitle="Host will review your suggestion"
+      footerDivider={false}
       footer={
         <TouchableOpacity
           style={[styles.add, disabled && styles.addDisabled]}
@@ -72,13 +74,13 @@ export const RequestGearSheet: React.FC<Props> = ({ visible, onClose, onSubmit }
       }
     >
       <View style={styles.labelRow}>
-        <Text style={styles.label}>Name</Text>
+        <Text style={styles.label}>What do we need?</Text>
         <Text style={styles.counter}>
           {name.length} /{NAME_MAX}
         </Text>
       </View>
       <View style={styles.field}>
-        <Ionicons name="pencil-outline" size={20} color={SHEET.textMuted} />
+        <TripIcon name="edit-03" size={24} color="#333333" />
         <TextInput
           style={styles.input}
           value={name}
@@ -124,11 +126,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    marginTop: 16, // more breathing room above the first label
   },
   label: {
     fontFamily: ff('Inter', '700'),
-    fontSize: 18,
-    lineHeight: 22,
+    fontSize: 14,
+    lineHeight: 18,
     color: '#333333',
   },
   counter: {
@@ -142,7 +145,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     height: 56,
-    marginTop: 8,
+    marginTop: 8, // tight to its label (Figma: 8px label→input)
     paddingHorizontal: 16,
     borderWidth: 1,
     borderColor: SHEET.hairline,
@@ -159,16 +162,17 @@ const styles = StyleSheet.create({
   },
   qtyLabel: {
     fontFamily: ff('Inter', '700'),
-    fontSize: 18,
-    lineHeight: 22,
+    fontSize: 14,
+    lineHeight: 18,
     color: '#333333',
-    marginTop: 24,
+    marginTop: 32, // more gap below the item input
   },
   stepper: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    marginTop: 12,
+    marginTop: 8, // tight to its label (Figma: 8px label→stepper)
+    marginBottom: 12, // more gap below the quantity input (before Add)
   },
   stepBtn: {
     width: 56,
@@ -192,7 +196,7 @@ const styles = StyleSheet.create({
   },
   stepValueText: {
     fontFamily: ff('Inter', '600'),
-    fontSize: 18,
+    fontSize: 16,
     color: '#333333',
   },
   add: {

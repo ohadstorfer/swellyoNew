@@ -62,10 +62,13 @@ export default function YourGearScreen({ tripId, onBack }: Props) {
   const trip = coreQuery.data?.trip ?? null;
   const participants = coreQuery.data?.participants ?? [];
 
+  const isHost = !!trip && !!currentUserId && trip.host_id === currentUserId;
   const me = participants.find(p => p.user_id === currentUserId);
   const myGroupGear: GroupGearItem[] = me?.personal_gear_by_host ?? [];
   const myPersonalGear: PersonalGearItem[] = me?.personal_gear_by_me ?? [];
-  const hostSuggestions = trip?.personal_gear_host_suggestion ?? [];
+  // Host suggestions are what the host tells MEMBERS to pack — the host isn't
+  // packing them, so hide them from the host's own Your Gear list.
+  const hostSuggestions = isHost ? [] : trip?.personal_gear_host_suggestion ?? [];
 
   const rows: Row[] = useMemo(
     () => [
@@ -170,7 +173,7 @@ export default function YourGearScreen({ tripId, onBack }: Props) {
       {row.kind === 'host' ? (
         <View style={styles.hostSugg}>
           <Text style={styles.hostSuggText}>Host suggestion</Text>
-          <TripIcon name="award-01" size={14} color="#B72DF2" strokeWidth={1.2} />
+          <TripIcon name="award-01" size={14} color="#333333" strokeWidth={1.2} />
         </View>
       ) : (
         <TouchableOpacity
@@ -345,7 +348,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
   },
-  dividerLine: { flex: 1, height: 1, backgroundColor: T.hairline },
+  dividerLine: { flex: 1, height: 1, backgroundColor: '#000000' },
   dividerText: { fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 18, color: T.count },
 
   addBtn: {

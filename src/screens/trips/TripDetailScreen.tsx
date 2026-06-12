@@ -91,7 +91,6 @@ import { AddPersonalGearSheet } from '../../components/trips/gear/AddPersonalGea
 import { PersonalGearSheet } from '../../components/trips/gear/PersonalGearSheet';
 import ParticipantCard from '../../components/trips/ParticipantCard';
 import PendingRequestCard from '../../components/trips/PendingRequestCard';
-import TripParticipantsBreakdown from '../../components/trips/TripParticipantsBreakdown';
 import { GearItemSheet } from '../../components/trips/gear/GearItemSheet';
 import { RequestGearSheet } from '../../components/trips/gear/RequestGearSheet';
 import { ManageGearSheet } from '../../components/trips/gear/ManageGearSheet';
@@ -417,6 +416,9 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   const [gearItemSheetItem, setGearItemSheetItem] = useState<EnrichedGearItem | null>(null);
   const [requestSheetVisible, setRequestSheetVisible] = useState(false);
   const [manageSheetVisible, setManageSheetVisible] = useState(false);
+  // Group Gear "+ Add item" — opens the add-item sheet in place (Figma
+  // 12919-32232), without leaving for the "Edit Group Gear" screen.
+  const [addGroupGearSheetOpen, setAddGroupGearSheetOpen] = useState(false);
   const [requestsSheetVisible, setRequestsSheetVisible] = useState(false);
   // New gear/update sheets (Plan tab redesign)
   const [personalGearSheetOpen, setPersonalGearSheetOpen] = useState(false);
@@ -1019,7 +1021,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     if (!currentUserId) return;
     try {
       await createGearRequest(tripId, currentUserId, itemName, note || undefined, neededQty);
-      Alert.alert('Request sent', 'The host will review your request.');
+      Alert.alert('Request sent', 'The host will review your suggestion.');
     } catch (e: any) {
       Alert.alert('Could not send request', e?.message || 'Please try again.');
       throw e;
@@ -1415,8 +1417,9 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           </View>
         )}
 
-        {/* 2) Recent admin updates */}
-        {(adminUpdates.length > 0 || isHost) && (
+        {/* 2) Recent admin updates — always shown (members see a read-only
+            "No updates yet" placeholder; only the host gets "+ Add update"). */}
+        {(
           <View onLayout={registerSection('updates')}>
             <AdminUpdatesCard
               updates={adminUpdates}
@@ -1440,6 +1443,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
             currentUserId={currentUserId}
             onPressItem={item => setGearItemSheetItem(item)}
             onManage={onManageGroupGear ?? (() => setManageSheetVisible(true))}
+            onAddItem={() => setAddGroupGearSheetOpen(true)}
             onRequestItem={() => setRequestSheetVisible(true)}
             onViewAll={onViewAllGroupGear}
           />
@@ -1447,9 +1451,8 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
             <YourGearCard
               rows={gearAllRows}
               totalCount={gearTotalCount}
-              isHost={isHost}
+              mode={isHost ? 'personal' : 'member'}
               onOpen={onViewAllYourGear ?? (() => setPersonalGearSheetOpen(true))}
-              onEditSuggested={onManageSuggestedGear ?? (() => {})}
               onToggleItem={row =>
                 row.kind === 'host'
                   ? handleToggleGroupGearItem(row.name)
@@ -1462,12 +1465,27 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
               }
             />
           </View>
+          {/* Host only — a separate section for the gear the host suggests that
+              members pack for themselves (kept apart from the host's own gear). */}
+          {isHost && (
+            <View onLayout={registerSection('members-gear')}>
+              <YourGearCard
+                rows={gearAllRows}
+                totalCount={gearTotalCount}
+                mode="suggestions"
+                onOpen={onManageSuggestedGear ?? (() => {})}
+                onToggleItem={() => {}}
+                onAddItem={!isCancelled ? (onManageSuggestedGear ?? undefined) : undefined}
+              />
+            </View>
+          )}
         </View>
 
         {/* ---- Operational sections (kept at the bottom of Plan; not in Figma) ---- */}
 
-        {/* Gear requests (host) — review members' "request item" submissions. */}
-        {isHost && (
+        {/* Gear requests (host) — review members' "request item" submissions.
+            Only shown when there are pending requests to act on. */}
+        {isHost && gearRequests.length > 0 && (
           <View style={styles.planSection} onLayout={registerSection('gear-requests')}>
             <TouchableOpacity
               style={styles.gearReqsBadge}
@@ -1476,9 +1494,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
             >
               <Ionicons name="notifications-outline" size={16} color="#222B30" />
               <Text style={styles.gearReqsBadgeText}>
-                {gearRequests.length > 0
-                  ? `${gearRequests.length} pending gear ${gearRequests.length === 1 ? 'request' : 'requests'}`
-                  : 'Gear requests'}
+                {`${gearRequests.length} pending gear ${gearRequests.length === 1 ? 'request' : 'requests'}`}
               </Text>
               <Ionicons name="chevron-forward" size={16} color="#222B30" />
             </TouchableOpacity>
@@ -1538,15 +1554,6 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
                 />
               ))}
           </Section>
-        )}
-
-        {/* Group breakdown — only when there's at least one member besides the host */}
-        {hasNonHostMembers && (
-          <View onLayout={registerSection('breakdown')}>
-            <Section title="Group breakdown">
-              <TripParticipantsBreakdown participants={participants} />
-            </Section>
-          </View>
         )}
 
         {/* Bottom destructive — Exit (member) / Cancel (host), WhatsApp-style red rows */}
@@ -1668,6 +1675,17 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         visible={manageSheetVisible}
         items={gearItems}
         onClose={() => setManageSheetVisible(false)}
+        onSave={handleSaveGearItem}
+        onDelete={handleDeleteGearItem}
+      />
+      {/* Host "+ Add item" on the Group Gear preview — straight into the add
+          form (Figma 12919-32232), no detour through "Edit Group Gear". */}
+      <ManageGearSheet
+        visible={addGroupGearSheetOpen}
+        items={gearItems}
+        formOnly
+        editItem={null}
+        onClose={() => setAddGroupGearSheetOpen(false)}
         onSave={handleSaveGearItem}
         onDelete={handleDeleteGearItem}
       />
@@ -2459,12 +2477,12 @@ const styles = StyleSheet.create({
   gearReqsBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFF7E6',
-    borderWidth: 1.5,
-    borderColor: '#F59E0B',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#EEEEEE',
     paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 8,
+    paddingVertical: 12,
+    borderRadius: 12,
     marginTop: 8,
     gap: 8,
   },

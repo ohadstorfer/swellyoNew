@@ -11,6 +11,7 @@ import {
   Pressable,
   KeyboardAvoidingView,
   Platform,
+  Animated,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { EnrichedGearItem } from '../../../services/trips/groupTripsService';
@@ -18,6 +19,7 @@ import { TripBottomSheet, SHEET } from '../TripBottomSheet';
 import { HostTag } from '../HostTag';
 import { TripIcon } from '../tripIcons';
 import { ff } from '../../../theme/fonts';
+import { useSheetTransition } from '../../../hooks/useSheetTransition';
 
 // Name length cap mirrors the Figma "N /21" counter on the Edit Gear sheet.
 const MAX_LEN = 21;
@@ -80,6 +82,10 @@ export const ManageGearSheet: React.FC<Props> = ({
     }
   }, [view]);
 
+  // Sheet motion — fade the backdrop, slide the sheet (matches every other
+  // bottom sheet; the formOnly Modal below consumes it).
+  const { mounted, backdropOpacity, translateY, onSheetLayout } = useSheetTransition(visible);
+
   const beginAdd = () => setView({ mode: 'add' });
   const beginEdit = (item: EnrichedGearItem) => setView({ mode: 'edit', item });
   const backToList = () => setView({ mode: 'list' });
@@ -137,13 +143,15 @@ export const ManageGearSheet: React.FC<Props> = ({
     const saveDisabled = !name.trim() || saving || deleting;
 
     return (
-      <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <Modal visible={mounted} transparent animationType="none" onRequestClose={onClose}>
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={fs.kavRoot}
         >
-          <Pressable style={fs.backdrop} onPress={onClose}>
-            <Pressable style={fs.sheet} onPress={e => e.stopPropagation()}>
+          <Pressable style={fs.container} onPress={onClose}>
+            <Animated.View pointerEvents="none" style={[fs.backdrop, { opacity: backdropOpacity }]} />
+            <Animated.View style={{ transform: [{ translateY }] }} onLayout={onSheetLayout}>
+              <Pressable style={fs.sheet} onPress={e => e.stopPropagation()}>
               {/* Grabber */}
               <View style={fs.grabberRow}>
                 <View style={fs.grabber} />
@@ -179,23 +187,26 @@ export const ManageGearSheet: React.FC<Props> = ({
               {/* Name + counter */}
               <View style={fs.block}>
                 <View style={fs.labelRow}>
-                  <Text style={fs.fieldLabel}>Name</Text>
+                  <Text style={fs.fieldLabel}>Description</Text>
                   <Text style={fs.counter}>
                     {name.length} /{MAX_LEN}
                   </Text>
                 </View>
-                <TextInput
-                  style={fs.input}
-                  value={name}
-                  onChangeText={setName}
-                  placeholder="e.g. Sunscreen bottles"
-                  placeholderTextColor="#9CA3AF"
-                  maxLength={MAX_LEN}
-                  autoFocus={!isEdit}
-                  editable={!saving && !deleting}
-                  returnKeyType="done"
-                  onSubmitEditing={handleSave}
-                />
+                <View style={fs.field}>
+                  <TripIcon name="edit-03" size={20} color="#333333" />
+                  <TextInput
+                    style={fs.input}
+                    value={name}
+                    onChangeText={setName}
+                    placeholder="e.g. Sunscreen bottles"
+                    placeholderTextColor="#9CA3AF"
+                    maxLength={MAX_LEN}
+                    autoFocus={!isEdit}
+                    editable={!saving && !deleting}
+                    returnKeyType="done"
+                    onSubmitEditing={handleSave}
+                  />
+                </View>
               </View>
 
               {/* How many needed? — boxed −/＋ stepper */}
@@ -247,7 +258,8 @@ export const ManageGearSheet: React.FC<Props> = ({
                   )}
                 </TouchableOpacity>
               </View>
-            </Pressable>
+              </Pressable>
+            </Animated.View>
           </Pressable>
         </KeyboardAvoidingView>
       </Modal>
@@ -378,7 +390,8 @@ export default ManageGearSheet;
 // ── Figma "Edit Gear" sheet styles (node 12919:32508). ──
 const fs = StyleSheet.create({
   kavRoot: { flex: 1 },
-  backdrop: { flex: 1, backgroundColor: 'rgba(33,33,33,0.7)', justifyContent: 'flex-end' },
+  container: { flex: 1, justifyContent: 'flex-end' },
+  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(33,33,33,0.7)' },
   sheet: {
     backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 24,
@@ -399,7 +412,7 @@ const fs = StyleSheet.create({
     borderBottomColor: '#EEEEEE',
   },
   titleCol: { flex: 1, justifyContent: 'center', gap: 4, paddingBottom: 16 },
-  title: { fontFamily: ff('Inter', '700'), fontSize: 20, lineHeight: 24, color: '#333333' },
+  title: { fontFamily: ff('Inter', '700'), fontSize: 16, lineHeight: 24, color: '#333333' },
   subtitle: { fontFamily: ff('Inter', '400'), fontSize: 14, lineHeight: 18, color: '#4A5565' },
   trashBtn: {
     width: 44,
@@ -421,18 +434,27 @@ const fs = StyleSheet.create({
     height: 24,
     paddingRight: 4,
   },
-  fieldLabel: { fontFamily: ff('Inter', '700'), fontSize: 18, lineHeight: 22, color: '#333333' },
+  fieldLabel: { fontFamily: ff('Inter', '700'), fontSize: 14, lineHeight: 18, color: '#333333' },
   counter: { fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 18, color: '#7B7B7B' },
-  input: {
+  // Icon + input row (mirrors RequestGearSheet / AddPersonalGearSheet).
+  field: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
     height: 56,
     borderWidth: 1,
     borderColor: '#EEEEEE',
     borderRadius: 12,
     paddingHorizontal: 16,
     backgroundColor: '#FFFFFF',
+  },
+  input: {
+    flex: 1,
     fontFamily: ff('Inter', '400'),
     fontSize: 14,
     color: '#333333',
+    // Strip the default min height so the 56px field height holds on Android.
+    paddingVertical: 0,
   },
 
   // Quantity selector — two 56px boxes + a flexible value box, all #cfcfcf.

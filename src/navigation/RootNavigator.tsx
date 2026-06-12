@@ -85,7 +85,13 @@ function TripDetailCardScreen({ route, navigation }: NativeStackScreenProps<Root
 
 function PackingAndGearCardScreen({ route, navigation }: NativeStackScreenProps<RootStackParamList, 'PackingAndGear'>) {
   const { tripId } = route.params;
-  return <PackingAndGearScreen tripId={tripId} onBack={() => navigation.goBack()} />;
+  return (
+    <PackingAndGearScreen
+      tripId={tripId}
+      onBack={() => navigation.goBack()}
+      onEdit={() => navigation.dispatch(StackActions.push('ManageGear', { tripId }))}
+    />
+  );
 }
 
 function YourGearCardScreen({ route, navigation }: NativeStackScreenProps<RootStackParamList, 'YourGear'>) {
@@ -104,15 +110,8 @@ function ManageGearCardScreen({ route, navigation }: NativeStackScreenProps<Root
 }
 
 function TripUpdatesCardScreen({ route, navigation }: NativeStackScreenProps<RootStackParamList, 'TripUpdates'>) {
-  const { tripCard } = useMainNav();
   const { tripId } = route.params;
-  return (
-    <TripUpdatesScreen
-      tripId={tripId}
-      onBack={() => navigation.goBack()}
-      onOpenGroupChat={tripCard.onOpenGroupChat}
-    />
-  );
+  return <TripUpdatesScreen tripId={tripId} onBack={() => navigation.goBack()} />;
 }
 
 function EditTripCardScreen({ route, navigation }: NativeStackScreenProps<RootStackParamList, 'EditTrip'>) {

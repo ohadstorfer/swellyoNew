@@ -177,7 +177,7 @@ export const EditSuggestedGearSheet: React.FC<Props> = ({
     <TripBottomSheet
       visible={visible}
       onClose={onClose}
-      title="Members pack suggestion"
+      title="Members packing suggestion"
       headerRight={
         <Text style={styles.countText}>
           {draft.length} item{draft.length === 1 ? '' : 's'}
@@ -251,7 +251,7 @@ const styles = StyleSheet.create({
     paddingVertical: 23,
     marginBottom: 8,
   },
-  addCardText: { fontFamily: ff('Inter', '700'), fontSize: 18, lineHeight: 22, color: '#333333' },
+  addCardText: { fontFamily: ff('Inter', '400'), fontSize: 14, lineHeight: 18, color: '#333333' },
 
   // Dark sticky "Save" (Figma surface/M-07 #212121, radius 12).
   saveBtn: {

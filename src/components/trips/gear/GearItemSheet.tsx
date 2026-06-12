@@ -22,10 +22,12 @@ import {
   StyleSheet,
   ActivityIndicator,
   Dimensions,
+  Animated,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { ff } from '../../../theme/fonts';
+import { useSheetTransition } from '../../../hooks/useSheetTransition';
 import { TripIcon } from '../tripIcons';
 import type { EnrichedGearItem, GearContributor } from '../../../services/trips/groupTripsService';
 
@@ -83,17 +85,32 @@ const Contributor: React.FC<{ c: GearContributor; me?: boolean }> = ({ c, me }) 
   </View>
 );
 
-export const GearItemSheet: React.FC<Props> = ({ visible, item, currentUserId, onClose, onSetClaim }) => {
+export const GearItemSheet: React.FC<Props> = ({ visible, item: itemProp, currentUserId, onClose, onSetClaim }) => {
   const insets = useSafeAreaInsets();
   const [draft, setDraft] = useState(1);
   const [saving, setSaving] = useState(false);
+  // Retain the last item so the sheet keeps rendering through the CLOSE
+  // animation. The parent nulls `item` on close; unmounting the animated content
+  // mid-exit would interrupt the native (useNativeDriver) animation so it never
+  // reports `finished` — leaving `mounted` stuck true and an invisible modal
+  // capturing every touch. Staying mounted lets the exit finish and unmount.
+  const [shownItem, setShownItem] = useState(itemProp);
+
+  // Fade the backdrop, slide the sheet (matches the other bottom sheets).
+  const { mounted, backdropOpacity, translateY, onSheetLayout } = useSheetTransition(visible);
 
   useEffect(() => {
-    if (item) setDraft(item.my_claim_qty > 0 ? item.my_claim_qty : 1);
-  }, [item?.id, item?.my_claim_qty]);
+    if (itemProp) {
+      setShownItem(itemProp);
+      setDraft(itemProp.my_claim_qty > 0 ? itemProp.my_claim_qty : 1);
+    }
+  }, [itemProp?.id, itemProp?.my_claim_qty]);
+
+  // During the close animation `itemProp` is null — fall back to the retained item.
+  const item = itemProp ?? shownItem;
 
   if (!item) {
-    return <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose} />;
+    return <Modal visible={mounted} transparent animationType="none" onRequestClose={onClose} />;
   }
 
   const othersQty = item.claimed_qty - item.my_claim_qty;
@@ -142,9 +159,11 @@ export const GearItemSheet: React.FC<Props> = ({ visible, item, currentUserId, o
   const hasContributors = item.contributors.length > 0;
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable style={styles.sheet} onPress={e => e.stopPropagation()}>
+    <Modal visible={mounted} transparent animationType="none" onRequestClose={onClose}>
+      <Pressable style={styles.container} onPress={onClose}>
+        <Animated.View pointerEvents="none" style={[styles.backdrop, { opacity: backdropOpacity }]} />
+        <Animated.View style={{ transform: [{ translateY }] }} onLayout={onSheetLayout}>
+          <Pressable style={styles.sheet} onPress={e => e.stopPropagation()}>
           {/* Grabber */}
           <View style={styles.grabberRow}>
             <View style={styles.grabber} />
@@ -173,6 +192,9 @@ export const GearItemSheet: React.FC<Props> = ({ visible, item, currentUserId, o
               </View>
             </View>
 
+            {/* Hairline below the progress bar (Figma). */}
+            <View style={styles.progressDivider} />
+
             {/* Contributors — "You" pinned first (teal ring) + divider + others. */}
             {hasContributors ? (
               <View style={styles.contributorsSection}>
@@ -199,7 +221,7 @@ export const GearItemSheet: React.FC<Props> = ({ visible, item, currentUserId, o
             {iHaveIt ? (
               <View style={styles.banner}>
                 <View style={styles.bannerIcon}>
-                  <Ionicons name="checkmark" size={26} color={C.white} />
+                  <TripIcon name="check" size={24} color={C.white} strokeWidth={3} />
                 </View>
                 <View style={styles.bannerText}>
                   <Text style={styles.bannerTitle}>You're bringing {item.my_claim_qty}</Text>
@@ -212,7 +234,13 @@ export const GearItemSheet: React.FC<Props> = ({ visible, item, currentUserId, o
             {showStepper ? (
               <View style={styles.howManyCard}>
                 <View style={styles.cardHeader}>
-                  <Text style={styles.cardTitle}>How many can you bring?</Text>
+                  <View style={styles.cardTextCol}>
+                    <Text style={styles.cardTitle}>How many can you bring?</Text>
+                    <Text style={styles.cardBody}>
+                      By claiming this item, you're committing to bring it on the trip. The group is
+                      counting on you!
+                    </Text>
+                  </View>
                   {iHaveIt ? (
                     <TouchableOpacity
                       style={styles.trashBtn}
@@ -225,10 +253,6 @@ export const GearItemSheet: React.FC<Props> = ({ visible, item, currentUserId, o
                     </TouchableOpacity>
                   ) : null}
                 </View>
-                <Text style={styles.cardBody}>
-                  By claiming this item, you're committing to bring it on the trip. The group is
-                  counting on you!
-                </Text>
                 <View style={styles.stepperRow}>
                   <TouchableOpacity
                     style={styles.stepBtn}
@@ -276,14 +300,16 @@ export const GearItemSheet: React.FC<Props> = ({ visible, item, currentUserId, o
               <Text style={styles.maybeLater}>Maybe later</Text>
             </TouchableOpacity>
           </View>
-        </Pressable>
+          </Pressable>
+        </Animated.View>
       </Pressable>
     </Modal>
   );
 };
 
 const styles = StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: 'rgba(33,33,33,0.70)', justifyContent: 'flex-end' },
+  container: { flex: 1, justifyContent: 'flex-end' },
+  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(33,33,33,0.70)' },
   sheet: {
     backgroundColor: C.white,
     borderTopLeftRadius: 24,
@@ -316,12 +342,15 @@ const styles = StyleSheet.create({
   },
   fill: { backgroundColor: C.accent },
 
+  // Hairline below the progress bar.
+  progressDivider: { height: 1, backgroundColor: C.hairline, marginTop: 16 },
+
   // Contributors — 16 below the progress bar, 24 between title and avatars (Figma).
   contributorsSection: {
     marginTop: 16,
     gap: 24,
   },
-  sectionTitle: { fontFamily: ff('Inter', '700'), fontWeight: '700', fontSize: 16, lineHeight: 24, color: C.ink },
+  sectionTitle: { fontFamily: ff('Inter', '700'), fontWeight: '700', fontSize: 14, lineHeight: 18, color: C.ink },
   contributorRow: { gap: 8, paddingVertical: 2, alignItems: 'flex-start' },
   contributor: { width: 48, alignItems: 'center', gap: 2 },
   avatarWrap: { width: 48, height: 48 },
@@ -380,10 +409,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 16,
     paddingBottom: 8,
-    gap: 10,
   },
   cardHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
-  cardTitle: { flex: 1, fontFamily: ff('Inter', '700'), fontWeight: '700', fontSize: 16, lineHeight: 24, color: C.ink },
+  // Title + body stack in a column so the (taller) trash button doesn't push the
+  // body away from the title, and the body never wraps under the trash.
+  cardTextCol: { flex: 1 },
+  cardTitle: { fontFamily: ff('Inter', '700'), fontWeight: '700', fontSize: 14, lineHeight: 18, color: C.ink },
   trashBtn: {
     width: 40,
     height: 40,
@@ -394,12 +425,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  cardBody: { fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 18, color: C.body },
+  cardBody: { fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 18, color: C.body, marginTop: 4 },
   stepperRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 24,
+    marginTop: 10, // preserve the body → stepper gap after dropping the card's uniform gap
     paddingTop: 24,
     paddingBottom: 16,
     paddingHorizontal: 8,

@@ -57,37 +57,57 @@ export const AdminUpdateRow: React.FC<{
   onLongPress?: () => void;
   /** Trailing slot, e.g. the host "Edit" link (Plan tab only). */
   right?: React.ReactNode;
-}> = ({ update, formatTime, onOpenDetail, onLongPress, right }) => {
+  /** Connected-list mode (Plan card, Figma 12716:6935): no own border/radius,
+   *  larger type, hairline divider instead of a gap, and no chevron — the parent
+   *  wraps the rows in one rounded card. */
+  connected?: boolean;
+  /** Connected mode only — draw a bottom hairline (between consecutive rows). */
+  showDivider?: boolean;
+  /** Full Updates page (Figma 13179:8792): render the whole body inline — no
+   *  one-line clamp, no chevron, no detail overlay. The icon top-aligns to the
+   *  first line so tall cards read like the Figma frame. */
+  expanded?: boolean;
+}> = ({ update, formatTime, onOpenDetail, onLongPress, right, connected, showDivider, expanded }) => {
   const [truncated, setTruncated] = useState(false);
+  const titleStyle = connected ? styles.titleLg : styles.title;
 
   return (
     <Pressable
-      onPress={truncated ? () => onOpenDetail(update) : undefined}
+      onPress={!expanded && truncated ? () => onOpenDetail(update) : undefined}
       onLongPress={onLongPress}
-      style={styles.card}
+      style={[
+        connected ? styles.row : styles.card,
+        expanded ? styles.cardExpanded : null,
+        connected && showDivider ? styles.rowDivider : null,
+      ]}
     >
       <View style={styles.iconBox}>
         <AnnouncementIcon size={18} color={C.ink} />
       </View>
       <View style={styles.textCol}>
-        <Text style={styles.title} numberOfLines={1}>
+        <Text style={titleStyle} numberOfLines={expanded ? undefined : 1}>
           {update.body}
         </Text>
         {/* Invisible full-text measurer: lays out every line so we can detect
             one-line overflow without any visible layout shift. pointerEvents
-            none keeps it from stealing the card's press. */}
-        <View style={styles.measure} pointerEvents="none">
-          <Text
-            style={styles.title}
-            onTextLayout={e => setTruncated(e.nativeEvent.lines.length > 1)}
-          >
-            {update.body}
-          </Text>
-        </View>
-        <Text style={styles.time}>{formatTime(update.created_at)}</Text>
+            none keeps it from stealing the card's press. Skipped when expanded —
+            the full body is already shown, so there's nothing to detect. */}
+        {!expanded ? (
+          <View style={styles.measure} pointerEvents="none">
+            <Text
+              style={titleStyle}
+              onTextLayout={e => setTruncated(e.nativeEvent.lines.length > 1)}
+            >
+              {update.body}
+            </Text>
+          </View>
+        ) : null}
+        <Text style={connected ? styles.timeLg : styles.time}>{formatTime(update.created_at)}</Text>
       </View>
       {right}
-      {truncated ? <Ionicons name="chevron-forward" size={16} color={C.muted} /> : null}
+      {!connected && !expanded && truncated ? (
+        <Ionicons name="chevron-forward" size={16} color={C.muted} />
+      ) : null}
     </Pressable>
   );
 };
@@ -144,6 +164,9 @@ const styles = StyleSheet.create({
     borderColor: C.cardBorder,
     borderRadius: 20,
   },
+  // Full Updates page: body wraps over many lines, so top-align the icon to the
+  // first line instead of vertically centering it against the whole block.
+  cardExpanded: { alignItems: 'flex-start' },
   iconBox: {
     padding: 10,
     borderRadius: 8,
@@ -155,6 +178,23 @@ const styles = StyleSheet.create({
   title: { fontFamily: ff('Inter', '700'), fontSize: 12, lineHeight: 18, fontWeight: '700', color: C.title },
   time: { fontFamily: ff('Inter', '400'), fontSize: 10, lineHeight: 20, color: C.time, marginTop: 2 },
   measure: { position: 'absolute', left: 0, right: 0, top: 0, opacity: 0 },
+
+  // Connected-list mode (Plan card) — rows share one rounded card with hairline
+  // dividers; larger Figma type (title 16/18, time 14/20).
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingLeft: 8,
+    paddingRight: 16,
+    paddingVertical: 16,
+    backgroundColor: C.surface,
+  },
+  rowDivider: { borderBottomWidth: 1, borderBottomColor: C.cardBorder },
+  // Sizes from get_variable_defs (per text node): title Body/B-3 = Size/s 12 /
+  // lineHeight 18 (bold); time Body/B-4 = Size/xs 10 / lineHeight 20.
+  titleLg: { fontFamily: ff('Inter', '700'), fontSize: 12, lineHeight: 18, fontWeight: '700', color: C.title, marginBottom: -2 },
+  timeLg: { fontFamily: ff('Inter', '400'), fontSize: 10, lineHeight: 20, color: C.time },
 
   // Detail overlay
   scrim: {

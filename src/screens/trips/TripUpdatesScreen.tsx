@@ -1,8 +1,8 @@
 // Full-screen "Updates" list — the "View all" target of the Plan-tab
-// "Recent admin updates" preview (Figma node 12933-38189). Read-only: host
-// add/edit stays on the TripDetail preview card; here we just list every
-// admin update with the same dark header + sticky Trip Chat chrome the trip
-// detail card uses, so the screen feels native to the trips flow.
+// "Recent admin updates" preview (Figma node 12933-38189). Lists every admin
+// update in full under the same dark header the trip detail card uses. The host
+// gets a per-card "Edit" link that opens the same AdminUpdateSheet (edit/delete)
+// the Plan tab uses, so editing works from here too (Figma node 13179:8792).
 
 import React, { useState } from 'react';
 import {
@@ -11,19 +11,22 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  Pressable,
   Platform,
   Alert,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useQueryClient } from '@tanstack/react-query';
 import { useOnboarding } from '../../context/OnboardingContext';
 import { useTripCore, useTripAdminUpdates } from '../../hooks/trips/useTripDetail';
-import { messagingService } from '../../services/messaging/messagingService';
-import { NotificationCenter } from '../../components/notifications/NotificationCenter';
-import { StickyTripChat } from '../../components/trips/plan/PlanSections';
-import { AdminUpdateRow, UpdateDetailModal } from '../../components/trips/AdminUpdateUI';
-import { ff } from '../../theme/fonts';
+import { tripsKeys } from '../../hooks/trips/useTripQueries';
+import { updateAdminUpdate, deleteAdminUpdate } from '../../services/trips/groupTripsService';
 import type { AdminUpdate } from '../../services/trips/groupTripsService';
+import { NotificationCenter } from '../../components/notifications/NotificationCenter';
+import { AdminUpdateRow } from '../../components/trips/AdminUpdateUI';
+import { AdminUpdateSheet } from '../../components/trips/updates/AdminUpdateSheet';
+import { ff } from '../../theme/fonts';
 
 // Tokens mirror the Figma frame (accent #05BCD3, dark #212121, muted greys).
 const T = {
@@ -59,51 +62,73 @@ const formatRelativeTime = (iso: string): string => {
 interface Props {
   tripId: string;
   onBack: () => void;
-  onOpenGroupChat?: (params: {
-    conversationId: string;
-    title: string;
-    heroImageUrl?: string | null;
-    tripId?: string;
-  }) => void;
 }
 
-export default function TripUpdatesScreen({ tripId, onBack, onOpenGroupChat }: Props) {
+export default function TripUpdatesScreen({ tripId, onBack }: Props) {
   const { user: contextUser } = useOnboarding();
   const insets = useSafeAreaInsets();
+  const queryClient = useQueryClient();
   const currentUserId = contextUser?.id?.toString() ?? null;
-  // Full text of a tapped (truncated) update — drives the detail overlay.
-  const [detail, setDetail] = useState<AdminUpdate | null>(null);
 
-  // Both reads hit the react-query cache seeded by TripDetail, so the list is
-  // there instantly when arriving via "View all".
+  // Both reads hit the react-query cache seeded by TripDetail, so the list and
+  // host check are there instantly when arriving via "View all".
   const coreQuery = useTripCore(tripId, currentUserId);
   const trip = coreQuery.data?.trip ?? null;
+  const isHost = !!trip && !!currentUserId && trip.host_id === currentUserId;
   const updatesQuery = useTripAdminUpdates(tripId);
   const updates = updatesQuery.data ?? [];
 
-  const [openingChat, setOpeningChat] = useState(false);
+  // Host edit — same AdminUpdateSheet (edit/delete) the Plan tab drives, with
+  // the same optimistic cache patch so the list updates instantly.
+  const [editingUpdateId, setEditingUpdateId] = useState<string | null>(null);
+  const [savingUpdate, setSavingUpdate] = useState(false);
+  const editingBody = editingUpdateId
+    ? updates.find(u => u.id === editingUpdateId)?.body ?? ''
+    : '';
 
-  const handleOpenGroupChat = async () => {
-    if (!trip || !onOpenGroupChat) return;
-    setOpeningChat(true);
-    try {
-      let conv = await messagingService.getConversationByTripId(trip.id);
-      if (!conv) {
-        conv = await messagingService.createGroupConversation(trip.title || 'Surftrip', [], {
-          trip_id: trip.id,
-        });
-      }
-      onOpenGroupChat({
-        conversationId: conv.id,
-        title: trip.title || 'Surftrip',
-        heroImageUrl: trip.hero_image_url ?? null,
-        tripId: trip.id,
-      });
-    } catch (e: any) {
-      Alert.alert('Could not open chat', e?.message || 'Please try again.');
-    } finally {
-      setOpeningChat(false);
+  const patchUpdatesCache = (updater: (prev: AdminUpdate[]) => AdminUpdate[]) => {
+    queryClient.setQueryData<AdminUpdate[]>(tripsKeys.detailUpdates(tripId), prev =>
+      updater(prev ?? [])
+    );
+  };
+
+  const handleSubmitEdit = async (body: string) => {
+    const text = body.trim();
+    if (!editingUpdateId || !text) {
+      setEditingUpdateId(null);
+      return;
     }
+    setSavingUpdate(true);
+    try {
+      const updated = await updateAdminUpdate(editingUpdateId, text);
+      patchUpdatesCache(prev => prev.map(u => (u.id === updated.id ? updated : u)));
+      setEditingUpdateId(null);
+    } catch (e: any) {
+      Alert.alert('Could not save update', e?.message || 'Please try again.');
+    } finally {
+      setSavingUpdate(false);
+    }
+  };
+
+  const handleDeleteEditing = () => {
+    if (!editingUpdateId) return;
+    Alert.alert('Delete update', 'This update will be removed for everyone.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          const id = editingUpdateId;
+          try {
+            await deleteAdminUpdate(id);
+            patchUpdatesCache(prev => prev.filter(u => u.id !== id));
+            setEditingUpdateId(null);
+          } catch (e: any) {
+            Alert.alert('Could not delete', e?.message || 'Please try again.');
+          }
+        },
+      },
+    ]);
   };
 
   return (
@@ -129,7 +154,7 @@ export default function TripUpdatesScreen({ tripId, onBack, onOpenGroupChat }: P
         <ScrollView
           contentContainerStyle={[
             styles.scrollContent,
-            { paddingBottom: Math.max(insets.bottom, 16) + 96 },
+            { paddingBottom: Math.max(insets.bottom, 16) + 16 },
           ]}
           showsVerticalScrollIndicator={false}
         >
@@ -148,27 +173,33 @@ export default function TripUpdatesScreen({ tripId, onBack, onOpenGroupChat }: P
                 <AdminUpdateRow
                   key={u.id}
                   update={u}
+                  expanded
                   formatTime={formatRelativeTime}
-                  onOpenDetail={setDetail}
+                  onOpenDetail={() => {}}
+                  right={
+                    isHost ? (
+                      <Pressable onPress={() => setEditingUpdateId(u.id)} hitSlop={8}>
+                        <Text style={styles.editLink}>Edit</Text>
+                      </Pressable>
+                    ) : undefined
+                  }
                 />
               ))}
             </View>
           )}
         </ScrollView>
-
-        {trip && onOpenGroupChat ? (
-          <StickyTripChat
-            onPress={handleOpenGroupChat}
-            loading={openingChat}
-            bottomInset={insets.bottom}
-          />
-        ) : null}
       </View>
 
-      <UpdateDetailModal
-        update={detail}
-        formatTime={formatRelativeTime}
-        onClose={() => setDetail(null)}
+      {/* Host edits an existing update — opens the same sheet as the Plan tab,
+          in edit mode (with delete). */}
+      <AdminUpdateSheet
+        visible={!!editingUpdateId}
+        mode="edit"
+        initialBody={editingBody}
+        saving={savingUpdate}
+        onClose={() => setEditingUpdateId(null)}
+        onSubmit={handleSubmitEdit}
+        onDelete={handleDeleteEditing}
       />
     </SafeAreaView>
   );
@@ -208,10 +239,13 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 24,
   },
-  listTitle: { flex: 1, fontFamily: ff('Inter', '700'), fontSize: 16, lineHeight: 24, fontWeight: '700', color: T.title },
+  listTitle: { flex: 1, fontFamily: ff('Inter', '700'), fontSize: 14, lineHeight: 18, fontWeight: '700', color: T.title },
   listCount: { fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 18, color: T.count },
 
   list: { gap: 8 },
+
+  // Per-card host "Edit" — Body/B-4 (Size/xs 10 / 20) in accent (node 13179:8958).
+  editLink: { fontFamily: ff('Inter', '400'), fontSize: 10, lineHeight: 20, color: T.accent },
 
   empty: { fontFamily: ff('Inter', '400'), fontSize: 14, color: T.count },
 });

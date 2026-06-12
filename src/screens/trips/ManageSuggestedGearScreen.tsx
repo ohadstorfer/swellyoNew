@@ -12,12 +12,12 @@ import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
   TouchableOpacity,
   ActivityIndicator,
   Alert,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flatlist';
 import { Ionicons } from '@expo/vector-icons';
 import { useQueryClient } from '@tanstack/react-query';
 import { useOnboarding } from '../../context/OnboardingContext';
@@ -28,6 +28,7 @@ import { ff } from '../../theme/fonts';
 import { NotificationCenter } from '../../components/notifications/NotificationCenter';
 import { StickyGradientFooter } from '../../components/trips/plan/PlanSections';
 import { EditGearItemSheet } from '../../components/trips/gear/EditGearItemSheet';
+import { TripIcon } from '../../components/trips/tripIcons';
 
 const T = {
   accent: '#05BCD3',
@@ -100,6 +101,89 @@ export default function ManageSuggestedGearScreen({ tripId, onBack }: Props) {
   const existingNames =
     sheet?.mode === 'edit' ? draft.filter((_, i) => i !== sheet.index) : draft;
 
+  // Drag-reorder persists immediately (optimistic): update the draft, write the
+  // new array order to the trip, and revert if the save fails. Suggestions are an
+  // ordered string[], so this is just persisting the reordered list.
+  const handleDragEnd = async ({ data }: { data: string[] }) => {
+    const prev = draft;
+    setDraft(data);
+    try {
+      await setTripGroupGear(tripId, data);
+      queryClient.invalidateQueries({ queryKey: tripsKeys.detail(tripId) });
+    } catch (e: any) {
+      setDraft(prev); // snap back to the pre-drag order
+      Alert.alert('Could not reorder', e?.message || 'Please try again.');
+    }
+  };
+
+  // Trash → confirm, then delete the item and persist immediately (optimistic).
+  const handleDeleteItem = (index?: number) => {
+    if (index == null) return;
+    const name = draft[index];
+    Alert.alert('Delete item', `Remove "${name}" from the suggestions?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          const prev = draft;
+          const next = draft.filter((_, i) => i !== index);
+          setDraft(next);
+          try {
+            await setTripGroupGear(tripId, next);
+            queryClient.invalidateQueries({ queryKey: tripsKeys.detail(tripId) });
+          } catch (e: any) {
+            setDraft(prev);
+            Alert.alert('Could not delete', e?.message || 'Please try again.');
+          }
+        },
+      },
+    ]);
+  };
+
+  const renderItem = ({ item, getIndex, drag, isActive }: RenderItemParams<string>) => (
+    <View style={[styles.itemCard, isActive && styles.itemCardActive]}>
+      <TouchableOpacity
+        onPressIn={drag}
+        disabled={isActive}
+        hitSlop={{ top: 14, bottom: 14, left: 8, right: 8 }}
+        accessibilityLabel={`Reorder ${item}`}
+      >
+        <Ionicons name="ellipsis-vertical" size={20} color="#333333" />
+      </TouchableOpacity>
+      <Text style={styles.itemName} numberOfLines={2}>
+        {item}
+      </Text>
+      <TouchableOpacity
+        onPress={() => handleDeleteItem(getIndex())}
+        hitSlop={8}
+        activeOpacity={0.7}
+        accessibilityLabel={`Delete ${item}`}
+      >
+        <TripIcon name="trash-01" size={22} color={T.title} strokeWidth={1} />
+      </TouchableOpacity>
+    </View>
+  );
+
+  const listHeader = (
+    <View style={styles.listHeader}>
+      <Text style={styles.listTitle}>Members packing suggestion</Text>
+      <Text style={styles.listCount}>
+        {draft.length} item{draft.length === 1 ? '' : 's'}
+      </Text>
+    </View>
+  );
+
+  const listFooter = (
+    <TouchableOpacity
+      style={styles.addCard}
+      onPress={() => setSheet({ mode: 'add' })}
+      activeOpacity={0.85}
+    >
+      <Text style={styles.addCardText}>+ Add Item</Text>
+    </TouchableOpacity>
+  );
+
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
       <View style={styles.header}>
@@ -111,7 +195,7 @@ export default function ManageSuggestedGearScreen({ tripId, onBack }: Props) {
           <Ionicons name="chevron-back" size={28} color="#FFFFFF" />
         </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>
-          Manage Member
+        Edit Members Packing
         </Text>
         <View style={styles.headerRight}>
           {currentUserId ? <NotificationCenter userId={currentUserId} bare /> : null}
@@ -119,44 +203,20 @@ export default function ManageSuggestedGearScreen({ tripId, onBack }: Props) {
       </View>
 
       <View style={styles.body}>
-        <ScrollView
+        <DraggableFlatList
+          data={draft}
+          keyExtractor={item => item}
+          renderItem={renderItem}
+          onDragEnd={handleDragEnd}
+          ListHeaderComponent={listHeader}
+          ListFooterComponent={listFooter}
           contentContainerStyle={[
             styles.scrollContent,
             { paddingBottom: Math.max(insets.bottom, 16) + 96 },
           ]}
           showsVerticalScrollIndicator={false}
-        >
-          <View style={styles.listHeader}>
-            <Text style={styles.listTitle}>Members pack suggestion</Text>
-            <Text style={styles.listCount}>
-              {draft.length} item{draft.length === 1 ? '' : 's'}
-            </Text>
-          </View>
-
-          {draft.map((item, index) => (
-            <View key={`${item}-${index}`} style={styles.itemCard}>
-              <Ionicons name="ellipsis-vertical" size={20} color="#333333" />
-              <Text style={styles.itemName} numberOfLines={2}>
-                {item}
-              </Text>
-              <TouchableOpacity
-                onPress={() => setSheet({ mode: 'edit', index })}
-                hitSlop={8}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.editLink}>Edit</Text>
-              </TouchableOpacity>
-            </View>
-          ))}
-
-          <TouchableOpacity
-            style={styles.addCard}
-            onPress={() => setSheet({ mode: 'add' })}
-            activeOpacity={0.85}
-          >
-            <Text style={styles.addCardText}>+ Add Item</Text>
-          </TouchableOpacity>
-        </ScrollView>
+          activationDistance={12}
+        />
 
         <StickyGradientFooter bottomInset={insets.bottom}>
           <TouchableOpacity
@@ -216,10 +276,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     justifyContent: 'space-between',
-    marginBottom: 16,
+    marginTop: 8,
+    marginBottom: 24,
   },
-  listTitle: { flex: 1, fontFamily: ff('Inter', '700'), fontSize: 18, lineHeight: 22, color: T.title },
-  listCount: { fontFamily: ff('Inter', '400'), fontSize: 16, lineHeight: 18, color: T.count },
+  listTitle: { flex: 1, fontFamily: ff('Inter', '700'), fontSize: 14, lineHeight: 18, color: T.title },
+  listCount: { fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 18, color: T.count },
 
   // Item cards — dots handle + name + Edit (Figma 12933-36310).
   itemCard: {
@@ -235,7 +296,16 @@ const styles = StyleSheet.create({
     paddingVertical: 18,
     marginBottom: 8,
   },
-  itemName: { flex: 1, fontFamily: ff('Inter', '700'), fontSize: 18, lineHeight: 22, color: T.title },
+  // Subtle lift while dragging (Emil: the grabbed row should feel picked up).
+  itemCardActive: {
+    borderColor: T.accent,
+    shadowColor: '#000000',
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 6,
+  },
+  itemName: { flex: 1, fontFamily: ff('Inter', '700'), fontSize: 14, lineHeight: 18, color: T.title },
   editLink: { fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 18, color: T.accent },
 
   addCard: {
@@ -249,11 +319,14 @@ const styles = StyleSheet.create({
     paddingVertical: 23,
     marginBottom: 8,
   },
-  addCardText: { fontFamily: ff('Inter', '700'), fontSize: 18, lineHeight: 22, color: T.title },
+  addCardText: { fontFamily: ff('Inter', '700'), fontSize: 14, lineHeight: 18, color: T.title },
 
   saveBtn: {
     height: 56,
     borderRadius: 12,
+    // Figma 12933-36310: button is 313 wide in a 393 frame (40px side margins).
+    // footerWrap already insets 16px each side, so 24 more lands it at 313.
+    marginHorizontal: 24,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: T.ink,

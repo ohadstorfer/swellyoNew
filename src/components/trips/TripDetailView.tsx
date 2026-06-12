@@ -43,9 +43,10 @@ export const BOARD_IMAGE: Partial<Record<SurfStyle, ReturnType<typeof require>>>
   longboard: Images.boards.longboard,
 };
 
-// Even-height board renders (boards-even/*) — all share the same canvas height,
-// so rendered at a fixed height with their own aspect ratio they line up at one
-// uniform height (Figma "Surf style" card). `aspect` = source pixelWidth/Height.
+// Tightly-cropped "even" board renders (boards-even/*) — all drawn on the same
+// canvas height, so when rendered at one fixed height with their own aspect
+// ratio they line up at a uniform height in the Surf style card.
+// `aspect` = source pixelWidth / pixelHeight.
 export const BOARD_IMAGE_EVEN: Partial<
   Record<SurfStyle, { src: ReturnType<typeof require>; aspect: number }>
 > = {

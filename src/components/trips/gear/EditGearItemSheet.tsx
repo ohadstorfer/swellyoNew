@@ -199,7 +199,7 @@ const styles = StyleSheet.create({
     marginTop: 24,
     marginBottom: 8,
   },
-  nameLabel: { fontFamily: ff('Inter', '700'), fontSize: 18, lineHeight: 22, color: '#333333' },
+  nameLabel: { fontFamily: ff('Inter', '700'), fontSize: 14, lineHeight: 18, color: '#333333' },
   counter: { fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 18, color: '#7B7B7B' },
 
   input: {

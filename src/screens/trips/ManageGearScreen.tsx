@@ -1,20 +1,34 @@
-// Full-screen "Manage Gear" — the host's group-gear editor (Figma node
+// Full-screen "Edit Group Gear" — the host's group-gear editor (Figma node
 // 12919-14214). Same dark-header full-screen shell as PackingAndGear/YourGear.
-// Lists every shared gear item as a white card with a ⋮ handle, name, status
+// Lists every shared gear item as a white card with a drag handle, name, status
 // and a teal "Edit" link; a "+ Add Item" card and a dark "Save" button finish
 // the screen. Tapping Edit / Add opens ManageGearSheet in form-only mode (the
 // Figma "Edit Gear" sheet), which owns the name + needed-qty form. All writes
 // go through the same gear service + react-query cache the trip detail uses.
+//
+// The list is a DraggableFlatList (the screen's scroll container — NOT nested in
+// a ScrollView, which would break the VirtualizedList). Header/title + add-item
+// + the dark Save CTA ride in ListHeader/ListFooter. Dragging the handle (long-
+// press) reorders rows; on drop we optimistically reorder locally, persist via
+// reorderGearItems, then refresh the react-query gear cache.
 
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useQueryClient } from '@tanstack/react-query';
+import DraggableFlatList, {
+  type RenderItemParams,
+} from 'react-native-draggable-flatlist';
 import { useOnboarding } from '../../context/OnboardingContext';
 import { useTripGear } from '../../hooks/trips/useTripDetail';
 import { tripsKeys } from '../../hooks/trips/useTripQueries';
-import { updateGearItem, addGearItem, deleteGearItem } from '../../services/trips/groupTripsService';
+import {
+  updateGearItem,
+  addGearItem,
+  deleteGearItem,
+  reorderGearItems,
+} from '../../services/trips/groupTripsService';
 import type { EnrichedGearItem } from '../../services/trips/groupTripsService';
 import { ff } from '../../theme/fonts';
 import { NotificationCenter } from '../../components/notifications/NotificationCenter';
@@ -49,7 +63,13 @@ export default function ManageGearScreen({ tripId, onBack }: Props) {
   const currentUserId = contextUser?.id?.toString() ?? null;
 
   const gearQuery = useTripGear(tripId, currentUserId);
-  const gearItems = gearQuery.data ?? [];
+
+  // Local copy so a drag reorder is reflected instantly; kept in sync with the
+  // query whenever fresh data arrives (add/edit/delete refetches).
+  const [items, setItems] = useState<EnrichedGearItem[]>(gearQuery.data ?? []);
+  useEffect(() => {
+    setItems(gearQuery.data ?? []);
+  }, [gearQuery.data]);
 
   // null + addOpen=false → closed. editItem set → edit; addOpen → add.
   const [editItem, setEditItem] = useState<EnrichedGearItem | null>(null);
@@ -77,9 +97,70 @@ export default function ManageGearScreen({ tripId, onBack }: Props) {
     queryClient.invalidateQueries({ queryKey: tripsKeys.detailGear(tripId) });
   };
 
+  // Drop → optimistic local order, persist, then refresh the cache. On failure
+  // we still invalidate so the list snaps back to the server's truth.
+  const handleDragEnd = async ({ data }: { data: EnrichedGearItem[] }) => {
+    setItems(data);
+    try {
+      await reorderGearItems(
+        tripId,
+        data.map(i => i.id)
+      );
+    } catch (err) {
+      console.error('[ManageGearScreen] reorderGearItems failed:', err);
+    } finally {
+      queryClient.invalidateQueries({ queryKey: tripsKeys.detailGear(tripId) });
+    }
+  };
+
+  const renderItem = ({ item, drag, isActive }: RenderItemParams<EnrichedGearItem>) => (
+    <View style={[styles.card, isActive && styles.cardActive]}>
+      <TouchableOpacity
+        onPressIn={drag}
+        disabled={isActive}
+        style={styles.cardHandle}
+        hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
+        accessibilityLabel={`Reorder ${item.name}`}
+      >
+        <Ionicons name="reorder-three-outline" size={22} color={T.handle} />
+      </TouchableOpacity>
+      <View style={styles.cardText}>
+        <Text style={styles.itemName} numberOfLines={1}>
+          {item.name}
+        </Text>
+        <Text style={styles.itemSub} numberOfLines={1}>
+          {statusText(item)}
+        </Text>
+      </View>
+      <TouchableOpacity onPress={() => setEditItem(item)} hitSlop={8}>
+        <Text style={styles.editText}>Edit</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
+  const listHeader = (
+    <View style={styles.listHeader}>
+      <Text style={styles.listTitle}>Group Gear</Text>
+      <Text style={styles.listCount}>
+        {items.length} item{items.length === 1 ? '' : 's'}
+      </Text>
+    </View>
+  );
+
+  // "+ Add Item" — its own card, last in the list (Figma).
+  const listFooter = (
+    <TouchableOpacity
+      style={styles.addCard}
+      onPress={() => setAddOpen(true)}
+      activeOpacity={0.85}
+    >
+      <Text style={styles.addCardText}>+ Add Item</Text>
+    </TouchableOpacity>
+  );
+
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
-      {/* Dark header — chevron back + "Manage Gear" + notification bell. */}
+      {/* Dark header — chevron back + "Edit Group Gear" + notification bell. */}
       <View style={styles.header}>
         <TouchableOpacity
           onPress={onBack}
@@ -89,7 +170,7 @@ export default function ManageGearScreen({ tripId, onBack }: Props) {
           <Ionicons name="chevron-back" size={28} color="#FFFFFF" />
         </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>
-          Manage Gear
+          Edit Group Gear
         </Text>
         <View style={styles.headerRight}>
           {currentUserId ? <NotificationCenter userId={currentUserId} bare /> : null}
@@ -97,50 +178,20 @@ export default function ManageGearScreen({ tripId, onBack }: Props) {
       </View>
 
       <View style={styles.body}>
-        <ScrollView
+        <DraggableFlatList
+          data={items}
+          keyExtractor={item => item.id}
+          renderItem={renderItem}
+          onDragEnd={handleDragEnd}
+          ListHeaderComponent={listHeader}
+          ListFooterComponent={listFooter}
           contentContainerStyle={[
             styles.scrollContent,
             { paddingBottom: Math.max(insets.bottom, 16) + 96 },
           ]}
           showsVerticalScrollIndicator={false}
-        >
-          <View style={styles.listHeader}>
-            <Text style={styles.listTitle}>Group Gear</Text>
-            <Text style={styles.listCount}>
-              {gearItems.length} item{gearItems.length === 1 ? '' : 's'}
-            </Text>
-          </View>
-
-          <View style={styles.list}>
-            {gearItems.map(item => (
-              <View key={item.id} style={styles.card}>
-                <View style={styles.cardHandle}>
-                  <Ionicons name="ellipsis-vertical" size={22} color={T.handle} />
-                </View>
-                <View style={styles.cardText}>
-                  <Text style={styles.itemName} numberOfLines={1}>
-                    {item.name}
-                  </Text>
-                  <Text style={styles.itemSub} numberOfLines={1}>
-                    {statusText(item)}
-                  </Text>
-                </View>
-                <TouchableOpacity onPress={() => setEditItem(item)} hitSlop={8}>
-                  <Text style={styles.editText}>Edit</Text>
-                </TouchableOpacity>
-              </View>
-            ))}
-
-            {/* "+ Add Item" — its own card, last in the list (Figma). */}
-            <TouchableOpacity
-              style={styles.addCard}
-              onPress={() => setAddOpen(true)}
-              activeOpacity={0.85}
-            >
-              <Text style={styles.addCardText}>+ Add Item</Text>
-            </TouchableOpacity>
-          </View>
-        </ScrollView>
+          activationDistance={12}
+        />
 
         {/* Sticky dark "Save" button (Figma CTA). Edits persist immediately via
             the form sheet, so Save just returns to the trip. */}
@@ -161,7 +212,7 @@ export default function ManageGearScreen({ tripId, onBack }: Props) {
         visible={!!editItem || addOpen}
         formOnly
         editItem={editItem}
-        items={gearItems}
+        items={items}
         onClose={closeForm}
         onSave={handleSaveGearItem}
         onDelete={handleDeleteGearItem}
@@ -208,9 +259,8 @@ const styles = StyleSheet.create({
   listTitle: { flex: 1, fontFamily: ff('Inter', '700'), fontSize: 14, lineHeight: 18, fontWeight: '700', color: T.title },
   listCount: { fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 18, color: T.count },
 
-  list: { gap: 8 },
-
   // Gear card — white, rounded-20, border #eee, pl8 pr16 py18 (Figma).
+  // marginBottom replaces the old `list` gap (DraggableFlatList rows aren't gapped).
   card: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -218,10 +268,20 @@ const styles = StyleSheet.create({
     paddingLeft: 8,
     paddingRight: 16,
     paddingVertical: 18,
+    marginBottom: 8,
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: T.cardBorder,
     borderRadius: 20,
+  },
+  // While dragging: subtle lift so the row reads as "picked up".
+  cardActive: {
+    borderColor: T.accent,
+    shadowColor: '#000000',
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
   },
   cardHandle: { width: 22, alignItems: 'center', justifyContent: 'center' },
   cardText: { flex: 1, gap: 4 },
