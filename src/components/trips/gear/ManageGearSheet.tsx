@@ -192,8 +192,14 @@ export const ManageGearSheet: React.FC<Props> = ({
                     {name.length} /{MAX_LEN}
                   </Text>
                 </View>
-                <View style={fs.field}>
-                  <TripIcon name="edit-03" size={20} color="#333333" />
+                {/* An existing item's name is locked (only its quantity changes);
+                    adding a new item lets you type it. */}
+                <View style={[fs.field, isEdit && fs.fieldLocked]}>
+                  {isEdit ? (
+                    <TripIcon name="lock" size={20} color="#222B30" strokeWidth={2} />
+                  ) : (
+                    <TripIcon name="edit-03" size={20} color="#333333" />
+                  )}
                   <TextInput
                     style={fs.input}
                     value={name}
@@ -202,7 +208,7 @@ export const ManageGearSheet: React.FC<Props> = ({
                     placeholderTextColor="#9CA3AF"
                     maxLength={MAX_LEN}
                     autoFocus={!isEdit}
-                    editable={!saving && !deleting}
+                    editable={!isEdit && !saving && !deleting}
                     returnKeyType="done"
                     onSubmitEditing={handleSave}
                   />
@@ -448,6 +454,8 @@ const fs = StyleSheet.create({
     paddingHorizontal: 16,
     backgroundColor: '#FFFFFF',
   },
+  // Read-only (editing an existing item) — muted fill signals the locked name.
+  fieldLocked: { backgroundColor: '#F7F7F7' },
   input: {
     flex: 1,
     fontFamily: ff('Inter', '400'),
