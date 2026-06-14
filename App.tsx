@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 import { Platform, I18nManager, AppState, Text as RNText, TextInput as RNTextInput } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { PostHogProvider, PostHogSurveyProvider } from 'posthog-react-native';
@@ -86,8 +86,6 @@ if (I18nManager.isRTL) {
 (RNTextInput as any).defaultProps.allowFontScaling = false;
 
 export default Sentry.wrap(function App() {
-  const [isNavigationReady, setIsNavigationReady] = useState(false);
-
   // Load Inter + Montserrat before rendering so native shows the real typefaces
   // (not the system-font fallback). Fail-open: if loading errors, render anyway
   // with the system font (same as before). Web never blocks (browser has fonts).
@@ -110,28 +108,41 @@ export default Sentry.wrap(function App() {
     return () => sub.remove();
   }, []);
 
-  const handleNavigationReady = () => {
-    setIsNavigationReady(true);
-  };
-
   // Hold render until fonts are ready (native only) to avoid a system-font flash.
   if (!fontsReady) return null;
+
+  // The provider tree is rendered ONCE and never restructured at runtime.
+  // PREVIOUSLY this whole subtree was duplicated and swapped when an
+  // `isNavigationReady` flag flipped (to delay mounting PostHogProvider). That
+  // swap changed the tree shape, so React unmounted and FULLY REMOUNTED every
+  // provider + AppContent — re-running DB init, session restoration, conversation
+  // loads, presence and the welcome video all over again, mid-boot. That double/
+  // triple boot pegged the JS thread for tens of seconds (hot phone, nothing
+  // loads). PostHog autocapture is already off (captureScreens/native tracking
+  // false), so it never needed the gate — mount it unconditionally and keep the
+  // tree stable. isMVPMode is a constant, so its branch never swaps at runtime.
+  const appTree = (
+    <OnboardingProvider>
+      <UserProfileProvider>
+        <MessagingProvider>
+          <TutorialProvider>
+            <AppContent />
+            <StatusBar style="light" />
+          </TutorialProvider>
+        </MessagingProvider>
+      </UserProfileProvider>
+    </OnboardingProvider>
+  );
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
     <MaybeKeyboardProvider>
     <SafeAreaProvider>
-    <NavigationContainer independent={true} ref={navigationRef} onReady={handleNavigationReady}>
+    <NavigationContainer independent={true} ref={navigationRef}>
       <PostHogErrorBoundary>
         <QueryClientProvider client={queryClient}>
-        {isNavigationReady ? (
           <PostHogProvider
             apiKey={POSTHOG_API_KEY}
-            // Screen autocapture calls useNavigationState from OUTSIDE the
-            // navigator and logs "useNavigationState error … couldn't get the
-            // navigation state" on every app open. It has never produced
-            // screen events here (no navigator wraps this provider). Off until
-            // we wire real screen analytics via navigationRef (nav migration).
             autocapture={{ captureScreens: false }}
             options={{
               host: POSTHOG_HOST,
@@ -143,43 +154,11 @@ export default Sentry.wrap(function App() {
             }}
           >
             {isMVPMode ? (
-              <PostHogSurveyProvider>
-                <OnboardingProvider>
-                  <UserProfileProvider>
-                    <MessagingProvider>
-                      <TutorialProvider>
-                        <AppContent />
-                        <StatusBar style="light" />
-                      </TutorialProvider>
-                    </MessagingProvider>
-                  </UserProfileProvider>
-                </OnboardingProvider>
-              </PostHogSurveyProvider>
+              <PostHogSurveyProvider>{appTree}</PostHogSurveyProvider>
             ) : (
-              <OnboardingProvider>
-                <UserProfileProvider>
-                  <MessagingProvider>
-                    <TutorialProvider>
-                      <AppContent />
-                      <StatusBar style="light" />
-                    </TutorialProvider>
-                  </MessagingProvider>
-                </UserProfileProvider>
-              </OnboardingProvider>
+              appTree
             )}
           </PostHogProvider>
-        ) : (
-          <OnboardingProvider>
-            <UserProfileProvider>
-              <MessagingProvider>
-                <TutorialProvider>
-                  <AppContent />
-                  <StatusBar style="light" />
-                </TutorialProvider>
-              </MessagingProvider>
-            </UserProfileProvider>
-          </OnboardingProvider>
-        )}
         </QueryClientProvider>
       </PostHogErrorBoundary>
     </NavigationContainer>

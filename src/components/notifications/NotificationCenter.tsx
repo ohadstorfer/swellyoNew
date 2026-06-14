@@ -102,21 +102,20 @@ export const NotificationCenter: React.FC<Props> = ({ userId, bare = false }) =>
     }, [userId])
   );
 
-  // Focus-gated: this bell renders in every mounted tab/screen header, but only
-  // the focused one needs a live postgres_changes channel for the +1. Without
-  // gating, all mounted bells open duplicate notifications:<userId> channels and
-  // pile onto the realtime socket. The badge stays correct because the count is
-  // refetched on every focus regain (the useFocusEffect above).
-  useFocusEffect(
-    useCallback(() => {
-      if (!userId) return;
-      const unsubscribe = notificationsService.subscribe(userId, {
-        onInsert: () => setUnread((u) => u + 1),
-        onUpdate: () => {},
-      });
-      return unsubscribe;
-    }, [userId])
-  );
+  // ONE stable subscription per mounted bell — NOT focus-gated. Focus-gating
+  // churned this channel (subscribe + removeChannel on every navigation), which
+  // spammed the realtime socket with CLOSED/re-subscribe cycles and heated the
+  // device during heavy use. A bell's badge needs to stay live regardless of
+  // focus, so keep a stable channel for the bell's lifetime. (The panel below
+  // IS focus-gated — it's a single screen, so that's correct there.)
+  useEffect(() => {
+    if (!userId) return;
+    const unsubscribe = notificationsService.subscribe(userId, {
+      onInsert: () => setUnread((u) => u + 1),
+      onUpdate: () => {},
+    });
+    return unsubscribe;
+  }, [userId]);
 
   const openPanel = useCallback(() => {
     // Via the root ref — this bell renders inside the `independent`
