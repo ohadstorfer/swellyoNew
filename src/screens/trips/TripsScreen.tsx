@@ -611,11 +611,13 @@ const TripDeck: React.FC<{
         snapToAlignment="start"
         decelerationRate="fast"
         disableIntervalMomentum
-        // 1 (not 16) so the card transform gets every display frame. At 16 the
-        // scroll-event stream is capped to ~60/s while a ProMotion screen runs at
-        // 120 — fine during fast motion, but at the slow tail of the snap the
-        // transform steps at half the display rate and clips into its final state.
-        scrollEventThrottle={1}
+        // 16 (~60 events/s). 1 streamed ~120 JS-thread onScroll events/s on
+        // ProMotion — each calling scrollX.setValue — which saturated the JS
+        // thread and froze the whole app while a deck was on screen. The minor
+        // snap-tail transform clip is an acceptable trade; the proper fix (if it
+        // ever matters) is Animated.event with useNativeDriver so the transform
+        // runs on the UI thread independent of event throttle.
+        scrollEventThrottle={16}
         getItemLayout={(_, index) => ({
           length: DECK_ITEM_W,
           offset: index * DECK_ITEM_W,

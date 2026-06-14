@@ -47,7 +47,6 @@ export async function logEvent(
   opts: LogEventOptions = {}
 ): Promise<void> {
   if (analyticsService.getIsOptedOut()) {
-    console.log(`[analytics][DEBUG] logEvent(${eventName}) SKIPPED — user opted out`);
     return;
   }
 
@@ -72,18 +71,6 @@ export async function logEvent(
     properties: opts.properties ?? null,
   };
 
-  // TEMP DEBUG — remove once swelly_search_clicked logging is confirmed.
-  try {
-    const { data: authData } = await supabase.auth.getUser();
-    console.log(`[analytics][DEBUG] logEvent(${eventName}) attempt`, {
-      passedUserId: row.user_id,
-      authUid: authData?.user?.id ?? null,
-      uidMatch: row.user_id === (authData?.user?.id ?? null),
-    });
-  } catch (e) {
-    console.log(`[analytics][DEBUG] logEvent(${eventName}) — could not read auth user`, e);
-  }
-
   try {
     // Always plain INSERT. The DB's UNIQUE partial index enforces "one row per user"
     // for one-shot events; duplicate inserts get rejected at the constraint level
@@ -96,12 +83,10 @@ export async function logEvent(
       const isExpectedDuplicate = code === '23505' && ONE_SHOT_EVENTS.has(eventName);
       if (!isExpectedDuplicate) {
         console.warn(`[analytics] logEvent(${eventName}) error:`, error.message);
-        // TEMP DEBUG — full error so we can see RLS / permission failures.
-        console.warn(`[analytics][DEBUG] logEvent(${eventName}) FAILED — full error:`, JSON.stringify(error));
+        if (__DEV__) {
+          console.warn(`[analytics] logEvent(${eventName}) full error:`, JSON.stringify(error));
+        }
       }
-    } else {
-      // TEMP DEBUG — remove once confirmed.
-      console.log(`[analytics][DEBUG] logEvent(${eventName}) INSERT OK ✅`);
     }
   } catch (err) {
     console.warn(`[analytics] logEvent(${eventName}) threw:`, err);

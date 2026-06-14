@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
   StyleSheet,
@@ -151,8 +152,11 @@ export default function SurftripDetailScreen({
   // even when this screen is mounted without a chat subscription.
   // surftrip_group_members covers the role column (promote / demote), which
   // doesn't write to conversation_members.role.
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     if (!group?.conversation_id) return;
+    // Catch up on membership changes missed while the screen was blurred (the
+    // channel below is closed on blur — see useTripRealtime for the rationale).
+    scheduleMemberRefresh();
     const channel = supabase
       .channel(`surftrip-detail-members:${group.conversation_id}`)
       .on(
@@ -189,14 +193,15 @@ export default function SurftripDetailScreen({
     return () => {
       try { supabase.removeChannel(channel); } catch { /* noop */ }
     };
-  }, [group?.conversation_id, groupId, scheduleMemberRefresh]);
+  }, [group?.conversation_id, groupId, scheduleMemberRefresh]));
 
   // Group metadata updates (name, description, hero image, max_members).
   // surftrip_groups is published as of the realtime migration; before that,
   // a host renaming the group only updated the linked conversations.title in
   // realtime, while description / hero / max_members went stale until remount.
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     if (!groupId) return;
+    refreshGroup();
     const channel = supabase
       .channel(`surftrip-detail-group:${groupId}`)
       .on(
@@ -213,13 +218,15 @@ export default function SurftripDetailScreen({
     return () => {
       try { supabase.removeChannel(channel); } catch { /* noop */ }
     };
-  }, [groupId, refreshGroup]);
+  }, [groupId, refreshGroup]));
 
   // Join-request churn — admins see incoming requests / withdrawals live, and
   // requesters see their own status flip from pending to approved/declined
   // without remounting.
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     if (!groupId) return;
+    refreshPendingRequests();
+    refreshMyRequest();
     const channel = supabase
       .channel(`surftrip-detail-requests:${groupId}`)
       .on(
@@ -239,7 +246,7 @@ export default function SurftripDetailScreen({
     return () => {
       try { supabase.removeChannel(channel); } catch { /* noop */ }
     };
-  }, [groupId, refreshPendingRequests, refreshMyRequest]);
+  }, [groupId, refreshPendingRequests, refreshMyRequest]));
 
   // ---- Join / leave / request -------------------------------------------------
 

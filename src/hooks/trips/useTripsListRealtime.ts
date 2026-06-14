@@ -10,8 +10,14 @@
  * the tables that affect what cards show). One pub/sub topic regardless of
  * user count, auth checked once per subscription: scale-proof, unlike the
  * unfiltered postgres_changes subscription this replaced.
+ *
+ * FOCUS-GATED (see useTripRealtime): the card stack keeps TripsScreen mounted
+ * behind whatever you open on top of it, so a plain useEffect would keep this
+ * channel open while you're deep in a trip/chat. useFocusEffect closes it on
+ * blur and re-opens + refetches the list on return.
  */
-import { useEffect } from 'react';
+import { useCallback } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../../config/supabase';
 import { tripsKeys } from './useTripQueries';
@@ -20,7 +26,7 @@ import { TRIPS_LIST_TOPIC } from '../../services/trips/tripsRealtime';
 export function useTripsListRealtime() {
   const queryClient = useQueryClient();
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     // Coalesce bursts (e.g. several participant rows in one transaction) into
     // a single invalidation pass instead of one refetch per event.
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -33,6 +39,9 @@ export function useTripsListRealtime() {
       }, 300);
     };
 
+    // Catch up on list changes missed while this screen was blurred.
+    invalidateSoon();
+
     const channel = supabase
       .channel(TRIPS_LIST_TOPIC, { config: { private: true } })
       .on('broadcast', { event: 'trips_list_changed' }, invalidateSoon)
@@ -40,7 +49,7 @@ export function useTripsListRealtime() {
 
     return () => {
       if (timer) clearTimeout(timer);
-      supabase.removeChannel(channel);
+      try { supabase.removeChannel(channel); } catch { /* noop */ }
     };
-  }, [queryClient]);
+  }, [queryClient]));
 }

@@ -383,9 +383,13 @@ function HomeTabs() {
       // Hardware back must not jump between tabs (platform convention —
       // Instagram/WhatsApp behavior). Each root handles its own back.
       backBehavior="none"
-      // Keep visited tabs mounted: scroll positions, the trips pager, and
-      // realtime subscriptions (useTripsListRealtime, conversations) survive
-      // tab switches. lazy keeps first launch cheap.
+      // Keep visited tabs mounted so scroll positions and the trips pager
+      // survive tab switches (instant back). NOTE: screens stay mounted but do
+      // NOT keep doing work while blurred — realtime subscriptions are
+      // focus-gated via useFocusEffect (useTripRealtime / useTripsListRealtime /
+      // SurftripDetailScreen) so only the focused screen holds a live channel.
+      // Without that gating, mounted-forever screens pile up open realtime
+      // channels and saturate the socket. lazy keeps first launch cheap.
       detachInactiveScreens={false}
       tabBar={renderTabBar}
       screenOptions={{

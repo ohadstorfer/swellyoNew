@@ -1,7 +1,7 @@
 // ⚠ NAV MIGRATION IN PROGRESS (branch nav-migration — see task_plan.md + docs/nav-migration/).
 // Do NOT add new showX boolean flags or origin-tracking back flags here.
 // New screens go through the navigator (navigation.push). Routing changes: talk to Eyal first.
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Alert, AppState, Keyboard, Linking, Platform, Pressable, StyleSheet, View, TouchableOpacity, Text as RNText } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { WelcomeScreen } from '../screens/WelcomeScreen';
@@ -1605,6 +1605,181 @@ export const AppContent: React.FC = () => {
     setShowAgeBlockOverlay(false);
   };
 
+  // ---- Main-app nav context (computed unconditionally — hooks must run on
+  // every render, so this lives ABOVE the conditional returns below even
+  // though it is only consumed by the main-app branch). ----
+
+  // True only when the conversations list is the topmost visible layer. Used to
+  // gate the welcome-guide tutorial trigger inside ConversationsScreen.
+  const isListFrontmost =
+    activeTab === 'lineup' &&
+    !showConversationLoading &&
+    !showProfile &&
+    !showSwellyShaper &&
+    !showWelcomeToLineupOverlay &&
+    !showProfileEditor;
+
+  // The floating bottom nav lives INSIDE the tab navigator (custom tabBar).
+  // Cards cover it natively; this list is the legacy overlays that render ABOVE
+  // the navigator and would otherwise float over the bar.
+  const barSuppressed =
+    showConversationLoading ||
+    showSwellyShaper ||
+    showProfile ||
+    showProfileEditor ||
+    showWelcomeToLineupOverlay;
+  //
+  // Several of the handlers above are plain (non-useCallback) functions that
+  // legitimately read live state, so their identities change every render.
+  // Feeding them straight into the context would rebuild mainNavValue on every
+  // AppContent re-render (messaging events, scroll, etc.) and re-render the
+  // entire mounted screen tree — the root cause of the freeze. The latest-ref
+  // pattern gives the context STABLE callback identities while each call still
+  // runs the freshest implementation (no stale closures, no behavior change).
+  const liveHandlersRef = useRef({
+    handleViewUserProfile,
+    handleViewUserProfileFromTrip,
+    handleStartConversation,
+    handleConversationPress,
+    handleSwellyPress,
+    handleSwellyPressCopy,
+    handleProfilePress,
+    handleSwellyShaperViewProfile,
+  });
+  liveHandlersRef.current = {
+    handleViewUserProfile,
+    handleViewUserProfileFromTrip,
+    handleStartConversation,
+    handleConversationPress,
+    handleSwellyPress,
+    handleSwellyPressCopy,
+    handleProfilePress,
+    handleSwellyShaperViewProfile,
+  };
+  const stableHandlers = useMemo(
+    () => ({
+      onViewUserProfile: (userId: string) =>
+        liveHandlersRef.current.handleViewUserProfile(userId),
+      onViewUserProfileFromTrip: (userId: string, fromTripId: string) =>
+        liveHandlersRef.current.handleViewUserProfileFromTrip(userId, fromTripId),
+      onStartConversation: (
+        userId: string,
+        otherUserName?: string,
+        otherUserAvatar?: string | null
+      ) =>
+        liveHandlersRef.current.handleStartConversation(
+          userId,
+          otherUserName,
+          otherUserAvatar
+        ),
+      onConversationPress: (conversationId: string) =>
+        liveHandlersRef.current.handleConversationPress(conversationId),
+      onSwellyPress: () => liveHandlersRef.current.handleSwellyPress(),
+      onSwellyPressCopy: () => liveHandlersRef.current.handleSwellyPressCopy(),
+      onProfilePress: () => liveHandlersRef.current.handleProfilePress(),
+      onSwellyShaperViewProfile: () =>
+        liveHandlersRef.current.handleSwellyShaperViewProfile(),
+    }),
+    []
+  );
+
+  // Everything the three tab roots need from AppContent travels through this
+  // context (navigator screens must be stable module-level components, so direct
+  // prop threading is no longer possible). Memoized: only rebuilds when a value
+  // a child actually consumes changes — NOT on every unrelated re-render.
+  const mainNavValue: MainNavContextValue = useMemo(() => ({
+    navControl: bottomNavControl,
+    barSuppressed,
+    onTabChange: handleTabChange,
+    requestedTab,
+    onRequestedTabConsumed: handleRequestedTabConsumed,
+    requestedTripCard,
+    onRequestedTripCardConsumed: handleRequestedTripCardConsumed,
+    tripCard: {
+      onOpenGroupChat: handleOpenGroupChat,
+      onViewUserProfile: stableHandlers.onViewUserProfileFromTrip,
+    },
+    chatCard: {
+      onViewProfile: stableHandlers.onViewUserProfile,
+      onOpenTripDetail: handleOpenTripDetailFromChat,
+      onOpenSurftripDetail: handleOpenSurftripDetail,
+    },
+    profileCard: {
+      onMessage: stableHandlers.onStartConversation,
+      onWelcomeOverlayProfileClosed: () => {
+        // Un-hide the celebration overlay as the profile card slides away.
+        setWelcomeOverlayHiddenByProfile(false);
+        setProfileFromWelcomeOverlay(false);
+      },
+    },
+    settings: {
+      userName: currentUserName,
+      userAvatar: currentUserAvatar,
+      userEmail: user?.email,
+    },
+    swellyChat: {
+      persistedChatId: tripPlanningChatId,
+      persistedMatchedUsers: tripPlanningMatchedUsers,
+      persistedDestination: tripPlanningDestination,
+      onChatStateChange: handleSwellyChatStateChange,
+      onViewUserProfile: stableHandlers.onViewUserProfile,
+      onStartConversation: stableHandlers.onStartConversation,
+      onboardingMatches: pendingOnboardingMatches,
+      onChatComplete: () => setPendingOnboardingMatches(null),
+    },
+    lineupProps: {
+      isListFrontmost,
+      onConversationPress: stableHandlers.onConversationPress,
+      onSwellyPress: stableHandlers.onSwellyPress,
+      onSwellyPressCopy: stableHandlers.onSwellyPressCopy,
+      onProfilePress: stableHandlers.onProfilePress,
+      onSettingsPress: () => pushRootCard('Settings', undefined),
+      onTripsPress: () => requestTab('trips'),
+      onOpenTripDetail: handleOpenTripDetailFromChat,
+      onOpenSurftripDetail: handleOpenSurftripDetail,
+      onViewUserProfile: stableHandlers.onViewUserProfile,
+      onSwellyShaperViewProfile: stableHandlers.onSwellyShaperViewProfile,
+      pendingNotificationConversationId,
+      onPendingNotificationHandled: () => setPendingNotificationConversationId(null),
+    },
+    tripsProps: {
+      onBack: () => requestTab('lineup'),
+    },
+    profileProps: {
+      onBack: () => requestTab(prevTabRef.current),
+      onMessage: stableHandlers.onStartConversation,
+      onEdit: () => setShowProfileEditor(true),
+      onSettings: () => pushRootCard('Settings', undefined),
+      // Tab root: snaps into place (no slide-in) and never animates itself
+      // off-screen — it stays mounted, so a slide-out would park it there.
+      noTransition: true,
+      swipeBackDisabled: true,
+    },
+  }), [
+    bottomNavControl,
+    barSuppressed,
+    handleTabChange,
+    requestedTab,
+    handleRequestedTabConsumed,
+    requestedTripCard,
+    handleRequestedTripCardConsumed,
+    handleOpenGroupChat,
+    handleOpenTripDetailFromChat,
+    handleOpenSurftripDetail,
+    handleSwellyChatStateChange,
+    stableHandlers,
+    currentUserName,
+    currentUserAvatar,
+    user?.email,
+    tripPlanningChatId,
+    tripPlanningMatchedUsers,
+    tripPlanningDestination,
+    pendingOnboardingMatches,
+    isListFrontmost,
+    pendingNotificationConversationId,
+    requestTab,
+  ]);
+
   if (showAgeBlockOverlay) {
     return (
       <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center', padding: 24 }}>
@@ -1645,28 +1820,6 @@ export const AppContent: React.FC = () => {
   if (shouldShowConversations) {
     console.log('[AppContent] Rendering check - showProfile:', showProfile);
     console.log('[AppContent] Rendering check - showConversationLoading:', showConversationLoading, 'pendingConversation:', !!pendingConversation);
-
-    // True only when the conversations list is the topmost visible layer.
-    // Used to gate the welcome-guide tutorial trigger inside ConversationsScreen.
-    // (Cards — chats, Swelly, trips, notifications — blur the tab natively now;
-    // these terms cover the remaining legacy overlays only.)
-    const isListFrontmost =
-      activeTab === 'lineup' &&
-      !showConversationLoading &&
-      !showProfile &&
-      !showSwellyShaper &&
-      !showWelcomeToLineupOverlay &&
-      !showProfileEditor;
-
-    // The floating bottom nav lives INSIDE the tab navigator (custom tabBar).
-    // Cards cover it natively; this list is the legacy overlays that render
-    // ABOVE the navigator and would otherwise float over the bar.
-    const barSuppressed =
-      showConversationLoading ||
-      showSwellyShaper ||
-      showProfile ||
-      showProfileEditor ||
-      showWelcomeToLineupOverlay;
 
     // Determine which overlay screen (if any) should cover the navigator.
     // Remaining legacy overlays: Settings, SwellyShaper, Profile, the
@@ -1712,79 +1865,6 @@ export const AppContent: React.FC = () => {
     }
     // Chats (DMs, group chats, surftrip chats) and Swelly are all CARDS on
     // the root stack now — no overlay branches for them.
-
-    // Everything the three tab roots need from AppContent travels through
-    // this context (navigator screens must be stable module-level components,
-    // so direct prop threading is no longer possible). Shrinks per phase.
-    const mainNavValue: MainNavContextValue = {
-      navControl: bottomNavControl,
-      barSuppressed,
-      onTabChange: handleTabChange,
-      requestedTab,
-      onRequestedTabConsumed: handleRequestedTabConsumed,
-      requestedTripCard,
-      onRequestedTripCardConsumed: handleRequestedTripCardConsumed,
-      tripCard: {
-        onOpenGroupChat: handleOpenGroupChat,
-        onViewUserProfile: handleViewUserProfileFromTrip,
-      },
-      chatCard: {
-        onViewProfile: handleViewUserProfile,
-        onOpenTripDetail: handleOpenTripDetailFromChat,
-        onOpenSurftripDetail: handleOpenSurftripDetail,
-      },
-      profileCard: {
-        onMessage: handleStartConversation,
-        onWelcomeOverlayProfileClosed: () => {
-          // Un-hide the celebration overlay as the profile card slides away.
-          setWelcomeOverlayHiddenByProfile(false);
-          setProfileFromWelcomeOverlay(false);
-        },
-      },
-      settings: {
-        userName: currentUserName,
-        userAvatar: currentUserAvatar,
-        userEmail: user?.email,
-      },
-      swellyChat: {
-        persistedChatId: tripPlanningChatId,
-        persistedMatchedUsers: tripPlanningMatchedUsers,
-        persistedDestination: tripPlanningDestination,
-        onChatStateChange: handleSwellyChatStateChange,
-        onViewUserProfile: handleViewUserProfile,
-        onStartConversation: handleStartConversation,
-        onboardingMatches: pendingOnboardingMatches,
-        onChatComplete: () => setPendingOnboardingMatches(null),
-      },
-      lineupProps: {
-        isListFrontmost,
-        onConversationPress: handleConversationPress,
-        onSwellyPress: handleSwellyPress,
-        onSwellyPressCopy: handleSwellyPressCopy,
-        onProfilePress: handleProfilePress,
-        onSettingsPress: () => pushRootCard('Settings', undefined),
-        onTripsPress: () => requestTab('trips'),
-        onOpenTripDetail: handleOpenTripDetailFromChat,
-        onOpenSurftripDetail: handleOpenSurftripDetail,
-        onViewUserProfile: handleViewUserProfile,
-        onSwellyShaperViewProfile: handleSwellyShaperViewProfile,
-        pendingNotificationConversationId,
-        onPendingNotificationHandled: () => setPendingNotificationConversationId(null),
-      },
-      tripsProps: {
-        onBack: () => requestTab('lineup'),
-      },
-      profileProps: {
-        onBack: () => requestTab(prevTabRef.current),
-        onMessage: handleStartConversation,
-        onEdit: () => setShowProfileEditor(true),
-        onSettings: () => pushRootCard('Settings', undefined),
-        // Tab root: snaps into place (no slide-in) and never animates itself
-        // off-screen — it stays mounted, so a slide-out would park it there.
-        noTransition: true,
-        swipeBackDisabled: true,
-      },
-    };
 
     return (
       <MainNavProvider value={mainNavValue}>

@@ -102,14 +102,21 @@ export const NotificationCenter: React.FC<Props> = ({ userId, bare = false }) =>
     }, [userId])
   );
 
-  useEffect(() => {
-    if (!userId) return;
-    const unsubscribe = notificationsService.subscribe(userId, {
-      onInsert: () => setUnread((u) => u + 1),
-      onUpdate: () => {},
-    });
-    return unsubscribe;
-  }, [userId]);
+  // Focus-gated: this bell renders in every mounted tab/screen header, but only
+  // the focused one needs a live postgres_changes channel for the +1. Without
+  // gating, all mounted bells open duplicate notifications:<userId> channels and
+  // pile onto the realtime socket. The badge stays correct because the count is
+  // refetched on every focus regain (the useFocusEffect above).
+  useFocusEffect(
+    useCallback(() => {
+      if (!userId) return;
+      const unsubscribe = notificationsService.subscribe(userId, {
+        onInsert: () => setUnread((u) => u + 1),
+        onUpdate: () => {},
+      });
+      return unsubscribe;
+    }, [userId])
+  );
 
   const openPanel = useCallback(() => {
     // Via the root ref — this bell renders inside the `independent`
@@ -155,25 +162,30 @@ export const NotificationsPanel: React.FC<PanelProps> = ({ userId, onClose, onOp
   // duration of this viewing even after we mark them read.
   const unreadAtOpen = useRef<Set<string>>(new Set());
 
-  // ── Live inserts/updates while the panel is open ─────────────────────────
-  useEffect(() => {
-    if (!userId) {
-      setItems([]);
-      return;
-    }
-    const unsubscribe = notificationsService.subscribe(userId, {
-      onInsert: (row) => {
-        const thumbs = avatarThumbsFor([row]);
-        if (thumbs.length) ExpoImage.prefetch(thumbs).catch(() => {});
-        setItems((prev) => (prev.some((r) => r.id === row.id) ? prev : [row, ...prev]));
-        notificationsService.markRead(row.id); // panel open → treat as seen
-      },
-      onUpdate: (row) => {
-        setItems((prev) => prev.map((r) => (r.id === row.id ? row : r)));
-      },
-    });
-    return unsubscribe;
-  }, [userId]);
+  // ── Live inserts/updates while the panel is FOCUSED ──────────────────────
+  // The panel is a card that stays mounted in the stack when you open a trip on
+  // top of it; focus-gating closes its channel while it's not the visible
+  // screen and re-opens on return (see useTripRealtime for the rationale).
+  useFocusEffect(
+    useCallback(() => {
+      if (!userId) {
+        setItems([]);
+        return;
+      }
+      const unsubscribe = notificationsService.subscribe(userId, {
+        onInsert: (row) => {
+          const thumbs = avatarThumbsFor([row]);
+          if (thumbs.length) ExpoImage.prefetch(thumbs).catch(() => {});
+          setItems((prev) => (prev.some((r) => r.id === row.id) ? prev : [row, ...prev]));
+          notificationsService.markRead(row.id); // panel open → treat as seen
+        },
+        onUpdate: (row) => {
+          setItems((prev) => prev.map((r) => (r.id === row.id ? row : r)));
+        },
+      });
+      return unsubscribe;
+    }, [userId])
+  );
 
   const loadList = useCallback(async () => {
     setLoading(true);

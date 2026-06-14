@@ -12,8 +12,17 @@
  * Broadcast (not postgres_changes) so subscription auth is evaluated once per
  * subscribe instead of per event per subscriber — same scaling rationale as
  * the messaging/reactions migrations.
+ *
+ * FOCUS-GATED: the card stack keeps every visited screen MOUNTED (instant
+ * back), so a plain useEffect would hold this channel open forever and they'd
+ * pile up — saturating the realtime socket. useFocusEffect tears the channel
+ * down on blur and re-opens it on focus, so only the screen you're looking at
+ * holds a live line. On re-focus we force a refetch to catch anything that
+ * changed while we were unsubscribed. (This is the pattern React Navigation
+ * v8's inactiveBehavior="pause" will automate.)
  */
-import { useEffect } from 'react';
+import { useCallback } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../../config/supabase';
 import { tripsKeys } from './useTripQueries';
@@ -22,12 +31,16 @@ import { tripTopic } from '../../services/trips/tripsRealtime';
 export function useTripRealtime(tripId: string) {
   const queryClient = useQueryClient();
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     if (!tripId) return;
 
     const invalidate = (...keys: readonly unknown[][]) => {
       keys.forEach((queryKey) => queryClient.invalidateQueries({ queryKey }));
     };
+
+    // Catch up on anything that changed while this screen was blurred (and its
+    // channel was closed). invalidateQueries refetches the mounted detail keys.
+    invalidate([...tripsKeys.detail(tripId)]);
 
     const channel = supabase
       .channel(tripTopic(tripId), { config: { private: true } })
@@ -66,7 +79,7 @@ export function useTripRealtime(tripId: string) {
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      try { supabase.removeChannel(channel); } catch { /* noop */ }
     };
-  }, [tripId, queryClient]);
+  }, [tripId, queryClient]));
 }
