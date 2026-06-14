@@ -78,8 +78,10 @@ export const TripBottomSheet: React.FC<Props> = ({
   scroll = true,
   children,
 }) => {
-  // Backdrop fades in; the sheet itself slides up (separate animations).
-  const { mounted, backdropOpacity, translateY, onSheetLayout } = useSheetTransition(visible);
+  // Backdrop fades in; the sheet itself slides up (separate animations). The
+  // grabber + header double as the swipe-down-to-dismiss drag zone.
+  const { mounted, backdropOpacity, translateY, onSheetLayout, panHandlers } =
+    useSheetTransition(visible, onClose);
   return (
     <Modal visible={mounted} transparent animationType="none" onRequestClose={onClose}>
       {/* KAV wraps the whole bottom-anchored sheet so the ENTIRE sheet (incl. the
@@ -98,7 +100,11 @@ export const TripBottomSheet: React.FC<Props> = ({
             onLayout={onSheetLayout}
           >
             <Pressable style={styles.sheet} onPress={e => e.stopPropagation()}>
-            <View style={styles.header}>
+            {/* Grabber doubles as the swipe-down handle. */}
+            <View style={styles.grabberRow} {...panHandlers}>
+              <View style={styles.grabber} />
+            </View>
+            <View style={styles.header} {...panHandlers}>
               <View style={styles.headerLeft}>
                 {onBack ? (
                   <TouchableOpacity onPress={onBack} hitSlop={10} style={styles.backBtn}>
@@ -155,6 +161,8 @@ const styles = StyleSheet.create({
     maxHeight: SHEET_MAX_HEIGHT,
     width: '100%',
   },
+  grabberRow: { alignItems: 'center', paddingTop: 8, paddingBottom: 4 },
+  grabber: { width: 40, height: 4, borderRadius: 20, backgroundColor: '#D5D7DA' },
   header: {
     flexDirection: 'row',
     alignItems: 'center',

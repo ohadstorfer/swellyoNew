@@ -82,9 +82,9 @@ export default function TripUpdatesScreen({ tripId, onBack }: Props) {
   // the same optimistic cache patch so the list updates instantly.
   const [editingUpdateId, setEditingUpdateId] = useState<string | null>(null);
   const [savingUpdate, setSavingUpdate] = useState(false);
-  const editingBody = editingUpdateId
-    ? updates.find(u => u.id === editingUpdateId)?.body ?? ''
-    : '';
+  const editingUpdate = editingUpdateId ? updates.find(u => u.id === editingUpdateId) ?? null : null;
+  const editingTitle = editingUpdate?.title ?? '';
+  const editingBody = editingUpdate?.body ?? '';
 
   const patchUpdatesCache = (updater: (prev: AdminUpdate[]) => AdminUpdate[]) => {
     queryClient.setQueryData<AdminUpdate[]>(tripsKeys.detailUpdates(tripId), prev =>
@@ -92,15 +92,15 @@ export default function TripUpdatesScreen({ tripId, onBack }: Props) {
     );
   };
 
-  const handleSubmitEdit = async (body: string) => {
-    const text = body.trim();
-    if (!editingUpdateId || !text) {
+  const handleSubmitEdit = async (title: string, body: string) => {
+    const titleText = title.trim();
+    if (!editingUpdateId || !titleText) {
       setEditingUpdateId(null);
       return;
     }
     setSavingUpdate(true);
     try {
-      const updated = await updateAdminUpdate(editingUpdateId, text);
+      const updated = await updateAdminUpdate(editingUpdateId, titleText, body.trim());
       patchUpdatesCache(prev => prev.map(u => (u.id === updated.id ? updated : u)));
       setEditingUpdateId(null);
     } catch (e: any) {
@@ -195,6 +195,7 @@ export default function TripUpdatesScreen({ tripId, onBack }: Props) {
       <AdminUpdateSheet
         visible={!!editingUpdateId}
         mode="edit"
+        initialTitle={editingTitle}
         initialBody={editingBody}
         saving={savingUpdate}
         onClose={() => setEditingUpdateId(null)}
@@ -244,8 +245,8 @@ const styles = StyleSheet.create({
 
   list: { gap: 8 },
 
-  // Per-card host "Edit" — Body/B-4 (Size/xs 10 / 20) in accent (node 13179:8958).
-  editLink: { fontFamily: ff('Inter', '400'), fontSize: 10, lineHeight: 20, color: T.accent },
+  // Per-card host "Edit" — bumped up from the Figma 10px for legibility.
+  editLink: { fontFamily: ff('Inter', '400'), fontSize: 14, lineHeight: 20, color: T.accent },
 
   empty: { fontFamily: ff('Inter', '400'), fontSize: 14, color: T.count },
 });

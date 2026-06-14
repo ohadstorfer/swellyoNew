@@ -1,0 +1,1 @@
+- [Nav-migration perf findings](perf_nav_migration_findings.md) — ranked root causes of the June 2026 UI freeze; #1 is mainNavValue object recreated every render (no useMemo).

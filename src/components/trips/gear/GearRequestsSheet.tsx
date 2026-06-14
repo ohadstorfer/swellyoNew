@@ -51,7 +51,7 @@ export const GearRequestsSheet: React.FC<Props> = ({
     setQtys(prev => ({ ...prev, [id]: Math.max(1, (prev[id] ?? base) + delta) }));
 
   // Fade the backdrop, slide the sheet (matches the other bottom sheets).
-  const { mounted, backdropOpacity, translateY, onSheetLayout } = useSheetTransition(visible);
+  const { mounted, backdropOpacity, translateY, onSheetLayout, panHandlers } = useSheetTransition(visible, onClose);
 
   // Reset the staged quantities whenever the sheet (re)opens.
   useEffect(() => {
@@ -69,7 +69,7 @@ export const GearRequestsSheet: React.FC<Props> = ({
           <Animated.View style={{ transform: [{ translateY }] }} onLayout={onSheetLayout}>
             <Pressable style={s.sheet} onPress={e => e.stopPropagation()}>
               {/* Grabber */}
-              <View style={s.grabberRow}>
+              <View style={s.grabberRow} {...panHandlers}>
                 <View style={s.grabber} />
               </View>
 

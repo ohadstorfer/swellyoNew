@@ -97,7 +97,7 @@ export const GearItemSheet: React.FC<Props> = ({ visible, item: itemProp, curren
   const [shownItem, setShownItem] = useState(itemProp);
 
   // Fade the backdrop, slide the sheet (matches the other bottom sheets).
-  const { mounted, backdropOpacity, translateY, onSheetLayout } = useSheetTransition(visible);
+  const { mounted, backdropOpacity, translateY, onSheetLayout, panHandlers } = useSheetTransition(visible, onClose);
 
   useEffect(() => {
     if (itemProp) {
@@ -165,7 +165,7 @@ export const GearItemSheet: React.FC<Props> = ({ visible, item: itemProp, curren
         <Animated.View style={{ transform: [{ translateY }] }} onLayout={onSheetLayout}>
           <Pressable style={styles.sheet} onPress={e => e.stopPropagation()}>
           {/* Grabber */}
-          <View style={styles.grabberRow}>
+          <View style={styles.grabberRow} {...panHandlers}>
             <View style={styles.grabber} />
           </View>
 

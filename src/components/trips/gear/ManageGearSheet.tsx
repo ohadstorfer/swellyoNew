@@ -84,7 +84,7 @@ export const ManageGearSheet: React.FC<Props> = ({
 
   // Sheet motion — fade the backdrop, slide the sheet (matches every other
   // bottom sheet; the formOnly Modal below consumes it).
-  const { mounted, backdropOpacity, translateY, onSheetLayout } = useSheetTransition(visible);
+  const { mounted, backdropOpacity, translateY, onSheetLayout, panHandlers } = useSheetTransition(visible, onClose);
 
   const beginAdd = () => setView({ mode: 'add' });
   const beginEdit = (item: EnrichedGearItem) => setView({ mode: 'edit', item });
@@ -153,7 +153,7 @@ export const ManageGearSheet: React.FC<Props> = ({
             <Animated.View style={{ transform: [{ translateY }] }} onLayout={onSheetLayout}>
               <Pressable style={fs.sheet} onPress={e => e.stopPropagation()}>
               {/* Grabber */}
-              <View style={fs.grabberRow}>
+              <View style={fs.grabberRow} {...panHandlers}>
                 <View style={fs.grabber} />
               </View>
 

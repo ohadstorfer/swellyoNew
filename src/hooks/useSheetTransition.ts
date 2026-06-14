@@ -21,17 +21,26 @@
 // play before unmount.
 
 import { useEffect, useRef, useState } from 'react';
-import { Animated, Dimensions, Easing, LayoutChangeEvent } from 'react-native';
+import { Animated, Dimensions, Easing, LayoutChangeEvent, PanResponder } from 'react-native';
 
 const SCREEN_H = Dimensions.get('window').height;
 
-export function useSheetTransition(visible: boolean) {
+// Drag past this many px (or flick faster than this velocity) to dismiss; else
+// the sheet springs back to its resting position.
+const DISMISS_DISTANCE = 100;
+const DISMISS_VELOCITY = 1.2;
+
+export function useSheetTransition(visible: boolean, onClose?: () => void) {
   const [mounted, setMounted] = useState(visible);
   const backdropOpacity = useRef(new Animated.Value(0)).current;
   // Start fully below the screen; corrected to the measured height on layout.
   const translateY = useRef(new Animated.Value(SCREEN_H)).current;
   const sheetH = useRef(0);
   const animatedIn = useRef(false);
+
+  // Keep the latest onClose without rebuilding the PanResponder each render.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     if (visible) {
@@ -85,5 +94,41 @@ export function useSheetTransition(visible: boolean) {
     }
   };
 
-  return { mounted, backdropOpacity, translateY, onSheetLayout };
+  // Swipe-to-dismiss. Spread these onto the grabber/header (the non-scrolling top
+  // of the sheet) so a downward drag there pulls the sheet down — past a
+  // threshold it closes, otherwise it springs back. Attaching to the handle (not
+  // the whole sheet) keeps it from fighting any ScrollView inside the body.
+  const panResponder = useRef(
+    PanResponder.create({
+      // Only claim clearly-downward drags; taps and horizontal moves pass through.
+      onMoveShouldSetPanResponder: (_, g) => g.dy > 6 && g.dy > Math.abs(g.dx),
+      onPanResponderMove: (_, g) => {
+        if (g.dy > 0) translateY.setValue(g.dy);
+      },
+      onPanResponderRelease: (_, g) => {
+        if (g.dy > DISMISS_DISTANCE || g.vy > DISMISS_VELOCITY) {
+          // Let the visible→false effect play the slide-out from the dragged
+          // position (smooth hand-off); the parent owns the actual close.
+          onCloseRef.current?.();
+        } else {
+          Animated.spring(translateY, {
+            toValue: 0,
+            useNativeDriver: true,
+            bounciness: 0,
+            speed: 18,
+          }).start();
+        }
+      },
+      onPanResponderTerminate: () => {
+        Animated.spring(translateY, {
+          toValue: 0,
+          useNativeDriver: true,
+          bounciness: 0,
+          speed: 18,
+        }).start();
+      },
+    })
+  ).current;
+
+  return { mounted, backdropOpacity, translateY, onSheetLayout, panHandlers: panResponder.panHandlers };
 }

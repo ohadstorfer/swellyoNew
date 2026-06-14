@@ -71,10 +71,23 @@ export const navigationRef = createNavigationContainerRef<RootStackParamList>();
  * (dispatching via useNavigation there dies with "not handled by any
  * navigator"). The ref targets the root container directly.
  */
+// App-wide double-push defense. Every card navigation flows through here, so a
+// single guard protects the whole app from the two ways a button fires twice:
+// an accidental double-tap, and taps that QUEUE during a JS-thread stall and all
+// fire at once when it unblocks. Same route+params within the window is never
+// intentional, so we drop the repeat. Distinct navigations are unaffected.
+const DUP_PUSH_WINDOW_MS = 700;
+let lastPush: { key: string; ts: number } = { key: '', ts: 0 };
+
 export function pushRootCard<RouteName extends Exclude<keyof RootStackParamList, 'HomeTabs'>>(
   name: RouteName,
   params: RootStackParamList[RouteName],
 ) {
   if (!navigationRef.isReady()) return;
+  let key = name as string;
+  try { key = `${name}:${JSON.stringify(params ?? {})}`; } catch { /* unserializable params — fall back to route name */ }
+  const now = Date.now();
+  if (key === lastPush.key && now - lastPush.ts < DUP_PUSH_WINDOW_MS) return;
+  lastPush = { key, ts: now };
   navigationRef.dispatch(StackActions.push(name, params));
 }

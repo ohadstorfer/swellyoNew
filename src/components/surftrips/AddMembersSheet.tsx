@@ -10,9 +10,11 @@ import {
   Image,
   Platform,
   TextInput,
+  Animated,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../Text';
+import { useSheetTransition } from '../../hooks/useSheetTransition';
 import type { AddableDmPartner } from '../../services/surftrips/surftripsService';
 
 interface AddMembersSheetProps {
@@ -50,6 +52,10 @@ export const AddMembersSheet: React.FC<AddMembersSheetProps> = ({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState('');
+
+  // Slide + swipe-to-dismiss, shared with every other bottom sheet.
+  const { mounted, backdropOpacity, translateY, onSheetLayout, panHandlers } =
+    useSheetTransition(visible, submitting ? () => {} : onClose);
 
   useEffect(() => {
     if (!visible) return;
@@ -123,17 +129,21 @@ export const AddMembersSheet: React.FC<AddMembersSheetProps> = ({
 
   return (
     <Modal
-      visible={visible}
+      visible={mounted}
       transparent
-      animationType="slide"
+      animationType="none"
       onRequestClose={onClose}
     >
       <Pressable style={styles.backdrop} onPress={submitting ? undefined : onClose}>
+        <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.dim, { opacity: backdropOpacity }]} />
+        <Animated.View style={{ transform: [{ translateY }] }} onLayout={onSheetLayout}>
         <Pressable
           style={styles.sheet}
           onPress={e => e.stopPropagation()}
         >
-          <View style={styles.handle} />
+          <View style={styles.handleZone} {...panHandlers}>
+            <View style={styles.handle} />
+          </View>
           <View style={styles.headerRow}>
             <Text style={styles.title}>{title}</Text>
             <TouchableOpacity
@@ -229,6 +239,7 @@ export const AddMembersSheet: React.FC<AddMembersSheetProps> = ({
             </TouchableOpacity>
           </View>
         </Pressable>
+        </Animated.View>
       </Pressable>
     </Modal>
   );
@@ -305,9 +316,9 @@ const PartnerRow: React.FC<PartnerRowProps> = ({
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
     justifyContent: 'flex-end',
   },
+  dim: { backgroundColor: 'rgba(0,0,0,0.4)' },
   sheet: {
     backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 16,
@@ -317,8 +328,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     maxHeight: '85%',
   },
+  // Wider grab target around the thin handle bar for the swipe-down gesture.
+  handleZone: { alignSelf: 'stretch', alignItems: 'center', paddingVertical: 6, marginTop: -6 },
   handle: {
-    alignSelf: 'center',
     width: 36,
     height: 4,
     borderRadius: 2,

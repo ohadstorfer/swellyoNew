@@ -2188,6 +2188,9 @@ export interface AdminUpdate {
   id: string;
   trip_id: string;
   author_id: string;
+  /** Short headline — the only thing shown in the Plan-tab preview. */
+  title: string;
+  /** Optional longer description, shown in the detail overlay + Updates screen. */
   body: string;
   created_at: string;
   updated_at: string;
@@ -2210,14 +2213,16 @@ export async function listAdminUpdates(tripId: string): Promise<AdminUpdate[]> {
 export async function addAdminUpdate(
   tripId: string,
   authorId: string,
+  title: string,
   body: string
 ): Promise<AdminUpdate> {
-  const trimmed = body.trim();
-  if (!trimmed) throw new Error('Update body cannot be empty');
+  const trimmedTitle = title.trim();
+  const trimmedBody = body.trim();
+  if (!trimmedTitle) throw new Error('Update title cannot be empty');
 
   const { data, error } = await supabase
     .from('group_trip_admin_updates')
-    .insert({ trip_id: tripId, author_id: authorId, body: trimmed })
+    .insert({ trip_id: tripId, author_id: authorId, title: trimmedTitle, body: trimmedBody })
     .select()
     .single();
 
@@ -2231,14 +2236,16 @@ export async function addAdminUpdate(
 
 export async function updateAdminUpdate(
   updateId: string,
+  title: string,
   body: string
 ): Promise<AdminUpdate> {
-  const trimmed = body.trim();
-  if (!trimmed) throw new Error('Update body cannot be empty');
+  const trimmedTitle = title.trim();
+  const trimmedBody = body.trim();
+  if (!trimmedTitle) throw new Error('Update title cannot be empty');
 
   const { data, error } = await supabase
     .from('group_trip_admin_updates')
-    .update({ body: trimmed })
+    .update({ title: trimmedTitle, body: trimmedBody })
     .eq('id', updateId)
     .select()
     .single();

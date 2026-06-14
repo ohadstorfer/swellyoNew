@@ -1348,7 +1348,19 @@ export const AppContent: React.FC = () => {
     pushRootCard('SurftripCard', { groupId });
   }, []);
 
+  // Re-entrancy guard for the conversation-start flow: a frozen UI can queue
+  // several taps that all fire when it unblocks (this caused 6 concurrent
+  // createDirectConversation calls + 6 heavy refreshes that locked the thread).
+  // Shared with the welcome-overlay "Connect" button below — both open a DM.
+  const startConvoGuardRef = useRef(0);
+
   const handleStartConversation = async (userId: string, otherUserName?: string, otherUserAvatar?: string | null) => {
+    const nowTs = Date.now();
+    if (nowTs - startConvoGuardRef.current < 1500) {
+      console.log('[AppContent] handleStartConversation ignored — rapid repeat tap');
+      return;
+    }
+    startConvoGuardRef.current = nowTs;
     console.log('[AppContent] ========== handleStartConversation START ==========');
     console.log('[AppContent] handleStartConversation called with userId:', userId);
     console.log('[AppContent] Current state - showConversationLoading:', showConversationLoading);
@@ -1941,6 +1953,11 @@ export const AppContent: React.FC = () => {
             setWelcomeOverlayHiddenByProfile(false);
           }}
           onConnect={(match) => {
+            // Drop rapid repeat taps (frozen-UI mash) so we don't fire several
+            // createDirectConversation + refreshConversations cascades at once.
+            const nowTs = Date.now();
+            if (nowTs - startConvoGuardRef.current < 1500) return;
+            startConvoGuardRef.current = nowTs;
             markWelcomeLineupDismissed();
             setShowWelcomeToLineupOverlay(false);
             // Show loading screen immediately

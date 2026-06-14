@@ -43,7 +43,7 @@ export const AddPersonalGearSheet: React.FC<Props> = ({
   const [error, setError] = useState('');
 
   // Fade the backdrop, slide the sheet (matches the other bottom sheets).
-  const { mounted, backdropOpacity, translateY, onSheetLayout } = useSheetTransition(visible);
+  const { mounted, backdropOpacity, translateY, onSheetLayout, panHandlers } = useSheetTransition(visible, onClose);
 
   // Reset input + error each time the sheet opens.
   useEffect(() => {
@@ -84,7 +84,7 @@ export const AddPersonalGearSheet: React.FC<Props> = ({
           <Animated.View style={{ transform: [{ translateY }] }} onLayout={onSheetLayout}>
             <Pressable style={s.sheet} onPress={e => e.stopPropagation()}>
               {/* Grabber */}
-              <View style={s.grabberRow}>
+              <View style={s.grabberRow} {...panHandlers}>
                 <View style={s.grabber} />
               </View>
 

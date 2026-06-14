@@ -75,7 +75,7 @@ export const RequestToJoinSheet: React.FC<Props> = ({
   const displayName = profile?.name?.trim() || 'You';
   const initial = displayName.charAt(0).toUpperCase();
 
-  const { mounted, backdropOpacity, translateY, onSheetLayout } = useSheetTransition(visible);
+  const { mounted, backdropOpacity, translateY, onSheetLayout, panHandlers } = useSheetTransition(visible, close);
   return (
     <Modal visible={mounted} transparent animationType="none" onRequestClose={close}>
       <KeyboardAvoidingView
@@ -92,7 +92,7 @@ export const RequestToJoinSheet: React.FC<Props> = ({
           onLayout={onSheetLayout}
         >
           <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
-          <View style={styles.header}>
+          <View style={styles.header} {...panHandlers}>
             <TouchableOpacity style={styles.closeBtn} onPress={close} hitSlop={8}>
               <Ionicons name="chevron-back" size={18} color="#222B30" />
             </TouchableOpacity>

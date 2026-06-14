@@ -68,7 +68,7 @@ export const EditGearItemSheet: React.FC<Props> = ({
     onSubmit(trimmed);
   };
 
-  const { mounted, backdropOpacity, translateY, onSheetLayout } = useSheetTransition(visible);
+  const { mounted, backdropOpacity, translateY, onSheetLayout, panHandlers } = useSheetTransition(visible, onClose);
 
   return (
     <Modal visible={mounted} transparent animationType="none" onRequestClose={onClose}>
@@ -87,7 +87,7 @@ export const EditGearItemSheet: React.FC<Props> = ({
           >
             <Pressable style={styles.sheet} onPress={e => e.stopPropagation()}>
             {/* Grabber */}
-            <View style={styles.grabberWrap}>
+            <View style={styles.grabberWrap} {...panHandlers}>
               <View style={styles.grabber} />
             </View>
 

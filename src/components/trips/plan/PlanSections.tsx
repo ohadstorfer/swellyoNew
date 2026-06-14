@@ -230,13 +230,10 @@ export const AdminUpdatesCard: React.FC<{
   isHost: boolean;
   formatTime: (iso: string) => string;
   onAddUpdate: () => void;
-  onEditUpdate: (u: AdminUpdate) => void;
-  /** Host long-press → Edit/Delete menu (delete isn't in the sheet). */
-  onLongPressUpdate: (u: AdminUpdate) => void;
   /** When provided, "View all" pushes the full Updates screen instead of
    *  expanding inline (Figma node 12933-38189). */
   onViewAll?: () => void;
-}> = ({ updates, isHost, formatTime, onAddUpdate, onEditUpdate, onLongPressUpdate, onViewAll }) => {
+}> = ({ updates, isHost, formatTime, onAddUpdate, onViewAll }) => {
   const [expanded, setExpanded] = useState(false);
   // Full text of a tapped (truncated) update — drives the detail overlay.
   const [detail, setDetail] = useState<AdminUpdate | null>(null);
@@ -244,7 +241,9 @@ export const AdminUpdatesCard: React.FC<{
   // When "View all" navigates to a dedicated screen we always show the 3-item
   // preview here; inline expand is the fallback when no navigation is wired.
   const visible = onViewAll || !expanded ? updates.slice(0, PREVIEW) : updates;
-  const hasMore = updates.length > PREVIEW;
+  // "View all (N)" shows as soon as there's any update (count starts right away),
+  // not only once the preview overflows.
+  const hasAny = updates.length > 0;
 
   return (
     <View style={styles.block}>
@@ -252,7 +251,7 @@ export const AdminUpdatesCard: React.FC<{
         title="Recent admin updates"
         large
         right={
-          hasMore ? (
+          hasAny ? (
             onViewAll ? (
               <LinkText label={`View all (${updates.length})`} onPress={onViewAll} />
             ) : (
@@ -279,6 +278,8 @@ export const AdminUpdatesCard: React.FC<{
             </View>
           ) : null}
           {visible.map((u, i) => (
+            // Plan preview is read-only — tap opens the detail overlay; editing /
+            // deleting happens only on the "View all" Updates screen.
             <AdminUpdateRow
               key={u.id}
               update={u}
@@ -286,8 +287,6 @@ export const AdminUpdatesCard: React.FC<{
               showDivider={isHost || i < visible.length - 1}
               formatTime={formatTime}
               onOpenDetail={setDetail}
-              onLongPress={isHost ? () => onLongPressUpdate(u) : undefined}
-              right={isHost ? <LinkText label="Edit" size="sm" onPress={() => onEditUpdate(u)} /> : undefined}
             />
           ))}
           {isHost ? (
@@ -412,7 +411,7 @@ export const GroupGearCard: React.FC<{
         </Pressable>
       ) : isApprovedMember ? (
         <Pressable onPress={onRequestItem} hitSlop={8} style={styles.requestRow}>
-          <Text style={styles.requestLink}>Missing something? Suggest item</Text>
+          <Text style={styles.suggestLink}>Missing something? Suggest item</Text>
         </Pressable>
       ) : null}
     </View>
@@ -612,7 +611,7 @@ const styles = StyleSheet.create({
   // get_variable_defs (per node): View all = Body/M B-2 (Size/md 14 / Size/xl 18);
   // Edit = Body/B-4 (Size/xs 10 / 20).
   link: { fontFamily: ff('Inter', '400'), fontSize: 14, lineHeight: 18, fontWeight: '400', color: T.accent },
-  linkSmall: { fontFamily: ff('Inter', '400'), fontSize: 10, lineHeight: 20, fontWeight: '400', color: T.accent },
+  linkSmall: { fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 18, fontWeight: '400', color: T.accent },
   empty: { fontFamily: ff('Inter', '400'), fontSize: 14, color: T.muted, paddingVertical: 6 },
 
   rowDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: T.hairline },
@@ -649,7 +648,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     backgroundColor: T.surface,
   },
-  addRowText: { fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 18, fontWeight: '400', color: T.inkBody },
+  addRowText: { fontFamily: ff('Inter', '600'), fontSize: 14, lineHeight: 20, fontWeight: '600', color: T.inkBody },
   // Empty admin-updates placeholder — mirrors AdminUpdateUI's connected row
   // (icon box + title + time) so the empty card reads like a real update.
   updateEmptyRow: {
@@ -696,7 +695,9 @@ const styles = StyleSheet.create({
   gearList: { gap: 12 },
   // Centred "Missing something? Suggest item" link, spaced from the cards above.
   requestRow: { alignItems: 'center', marginTop: 16 },
-  requestLink: { fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 18, fontWeight: '400', color: T.accent },
+  requestLink: { fontFamily: ff('Inter', '600'), fontSize: 14, lineHeight: 20, fontWeight: '600', color: T.accent },
+  // Member "Missing something? Suggest item" — 14px but kept regular weight.
+  suggestLink: { fontFamily: ff('Inter', '400'), fontSize: 14, lineHeight: 20, fontWeight: '400', color: T.accent },
   // "All set" badge — solid teal circle with a white check (Figma: 20px, radius
   // 10, fill/border #05BCD3). Distinct from the cut-out checkmark-circle glyph.
   coveredBadge: {
@@ -767,7 +768,7 @@ const styles = StyleSheet.create({
   ygHeader: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 16 },
   ygHeaderText: { flex: 1, gap: 4, paddingRight: 12 },
   ygHeaderRight: { alignSelf: 'stretch', alignItems: 'flex-end', justifyContent: 'flex-end' },
-  ygTitle: { fontFamily: ff('Inter', '700'), fontSize: 14, lineHeight: 18, fontWeight: '700', color: '#333333' },
+  ygTitle: { fontFamily: ff('Inter', '700'), fontSize: 16, lineHeight: 24, fontWeight: '700', color: '#333333' },
   ygSub: { fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 18, color: '#6a7282' },
   ygViewAll: { fontFamily: ff('Inter', '400'), fontSize: 14, lineHeight: 18, color: T.accent },
   ygCard: {

@@ -7,6 +7,7 @@ import {
   Platform,
   Animated,
   Pressable,
+  PanResponder,
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -119,6 +120,24 @@ export function ReportAISheet({ visible, messageText, messageTimestamp, messageX
     }).start(() => onClose());
   };
 
+  // Swipe the handle/sheet down to dismiss — drives the same slideAnim.
+  const closeRef = useRef(handleClose);
+  closeRef.current = handleClose;
+  const panResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, g) => g.dy > 6 && g.dy > Math.abs(g.dx),
+      onPanResponderMove: (_, g) => {
+        if (g.dy > 0) slideAnim.setValue(g.dy);
+      },
+      onPanResponderRelease: (_, g) => {
+        if (g.dy > 100 || g.vy > 1.2) closeRef.current();
+        else Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, bounciness: 0, speed: 18 }).start();
+      },
+      onPanResponderTerminate: () =>
+        Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, bounciness: 0, speed: 18 }).start(),
+    })
+  ).current;
+
   const handleConfirmationClose = () => {
     Animated.timing(confirmFade, {
       toValue: 0,
@@ -159,8 +178,8 @@ export function ReportAISheet({ visible, messageText, messageTimestamp, messageX
           <Animated.View
             style={[styles.sheet, { transform: [{ translateY: slideAnim }] }]}
           >
-            {/* Drag handle */}
-            <View style={styles.handleContainer}>
+            {/* Drag handle — swipe down to dismiss */}
+            <View style={styles.handleContainer} {...panResponder.panHandlers}>
               <View style={styles.handle} />
             </View>
 

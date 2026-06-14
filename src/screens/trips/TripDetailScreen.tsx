@@ -429,6 +429,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   // Admin updates — host-posted free-text lines, visible to all members.
   // adminUpdates now comes from react-query (declared above).
   const [addingUpdate, setAddingUpdate] = useState(false);
+  const [updateTitleDraft, setUpdateTitleDraft] = useState('');
   const [updateDraft, setUpdateDraft] = useState('');
   const [editingUpdateId, setEditingUpdateId] = useState<string | null>(null);
   const [savingUpdate, setSavingUpdate] = useState(false);
@@ -1093,6 +1094,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   // -------------------------------------------------------------------------
   const handleStartAddUpdate = () => {
     setEditingUpdateId(null);
+    setUpdateTitleDraft('');
     setUpdateDraft('');
     setAddingUpdate(true);
   };
@@ -1100,6 +1102,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   const handleCancelUpdateDraft = () => {
     setAddingUpdate(false);
     setEditingUpdateId(null);
+    setUpdateTitleDraft('');
     setUpdateDraft('');
   };
 
@@ -1109,30 +1112,10 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     );
   };
 
-  const handleSubmitUpdate = async () => {
-    if (!currentUserId) return;
-    const body = updateDraft.trim();
-    if (!body) { handleCancelUpdateDraft(); return; }
-    setSavingUpdate(true);
-    try {
-      if (editingUpdateId) {
-        const updated = await updateAdminUpdate(editingUpdateId, body);
-        patchUpdatesCache(prev => prev.map(u => (u.id === updated.id ? updated : u)));
-      } else {
-        const created = await addAdminUpdate(tripId, currentUserId, body);
-        patchUpdatesCache(prev => [created, ...prev]);
-      }
-      handleCancelUpdateDraft();
-    } catch (e: any) {
-      Alert.alert('Could not save update', e?.message || 'Please try again.');
-    } finally {
-      setSavingUpdate(false);
-    }
-  };
-
   const handleEditUpdate = (update: AdminUpdate) => {
     setAddingUpdate(false);
     setEditingUpdateId(update.id);
+    setUpdateTitleDraft(update.title);
     setUpdateDraft(update.body);
   };
 
@@ -1168,20 +1151,21 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   // Sheet-driven handlers (Plan tab redesign — bottom sheets replace the old
   // inline editors).
   // -------------------------------------------------------------------------
-  const handleSubmitUpdateBody = async (body: string) => {
+  const handleSubmitUpdateBody = async (title: string, body: string) => {
     if (!currentUserId) return;
-    const text = body.trim();
-    if (!text) {
+    const titleText = title.trim();
+    if (!titleText) {
       handleCancelUpdateDraft();
       return;
     }
+    const bodyText = body.trim();
     setSavingUpdate(true);
     try {
       if (editingUpdateId) {
-        const updated = await updateAdminUpdate(editingUpdateId, text);
+        const updated = await updateAdminUpdate(editingUpdateId, titleText, bodyText);
         patchUpdatesCache(prev => prev.map(u => (u.id === updated.id ? updated : u)));
       } else {
-        const created = await addAdminUpdate(tripId, currentUserId, text);
+        const created = await addAdminUpdate(tripId, currentUserId, titleText, bodyText);
         patchUpdatesCache(prev => [created, ...prev]);
       }
       handleCancelUpdateDraft();
@@ -1452,14 +1436,14 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         {/* 2) Recent admin updates — always shown (members see a read-only
             "No updates yet" placeholder; only the host gets "+ Add update"). */}
         {(
-          <View onLayout={registerSection('updates')}>
+          // Host has no commit pill above, so the updates sit right under the
+          // toggle — add a little breathing room there (members get it from the pill).
+          <View onLayout={registerSection('updates')} style={isHost && { marginTop: 16 }}>
             <AdminUpdatesCard
               updates={adminUpdates}
               isHost={isHost}
               formatTime={formatRelativeTime}
               onAddUpdate={handleStartAddUpdate}
-              onEditUpdate={handleEditUpdate}
-              onLongPressUpdate={handleLongPressUpdate}
               onViewAll={onViewAllUpdates}
             />
           </View>
@@ -1467,7 +1451,6 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
 
         {/* 3) Packing & Gear — Group Gear + Your Gear */}
         <View style={styles.planSection} onLayout={registerSection('gear')}>
-          <Text style={styles.planSectionHeading}>Packing & Gear</Text>
           <GroupGearCard
             items={gearItems}
             isHost={isHost}
@@ -1770,6 +1753,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
       <AdminUpdateSheet
         visible={addingUpdate || !!editingUpdateId}
         mode={editingUpdateId ? 'edit' : 'add'}
+        initialTitle={editingUpdateId ? (updateTitleDraft ?? '') : ''}
         initialBody={editingUpdateId ? (updateDraft ?? '') : ''}
         saving={savingUpdate}
         onClose={handleCancelUpdateDraft}

@@ -40,9 +40,10 @@ interface Props {
   visible: boolean;
   onClose: () => void;
   mode: 'add' | 'edit';
+  initialTitle?: string;
   initialBody?: string;
   saving?: boolean;
-  onSubmit: (body: string) => void | Promise<void>;
+  onSubmit: (title: string, body: string) => void | Promise<void>;
   /** Edit mode only — host deletes the update (parent owns the confirm). */
   onDelete?: () => void;
 }
@@ -51,16 +52,19 @@ export const AdminUpdateSheet: React.FC<Props> = ({
   visible,
   onClose,
   mode,
+  initialTitle,
   initialBody,
   saving,
   onSubmit,
   onDelete,
 }) => {
+  const [updateTitle, setUpdateTitle] = useState(initialTitle ?? '');
   const [body, setBody] = useState(initialBody ?? '');
 
-  // Reset the draft from initialBody each time the sheet opens.
+  // Reset the draft from the initial values each time the sheet opens.
   useEffect(() => {
     if (visible) {
+      setUpdateTitle(initialTitle ?? '');
       setBody(initialBody ?? '');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -70,15 +74,17 @@ export const AdminUpdateSheet: React.FC<Props> = ({
   // Figma copy (nodes 12933:37758 add / 13179:6550 edit).
   const title = isEdit ? 'Edit update' : 'Add an update';
   const cta = isEdit ? 'Save' : 'Update';
+  const TITLE_MAX = 21;
   const MAX = 500;
-  const disabled = body.trim().length === 0 || !!saving;
+  // Title is required; the description is optional (Figma 12933-37482).
+  const disabled = updateTitle.trim().length === 0 || !!saving;
 
   const handleSubmit = () => {
     if (disabled) return;
-    onSubmit(body.trim());
+    onSubmit(updateTitle.trim(), body.trim());
   };
 
-  const { mounted, backdropOpacity, translateY, onSheetLayout } = useSheetTransition(visible);
+  const { mounted, backdropOpacity, translateY, onSheetLayout, panHandlers } = useSheetTransition(visible, onClose);
   return (
     <Modal visible={mounted} transparent animationType="none" onRequestClose={onClose}>
       <KeyboardAvoidingView
@@ -96,7 +102,7 @@ export const AdminUpdateSheet: React.FC<Props> = ({
           >
             <Pressable style={styles.sheet} onPress={e => e.stopPropagation()}>
             {/* Grabber */}
-            <View style={styles.grabberRow}>
+            <View style={styles.grabberRow} {...panHandlers}>
               <View style={styles.grabber} />
             </View>
 
@@ -122,6 +128,31 @@ export const AdminUpdateSheet: React.FC<Props> = ({
                 ) : null}
               </View>
 
+              {/* "Update Title" label + live counter, then a single-line field.
+                  Required — drives the CTA (Figma 12933-37482). */}
+              <View style={styles.descBlock}>
+                <View style={styles.labelRow}>
+                  <Text style={styles.fieldLabel}>Update Title</Text>
+                  <Text style={styles.counter}>
+                    {updateTitle.length} /{TITLE_MAX}
+                  </Text>
+                </View>
+                <View style={styles.titleField}>
+                  <UpdatePencilIcon size={24} color="#7B7B7B" />
+                  <TextInput
+                    style={styles.titleInput}
+                    value={updateTitle}
+                    onChangeText={setUpdateTitle}
+                    maxLength={TITLE_MAX}
+                    editable={!saving}
+                    autoFocus
+                    returnKeyType="next"
+                    placeholder="e.g. Portable speaker, Beach towels…"
+                    placeholderTextColor="#7B7B7B"
+                  />
+                </View>
+              </View>
+
               {/* "Description" label + live char counter, then the pencil field. */}
               <View style={styles.descBlock}>
                 <View style={styles.labelRow}>
@@ -139,7 +170,6 @@ export const AdminUpdateSheet: React.FC<Props> = ({
                     multiline
                     maxLength={MAX}
                     textAlignVertical="top"
-                    autoFocus
                     editable={!saving}
                     placeholder="Bali and Barrels"
                     placeholderTextColor="#7B7B7B"
@@ -234,6 +264,18 @@ const styles = StyleSheet.create({
   labelRow: { flexDirection: 'row', alignItems: 'center', height: 24, paddingRight: 4 },
   fieldLabel: { flex: 1, fontFamily: ff('Inter', '700'), fontSize: 16, lineHeight: 24, color: '#333333' },
   counter: { fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 18, color: '#7B7B7B' },
+  // Title field — single line, pencil centered with the text (Figma 12933-37482).
+  titleField: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    height: 56,
+    borderWidth: 1,
+    borderColor: '#EEEEEE',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    backgroundColor: '#FFFFFF',
+  },
   // Field — fixed 150 tall, pencil top-aligned, padding 16/8/16 (Figma 13169:13688).
   field: {
     flexDirection: 'row',
@@ -253,6 +295,15 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch',
     padding: 0,
     textAlignVertical: 'top',
+    fontFamily: ff('Inter', '400'),
+    fontSize: 14,
+    lineHeight: 18,
+    color: '#333333',
+  },
+  // Single-line title input — vertically centered in its row.
+  titleInput: {
+    flex: 1,
+    padding: 0,
     fontFamily: ff('Inter', '400'),
     fontSize: 14,
     lineHeight: 18,

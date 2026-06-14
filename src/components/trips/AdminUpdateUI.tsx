@@ -6,7 +6,7 @@
 //     line the whole card becomes tappable and surfaces a chevron affordance;
 //     tapping asks the parent to open the detail overlay.
 //   • UpdateDetailModal — the centered overlay showing the full update text.
-import React, { useState } from 'react';
+import React from 'react';
 import {
   View,
   Text,
@@ -68,12 +68,15 @@ export const AdminUpdateRow: React.FC<{
    *  first line so tall cards read like the Figma frame. */
   expanded?: boolean;
 }> = ({ update, formatTime, onOpenDetail, onLongPress, right, connected, showDivider, expanded }) => {
-  const [truncated, setTruncated] = useState(false);
-  const titleStyle = connected ? styles.titleLg : styles.title;
+  // Plan preview shows only the title; tapping always opens the detail overlay
+  // (where the description lives). The full Updates page (expanded) renders the
+  // title + description inline, so it isn't tappable.
+  const titleStyle = expanded ? styles.titleExpanded : connected ? styles.titleLg : styles.title;
+  const hasDescription = !!update.body?.trim();
 
   return (
     <Pressable
-      onPress={!expanded && truncated ? () => onOpenDetail(update) : undefined}
+      onPress={!expanded ? () => onOpenDetail(update) : undefined}
       onLongPress={onLongPress}
       style={[
         connected ? styles.row : styles.card,
@@ -86,26 +89,15 @@ export const AdminUpdateRow: React.FC<{
       </View>
       <View style={styles.textCol}>
         <Text style={titleStyle} numberOfLines={expanded ? undefined : 1}>
-          {update.body}
+          {update.title}
         </Text>
-        {/* Invisible full-text measurer: lays out every line so we can detect
-            one-line overflow without any visible layout shift. pointerEvents
-            none keeps it from stealing the card's press. Skipped when expanded —
-            the full body is already shown, so there's nothing to detect. */}
-        {!expanded ? (
-          <View style={styles.measure} pointerEvents="none">
-            <Text
-              style={titleStyle}
-              onTextLayout={e => setTruncated(e.nativeEvent.lines.length > 1)}
-            >
-              {update.body}
-            </Text>
-          </View>
+        {expanded && hasDescription ? (
+          <Text style={styles.bodyText}>{update.body}</Text>
         ) : null}
         <Text style={connected ? styles.timeLg : styles.time}>{formatTime(update.created_at)}</Text>
       </View>
       {right}
-      {!connected && !expanded && truncated ? (
+      {!connected && !expanded ? (
         <Ionicons name="chevron-forward" size={16} color={C.muted} />
       ) : null}
     </Pressable>
@@ -144,7 +136,8 @@ export const UpdateDetailModal: React.FC<{
           contentContainerStyle={styles.sheetScrollContent}
           showsVerticalScrollIndicator={false}
         >
-          <Text style={styles.sheetBody}>{update?.body}</Text>
+          {update?.title ? <Text style={styles.sheetTitle}>{update.title}</Text> : null}
+          {update?.body?.trim() ? <Text style={styles.sheetBody}>{update.body}</Text> : null}
         </ScrollView>
       </TouchableOpacity>
     </TouchableOpacity>
@@ -176,8 +169,10 @@ const styles = StyleSheet.create({
   },
   textCol: { flex: 1 },
   title: { fontFamily: ff('Inter', '700'), fontSize: 12, lineHeight: 18, fontWeight: '700', color: C.title },
-  time: { fontFamily: ff('Inter', '400'), fontSize: 10, lineHeight: 20, color: C.time, marginTop: 2 },
-  measure: { position: 'absolute', left: 0, right: 0, top: 0, opacity: 0 },
+  // Full Updates page (expanded): bold title above the description (Figma 13179:8792).
+  titleExpanded: { fontFamily: ff('Inter', '700'), fontSize: 14, lineHeight: 20, fontWeight: '700', color: C.title },
+  bodyText: { fontFamily: ff('Inter', '400'), fontSize: 14, lineHeight: 20, color: C.ink, marginTop: 2, marginBottom: 2 },
+  time: { fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 18, color: C.time, marginTop: 2 },
 
   // Connected-list mode (Plan card) — rows share one rounded card with hairline
   // dividers; larger Figma type (title 16/18, time 14/20).
@@ -193,8 +188,8 @@ const styles = StyleSheet.create({
   rowDivider: { borderBottomWidth: 1, borderBottomColor: C.cardBorder },
   // Sizes from get_variable_defs (per text node): title Body/B-3 = Size/s 12 /
   // lineHeight 18 (bold); time Body/B-4 = Size/xs 10 / lineHeight 20.
-  titleLg: { fontFamily: ff('Inter', '700'), fontSize: 12, lineHeight: 18, fontWeight: '700', color: C.title, marginBottom: -2 },
-  timeLg: { fontFamily: ff('Inter', '400'), fontSize: 10, lineHeight: 20, color: C.time },
+  titleLg: { fontFamily: ff('Inter', '700'), fontSize: 14, lineHeight: 20, fontWeight: '700', color: C.title, marginBottom: -2 },
+  timeLg: { fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 18, color: C.time },
 
   // Detail overlay
   scrim: {
@@ -218,5 +213,6 @@ const styles = StyleSheet.create({
   sheetTime: { flex: 1, fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 18, color: C.time },
   sheetScroll: { flexGrow: 0 },
   sheetScrollContent: { paddingBottom: 4 },
+  sheetTitle: { fontFamily: ff('Inter', '700'), fontSize: 18, lineHeight: 24, fontWeight: '700', color: C.title, marginBottom: 8 },
   sheetBody: { fontFamily: ff('Inter', '400'), fontSize: 15, lineHeight: 22, color: C.title },
 });

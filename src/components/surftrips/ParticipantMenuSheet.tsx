@@ -1,7 +1,8 @@
 import React from 'react';
-import { View, StyleSheet, TouchableOpacity, Modal, Pressable } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, Modal, Pressable, Animated } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../Text';
+import { useSheetTransition } from '../../hooks/useSheetTransition';
 import type { EnrichedSurftripMember, SurftripRole } from '../../types/surftrips';
 
 interface ParticipantMenuSheetProps {
@@ -23,6 +24,11 @@ export const ParticipantMenuSheet: React.FC<ParticipantMenuSheetProps> = ({
   onDemoteToMember,
   onRemoveMember,
 }) => {
+  // Slide + swipe-to-dismiss (shared with every other bottom sheet). Called
+  // before the early returns so hook order stays stable.
+  const { mounted, backdropOpacity, translateY, onSheetLayout, panHandlers } =
+    useSheetTransition(visible, onClose);
+
   if (!participant) return null;
 
   const isHostViewer = viewerRole === 'host';
@@ -74,10 +80,14 @@ export const ParticipantMenuSheet: React.FC<ParticipantMenuSheetProps> = ({
   if (items.length === 0) return null;
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal visible={mounted} transparent animationType="none" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose}>
+        <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.dim, { opacity: backdropOpacity }]} />
+        <Animated.View style={{ transform: [{ translateY }] }} onLayout={onSheetLayout}>
         <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
-          <View style={styles.handle} />
+          <View style={styles.handleZone} {...panHandlers}>
+            <View style={styles.handle} />
+          </View>
           <Text style={styles.title} numberOfLines={1}>{participant.name || 'User'}</Text>
           {items.map(item => (
             <TouchableOpacity
@@ -98,6 +108,7 @@ export const ParticipantMenuSheet: React.FC<ParticipantMenuSheetProps> = ({
             <Text style={styles.cancelLabel}>Cancel</Text>
           </TouchableOpacity>
         </Pressable>
+        </Animated.View>
       </Pressable>
     </Modal>
   );
@@ -106,9 +117,9 @@ export const ParticipantMenuSheet: React.FC<ParticipantMenuSheetProps> = ({
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
     justifyContent: 'flex-end',
   },
+  dim: { backgroundColor: 'rgba(0,0,0,0.4)' },
   sheet: {
     backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 16,
@@ -117,8 +128,9 @@ const styles = StyleSheet.create({
     paddingBottom: 24,
     paddingHorizontal: 16,
   },
+  // Wider grab target around the thin handle bar for the swipe-down gesture.
+  handleZone: { alignSelf: 'stretch', alignItems: 'center', paddingVertical: 6, marginTop: -6 },
   handle: {
-    alignSelf: 'center',
     width: 36,
     height: 4,
     borderRadius: 2,
