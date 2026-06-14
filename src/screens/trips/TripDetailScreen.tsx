@@ -8,6 +8,7 @@ import {
   ScrollView,
   ActivityIndicator,
   Alert,
+  Animated,
   Platform,
   TextInput,
   KeyboardAvoidingView,
@@ -449,6 +450,12 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   // focus effect scrolls once the target exists. 'your-gear' is nested inside
   // the 'gear' section, so its absolute Y is the sum of both.
   const scrollRef = useRef<ScrollView>(null);
+  // Sticky Overview/Plan toggle: track scroll position and the toggle's resting
+  // Y so a clone can clip under the black header once the real one scrolls past.
+  const scrollY = useRef(new Animated.Value(0)).current;
+  const toggleYRef = useRef(0);
+  const [toggleY, setToggleY] = useState(0);
+  const [toggleStuck, setToggleStuck] = useState(false);
   const sectionYs = useRef<Record<string, number>>({});
   const appliedFocusRef = useRef<string | null>(null);
   const registerSection = useCallback(
@@ -460,6 +467,16 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   useEffect(() => {
     sectionYs.current = {}; // stale Ys from another trip must not be scroll targets
   }, [tripId]);
+
+  // Flip the sticky toggle on/off only as the scroll crosses the toggle's resting
+  // Y (not every frame) — the clone's opacity itself is driven natively below.
+  useEffect(() => {
+    const id = scrollY.addListener(({ value }) => {
+      const next = toggleYRef.current > 0 && value >= toggleYRef.current;
+      setToggleStuck(prev => (prev !== next ? next : prev));
+    });
+    return () => scrollY.removeListener(id);
+  }, [scrollY]);
 
   // Analytics: "active in this trip today" (chart C). Throttled per (user, trip).
   useEffect(() => {
@@ -1300,7 +1317,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         style={styles.keyboardAvoider}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-      <ScrollView
+      <Animated.ScrollView
         ref={scrollRef}
         contentContainerStyle={[
           styles.scrollContent,
@@ -1308,6 +1325,10 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         ]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        scrollEventThrottle={16}
+        onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], {
+          useNativeDriver: true,
+        })}
       >
         {isCancelled && (
           <View style={styles.cancelledBanner}>
@@ -1355,7 +1376,18 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           }
           afterHeroSlot={
             canSeePlan ? (
-              <TripTabToggle value={activeTab} onChange={setActiveTab} />
+              <View
+                onLayout={e => {
+                  // Y is relative to the white header zone, which starts at the
+                  // top of the scroll content (no banners while the toggle shows),
+                  // so this equals the scroll offset where it reaches the header.
+                  const y = e.nativeEvent.layout.y;
+                  toggleYRef.current = y;
+                  setToggleY(y);
+                }}
+              >
+                <TripTabToggle value={activeTab} onChange={setActiveTab} />
+              </View>
             ) : null
           }
           bodyHidden={showPlan}
@@ -1601,7 +1633,29 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         {/* Clearance for the floating sticky footer (Trip Chat / Join a Trip)
             so the last content isn't hidden behind it; smaller otherwise. */}
         <View style={{ height: hasStickyFooter ? insets.bottom + 96 : 40 }} />
-      </ScrollView>
+      </Animated.ScrollView>
+
+      {/* Sticky Overview/Plan toggle — a clone that clips under the black header
+          once the real toggle scrolls past its resting Y, so members can switch
+          tabs without scrolling back to the top. Crisp opacity swap at the
+          threshold (native-driven) so it hands off seamlessly from the real one. */}
+      {canSeePlan && (
+        <Animated.View
+          pointerEvents={toggleStuck ? 'auto' : 'none'}
+          style={[
+            styles.stickyToggle,
+            {
+              opacity: scrollY.interpolate({
+                inputRange: [Math.max(toggleY - 1, 0), Math.max(toggleY, 1)],
+                outputRange: [0, 1],
+                extrapolate: 'clamp',
+              }),
+            },
+          ]}
+        >
+          <TripTabToggle value={activeTab} onChange={setActiveTab} />
+        </Animated.View>
+      )}
       </KeyboardAvoidingView>
 
       {/* Sticky CTA — floating pill over a foggy fade (mirrors the profile
@@ -1941,6 +1995,23 @@ const styles = StyleSheet.create({
   keyboardAvoider: { flex: 1, backgroundColor: '#FAFAFA' },
   scrollContent: { paddingBottom: 24 },
 
+  // Sticky Overview/Plan clone — pinned to the top of the scroll area (right
+  // under the black header). paddingHorizontal cancels the toggle's -16 bleed so
+  // it spans edge-to-edge; a soft shadow lifts it above the scrolling content.
+  stickyToggle: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    paddingHorizontal: 16,
+    backgroundColor: '#FFFFFF',
+    zIndex: 20,
+    ...Platform.select({
+      ios: { shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 6, shadowOffset: { width: 0, height: 3 } },
+      android: { elevation: 4 },
+      default: {},
+    }),
+  },
   // Redesigned Plan tab (Figma) — light wrappers around the PlanSections cards.
   planSection: { paddingHorizontal: 16, paddingTop: 20 },
   planSectionHeading: {

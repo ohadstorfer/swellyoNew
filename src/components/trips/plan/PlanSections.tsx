@@ -216,7 +216,7 @@ export const CommitPill: React.FC<{
       {/* Committed state has no caption (Image #2). */}
       {!approved ? (
         <Text style={styles.commitCaption}>
-          {pending ? 'Waiting for the host to approve. Tap to update.' : "Let the host know how you're committed"}
+          {pending ? 'Waiting for the host to approve. Tap to update.' : "Let the admin know how you're committed"}
         </Text>
       ) : null}
     </View>
@@ -377,12 +377,12 @@ export const GroupGearCard: React.FC<{
       <View style={styles.ygHeader}>
         <View style={styles.ygHeaderText}>
           <Text style={styles.ygTitle}>Group Gear</Text>
-          <Text style={styles.ygSub}>Shared items for the trip</Text>
+          <Text style={styles.ygSub}>Shared items - e.g. camera, speaker</Text>
         </View>
         <View style={styles.ygHeaderRight}>
           {items.length > 0 ? (
             <Pressable onPress={handleViewAll} hitSlop={8}>
-              <Text style={styles.ygViewAll}>View all</Text>
+              <Text style={styles.ygViewAll}>View all ({items.length})</Text>
             </Pressable>
           ) : null}
         </View>
@@ -435,7 +435,7 @@ const GearCheckbox: React.FC<{ checked: boolean }> = ({ checked }) => (
 // distinct from the teal HostTag pill used on host-only controls.
 const HostSuggestionTag: React.FC = () => (
   <View style={styles.hostSugg}>
-    <Text style={styles.hostSuggText}>Host suggestion</Text>
+    <Text style={styles.hostSuggText}>Admin suggested</Text>
     <TripIcon name="award-01" size={14} color="#333333" strokeWidth={1.2} />
   </View>
 );
@@ -618,7 +618,7 @@ const styles = StyleSheet.create({
   rowDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: T.hairline },
 
   // Commit pill
-  commitWrap: { paddingHorizontal: 16, marginTop: 32 },
+  commitWrap: { paddingHorizontal: 16, marginTop: 32, marginBottom: 12 },
   commitPill: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -769,7 +769,7 @@ const styles = StyleSheet.create({
   ygHeaderRight: { alignSelf: 'stretch', alignItems: 'flex-end', justifyContent: 'flex-end' },
   ygTitle: { fontFamily: ff('Inter', '700'), fontSize: 14, lineHeight: 18, fontWeight: '700', color: '#333333' },
   ygSub: { fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 18, color: '#6a7282' },
-  ygViewAll: { fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 18, color: T.accent },
+  ygViewAll: { fontFamily: ff('Inter', '400'), fontSize: 14, lineHeight: 18, color: T.accent },
   ygCard: {
     backgroundColor: '#FFFFFF',
     borderWidth: 1,

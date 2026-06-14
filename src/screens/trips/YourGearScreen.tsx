@@ -172,7 +172,7 @@ export default function YourGearScreen({ tripId, onBack }: Props) {
       </Text>
       {row.kind === 'host' ? (
         <View style={styles.hostSugg}>
-          <Text style={styles.hostSuggText}>Host suggestion</Text>
+          <Text style={styles.hostSuggText}>Admin suggested</Text>
           <TripIcon name="award-01" size={14} color="#333333" strokeWidth={1.2} />
         </View>
       ) : (

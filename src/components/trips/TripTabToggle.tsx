@@ -112,7 +112,7 @@ const styles = StyleSheet.create({
     color: '#333333',
     textAlign: 'center',
   },
-  bold: { fontWeight: '700' },
+  bold: { fontFamily: ff('Inter', '700'), fontWeight: '700' },
   reg: { fontWeight: '400' },
   overlay: {
     position: 'absolute',

@@ -1628,6 +1628,27 @@ export const AppContent: React.FC = () => {
     showProfile ||
     showProfileEditor ||
     showWelcomeToLineupOverlay;
+
+  // Dev-only perf watchdog. SILENT when healthy — only logs when the JS thread
+  // actually freezes (a 2s timer that fires >1s late = the thread was blocked).
+  // Quiet Metro = the app is genuinely fine. A "⚠️ PERF" line = a real stall is
+  // happening right now, with how long it blocked + open realtime channel count
+  // for context. Keeps us honest instead of guessing by feel.
+  useEffect(() => {
+    if (!__DEV__) return;
+    let last = Date.now();
+    const id = setInterval(() => {
+      const now = Date.now();
+      const lag = now - last - 2000;
+      last = now;
+      if (lag > 1000) {
+        let channels = 0;
+        try { channels = supabase.getChannels().length; } catch { /* noop */ }
+        console.log(`⚠️ PERF: JS thread blocked ${Math.round(lag)}ms (realtime channels: ${channels})`);
+      }
+    }, 2000);
+    return () => clearInterval(id);
+  }, []);
   //
   // Several of the handlers above are plain (non-useCallback) functions that
   // legitimately read live state, so their identities change every render.
