@@ -23,6 +23,11 @@ import {
 export const tripsKeys = {
   all: ['trips'] as const,
   explore: ['trips', 'explore'] as const,
+  // Nested UNDER explore so any invalidateQueries({ queryKey: tripsKeys.explore })
+  // (realtime, post-edit, etc.) also invalidates the meta query — no extra call
+  // sites to keep in sync. Parameterised by trip ids so it auto-refetches when
+  // the trip set changes.
+  exploreMeta: (ids: string[]) => ['trips', 'explore', 'meta', ids.join(',')] as const,
   my: (userId: string) => ['trips', 'my', userId] as const,
   detail: (id: string) => ['trips', 'detail', id] as const,
   detailUpdates: (id: string) => ['trips', 'detail-updates', id] as const,
@@ -31,19 +36,35 @@ export const tripsKeys = {
   detailGearRequests: (id: string) => ['trips', 'detail-gear-requests', id] as const,
 };
 
-export type ExploreData = { trips: GroupTrip[]; meta: Map<string, TripCardMeta> };
 export type MyTripsData = { buckets: MyTripsBuckets; meta: Map<string, TripCardMeta> };
 
-/** Explore deck: active group trips + batched card meta. */
+const EMPTY_TRIPS: GroupTrip[] = [];
+const EMPTY_META: Map<string, TripCardMeta> = new Map();
+
+/**
+ * Explore deck. Split into two queries so the deck paints from the trips query
+ * alone (1 round-trip); avatars/host names load via the nested meta query and
+ * fill in progressively. `isLoading` gates the skeleton on TRIPS only.
+ */
 export function useExploreTrips() {
-  return useQuery<ExploreData>({
+  const tripsQuery = useQuery<GroupTrip[]>({
     queryKey: tripsKeys.explore,
-    queryFn: async () => {
-      const trips = await listExploreTrips();
-      const meta = await getTripCardMeta(trips);
-      return { trips, meta };
-    },
+    queryFn: () => listExploreTrips(),
   });
+  const trips = tripsQuery.data ?? EMPTY_TRIPS;
+
+  const metaQuery = useQuery<Map<string, TripCardMeta>>({
+    queryKey: tripsKeys.exploreMeta(trips.map(t => t.id)),
+    enabled: trips.length > 0,
+    queryFn: () => getTripCardMeta(trips),
+  });
+
+  return {
+    trips,
+    meta: metaQuery.data ?? EMPTY_META,
+    isLoading: tripsQuery.isLoading,
+    isMetaLoading: metaQuery.isLoading,
+  };
 }
 
 /**

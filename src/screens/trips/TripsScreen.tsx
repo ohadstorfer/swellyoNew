@@ -53,6 +53,8 @@ import { Images } from '../../assets/images';
 import { Logo } from '../../components/Logo';
 import { NotificationCenter } from '../../components/notifications/NotificationCenter';
 import type { TripDetailFocus } from '../../services/notifications/notificationsService';
+import { getStorageThumbUrl } from '../../services/media/imageService';
+import { neighbourHeroUrls } from './deckPrefetch';
 import Reanimated, {
   Easing,
   Extrapolation,
@@ -370,6 +372,15 @@ const ExploreTripCard: React.FC<{
   const occupancy = max != null ? `${count}/${max}` : `${count}`;
   const price = formatTripPrice(trip);
 
+  // Tiny (~24px) transform thumbnail used as a blur-up placeholder. Supabase
+  // image transforms are enabled (already used in NotificationCenter). For
+  // non-Supabase hero URLs getStorageThumbUrl returns the URL unchanged, so we
+  // pass no placeholder and fall back to the plain fade.
+  const heroThumb = useMemo(() => {
+    const t = getStorageThumbUrl(trip.hero_image_url, 24);
+    return t && t !== trip.hero_image_url ? t : null;
+  }, [trip.hero_image_url]);
+
   const headline = trip.title || formatDestination(trip);
   const location = formatDestination(trip);
   const showLocation = !!trip.title && !!location && location !== headline;
@@ -384,6 +395,8 @@ const ExploreTripCard: React.FC<{
       {trip.hero_image_url ? (
         <CachedImage
           source={{ uri: trip.hero_image_url }}
+          placeholder={heroThumb ? { uri: heroThumb } : undefined}
+          placeholderContentFit="cover"
           style={styles.cardImageBg}
           contentFit="cover"
           cachePolicy="memory-disk"
@@ -543,6 +556,11 @@ const TripDeck: React.FC<{
     listRef.current?.scrollToOffset({ offset: 0, animated: false });
   }, [trips, scrollX]);
 
+  // Warm the first card + right neighbours as soon as the deck mounts/changes.
+  useEffect(() => {
+    neighbourHeroUrls(trips, 0).forEach(u => { CachedImage.prefetch(u); });
+  }, [trips]);
+
   const renderItem = useCallback(
     ({ item, index }: { item: GroupTrip; index: number }) => {
       const inputRange = [
@@ -630,6 +648,10 @@ const TripDeck: React.FC<{
             lastReportedX.current = x;
             onUserScroll();
           }
+        }}
+        onMomentumScrollEnd={e => {
+          const idx = Math.round(e.nativeEvent.contentOffset.x / DECK_ITEM_W);
+          neighbourHeroUrls(trips, idx).forEach(u => { CachedImage.prefetch(u); });
         }}
         contentContainerStyle={[styles.deckContent, { paddingHorizontal: DECK_SIDE_PAD }]}
         {...(Platform.OS === 'web' && {
@@ -795,9 +817,7 @@ const ExploreTripsView: React.FC<{
   // Cached + stale-while-revalidate. The data survives tab switches and
   // leaving/re-entering Trips, so re-entry is instant (no skeleton) and only
   // revalidates silently in the background when stale.
-  const { data, isLoading } = useExploreTrips();
-  const trips = data?.trips ?? [];
-  const meta = data?.meta ?? EMPTY_META;
+  const { trips, meta, isLoading } = useExploreTrips();
 
   // Month chips roll off the device clock; built once per mount.
   const chips = useMemo(() => buildExploreChips(new Date()), []);

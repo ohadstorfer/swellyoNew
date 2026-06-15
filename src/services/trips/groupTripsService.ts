@@ -334,6 +334,18 @@ export interface TripDestination {
 const TRIP_DEST_EMBED =
   'destination:group_trip_destinations(name, short_label, country, admin_level_1, lat, lng)';
 
+// Columns the Explore deck card (ExploreTripCard) actually reads. Keep in sync
+// with that component — verified against formatTripPrice / formatTripDates /
+// formatDestination / normalizeTrip. Replaces select('*') so the explore query
+// stays lean (and lean to parse) as the trip table grows wider.
+export const EXPLORE_TRIP_SELECT = [
+  'id', 'host_id', 'status', 'hosting_style', 'title', 'hero_image_url',
+  'start_date', 'end_date', 'dates_set_in_stone', 'date_months',
+  'cost_per_person', 'budget_min', 'budget_max',
+  'max_participants', 'participant_count', 'created_at',
+  TRIP_DEST_EMBED,
+].join(', ');
+
 function pickDestination(embedded: any): TripDestination | null {
   if (!embedded) return null;
   // PostgREST returns an object for the 1:1 embed (unique trip_id), but tolerate
@@ -487,7 +499,7 @@ export async function getTripDestination(
 export async function listExploreTrips(limit = 50, offset = 0): Promise<GroupTrip[]> {
   const { data, error } = await supabase
     .from('group_trips')
-    .select(`*, ${TRIP_DEST_EMBED}`)
+    .select(EXPLORE_TRIP_SELECT)
     .eq('status', 'active')
     .order('created_at', { ascending: false })
     .range(offset, offset + limit - 1);

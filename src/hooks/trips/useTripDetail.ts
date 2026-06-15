@@ -24,7 +24,7 @@ import {
   listGearRequests,
 } from '../../services/trips/groupTripsService';
 import { tripsKeys } from './useTripQueries';
-import type { ExploreData, MyTripsData } from './useTripQueries';
+import type { MyTripsData } from './useTripQueries';
 
 // ---------------------------------------------------------------------------
 // Shared return types (used by TripDetailScreen + useTripMutations)
@@ -48,8 +48,8 @@ function seedFromListCache(
   queryClient: ReturnType<typeof useQueryClient>,
   tripId: string,
 ): TripCoreData | undefined {
-  const exploreData = queryClient.getQueryData<ExploreData>(tripsKeys.explore);
-  const exploreTrip = exploreData?.trips.find(t => t.id === tripId);
+  const exploreTrips = queryClient.getQueryData<GroupTrip[]>(tripsKeys.explore);
+  const exploreTrip = exploreTrips?.find(t => t.id === tripId);
   if (exploreTrip) return { trip: exploreTrip, participants: [], myRequest: null };
 
   // Try every cached my-trips key (userId is baked into the key).

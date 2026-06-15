@@ -29,7 +29,10 @@ import {
   listUnseenJoinDecisions,
   markJoinDecisionSeen,
   destinationLabel,
+  listExploreTrips,
+  getTripCardMeta,
   type UnseenJoinDecision,
+  type GroupTrip,
 } from '../services/trips/groupTripsService';
 import { supabase } from '../config/supabase';
 import { queryClient } from '../lib/queryClient';
@@ -1597,6 +1600,29 @@ export const AppContent: React.FC = () => {
       }).catch(() => {});
     }
   }, [shouldShowConversations]);
+
+  // Warm the Explore cache the moment the user reaches the main app, so opening
+  // Trips paints instantly instead of waiting on a cold fetch. Fire-and-forget,
+  // once per app session. (We prefetch trips first — that's what paints — then
+  // the meta so avatars are warm too.) `shouldShowConversations` is the same
+  // "in main app" signal used by the effect above.
+  const exploreWarmedRef = useRef(false);
+  useEffect(() => {
+    if (!shouldShowConversations || exploreWarmedRef.current) return;
+    exploreWarmedRef.current = true;
+    queryClient
+      .prefetchQuery({ queryKey: tripsKeys.explore, queryFn: () => listExploreTrips() })
+      .then(() => {
+        const trips = queryClient.getQueryData<GroupTrip[]>(tripsKeys.explore) ?? [];
+        if (trips.length > 0) {
+          queryClient.prefetchQuery({
+            queryKey: tripsKeys.exploreMeta(trips.map(t => t.id)),
+            queryFn: () => getTripCardMeta(trips),
+          });
+        }
+      })
+      .catch(() => { /* prefetch is best-effort */ });
+  }, [shouldShowConversations, queryClient]);
 
   // Age block overlay — shown when device flag is set (underage user)
   const handleAgeBlockOK = async () => {
