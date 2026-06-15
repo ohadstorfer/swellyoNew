@@ -34,13 +34,6 @@ export const BackgroundVideo: React.FC<BackgroundVideoProps> = ({
   
   const mobileWebVideoUrl = mp4FallbackUrl;
 
-  if (__DEV__) {
-    console.log('[BackgroundVideo] Video URL:', videoUrl);
-    console.log('[BackgroundVideo] Mobile Web URL:', mobileWebVideoUrl);
-    console.log('[BackgroundVideo] Platform:', Platform.OS);
-    console.log('[BackgroundVideo] Is Mobile Web:', isMobileWeb());
-  }
-
   // Web-specific: Optimized for fast loading and immediate autoplay with non-interactive behavior
   if (Platform.OS === 'web') {
     useEffect(() => {
@@ -461,7 +454,6 @@ export const BackgroundVideo: React.FC<BackgroundVideoProps> = ({
   // Create video player
   const player = useVideoPlayer(videoPlayerSource, (player: any) => {
     if (player) {
-      console.log('[BackgroundVideo] Player created:', player);
       player.loop = true;
       player.muted = true;
       player.audioMixingMode = 'mixWithOthers';
@@ -479,7 +471,6 @@ export const BackgroundVideo: React.FC<BackgroundVideoProps> = ({
   // Ensure video plays after mount and handle errors
   useEffect(() => {
     if (player) {
-      console.log('[BackgroundVideo] Setting up player properties');
       // Set properties again to ensure they're applied
       player.loop = true;
       player.muted = true;
@@ -488,9 +479,7 @@ export const BackgroundVideo: React.FC<BackgroundVideoProps> = ({
       // Play the video
       const playVideo = async () => {
         try {
-          console.log('[BackgroundVideo] Attempting to play video');
           await player.play();
-          console.log('[BackgroundVideo] Video play() called successfully');
         } catch (error) {
           console.error('[BackgroundVideo] Error playing background video:', error);
           setVideoError(String(error));

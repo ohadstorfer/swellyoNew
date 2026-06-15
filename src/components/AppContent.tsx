@@ -1643,23 +1643,34 @@ export const AppContent: React.FC = () => {
 
   // Dev-only perf watchdog. SILENT when healthy — only logs when the JS thread
   // actually freezes (a 2s timer that fires >1s late = the thread was blocked).
-  // Quiet Metro = the app is genuinely fine. A "⚠️ PERF" line = a real stall is
-  // happening right now, with how long it blocked + open realtime channel count
-  // for context. Keeps us honest instead of guessing by feel.
+  // Quiet Metro = the app is genuinely fine. A "⚠️ PERF" line = a REAL foreground
+  // stall, with how long it blocked + open realtime channel count for context.
+  //
+  // Critically: iOS suspends JS timers while the app is backgrounded / the phone
+  // is locked, so a plain timer-drift check reports huge FAKE "freezes" (e.g.
+  // 28s) that are really just you switching apps. We track AppState and skip the
+  // warning whenever the app was anything but 'active' across the interval — so a
+  // ⚠️ line means a genuine on-screen freeze, not a suspended timer.
   useEffect(() => {
     if (!__DEV__) return;
     let last = Date.now();
+    let leftActive = false;
+    const sub = AppState.addEventListener('change', (s) => {
+      if (s !== 'active') leftActive = true;
+    });
     const id = setInterval(() => {
       const now = Date.now();
       const lag = now - last - 2000;
       last = now;
-      if (lag > 1000) {
+      const wasBackgrounded = leftActive || AppState.currentState !== 'active';
+      leftActive = AppState.currentState !== 'active';
+      if (lag > 1000 && !wasBackgrounded) {
         let channels = 0;
         try { channels = supabase.getChannels().length; } catch { /* noop */ }
         console.log(`⚠️ PERF: JS thread blocked ${Math.round(lag)}ms (realtime channels: ${channels})`);
       }
     }, 2000);
-    return () => clearInterval(id);
+    return () => { sub.remove(); clearInterval(id); };
   }, []);
   //
   // Several of the handlers above are plain (non-useCallback) functions that
@@ -1851,8 +1862,6 @@ export const AppContent: React.FC = () => {
   // The auth guard now handles all authentication redirects after session restoration completes
 
   if (shouldShowConversations) {
-    console.log('[AppContent] Rendering check - showProfile:', showProfile);
-    console.log('[AppContent] Rendering check - showConversationLoading:', showConversationLoading, 'pendingConversation:', !!pendingConversation);
 
     // Determine which overlay screen (if any) should cover the navigator.
     // Remaining legacy overlays: Settings, SwellyShaper, Profile, the

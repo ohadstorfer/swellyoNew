@@ -416,10 +416,6 @@ export const getImageUrl = (path: string): string => {
         
         const fullUrl = `${devServerUrl}${encodedPath}`;
         
-        if (__DEV__) {
-          console.log(`[getImageUrl] Resolved: ${normalizedPath} -> ${fullUrl}`);
-        }
-        
         return fullUrl;
       }
     } catch (error) {

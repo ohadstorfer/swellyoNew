@@ -770,7 +770,6 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
   };
 
 
-  console.log('WelcomeScreen rendering - Platform:', Platform.OS);
   
   const handleAppleSignIn = async (ageVerified = false) => {
     if (Platform.OS !== 'ios') {

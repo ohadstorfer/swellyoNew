@@ -58,7 +58,6 @@ export const WelcomeToLineupOverlay: React.FC<WelcomeToLineupOverlayProps> = ({
     ? [matches[1], matches[0], ...matches.slice(2)]
     : matches;
 
-  console.log('[WelcomeToLineupOverlay] Rendered with', reorderedMatches.length, 'matches:', reorderedMatches.map(m => ({ user_id: m.user_id, name: m.name, profile_image_url: m.profile_image_url })));
 
   const [activeIndex, setActiveIndex] = useState(0);
   const scrollViewRef = useRef<ScrollView>(null);
